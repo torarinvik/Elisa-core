@@ -581,6 +581,13 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 	if !strings.HasSuffix(g.result.File.Filename, "native_runtime_support.elisa") {
 		return false
 	}
+	// The packed-store helper families are declared directly by the backend (region-backed
+	// packed enums, docs/74) in programs that do not include the std runtime themselves.
+	// They must stay external here or those programs' declarations null-bind under
+	// -undefined,dynamic_lookup and segfault on the first constructor/match.
+	if strings.HasPrefix(name, "ctx_packed_store_") || strings.HasPrefix(name, "ctx_aos_store_") {
+		return true
+	}
 	switch name {
 	case "new_region",
 		"new_region_backend",
@@ -601,6 +608,8 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"alloc_perm",
 		"alloc_scratch",
 		"reset_scratch",
+		"ctx_hash_cstr",
+		"ctx_hash_u64",
 		"ctx_strlen",
 		"ctx_streq",
 		"ctx_string_slice_eq",

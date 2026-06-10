@@ -408,11 +408,35 @@ func warnOnSplitNullBoundSymbols(exePath string, stderr io.Writer) {
 		return
 	}
 	split := findSplitNullBoundSymbols(string(out))
-	if len(split) == 0 {
-		return
+	if len(split) != 0 {
+		fmt.Fprintf(stderr, "warning: linked binary has %d undefined split-symbol(s) that may bind to NULL under dynamic_lookup (symbol-split null-bind hazard; e.g. duplicate externs sharing a link_name): %s\n", len(split), strings.Join(split, ", "))
+		fmt.Fprintf(stderr, "         this is the CUSA07399-class fault; consolidate the duplicate declaration(s). Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
 	}
-	fmt.Fprintf(stderr, "warning: linked binary has %d undefined split-symbol(s) that may bind to NULL under dynamic_lookup (symbol-split null-bind hazard; e.g. duplicate externs sharing a link_name): %s\n", len(split), strings.Join(split, ", "))
-	fmt.Fprintf(stderr, "         this is the CUSA07399-class fault; consolidate the duplicate declaration(s). Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
+	helpers := findNullBoundRuntimeHelperSymbols(string(out))
+	if len(helpers) != 0 {
+		fmt.Fprintf(stderr, "warning: linked binary has %d undefined elisa runtime helper symbol(s) that will bind to NULL under dynamic_lookup and segfault on first call: %s\n", len(helpers), strings.Join(helpers, ", "))
+		fmt.Fprintf(stderr, "         the default runtime object likely kept them private (isDefaultNativeRuntimeSupportExport whitelist) -- add them there, or include the std runtime. Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
+	}
+}
+
+// findNullBoundRuntimeHelperSymbols extracts dynamically-looked-up undefined symbols that
+// match the elisa runtime helper namespaces (ctx_*, arena_*, packed_store_*). Such a symbol
+// has no definition anywhere -- libSystem never provides them -- so under
+// -Wl,-undefined,dynamic_lookup it resolves to NULL and the first call through it crashes.
+// This is exactly the stripped-runtime-helper class (e.g. ctx_aos_store_new missing from the
+// default runtime export whitelist).
+func findNullBoundRuntimeHelperSymbols(nmOutput string) []string {
+	re := regexp.MustCompile(`\(undefined\)[^\n]*\b(_(?:ctx|arena|packed_store)_[A-Za-z0-9_]+)\b[^\n]*dynamically looked up`)
+	seen := map[string]bool{}
+	var helpers []string
+	for _, m := range re.FindAllStringSubmatch(nmOutput, -1) {
+		if sym := m[1]; !seen[sym] {
+			seen[sym] = true
+			helpers = append(helpers, sym)
+		}
+	}
+	sort.Strings(helpers)
+	return helpers
 }
 
 // findSplitNullBoundSymbols extracts undefined external symbols carrying a `.<digits>`

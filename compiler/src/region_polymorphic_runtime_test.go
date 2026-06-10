@@ -496,3 +496,57 @@ def bt() -> void:
 		t.Fatalf("region-polymorphic packed tree run failed: %v\noutput:\n%s", err, string(out))
 	}
 }
+
+// Regression: a recursive plain enum in a program that does NOT include the std runtime must
+// still run. The backend declares the packed-store helpers (ctx_aos_store_new/alloc/record,
+// ctx_packed_store_*) as externs; they resolve against the default runtime object, which keeps
+// only whitelisted symbols external under -O3 private linkage. Before the whitelist covered the
+// packed-store families, those externs null-bound under -Wl,-undefined,dynamic_lookup and the
+// first constructor call segfaulted at runtime (the "self-referential enum Tree segfault").
+func TestPlainRecursiveEnumWithoutStdIncludeRuns(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	src := `enum Tree:
+    Leaf(value: i64)
+    Node(left: Tree, right: Tree)
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def eval(t: Tree) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        match t:
+            Tree.Leaf(value: v):
+                return v
+            Tree.Node(left: l, right: r):
+                return eval(l) + eval(r)
+
+@test
+def bt() -> void:
+    can Abort.Panic, Memory.Allocate, Memory.Release:
+        region scope(1048576):
+            t: Tree = make(6)
+            if eval(t) != 64:
+                panic("recursive plain enum without std include produced wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plain_noinclude.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISACORE_TEST_CACHE", "0")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("no-include recursive enum test failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "[       OK ] bt") {
+		t.Fatalf("expected test to pass, got:\n%s", stdout.String())
+	}
+	if strings.Contains(stderr.String(), "bind to NULL") {
+		t.Fatalf("link produced null-bind warnings:\n%s", stderr.String())
+	}
+}
