@@ -866,6 +866,9 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 	case *ast.MatchWildcardPattern:
 		return "_"
 	case *ast.MatchBindPattern:
+		if n.Binder != "" {
+			return n.Name + " " + n.Binder
+		}
 		return n.Name
 	case *ast.MatchStringLiteralPattern:
 		return strconv.Quote(n.Value)

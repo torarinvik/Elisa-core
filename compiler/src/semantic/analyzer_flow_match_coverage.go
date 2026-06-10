@@ -81,6 +81,29 @@ func (a *Analyzer) validateTreeMatchStore(treeType *TreeCategoryType, storeExpr 
 	a.errorf(storeExpr.Pos(), "tree match over %q does not take an in-store clause", treeType.Name)
 }
 
+// silentEnumMatchPatternVariant resolves a variant arm against a hierarchy scrutinee without
+// emitting diagnostics (the erroring twin is resolveEnumMatchPatternCategory) — used by the
+// reachability/coverage walk, which must not double-report.
+func (a *Analyzer) silentEnumMatchPatternVariant(enumType *EnumType, pattern *ast.MatchVariantPattern) (*EnumVariant, bool) {
+	owner := enumType
+	if pattern.EnumName != enumType.Name {
+		base, _, ok := a.lookupVisibleType(pattern.EnumName)
+		if !ok {
+			return nil, false
+		}
+		resolved, ok := StripAggregateStateType(base).(*EnumType)
+		if !ok || resolved == nil || !enumDescendsFrom(resolved, enumType) {
+			return nil, false
+		}
+		owner = resolved
+	}
+	variant, ok := owner.Variant(pattern.Variant)
+	if !ok || variant == nil {
+		return nil, false
+	}
+	return variant, true
+}
+
 func (a *Analyzer) matchPatternShadowedByPrevious(pattern ast.MatchPattern, expected Type, prior []ast.MatchPattern) bool {
 	for _, prev := range prior {
 		if a.matchPatternCovers(prev, pattern, expected) {
@@ -115,6 +138,31 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 	case *ast.MatchWildcardPattern:
 		return true
 	case *ast.MatchBindPattern:
+		// docs/77 §2: on a hierarchy scrutinee a bind arm naming a sub-category covers exactly
+		// that category's leaf range, not everything. A plain (non-category) bind stays catch-all.
+		if enumType, ok := StripAggregateStateType(expected).(*EnumType); ok && enumIsHierarchical(enumType) {
+			if prevCategory, ok := a.resolveEnumCategoryArm(enumType, p.Name); ok {
+				switch curr := current.(type) {
+				case *ast.MatchVariantPattern:
+					variant, ok := a.silentEnumMatchPatternVariant(enumType, curr)
+					if !ok {
+						return false
+					}
+					return variant.Tag-prevCategory.LeafTagLo < prevCategory.LeafTagCount
+				case *ast.MatchBindPattern:
+					currCategory, ok := a.resolveEnumCategoryArm(enumType, curr.Name)
+					if !ok {
+						// a plain catch-all bind is only covered if the category spans the scrutinee
+						return enumDescendsFrom(enumType, prevCategory)
+					}
+					return enumDescendsFrom(currCategory, prevCategory)
+				case *ast.MatchWildcardPattern:
+					return enumDescendsFrom(enumType, prevCategory)
+				default:
+					return false
+				}
+			}
+		}
 		return true
 	case *ast.MatchStringLiteralPattern:
 		switch curr := current.(type) {
@@ -409,6 +457,9 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 	case *ast.MatchWildcardPattern:
 		return "_"
 	case *ast.MatchBindPattern:
+		if p.Binder != "" {
+			return p.Name + " " + p.Binder
+		}
 		return p.Name
 	case *ast.MatchStringLiteralPattern:
 		return p.Value

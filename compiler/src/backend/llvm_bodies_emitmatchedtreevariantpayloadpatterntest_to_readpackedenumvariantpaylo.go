@@ -338,7 +338,7 @@ func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef
 	}
 	return s.loadEnumVariantPayload(nil, enumPtr, enumType, variant, store, packedReadOriginKey{})
 }
-func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
+func (s *functionState) matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil {
 		return false
 	}
@@ -351,10 +351,30 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 		case *ast.MatchVariantPattern:
 			covered[pattern.Variant] = true
 			coveredQualified[pattern.EnumName+"."+pattern.Variant] = true
+		case *ast.MatchBindPattern:
+			// docs/77 §2 category arm: covers its category's whole leaf range. A plain
+			// (non-category) bind arm catches everything, like a wildcard.
+			category, ok := s.enumCategoryArm(enumType, pattern.Name)
+			if !ok {
+				return true
+			}
+			var mark func(e *semantic.EnumType)
+			mark = func(e *semantic.EnumType) {
+				for _, variant := range e.Variants {
+					covered[variant.Name] = true
+					coveredQualified[e.Name+"."+variant.Name] = true
+				}
+				for _, child := range e.Children {
+					mark(child)
+				}
+			}
+			mark(category)
 		}
 	}
-	// docs/77: a hierarchy match is exhaustive when every leaf across the whole refinement subtree is
-	// covered (by qualified Owner.Variant key).
+	// docs/77: a hierarchy match is exhaustive when every leaf across the SCRUTINEE's refinement
+	// subtree is covered (qualified Owner.Variant key). The frontier is the scrutinee's static
+	// type, not the hierarchy root — matching the analyzer's exhaustiveness scope (a match over
+	// `Expr` must cover Expr's leaves, not its sibling categories').
 	if enumType.Parent != nil || len(enumType.Children) > 0 {
 		total := 0
 		allCovered := true
@@ -370,7 +390,7 @@ func matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 				visit(child)
 			}
 		}
-		visit(enumType.Root())
+		visit(enumType)
 		return allCovered && total > 0
 	}
 	return len(covered) == len(enumType.Variants)

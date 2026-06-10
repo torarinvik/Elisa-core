@@ -229,6 +229,20 @@ func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, lo uint32, cou
 	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), relative, countConst, cStringFree("istag.range")), boolType, nil
 }
 
+// enumCategoryArm resolves a bind-arm name to a sub-category of a hierarchy scrutinee (docs/77 §2),
+// mirroring the analyzer's resolveEnumCategoryArm so the backend dispatches the same arms the
+// analyzer accepted. A plain (non-category) bind name returns false and stays a catch-all bind.
+func (s *functionState) enumCategoryArm(enumType *semantic.EnumType, name string) (*semantic.EnumType, bool) {
+	if enumType == nil || name == "" || (enumType.Parent == nil && len(enumType.Children) == 0) {
+		return nil, false
+	}
+	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
+	if !ok || category == nil || !semantic.EnumDescendsFrom(category, enumType) {
+		return nil, false
+	}
+	return category, true
+}
+
 // enumCategoryIsTarget recognizes a bare enum-category `is` target (docs/77): the target names an
 // enum TYPE (no `.Variant`) and the scrutinee is a hierarchical enum related to it. Mirrors the
 // analyzer's resolveEnumCategoryIsTarget gating so flat-enum `is` lowering is unchanged.

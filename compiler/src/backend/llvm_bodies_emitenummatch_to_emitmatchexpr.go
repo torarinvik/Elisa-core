@@ -135,14 +135,14 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-		if matchIsExhaustive(enumType, stmt.Arms) {
+		if s.matchIsExhaustive(enumType, stmt.Arms) {
 			C.LLVMBuildUnreachable(s.builder)
 		} else {
 			C.LLVMBuildBr(s.builder, mergeBB)
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-		if allTerminated && matchIsExhaustive(enumType, stmt.Arms) {
+		if allTerminated && s.matchIsExhaustive(enumType, stmt.Arms) {
 			C.LLVMBuildUnreachable(s.builder)
 		}
 		return nil
@@ -189,14 +189,14 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if matchIsExhaustive(enumType, stmt.Arms) {
+	if s.matchIsExhaustive(enumType, stmt.Arms) {
 		C.LLVMBuildUnreachable(s.builder)
 	} else {
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if allTerminated && matchIsExhaustive(enumType, stmt.Arms) {
+	if allTerminated && s.matchIsExhaustive(enumType, stmt.Arms) {
 		C.LLVMBuildUnreachable(s.builder)
 	}
 	return nil

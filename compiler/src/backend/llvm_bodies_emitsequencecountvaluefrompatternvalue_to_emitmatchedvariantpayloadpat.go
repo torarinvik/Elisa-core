@@ -174,6 +174,42 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		C.LLVMBuildBr(s.builder, successBB)
 		return decodedActualValue, packedPayloadValueCache{}, nil
 	case *ast.MatchBindPattern:
+		// docs/77 §2 category arm (`Statement:` / `Statement s:`) on a hierarchy scrutinee:
+		// dispatch is the docs/81 range primitive over the category's leaf-tag range; the
+		// binder is the same value at the narrowed static type (a no-op re-bind).
+		if enumType, ok := semantic.StripAggregateStateType(actualType).(*semantic.EnumType); ok {
+			if category, isCategory := s.enumCategoryArm(enumType, p.Name); isCategory {
+				if p.Binder != "" {
+					alloca, err := s.createEntryAlloca(p.Binder, category)
+					if err != nil {
+						return nil, packedPayloadValueCache{}, err
+					}
+					C.LLVMBuildStore(s.builder, actualValue, alloca)
+					s.defineBinding(p.Binder, valueBinding{ptr: alloca, typ: category})
+					if enumType.Packed {
+						s.bindPackedEnumStoreOrigin(p.Binder, enumType, store)
+					}
+				}
+				if semantic.EnumDescendsFrom(enumType, category) {
+					C.LLVMBuildBr(s.builder, successBB) // covers the whole scrutinee
+					return decodedActualValue, packedPayloadValueCache{}, nil
+				}
+				tagValue := precomputedTagValue
+				if tagValue == nil {
+					var err error
+					tagValue, err = s.extractEnumTagValue(actualValue, decodedActualValue, enumType, store)
+					if err != nil {
+						return nil, packedPayloadValueCache{}, err
+					}
+				}
+				cond, _, err := s.emitTagRangeTest(tagValue, category.LeafTagLo, category.LeafTagCount)
+				if err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
+				C.LLVMBuildCondBr(s.builder, cond, successBB, failureBB)
+				return decodedActualValue, packedPayloadValueCache{}, nil
+			}
+		}
 		if handled, err := s.emitPredicateMatchPatternTest(p.Name, actualValue, actualType, successBB, failureBB); handled || err != nil {
 			return decodedActualValue, packedPayloadValueCache{}, err
 		}

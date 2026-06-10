@@ -326,6 +326,10 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		}
 		a.analyzeNestedMatchPattern(p.Options[0], expected, valueExpr, scope)
 	case *ast.MatchBindPattern:
+		if p.Binder != "" {
+			a.errorf(p.Pos(), "category arm binder (`%s %s`) is only valid as a top-level match arm", p.Name, p.Binder)
+			return
+		}
 		if a.analyzePredicateMatchPattern(p, expected, valueExpr) {
 			return
 		}

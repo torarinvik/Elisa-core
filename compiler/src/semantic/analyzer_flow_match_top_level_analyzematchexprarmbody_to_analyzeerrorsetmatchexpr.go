@@ -104,12 +104,55 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		}
 		return false
 	case *ast.MatchBindPattern:
+		// docs/77 §2 category arm: `Statement:` matches the sub-category's whole leaf range;
+		// `Statement s:` additionally binds the scrutinee at the narrowed type. Gated to
+		// hierarchical enums, so flat-enum arms keep the variants-or-_ rule.
+		if category, ok := a.resolveEnumCategoryArm(enumType, p.Name); ok {
+			if covered != nil {
+				for _, leaf := range enumDescendantLeaves(category) {
+					covered[leaf.Variant.Name] = true
+					covered[leaf.Qualified] = true
+				}
+			}
+			if p.Binder != "" {
+				sym := &Symbol{Name: p.Binder, Kind: SymbolLocal, Type: category, Node: p, Mutable: false}
+				a.defineLocal(sym, p.Pos())
+				a.recordValueBinding(sym, valueExpr)
+			}
+			if category != enumType {
+				a.bindRefinedExprType(scope, valueExpr, category)
+			}
+			return false
+		}
+		if p.Binder != "" {
+			a.errorf(p.Pos(), "match arm binder %q requires a sub-category of %q, but %q does not name one", p.Binder, enumType.Name, p.Name)
+			return false
+		}
 		a.errorf(p.Pos(), "top-level match arm must use %q variants or _", enumType.Name)
 		return false
 	default:
 		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
 		return false
 	}
+}
+
+// resolveEnumCategoryArm resolves a bare match-arm name to a sub-category of the hierarchy
+// scrutinee (docs/77 §2). Silent: a name that is not a related enum category is NOT a category
+// arm (it stays a plain bind / keeps the original diagnostics). Only downward narrowing —
+// including the scrutinee itself (a catch-all category arm) — qualifies.
+func (a *Analyzer) resolveEnumCategoryArm(enumType *EnumType, name string) (*EnumType, bool) {
+	if !enumIsHierarchical(enumType) || name == "" {
+		return nil, false
+	}
+	base, _, ok := a.lookupVisibleType(name)
+	if !ok {
+		return nil, false
+	}
+	category, ok := StripAggregateStateType(base).(*EnumType)
+	if !ok || category == nil || !enumDescendsFrom(category, enumType) {
+		return nil, false
+	}
+	return category, true
 }
 func (a *Analyzer) analyzeTopLevelConstEnumMatchPattern(pattern ast.MatchPattern, constEnumType *ConstEnumType, scope *Scope, index int, armCount int, covered map[string]bool) bool {
 	savedScope := a.currentScope

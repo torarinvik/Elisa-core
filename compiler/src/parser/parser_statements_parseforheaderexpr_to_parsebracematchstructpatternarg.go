@@ -836,6 +836,12 @@ func (p *Parser) parseNestedOrMatchPattern() ast.MatchPattern {
 }
 func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
+	// docs/77 §2 category arm with binder: `Statement s:` — two bare identifiers. Only the
+	// top-level arm position accepts the binder; nested payload patterns stay single-ident.
+	if bind, ok := pattern.(*ast.MatchBindPattern); ok && bind != nil && bind.Binder == "" &&
+		p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "_" {
+		bind.Binder = p.advance().Text
+	}
 	if p.peek() == lexer.TOKEN_COMMA {
 		elems := []ast.MatchPattern{pattern}
 		for p.match(lexer.TOKEN_COMMA) {

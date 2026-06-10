@@ -158,6 +158,11 @@ type MatchWildcardPattern struct {
 type MatchBindPattern struct {
 	Position lexer.Pos
 	Name     string
+	// Binder (docs/77 §2) is the optional second identifier of a category arm
+	// (`Statement s:`): Name must then resolve to a sub-category of the hierarchy
+	// scrutinee, and Binder binds the matched value at that narrowed type.
+	// Empty for a plain bind arm. Only valid in top-level arm position.
+	Binder string
 }
 type MatchStringLiteralPattern struct {
 	Position lexer.Pos

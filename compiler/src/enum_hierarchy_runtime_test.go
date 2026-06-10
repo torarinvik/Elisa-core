@@ -243,6 +243,82 @@ def bt() -> void:
 `)
 }
 
+// docs/77 §2 category arms: `Mono:` matches the whole sub-category (range dispatch), and the
+// match is EXHAUSTIVE through category arms alone (no wildcard) — each child category
+// discharges its leaf range.
+func TestValueEnumHierarchyCategoryMatchArms(t *testing.T) {
+	runEnumHierarchyProgram(t, "cat_arms.elisa", `
+enum Color: pass
+enum Mono is Color:
+    Black
+    White
+enum RGB is Color:
+    Red
+    Green
+    Blue
+
+def classify(c: Color) -> i64:
+    match c:
+        Mono:
+            return 1
+        RGB:
+            return 2
+
+@test
+def bt() -> void:
+    can Abort.Panic:
+        if classify(Mono.Black) != 1:
+            panic("Mono.Black must take the Mono category arm")
+        if classify(Mono.White) != 1:
+            panic("Mono.White must take the Mono category arm")
+        if classify(RGB.Red) != 2:
+            panic("RGB.Red must take the RGB category arm")
+        if classify(RGB.Blue) != 2:
+            panic("RGB.Blue must take the RGB category arm")
+`)
+}
+
+// Category arm WITH binder (`Expr e:`) on a region-backed recursive hierarchy: binds the
+// scrutinee at the narrowed type so it can be passed where the sub-category is required.
+func TestRecursiveEnumHierarchyCategoryArmBinder(t *testing.T) {
+	runEnumHierarchyProgram(t, "cat_arm_bind.elisa", `
+enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Ret(value: Node)
+    Nop
+
+def eval_expr(e: Expr) -> i64:
+    match e:
+        Expr.Add(left: l, right: r):
+            return describe(l) + describe(r)
+        Expr.Lit(value: v):
+            return v
+
+def describe(n: Node) -> i64:
+    match n:
+        Expr e:
+            return eval_expr(e)
+        Stmt:
+            return 100
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(value: 5)
+            b: Node = new[auto] Expr.Lit(value: 7)
+            root: Node = new[auto] Expr.Add(left: a, right: b)
+            nop: Node = new[auto] Stmt.Nop
+            if describe(root) != 12:
+                panic("Expr category arm with binder must narrow and eval to 12")
+            if describe(nop) != 100:
+                panic("Stmt category arm must match Nop")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `

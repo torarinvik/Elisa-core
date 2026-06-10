@@ -60,7 +60,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, len(expr.Arms)+1)
 	valuePath, hasValuePath := s.packedEnumStoragePath(expr.Value)
 	valueIdent, hasValueIdent := expr.Value.(*ast.Ident)
-	exhaustive := matchIsExhaustive(enumType, expr.Arms)
+	exhaustive := s.matchIsExhaustive(enumType, expr.Arms)
 	if packedEnumMatchCanUseTagSwitch(enumType, expr.Arms) {
 		wildcardIndex := -1
 		variantArmCount := 0
