@@ -373,6 +373,10 @@ type ifClause struct {
 	Patterns         []ast.MatchPattern
 	OptionalBindings []optionalReturnWithBinding
 	Body             []ast.Stmt
+	// StoreBinderDeprecated marks a store-pattern clause written with the legacy
+	// `value in store as Pattern` spelling (vs the modern `value in store is
+	// Pattern`), so only the legacy form emits the deprecation diagnostic.
+	StoreBinderDeprecated bool
 }
 
 func (p *Parser) parseBranchHint() ast.BranchHint {
@@ -446,13 +450,18 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 				p.errorf("if likely/unlikely hint cannot be combined with pattern binders")
 			}
 		}
-		store := p.parseExpr()
-		if p.match(lexer.TOKEN_AS) {
+		// Parse the store with `is` suppressed so `value in store is Pattern`
+		// keeps the trailing `is` for the store-pattern clause (docs/80 Phase B);
+		// the legacy `value in store as Pattern` spelling still works and is the
+		// only one that carries the deprecation.
+		store := p.withIsComparisonDisabled(p.parseExpr)
+		usedAs := p.peek() == lexer.TOKEN_AS
+		if p.match(lexer.TOKEN_AS) || p.match(lexer.TOKEN_IS) {
 			patterns := p.parseTopLevelMatchPatterns()
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
 			body := p.parseBlock()
-			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body}
+			return ifClause{Position: pos, Hint: hint, Value: head, Store: store, Patterns: patterns, Body: body, StoreBinderDeprecated: usedAs}
 		}
 		p.pos = headStart
 		cond := p.parseExpr()

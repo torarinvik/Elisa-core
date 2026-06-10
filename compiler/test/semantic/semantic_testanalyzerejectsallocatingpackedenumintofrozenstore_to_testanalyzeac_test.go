@@ -252,6 +252,25 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	}
 	requireNoWarnings(t, result)
 }
+
+// docs/80 Phase B: the modern `if value in store is Pattern` spelling refines a
+// store entry exactly like the legacy `as` form but carries NO deprecation.
+func TestAnalyzeAcceptsPackedEnumIfStorePatternBinderIsForm(t *testing.T) {
+	src := `packed enum Expr:
+	Int(value: int)
+
+def fold(node: Expr, store: Expr.Store[Local]) -> int:
+	if node in store is Expr.Int(value: value):
+		return value
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "packed_enum_if_store_pattern_binder_is_form.elisa", src)
+	requireNoErrors(t, errs)
+	if deprecations := strings.Join(result.Deprecations(), "\n"); strings.Contains(deprecations, "is deprecated") {
+		t.Fatalf("expected the `is` store form to carry no deprecation, got:\n%s", deprecations)
+	}
+	requireNoWarnings(t, result)
+}
 func TestAnalyzeAcceptsPackedEnumIfPatternBinderWithElif(t *testing.T) {
 	src := `packed enum Expr:
 	common:

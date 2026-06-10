@@ -8,18 +8,19 @@ import (
 )
 
 type Parser struct {
-	tokens              []lexer.Token
-	pos                 int
-	errors              []string
-	poolScopes          []string
-	nurseryGroupByPool  map[string]string
-	nurseryCounter      int
-	declVisibility      map[ast.Decl]string
-	currentVisibility   string
-	allowInMembership   bool
-	allowTernary        bool
-	allowWhereExpr      bool
-	staticFunctionDepth int
+	tokens               []lexer.Token
+	pos                  int
+	errors               []string
+	poolScopes           []string
+	nurseryGroupByPool   map[string]string
+	nurseryCounter       int
+	declVisibility       map[ast.Decl]string
+	currentVisibility    string
+	allowInMembership    bool
+	allowTernary         bool
+	allowWhereExpr       bool
+	disallowIsComparison bool
+	staticFunctionDepth  int
 }
 
 func New(tokens []lexer.Token) *Parser {
@@ -86,6 +87,19 @@ func (p *Parser) withInMembershipDisabled(parse func() ast.Expr) ast.Expr {
 	p.allowInMembership = false
 	defer func() {
 		p.allowInMembership = saved
+	}()
+	return parse()
+}
+
+// withIsComparisonDisabled parses without treating a top-level `is` as a
+// comparison operator, so `value in store is Pattern` parses the store
+// expression up to (but not including) the `is` — letting the store-pattern
+// clause own the `is` (docs/80 Phase B). `in` binds tighter than `is`.
+func (p *Parser) withIsComparisonDisabled(parse func() ast.Expr) ast.Expr {
+	saved := p.disallowIsComparison
+	p.disallowIsComparison = true
+	defer func() {
+		p.disallowIsComparison = saved
 	}()
 	return parse()
 }

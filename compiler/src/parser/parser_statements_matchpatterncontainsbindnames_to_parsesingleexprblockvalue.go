@@ -175,7 +175,7 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 				Value:                          clause.Value,
 				Store:                          clause.Store,
 				Arms:                           arms,
-				DeprecatedIfStorePatternBinder: clause.Store != nil,
+				DeprecatedIfStorePatternBinder: clause.Store != nil && clause.StoreBinderDeprecated,
 			}}
 			continue
 		}

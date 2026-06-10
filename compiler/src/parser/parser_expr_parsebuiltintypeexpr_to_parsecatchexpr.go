@@ -599,7 +599,7 @@ func (p *Parser) parseComparison() ast.Expr {
 	for p.peek() == lexer.TOKEN_EQEQ || p.peek() == lexer.TOKEN_BANGEQ ||
 		p.peek() == lexer.TOKEN_LT || p.peek() == lexer.TOKEN_GT ||
 		p.peek() == lexer.TOKEN_LTEQ || p.peek() == lexer.TOKEN_GTEQ ||
-		p.peek() == lexer.TOKEN_IS || p.membershipLiteralAhead() || p.notInMembershipAhead() {
+		(!p.disallowIsComparison && p.peek() == lexer.TOKEN_IS) || p.membershipLiteralAhead() || p.notInMembershipAhead() {
 		pos := p.cur().Pos
 		if p.notInMembershipAhead() {
 			p.advance()
