@@ -109,6 +109,12 @@ func (a *Analyzer) inheritHierarchyCommonFields(decls []scopedDecl) {
 	}
 }
 
+// EnumDescendsFrom is the exported sealed-subtype walk (src is dst or a transitive refinement of
+// dst), used by the backend to lower category `is` tests and match dispatch (docs/77/81).
+func EnumDescendsFrom(src *EnumType, dst *EnumType) bool {
+	return enumDescendsFrom(src, dst)
+}
+
 // enumIsHierarchical reports whether the enum participates in a sealed hierarchy (docs/77) — it is a
 // refinement of another enum, or has its own refinements. Plain standalone enums are not hierarchical
 // and keep the original flat match/exhaustiveness behavior.

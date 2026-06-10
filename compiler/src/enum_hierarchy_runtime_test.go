@@ -182,6 +182,67 @@ def bt() -> void:
 `)
 }
 
+// docs/77 §2 + docs/81 Phase 3e: a bare-category `is` test in expression position is a single
+// unsigned tag-range check (`tag - lo <u count`). Value hierarchy: Mono owns 2 tags, RGB owns 3.
+func TestValueEnumHierarchyCategoryIsTest(t *testing.T) {
+	runEnumHierarchyProgram(t, "cat_is.elisa", `
+enum Color: pass
+enum Mono is Color:
+    Black
+    White
+enum RGB is Color:
+    Red
+    Green
+    Blue
+
+@test
+def bt() -> void:
+    c: Color = RGB.Green
+    if c is Mono:
+        panic("RGB.Green must not test as Mono")
+    if not (c is RGB):
+        panic("RGB.Green must test as RGB")
+    if not (c is Color):
+        panic("widening test must be true")
+    m: Color = Mono.White
+    if not (m is Mono):
+        panic("Mono.White must test as Mono")
+    if m is RGB:
+        panic("Mono.White must not test as RGB")
+`)
+}
+
+// Category `is` on a REGION-BACKED recursive hierarchy: the tag is read from the root store's
+// record (one load), then the same range check.
+func TestRecursiveEnumHierarchyCategoryIsTest(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_cat_is.elisa", `
+enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Ret(value: Node)
+    Nop
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            lit: Node = new[auto] Expr.Lit(value: 5)
+            ret: Node = new[auto] Stmt.Ret(value: lit)
+            if not (lit is Expr):
+                panic("Lit must test as Expr")
+            if lit is Stmt:
+                panic("Lit must not test as Stmt")
+            if not (ret is Stmt):
+                panic("Ret must test as Stmt")
+            if ret is Expr:
+                panic("Ret must not test as Expr")
+            if not (ret is Node):
+                panic("widening test must be true")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `

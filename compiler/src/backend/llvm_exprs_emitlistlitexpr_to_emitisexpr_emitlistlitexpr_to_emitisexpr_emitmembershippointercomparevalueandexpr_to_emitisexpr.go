@@ -188,6 +188,8 @@ func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semant
 			value, _, err = s.emitStructIsTest(expr.Left, pattern)
 		} else if enumType, variant, pattern, ok := s.enumIsTargetPattern(target); ok {
 			value, _, err = s.emitEnumIsTest(expr.Left, enumType, variant, pattern)
+		} else if scrutinee, category, ok := s.enumCategoryIsTarget(expr.Left, target); ok {
+			value, _, err = s.emitEnumCategoryIsTest(expr.Left, scrutinee, category)
 		} else if base, cases, ok := s.namedStateIsTarget(target); ok {
 			value, _, err = s.emitNamedStateIsTest(expr.Left, base, cases)
 		} else {

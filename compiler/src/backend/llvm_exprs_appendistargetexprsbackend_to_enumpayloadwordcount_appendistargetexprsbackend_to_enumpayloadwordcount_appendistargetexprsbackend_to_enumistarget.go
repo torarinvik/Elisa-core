@@ -179,6 +179,97 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	cmp := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("istag"))
 	return cmp, s.g.result.NamedTypes["bool"], nil
 }
+
+// emitEnumCategoryIsTest lowers a bare-category `is` test (`e is Statement`, docs/77 §2) to the
+// docs/81 range primitive against the category's dense leaf-tag range. A widening test (the
+// scrutinee's static type already descends from the category) is constant true; an empty category
+// is constant false. The scrutinee is still evaluated for effects in the constant cases.
+func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *semantic.EnumType, category *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
+	boolType := s.g.result.NamedTypes["bool"]
+	storeBinding, err := s.resolvePackedMatchStoreBinding(scrutinee, leftExpr, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	enumValue, _, err := s.emitExpr(leftExpr, scrutinee)
+	if err != nil {
+		return nil, nil, err
+	}
+	if semantic.EnumDescendsFrom(scrutinee, category) {
+		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), boolType, nil
+	}
+	if category.LeafTagCount == 0 {
+		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 0, 0), boolType, nil
+	}
+	tagValue, err := s.extractEnumTagValue(enumValue, nil, scrutinee, storeBinding)
+	if err != nil {
+		return nil, nil, err
+	}
+	return s.emitTagRangeTest(tagValue, category.LeafTagLo, category.LeafTagCount)
+}
+
+// emitTagRangeTest emits the docs/81 category-membership primitive: matches ⇔ tag - lo <u count.
+// count==1 folds to plain equality (a leaf is a range of size 1), lo==0 skips the subtract.
+func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, lo uint32, count uint32) (C.LLVMValueRef, semantic.Type, error) {
+	boolType := s.g.result.NamedTypes["bool"]
+	loConst, err := s.enumTagConstant(lo)
+	if err != nil {
+		return nil, nil, err
+	}
+	if count == 1 {
+		return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, loConst, cStringFree("istag")), boolType, nil
+	}
+	relative := tagValue
+	if lo != 0 {
+		relative = C.LLVMBuildSub(s.builder, tagValue, loConst, cStringFree("istag.rel"))
+	}
+	countConst, err := s.enumTagConstant(count)
+	if err != nil {
+		return nil, nil, err
+	}
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), relative, countConst, cStringFree("istag.range")), boolType, nil
+}
+
+// enumCategoryIsTarget recognizes a bare enum-category `is` target (docs/77): the target names an
+// enum TYPE (no `.Variant`) and the scrutinee is a hierarchical enum related to it. Mirrors the
+// analyzer's resolveEnumCategoryIsTarget gating so flat-enum `is` lowering is unchanged.
+func (s *functionState) enumCategoryIsTarget(leftExpr ast.Expr, target ast.Expr) (*semantic.EnumType, *semantic.EnumType, bool) {
+	scrutinee, ok := semantic.StripAggregateStateType(s.exprType(leftExpr)).(*semantic.EnumType)
+	if !ok || scrutinee == nil || (scrutinee.Parent == nil && len(scrutinee.Children) == 0) {
+		return nil, nil, false
+	}
+	name := ""
+	switch e := target.(type) {
+	case *ast.ParenExpr:
+		if e == nil {
+			return nil, nil, false
+		}
+		return s.enumCategoryIsTarget(leftExpr, e.Inner)
+	case *ast.TypeExprExpr:
+		if e == nil {
+			return nil, nil, false
+		}
+		named, ok := e.Type.(*ast.NamedType)
+		if !ok || named == nil || strings.Contains(named.Name, ".") {
+			return nil, nil, false // dotted ⇒ a variant target, handled elsewhere
+		}
+		name = named.Name
+	case *ast.Ident:
+		if e == nil {
+			return nil, nil, false
+		}
+		name = e.Name
+	default:
+		return nil, nil, false
+	}
+	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
+	if !ok || category == nil {
+		return nil, nil, false
+	}
+	if !semantic.EnumDescendsFrom(category, scrutinee) && !semantic.EnumDescendsFrom(scrutinee, category) {
+		return nil, nil, false
+	}
+	return scrutinee, category, true
+}
 func (s *functionState) structIsTargetPattern(expr ast.Expr) (*ast.MatchStructPattern, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return s.structIsTargetPattern(paren.Inner)
