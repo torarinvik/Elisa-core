@@ -195,7 +195,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
 				p.expect(lexer.TOKEN_RPAREN)
 				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ParamPacks: paramPacks, ArgItemOrder: argItems}
-				expr = p.attachOptionalCallWithClause(expr)
 				continue
 			}
 			p.advance()
@@ -251,7 +250,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 				ArgItemOrder:  argItems,
 				Safe:          safe,
 			}
-			expr = p.attachOptionalCallWithClause(expr)
 
 		default:
 			return expr

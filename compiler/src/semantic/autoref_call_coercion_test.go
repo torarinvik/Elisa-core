@@ -186,40 +186,6 @@ def build() -> i64:
 	}
 }
 
-func TestAnalyzeImplicitAutorefOnTrailingWithArgs(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "implicit_autoref_trailing_with.elisa", `struct ScratchArena:
-    value: i64
-
-bundle ArenaCtx implicit:
-    alloc: ScratchArena&
-
-def read() with ArenaCtx -> i64:
-    return alloc.value
-
-def build() -> i64:
-    owner: mutable ScratchArena = zeroed
-    return read() with ArenaCtx(alloc = owner)
-`)
-
-	buildSym, ok := result.GlobalScope.Lookup("build")
-	if !ok {
-		t.Fatal("expected build symbol")
-	}
-	buildDecl := buildSym.Node.(*ast.FuncDecl)
-	ret := buildDecl.Body[1].(*ast.ReturnStmt)
-	call := ret.Value.(*ast.CallExpr)
-	if !call.ResolvedImplicitArgsValid || len(call.ResolvedImplicitArgs) != 1 {
-		t.Fatalf("expected one resolved implicit arg, got %#v", call.ResolvedImplicitArgs)
-	}
-	addr, ok := call.ResolvedImplicitArgs[0].(*ast.AddrOfExpr)
-	if !ok {
-		t.Fatalf("expected implicit with arg to autoref, got %T", call.ResolvedImplicitArgs[0])
-	}
-	if ident, ok := addr.Operand.(*ast.Ident); !ok || ident.Name != "owner" {
-		t.Fatalf("expected autoref operand owner, got %T %#v", addr.Operand, addr.Operand)
-	}
-}
-
 func TestAnalyzeImplicitRefUpcastOnExistingRefArg(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "implicit_ref_upcast_existing_ref.elisa", `struct ScratchArena:
     value: i64

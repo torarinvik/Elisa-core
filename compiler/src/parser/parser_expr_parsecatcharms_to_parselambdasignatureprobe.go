@@ -287,22 +287,6 @@ func (p *Parser) parseNamedArgList(endToken lexer.TokenKind, allowSpread bool) (
 	}
 	return args, spread
 }
-func (p *Parser) parseValueParamPackUse() ast.ParamPackUse {
-	pos := p.tokens[p.pos-1].Pos
-	pack := ast.ParamPackUse{Position: pos, Name: p.parseQualifiedDeclName()}
-	if p.peek() != lexer.TOKEN_LPAREN {
-		pack.Bare = true
-		return pack
-	}
-	p.expect(lexer.TOKEN_LPAREN)
-	pack.Args, _ = p.parseNamedArgList(lexer.TOKEN_RPAREN, false)
-	p.expect(lexer.TOKEN_RPAREN)
-	if len(pack.Args) == 0 {
-		pack.DeprecatedSyntax = "use " + pack.Name + "()"
-		pack.DeprecatedReplacement = "use " + pack.Name
-	}
-	return pack
-}
 func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackUse, []ast.CallArgItem, bool, lexer.Pos) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
@@ -315,7 +299,6 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 	if p.peek() == lexer.TOKEN_RPAREN {
 		return nil, nil, nil, nil, nil, false, lexer.Pos{}
 	}
-	sawPack := false
 	for {
 		if p.peek() == lexer.TOKEN_RANGE {
 			pos := p.cur().Pos
@@ -327,30 +310,6 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 				p.errorf("call argument forwarding `..` must appear before other call arguments")
 			}
 			hasArgForward, argForwardPos = true, pos
-			if !p.match(lexer.TOKEN_COMMA) {
-				break
-			}
-			if p.peek() == lexer.TOKEN_RPAREN {
-				break
-			}
-			continue
-		}
-		if p.matchIdentText("use") {
-			if sawPack {
-				p.errorf("call parameter-pack application may appear at most once")
-			}
-			if len(argNames) != 0 {
-				for _, name := range argNames {
-					if name != "" {
-						p.errorf("call parameter-pack application must appear before ordinary named arguments")
-						break
-					}
-				}
-			}
-			pack := p.parseValueParamPackUse()
-			packs = append(packs, pack)
-			items = append(items, ast.CallArgItem{Position: pack.Position, Pack: pack, IsPack: true})
-			sawPack = true
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -376,9 +335,6 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 			arg = &ast.Ident{Position: namePos, Name: name}
 		} else {
 			arg = p.parseExpr()
-		}
-		if name == "" && sawPack {
-			p.errorf("call parameter-pack application must come after all positional arguments")
 		}
 		args = append(args, arg)
 		argNames = append(argNames, name)
@@ -423,65 +379,6 @@ func (p *Parser) isImmediateGroupedBlockExprName(name string) bool {
 		return false
 	}
 }
-func (p *Parser) parseWithBundleNamedArgs() ([]ast.WithArg, bool) {
-	return p.parseNamedArgList(lexer.TOKEN_RPAREN, true)
-}
-func (p *Parser) parseWithValueClause() ([]ast.WithArg, []ast.WithBundleUse, []ast.WithItem) {
-	p.expect(lexer.TOKEN_WITH)
-	args := make([]ast.WithArg, 0, 2)
-	bundles := make([]ast.WithBundleUse, 0, 1)
-	items := make([]ast.WithItem, 0, 2)
-	for {
-		pos := p.cur().Pos
-		name := p.expect(lexer.TOKEN_IDENT).Text
-		qualifiedName := name
-		hasDot := false
-		for p.matchQualifiedNameSeparator() {
-			hasDot = true
-			qualifiedName += "." + p.expect(lexer.TOKEN_IDENT).Text
-		}
-		switch {
-		case p.peek() == lexer.TOKEN_LPAREN:
-			p.advance()
-			bundleArgs, spread := p.parseWithBundleNamedArgs()
-			p.expect(lexer.TOKEN_RPAREN)
-			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName, Args: bundleArgs, Spread: spread}
-			bundles = append(bundles, bundle)
-			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})
-		case !hasDot && p.match(lexer.TOKEN_ASSIGN):
-			arg := ast.WithArg{Position: pos, Name: name, Value: p.parseExpr()}
-			args = append(args, arg)
-			items = append(items, ast.WithItem{Position: pos, Arg: arg})
-		case !hasDot:
-			arg := ast.WithArg{Position: pos, Name: name, Value: &ast.Ident{Position: pos, Name: name}, Shorthand: true}
-			args = append(args, arg)
-			items = append(items, ast.WithItem{Position: pos, Arg: arg})
-		default:
-			p.errorf("implicit bundle use %q requires (...) in a with clause", qualifiedName)
-			bundle := ast.WithBundleUse{Position: pos, Name: qualifiedName}
-			bundles = append(bundles, bundle)
-			items = append(items, ast.WithItem{Position: pos, Bundle: bundle, IsBundle: true})
-		}
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-	}
-	return args, bundles, items
-}
-func (p *Parser) attachOptionalCallWithClause(expr ast.Expr) ast.Expr {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok || p.peek() != lexer.TOKEN_WITH {
-		return expr
-	}
-	call.WithArgs, call.WithBundles, call.WithItemOrder = p.parseWithValueClause()
-	return call
-}
-
-// peekPostfixGenericValueApplication matches a generic-function value specialization with two or
-// more type args and NO trailing call: `fn[A, B]`. A multi-element bracket can never be an index
-// (indexing is single-subscript), so this is unambiguous and net-new (it was a parse error before).
-// Single-arg `fn[T]` is intentionally NOT matched here -- it is ambiguous with `arr[i]` and is
-// resolved in the analyzer instead.
 func (p *Parser) peekPostfixGenericValueApplication() bool {
 	if p.peek() != lexer.TOKEN_LBRACKET {
 		return false

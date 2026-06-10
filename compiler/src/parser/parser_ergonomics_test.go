@@ -143,109 +143,28 @@ func TestParseOneLineStaticFunctionBodies(t *testing.T) {
 	}
 }
 
-func TestParseExplicitArgErgonomicsAndDestructuring(t *testing.T) {
-	file, errs := parseSourceFile(t, `bundle Pair explicit:
-    left: i64
-    right: i64 = 7
-
-struct PairRow:
+func TestParseStructDefaultsAndDestructuring(t *testing.T) {
+	file, errs := parseSourceFile(t, `struct PairRow:
     first: i64
     second: i64 = 0
 
-def add(use Pair) -> i64:
-    return left + right
-
-def build(left: i64, width: i64, pair: PairRow, rows: darray[PairRow]) -> i64:
-    with args(use Pair(left:), width:):
-        let PairRow{first: local_first, second} = pair
-        for {first, second} in rows:
-            return add(use Pair(right: 5, left:), right: width)
+def build(pair: PairRow, rows: darray[PairRow]) -> i64:
+    let PairRow{first: local_first, second} = pair
+    for {first, second} in rows:
+        return local_first + first + second
     return 0
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	paramsDecl, ok := file.Decls[0].(*ast.ParamsDecl)
-	if !ok {
-		t.Fatalf("expected params decl, got %T", file.Decls[0])
-	}
-	if paramsDecl.Name != "Pair" || len(paramsDecl.Params) != 2 || paramsDecl.Params[1].DefaultValue == nil {
-		t.Fatalf("expected Pair explicit bundle declaration with a defaulted field, got %#v", paramsDecl)
-	}
-	pairRow, ok := file.Decls[1].(*ast.StructDecl)
+	pairRow, ok := file.Decls[0].(*ast.StructDecl)
 	if !ok || len(pairRow.Fields) != 2 || pairRow.Fields[1].DefaultValue == nil {
-		t.Fatalf("expected PairRow struct field default, got %#v", file.Decls[1])
-	}
-	addDecl, ok := file.Decls[2].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected add function decl, got %T", file.Decls[2])
-	}
-	if len(addDecl.ParamPacks) != 1 || addDecl.ParamPacks[0].Name != "Pair" {
-		t.Fatalf("expected add signature to use Pair pack, got %#v", addDecl.ParamPacks)
-	}
-	buildDecl, ok := file.Decls[3].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected build function decl, got %T", file.Decls[3])
-	}
-	argsScope, ok := buildDecl.Body[0].(*ast.ArgsScopeStmt)
-	if !ok {
-		t.Fatalf("expected args scope stmt, got %T", buildDecl.Body[0])
-	}
-	if len(argsScope.ParamPacks) != 1 || argsScope.ParamPacks[0].Name != "Pair" {
-		t.Fatalf("expected args scope to use Pair pack, got %#v", argsScope.ParamPacks)
-	}
-	if len(argsScope.Args) != 1 || argsScope.Args[0].Name != "width" || !argsScope.Args[0].Shorthand {
-		t.Fatalf("expected shorthand width ambient arg, got %#v", argsScope.Args)
-	}
-	letStmt, ok := argsScope.Body[0].(*ast.LetDestructureStmt)
-	if !ok {
-		t.Fatalf("expected let destructure stmt, got %T", argsScope.Body[0])
-	}
-	if letStmt.Pattern.TypeName != "PairRow" || len(letStmt.Pattern.Args) != 2 || !letStmt.Pattern.Brace {
-		t.Fatalf("expected typed brace destructure pattern, got %#v", letStmt.Pattern)
-	}
-	if letStmt.Pattern.Args[0].Field != "first" || letStmt.Pattern.Args[0].Name != "local_first" {
-		t.Fatalf("expected renamed destructure field, got %#v", letStmt.Pattern.Args[0])
-	}
-	iterStmt, ok := argsScope.Body[1].(*ast.IterForStmt)
-	if !ok {
-		t.Fatalf("expected iter for stmt, got %T", argsScope.Body[1])
-	}
-	pattern, ok := iterStmt.Pattern.(*ast.MoveBindStructPattern)
-	if !ok {
-		t.Fatalf("expected struct destructure loop pattern, got %T", iterStmt.Pattern)
-	}
-	if pattern.TypeName != "" || len(pattern.Args) != 2 || !pattern.Brace || pattern.Args[0].Field != "first" || pattern.Args[1].Field != "second" {
-		t.Fatalf("unexpected loop destructure pattern %#v", pattern)
-	}
-	ret, ok := iterStmt.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt inside loop, got %T", iterStmt.Body[0])
-	}
-	call, ok := ret.Value.(*ast.CallExpr)
-	if !ok {
-		t.Fatalf("expected call expr, got %T", ret.Value)
-	}
-	if len(call.ParamPacks) != 1 || call.ParamPacks[0].Name != "Pair" {
-		t.Fatalf("expected call to use Pair pack, got %#v", call.ParamPacks)
-	}
-	foundPackShorthand := false
-	for _, arg := range call.ParamPacks[0].Args {
-		if arg.Name == "left" && arg.Shorthand {
-			foundPackShorthand = true
-		}
-	}
-	if !foundPackShorthand {
-		t.Fatalf("expected pack application to preserve shorthand args, got %#v", call.ParamPacks[0].Args)
+		t.Fatalf("expected PairRow struct field default, got %#v", file.Decls[0])
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"bundle Pair explicit:",
-		"def add(use Pair) -> i64:",
-		"with args(use Pair(left:), width:):",
 		"let PairRow{first: local_first, second} = pair",
 		"for {first, second} in rows:",
-		"return add(use Pair(right: 5, left:), right: width)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -276,119 +195,6 @@ func TestParseWithArenaScopedAllocatorShorthand(t *testing.T) {
 	formatted := unparse.FormatDecl(decl)
 	if !strings.Contains(formatted, "with arena scratch(8192) as owner:") {
 		t.Fatalf("expected unparse to preserve scoped arena shorthand, got:\n%s", formatted)
-	}
-}
-
-func TestParseLocalParamsStmt(t *testing.T) {
-	file, errs := parseSourceFile(t, `def build(left: i64) -> i64:
-    args Pair:
-        value: i64 = left
-        width: i64 = 7
-    return consume(use Pair, width: left)
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	buildDecl, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[0])
-	}
-	localParams, ok := buildDecl.Body[0].(*ast.LocalParamsStmt)
-	if !ok {
-		t.Fatalf("expected local params stmt, got %T", buildDecl.Body[0])
-	}
-	if localParams.Name != "Pair" || len(localParams.Params) != 2 {
-		t.Fatalf("expected Pair local params with two fields, got %#v", localParams)
-	}
-	if localParams.Params[0].DefaultValue == nil || localParams.Params[1].DefaultValue == nil {
-		t.Fatalf("expected local params defaults, got %#v", localParams.Params)
-	}
-	formatted := unparse.FormatFile(file)
-	for _, want := range []string{
-		"args Pair:",
-		"value: i64 = left",
-		"width: i64 = 7",
-		"return consume(use Pair, width: left)",
-	} {
-		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
-		}
-	}
-}
-
-func TestParseBareValueParamPackUse(t *testing.T) {
-	file, errs := parseSourceFile(t, `bundle Pair explicit:
-    left: i64
-
-def add(use Pair) -> i64:
-    return left
-
-def build(left: i64) -> i64:
-    with args(use Pair, width: left):
-        return add(use Pair)
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	buildDecl, ok := file.Decls[2].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[2])
-	}
-	argsScope, ok := buildDecl.Body[0].(*ast.ArgsScopeStmt)
-	if !ok {
-		t.Fatalf("expected args scope stmt, got %T", buildDecl.Body[0])
-	}
-	if len(argsScope.ParamPacks) != 1 || !argsScope.ParamPacks[0].Bare || len(argsScope.ParamPacks[0].Args) != 0 {
-		t.Fatalf("expected bare args-scope pack use, got %#v", argsScope.ParamPacks)
-	}
-	ret, ok := argsScope.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", argsScope.Body[0])
-	}
-	call, ok := ret.Value.(*ast.CallExpr)
-	if !ok {
-		t.Fatalf("expected call expr, got %T", ret.Value)
-	}
-	if len(call.ParamPacks) != 1 || !call.ParamPacks[0].Bare || len(call.ParamPacks[0].Args) != 0 {
-		t.Fatalf("expected bare call pack use, got %#v", call.ParamPacks)
-	}
-	formatted := unparse.FormatFile(file)
-	for _, want := range []string{
-		"with args(use Pair, width: left):",
-		"return add(use Pair)",
-	} {
-		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
-		}
-	}
-}
-
-func TestParseLegacyContextAndParamsFormatAsBundles(t *testing.T) {
-	file, errs := parseSourceFile(t, `context ParseCtx:
-    parser: i64
-
-params Pair:
-    left: i64
-    right: i64 = 7
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	if _, ok := file.Decls[0].(*ast.ContextDecl); !ok {
-		t.Fatalf("expected legacy context declaration to parse as ContextDecl, got %T", file.Decls[0])
-	}
-	if _, ok := file.Decls[1].(*ast.ParamsDecl); !ok {
-		t.Fatalf("expected legacy params declaration to parse as ParamsDecl, got %T", file.Decls[1])
-	}
-	formatted := unparse.FormatFile(file)
-	for _, want := range []string{
-		"bundle ParseCtx implicit:",
-		"bundle Pair explicit:",
-		"right: i64 = 7",
-	} {
-		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
-		}
 	}
 }
 
@@ -562,55 +368,6 @@ def update(base: Accessors, name: i64) -> Accessors:
 	formatted := unparse.FormatDecl(updateDecl)
 	if !strings.Contains(formatted, "Accessors{...base, read_name_id: name, default_enabled: true}") {
 		t.Fatalf("expected formatted spread literal, got:\n%s", formatted)
-	}
-}
-
-func TestParseLocalArgsPacksForStructLiteralSpread(t *testing.T) {
-	file, errs := parseSourceFile(t, `struct Accessors:
-    read_name_id: i64?
-    write_name_id: i64?
-    index_expr: i64?
-    stored_expr: i64?
-
-def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> Accessors:
-    args name_ids:
-        read_name_id: i64? = next_read
-        write_name_id: i64? = next_write
-    args expressions:
-        index_expr: i64? = next_index
-        stored_expr: i64? = null
-    return Accessors{...current, ...name_ids, ...expressions}
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	updateDecl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected update function decl, got %T", file.Decls[1])
-	}
-	if _, ok := updateDecl.Body[0].(*ast.LocalParamsStmt); !ok {
-		t.Fatalf("expected first local args pack, got %T", updateDecl.Body[0])
-	}
-	if _, ok := updateDecl.Body[1].(*ast.LocalParamsStmt); !ok {
-		t.Fatalf("expected second local args pack, got %T", updateDecl.Body[1])
-	}
-	ret := updateDecl.Body[2].(*ast.ReturnStmt)
-	lit, ok := ret.Value.(*ast.StructLitExpr)
-	if !ok {
-		t.Fatalf("expected struct literal return value, got %T", ret.Value)
-	}
-	if len(lit.Spreads) != 3 {
-		t.Fatalf("expected current plus two args-pack spreads, got %#v", lit.Spreads)
-	}
-	formatted := unparse.FormatDecl(updateDecl)
-	for _, want := range []string{
-		"args name_ids:",
-		"args expressions:",
-		"return Accessors{...current, ...name_ids, ...expressions}",
-	} {
-		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
-		}
 	}
 }
 

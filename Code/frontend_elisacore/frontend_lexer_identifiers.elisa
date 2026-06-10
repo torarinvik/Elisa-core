@@ -71,13 +71,12 @@ def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
         return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 9, text)
 
     if text.len == 7:
-        entries: FrontendKeywordEntry[4] = [
+        entries: FrontendKeywordEntry[3] = [
             FrontendKeywordEntry("alignof", FrontendTokenKind.Alignof),
             FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
-            FrontendKeywordEntry("context", FrontendTokenKind.Context),
             FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable)
         ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 4, text)
+        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 3, text)
 
     if text.len == 8:
         entries: FrontendKeywordEntry[2] = [

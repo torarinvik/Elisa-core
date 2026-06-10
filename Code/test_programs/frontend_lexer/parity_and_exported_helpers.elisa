@@ -152,7 +152,7 @@ def frontend_case_with_and_context_keywords() -> bool:
         a: mutable Arena& = (&scratch).cast[mutable Arena&]
         bytes: u8[14] = [119, 105, 116, 104, 32, 99, 111, 110, 116, 101, 120, 116, 10, 0]
         tokens: darray[FrontendToken] = frontend_tokenize_test_source(a, &bytes[0])
-        ok: bool = frontend_expect_token_count(tokens, 4) and frontend_expect_kind(tokens, 0, FrontendTokenKind.With) and frontend_expect_kind(tokens, 1, FrontendTokenKind.Context) and frontend_expect_kind(tokens, 2, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3, FrontendTokenKind.Eof)
+        ok: bool = frontend_expect_token_count(tokens, 4) and frontend_expect_kind(tokens, 0, FrontendTokenKind.With) and frontend_expect_kind(tokens, 1, FrontendTokenKind.Ident) and frontend_expect_kind(tokens, 2, FrontendTokenKind.Newline) and frontend_expect_kind(tokens, 3, FrontendTokenKind.Eof)
         destroy scratch
         return ok
 
@@ -199,7 +199,7 @@ def frontend_case_lookup_keyword_table() -> bool:
         FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
         FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed),
         FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
-        FrontendKeywordEntry("context", FrontendTokenKind.Context),
+        FrontendKeywordEntry("context", FrontendTokenKind.Ident),
         FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable),
         FrontendKeywordEntry("region", FrontendTokenKind.Ident),
         FrontendKeywordEntry("new", FrontendTokenKind.Ident),
@@ -229,7 +229,7 @@ def frontend_case_kind_only_keyword_path() -> bool:
         if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[mutable FrontendLexer&]), FrontendTokenKind.With):
             destroy scratch
             return false
-        if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[mutable FrontendLexer&]), FrontendTokenKind.Context):
+        if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[mutable FrontendLexer&]), FrontendTokenKind.Ident):
             destroy scratch
             return false
         if not frontend_kind_eq(frontend_next_token_kind((&lexer).cast[mutable FrontendLexer&]), FrontendTokenKind.Ident):

@@ -598,9 +598,6 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	var implicitParams []ast.ParamDecl
 	var implicitBundles []string
 	var implicitItemOrder []ast.ImplicitSigItem
-	if p.peek() == lexer.TOKEN_WITH {
-		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
-	}
 
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {

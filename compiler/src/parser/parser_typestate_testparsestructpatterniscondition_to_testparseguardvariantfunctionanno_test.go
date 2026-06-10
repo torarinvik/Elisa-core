@@ -321,25 +321,6 @@ func TestParseGuardElseStatement(t *testing.T) {
 		t.Fatalf("expected guard else branch to lower to return, got %T", ifStmt.Then[0])
 	}
 }
-func TestParseWithBundleSpread(t *testing.T) {
-	file, errs := parseSourceFile(t, "bundle ParseCtx implicit:\n    offset: i64\n\ndef inner() with ParseCtx -> i64:\n    return offset\n\ndef keep() -> i64:\n    offset: i64 = 7\n    return inner() with ParseCtx(.., offset = offset)\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[2].(*ast.FuncDecl)
-	ret := decl.Body[1].(*ast.ReturnStmt)
-	call, ok := ret.Value.(*ast.CallExpr)
-	if !ok || len(call.WithBundles) != 1 {
-		t.Fatalf("expected call with one bundle, got %T %#v", ret.Value, ret.Value)
-	}
-	bundle := call.WithBundles[0]
-	if !bundle.Spread {
-		t.Fatalf("expected ParseCtx bundle to record spread marker, got %#v", bundle)
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "ParseCtx(.., offset = offset)") {
-		t.Fatalf("expected unparse output to preserve bundle spread, got:\n%s", formatted)
-	}
-}
 func TestParseVisitArmAlternativesAndGuard(t *testing.T) {
 	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Float(value: f64)\n\ndef score(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:\n            expr.span\n        _:\n            0\n")
 	if len(errs) != 0 {

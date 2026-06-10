@@ -58,7 +58,6 @@ enum FrontendTokenKind:
     As
     In
     With
-    Context
     Colon
     Scope
     Arrow

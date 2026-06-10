@@ -264,24 +264,6 @@ def build() -> i64 error[Error] can[Abort.Panic, Memory.Allocate]:
 	}
 }
 
-func TestGenerateLLVMIRIgnoresExplicitBundleDeclarations(t *testing.T) {
-	src := `bundle SharedArgs explicit:
-    value: i64
-    extra: i64 = 2
-
-def entry(value: i64) -> i64:
-	return value + 2
-`
-	result := parseAndAnalyzeBackendTest(t, "backend_params_decl.elisa", src)
-	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err != nil {
-		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
-	}
-	if !strings.Contains(output, "@entry") {
-		t.Fatalf("expected LLVM output for entry, got:\n%s", output)
-	}
-}
-
 func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	src := `def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
     return null

@@ -265,15 +265,6 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("alias") {
 		return p.parseAliasDecl()
 	}
-	if p.peekIdentText("params") {
-		return p.parseParamsDecl()
-	}
-	if p.peekIdentText("bundle") {
-		return p.parseBundleDecl()
-	}
-	if p.peek() == lexer.TOKEN_CONTEXT {
-		return p.parseContextDecl()
-	}
 	if p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
@@ -384,8 +375,6 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseConstDecl()
 	case lexer.TOKEN_ERROR:
 		return p.parseErrorDecl()
-	case lexer.TOKEN_CONTEXT:
-		return p.parseContextDecl()
 	case lexer.TOKEN_ENUM:
 		if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
 			return p.parseEnumMapDecl()
@@ -668,51 +657,6 @@ func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.PermissionDecl{Position: pos, Name: name, Members: members, Includes: includes}
-}
-func (p *Parser) parseContextDecl() *ast.ContextDecl {
-	pos := p.cur().Pos
-	p.expect(lexer.TOKEN_CONTEXT)
-	name := p.parseQualifiedDeclName()
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	p.expect(lexer.TOKEN_INDENT)
-
-	fields := make([]ast.ParamDecl, 0, p.estimateIndentedItemCount())
-	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-		p.skipNewlines()
-		if p.peek() == lexer.TOKEN_DEDENT {
-			break
-		}
-		fields = append(fields, p.parseParam(false))
-		p.expectNewline()
-	}
-	p.expect(lexer.TOKEN_DEDENT)
-	return &ast.ContextDecl{Position: pos, Name: name, Fields: fields}
-}
-func (p *Parser) parseParamsDecl() *ast.ParamsDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("params")
-	name := p.parseQualifiedDeclName()
-	params := p.parseParamDeclBlock(true)
-	return &ast.ParamsDecl{Position: pos, Name: name, Params: params, DeprecatedSyntax: "params " + name + ":", DeprecatedReplacement: "bundle " + name + " explicit:"}
-}
-func (p *Parser) parseBundleDecl() ast.Decl {
-	pos := p.cur().Pos
-	p.expectIdentText("bundle")
-	name := p.parseQualifiedDeclName()
-	mode := p.expect(lexer.TOKEN_IDENT).Text
-	switch mode {
-	case "implicit":
-		fields := p.parseParamDeclBlock(false)
-		return &ast.ContextDecl{Position: pos, Name: name, Fields: fields}
-	case "explicit":
-		params := p.parseParamDeclBlock(true)
-		return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
-	default:
-		p.errorf("expected bundle mode `implicit` or `explicit`, got %q", mode)
-		params := p.parseParamDeclBlock(true)
-		return &ast.ParamsDecl{Position: pos, Name: name, Params: params}
-	}
 }
 func (p *Parser) parseParamDeclBlock(allowDefaults bool) []ast.ParamDecl {
 	p.expect(lexer.TOKEN_COLON)

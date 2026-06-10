@@ -145,110 +145,108 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
             return 54
         FrontendTokenKind.With:
             return 55
-        FrontendTokenKind.Context:
-            return 56
         FrontendTokenKind.Colon:
-            return 57
+            return 56
         FrontendTokenKind.Scope:
-            return 58
+            return 57
         FrontendTokenKind.Arrow:
-            return 59
+            return 58
         FrontendTokenKind.Dot:
-            return 60
+            return 59
         FrontendTokenKind.Range:
-            return 61
+            return 60
         FrontendTokenKind.RangeLt:
-            return 62
+            return 61
         FrontendTokenKind.RangeGt:
-            return 63
+            return 62
         FrontendTokenKind.Comma:
-            return 64
+            return 63
         FrontendTokenKind.LParen:
-            return 65
+            return 64
         FrontendTokenKind.RParen:
-            return 66
+            return 65
         FrontendTokenKind.LBracket:
-            return 67
+            return 66
         FrontendTokenKind.RBracket:
-            return 68
+            return 67
         FrontendTokenKind.Hash:
-            return 69
+            return 68
         FrontendTokenKind.Ampersand:
-            return 70
+            return 69
         FrontendTokenKind.Question:
-            return 71
+            return 70
         FrontendTokenKind.QAssign:
-            return 72
+            return 71
         FrontendTokenKind.Bang:
-            return 73
+            return 72
         FrontendTokenKind.At:
-            return 74
+            return 73
         FrontendTokenKind.Ellipsis:
-            return 75
+            return 74
         FrontendTokenKind.LArrow:
-            return 76
+            return 75
         FrontendTokenKind.PlusEq:
-            return 77
+            return 76
         FrontendTokenKind.MinusEq:
-            return 78
+            return 77
         FrontendTokenKind.StarEq:
-            return 79
+            return 78
         FrontendTokenKind.SlashEq:
-            return 80
+            return 79
         FrontendTokenKind.PercentEq:
-            return 81
+            return 80
         FrontendTokenKind.CaretEq:
-            return 82
+            return 81
         FrontendTokenKind.PipeEq:
-            return 83
+            return 82
         FrontendTokenKind.AmpEq:
-            return 84
+            return 83
         FrontendTokenKind.LShiftEq:
-            return 85
+            return 84
         FrontendTokenKind.RShiftEq:
-            return 86
+            return 85
         FrontendTokenKind.Assign:
-            return 87
+            return 86
         FrontendTokenKind.EqEq:
-            return 88
+            return 87
         FrontendTokenKind.BangEq:
-            return 89
+            return 88
         FrontendTokenKind.Lt:
-            return 90
+            return 89
         FrontendTokenKind.Gt:
-            return 91
+            return 90
         FrontendTokenKind.LtEq:
-            return 92
+            return 91
         FrontendTokenKind.GtEq:
-            return 93
+            return 92
         FrontendTokenKind.Plus:
-            return 94
+            return 93
         FrontendTokenKind.Minus:
-            return 95
+            return 94
         FrontendTokenKind.Star:
-            return 96
+            return 95
         FrontendTokenKind.Slash:
-            return 97
+            return 96
         FrontendTokenKind.Percent:
-            return 98
+            return 97
         FrontendTokenKind.Pipe:
-            return 99
+            return 98
         FrontendTokenKind.Caret:
-            return 100
+            return 99
         FrontendTokenKind.LShift:
-            return 101
+            return 100
         FrontendTokenKind.RShift:
-            return 102
+            return 101
         FrontendTokenKind.Tilde:
-            return 103
+            return 102
         FrontendTokenKind.CharLit:
-            return 104
+            return 103
         FrontendTokenKind.Is:
-            return 105
+            return 104
         FrontendTokenKind.FatArrow:
-            return 106
+            return 105
         FrontendTokenKind.To:
-            return 107
+            return 106
     return 0
 
 

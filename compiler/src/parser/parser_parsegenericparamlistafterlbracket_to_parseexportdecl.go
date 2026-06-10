@@ -234,9 +234,6 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	var implicitParams []ast.ParamDecl
 	var implicitBundles []string
 	var implicitItemOrder []ast.ImplicitSigItem
-	if p.peek() == lexer.TOKEN_WITH {
-		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
-	}
 
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
@@ -314,8 +311,6 @@ func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
 }
 func (p *Parser) parseExplicitSignatureParamList(allowDefault bool, allowVariadic bool) ([]ast.ParamDecl, []ast.ParamPackUse, []ast.ParamSigItem, bool) {
 	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
-	packs := make([]ast.ParamPackUse, 0, 1)
-	items := make([]ast.ParamSigItem, 0, cap(params))
 	variadic := false
 	if p.peek() == lexer.TOKEN_RPAREN {
 		return params, nil, nil, false
@@ -326,24 +321,12 @@ func (p *Parser) parseExplicitSignatureParamList(allowDefault bool, allowVariadi
 			variadic = true
 			break
 		}
-		if p.matchIdentText("use") {
-			pos := p.tokens[p.pos-1].Pos
-			pack := ast.ParamPackUse{Position: pos, Name: p.parseQualifiedDeclName()}
-			packs = append(packs, pack)
-			items = append(items, ast.ParamSigItem{Position: pos, Pack: pack, IsPack: true})
-		} else {
-			param := p.parseParam(allowDefault)
-			params = append(params, param)
-			items = append(items, ast.ParamSigItem{Position: param.Position, Param: param})
-		}
+		params = append(params, p.parseParam(allowDefault))
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
 	}
-	if len(packs) == 0 {
-		items = nil
-	}
-	return params, packs, items, variadic
+	return params, nil, nil, variadic
 }
 func (p *Parser) parseParam(allowDefault bool) ast.ParamDecl {
 	pos := p.cur().Pos
@@ -379,28 +362,6 @@ func (p *Parser) lookaheadParamDecl() bool {
 	i++
 	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_COLON
 }
-func (p *Parser) parseWithSignatureClause() ([]ast.ParamDecl, []string, []ast.ImplicitSigItem) {
-	p.expect(lexer.TOKEN_WITH)
-	implicitParams := make([]ast.ParamDecl, 0, 2)
-	implicitBundles := make([]string, 0, 2)
-	implicitItemOrder := make([]ast.ImplicitSigItem, 0, 2)
-	for {
-		if p.lookaheadParamDecl() {
-			param := p.parseParam(false)
-			implicitParams = append(implicitParams, param)
-			implicitItemOrder = append(implicitItemOrder, ast.ImplicitSigItem{Position: param.Position, Param: param})
-		} else {
-			namePos := p.cur().Pos
-			bundle := p.parseQualifiedDeclName()
-			implicitBundles = append(implicitBundles, bundle)
-			implicitItemOrder = append(implicitItemOrder, ast.ImplicitSigItem{Position: namePos, Bundle: bundle, IsBundle: true})
-		}
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-	}
-	return implicitParams, implicitBundles, implicitItemOrder
-}
 func (p *Parser) parseExternDecl() ast.Decl {
 	return p.parseExternDeclWithAnnotations(nil)
 }
@@ -433,9 +394,6 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	var implicitParams []ast.ParamDecl
 	var implicitBundles []string
 	var implicitItemOrder []ast.ImplicitSigItem
-	if p.peek() == lexer.TOKEN_WITH {
-		implicitParams, implicitBundles, implicitItemOrder = p.parseWithSignatureClause()
-	}
 
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {

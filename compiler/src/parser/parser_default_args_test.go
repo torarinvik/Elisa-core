@@ -41,14 +41,6 @@ func TestParseRejectsDefaultsInDisallowedPositions(t *testing.T) {
 		src  string
 	}{
 		{
-			name: "implicit bundle field",
-			src:  "bundle ParseCtx implicit:\n    parser: i64 = 1\n",
-		},
-		{
-			name: "with signature",
-			src:  "def build() with parser: i64 = 1 -> i64:\n    return parser\n",
-		},
-		{
 			name: "export func",
 			src:  "def add(x: i64, y: i64) -> i64:\n    return x + y\n\nexport func add_export(x: i64 = 1, y: i64) -> i64 = add\n",
 		},

@@ -120,14 +120,6 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
 			}
-		case "params", "parameters", "args":
-			if p.looksLikeLocalParamsStmt() {
-				return p.parseLocalParamsStmt()
-			}
-		case "bundle":
-			if p.looksLikeLocalBundleStmt() {
-				return p.parseLocalBundleStmt()
-			}
 		case "lock":
 			if p.looksLikeLockStmt() {
 				return p.parseLockStmt()
@@ -197,13 +189,9 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.TOKEN_IN:
 		return p.parseInStore()
 	case lexer.TOKEN_WITH:
-		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "args" && p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN {
-			return p.parseArgsScopeStmt()
-		}
-		if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "arena" && p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT {
-			return p.parseWithArenaStmt()
-		}
-		return p.parseWithStmt()
+		// `with arena name(...) as owner:` is the only statement-level `with` form
+		// (the implicit-args with-scope and `with args(...)` were removed).
+		return p.parseWithArenaStmt()
 	case lexer.TOKEN_WHILE:
 		return p.parseWhile()
 	case lexer.TOKEN_STATIC:
@@ -262,43 +250,6 @@ func (p *Parser) looksLikeSignalStmt() bool {
 		}
 	}
 	return true
-}
-func (p *Parser) looksLikeLocalParamsStmt() bool {
-	return p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON
-}
-func (p *Parser) parseLocalParamsStmt() *ast.LocalParamsStmt {
-	pos := p.cur().Pos
-	syntax := p.cur().Text
-	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "params" || p.cur().Text == "parameters" || p.cur().Text == "args") {
-		p.advance()
-	} else {
-		p.expectIdentText("params")
-	}
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	params := p.parseParamDeclBlock(true)
-	stmt := &ast.LocalParamsStmt{Position: pos, Name: name, Params: params}
-	if syntax != "args" {
-		stmt.DeprecatedSyntax = syntax + " " + name + ":"
-		stmt.DeprecatedReplacement = "args " + name + ":"
-	}
-	return stmt
-}
-func (p *Parser) looksLikeLocalBundleStmt() bool {
-	return p.pos+3 < len(p.tokens) &&
-		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+3].Kind == lexer.TOKEN_COLON
-}
-func (p *Parser) parseLocalBundleStmt() *ast.LocalParamsStmt {
-	pos := p.cur().Pos
-	p.expectIdentText("bundle")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	mode := p.expect(lexer.TOKEN_IDENT).Text
-	if mode != "explicit" {
-		p.errorf("local bundle declarations only support `explicit` mode, got %q", mode)
-	}
-	params := p.parseParamDeclBlock(true)
-	return &ast.LocalParamsStmt{Position: pos, Name: name, Params: params, DeprecatedSyntax: "bundle " + name + " explicit:", DeprecatedReplacement: "args " + name + ":"}
 }
 func (p *Parser) looksLikePoolStmt() bool {
 	if p.pos+2 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT || p.tokens[p.pos+2].Kind != lexer.TOKEN_LPAREN {

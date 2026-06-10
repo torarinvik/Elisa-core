@@ -77,33 +77,6 @@ def update(base: Accessors, name: i64) -> bool:
 	}
 }
 
-func TestGenerateLLVMIRLowersStructLiteralArgsPackSpread(t *testing.T) {
-	src := `struct Accessors:
-    read_name_id: i64?
-    write_name_id: i64?
-    index_expr: i64?
-    stored_expr: i64?
-
-def update(current: Accessors, next_read: i64?, next_write: i64?, next_index: i64?) -> bool:
-    args name_ids:
-        read_name_id: i64? = next_read
-        write_name_id: i64? = next_write
-    args expressions:
-        index_expr: i64? = next_index
-        stored_expr: i64? = null
-    next: Accessors = Accessors{...current, ...name_ids, ...expressions}
-    return true
-`
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_literal_args_pack_spread.elisa", src)
-	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err != nil {
-		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
-	}
-	if strings.Count(output, "ins") < 4 {
-		t.Fatalf("expected args-pack struct spread to lower to field inserts, got:\n%s", output)
-	}
-}
-
 func TestGenerateLLVMIRLowersStructFieldDefaults(t *testing.T) {
 	src := `struct Accessors:
     read_name_id: i64? = null
