@@ -193,6 +193,51 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	}
 }
 
+// GAP 5b (bare-lambda error inference, NOT YET CLOSED): a bare lambda whose
+// body propagates errors (`lambda() => try seven()`) cannot infer its
+// error-union return, so it cannot bind R. Error-set inference for un-annotated
+// lambda returns is deferred; the diagnostic points at the two working
+// spellings (annotated lambda / named function), which DO bind R.
+func TestGapBareLambdaErrorInferenceHint(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_bare_lambda.elisa", `
+error IoErr:
+    Bad
+
+def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    return try f()
+
+def seven() -> i64 error[IoErr]:
+    return 7
+
+def use() -> i64 error[IoErr]:
+    return applyDouble(lambda() => try seven())
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "annotate the lambda return type") {
+		t.Fatalf("gap moved or hint missing: expected the bare-lambda actionable hint, got:\n%s", all)
+	}
+}
+
+// The hint's annotated-lambda spelling DOES bind R end to end.
+func TestErrorSetParamAnnotatedLambdaBindsR(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "annotated_lambda.elisa", `
+error IoErr:
+    Bad
+
+def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    return try f()
+
+def seven() -> i64 error[IoErr]:
+    return 7
+
+def use() -> i64 error[IoErr]:
+    return applyDouble(lambda() -> i64 error[IoErr] => try seven())
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("an annotated lambda callback should bind R, got:\n%s", all)
+	}
+}
+
 func TestTryElseBindingReRaisesOpaqueParamSet(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "gap_else_param.elisa", `
 def passThrough[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:

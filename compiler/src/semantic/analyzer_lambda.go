@@ -325,6 +325,19 @@ func (a *Analyzer) collectLambdaCaptures(expr *ast.LambdaExpr) []lambdaCaptureBi
 	return bindings
 }
 
+// errorUnionReturnHint tailors the "requires an error-union return" diagnostic
+// for `try`/`raise`. Inside a bare lambda the fix is local and not obvious
+// (error-set inference for un-annotated lambda returns is not yet implemented,
+// so the propagated set cannot be inferred from the body); point at the two
+// working spellings. Empty outside a lambda, where the function header is the
+// obvious place to add the union.
+func (a *Analyzer) errorUnionReturnHint() string {
+	if a != nil && a.currentFuncDecl != nil && a.currentFuncDecl.Name == "lambda" {
+		return "; annotate the lambda return type (e.g. `lambda() -> T error[E] => ...`) or move the body into a named function"
+	}
+	return ""
+}
+
 func (a *Analyzer) recordLambdaReturnExpr(value ast.Expr, valueType Type) {
 	if value == nil || a.currentReturn == nil {
 		return

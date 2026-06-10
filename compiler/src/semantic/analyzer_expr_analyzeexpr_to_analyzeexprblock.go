@@ -312,7 +312,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		errorType := a.analyzeExpr(n.Error)
 		currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 		if !ok {
-			a.errorf(n.Pos(), "raise requires the current function to return an error union")
+			a.errorf(n.Pos(), "raise requires the current function to return an error union%s", a.errorUnionReturnHint())
 			result = neverType
 			return
 		}
@@ -336,7 +336,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if recovery == nil {
 				currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 				if !ok {
-					a.errorf(n.Pos(), "try without else requires the current function to return an error union")
+					a.errorf(n.Pos(), "try without else requires the current function to return an error union%s", a.errorUnionReturnHint())
 				} else if !ErrorSetAssignable(currentUnion.Errors, unionType.Errors) {
 					a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", ErrorSetDiagnosticName(unionType.Errors), ErrorSetDiagnosticName(currentUnion.Errors))
 				}
