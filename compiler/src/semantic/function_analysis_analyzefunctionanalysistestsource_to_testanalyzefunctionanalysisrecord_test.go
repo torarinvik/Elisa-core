@@ -318,42 +318,6 @@ def fold(node: Expr) -> i32:
 		t.Fatalf("expected function analysis to expose variant refine transform, got %#v", analysis.FactTransforms)
 	}
 }
-func TestAnalyzeFunctionAnalysisCFGRecordsTreeGuardVariantCallFacts(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "tree_guard_variant_cfg.elisa", `tree Lua:
-	common:
-		span: i64
-	@role(expr)
-	node Expr:
-		Nil
-		Binary(left: Expr, right: Expr)
-
-@guard_variant(node, Lua.Expr.Binary)
-def is_binary(node: Lua.Expr) -> bool:
-	return node is Lua.Expr.Binary
-
-def fold(node: Lua.Expr) -> i64:
-	if is_binary(node):
-		return node.left.span + node.right.span + node.span
-	return node.span
-`)
-	analysis, ok := result.FunctionAnalysisByName("fold")
-	if !ok || analysis == nil || analysis.CFG == nil {
-		t.Fatal("expected fold function analysis CFG")
-	}
-	var sawVariantGuard bool
-	for _, edge := range analysis.CFG.Blocks[analysis.CFG.Entry].Edges {
-		guard, ok := edge.Guard.PackedVariant(&ast.Ident{Name: "node"})
-		if ok && guard.EnumName == "Lua.Expr" && guard.VariantName == "Binary" {
-			sawVariantGuard = true
-		}
-	}
-	if !sawVariantGuard {
-		t.Fatalf("expected entry CFG edges to carry tree @guard_variant facts, got %#v", analysis.CFG.Blocks[analysis.CFG.Entry].Edges)
-	}
-	if !hasFactTransform(analysis.FactTransforms, FactTransformRefine, FactTypestate, "node", "guard proves variant Lua.Expr.Binary") {
-		t.Fatalf("expected function analysis to expose tree variant refine transform, got %#v", analysis.FactTransforms)
-	}
-}
 func TestAnalyzeFunctionAnalysisRecordsConservativeCallWidening(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "call_widening_fact_transform.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int

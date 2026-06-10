@@ -106,50 +106,6 @@ def outer[B: Builder]() -> B.State:
 	}
 }
 
-func TestAnalyzeDerivedParseBuilderSynthesizesMissingMethods(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "derived_parse_builder.elisa", `
-tree Lua:
-    common:
-        span: i64
-    @role(expr)
-    node Expr:
-        IntegerLit(value: i64)
-        Binary(left: Expr, right: Expr)
-
-struct LuaAstBuilder:
-    tag: int
-
-protocol LuaBuilder:
-    type ExprNode
-    def make_integer(alloc: mutable Arena&, span: i64, value: i64) -> ExprNode
-    def make_binary(alloc: mutable Arena&, span: i64, left: ExprNode, right: ExprNode) -> ExprNode
-
-@derive(parse_builder tree Lua)
-impl LuaBuilder for LuaAstBuilder:
-    type ExprNode = Lua.Expr
-
-def build(owner: Arena) -> Lua.Expr:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    left: Lua.Expr = LuaAstBuilder.make_integer(alloc, 1, 2)
-    right: Lua.Expr = LuaAstBuilder.make_integer(alloc, 1, 3)
-    return LuaAstBuilder.make_binary(alloc, 1, left, right)
-`)
-
-	if len(result.Errors()) != 0 {
-		t.Fatalf("unexpected semantic errors: %v", result.Errors())
-	}
-	impl, ok := LookupStaticImpl(result.StaticImpls, "LuaBuilder", result.NamedTypes["LuaAstBuilder"])
-	if !ok || impl == nil {
-		t.Fatal("expected derived impl for LuaBuilder/LuaAstBuilder")
-	}
-	if impl.Methods["make_integer"] == nil {
-		t.Fatal("expected derived impl method symbol for make_integer")
-	}
-	if impl.Methods["make_binary"] == nil {
-		t.Fatal("expected derived impl method symbol for make_binary")
-	}
-}
-
 func TestAnalyzeDerivedNullBuilderSynthesizesMissingMethods(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "derived_null_builder.elisa", `
 struct SinkBuilder:

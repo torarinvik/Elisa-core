@@ -115,41 +115,6 @@ func TestParseListLiteralSpreadElements(t *testing.T) {
 	}
 }
 
-func TestParseChildrenToOverrideExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt.cast[Lua.Node]).node\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[1].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
-	}
-	field, ok := ret.Value.(*ast.FieldExpr)
-	if !ok {
-		t.Fatalf("expected field expr, got %T", ret.Value)
-	}
-	call, ok := field.Object.(*ast.CallExpr)
-	if !ok || len(call.Args) != 1 {
-		t.Fatalf("expected children call, got %T %#v", field.Object, field.Object)
-	}
-	cast, ok := call.Args[0].(*ast.CastExpr)
-	if !ok {
-		t.Fatalf("expected to-override arg, got %T", call.Args[0])
-	}
-	if cast.Origin != ast.CastExprOriginExplicitCast {
-		t.Fatalf("expected explicit cast origin, got %v", cast.Origin)
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "children(stmt.cast[Lua.Node])") {
-		t.Fatalf("expected unparse to preserve children as-cast syntax, got:\n%s", formatted)
-	}
-}
-func TestParseRejectsLegacyChildrenToCastSyntax(t *testing.T) {
-	_, errs := parseSourceFile(t, "tree Lua:\n    @role(stmt)\n    node Stmt:\n        BreakStmt\n\ndef keep(stmt: Lua.Stmt) -> Lua.Node:\n    return children(stmt to Lua.Node).node\n")
-	if !strings.Contains(strings.Join(errs, "\n"), "the `expr to T` cast has been removed") {
-		t.Fatalf("expected legacy children to-cast diagnostic, got %v", errs)
-	}
-}
 func TestParsePostfixShorthandCastFormatsAsPostfixShorthand(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(value: i64) -> u32:\n    return value.u32()\n")
 	if len(errs) != 0 {

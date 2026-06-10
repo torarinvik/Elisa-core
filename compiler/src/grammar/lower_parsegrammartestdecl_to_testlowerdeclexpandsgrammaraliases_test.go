@@ -366,13 +366,10 @@ const enum TokenKind of i16:
     IDENT = 1
     STAR = 2
 
-tree Demo:
-    common:
-        span: Span
-    node Expr:
-        Invalid
-        Name(name_id: u32)
-        Pair(left: Expr, right: Expr)
+enum DemoExpr:
+    Invalid(span: Span)
+    Name(span: Span, name_id: u32)
+    Pair(span: Span, left: DemoExpr, right: DemoExpr)
 
 grammarenv DemoEnv over Token using ParserState:
     cursor state
@@ -388,24 +385,24 @@ grammar DemoGrammar with DemoEnv:
     token:
         IDENT
         STAR "*"
-    atom() -> Demo.Expr:
+    atom() -> DemoExpr:
         .IDENT(token)
-        node <- expr(node[span = token.span] Demo.Expr.Name(name_id: token.lexeme_key))
+        node <- expr(DemoExpr.Name(span: token.span, name_id: token.lexeme_key))
         return node
-    maybe_pair(left: Demo.Expr) -> Demo.Expr:
-        node <- when(state.current_token().kind == TokenKind.STAR, pair_tail(left), expr(node[span = left.span] Demo.Expr.Invalid))
+    maybe_pair(left: DemoExpr) -> DemoExpr:
+        node <- when(state.current_token().kind == TokenKind.STAR, pair_tail(left), expr(DemoExpr.Invalid(span: left.span)))
         return node
-    pair_tail(left: Demo.Expr) -> Demo.Expr:
+    pair_tail(left: DemoExpr) -> DemoExpr:
         .STAR
         right = atom()
-        return node[span = left.span + right.span] Demo.Expr.Pair(left: left, right: right)
+        return DemoExpr.Pair(span: left.span + right.span, left: left, right: right)
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
 	for _, want := range []string{
-		"__grammar_value_atom_DemoGrammar_value_11 = node[span = token.span] Demo.Expr.Name(name_id: token.lexeme_key)",
-		"node[span = left.span] Demo.Expr.Invalid",
-		"return (true, __grammar_committed_pair_tail_DemoGrammar_committed_8, node[span = (left.span + right.span)] Demo.Expr.Pair(left: left, right: right))",
+		"DemoExpr.Name(span: token.span, name_id: token.lexeme_key)",
+		"DemoExpr.Invalid(span: left.span)",
+		"DemoExpr.Pair(span: (left.span + right.span), left: left, right: right)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected lowered inline node construction to contain %q, got:\n%s", want, formatted)

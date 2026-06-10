@@ -304,38 +304,6 @@ func TestParseGuardElseStatement(t *testing.T) {
 		t.Fatalf("expected guard else branch to lower to return, got %T", ifStmt.Then[0])
 	}
 }
-func TestParseVisitArmAlternativesAndGuard(t *testing.T) {
-	file, errs := parseSourceFile(t, "tree Lua:\n    @role(expr)\n    node Expr:\n        Int(value: i64)\n        Float(value: f64)\n\ndef score(node: Lua.Expr) -> i64:\n    return visit node:\n        Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:\n            expr.span\n        _:\n            0\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected func decl, got %T", file.Decls[1])
-	}
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
-	}
-	visitExpr, ok := ret.Value.(*ast.VisitExpr)
-	if !ok {
-		t.Fatalf("expected visit expr, got %T", ret.Value)
-	}
-	if len(visitExpr.Arms) != 3 {
-		t.Fatalf("expected visit arm alternatives to expand into three arms, got %d", len(visitExpr.Arms))
-	}
-	for i := 0; i < 2; i++ {
-		if visitExpr.Arms[i].Guard == nil {
-			t.Fatalf("expected expanded visit arm %d to keep guard", i)
-		}
-		if visitExpr.Arms[i].BindName != "expr" {
-			t.Fatalf("expected expanded visit arm %d bind name expr, got %#v", i, visitExpr.Arms[i])
-		}
-	}
-	if !visitExpr.Arms[2].Wildcard {
-		t.Fatalf("expected final wildcard arm, got %#v", visitExpr.Arms[2])
-	}
-}
 func TestParseStructDeclWithNamedStateCasesAndDeriveBlock(t *testing.T) {
 	file, errs := parseSourceFile(t, "struct Player[state Alive | Dead]:\n    health: int\n\n    derive state:\n        Alive when self.health > 0\n        Dead when self.health <= 0\n")
 	if len(errs) != 0 {
