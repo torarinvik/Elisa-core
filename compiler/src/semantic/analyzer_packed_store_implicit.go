@@ -103,6 +103,9 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 		if enumType == nil || enumType.StoreType == nil {
 			continue
 		}
+		if enumType.HandleIsPointer() {
+			continue // docs/82: ptr handles are self-contained; no boundary store needed
+		}
 		paramName := packedStoreImplicitParamName(enumName)
 		if funcTypeHasImplicitParam(fnType, paramName) || funcTypeHasExplicitPackedStoreParam(fnType, enumName) {
 			continue
@@ -111,6 +114,58 @@ func (a *Analyzer) injectInferredPackedStoreParams(fnType *FuncType, regionBacke
 		fnType.Params = append(fnType.Params, storeType)
 		fnType.ImplicitParamNames = append(fnType.ImplicitParamNames, paramName)
 	}
+}
+
+// funcConstructsPackedEnumRoots returns the hierarchy roots (by name) of every region-backed packed
+// enum the function CONSTRUCTS in its body — `new`/`new[auto]` constructor allocations plus bare
+// constructors of recursive-plain enums (pre-rewrite CallExprs). docs/82: for `handle: ptr` enums
+// this is the store-threading seed — reads are self-contained (the handle is the record address),
+// so only construction pulls the store in.
+func (a *Analyzer) funcConstructsPackedEnumRoots(fn *ast.FuncDecl) map[string]*EnumType {
+	out := map[string]*EnumType{}
+	if fn == nil {
+		return out
+	}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.AllocExpr:
+				if n != nil {
+					if enumType, _, ok := a.packedAllocConstructorInfo(n.Value); ok && enumType != nil && enumType.Packed {
+						out[enumType.Root().Name] = enumType.Root()
+					}
+				}
+			case *ast.CallExpr:
+				if et, ok := a.regionBackedEnumConstructor(n); ok && et != nil {
+					out[et.Root().Name] = et.Root()
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(fn.Body))
+	return out
 }
 
 // computeTransitiveStoreNeeds computes, for each region-poly candidate function, the full set of
@@ -141,7 +196,14 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 		}
 		collectPackedEnumsInType(ft.Return, sig)
 		for name, et := range sig {
-			if regionBacked[name] {
+			// docs/82 `handle: ptr`: the handle is the record address, so signature exposure
+			// alone needs no store — reads are self-contained. Construction still does (below).
+			if regionBacked[name] && !et.HandleIsPointer() {
+				needs[ft][name] = et
+			}
+		}
+		for name, et := range a.funcConstructsPackedEnumRoots(fn) {
+			if regionBacked[name] && et.HandleIsPointer() {
 				needs[ft][name] = et
 			}
 		}

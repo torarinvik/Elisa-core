@@ -592,7 +592,27 @@ func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumTy
 	}
 	binding, ok := s.lookupPackedStore(enumType)
 	if !ok {
+		if synthetic, err := s.syntheticPtrHandleStoreBinding(enumType); synthetic != nil || err != nil {
+			return synthetic, err
+		}
 		return nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 	}
 	return &binding, nil
+}
+
+// syntheticPtrHandleStoreBinding returns a read-only placeholder store binding for a `handle: ptr`
+// enum (docs/82). A ptr handle is the record address, so every read (tag, payload, range test)
+// resolves through a bare inttoptr and never touches the store state — functions that only consume
+// such handles carry no threaded store at all, and match codegen still needs a binding value only
+// to satisfy the packedStoreOps plumbing. The value is undef and MUST never be read; any path that
+// did would be a representation bug (it would trap loudly in -fbounds-check runs, not silently).
+func (s *functionState) syntheticPtrHandleStoreBinding(enumType *semantic.EnumType) (*packedStoreBinding, error) {
+	if enumType == nil || !enumType.HandleIsPointer() || enumType.StoreType == nil {
+		return nil, nil
+	}
+	loweredStore, err := s.g.lowerType(enumType.StoreType)
+	if err != nil {
+		return nil, err
+	}
+	return &packedStoreBinding{value: C.LLVMGetUndef(loweredStore), typ: enumType.StoreType}, nil
 }

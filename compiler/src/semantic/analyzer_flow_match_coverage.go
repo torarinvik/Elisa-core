@@ -54,6 +54,9 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 		return
 	}
 	if storeExpr == nil {
+		if enumType.HandleIsPointer() {
+			return // docs/82 `handle: ptr`: the handle is the record address; match reads need no store
+		}
 		if a.canInferPackedStoreFromValue(valueExpr, actual, enumType) {
 			return
 		}

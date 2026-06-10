@@ -551,6 +551,71 @@ def bt() -> void:
 `)
 }
 
+// docs/82 step 3 tail: a function that only READS a ptr-handle enum carries no implicit store
+// parameter (the handle is the record address — reads are self-contained), while a function that
+// CONSTRUCTS still threads the region + store. This is the ABI simplification the ptr dial buys.
+func TestPtrHandleReaderHasNoImplicitStoreParam(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := `
+enum Tree layout(handle: ptr):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            return total(l) + total(r)
+        Tree.Leaf(value: v):
+            return v
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def main() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(65536u)
+        root: Tree = make(3)
+        out: i64 = total(root) - 8
+        destroy scratch
+        return out
+`
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, "ptr_abi.elisa")
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstderr:\n%s", code, stderr.String())
+	}
+	ir := stdout.String()
+	totalDefine, makeDefine := "", ""
+	for _, line := range strings.Split(ir, "\n") {
+		if strings.HasPrefix(line, "define") && strings.Contains(line, "@total(") {
+			totalDefine = line
+		}
+		if strings.HasPrefix(line, "define") && strings.Contains(line, "@make(") {
+			makeDefine = line
+		}
+	}
+	if totalDefine == "" || makeDefine == "" {
+		t.Fatalf("could not locate @total/@make defines in IR")
+	}
+	if strings.Contains(totalDefine, "Tree__Store") {
+		t.Fatalf("ptr-handle reader must carry no implicit store param, got: %s", totalDefine)
+	}
+	if !strings.Contains(makeDefine, "Tree__Store") {
+		t.Fatalf("ptr-handle builder must still thread the store, got: %s", makeDefine)
+	}
+}
+
 // expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
 func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
 	t.Helper()
