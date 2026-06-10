@@ -21,6 +21,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if lambda, ok := unwrapLambdaExpr(expr.Func); ok && lambdaHasUntypedParams(lambda) {
 		return a.analyzeDirectLambdaCallExpr(expr, lambda)
 	}
+	a.rewriteIndexedElementCall(expr)
 	// `Foo.bar(...)` where Foo is a namespace (not a value) is a namespaced call
 	// spelled with `.`; direct the user to `Foo::bar(...)` before any receiver
 	// analysis reports a cryptic "undefined identifier Foo".

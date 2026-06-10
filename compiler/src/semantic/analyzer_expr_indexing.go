@@ -478,3 +478,80 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	a.errorf(expr.Pos(), "slicing requires string, array, view, or packed store type, got %s", objType)
 	return invalidType
 }
+
+// specializeTypeArgAsIndexValue converts a single bracket argument the parser read as a
+// generic type arg back into the value expression it would have been as an index. Only the
+// two ambiguous forms qualify: a literal (`fs[0]`) and a bare name (`fs[i]`).
+func specializeTypeArgAsIndexValue(arg ast.TypeExpr) (ast.Expr, bool) {
+	switch t := arg.(type) {
+	case *ast.GenericValueArgTypeExpr:
+		return t.Value, true
+	case *ast.NamedType:
+		if t.Name != "" {
+			return &ast.Ident{Position: t.Position, Name: t.Name}, true
+		}
+	}
+	return nil, false
+}
+
+// rewriteIndexedElementCall undoes the parser's generic-call reading of `xs[i](...)` when
+// `xs` is a value (e.g. a container of functions), not a generic function. `name[arg](...)`
+// is ambiguous at parse time -- const-generic args make literals and bare names valid type
+// args -- so the parser commits to the specialize-call form and the disambiguation happens
+// here, where the operand resolves. Function-typed operands are left alone so the generic
+// specialization path keeps producing its diagnostics ("not generic", arg-count, ...).
+func (a *Analyzer) rewriteIndexedElementCall(expr *ast.CallExpr) {
+	if a == nil || expr == nil {
+		return
+	}
+	spec, ok := expr.Func.(*ast.SpecializeExpr)
+	if !ok || spec == nil || spec.Legacy || len(spec.TypeArgs) != 1 {
+		return
+	}
+	index, ok := specializeTypeArgAsIndexValue(spec.TypeArgs[0])
+	if !ok {
+		return
+	}
+	var operandType Type
+	switch operand := spec.Operand.(type) {
+	case *ast.Ident:
+		if operand.Name == "" {
+			return
+		}
+		if a.currentScope != nil {
+			if sym, found := a.currentScope.Lookup(operand.Name); found && sym != nil {
+				operandType = sym.Type
+			}
+		}
+		if operandType == nil {
+			if sym, _, found := a.lookupVisibleGlobal(operand.Name); found && sym != nil {
+				operandType = sym.Type
+			}
+		}
+	case *ast.FieldExpr:
+		if operand.Field == "" || operand.Object == nil {
+			return
+		}
+		savedSuppress := a.suppressDiagnostics
+		a.suppressDiagnostics = true
+		receiverType := a.analyzeExpr(operand.Object)
+		a.suppressDiagnostics = savedSuppress
+		if receiverType == nil || IsInvalidType(receiverType) {
+			return
+		}
+		field, found := a.lookupFieldNoError(receiverType, operand.Field)
+		if !found {
+			return
+		}
+		operandType = field.Type
+	default:
+		return
+	}
+	if operandType == nil {
+		return
+	}
+	if _, isFunc := operandType.(*FuncType); isFunc {
+		return
+	}
+	expr.Func = &ast.IndexExpr{Position: spec.Position, Object: spec.Operand, Index: index}
+}
