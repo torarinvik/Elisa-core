@@ -336,7 +336,7 @@ func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Ty
 		return nil, fmt.Errorf("error[...] requires at least one qualified error tag")
 	}
 	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
-		return nil, fmt.Errorf("error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
+		return nil, fmt.Errorf("error[Set.*, ...] is no longer supported; use error[Set] instead")
 	}
 	if containsWildcardErrorTag(expr.Tags) {
 		return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")

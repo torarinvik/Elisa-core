@@ -2269,6 +2269,24 @@ func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
+// warnOncef emits a warning at most once per position+message, for checks that
+// run on paths visited more than once per declaration (e.g. funcTypeFromDecl).
+func (a *Analyzer) warnOncef(pos lexer.Pos, format string, args ...interface{}) {
+	if a.suppressDiagnostics {
+		return
+	}
+	message := fmt.Sprintf(format, formatDiagnosticArgs(args)...)
+	key := fmt.Sprintf("%s:%d:%d:%s", pos.File, pos.Line, pos.Col, message)
+	if a.warnOnceSeen == nil {
+		a.warnOnceSeen = make(map[string]bool)
+	}
+	if a.warnOnceSeen[key] {
+		return
+	}
+	a.warnOnceSeen[key] = true
+	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: message})
+}
+
 // intLitRequiresSuffix reports whether an integer literal's value exceeds the int64 range
 // (but still fits uint64), in which case an unsuffixed literal would fail default `int`
 // inference and the explicit unsigned suffix is necessary -- so it should not be flagged as

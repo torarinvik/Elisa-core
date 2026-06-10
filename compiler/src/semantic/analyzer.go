@@ -245,6 +245,8 @@ type Analyzer struct {
 	currentRegionFactTransforms       []FactTransform
 	conditionalCallPoststateOriginals map[*ast.CallExpr]map[*Symbol]Type
 	suppressDiagnostics               bool
+	// warnOnceSeen dedupes warnings emitted from multi-visit paths (warnOncef).
+	warnOnceSeen map[string]bool
 	// deprecatedSeen dedupes deprecation diagnostics emitted for the same site+message
 	// (a call may be analyzed more than once across passes).
 	deprecatedSeen map[string]bool

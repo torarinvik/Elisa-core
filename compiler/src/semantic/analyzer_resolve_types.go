@@ -272,8 +272,14 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		return invalidType
 	}
 	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
-		a.errorf(expr.Pos(), "error[Set.*, ...] is no longer supported; use error[Set, ...] or error[Set] instead")
+		a.errorf(expr.Pos(), "error[Set.*, ...] is no longer supported; use error[Set] instead")
 		return invalidType
+	}
+	if expr.HasEllipsis {
+		// `error[Tags, ...]` rounds the listed selections up to their whole declared
+		// families — a CLOSED set, despite reading as "open to more". A bare set name
+		// already means the whole family, so the suffix adds nothing but confusion.
+		a.deprecatedf(expr.Pos(), "the `, ...` suffix in error[...] is deprecated; it expands the listed tags to whole sets, so name the full sets directly (a bare set name already means the whole family)")
 	}
 	if containsWildcardErrorTag(expr.Tags) {
 		if len(expr.Tags) != 1 {

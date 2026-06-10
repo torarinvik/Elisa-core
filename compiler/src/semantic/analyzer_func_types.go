@@ -9,6 +9,18 @@ import (
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
+	for _, param := range resolvedGenericParams {
+		if param.Kind != ast.GenericParamErrorSet {
+			continue
+		}
+		shadowed, ok := a.namedTypes[param.Name]
+		if !ok {
+			shadowed, _, ok = a.lookupVisibleType(param.Name)
+		}
+		if errSet, isSet := shadowed.(*ErrorSetType); ok && isSet && errSet != nil && !errSet.Param {
+			a.warnOncef(param.Position, "errorset parameter %q on %q shadows the declared error set %q; every `error[%s]` in this signature means the parameter, not the set — rename the parameter", param.Name, name, param.Name, param.Name)
+		}
+	}
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
 			continue
