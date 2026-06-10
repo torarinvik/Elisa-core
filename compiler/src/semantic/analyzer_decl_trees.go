@@ -243,7 +243,7 @@ func flattenTreeMemberDecls(members []ast.TreeMemberDecl) []ast.TreeMemberDecl {
 
 func (a *Analyzer) inferTreePayloadRelation(category *TreeCategoryType, payloadDecl ast.EnumPayloadDecl, payloadType Type) ast.EnumPayloadRelation {
 	if payloadDecl.Relation == ast.EnumPayloadRelationChild || payloadDecl.Relation == ast.EnumPayloadRelationChildren {
-		a.deprecatedf(payloadDecl.Position, "explicit tree payload relation %q is deprecated; omit it and qualify the payload type when name resolution is ambiguous", string(payloadDecl.Relation))
+		a.errorf(payloadDecl.Position, "explicit tree payload relation %q is no longer supported; omit it (the %s/%s relation is inferred from the payload type — qualify the type when name resolution is ambiguous)", string(payloadDecl.Relation), string(ast.EnumPayloadRelationChild), string(ast.EnumPayloadRelationChildren))
 		return payloadDecl.Relation
 	}
 	if payloadDecl.Relation != ast.EnumPayloadRelationNone || category == nil || category.Family == nil {

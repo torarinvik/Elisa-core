@@ -40,6 +40,23 @@ func analyzeTreeTestSourceWithSemanticErrors(t *testing.T, filename string, src 
 	}
 	return Analyze(file)
 }
+
+// The explicit `child`/`children` tree payload relation markers are no longer
+// supported — the relation is inferred from the payload type. The `link`
+// relation stays explicit (it is not inferable) and is unaffected.
+func TestAnalyzeRejectsExplicitChildPayloadRelation(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "tree_explicit_child.elisa", `tree Lua:
+    @role(expr)
+    node Expr:
+        Nil
+        Binary(op: i32, child left: Expr, right: Expr)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `explicit tree payload relation "child" is no longer supported`) {
+		t.Fatalf("expected explicit `child` relation to be rejected, got:\n%s", all)
+	}
+}
+
 func TestAnalyzeRegistersTreeFamilyAndMembers(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tree_registers.elisa", `tree Lua:
     common:
