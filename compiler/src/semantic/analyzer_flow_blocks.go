@@ -516,6 +516,13 @@ func (a *Analyzer) conditionAliasBindingType(leftExpr ast.Expr, target ast.Expr,
 			}
 		}
 	}
+	// docs/77 §2: `e is Statement s` — a bare-category target gives the binder the NARROWED
+	// category type, so it can be passed where the sub-category is required.
+	if matchableEnum, _, ok := resolveMatchableEnumType(StripAggregateStateType(leftType)); ok && enumIsHierarchical(matchableEnum) {
+		if category, ok := a.resolveEnumCategoryIsTarget(alias.Target); ok && enumDescendsFrom(category, matchableEnum) {
+			return alias.Alias, category, true
+		}
+	}
 	return alias.Alias, leftType, true
 }
 

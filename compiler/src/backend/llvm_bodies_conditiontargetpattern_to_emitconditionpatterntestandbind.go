@@ -99,7 +99,45 @@ func (s *functionState) conditionAliasBindingType(target ast.Expr, leftType sema
 			return alias.Alias, actualTree.VariantViewType(variant), true
 		}
 	}
+	// docs/77 §2: `e is Statement s` — a bare-category target binds at the NARROWED category
+	// type (same value, narrower static type), mirroring the analyzer's conditionAliasBindingType.
+	if actualEnum, ok := backendMatchableEnumType(semantic.StripAggregateStateType(leftType)); ok {
+		if category, ok := s.enumCategoryAliasTarget(actualEnum, alias.Target); ok {
+			return alias.Alias, category, true
+		}
+	}
 	return alias.Alias, leftType, true
+}
+
+// enumCategoryAliasTarget resolves a bare-category alias target (`is Statement s` / `is Statement
+// as s`) against a hierarchy scrutinee enum: the target must name an enum that descends from the
+// scrutinee (downward narrowing). Widening aliases keep the scrutinee type via the caller's
+// fallthrough.
+func (s *functionState) enumCategoryAliasTarget(enumType *semantic.EnumType, target ast.Expr) (*semantic.EnumType, bool) {
+	if enumType == nil || (enumType.Parent == nil && len(enumType.Children) == 0) {
+		return nil, false
+	}
+	name := ""
+	switch e := target.(type) {
+	case *ast.TypeExprExpr:
+		named, ok := e.Type.(*ast.NamedType)
+		if !ok || named == nil {
+			return nil, false
+		}
+		name = named.Name
+	case *ast.Ident:
+		if e == nil {
+			return nil, false
+		}
+		name = e.Name
+	default:
+		return nil, false
+	}
+	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
+	if !ok || category == nil || !semantic.EnumDescendsFrom(category, enumType) {
+		return nil, false
+	}
+	return category, true
 }
 
 func backendConditionAliasNeedsValueSlot(typ semantic.Type) bool {

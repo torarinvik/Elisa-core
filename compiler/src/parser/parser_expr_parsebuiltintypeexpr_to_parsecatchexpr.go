@@ -711,6 +711,18 @@ func (p *Parser) parseSingleIsTestTargetExpr() ast.Expr {
 		alias := p.expect(lexer.TOKEN_IDENT).Text
 		return &ast.IsAliasExpr{Position: pos, Target: target, Alias: alias}
 	}
+	// docs/77 §2 binder sugar: `e is Statement s` ≡ `e is Statement as s` — a bare
+	// lowercase identifier directly after the target binds the matched value (for a
+	// category target, at the narrowed type). No valid continuation starts with a
+	// bare lowercase ident here, so this is unambiguous.
+	if p.peek() == lexer.TOKEN_IDENT {
+		name := p.cur().Text
+		if name != "" && name != "_" && name[0] >= 'a' && name[0] <= 'z' {
+			pos := p.cur().Pos
+			alias := p.advance().Text
+			return &ast.IsAliasExpr{Position: pos, Target: target, Alias: alias}
+		}
+	}
 	return target
 }
 func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
@@ -730,6 +742,23 @@ func (p *Parser) parseSingleIsTestTargetExprWithoutAlias() ast.Expr {
 		inner := p.parseIsTestExpr()
 		p.expect(lexer.TOKEN_RPAREN)
 		return &ast.ParenExpr{Position: pos, Inner: inner}
+	}
+	// docs/77 §2 binder form: `is Statement s` — a bare type name followed by a lowercase
+	// binder identifier. Intercepted BEFORE the type parser, whose legacy region-prefix
+	// grammar (`r T&`) would otherwise swallow both identifiers. The binder form never
+	// continues with `&` / `.` / `[` after the second identifier.
+	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		second := p.tokens[p.pos+1].Text
+		cont := lexer.TOKEN_EOF
+		if p.pos+2 < len(p.tokens) {
+			cont = p.tokens[p.pos+2].Kind
+		}
+		if second != "" && second != "_" && second[0] >= 'a' && second[0] <= 'z' &&
+			cont != lexer.TOKEN_AMPERSAND && cont != lexer.TOKEN_DOT && cont != lexer.TOKEN_LBRACKET {
+			pos := p.cur().Pos
+			name := p.advance().Text
+			return &ast.TypeExprExpr{Position: pos, Type: &ast.NamedType{Position: pos, Name: name}}
+		}
 	}
 	target := p.parseTypeExprWithoutErrorUnionSuffix()
 	return &ast.TypeExprExpr{Position: target.Pos(), Type: target}

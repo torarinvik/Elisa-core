@@ -319,6 +319,46 @@ def bt() -> void:
 `)
 }
 
+// docs/77 §2 binding form: `if e is Stmt s:` — the docs/81 range test plus a branch-scoped
+// binder at the NARROWED category type (sugar for `is Stmt as s`). The binder must be usable
+// where the sub-category is required.
+func TestRecursiveEnumHierarchyIsBindingForm(t *testing.T) {
+	runEnumHierarchyProgram(t, "cat_is_bind.elisa", `
+enum Node: pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Ret(value: Node)
+    Nop
+
+def eval_expr(e: Expr) -> i64:
+    match e:
+        Expr.Add(left: l, right: r):
+            return 0
+        Expr.Lit(value: v):
+            return v
+
+def describe(n: Node) -> i64:
+    if n is Expr e:
+        return eval_expr(e)
+    if n is Stmt as st:
+        return 100
+    return -1
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            lit: Node = new[auto] Expr.Lit(value: 42)
+            nop: Node = new[auto] Stmt.Nop
+            if describe(lit) != 42:
+                panic("is-binding form must narrow Expr and eval to 42")
+            if describe(nop) != 100:
+                panic("is-binding (as-alias) form must match Stmt")
+`)
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `
