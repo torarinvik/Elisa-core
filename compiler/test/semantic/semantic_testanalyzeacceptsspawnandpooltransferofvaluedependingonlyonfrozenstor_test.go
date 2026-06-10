@@ -356,6 +356,7 @@ def ok(values: dict[i32, i32], keyed: dict[Pair, i32]) -> void:
 	_, errs := parseAndAnalyze(t, "dict_generic_keys_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
+
 // Integral/bool/enum/cstr keys are runtime-backed, but a float key is not (== is unsafe on
 // floats), so the `.get` runtime sugar is rejected on a `dict[f64, V]`.
 func TestAnalyzeRejectsFloatKeyRuntimeBackedDictSugar(t *testing.T) {

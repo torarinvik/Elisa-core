@@ -369,6 +369,7 @@ def score(tok: Token) -> i64:
 		t.Fatalf("expected specialized diagnostic instead of generic undefined identifier, got:\n%s", all)
 	}
 }
+
 // docs/76 Phase 3 / docs/77: a plain `enum` whose variant contains the enum by value is now
 // automatically promoted to the region-backed (packed) machinery (RecursivePlain flag). The old
 // "cannot contain Expr by value" rejection no longer fires — the declaration is accepted.

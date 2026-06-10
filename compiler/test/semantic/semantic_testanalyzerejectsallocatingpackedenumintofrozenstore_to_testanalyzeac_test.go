@@ -232,6 +232,7 @@ def fold(node: Expr, store: Expr.Store[Local]) -> int:
 	_, errs := parseAndAnalyze(t, "packed_enum_if_pattern_binder_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
+
 // docs/80 Phase D: `if value in store is Pattern` is the sole form; `as` is hard-rejected.
 func TestAnalyzeAcceptsPackedEnumIfStorePatternBinderIsForm(t *testing.T) {
 	src := `packed enum Expr:

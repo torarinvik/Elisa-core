@@ -362,6 +362,7 @@ func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
 		t.Fatalf("expected local grant warning to remain, got:\n%s", warns)
 	}
 }
+
 // The canonical `@r` suffix on a reference (docs/68 §5) is equivalent to the legacy
 // region prefix `r T&`: both bind the reference to region parameter r, so the same
 // program analyzes cleanly written either way.
