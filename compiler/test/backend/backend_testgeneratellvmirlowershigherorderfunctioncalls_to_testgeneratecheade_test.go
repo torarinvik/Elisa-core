@@ -320,12 +320,12 @@ def same_box(left: Box&, right: Box&) -> bool:
 	}
 }
 func TestGenerateLLVMIRLowersOptionalStructFieldNullComparisons(t *testing.T) {
-	src := `tree PascalType:
-	node Type:
-		Name(id: u32)
+	src := `enum Ty:
+	Name(id: u32)
+	Void
 
 struct Symbol:
-	type_expr: PascalType.Type?
+	type_expr: Ty?
 
 def has_type_expr(symbol: Symbol) -> bool:
 	return symbol.type_expr != null
@@ -346,14 +346,14 @@ def lacks_type_expr(symbol: Symbol) -> bool:
 	}
 }
 func TestGenerateLLVMIRLowersOptionalNullChecksInTernaryConditions(t *testing.T) {
-	src := `tree PascalType:
-	node Type:
-		Name(id: u32)
+	src := `enum Ty:
+	Name(id: u32)
+	Void
 
-def both_present(left: PascalType.Type?, right: PascalType.Type?) -> bool:
+def both_present(left: Ty?, right: Ty?) -> bool:
 	return true if left != null and right != null else false
 
-def both_missing(left: PascalType.Type?, right: PascalType.Type?) -> bool:
+def both_missing(left: Ty?, right: Ty?) -> bool:
 	return true if left == null and right == null else false
 `
 	result := parseAndAnalyze(t, "backend_optional_ternary_condition_null_compare.elisa", src)

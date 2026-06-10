@@ -5,24 +5,14 @@ import (
 	"testing"
 )
 
-func TestAnalyzeCloneBuiltinSupportsDArrayAndTreeTargets(t *testing.T) {
-	analyzeTreeTestSource(t, "clone_builtin_surface.elisa", `tree Lua:
-	common:
-		span: i64
-	@role(expr)
-	node Expr:
-		Int(value: i64)
-	block Block:
-		items: darray[Expr]
-
-struct Pair:
+func TestAnalyzeCloneBuiltinSupportsDArrayTargets(t *testing.T) {
+	analyzeTreeTestSource(t, "clone_builtin_surface.elisa", `struct Pair:
 	items: darray[u32]
-	root: Lua.Block
 
-def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua.Block) -> Pair:
+def clone_pair(owner: mutable Arena&, source_items: view[u32]) -> Pair:
 	can Abort.Panic, Memory.Allocate:
 		in owner:
-			return Pair{items: clone[darray[u32]](source_items), root: clone[Lua.Block](block)}
+			return Pair{items: clone[darray[u32]](source_items)}
 `)
 }
 
