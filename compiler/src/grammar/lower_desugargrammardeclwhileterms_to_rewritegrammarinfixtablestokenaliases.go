@@ -443,11 +443,11 @@ func lowerGrammarTokenLookupAssertFunc(grammarDecl *ast.GrammarDecl) *ast.FuncDe
 		return nil
 	}
 	return &ast.FuncDecl{
-		Position:   pos,
-		Name:       grammarDecl.TokenLookupFunc + "_assert_table",
-		Effects:    abortPanicEffects(pos),
-		ReturnType: builtinTypeExpr(pos, "void"),
-		Body:       abortPanicBody(pos, body),
+		Position:    pos,
+		Name:        grammarDecl.TokenLookupFunc + "_assert_table",
+		Permissions: []ast.PermissionRef{abortPanicPermission(pos)},
+		ReturnType:  builtinTypeExpr(pos, "void"),
+		Body:        abortPanicBody(pos, body),
 	}
 }
 func tokenLookupAssertStmt(pos lexer.Pos, lookup ast.Expr, args []ast.Expr, expected ast.Expr) ast.Stmt {
@@ -466,15 +466,6 @@ func tokenLookupAssertStmt(pos lexer.Pos, lookup ast.Expr, args []ast.Expr, expe
 			},
 		},
 	}
-}
-func abortPanicEffects(pos lexer.Pos) []ast.SignatureEffectItem {
-	return []ast.SignatureEffectItem{{
-		Position:   pos,
-		Permission: ptrPermissionRef(abortPanicPermission(pos)),
-	}}
-}
-func ptrPermissionRef(value ast.PermissionRef) *ast.PermissionRef {
-	return &value
 }
 func abortPanicBody(pos lexer.Pos, body []ast.Stmt) []ast.Stmt {
 	if len(body) == 0 {

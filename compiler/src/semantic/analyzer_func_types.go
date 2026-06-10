@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, effectAliasPos lexer.Pos, effectAlias string, effects []ast.SignatureEffectItem, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -36,7 +36,6 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 	a.withGenericParams(resolvedGenericParams, nil, func() {
 		a.withRegionParams(regionParams, func() {
 			a.withPermissionParams(permissionParams, func() {
-				ret, permissionRefs = a.expandSignatureEffects(ret, permissionRefs, effectAlias, effectAliasPos, effects)
 				resolvedPermissionRefs = a.resolvePermissionRefs(permissionRefs, true)
 				permissions = a.resolvePermissionFamilies(permissionRefs, true)
 				a.withShapeParams(shapeParams, func() {

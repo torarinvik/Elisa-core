@@ -66,12 +66,6 @@ type ErrorVariantDecl struct {
 	Name     string
 	Payload  []ParamDecl
 }
-type EffectsDecl struct {
-	Position     lexer.Pos
-	Name         string
-	ErrorEffects *ErrorSetExpr
-	Permissions  []PermissionRef
-}
 
 // GrantAliasDecl names a fixed set of permission refs for reuse in local `can`
 // grant blocks: `grant HostSeg = Segment.Host, Unsafe.SegmentMutation` then
@@ -82,12 +76,6 @@ type GrantAliasDecl struct {
 	Position lexer.Pos
 	Name     string
 	Refs     []PermissionRef
-}
-type SignatureEffectItem struct {
-	Position     lexer.Pos
-	Alias        string
-	ErrorEffects *ErrorSetExpr
-	Permission   *PermissionRef
 }
 type PermissionDecl struct {
 	Position              lexer.Pos

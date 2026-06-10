@@ -89,7 +89,6 @@ type Analyzer struct {
 	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
-	effectAliases           map[string]*EffectAlias
 	grantAliases            map[string][]ast.PermissionRef
 	contextBundles          map[string]*ContextBundle
 	paramPacks              map[string]*ParamPack
@@ -495,7 +494,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
-		effectAliases:                     map[string]*EffectAlias{},
 		grantAliases:                      map[string][]ast.PermissionRef{},
 		contextBundles:                    map[string]*ContextBundle{},
 		paramPacks:                        map[string]*ParamPack{},
@@ -563,7 +561,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
-	a.collectEffectAliases(activeDecls)
 	a.collectGrantAliases(activeDecls)
 	a.collectContextBundles(activeDecls)
 	a.collectParamPacks(activeDecls)
@@ -592,7 +589,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectPermissionDecls(generatedScopedDecls)
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
-		a.collectEffectAliases(generatedScopedDecls)
 		a.collectGrantAliases(generatedScopedDecls)
 		a.collectContextBundles(generatedScopedDecls)
 		a.collectParamPacks(generatedScopedDecls)

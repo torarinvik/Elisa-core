@@ -2,7 +2,6 @@ package semantic
 
 import (
 	"elisacore/src/ast"
-	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
@@ -98,7 +97,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, lexer.Pos{}, "", nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, decl.Params, nil, nil, nil, nil, nil, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return

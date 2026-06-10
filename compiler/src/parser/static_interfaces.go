@@ -83,22 +83,9 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 		retType = p.parseTypeExpr()
 	}
 
-	effectAliasPos := lexer.Pos{}
-	effectAlias := ""
-	var effects []ast.SignatureEffectItem
-
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
-	}
-
-	if effectAlias != "" {
-		if signatureHasExplicitErrorEffects(retType) {
-			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
-		}
-		if len(permissions) != 0 {
-			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
-		}
 	}
 
 	var ensures []ast.EnsuresClause
@@ -114,9 +101,6 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 		PermissionParams:  permissionParams,
 		GenericParams:     genericParams,
 		RegionParams:      regionParams,
-		EffectAliasPos:    effectAliasPos,
-		EffectAlias:       effectAlias,
-		Effects:           effects,
 		Permissions:       permissions,
 		Ensures:           ensures,
 		Params:            params,
@@ -233,22 +217,9 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		retType = p.parseTypeExpr()
 	}
 
-	effectAliasPos := lexer.Pos{}
-	effectAlias := ""
-	var effects []ast.SignatureEffectItem
-
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
-	}
-
-	if effectAlias != "" {
-		if signatureHasExplicitErrorEffects(retType) {
-			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
-		}
-		if len(permissions) != 0 {
-			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
-		}
 	}
 
 	var ensures []ast.EnsuresClause
@@ -258,8 +229,8 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ReturnType: retType, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ReturnType: retType, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder}
 }

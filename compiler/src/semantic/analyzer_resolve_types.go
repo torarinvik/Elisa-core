@@ -126,7 +126,8 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		for _, param := range expandedImplicitParams {
 			ptypes = append(ptypes, a.resolveType(param.Type))
 		}
-		retExpr, permissionRefs := a.expandSignatureEffects(n.Return, n.Permissions, n.EffectAlias, n.EffectAliasPos, n.Effects)
+		retExpr := n.Return
+		permissionRefs := n.Permissions
 		resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
 		permissions := a.resolvePermissionFamilies(permissionRefs, true)
 		retType := a.namedTypes["void"]

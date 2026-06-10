@@ -103,13 +103,6 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeLine(level+1, line)
 		}
-	case *ast.EffectsDecl:
-		line := "effectalias " + n.Name + " ="
-		if n.ErrorEffects != nil {
-			line += " " + formatTypeExpr(n.ErrorEffects)
-		}
-		line += formatPermissionRefs(n.Permissions)
-		f.writeLine(level, line)
 	case *ast.GrantAliasDecl:
 		parts := make([]string, 0, len(n.Refs))
 		for _, ref := range n.Refs {
@@ -429,7 +422,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			case *ast.AssociatedTypeDecl:
 				f.writeLine(level+1, "type "+m.Name)
 			case *ast.ExternFuncDecl:
-				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, m.Variadic))
+				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
 			}
 		}
 	case *ast.ImplDecl:
@@ -448,7 +441,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
 			case *ast.FuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, false)
+				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, false)
 				if m.Override {
 					header = "override " + header
 				}
@@ -458,7 +451,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				}
 			case *ast.ExternFuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.EffectAlias, m.Effects, m.Permissions, m.Ensures, m.Variadic)
+				header := formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ParamPacks, m.ParamItemOrder, m.ImplicitParams, m.ImplicitBundles, m.ImplicitItemOrder, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
 				if m.Override {
 					header = "override " + header
 				}
@@ -467,7 +460,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, false)
+		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Permissions, n.Ensures, false)
 		if n.Static {
 			header = "static " + header
 		}
@@ -477,7 +470,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.ExternFuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.EffectAlias, n.Effects, n.Permissions, n.Ensures, n.Variadic))
+		f.writeLine(level, formatExternFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ParamPacks, n.ParamItemOrder, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, n.ReturnType, n.Permissions, n.Ensures, n.Variadic))
 	case *ast.ExternVarDecl:
 		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, "extern "+n.Name+": "+formatTypeExpr(n.Type))

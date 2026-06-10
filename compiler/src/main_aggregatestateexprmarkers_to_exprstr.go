@@ -37,15 +37,6 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 	switch n := d.(type) {
 	case *ast.PermissionDecl:
 		fmt.Fprintf(w, "%spermission %s: (%d members)\n", prefix, n.Name, len(n.Members))
-	case *ast.EffectsDecl:
-		parts := make([]string, 0, 2)
-		if n.ErrorEffects != nil {
-			parts = append(parts, typeStr(n.ErrorEffects))
-		}
-		if can := formatPermissionRefs(n.Permissions); can != "" {
-			parts = append(parts, strings.TrimSpace(can))
-		}
-		fmt.Fprintf(w, "%seffectalias %s = %s\n", prefix, n.Name, strings.Join(parts, " "))
 	case *ast.NamespaceDecl:
 		keyword := "namespace"
 		if n.Module {
@@ -134,7 +125,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Fprintf(w, "%sdef %s%s(%d params)%s%s%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, formatMainEffects(n.EffectAlias, n.Effects), formatMainPermissionRefs(n.EffectAlias, n.Effects, n.Permissions), len(n.Body))
+		fmt.Fprintf(w, "%sdef %s%s(%d params)%s%s (%d stmts)\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions), len(n.Body))
 	case *ast.ExternFuncDecl:
 		for _, annotation := range n.Annotations {
 			fmt.Fprintf(w, "%s%s\n", prefix, formatAnnotation(annotation))
@@ -144,7 +135,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.ReturnType != nil {
 			ret = " -> " + typeStr(n.ReturnType)
 		}
-		fmt.Fprintf(w, "%sextern %s%s(%d params)%s%s%s\n", prefix, n.Name, tparams, len(n.Params), ret, formatMainEffects(n.EffectAlias, n.Effects), formatMainPermissionRefs(n.EffectAlias, n.Effects, n.Permissions))
+		fmt.Fprintf(w, "%sextern %s%s(%d params)%s%s\n", prefix, n.Name, tparams, len(n.Params), ret, formatPermissionRefs(n.Permissions))
 	case *ast.ExternVarDecl:
 		fmt.Fprintf(w, "%sextern %s: %s\n", prefix, n.Name, typeStr(n.Type))
 	case *ast.ExternTypeDecl:
@@ -286,7 +277,7 @@ func typeStr(t ast.TypeExpr) string {
 		if n.Return != nil {
 			ret = " -> " + typeStr(n.Return)
 		}
-		return "func(" + strings.Join(parts, ", ") + ")" + withClause + ret + formatMainEffects(n.EffectAlias, n.Effects) + formatMainPermissionRefs(n.EffectAlias, n.Effects, n.Permissions)
+		return "func(" + strings.Join(parts, ", ") + ")" + withClause + ret + formatPermissionRefs(n.Permissions)
 	case *ast.ErrorSetExpr:
 		parts := make([]string, 0, len(n.Tags)+1)
 		for _, tag := range n.Tags {
@@ -326,42 +317,6 @@ func formatMainWithSignatureClause(bundles []string, params []ast.ParamDecl) str
 		return ""
 	}
 	return " with " + strings.Join(parts, ", ")
-}
-func formatMainEffects(alias string, effects []ast.SignatureEffectItem) string {
-	// Errors render in their own `error[...]` clause, capabilities in `can[...]`;
-	// the legacy bundled `effects[...]` spelling is gone.
-	caps := make([]string, 0, len(effects)+1)
-	errParts := make([]string, 0)
-	if alias != "" {
-		caps = append(caps, alias)
-	}
-	for _, effect := range effects {
-		if effect.ErrorEffects != nil {
-			errParts = append(errParts, typeStr(effect.ErrorEffects))
-			continue
-		}
-		if effect.Permission != nil {
-			caps = append(caps, formatPermissionRef(*effect.Permission))
-			continue
-		}
-		if effect.Alias != "" {
-			caps = append(caps, effect.Alias)
-		}
-	}
-	out := ""
-	for _, e := range errParts {
-		out += " " + e
-	}
-	if len(caps) > 0 {
-		out += " can[" + strings.Join(caps, ", ") + "]"
-	}
-	return out
-}
-func formatMainPermissionRefs(effectAlias string, effects []ast.SignatureEffectItem, permissions []ast.PermissionRef) string {
-	if effectAlias != "" || len(effects) != 0 {
-		return ""
-	}
-	return formatPermissionRefs(permissions)
 }
 func formatMainWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg) string {
 	parts := make([]string, 0, len(bundles)+len(args))

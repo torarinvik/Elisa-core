@@ -47,11 +47,11 @@ func lowerLexerKeywordAssertDecl(decl *ast.LexerDecl, keywords ast.LexerKeywordD
 		))
 	}
 	return &ast.FuncDecl{
-		Position:   pos,
-		Name:       lexerHelperName(decl.Name, "assert_keyword_table"),
-		Effects:    abortPanicEffects(pos),
-		ReturnType: builtinTypeExpr(pos, "void"),
-		Body:       abortPanicBody(pos, body),
+		Position:    pos,
+		Name:        lexerHelperName(decl.Name, "assert_keyword_table"),
+		Permissions: []ast.PermissionRef{abortPanicPermission(pos)},
+		ReturnType:  builtinTypeExpr(pos, "void"),
+		Body:        abortPanicBody(pos, body),
 	}
 }
 

@@ -28,8 +28,8 @@ func TestRunCLIByParFoldSmoke(t *testing.T) {
 // Ineligible folds are a clear parser error, not a sequential fallback.
 func TestByParFoldRejectsIneligibleFolds(t *testing.T) {
 	cases := map[string]string{
-		"filter":       "return (acc + x for x in a if x > 0 with acc: i64 = 0 by par)",
-		"non-assoc op": "return (acc - x for x in a with acc: i64 = 0 by par)",
+		"filter":                  "return (acc + x for x in a if x > 0 with acc: i64 = 0 by par)",
+		"non-assoc op":            "return (acc - x for x in a with acc: i64 = 0 by par)",
 		"acc not a whole operand": "return (acc*2 + x for x in a with acc: i64 = 0 by par)",
 	}
 	for name, foldExpr := range cases {

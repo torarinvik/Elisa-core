@@ -607,25 +607,12 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 		retType = p.parseTypeExpr()
 	}
 
-	effectAliasPos := lexer.Pos{}
-	effectAlias := ""
-	var effects []ast.SignatureEffectItem
-
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
 	}
 
-	if effectAlias != "" {
-		if signatureHasExplicitErrorEffects(retType) {
-			p.errorf("effects alias cannot be combined with an explicit error[...] clause")
-		}
-		if len(permissions) != 0 {
-			p.errorf("effects alias cannot be combined with an explicit can[...] clause")
-		}
-	}
-
-	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, EffectAliasPos: effectAliasPos, EffectAlias: effectAlias, Effects: effects, Permissions: permissions, Variadic: variadic}
+	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, Permissions: permissions, Variadic: variadic}
 }
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
 	pos := p.cur().Pos

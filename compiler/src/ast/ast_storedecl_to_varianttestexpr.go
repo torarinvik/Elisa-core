@@ -163,9 +163,6 @@ type FuncDecl struct {
 	RegionParams      []string
 	PermissionParams  []string
 	GenericParams     []GenericParam
-	EffectAliasPos    lexer.Pos
-	EffectAlias       string
-	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -193,9 +190,6 @@ type ExternFuncDecl struct {
 	PermissionParams  []string
 	GenericParams     []GenericParam
 	RegionParams      []string
-	EffectAliasPos    lexer.Pos
-	EffectAlias       string
-	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Ensures           []EnsuresClause
 	Params            []ParamDecl
@@ -407,9 +401,6 @@ type FuncTypeExpr struct {
 	ImplicitBundles   []string
 	ImplicitItemOrder []ImplicitSigItem
 	Return            TypeExpr
-	EffectAliasPos    lexer.Pos
-	EffectAlias       string
-	Effects           []SignatureEffectItem
 	Permissions       []PermissionRef
 	Variadic          bool
 }

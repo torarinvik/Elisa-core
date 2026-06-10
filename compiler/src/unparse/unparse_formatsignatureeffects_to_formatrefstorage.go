@@ -5,37 +5,6 @@ import (
 	"strings"
 )
 
-func formatSignatureEffects(alias string, effects []ast.SignatureEffectItem) string {
-	// Errors and capabilities are separate channels: errors render in their own
-	// `error[...]` clause, capabilities (permissions + capability-set aliases) in
-	// `can[...]`. The legacy bundled `effects[...]` spelling is gone.
-	caps := make([]string, 0, len(effects)+1)
-	errParts := make([]string, 0)
-	if alias != "" {
-		caps = append(caps, alias)
-	}
-	for _, effect := range effects {
-		if effect.ErrorEffects != nil {
-			errParts = append(errParts, formatTypeExpr(effect.ErrorEffects))
-			continue
-		}
-		if effect.Permission != nil {
-			caps = append(caps, formatPermissionRef(*effect.Permission))
-			continue
-		}
-		if effect.Alias != "" {
-			caps = append(caps, effect.Alias)
-		}
-	}
-	out := ""
-	for _, e := range errParts {
-		out += " " + e
-	}
-	if len(caps) > 0 {
-		out += " can[" + strings.Join(caps, ", ") + "]"
-	}
-	return out
-}
 func formatWithSignatureClause(bundles []string, params []ast.ParamDecl, order []ast.ImplicitSigItem) string {
 	parts := make([]string, 0, len(bundles)+len(params))
 	if len(order) != 0 {
@@ -368,10 +337,7 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		if n.Return != nil {
 			line += " -> " + formatTypeExpr(n.Return)
 		}
-		line += formatSignatureEffects(n.EffectAlias, n.Effects)
-		if n.EffectAlias == "" && len(n.Effects) == 0 {
-			line += formatPermissionRefs(n.Permissions)
-		}
+		line += formatPermissionRefs(n.Permissions)
 		return line
 	case *ast.ErrorSetExpr:
 		parts := make([]string, 0, len(n.Tags)+1)

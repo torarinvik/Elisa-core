@@ -473,8 +473,6 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		return nil
 	case *ast.ParamsDecl:
 		return nil
-	case *ast.EffectsDecl:
-		return nil
 	case *ast.ContextDecl:
 		return nil
 	case *ast.NamespaceDecl:
@@ -661,8 +659,6 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.PermissionDecl:
 		return nil
 	case *ast.ParamsDecl:
-		return nil
-	case *ast.EffectsDecl:
 		return nil
 	case *ast.ContextDecl:
 		return nil
