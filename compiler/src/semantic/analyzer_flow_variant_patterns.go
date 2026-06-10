@@ -139,6 +139,7 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 	case *ast.MatchVariantPattern:
 		enumType, _, enumOK := resolveMatchableEnumType(expected)
 		if enumOK && enumType != nil {
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, enumType.Name)
 			if p.EnumName != enumType.Name {
 				a.errorf(p.Pos(), "nested move-as pattern expects enum %q, got %q", enumType.Name, p.EnumName)
 				return fields
@@ -163,6 +164,7 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
 			return fields
 		}
+		p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, treeType.Name)
 		if p.EnumName != treeType.Name {
 			a.errorf(p.Pos(), "nested move-as pattern expects tree category %q, got %q", treeType.Name, p.EnumName)
 			return fields

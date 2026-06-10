@@ -37,3 +37,7 @@ func UnknownTypeMessage(name string) string {
 func UndefinedIdentifierMessage(name string) string {
 	return fmt.Sprintf("undefined identifier %q", name)
 }
+
+func PrivateNameMessage(qualifiedName string, owner string) string {
+	return fmt.Sprintf("%q is private to module %q", qualifiedName, owner)
+}

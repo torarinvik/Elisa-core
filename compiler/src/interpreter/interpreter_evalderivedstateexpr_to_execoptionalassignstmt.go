@@ -425,23 +425,23 @@ func (i *Interpreter) lookupStructDecl(name string) (*ast.StructDecl, bool) {
 	if i.result == nil || activeFile == nil {
 		return nil, false
 	}
-	var search func([]ast.Decl) (*ast.StructDecl, bool)
-	search = func(decls []ast.Decl) (*ast.StructDecl, bool) {
+	var search func([]ast.Decl, string) (*ast.StructDecl, bool)
+	search = func(decls []ast.Decl, namespace string) (*ast.StructDecl, bool) {
 		for _, decl := range decls {
 			switch n := decl.(type) {
 			case *ast.StructDecl:
-				if n != nil && n.Name == name {
+				if n != nil && (n.Name == name || qualifiedInterpreterName(namespace, n.Name) == name) {
 					return n, true
 				}
 			case *ast.NamespaceDecl:
-				if found, ok := search(n.Decls); ok {
+				if found, ok := search(n.Decls, qualifiedInterpreterName(namespace, n.Name)); ok {
 					return found, true
 				}
 			}
 		}
 		return nil, false
 	}
-	decl, ok := search(activeFile.Decls)
+	decl, ok := search(activeFile.Decls, "")
 	if !ok || decl == nil {
 		return nil, false
 	}

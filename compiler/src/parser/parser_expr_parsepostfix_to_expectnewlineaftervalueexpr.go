@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -507,7 +509,43 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		tok := p.advance()
 		if p.peek() == lexer.TOKEN_SCOPE {
-			return &ast.Ident{Position: tok.Pos, Name: p.parseQualifiedIdentNameAfterFirst(tok.Text)}
+			qualified := p.parseQualifiedIdentNameAfterFirst(tok.Text)
+			// A `::`-qualified name whose final segment is capitalized supports the
+			// same construction forms as a bare type name: `Geo::Point(3, 4)`,
+			// `Geo::Point{x: 3}`, and the type-arg variants.
+			last := qualified
+			if idx := strings.LastIndex(qualified, "."); idx >= 0 {
+				last = qualified[idx+1:]
+			}
+			if len(last) > 0 && last[0] >= 'A' && last[0] <= 'Z' {
+				if p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {
+					typeArgs := p.parseStructLiteralTypeArgs()
+					p.expect(lexer.TOKEN_LPAREN)
+					args, argNames := p.parseStructLiteralParenArgs()
+					p.expect(lexer.TOKEN_RPAREN)
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, TypeArgs: typeArgs, Args: args, ArgNames: argNames}
+				}
+				if p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LBRACE) {
+					typeArgs := p.parseStructLiteralTypeArgs()
+					p.expect(lexer.TOKEN_LBRACE)
+					args, argNames, spreads := p.parseStructLiteralBraceFields()
+					p.expect(lexer.TOKEN_RBRACE)
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, TypeArgs: typeArgs, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+				}
+				if p.peek() == lexer.TOKEN_LPAREN {
+					p.advance()
+					args, argNames := p.parseStructLiteralParenArgs()
+					p.expect(lexer.TOKEN_RPAREN)
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, Args: args, ArgNames: argNames}
+				}
+				if p.peek() == lexer.TOKEN_LBRACE {
+					p.advance()
+					args, argNames, spreads := p.parseStructLiteralBraceFields()
+					p.expect(lexer.TOKEN_RBRACE)
+					return &ast.StructLitExpr{Position: tok.Pos, Name: qualified, Args: args, ArgNames: argNames, Brace: true, Spreads: spreads}
+				}
+			}
+			return &ast.Ident{Position: tok.Pos, Name: qualified}
 		}
 		if len(tok.Text) > 0 && tok.Text[0] >= 'A' && tok.Text[0] <= 'Z' && p.peekStructLiteralTypeArgsFollowedBy(lexer.TOKEN_LPAREN) {
 			typeArgs := p.parseStructLiteralTypeArgs()

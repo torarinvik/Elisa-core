@@ -344,7 +344,7 @@ def outside() -> i32:
     return Secret::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined identifier \"Secret.hidden\"") && !strings.Contains(all, "undefined name \"Secret.hidden\"") && !strings.Contains(all, "unknown function \"Secret.hidden\"") {
+	if !strings.Contains(all, "\"Secret.hidden\" is private to module \"Secret\"") {
 		t.Fatalf("expected private module member to be hidden from outside, got:\n%s", all)
 	}
 	if _, ok := result.GlobalScope.Lookup("Secret.hidden"); !ok {
@@ -367,7 +367,7 @@ def outside() -> i32:
     return Api::visible() + Api::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined identifier \"Api.hidden\"") && !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+	if !strings.Contains(all, "\"Api.hidden\" is private to module \"Api\"") {
 		t.Fatalf("expected private section member to be hidden from outside, got:\n%s", all)
 	}
 	if sym, ok := result.GlobalScope.Lookup("Api.visible"); !ok || sym.Private {
@@ -391,7 +391,88 @@ def outside() -> i32:
     return Api::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "undefined identifier \"Api.hidden\"") && !strings.Contains(all, "undefined name \"Api.hidden\"") && !strings.Contains(all, "unknown function \"Api.hidden\"") {
+	if !strings.Contains(all, "\"Api.hidden\" is private to module \"Api\"") {
 		t.Fatalf("expected private def to be hidden from outside, got:\n%s", all)
+	}
+}
+
+// A `public:` section inside a `private module` re-exports its members: the
+// explicit section visibility overrides the module's private default. The
+// indented-block section form is exercised here (the flat-label form above).
+func TestPublicSectionInsidePrivateModuleReExports(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "public_in_private_module.elisa", `
+private module Foo:
+    public:
+        def pubfn() -> i32:
+            return secret() + 1
+
+    def secret() -> i32:
+        return 41
+
+def outside() -> i32:
+    return Foo::pubfn() + Foo::secret()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "\"Foo.secret\" is private to module \"Foo\"") {
+		t.Fatalf("expected unmarked member of private module to stay private, got:\n%s", all)
+	}
+	if strings.Contains(all, "Foo.pubfn") {
+		t.Fatalf("expected public-section member of private module to be accessible, got:\n%s", all)
+	}
+	if sym, ok := result.GlobalScope.Lookup("Foo.pubfn"); !ok || sym.Private {
+		t.Fatalf("expected Foo.pubfn to be public, got %#v", sym)
+	}
+	if sym, ok := result.GlobalScope.Lookup("Foo.secret"); !ok || !sym.Private {
+		t.Fatalf("expected Foo.secret to be private, got %#v", sym)
+	}
+}
+
+// Indented-block `private:` section inside a default-public module; the block's
+// visibility ends with the block (a following decl is public again).
+func TestPrivateSectionBlockEndsWithBlock(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_section_block.elisa", `
+module Bar:
+    private:
+        def hidden() -> i32:
+            return 5
+
+    def open() -> i32:
+        return hidden() * 2
+
+def outside() -> i32:
+    return Bar::open() + Bar::hidden()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "\"Bar.hidden\" is private to module \"Bar\"") {
+		t.Fatalf("expected private-block member to be hidden from outside, got:\n%s", all)
+	}
+	if sym, ok := result.GlobalScope.Lookup("Bar.open"); !ok || sym.Private {
+		t.Fatalf("expected Bar.open (after the private block) to be public, got %#v", sym)
+	}
+}
+
+// Private module members include types and consts; a private type is reported
+// as private (not "unknown type") when referenced from outside.
+func TestPrivateModuleTypeDiagnostic(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_module_type.elisa", `
+private module Vault:
+    struct Key:
+        id: i32
+
+    public:
+        def check() -> i32:
+            k: Key = Key(7)
+            return k.id
+
+def outside() -> i32:
+    k: Vault::Key = Vault::Key{id: 1}
+    return Vault::check()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "\"Vault.Key\" is private to module \"Vault\"") {
+		t.Fatalf("expected private type diagnostic, got:\n%s", all)
+	}
+	if strings.Contains(all, "Vault.check") {
+		t.Fatalf("expected Vault.check to be accessible, got:\n%s", all)
 	}
 }

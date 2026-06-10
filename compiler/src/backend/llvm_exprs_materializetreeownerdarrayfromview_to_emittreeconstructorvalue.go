@@ -248,7 +248,7 @@ func (s *functionState) enumConstructorInfoFromField(expr *ast.FieldExpr) (*sema
 	if !ok {
 		return nil, nil, false
 	}
-	base, ok := s.g.result.NamedTypes[ownerName]
+	base, _, ok := s.lookupVisibleNamedType(ownerName)
 	if !ok {
 		return nil, nil, false
 	}
@@ -303,7 +303,7 @@ func (s *functionState) treeConstructorInfoFromField(expr *ast.FieldExpr) (*sema
 	if !ok {
 		return nil, nil, false
 	}
-	base, ok := s.g.result.NamedTypes[ownerName]
+	base, _, ok := s.lookupVisibleNamedType(ownerName)
 	if !ok {
 		return nil, nil, false
 	}

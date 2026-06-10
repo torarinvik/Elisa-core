@@ -339,6 +339,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, variantBase.Name)
 			if p.EnumName != variantBase.Name {
 				a.errorf(p.Pos(), "nested match pattern expects enum %q, got %q", variantBase.Name, p.EnumName)
 				return
@@ -357,6 +358,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 				a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 			}
 		case *ConstEnumType:
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, variantBase.Name)
 			if p.EnumName != variantBase.Name {
 				a.errorf(p.Pos(), "nested match pattern expects const enum %q, got %q", variantBase.Name, p.EnumName)
 				return

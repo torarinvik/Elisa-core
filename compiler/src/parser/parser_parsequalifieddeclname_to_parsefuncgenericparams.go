@@ -18,9 +18,16 @@ func (p *Parser) matchQualifiedNameSeparator() bool {
 	return p.match(lexer.TOKEN_DOT) || p.match(lexer.TOKEN_SCOPE)
 }
 
+// parseQualifiedIdentNameAfterFirst consumes `::`-separated qualified-name
+// segments in EXPRESSION position. It deliberately stops at `.`: `::`
+// qualifies namespaces while `.` accesses value members, so
+// `Shapes::Form.Circle` is the qualified name `Shapes.Form` followed by
+// member access `.Circle` (handled by parsePostfix), not one
+// three-segment name.
 func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
 	name := first
-	for p.matchQualifiedNameSeparator() {
+	for p.peek() == lexer.TOKEN_SCOPE {
+		p.advance()
 		name += "." + p.expect(lexer.TOKEN_IDENT).Text
 	}
 	return name

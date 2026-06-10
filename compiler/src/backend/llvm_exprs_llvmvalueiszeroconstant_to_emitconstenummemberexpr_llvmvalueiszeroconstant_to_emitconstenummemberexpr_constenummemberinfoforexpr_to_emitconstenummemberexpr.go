@@ -188,7 +188,7 @@ func (s *functionState) treeCategoryKindTypeForExpr(expr *ast.FieldExpr) (*seman
 	if !ok {
 		return nil, false
 	}
-	base, ok := s.g.result.NamedTypes[ownerName]
+	base, _, ok := s.lookupVisibleNamedType(ownerName)
 	if !ok {
 		return nil, false
 	}

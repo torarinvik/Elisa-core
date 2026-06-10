@@ -42,7 +42,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.resolveNamedVariantWitnessType(n); ok {
 			return t
 		}
-		a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+		if qualified, owner, ok := a.inaccessiblePrivateName(n.Name); ok {
+			a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
+		} else {
+			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+		}
 		return invalidType
 	case *ast.StateSetTypeExpr:
 		a.errorf(n.Pos(), "state unions like %q are only valid as named struct state arguments", strings.Join(n.Cases, " | "))
@@ -183,7 +187,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		base, canonical, ok := a.lookupVisibleType(lookupName)
 		if !ok {
-			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+			if qualified, owner, privateHit := a.inaccessiblePrivateName(lookupName); privateHit {
+				a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
+			} else {
+				a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+			}
 			return invalidType
 		}
 		if a.resolvedTypeNames != nil && canonical != "" && canonical != lookupName {

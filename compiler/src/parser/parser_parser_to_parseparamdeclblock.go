@@ -23,7 +23,7 @@ type Parser struct {
 }
 
 func New(tokens []lexer.Token) *Parser {
-	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, nurseryGroupByPool: map[string]string{}, currentVisibility: "public", allowInMembership: true, allowTernary: true, allowWhereExpr: true}
+	return &Parser{tokens: tokens, declVisibility: map[ast.Decl]string{}, nurseryGroupByPool: map[string]string{}, allowInMembership: true, allowTernary: true, allowWhereExpr: true}
 }
 
 // nurseryGroupForActivePool returns the implicit task-group variable name for the innermost
@@ -211,8 +211,12 @@ func (p *Parser) markDeclVisibility(decl ast.Decl, visibility string) ast.Decl {
 	if visibility == "" {
 		visibility = p.currentVisibility
 	}
+	// Only record EXPLICIT visibility (a `public`/`private` prefix or an active
+	// `public:`/`private:` section). Unmarked decls stay absent from the map so the
+	// analyzer can tell "default" apart from "explicitly public" — an explicit
+	// public mark overrides an enclosing `private module` default, a default does not.
 	if visibility == "" {
-		visibility = "public"
+		return decl
 	}
 	if _, exists := p.declVisibility[decl]; !exists {
 		p.declVisibility[decl] = visibility

@@ -197,10 +197,22 @@ func (p *Parser) parseDeclBlock() []ast.Decl {
 			break
 		}
 		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
-			p.currentVisibility = p.cur().Text
+			visibility := p.cur().Text
 			p.advance()
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()
+			p.skipNewlines()
+			if p.peek() == lexer.TOKEN_INDENT {
+				// Block form: the visibility applies to the indented decls only;
+				// the surrounding section visibility resumes after the block.
+				sectionVisibility := p.currentVisibility
+				p.currentVisibility = visibility
+				decls = append(decls, p.parseDeclBlock()...)
+				p.currentVisibility = sectionVisibility
+				continue
+			}
+			// Flat label form: the visibility applies to subsequent decls in this block.
+			p.currentVisibility = visibility
 			continue
 		}
 		decl := p.parseDecl()

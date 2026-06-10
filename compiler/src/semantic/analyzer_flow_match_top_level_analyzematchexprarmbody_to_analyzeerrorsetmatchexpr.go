@@ -67,6 +67,7 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 				return false
 			}
 		} else {
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, enumType.Name)
 			if p.EnumName != enumType.Name {
 				a.errorf(p.Pos(), "match arm expects enum %q, got %q", enumType.Name, p.EnumName)
 				return false
@@ -121,6 +122,7 @@ func (a *Analyzer) analyzeTopLevelConstEnumMatchPattern(pattern ast.MatchPattern
 		}
 		return true
 	case *ast.MatchVariantPattern:
+		p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, constEnumType.Name)
 		if p.EnumName != constEnumType.Name {
 			a.errorf(p.Pos(), "match arm expects const enum %q, got %q", constEnumType.Name, p.EnumName)
 			return false
@@ -156,6 +158,7 @@ func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern,
 		}
 		return true
 	case *ast.MatchVariantPattern:
+		p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, errorSetType.Name)
 		if p.EnumName != errorSetType.Name {
 			a.errorf(p.Pos(), "match arm expects error set %q, got %q", errorSetType.Name, p.EnumName)
 			return false

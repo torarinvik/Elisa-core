@@ -734,6 +734,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 	case *ast.MatchVariantPattern:
 		switch target := expected.(type) {
 		case *EnumType:
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, target.Name)
 			if p.EnumName != target.Name {
 				a.errorf(p.Pos(), "nested variant is pattern expects enum %q, got %q", target.Name, p.EnumName)
 				return
@@ -751,6 +752,7 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
 			}
 		case *TreeCategoryType:
+			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, target.Name)
 			if p.EnumName != target.Name {
 				a.errorf(p.Pos(), "nested variant is pattern expects tree category %q, got %q", target.Name, p.EnumName)
 				return
@@ -796,6 +798,7 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected)
 			return
 		}
+		p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, enumType.Name)
 		if p.EnumName != enumType.Name {
 			a.errorf(p.Pos(), "nested variant is pattern expects enum %q, got %q", enumType.Name, p.EnumName)
 			return

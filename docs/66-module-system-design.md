@@ -270,12 +270,40 @@ PLANNED (in priority order):
 
 ## Known inconsistencies (audit — keep as the regression checklist)
 
-- **Resolver divergence** (HIGH): interpreter ignores namespaces/using/import; backend
-  re-resolves type names by bare name. Namespaced types half-usable until item 1 above.
-- **`.` vs `::`** (MED): `Module::f()` works, `Module.f()` doesn't (dot parses as value
-  field access); yet `Geo.Point` (dot) works for types. Unify per the `.`/`::` rule above.
+- **Resolver divergence** (HIGH): LARGELY FIXED (2026-06-10). The backend resolves
+  type names through `lookupVisibleNamedType` (namespace candidates + unique-suffix
+  fallback, mirroring `lookupVisibleGlobalSymbol`) at the enum/tree/const-enum
+  constructor chokepoints, and the interpreter resolves namespaced struct literals.
+  Match/is patterns canonicalize their enum name through the visible-name candidates
+  (`canonicalizeMatchEnumName`), so `Form.Circle(...)` arms match a `Shapes.Form`
+  scrutinee under `using Shapes`. REMAINING: the tree-walking interpreter has no enum
+  variant construction at all (pre-existing, also fails without modules).
+- **`.` vs `::`** (MED): FIXED. Expression qualified names consume only `::`
+  (`parseQualifiedIdentNameAfterFirst`), so `Shapes::Form.Circle` is namespace
+  qualification + member access. Qualified construction works: `Geo::Point(3, 4)`,
+  `Geo::Point{x: 1}`, `Shapes::Form.Circle(r: 2)`. `Foo.bar()` on a namespace still
+  gets the "use `Foo::bar`" diagnostic.
 - **Construction overlap** (MED): declaring any `def Type()` shadows the implicit
   all-fields positional `Type(a,b)` ("no matching __init__"); 1-arg vs multi-arg take
   different paths; brace is named-only. Fixed by item 2.
-- **Diagnostics** (LOW): cryptic resolver-order errors; runtime numeric-suffix warning
-  leak (separate spawned fix).
+- **Diagnostics** (LOW): private-access failures now report `"X" is private to module
+  "Y"` instead of "undefined identifier"/"unknown type". Cryptic resolver-order errors
+  remain; runtime numeric-suffix warning leak (separate spawned fix).
+
+## Visibility model (landed 2026-06-10)
+
+Modules are **public by default**; `private`/`public` inside a module is the hiding
+mechanism (axis 3 above). Three equivalent spellings, all enforced cross-namespace via
+`canAccessPrivateName`:
+
+- **Per-decl prefix**: `private def hidden() …` inside a module.
+- **Flat section label**: `private:` / `public:` switches the visibility of subsequent
+  decls in the same block (until the next label or end of block).
+- **Indented section block**: `private:` / `public:` followed by an indented decl block
+  applies only to that block; the surrounding default resumes after it.
+
+`private module Foo:` flips the module's member default to private. An EXPLICIT
+`public` mark (prefix or section) overrides the enclosing module default, so a
+`public:` section inside a `private module` re-exports those members. Unmarked decls
+inherit the module default. (Parser records only explicit marks in `DeclVisibility`;
+`declIsPrivate` gives explicit marks precedence over the inherited default.)

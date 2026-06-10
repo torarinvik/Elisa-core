@@ -141,7 +141,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = &FuncType{Name: n.Name, Return: &ConstValueType{Value: ConstValue{Kind: ConstUnknown}}}
 			return
 		}
-		a.errorf(n.Pos(), "%s", UndefinedIdentifierMessage(n.Name))
+		if qualified, owner, ok := a.inaccessiblePrivateName(n.Name); ok {
+			a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
+		} else {
+			a.errorf(n.Pos(), "%s", UndefinedIdentifierMessage(n.Name))
+		}
 		result = invalidType
 		return
 	case *ast.IntLit:

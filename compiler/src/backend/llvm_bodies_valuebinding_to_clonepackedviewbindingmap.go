@@ -155,6 +155,40 @@ func (s *functionState) visibleGlobalNames(name string) []string {
 	return []string{namespace + "." + name, name}
 }
 
+// lookupVisibleNamedType resolves a (possibly unqualified) type name against the
+// analyzer's NamedTypes the same way lookupVisibleGlobalSymbol resolves values:
+// current-namespace candidates first, then a unique-suffix fallback so a `using`
+// (which the backend does not track) still resolves when unambiguous.
+func (s *functionState) lookupVisibleNamedType(name string) (semantic.Type, string, bool) {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.NamedTypes == nil {
+		return nil, "", false
+	}
+	for _, candidate := range s.visibleGlobalNames(name) {
+		if t, ok := s.g.result.NamedTypes[candidate]; ok && t != nil {
+			return t, candidate, true
+		}
+	}
+	if !strings.Contains(name, ".") && !strings.Contains(name, "::") {
+		suffix := "." + strings.TrimSpace(name)
+		var resolvedName string
+		var resolved semantic.Type
+		for candidate, t := range s.g.result.NamedTypes {
+			if !strings.HasSuffix(candidate, suffix) || t == nil {
+				continue
+			}
+			if resolved != nil {
+				return nil, "", false
+			}
+			resolvedName = candidate
+			resolved = t
+		}
+		if resolved != nil {
+			return resolved, resolvedName, true
+		}
+	}
+	return nil, "", false
+}
+
 func (s *functionState) lookupVisibleGlobalSymbol(name string) (*semantic.Symbol, string, bool) {
 	if s == nil || s.g == nil || s.g.result == nil || s.g.result.GlobalScope == nil {
 		return nil, "", false

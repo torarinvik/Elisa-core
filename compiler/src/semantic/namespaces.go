@@ -43,19 +43,25 @@ func dedupeQualifiedNames(values []string) []string {
 }
 
 func (a *Analyzer) declIsPrivate(decl ast.Decl, inheritedPrivate bool) bool {
-	if inheritedPrivate {
-		return true
-	}
 	if a == nil || decl == nil {
-		return false
+		return inheritedPrivate
 	}
 	if ns, ok := decl.(*ast.NamespaceDecl); ok && ns.Private {
 		return true
 	}
-	if a.declVisibility == nil {
-		return false
+	// An explicit per-decl mark (a `public`/`private` prefix or an enclosing
+	// `public:`/`private:` section) wins over the enclosing module's default, so a
+	// `public:` section inside a `private module` re-exports its members. Unmarked
+	// decls inherit the module default (private module => private members).
+	if a.declVisibility != nil {
+		switch a.declVisibility[decl] {
+		case "private":
+			return true
+		case "public":
+			return false
+		}
 	}
-	return a.declVisibility[decl] == "private"
+	return inheritedPrivate
 }
 
 func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheritedUsings []string) []scopedDecl {
@@ -255,6 +261,46 @@ func (a *Analyzer) canAccessPrivateName(name string) bool {
 		current = privateOwnerNamespace(a.currentFuncType.Name)
 	}
 	return current == owner || strings.HasPrefix(current, owner+".")
+}
+
+// canonicalizeMatchEnumName resolves a match/is pattern's enum name through the
+// visible-name candidates (current namespace, `using`, imports), returning the
+// canonical qualified name when it resolves to the expected type name. This lets
+// `Form.Circle(...)` match a scrutinee of namespaced type `Shapes.Form` under
+// `using Shapes` — the strict name compares downstream all see the resolved name.
+func (a *Analyzer) canonicalizeMatchEnumName(name string, expectedName string) string {
+	if a == nil || name == "" || name == expectedName || expectedName == "" {
+		return name
+	}
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if candidate == expectedName {
+			if _, ok := a.namedTypes[candidate]; ok {
+				return candidate
+			}
+		}
+	}
+	return name
+}
+
+// inaccessiblePrivateName reports whether a failed lookup of name in fact found a
+// private declaration the current namespace may not access, returning the qualified
+// name and its owning module so the diagnostic can say "private", not "undefined".
+func (a *Analyzer) inaccessiblePrivateName(name string) (string, string, bool) {
+	if a == nil || name == "" {
+		return "", "", false
+	}
+	for _, candidate := range a.visibleNameCandidates(name) {
+		if a.canAccessPrivateName(candidate) {
+			continue
+		}
+		if a.privateTypeNames[candidate] {
+			return candidate, privateOwnerNamespace(candidate), true
+		}
+		if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil && sym.Private {
+			return candidate, privateOwnerNamespace(candidate), true
+		}
+	}
+	return "", "", false
 }
 
 func (a *Analyzer) lookupVisibleConst(name string) (ConstValue, bool) {
