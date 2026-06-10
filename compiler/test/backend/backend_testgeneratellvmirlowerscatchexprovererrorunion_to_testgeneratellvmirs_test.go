@@ -50,13 +50,13 @@ error NetworkError:
 extern read_disk() -> int error[FileError]
 extern read_network() -> int error[NetworkError.Timeout]
 
-def bubble_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+def bubble_disk() -> int error[FileError, NetworkError]:
 	return try read_disk()
 
-def bubble_network() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+def bubble_network() -> int error[FileError, NetworkError]:
 	return try read_network()
 
-def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+def fail_disk() -> int error[FileError, NetworkError]:
 	raise FileError.PermissionDenied
 `
 	result := parseAndAnalyze(t, "backend_error_mixed_row_style.elisa", src)
@@ -143,7 +143,7 @@ func TestGenerateLLVMIRAcceptsBareFamilyErrorSetShorthand(t *testing.T) {
 
 extern read_file(path: u8&) -> cstr[file_text] error[IoError]
 
-def load_text(path: u8&) -> cstr[file_text] error[IoError, ...]:
+def load_text(path: u8&) -> cstr[file_text] error[IoError]:
 	text: cstr[file_text] = try read_file(path)
 	return text
 `

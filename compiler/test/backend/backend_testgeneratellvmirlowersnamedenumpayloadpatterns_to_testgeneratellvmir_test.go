@@ -427,13 +427,13 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> cstr[file_text] error[IoError]
 
-def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
+def checked_alloc(size: usize) -> heap void& error[MemoryError]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
+def load_text(path: u8&) -> cstr[file_text] error[IoError]:
 	text: cstr[file_text] = try read_file(path)
 	return text
 
@@ -574,12 +574,12 @@ error BroadError:
 	Busy
 	NotFound
 
-extern read_value() -> int error[SourceError.NotFound, ...]
+extern read_value() -> int error[SourceError]
 
-def bubble() -> int error[BroadError.NotFound, ...]:
+def bubble() -> int error[BroadError]:
 	return try read_value()
 
-def fail_now() -> int error[BroadError.NotFound, ...]:
+def fail_now() -> int error[BroadError]:
 	raise SourceError.NotFound
 `
 	result := parseAndAnalyze(t, "backend_error_set_widening.elisa", src)

@@ -30,9 +30,9 @@ func TestAnalyzeRejectsTryPropagationWhenDestinationMissesErrorTags(t *testing.T
 error AppError:
 	NotFound
 
-extern read_value() -> int error[FileError.NotFound, ...]
+extern read_value() -> int error[FileError]
 
-def bubble() -> int error[AppError.NotFound, ...]:
+def bubble() -> int error[AppError]:
 	return try read_value()
 `
 	_, errs := parseAndAnalyze(t, "error_set_widening_rejects_missing_tags.elisa", src)

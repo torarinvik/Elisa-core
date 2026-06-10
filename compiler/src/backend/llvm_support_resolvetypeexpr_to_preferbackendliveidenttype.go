@@ -338,6 +338,9 @@ func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Ty
 	if expr.HasEllipsis && containsWildcardErrorTag(expr.Tags) {
 		return nil, fmt.Errorf("error[Set.*, ...] is no longer supported; use error[Set] instead")
 	}
+	if expr.HasEllipsis {
+		return nil, fmt.Errorf("the `, ...` suffix in error[...] is no longer supported; name the full sets directly (a bare set name already means the whole family)")
+	}
 	if containsWildcardErrorTag(expr.Tags) {
 		return nil, fmt.Errorf("error[Set.*] is no longer supported; use error[Set] instead")
 	}
@@ -347,9 +350,6 @@ func (s *functionState) resolveErrorSetExpr(expr *ast.ErrorSetExpr) (semantic.Ty
 			return nil, err
 		}
 		return errSet, nil
-	}
-	if expr.HasEllipsis {
-		return s.resolveExpandedErrorFamilies(expr)
 	}
 	familySets := map[string]*semantic.ErrorSetType{}
 	fullFamilies := map[string]bool{}
@@ -413,22 +413,6 @@ func containsBareFamily(tags []ast.ErrorTagExpr) bool {
 		}
 	}
 	return false
-}
-func (s *functionState) resolveExpandedErrorFamilies(expr *ast.ErrorSetExpr) (semantic.Type, error) {
-	familySets := map[string]*semantic.ErrorSetType{}
-	fullFamilies := map[string]bool{}
-	for _, tag := range expr.Tags {
-		_, errSet, err := s.lookupDeclaredErrorSet(tag)
-		if err != nil {
-			return nil, err
-		}
-		if tag.Tag != "" && !errSet.HasQualifiedTag(tag.SetName, tag.Tag) {
-			return nil, fmt.Errorf("error set %q has no tag %q", tag.SetName, tag.Tag)
-		}
-		familySets[tag.SetName] = errSet
-		fullFamilies[tag.SetName] = true
-	}
-	return semantic.CanonicalizeErrorSetSelections(familySets, fullFamilies, nil), nil
 }
 func onlyBareFamilies(tags []ast.ErrorTagExpr) bool {
 	for _, tag := range tags {

@@ -15,38 +15,34 @@ func deprecatedDiagnostics(result *Result) string {
 	return strings.Join(out, "\n")
 }
 
-// The `, ...` suffix in error[...] expands listed tags to whole declared
-// families — a closed set, despite reading as "open to more". It is deprecated
-// in favor of naming the full sets directly.
-func TestErrorSetEllipsisSuffixDeprecated(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "esl_ellipsis.elisa", `
+// The `, ...` suffix in error[...] used to round listed tags up to whole
+// declared families — a closed set, despite reading as "open to more". A bare
+// set name already means the whole family, so the suffix is no longer supported.
+func TestErrorSetEllipsisSuffixRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "esl_ellipsis.elisa", `
 error IoErr:
     Bad
 
 extern reader(f: func() -> i64 error[IoErr, ...]) -> i64
 `)
-	dep := deprecatedDiagnostics(result)
-	if !strings.Contains(dep, "`, ...` suffix in error[...] is deprecated") {
-		t.Fatalf("expected error[IoErr, ...] to emit the ellipsis deprecation, got:\n%s", dep)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "`, ...` suffix in error[...] is no longer supported") {
+		t.Fatalf("expected error[IoErr, ...] to be rejected, got:\n%s", all)
 	}
 }
 
-// The qualified-tag form `error[Set.Tag, ...]` (round Tag up to its whole
-// family) gets the same deprecation, and its expansion semantics stay intact.
-func TestErrorSetEllipsisQualifiedTagDeprecatedButStillExpands(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "esl_ellipsis_qualified.elisa", `
+// The qualified-tag form `error[Set.Tag, ...]` is rejected the same way.
+func TestErrorSetEllipsisQualifiedTagRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "esl_ellipsis_qualified.elisa", `
 error IoErr:
     Bad
     Worse
 
 extern reader() -> i64 error[IoErr.Bad, ...]
-
-def use() -> i64 error[IoErr]:
-    return try reader()
 `)
-	dep := deprecatedDiagnostics(result)
-	if !strings.Contains(dep, "`, ...` suffix in error[...] is deprecated") {
-		t.Fatalf("expected error[IoErr.Bad, ...] to emit the ellipsis deprecation, got:\n%s", dep)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "`, ...` suffix in error[...] is no longer supported") {
+		t.Fatalf("expected error[IoErr.Bad, ...] to be rejected, got:\n%s", all)
 	}
 }
 

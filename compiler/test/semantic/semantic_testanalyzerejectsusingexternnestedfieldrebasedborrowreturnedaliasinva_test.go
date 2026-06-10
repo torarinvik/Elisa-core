@@ -375,13 +375,13 @@ error IoError:
 	NotFound
 
 extern alloc(size: usize) -> heap void&?
-extern read_file(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]
+extern read_file(path: u8&) -> cstr[file_text] error[IoError]
 
-def checked_alloc(size: usize) -> heap void& error[MemoryError.OutOfMemory, ...]:
+def checked_alloc(size: usize) -> heap void& error[MemoryError]:
 	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
-def load_text(path: u8&) -> cstr[file_text] error[IoError.NotFound, ...]:
+def load_text(path: u8&) -> cstr[file_text] error[IoError]:
 	text: cstr[file_text] = try read_file(path)
 	return text
 
@@ -405,9 +405,9 @@ error AppError:
 error OneTagError:
 	NotFound
 
-extern read_value() -> int error[FileError.NotFound, ...]
+extern read_value() -> int error[FileError]
 
-def bubble() -> int error[AppError.NotFound, ...]:
+def bubble() -> int error[AppError]:
 	return try read_value()
 
 def fail_now() -> int error[OneTagError.NotFound]:
@@ -423,7 +423,7 @@ func TestAnalyzeAcceptsWildcardErrorSetShorthand(t *testing.T) {
 
 extern read_value() -> int error[FileError]
 
-def bubble() -> int error[FileError, ...]:
+def bubble() -> int error[FileError]:
 	return try read_value()
 `
 	_, errs := parseAndAnalyze(t, "error_set_wildcard_ok.elisa", src)
@@ -461,12 +461,12 @@ error NetworkError:
 extern read_disk() -> int error[FileError]
 extern read_network() -> int error[NetworkError.Timeout]
 
-def load_any(use_disk: bool) -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+def load_any(use_disk: bool) -> int error[FileError, NetworkError]:
 	if use_disk:
 		return try read_disk()
 	return try read_network()
 
-def fail_disk() -> int error[FileError.NotFound, NetworkError.Timeout, ...]:
+def fail_disk() -> int error[FileError, NetworkError]:
 	raise FileError.PermissionDenied
 `
 	_, errs := parseAndAnalyze(t, "error_mixed_row_expansion_ok.elisa", src)

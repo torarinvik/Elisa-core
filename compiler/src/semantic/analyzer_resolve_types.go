@@ -284,10 +284,12 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		return invalidType
 	}
 	if expr.HasEllipsis {
-		// `error[Tags, ...]` rounds the listed selections up to their whole declared
-		// families — a CLOSED set, despite reading as "open to more". A bare set name
-		// already means the whole family, so the suffix adds nothing but confusion.
-		a.deprecatedf(expr.Pos(), "the `, ...` suffix in error[...] is deprecated; it expands the listed tags to whole sets, so name the full sets directly (a bare set name already means the whole family)")
+		// `error[Tags, ...]` used to round the listed selections up to their whole
+		// declared families — a CLOSED set, despite reading as "open to more". A bare
+		// set name already means the whole family, so the suffix added nothing but
+		// confusion; it is no longer supported.
+		a.errorf(expr.Pos(), "the `, ...` suffix in error[...] is no longer supported; name the full sets directly (a bare set name already means the whole family)")
+		return invalidType
 	}
 	if containsWildcardErrorTag(expr.Tags) {
 		if len(expr.Tags) != 1 {
@@ -324,7 +326,7 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 			}
 			return &ErrorSetType{Name: errorSetNameWithParams("", 0, paramNames), Params: paramNames}
 		}
-		concrete := a.resolveErrorSetExpr(&ast.ErrorSetExpr{Position: expr.Position, Tags: concreteExprTags, HasEllipsis: expr.HasEllipsis})
+		concrete := a.resolveErrorSetExpr(&ast.ErrorSetExpr{Position: expr.Position, Tags: concreteExprTags})
 		concreteSet, ok := concrete.(*ErrorSetType)
 		if !ok || concreteSet == nil {
 			return invalidType
@@ -359,10 +361,6 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		}
 		return errSet
 	}
-	if expr.HasEllipsis {
-		return a.resolveExpandedErrorFamilies(tags)
-	}
-
 	familySets := map[string]*ErrorSetType{}
 	fullFamilies := map[string]bool{}
 	selectedTags := map[string]map[string]bool{}
@@ -509,24 +507,6 @@ func (a *Analyzer) normalizeErrorTag(tag ast.ErrorTagExpr) (ast.ErrorTagExpr, bo
 		a.errorf(tag.Position, "error variant %q is ambiguous across sets %s; qualify it as %s.%s", tag.SetName, strings.Join(owners, ", "), owners[0], tag.SetName)
 		return tag, false
 	}
-}
-
-func (a *Analyzer) resolveExpandedErrorFamilies(tags []ast.ErrorTagExpr) Type {
-	familySets := map[string]*ErrorSetType{}
-	fullFamilies := map[string]bool{}
-	for _, tag := range tags {
-		_, errSet := a.lookupDeclaredErrorSet(tag)
-		if errSet == nil {
-			return invalidType
-		}
-		if tag.Tag != "" && !errSet.HasQualifiedTag(tag.SetName, tag.Tag) {
-			a.errorf(tag.Position, "error set %q has no tag %q", tag.SetName, tag.Tag)
-			return invalidType
-		}
-		familySets[tag.SetName] = errSet
-		fullFamilies[tag.SetName] = true
-	}
-	return CanonicalizeErrorSetSelections(familySets, fullFamilies, nil)
 }
 
 func onlyBareFamilies(tags []ast.ErrorTagExpr) bool {
