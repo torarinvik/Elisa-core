@@ -130,6 +130,19 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 			if err != nil {
 				return nil, nil, err
 			}
+			// A protocol method with its own generic params (e.g. `[errorset R]`)
+			// must be monomorphized per call site, exactly like the plain-Ident
+			// generic path below — fnType.Name is the unique __impl__ symbol, so
+			// the mangled specialization name cannot collide across impls.
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && len(funcGenericParams(fnType)) > 0 {
+				argTypes := make([]semantic.Type, 0, len(expr.Args))
+				for _, arg := range expr.Args {
+					argTypes = append(argTypes, s.exprType(arg))
+				}
+				bindings := inferTypeBindingsFromCall(fnType, expr.Args, argTypes, s.exprType(expr))
+				value, specialized, err := s.g.ensureSpecializedFunction(decl, fnType, bindings)
+				return value, specialized, err
+			}
 			value, err := s.g.ensureFunctionDeclared(sym.Name, fnType)
 			return value, fnType, err
 		}

@@ -49,7 +49,11 @@ func TestCanonicalTypeIDDistinguishesWritableRefs(t *testing.T) {
 	}
 }
 
-func TestCanonicalTypeIDPreservesFuncGenericParamPositions(t *testing.T) {
+// The canonical ID is STRUCTURAL: two generic function types that differ only
+// in where their generic params were declared are the same type (this is what
+// lets an impl method conform to its protocol counterpart declared on another
+// line). Interface bounds DO distinguish — `[T: Bound]` is not `[T]`.
+func TestCanonicalTypeIDIgnoresFuncGenericParamPositions(t *testing.T) {
 	left := &FuncType{
 		GenericParams: []ast.GenericParam{{Position: lexer.Pos{File: "left.elisa", Line: 1, Col: 1, Offset: 0}, Kind: ast.GenericParamType, Name: "T"}},
 		TypeParams:    []string{"T"},
@@ -62,11 +66,20 @@ func TestCanonicalTypeIDPreservesFuncGenericParamPositions(t *testing.T) {
 		Params:        []Type{&TypeParamType{Name: "T"}},
 		Return:        &TypeParamType{Name: "T"},
 	}
-	if SameType(left, right) {
-		t.Fatalf("expected function types with different generic param positions to remain unequal")
+	if !SameType(left, right) {
+		t.Fatalf("expected structurally identical generic function types to be equal regardless of declaration position")
 	}
-	if leftID, rightID := requireCanonicalTypeID(t, left), requireCanonicalTypeID(t, right); leftID == rightID {
-		t.Fatalf("expected function generic param positions to contribute to canonical type ids")
+	if leftID, rightID := requireCanonicalTypeID(t, left), requireCanonicalTypeID(t, right); leftID != rightID {
+		t.Fatalf("expected structurally identical generic function types to share a canonical id")
+	}
+	bounded := &FuncType{
+		GenericParams: []ast.GenericParam{{Kind: ast.GenericParamType, Name: "T", InterfaceBound: "Ordered"}},
+		TypeParams:    []string{"T"},
+		Params:        []Type{&TypeParamType{Name: "T"}},
+		Return:        &TypeParamType{Name: "T"},
+	}
+	if id := requireCanonicalTypeID(t, bounded); id == requireCanonicalTypeID(t, left) {
+		t.Fatalf("expected an interface-bounded generic param to produce a distinct canonical id")
 	}
 }
 

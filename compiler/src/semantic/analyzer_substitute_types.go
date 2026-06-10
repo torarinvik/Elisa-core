@@ -269,23 +269,21 @@ func substituteErrorSetParams(errors *ErrorSetType, bindings map[string]Type) *E
 		Payloads: errors.Payloads,
 	}
 	changed := false
-	var residual []string
 	for _, param := range errors.Params {
 		if bound, ok := bindings[param]; ok {
 			if set, isSet := bound.(*ErrorSetType); isSet && set != nil {
+				// The binding may itself carry params (a caller's own error-set
+				// param flowing through); UnionErrorSets preserves them.
 				resolved = UnionErrorSets(resolved, set)
 				changed = true
 				continue
 			}
 		}
-		residual = append(residual, param)
+		// Unbound: the param stays symbolic in the result.
+		resolved = UnionErrorSets(resolved, &ErrorSetType{Name: param, Params: []string{param}})
 	}
 	if !changed {
 		return errors
-	}
-	resolved.Params = residual
-	if len(residual) != 0 || len(errors.Tags) != 0 {
-		resolved.Name = errorSetNameWithParams(resolved.Name, len(resolved.Tags), residual)
 	}
 	return resolved
 }

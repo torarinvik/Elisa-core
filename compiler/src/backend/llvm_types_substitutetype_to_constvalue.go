@@ -73,7 +73,6 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 		if errors != nil && errors.HasParams() {
 			resolved := &semantic.ErrorSetType{Name: errors.Name, Tags: append([]string(nil), errors.Tags...), Payloads: errors.Payloads}
 			changed := false
-			var residual []string
 			for _, param := range errors.Params {
 				if mapped, ok := subst[param]; ok {
 					if set, isSet := mapped.(*semantic.ErrorSetType); isSet && set != nil {
@@ -82,10 +81,9 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 						continue
 					}
 				}
-				residual = append(residual, param)
+				resolved = semantic.UnionErrorSets(resolved, &semantic.ErrorSetType{Name: param, Params: []string{param}})
 			}
 			if changed {
-				resolved.Params = residual
 				errors = resolved
 			}
 		}

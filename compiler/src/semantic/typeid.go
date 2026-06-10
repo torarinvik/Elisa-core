@@ -6,7 +6,6 @@ import (
 	"sync"
 
 	"elisacore/src/ast"
-	"elisacore/src/lexer"
 )
 
 type TypeID uint64
@@ -355,9 +354,9 @@ func appendGenericParamSlice(b *strings.Builder, params []ast.GenericParam) {
 	for _, param := range params {
 		appendKeyInt(b, int(param.Kind))
 		appendKeyString(b, param.Name)
+		appendKeyString(b, param.InterfaceBound)
 		appendKeyString(b, param.StateOwner)
 		appendKeyStringSlice(b, param.StateCases)
-		appendKeyPos(b, param.Position)
 	}
 }
 
@@ -373,16 +372,6 @@ func appendKeyRefStateSlice(b *strings.Builder, values []RefState) {
 	for _, value := range values {
 		appendKeyInt(b, int(value))
 	}
-}
-
-func appendKeyPos(b *strings.Builder, pos lexer.Pos) {
-	appendKeyString(b, pos.File)
-	appendKeyInt(b, pos.Line)
-	appendKeyInt(b, pos.Col)
-	appendKeyInt(b, pos.Offset)
-	appendKeyInt(b, pos.EndLine)
-	appendKeyInt(b, pos.EndCol)
-	appendKeyInt(b, pos.EndOffset)
 }
 
 func appendKeyTag(b *strings.Builder, tag string) {

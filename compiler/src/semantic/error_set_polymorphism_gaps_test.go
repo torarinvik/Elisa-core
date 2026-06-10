@@ -205,13 +205,15 @@ def passThrough[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	}
 }
 
-// GAP 4 (protocol conformance): an impl method with an `[errorset R]` (or any
-// generic) signature never conforms, because SameType's canonical-type-ID fast
-// path keys generic params by SOURCE POSITION (typeid.go appendGenericParamSlice
-// includes param.Position), so structurally identical signatures declared at
-// different lines compare unequal — yielding an "expects X, got X" diagnostic.
-func TestGapErrorSetParamProtocolConformance(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_protocol.elisa", `
+// CLOSED GAP 4 (protocol conformance): generic impl methods conform to their
+// protocol counterparts. The canonical type-ID used by SameType's fast path
+// previously keyed generic params by SOURCE POSITION, so structurally
+// identical signatures declared at different lines compared unequal (an
+// "expects X, got X" diagnostic); the key is structural now (and includes the
+// interface bound, which it previously omitted). Param NAMES must still match
+// between protocol and impl — there is no alpha-renaming.
+func TestErrorSetParamProtocolConformance(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "gap_protocol.elisa", `
 error IoErr:
     Bad
 
@@ -225,8 +227,50 @@ impl Runner for MyRunner:
     def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
         return try f()
 `)
-	all := allDiagnostics(result)
-	if !strings.Contains(all, `impl method "run" for interface "Runner" expects`) {
-		t.Fatalf("gap moved: [errorset R] impl method now conforms (Phase 4 done?). got:\n%s", all)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("[errorset R] impl method should conform to its protocol, got:\n%s", all)
+	}
+}
+
+// The same fix covers plain type-param generic methods in protocols.
+func TestTypeParamProtocolConformance(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "gap_protocol_typeparam.elisa", `
+protocol Mapper:
+    def map[T](x: T) -> T
+
+struct Identity:
+    tag: i64
+
+impl Mapper for Identity:
+    def map[T](x: T) -> T:
+        return x
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("[T] impl method should conform to its protocol, got:\n%s", all)
+	}
+}
+
+// Cross-scope propagation: a caller's own error-set param flows through a
+// callee's param without degenerating — including the same-name case where the
+// caller's R and the callee's R are different params.
+func TestErrorSetParamFlowsThroughProtocolMethod(t *testing.T) {
+	for _, callerParam := range []string{"R", "Q"} {
+		result := analyzeFunctionAnalysisTestSource(t, "proto_flow_"+callerParam+".elisa", `
+protocol Runner:
+    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]
+
+struct AddOne:
+    tag: i64
+
+impl Runner for AddOne:
+    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+        return try f()
+
+def drive[T: Runner, errorset `+callerParam+`](f: func() -> i64 error[`+callerParam+`]) -> i64 error[`+callerParam+`]:
+    return T.run(f)
+`)
+		if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+			t.Fatalf("caller param %q should flow through the protocol method, got:\n%s", callerParam, all)
+		}
 	}
 }
