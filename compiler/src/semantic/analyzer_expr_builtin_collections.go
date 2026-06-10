@@ -289,7 +289,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// Nested-region escape: pushing an inner-@r value into a darray whose element
 		// region outlives it would leave the longer-lived buffer holding a dangling
 		// reference once the inner region is freed.
-		a.checkNestedRegionStoreEscape(expr.Args[0], darrayType.Elem, argType)
+		a.checkNestedRegionElementStoreEscape(expr.Args[0], darrayType, darrayType.Elem, argType)
 		a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
 	}
 	resultType := receiverRefType

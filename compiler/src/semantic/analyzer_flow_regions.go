@@ -296,7 +296,7 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	sym := &Symbol{Name: stmt.Name, Kind: SymbolRegion, Type: arenaType, Node: stmt, Mutable: false}
 	a.defineLocal(sym, stmt.Pos())
 	if a.currentRegions != nil {
-		a.currentRegions[sym] = regionState{Backing: normalizeBacking(stmt.Allocator)}
+		a.currentRegions[sym] = regionState{Backing: normalizeBacking(stmt.Allocator), DeclScope: a.currentScope}
 	}
 	// Record this region's lifetime ordinal (declaration order == nesting order
 	// for live regions). Outer regions get lower ordinals and thus outlive inner

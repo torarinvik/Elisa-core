@@ -8,10 +8,11 @@ import (
 
 var debugRegionContainers = os.Getenv("ELISA_REGION_DEBUG") != ""
 
-// Region-parameterized containers — Phase 1 (carry the region; don't enforce).
-// See REGION_CONTAINERS_DESIGN.md. This stamps a darray's allocation region from
-// the enclosing `in <region>:` scope. SameType/AssignableTo/String/codegen do
-// NOT yet consult Region, so this is observable but behaviorally inert.
+// Region-parameterized containers. See REGION_CONTAINERS_DESIGN.md. This stamps
+// a container's allocation region from the enclosing `in <region>:` scope. The
+// stamped Region is load-bearing: escape checks (return/store/nested-store),
+// flow destruction-invalidation, region-param binding, and backend arena
+// routing (regionArenaOwner) all consult it.
 
 // stampContainerRegion returns t with its container region inferred from the
 // active allocation scope, if it is a region-less darray and a region scope is
@@ -205,13 +206,115 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType,
 		return
 	}
 	valueRegion := containerOrEntryRegion(valueType)
+	if valueRegion == "" {
+		return
+	}
 	targetRegion := containerOrEntryRegion(targetType)
-	if valueRegion == "" || targetRegion == "" {
+	if targetRegion == "" {
+		// Region-less target slot (a plain local, or a field of a region-less
+		// struct). The slot still dangles if its backing storage outlives the
+		// value's region block: a binding declared in a scope that strictly
+		// encloses the region's declaration scope survives the region's exit.
+		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
 	if a.regionOutlives(targetRegion, valueRegion) {
 		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
+}
+
+// checkNestedRegionElementStoreEscape is the container-mutation form of the
+// nested-region store check (push / dict.put / set.add). Element types are
+// never region-stamped, so when the slot's own type carries no region the
+// element's true lifetime is the CONTAINER's region — fall back to it.
+func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, containerType, elemType, valueType Type) {
+	if a == nil || argExpr == nil {
+		return
+	}
+	valueRegion := containerOrEntryRegion(valueType)
+	if valueRegion == "" {
+		return
+	}
+	targetRegion := containerOrEntryRegion(elemType)
+	if targetRegion == "" {
+		targetRegion = containerRegion(containerType)
+	}
+	if targetRegion == "" {
+		return
+	}
+	if a.regionOutlives(targetRegion, valueRegion) {
+		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+	}
+}
+
+// checkRegionlessTargetStoreEscape rejects storing region-allocated data into a
+// region-less binding that outlives the region's block. The target outlives the
+// region exactly when its defining scope strictly encloses the region's
+// declaration scope (it was declared before the region block opened, so it is
+// still live after the region is freed). Synthesized `in auto:` regions are
+// excluded: their lifetimes are governed by the region-return/adoption
+// machinery, not the explicit-region lattice.
+func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRegion string) {
+	if isSynthesizedAutoRegion(valueRegion) {
+		return
+	}
+	regionSym, state := a.lookupRegionState(valueRegion)
+	if regionSym == nil || state.Destroyed || state.DeclScope == nil {
+		return
+	}
+	root := rootIdentExpr(targetExpr)
+	if root == nil {
+		return
+	}
+	targetScope := a.definingScope(root.Name)
+	if targetScope == nil || targetScope == state.DeclScope {
+		return
+	}
+	if !scopeStrictlyEncloses(targetScope, state.DeclScope) {
+		return
+	}
+	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", valueRegion, root.Name, valueRegion, valueRegion, root.Name)
+}
+
+// rootIdentExpr peels field accesses and indexing down to the base identifier
+// of an lvalue expression, or nil when the root is not a plain identifier.
+func rootIdentExpr(expr ast.Expr) *ast.Ident {
+	for {
+		switch e := expr.(type) {
+		case *ast.Ident:
+			return e
+		case *ast.FieldExpr:
+			expr = e.Object
+		case *ast.IndexExpr:
+			expr = e.Object
+		default:
+			return nil
+		}
+	}
+}
+
+// definingScope returns the scope that defines name as seen from the current
+// scope (respecting shadowing), or nil if the name is not in scope.
+func (a *Analyzer) definingScope(name string) *Scope {
+	for s := a.currentScope; s != nil; s = s.Parent {
+		if _, ok := s.Symbols[name]; ok {
+			return s
+		}
+	}
+	return nil
+}
+
+// scopeStrictlyEncloses reports whether outer is a strict ancestor of inner.
+func scopeStrictlyEncloses(outer, inner *Scope) bool {
+	if outer == nil || inner == nil {
+		return false
+	}
+	for s := inner.Parent; s != nil; s = s.Parent {
+		if s == outer {
+			return true
+		}
+	}
+	return false
 }
 
 // regionAvailableForContainer reports whether a container's allocation region is

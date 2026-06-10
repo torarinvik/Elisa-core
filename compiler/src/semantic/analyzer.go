@@ -299,6 +299,11 @@ type regionState struct {
 	// / scratch; docs/68 §3). It governs adopt's backing-family check and the
 	// pointer-stability rule.
 	Backing string
+	// DeclScope is the scope in which the region was declared. A binding whose
+	// defining scope strictly encloses DeclScope outlives the region's block, so
+	// storing region-allocated data into it dangles (see the region-less-target
+	// case of checkNestedRegionStoreEscape).
+	DeclScope *Scope
 }
 
 type regionMarkState struct {

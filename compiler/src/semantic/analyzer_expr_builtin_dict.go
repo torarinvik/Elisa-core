@@ -301,6 +301,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 		if !AssignableTo(entryType.Dict.Value, argType) {
 			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value, argType)
 		}
+		a.checkNestedRegionElementStoreEscape(expr.Args[0], entryType.Dict, entryType.Dict.Value, argType)
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
 	}
 	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
@@ -369,6 +370,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		if !AssignableTo(dictType.Value, valueType) {
 			a.errorf(expr.Args[1].Pos(), "dict %s expects value of type %s, got %s", method, dictType.Value, valueType)
 		}
+		a.checkNestedRegionElementStoreEscape(expr.Args[1], dictType, dictType.Value, valueType)
 		a.consumeAffineValueExpr(expr.Args[1], dictType.Value, "move into dict "+method)
 	}
 	valueRefType := builtinDictEntryValueRefType(dictType)
