@@ -210,6 +210,7 @@ def visit(owner: Arena) -> int:
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "visit", "int")
 }
+
 // `parallel for` no longer requires an explicit `pool workers(w):` scope: with none, it falls
 // back to the implicit default pool (perf_cores() workers). So an out-of-pool parallel-for is
 // now ACCEPTED, not rejected for a missing pool.
@@ -267,7 +268,7 @@ def visit(values: darray[i32, 4]) -> int:
 func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
 	src := `def bad() -> void:
 	buf: mutable array[i32, 4] = [1, 2, 3, 4]
-	ro: view[i32, 0, 2] = readonly(buf[0:2])
+	ro: view[i32] = readonly(buf[0:2])
 	ro[0] <- 7
 `
 	_, errs := parseAndAnalyze(t, "readonly_index_assign_reject.elisa", src)
@@ -285,9 +286,9 @@ func TestAnalyzeRejectsZipMapWithoutReadonlySources(t *testing.T) {
 
 def bad() -> void:
 	buf: mutable array[i32, 6] = [0, 0, 1, 2, 3, 4]
-	dst: view[i32, 0, 2] = buf[0:2]
-	src1: view[i32, 2, 4] = buf[2:4]
-	src2: view[i32, 4, 6] = buf[4:6]
+	dst: view[i32] = buf[0:2]
+	src1: view[i32] = buf[2:4]
+	src2: view[i32] = buf[4:6]
 	zip_map(dst, src1, src2, add_pair)
 `
 	_, errs := parseAndAnalyze(t, "zip_map_requires_readonly_sources_reject.elisa", src)

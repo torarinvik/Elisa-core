@@ -554,7 +554,7 @@ def apply_i64(fn: func(i64) -> i64, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
-    fn: func(i64) -> i64 = id.specialize[i64]()
+    fn: func(i64) -> i64 = id[i64]
     return apply_i64(fn, 7)
 `
 	result, errs := parseAndAnalyze(t, "explicit_generic_function_specialization.elisa", src)

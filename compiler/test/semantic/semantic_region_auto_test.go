@@ -22,19 +22,39 @@ func TestAnalyzeAcceptsInAutoBlockWithNonEscapingValue(t *testing.T) {
 	}
 }
 
-// Inference's slack becomes a diagnostic, not a leak: a value allocated in the
-// `in auto:` region that escapes the block (returned by reference here) is rejected,
-// because the synthesized region is freed at block exit.
-func TestAnalyzeRejectsValueEscapingInAutoBlock(t *testing.T) {
+// Returning a value built in an `in auto:` block no longer leaks or errors:
+// region-return inference makes the function region-polymorphic, threading the
+// synthesized region out to the caller instead of freeing it at block exit.
+func TestAnalyzeAcceptsRegionPolymorphicReturnFromInAutoBlock(t *testing.T) {
 	src := `def f() -> darray[i64]:
 	in auto:
 		xs: mutable darray[i64] = []
 		xs.push(7)
 		return xs
 `
-	_, errs := parseAndAnalyze(t, "in_auto_escape_reject.elisa", src)
-	if !strings.Contains(strings.Join(errs, "\n"), "escapes its `in auto:` scope") {
-		t.Fatalf("expected an escape diagnostic for a value leaving the `in auto:` block, got:\n%s", strings.Join(errs, "\n"))
+	_, errs := parseAndAnalyze(t, "in_auto_return_region_poly.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected build-and-return from `in auto:` to be accepted as region-polymorphic, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The safety boundary moves to the call site: a region-polymorphic function
+// (one that returns a region-threaded value) may only be called from inside an
+// inferred region, so the threaded region always has an owner.
+func TestAnalyzeRejectsRegionPolymorphicCallOutsideInferredRegion(t *testing.T) {
+	src := `def build() -> darray[i64]:
+	in auto:
+		xs: mutable darray[i64] = []
+		xs.push(7)
+		return xs
+
+def use() -> i64:
+	ys: darray[i64] = build()
+	return ys[0]
+`
+	_, errs := parseAndAnalyze(t, "region_poly_call_reject.elisa", src)
+	if !strings.Contains(strings.Join(errs, "\n"), "region-polymorphic") {
+		t.Fatalf("expected calling a region-polymorphic function outside an inferred region to be rejected, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 

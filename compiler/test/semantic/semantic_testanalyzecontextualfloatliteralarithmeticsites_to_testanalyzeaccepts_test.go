@@ -509,18 +509,19 @@ func TestAnalyzeAcceptsBuiltinSurfaceCollectionTypes(t *testing.T) {
 	src := `extern take_array(values: array[i32, 4]) -> void
 extern take_darray(values: darray[i32, row]) -> void
 extern take_cstr(text: cstr[row]) -> void
-extern take_view(values: view[i32, 0, 2]) -> void
-extern take_sview(text: sview[1, 4]) -> void
+extern take_view(values: view[i32]) -> void
+extern take_byteview(bytes: view[u8]) -> void
+extern take_sview(text: sview) -> void
 
 def use(values: array[i32, 4], dyn: darray[i32, row], text: u8[5], dyn_text: cstr[row]) -> char:
-	sub_array: view[i32, 0, 2] = values[0:2]
-	sub_text: sview[1, 4] = text[1:4]
-	dyn_sub: sview[0, 1] = dyn_text[0:1]
+	sub_array: view[i32] = values[0:2]
+	sub_text: view[u8] = text[1:4]
+	dyn_sub: sview = dyn_text[0:1]
 	take_array(values)
 	take_darray(dyn)
 	take_cstr(dyn_text)
 	take_view(sub_array)
-	take_sview(sub_text)
+	take_byteview(sub_text)
 	take_sview(dyn_sub)
 	return text[0]
 `

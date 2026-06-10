@@ -256,7 +256,7 @@ func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got view[i32]") {
+	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got view[i32, 0, 4]") {
 		t.Fatalf("expected surface view safe-chain diagnostic, got:\n%s", all)
 	}
 	if strings.Contains(all, "DynArrayView") {

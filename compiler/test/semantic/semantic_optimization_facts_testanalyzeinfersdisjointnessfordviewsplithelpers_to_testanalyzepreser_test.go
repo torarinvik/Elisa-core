@@ -271,7 +271,7 @@ def inspect(owner: Arena) -> int:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	after_freeze: Expr = node
 	wrapped_after_freeze: Box = wrap_node(node)
-	view_after_freeze: view[Box, 0, 1] = items[0:1]
+	view_after_freeze: view[Box] = items[0:1]
 	held_after_freeze: Expr = held
 	_ = box
 	_ = held_before_freeze

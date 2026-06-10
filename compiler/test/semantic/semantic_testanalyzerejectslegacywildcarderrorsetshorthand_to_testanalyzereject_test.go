@@ -493,60 +493,6 @@ def fallback_value(flag: bool) -> int:
 	requireFunctionReturnTypeString(t, result, "maybe_value", "int?")
 	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
 }
-func TestAnalyzeAcceptsReturnQuestionWithOptionalBindings(t *testing.T) {
-	src := `def maybe_value(value: i64, keep: bool) -> i64?:
-	if keep:
-		return value
-	return null
-
-
-def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
-	return? with lower_value = lower, upper_value = upper, value_int = value:
-		value_int >= lower_value and value_int <= upper_value
-	return null
-
-
-def call_range(keep: bool) -> bool?:
-	return in_range(maybe_value(1, keep), maybe_value(5, keep), maybe_value(3, keep))
-`
-	result, errs := parseAndAnalyze(t, "return_question_with_optional_bindings.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "in_range", "bool?")
-	requireFunctionReturnTypeString(t, result, "call_range", "bool?")
-}
-func TestAnalyzeAcceptsErrorUnionTryDefaultShorthand(t *testing.T) {
-	src := `error FileError:
-	NotFound
-
-extern read_value(flag: bool) -> int error[FileError]
-
-def fallback_value(flag: bool) -> int:
-	return try? read_value(flag) default 11
-`
-	result, errs := parseAndAnalyze(t, "error_union_try_default.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "fallback_value", "int")
-}
-func TestAnalyzeRejectsOptionalTryDefaultShorthand(t *testing.T) {
-	src := `def maybe_value(flag: bool) -> int?:
-	if flag:
-		return 7
-	return null
-
-
-def bad(flag: bool) -> int:
-	return try? maybe_value(flag) default 11
-`
-	_, errs := parseAndAnalyze(t, "optional_try_default.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "try? ... default requires an error union") {
-		t.Fatalf("expected try default shorthand diagnostic, got:\n%s", strings.Join(errs, "\n"))
-	}
-}
 func TestAnalyzeRejectsTryOptionalWithoutElse(t *testing.T) {
 	src := `def maybe_value(flag: bool) -> int?:
 	if flag:

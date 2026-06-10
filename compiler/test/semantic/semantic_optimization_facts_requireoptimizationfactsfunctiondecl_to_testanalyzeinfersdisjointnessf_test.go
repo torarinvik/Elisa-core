@@ -66,7 +66,7 @@ func TestAnalyzeCollectsOptimizationFactsForShapeBackedCollections(t *testing.T)
 	same_b: darray[i32, row] = other
 	text_copy: cstr[row] = text
 	wildcard_copy: darray[i32] = any_values
-	slice: view[i32, 0, 2] = buf[0:2]
+	slice: view[i32] = buf[0:2]
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "optimization_facts_shape_backed.elisa", src)
@@ -441,9 +441,9 @@ def ctx_string_view_suffix(view: StringView, start: i64) -> StringView:
 	return sview(view.data, start, view.len)
 
 def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
-	left: view[i32, 0, 2] = buf[0:2]
-	right: view[i32, 2, 4] = buf[2:4]
-	overlap: view[i32, 1, 3] = buf[1:3]
+	left: view[i32] = buf[0:2]
+	right: view[i32] = buf[2:4]
+	overlap: view[i32] = buf[1:3]
 	base: StringView = ctx_string_view(text, 0, 4)
 	first: StringView = ctx_string_view(text, 0, 2)
 	second: StringView = ctx_string_view(text, 2, 4)
