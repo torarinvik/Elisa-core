@@ -36,7 +36,19 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 		return a.analyzeAutoAllocExpr(expr, expected)
 	}
 	if expr.Owner == nil {
-		return a.analyzeScopedPackedAllocExpr(expr)
+		// Bare `new` defaults to region inference (`new[auto]`). The historical
+		// bare-new form — a packed-enum constructor targeting an active
+		// `in <store>:` scope — keeps the store path, as do explicit (non
+		// recursive-plain) packed enums, whose store must be named. The flag is
+		// mutated in place so downstream passes and codegen see one canonical
+		// auto-alloc shape (same pattern as IndexExpr.AsSpecialize).
+		if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {
+			if _, hasStore := a.lookupPackedStore(enumType); hasStore || !enumType.RecursivePlain {
+				return a.analyzeScopedPackedAllocExpr(expr)
+			}
+		}
+		expr.AutoRegion = true
+		return a.analyzeAutoAllocExpr(expr, expected)
 	}
 	if updateExpr, ok := expr.Value.(*ast.RecordUpdateExpr); ok && updateExpr != nil {
 		baseType := a.analyzeExpr(updateExpr.Base)
@@ -149,7 +161,7 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type {
 	region := a.activeContainerRegionName()
 	if region == "" {
-		a.errorf(expr.Pos(), "new[auto] needs an enclosing inferred region (the native stack arena); wrap it in `in auto:` (or a scope that already opens one)")
+		a.errorf(expr.Pos(), "`new` needs a region to infer (the native stack arena), but none is in scope here; return the allocation from this function so a region is threaded in, or open an explicit `region NAME(size):` scope (or write `new[r]` to target a named region)")
 		// A bare packed-enum constructor routes back into this function (docs/76 Slice 0b); re-analyzing
 		// it as a value here would recurse infinitely, so stop after the diagnostic.
 		if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {

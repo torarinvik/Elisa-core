@@ -4,6 +4,10 @@
 > regions (docs/71), default stack backing (docs/73), `new[auto]` (inferred-region struct
 > allocation), and region-backed packed enums (docs/74). This is the cross-function half of `new[auto]`:
 > it lets a function *return* a region-allocated value, and recursion build one.
+>
+> **Spelling (2026-06):** bare `new T(...)` is now the default inferred-region allocation;
+> `new[auto]` is the older, still-accepted synonym. Every `new[auto]` in this doc reads identically
+> as bare `new`. See the default-allocation note in [docs/68](68-region-memory-model.md).
 
 ## The problem
 

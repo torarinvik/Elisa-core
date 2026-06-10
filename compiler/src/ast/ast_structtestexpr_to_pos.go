@@ -476,7 +476,11 @@ type RegionStmt struct {
 	// created on demand by arena_alloc rather than eagerly at the declaration. A region
 	// that never allocates costs only a zero-initialized Arena slot and an empty free.
 	Lazy bool
-	Body []Stmt
+	// UserAuto marks a region the USER wrote as `in auto:` (vs the parser's own
+	// function/loop auto-wraps, which share the synthesized name but must not
+	// warn). Drives the `in auto:` deprecation diagnostic.
+	UserAuto bool
+	Body     []Stmt
 }
 type DestroyStmt struct {
 	Position lexer.Pos

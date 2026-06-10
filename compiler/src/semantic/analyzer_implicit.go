@@ -82,7 +82,7 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 					resolved = append(resolved, regionArg)
 					continue
 				}
-				a.errorf(expr.Pos(), "call to region-polymorphic %q must occur inside an inferred region (open one with `in auto:`) or another region-polymorphic function", ft.Name)
+				a.errorf(expr.Pos(), "call to region-polymorphic %q must occur where a region can be inferred: inside another region-polymorphic function (one that returns an inferred-region value) or an explicit `region NAME(size):` scope", ft.Name)
 				continue
 			} else if packedStoreType, isPackedStore := expectedType.(*PackedEnumStoreType); isPackedStore && packedStoreType != nil {
 				// docs/74: thread the region-backed packed store. A caller that already has the store

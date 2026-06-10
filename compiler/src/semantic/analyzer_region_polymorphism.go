@@ -374,7 +374,23 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 	value = unwrapParenForRegionPoly(value)
 	switch e := value.(type) {
 	case *ast.AllocExpr:
-		return e != nil && e.AutoRegion
+		if e == nil {
+			return false
+		}
+		if e.AutoRegion {
+			return true
+		}
+		// Bare `new` defaults to new[auto] (region-allocated) unless it is a
+		// packed-enum constructor, where only region-backed (recursive-plain)
+		// enums take the inferred-region path — mirroring the bare-constructor
+		// rule (regionBackedEnumConstructor) and analyzeAllocExprWithExpected.
+		if e.Owner == nil {
+			if enumType, _, ok := a.packedAllocConstructorInfo(e.Value); ok && enumType != nil && enumType.Packed {
+				return enumType.RecursivePlain
+			}
+			return true
+		}
+		return false
 	case *ast.CallExpr:
 		if ft := a.regionPolyCalleeFuncType(e); ft != nil && ft.RegionPolymorphic {
 			return true

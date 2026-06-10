@@ -10,6 +10,18 @@ It supersedes the surface details in [08-region-checkpoints.md](08-region-checkp
 used across [01](01-memory-layout-syntax.md), [22](22-value-fact-core.md), and
 [18](18-current-surface-ergonomics.md).
 
+> **Default allocation (2026-06).** Heap allocation is `new T(...)` — bare, with
+> no annotation. The compiler infers the region: it threads one in from the
+> caller when the value is returned (the function becomes region-polymorphic,
+> [docs/75](75-region-polymorphic-functions.md)), or uses the innermost active
+> region otherwise. Write `new[r] T(...)` only when you want to target a *named*
+> region explicitly. `new[auto]` is the (still-accepted) spelling of the inferred
+> default — bare `new` is now preferred. The `in auto:` block is **deprecated**:
+> inference no longer needs it; use an explicit `region NAME(size):` when you
+> want a scope you control. Container literals (`darray[T] = []`, `dict = {}`)
+> infer their region the same way. Examples below that show `new[auto]` /
+> `in auto:` predate this and read identically with the bare forms.
+
 ---
 
 ## 1. Thesis

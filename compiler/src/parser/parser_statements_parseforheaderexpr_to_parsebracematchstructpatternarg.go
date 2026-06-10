@@ -300,7 +300,7 @@ func (p *Parser) parseInStore() ast.Stmt {
 	// (docs/68). A value that escapes the block is caught by the normal region
 	// destroy/outlives checks — inference's slack becomes a diagnostic, not a leak.
 	if ident, ok := store.(*ast.Ident); ok && ident.Name == "auto" {
-		return &ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, Body: body}
+		return &ast.RegionStmt{Position: pos, Name: synthesizedAutoRegionName(pos), Lazy: true, UserAuto: true, Body: body}
 	}
 	return &ast.InStoreStmt{Position: pos, Store: store, Body: body}
 }
@@ -509,7 +509,7 @@ func isAutoAllocValue(value ast.Expr) bool {
 		value = paren.Inner
 	}
 	alloc, ok := value.(*ast.AllocExpr)
-	return ok && alloc != nil && alloc.AutoRegion
+	return ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil)
 }
 
 // bodyContainsAutoAlloc reports whether any statement in the body contains a `new[auto]` allocation
@@ -527,7 +527,7 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 			if v.IsNil() {
 				return
 			}
-			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && alloc.AutoRegion {
+			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil) {
 				found = true
 				return
 			}
