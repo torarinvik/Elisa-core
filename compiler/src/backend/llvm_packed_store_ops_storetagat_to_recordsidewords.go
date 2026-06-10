@@ -25,6 +25,15 @@ import (
 // rowType-relative (packedEnumVariantPayloadFieldByteOffset uses abiOffsetOfLLVMElement(rowType,...)),
 // so reads are direct loads at record+offset, consistent with the constructor's record-based writes.
 func (ops *packedStoreOps) aosRecordPtr(handleValue C.LLVMValueRef, enumType *semantic.EnumType, name string) (C.LLVMValueRef, error) {
+	// docs/82 `handle: ptr`: the handle is the record address carried as a uintptr-width
+	// integer — handle-to-record is a bare inttoptr, no store state and no helper call.
+	if enumType != nil && enumType.HandleIsPointer() {
+		recordPtrType, err := ops.s.g.lowerType(ops.voidRefType())
+		if err != nil {
+			return nil, err
+		}
+		return C.LLVMBuildIntToPtr(ops.s.builder, handleValue, recordPtrType, cStringFree(name+".record.ptr")), nil
+	}
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
 		return nil, err
@@ -576,6 +585,16 @@ func (ops *packedStoreOps) allocateStorage(enumType *semantic.EnumType, totalSiz
 		allocResult := ops.s.buildCall(allocLLVMFnType, allocCallee, []C.LLVMValueRef{arenaValue, stateValue}, "packed.aos.alloc")
 		allocPtr := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 0, cStringFree("packed.aos.alloc.ptr"))
 		indexValue := C.LLVMBuildExtractValue(ops.s.builder, allocResult, 1, cStringFree("packed.aos.alloc.index"))
+		if enumType.HandleIsPointer() {
+			// docs/82 `handle: ptr`: the handle is the record address itself (the AoS chunk
+			// store never relocates, so the address is stable for the store's lifetime).
+			handleType, err := ops.s.g.lowerType(enumType)
+			if err != nil {
+				return nil, nil, nil, err
+			}
+			handleValue := C.LLVMBuildPtrToInt(ops.s.builder, allocPtr, handleType, cStringFree("packed.aos.alloc.handle"))
+			return allocPtr, handleValue, rowSizeValue, nil
+		}
 		if err := ops.s.emitHandleOverflowGuard(enumType, indexValue); err != nil {
 			return nil, nil, nil, err
 		}

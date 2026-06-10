@@ -66,6 +66,12 @@ func (a *Analyzer) analyzeFreezeCallExpr(expr *ast.CallExpr) Type {
 	storeType := a.analyzeExpr(expr.Args[0])
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if ok {
+		// docs/82: pointer handles are not position-independent, so a ptr-handle store can
+		// never graduate to the frozen (publishable/serializable) state.
+		if packedStore.Enum != nil && packedStore.Enum.HandleIsPointer() {
+			a.errorf(expr.Args[0].Pos(), "cannot freeze store of enum %q: pointer handles are not position-independent; use an index handle (`layout(handle: u32)`)", packedStore.Enum.Name)
+			return invalidType
+		}
 		if !IsLocalPackedEnumStoreType(packedStore) {
 			a.errorf(expr.Args[0].Pos(), "freeze expects local store type %q, got %s", PackedEnumStoreWithState(packedStore, a.namedTypes["Local"]), packedStore)
 			return invalidType

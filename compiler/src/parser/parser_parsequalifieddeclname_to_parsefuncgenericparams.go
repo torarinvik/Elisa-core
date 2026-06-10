@@ -229,10 +229,8 @@ func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, stri
 				p.expect(lexer.TOKEN_COLON)
 				width := p.expect(lexer.TOKEN_IDENT).Text
 				switch width {
-				case "u8", "u16", "u32", "u64":
+				case "u8", "u16", "u32", "u64", "ptr":
 					indexWidth = width
-				case "ptr":
-					p.errorf("`handle: ptr` is not implemented yet (docs/82); use an index width u8|u16|u32|u64")
 				default:
 					p.errorf("enum handle width must be u8, u16, u32, u64, or ptr, got %q", width)
 				}

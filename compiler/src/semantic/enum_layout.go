@@ -16,15 +16,32 @@ func (e *EnumType) ResolvedIndexWidthBits() int {
 		return 16
 	case "u64":
 		return 64
+	case "ptr":
+		// docs/82 `handle: ptr`: the handle IS the record address, carried as a
+		// uintptr-width integer (so all handle plumbing — coercion, switches, phis —
+		// is width-machinery as usual).
+		return 64
 	default:
 		return 32
 	}
+}
+
+// HandleIsPointer reports whether the enum's opaque handle is the record address itself
+// (docs/82 `layout(handle: ptr)`). The dial is a root-level fact: one store, one shape.
+func (e *EnumType) HandleIsPointer() bool {
+	if e == nil {
+		return false
+	}
+	return e.Root().IndexWidth == "ptr"
 }
 
 // NullSentinelValue returns the reserved handle value meaning "absent" (docs/76 free null sentinel):
 // the top value at the resolved index width. An optional child reuses this instead of paying for a
 // separate presence flag — the index-world equivalent of pointer niche optimization.
 func (e *EnumType) NullSentinelValue() uint64 {
+	if e.HandleIsPointer() {
+		return 0 // docs/82: pointer handles get null from the hardware (address 0)
+	}
 	bits := e.ResolvedIndexWidthBits()
 	if bits >= 64 {
 		return ^uint64(0)
@@ -35,6 +52,9 @@ func (e *EnumType) NullSentinelValue() uint64 {
 // MaxNodeCount is how many real nodes a store of this enum can hold before the index width overflows
 // (the top value is reserved for the null sentinel, so valid indices are 0 .. sentinel-1).
 func (e *EnumType) MaxNodeCount() uint64 {
+	if e.HandleIsPointer() {
+		return ^uint64(0) // not index-capped: the handle is the address
+	}
 	return e.NullSentinelValue()
 }
 
@@ -160,9 +180,20 @@ func enumDeclHasDirectSelfReference(n *ast.EnumDecl) bool {
 // validateEnumLayout enforces the docs/76 constraints on the `layout` suffix of an enum: only `aos`
 // and `soa` are enum layouts (`c`/`packed` are struct-FFI layouts), `(sparse)` is SoA-only, and
 // `(index: uN)` is meaningful only for the columnar/array layouts that carry handles.
-func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl) {
+func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType) {
 	if enumDecl == nil || !enumDecl.LayoutSet {
 		return
+	}
+	// docs/82 `handle: ptr` constraints, enforced as compile errors:
+	// pointer handles need stable record addresses (the AoS chunk store never relocates;
+	// SoA's darray-backed columns do), and only a recursive region-backed enum has a
+	// store-resident record to point at.
+	if enumDecl.IndexWidth == "ptr" {
+		if enumDecl.Layout == ast.StructLayoutSOA {
+			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires stable record addresses; `layout soa` columns relocate — use the AoS layout or an index handle (`handle: u32`)", enumDecl.Name)
+		} else if enumType != nil && !enumType.RecursivePlain {
+			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires a recursive region-backed enum (an AoS store record to point at); this enum has no store — use an index width or drop the option", enumDecl.Name)
+		}
 	}
 	switch enumDecl.Layout {
 	case ast.StructLayoutC, ast.StructLayoutPacked:

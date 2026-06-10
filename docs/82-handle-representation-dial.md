@@ -154,8 +154,20 @@ Plug points in docs/81 Phase 3:
    fields. In-record payload slots remain word-sized (the AoS payload is a uintptr-word
    array), so the per-edge memory win inside node records needs the tight-payload
    layout work, tracked separately.
-3. `ptr` kind: construction returns the record address; consumers skip store
-   threading; freeze rejection; SoA rejection.
+3. **CORE DONE (2026-06-10).** `ptr` kind: the handle is the record address carried as a
+   uintptr-width integer (so all width machinery — coercion, switches, phis — applies
+   unchanged; `ResolvedIndexWidthBits()` reports 64). Exactly two codegen sites are
+   representation-aware, as designed: the AoS alloc emits `ptrtoint(record)` as the
+   handle, and `aosRecordPtr` emits a bare `inttoptr` — no store-state call, no
+   `ctx_aos_store_record` helper — which every AoS read (tag, payload word, range test)
+   routes through. Null sentinel = 0 (hardware null); the overflow guard is skipped
+   (an address can't overflow its own width). Compile errors enforce the contract:
+   `layout soa(handle: ptr)` rejected (columns relocate), ptr on a non-recursive value
+   enum rejected (no store record to point at), and `freeze(move store)` rejected with
+   the one-line fix ("use an index handle (`layout(handle: u32)`)").
+   *Remaining tail:* consumers still receive the implicit store parameter even though
+   ptr-handle reads no longer use it — the `computeTransitiveStoreNeeds` skip (and its
+   backend call-site mirror) is the ABI-simplification follow-up.
 4. `-Wperf`/memory lint pointing at `u16` for bounded stores stays the docs/76 Phase 6
    tail. Free null sentinel for optional children (`Tree?` niche) also remains TODO —
    optionals still use the generic carrier.

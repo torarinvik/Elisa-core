@@ -477,6 +477,146 @@ def bt() -> void:
 	}
 }
 
+// docs/82 step 3: `layout(handle: ptr)` — the handle IS the record address (carried as a
+// uintptr-width integer). Reads need no store-state call; everything else is unchanged.
+func TestRecursiveEnumPtrHandle(t *testing.T) {
+	runEnumHierarchyProgram(t, "handle_ptr.elisa", `
+enum Tree layout(handle: ptr):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            return total(l) + total(r)
+        Tree.Leaf(value: v):
+            return v
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Tree = make(8)
+            if total(root) != 256:
+                panic("ptr-handle tree built or traversed wrong")
+`)
+}
+
+// docs/82: the ptr handle composes with hierarchies — root-level fact, category range tests
+// unchanged (tag read is a direct load at the record address).
+func TestHierarchyPtrHandle(t *testing.T) {
+	runEnumHierarchyProgram(t, "hier_handle_ptr.elisa", `
+enum Node layout(handle: ptr): pass
+enum Expr is Node:
+    Add(left: Node, right: Node)
+    Lit(value: i64)
+enum Stmt is Node:
+    Nop
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(value: 5)
+            b: Node = new[auto] Expr.Lit(value: 7)
+            root: Node = new[auto] Expr.Add(left: a, right: b)
+            if not (root is Expr):
+                panic("category test must hold with ptr handles")
+            if root is Stmt:
+                panic("negative category test must fail with ptr handles")
+            sum: mutable i64 = 0
+            if root is Expr e:
+                match e:
+                    Expr.Add(left: l, right: r):
+                        match l:
+                            Expr.Lit(value: lv):
+                                sum <- sum + lv
+                            _:
+                                pass
+                        match r:
+                            Expr.Lit(value: rv):
+                                sum <- sum + rv
+                            _:
+                                pass
+                    _:
+                        pass
+            if sum != 12:
+                panic("ptr-handle hierarchy fold produced wrong sum")
+`)
+}
+
+// expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
+func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
+	t.Helper()
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, fixture)
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code == 0 {
+		t.Fatalf("expected compile error containing %q, but build succeeded", want)
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, want) {
+		t.Fatalf("expected compile error containing %q, got:\n%s", want, combined)
+	}
+}
+
+// docs/82: ptr handles require stable addresses — SoA columns relocate, so the combination is
+// rejected at declaration.
+func TestPtrHandleRejectsSoA(t *testing.T) {
+	expectEnumProgramError(t, "ptr_soa.elisa", `
+enum Tree layout soa(handle: ptr):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def main() -> i64:
+    return 0
+`, "requires stable record addresses")
+}
+
+// docs/82: a non-recursive (inline value) enum has no store record to point at.
+func TestPtrHandleRejectsValueEnum(t *testing.T) {
+	expectEnumProgramError(t, "ptr_value.elisa", `
+enum Color layout(handle: ptr):
+    Red
+    Green
+
+def main() -> i64:
+    return 0
+`, "requires a recursive region-backed enum")
+}
+
+// docs/82: pointer handles are not position-independent → freeze is a compile error naming the fix.
+func TestPtrHandleRejectsFreeze(t *testing.T) {
+	expectEnumProgramError(t, "ptr_freeze.elisa", `
+enum Tree layout(handle: ptr):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def main() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region r(65536u)
+        store: Tree.Store[Local] = Tree.Store(r)
+        t: Tree = new[store] Tree.Leaf(value: 1)
+        frozen: Tree.Store[Frozen] = freeze(move store)
+        destroy r
+        return 0
+`, "not position-independent")
+}
+
 // Payload hierarchy: leaves carry data; the root's record is the union of all leaves' payloads.
 func TestValueEnumHierarchyWithPayload(t *testing.T) {
 	runEnumHierarchyProgram(t, "shape.elisa", `
