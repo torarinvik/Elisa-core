@@ -165,9 +165,13 @@ Plug points in docs/81 Phase 3:
    `layout soa(handle: ptr)` rejected (columns relocate), ptr on a non-recursive value
    enum rejected (no store record to point at), and `freeze(move store)` rejected with
    the one-line fix ("use an index handle (`layout(handle: u32)`)").
-   *Remaining tail:* consumers still receive the implicit store parameter even though
-   ptr-handle reads no longer use it — the `computeTransitiveStoreNeeds` skip (and its
-   backend call-site mirror) is the ABI-simplification follow-up.
+   **Tail DONE (2026-06-10):** the store-threading seed for ptr-handle enums is
+   *construction*, not signature exposure — `computeTransitiveStoreNeeds` seeds ptr
+   roots from a syntactic constructs-walk, `injectInferredPackedStoreParams` skips
+   ptr roots entirely, matching a storeless ptr handle is legal (codegen uses a
+   synthetic undef binding no read path can touch). IR-verified: `total(t: Tree)`
+   lowers to `@total(i64)` with zero implicit params; a builder still threads
+   region + store. This is the §ptr point-1 ABI win, delivered.
 4. `-Wperf`/memory lint pointing at `u16` for bounded stores stays the docs/76 Phase 6
    tail. Free null sentinel for optional children (`Tree?` niche) also remains TODO —
    optionals still use the generic carrier.
