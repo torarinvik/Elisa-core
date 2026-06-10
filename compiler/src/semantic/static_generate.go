@@ -327,8 +327,6 @@ func staticGenerateTokenText(tok lexer.Token) string {
 		return "while"
 	case lexer.TOKEN_RETURN:
 		return "return"
-	case lexer.TOKEN_ANY:
-		return "any"
 	case lexer.TOKEN_STATIC:
 		return "static"
 	case lexer.TOKEN_MUTABLE:

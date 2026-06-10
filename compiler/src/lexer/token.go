@@ -35,7 +35,6 @@ const (
 	TOKEN_BREAK
 	TOKEN_CONTINUE
 	TOKEN_RETURN
-	TOKEN_ANY
 	TOKEN_HEAP
 	TOKEN_STACK
 	TOKEN_STATIC
@@ -60,7 +59,6 @@ const (
 	TOKEN_CATCH
 	TOKEN_RAISE
 	TOKEN_REGION
-	TOKEN_DESTROY
 	TOKEN_NEW
 	TOKEN_AS
 	TOKEN_IN
@@ -163,7 +161,6 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_BREAK:    "break",
 	TOKEN_CONTINUE: "continue",
 	TOKEN_RETURN:   "return",
-	TOKEN_ANY:      "any",
 	TOKEN_HEAP:     "heap",
 	TOKEN_STACK:    "stack",
 	TOKEN_STATIC:   "static",
@@ -188,7 +185,6 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_CATCH:    "catch",
 	TOKEN_RAISE:    "raise",
 	TOKEN_REGION:   "region",
-	TOKEN_DESTROY:  "destroy",
 	TOKEN_NEW:      "new",
 	TOKEN_IS:       "is",
 	TOKEN_AS:       "as",

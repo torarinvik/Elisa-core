@@ -28,7 +28,6 @@ enum FrontendTokenKind:
     Break
     Continue
     Return
-    Any
     Heap
     Stack
     Static
@@ -53,7 +52,6 @@ enum FrontendTokenKind:
     Catch
     Raise
     Region
-    Destroy
     New
     As
     In

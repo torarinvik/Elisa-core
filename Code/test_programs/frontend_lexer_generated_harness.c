@@ -8,7 +8,7 @@ int main(void) {
     assert(frontend_lexer_token_count_with_len((uint8_t *)"hello\n", 6u) == 3);
     assert(frontend_lexer_token_count((uint8_t *)"x <- y -> z\n") == 7);
     assert(frontend_lexer_token_count((uint8_t *)"with context\n") == 4);
-    assert(frontend_lexer_token_kind_at((uint8_t *)"with context\n", 0u) == 55u);
+    assert(frontend_lexer_token_kind_at((uint8_t *)"with context\n", 0u) == 53u);
     assert(frontend_lexer_token_kind_at((uint8_t *)"with context\n", 1u) == 5u);
     assert(frontend_lexer_token_kind_at((uint8_t *)"with context\n", 2u) == 2u);
     assert(frontend_lexer_token_kind_at((uint8_t *)"with context\n", 3u) == 1u);
