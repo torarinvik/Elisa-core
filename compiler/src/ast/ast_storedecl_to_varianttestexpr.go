@@ -408,6 +408,10 @@ type ErrorTagExpr struct {
 	Position lexer.Pos
 	SetName  string
 	Tag      string
+	// Family marks an explicit `*Set` whole-family spread. A bare `Name`
+	// (Family=false, Tag="") resolves as a whole family if Name is a declared
+	// set, otherwise as a single variant searched across all sets.
+	Family bool
 }
 type ErrorSetExpr struct {
 	Position    lexer.Pos

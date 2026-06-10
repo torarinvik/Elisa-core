@@ -659,6 +659,13 @@ func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 // `Set.Tag1, Set.Tag2`). `Set` and `Set.Tag` yield a single tag.
 func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 	pos := p.cur().Pos
+	// `*Set` is an explicit whole-family spread. A bare `Name` (no `*`, no `.Tag`)
+	// resolves as a whole family if Name is a declared set, otherwise as a single
+	// variant searched across all error sets.
+	if p.match(lexer.TOKEN_STAR) {
+		setName := p.expect(lexer.TOKEN_IDENT).Text
+		return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: "", Family: true}}
+	}
 	setName := p.expect(lexer.TOKEN_IDENT).Text
 	if p.match(lexer.TOKEN_LBRACE) {
 		var tags []ast.ErrorTagExpr

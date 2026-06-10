@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"sort"
 	"strings"
 )
 
@@ -287,27 +288,40 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 		a.errorf(expr.Pos(), "error[Set.*] is no longer supported; use error[Set] instead")
 		return invalidType
 	}
-	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" {
+	if len(expr.Tags) == 1 && expr.Tags[0].Tag == "" && !expr.Tags[0].Family {
 		if !expr.HasEllipsis && a.lookupErrorSetParam(expr.Tags[0].SetName) {
 			// `error[R]` where R is a generic error-set parameter: an opaque
 			// placeholder, bound to a concrete set at each call site.
 			return &ErrorSetType{Name: expr.Tags[0].SetName, Param: true}
 		}
-		_, errSet := a.lookupDeclaredErrorSet(expr.Tags[0])
+	}
+	// Normalize: a bare `Name` that is not a declared set resolves as a single
+	// variant searched across all error sets (family-qualified on conflict). An
+	// explicit `*Set` stays a whole family. Qualified `Set.Tag` is untouched.
+	tags := make([]ast.ErrorTagExpr, 0, len(expr.Tags))
+	for _, tag := range expr.Tags {
+		normalized, ok := a.normalizeErrorTag(tag)
+		if !ok {
+			return invalidType
+		}
+		tags = append(tags, normalized)
+	}
+	if len(tags) == 1 && tags[0].Tag == "" {
+		_, errSet := a.lookupDeclaredErrorSet(tags[0])
 		if errSet == nil {
 			return invalidType
 		}
 		return errSet
 	}
 	if expr.HasEllipsis {
-		return a.resolveExpandedErrorFamilies(expr)
+		return a.resolveExpandedErrorFamilies(tags)
 	}
 
 	familySets := map[string]*ErrorSetType{}
 	fullFamilies := map[string]bool{}
 	selectedTags := map[string]map[string]bool{}
 	seenTags := map[string]ast.ErrorTagExpr{}
-	for _, tag := range expr.Tags {
+	for _, tag := range tags {
 		_, errSet := a.lookupDeclaredErrorSet(tag)
 		if errSet == nil {
 			return invalidType
@@ -382,10 +396,79 @@ func containsBareFamily(tags []ast.ErrorTagExpr) bool {
 	return false
 }
 
-func (a *Analyzer) resolveExpandedErrorFamilies(expr *ast.ErrorSetExpr) Type {
+// errorSetTypeQuiet looks up name as a declared error set without reporting an
+// error if it is missing or not an error set.
+func (a *Analyzer) errorSetTypeQuiet(name string) (*ErrorSetType, bool) {
+	t, ok := a.namedTypes[name]
+	if !ok {
+		if resolved, _, found := a.lookupVisibleType(name); found {
+			t = resolved
+			ok = true
+		}
+	}
+	if !ok {
+		return nil, false
+	}
+	errSet, ok := t.(*ErrorSetType)
+	return errSet, ok
+}
+
+// findErrorVariantOwners returns the canonical names of declared error sets that
+// contain a variant with the given short name, sorted for stable diagnostics.
+func (a *Analyzer) findErrorVariantOwners(shortName string) []string {
+	seen := map[string]bool{}
+	var owners []string
+	for _, t := range a.namedTypes {
+		errSet, ok := t.(*ErrorSetType)
+		if !ok || errSet == nil || errSet.Param {
+			continue
+		}
+		for _, qtag := range errSet.Tags {
+			if ErrorTagShortName(qtag) == shortName {
+				if !seen[errSet.Name] {
+					seen[errSet.Name] = true
+					owners = append(owners, errSet.Name)
+				}
+				break
+			}
+		}
+	}
+	sort.Strings(owners)
+	return owners
+}
+
+// normalizeErrorTag canonicalizes one error[...] item: qualified `Set.Tag` and
+// explicit `*Set` pass through; a bare `Name` is a whole family if Name is a
+// declared set, otherwise the single variant `Name` searched across all sets
+// (an ambiguous bare variant must be qualified `Set.Name`).
+func (a *Analyzer) normalizeErrorTag(tag ast.ErrorTagExpr) (ast.ErrorTagExpr, bool) {
+	if tag.Tag != "" {
+		return tag, true
+	}
+	if _, ok := a.errorSetTypeQuiet(tag.SetName); ok {
+		return tag, true
+	}
+	if tag.Family {
+		a.errorf(tag.Position, "unknown error set %q", tag.SetName)
+		return tag, false
+	}
+	owners := a.findErrorVariantOwners(tag.SetName)
+	switch len(owners) {
+	case 0:
+		a.errorf(tag.Position, "unknown error set or variant %q", tag.SetName)
+		return tag, false
+	case 1:
+		return ast.ErrorTagExpr{Position: tag.Position, SetName: owners[0], Tag: tag.SetName}, true
+	default:
+		a.errorf(tag.Position, "error variant %q is ambiguous across sets %s; qualify it as %s.%s", tag.SetName, strings.Join(owners, ", "), owners[0], tag.SetName)
+		return tag, false
+	}
+}
+
+func (a *Analyzer) resolveExpandedErrorFamilies(tags []ast.ErrorTagExpr) Type {
 	familySets := map[string]*ErrorSetType{}
 	fullFamilies := map[string]bool{}
-	for _, tag := range expr.Tags {
+	for _, tag := range tags {
 		_, errSet := a.lookupDeclaredErrorSet(tag)
 		if errSet == nil {
 			return invalidType

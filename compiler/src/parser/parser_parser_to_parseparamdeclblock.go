@@ -585,7 +585,7 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 		var payload []ast.ParamDecl
 		if p.match(lexer.TOKEN_LPAREN) {
 			for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
-				payload = append(payload, p.parseParam(false))
+				payload = append(payload, p.parseErrorPayloadDecl())
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}
@@ -598,6 +598,21 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
+}
+
+// parseErrorPayloadDecl parses one error-variant payload field. `name: T` is a
+// named field; a bare `T` (e.g. `LexerError(LexError)`) is positional — error
+// payloads are matched by position, so the name is optional.
+func (p *Parser) parseErrorPayloadDecl() ast.ParamDecl {
+	pos := p.cur().Pos
+	i := p.pos
+	if i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_MUTABLE {
+		i++
+	}
+	if i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Kind == lexer.TOKEN_COLON {
+		return p.parseParam(false)
+	}
+	return ast.ParamDecl{Position: pos, Type: p.parseTypeExpr()}
 }
 func (p *Parser) parseAliasDecl() *ast.GrantAliasDecl {
 	pos := p.cur().Pos
