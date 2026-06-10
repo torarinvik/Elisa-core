@@ -28,6 +28,14 @@ func UnwrapOptionalType(t Type) (Type, bool) {
 	return opt.Value, true
 }
 
+// IsEmpty reports whether the set carries no concrete tags and no unresolved
+// params — the `error[∅]` set raised by an infallible callback bound into an
+// `[errorset R]` combinator. A `T error[∅]` union is semantically just `T` and
+// is normalized away during substitution.
+func (t *ErrorSetType) IsEmpty() bool {
+	return t == nil || (len(t.Tags) == 0 && len(t.Params) == 0)
+}
+
 func (t *ErrorSetType) HasTag(name string) bool {
 	if t == nil {
 		return false

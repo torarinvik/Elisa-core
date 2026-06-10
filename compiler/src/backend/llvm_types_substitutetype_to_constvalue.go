@@ -87,7 +87,13 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 				errors = resolved
 			}
 		}
-		return &semantic.ErrorUnionType{Value: substituteType(tt.Value, subst, impls), Errors: errors}
+		value := substituteType(tt.Value, subst, impls)
+		// An infallible binding (R := ∅) collapses `T error[∅]` back to `T` so the
+		// monomorphized signature uses the plain value ABI (mirrors the analyzer).
+		if errors.IsEmpty() {
+			return value
+		}
+		return &semantic.ErrorUnionType{Value: value, Errors: errors}
 	case *semantic.OptionalType:
 		return &semantic.OptionalType{Value: substituteType(tt.Value, subst, impls)}
 	case *semantic.RefType:

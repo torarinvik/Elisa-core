@@ -57,10 +57,11 @@ def use() -> i64 error[NetErr]:
 	}
 }
 
-// A non-fallible callback gives R nothing to bind to → reported, not silently
-// accepted.
-func TestErrorSetParamUnbound(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "esp_unbound.elisa", `
+// An infallible callback binds R := ∅ so a pure function fits a fallible
+// combinator; `T error[∅]` collapses to `T`, so the result is a plain value
+// (no error union to handle).
+func TestErrorSetParamInfallibleCallbackBindsEmpty(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "esp_empty.elisa", `
 extern plain() -> i64
 
 def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
@@ -68,6 +69,28 @@ def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 
 def use() -> i64:
     return applies(plain)
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("infallible callback should bind R := empty and yield a plain i64, got:\n%s", all)
+	}
+}
+
+// A combinator with NO fallible source for R (no callback to bind from) still
+// cannot infer it.
+func TestErrorSetParamTrulyUnbound(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "esp_unbound.elisa", `
+error IoErr:
+    Bad
+
+def mk[errorset R]() -> i64 error[R]:
+    return 1
+
+def use() -> i64:
+    catch mk():
+        n:
+            return n
+        error e:
+            return -1
 `)
 	all := allDiagnostics(result)
 	if !strings.Contains(all, "error-set parameter") {

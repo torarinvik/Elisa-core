@@ -284,6 +284,22 @@ func dynSetRuntimeInstance(t semantic.Type) (*semantic.GenericInstanceType, bool
 	return gi, true
 }
 
+// bindBackendErrorSetParamContribution mirrors the analyzer's join-aware
+// error-set-param binding so monomorphization sees the identical set. Repeat
+// encounters union; an empty contribution (infallible callback) is the unit.
+func bindBackendErrorSetParamContribution(bindings map[string]semantic.Type, name string, contribution *semantic.ErrorSetType) {
+	if contribution == nil {
+		return
+	}
+	if existing, bound := bindings[name].(*semantic.ErrorSetType); bound {
+		bindings[name] = semantic.UnionErrorSets(existing, contribution)
+		return
+	}
+	if _, ok := bindings[name]; !ok {
+		bindings[name] = contribution
+	}
+}
+
 func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, bindings map[string]semantic.Type) {
 	if pattern == nil || actual == nil {
 		return
@@ -380,15 +396,13 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		if a, ok := actual.(*semantic.ErrorUnionType); ok {
 			collectSpecializationBindings(p.Value, a.Value, bindings)
 			if p.Errors != nil && len(p.Errors.Params) == 1 && a.Errors != nil {
-				name := p.Errors.Params[0]
-				contribution := semantic.SubtractErrorTags(a.Errors, p.Errors)
-				if existing, bound := bindings[name].(*semantic.ErrorSetType); bound {
-					bindings[name] = semantic.UnionErrorSets(existing, contribution)
-				} else if _, ok := bindings[name]; !ok {
-					bindings[name] = contribution
-				}
+				bindBackendErrorSetParamContribution(bindings, p.Errors.Params[0], semantic.SubtractErrorTags(a.Errors, p.Errors))
 			}
 		} else {
+			// Infallible argument bound into an `error[R]` pattern -> R := empty.
+			if p.Errors != nil && len(p.Errors.Params) == 1 {
+				bindBackendErrorSetParamContribution(bindings, p.Errors.Params[0], &semantic.ErrorSetType{Name: "error[]"})
+			}
 			collectSpecializationBindings(p.Value, actual, bindings)
 		}
 	case *semantic.FuncType:

@@ -409,15 +409,16 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			// with two or more params cannot split an argument set unambiguously,
 			// so they bind nothing here and surface as "cannot infer" at validation.
 			if p.Errors != nil && len(p.Errors.Params) == 1 && act.Errors != nil {
-				name := p.Errors.Params[0]
-				contribution := SubtractErrorTags(act.Errors, p.Errors)
-				if existing, bound := bindings[name].(*ErrorSetType); bound {
-					bindings[name] = UnionErrorSets(existing, contribution)
-				} else if _, exists := bindings[name]; !exists {
-					bindings[name] = contribution
-				}
+				bindErrorSetParamContribution(bindings, p.Errors.Params[0], SubtractErrorTags(act.Errors, p.Errors))
 			}
 			return
+		}
+		// The pattern is an error union but the argument is infallible (a plain
+		// value, e.g. a `func() -> i64` callback fed to `func() -> i64 error[R]`):
+		// bind a lone param to the EMPTY set so a pure function fits a fallible
+		// combinator. `T error[∅]` normalizes back to `T` during substitution.
+		if p.Errors != nil && len(p.Errors.Params) == 1 {
+			bindErrorSetParamContribution(bindings, p.Errors.Params[0], &ErrorSetType{Name: "error[]"})
 		}
 		a.collectTypeBindings(p.Value, actual, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 	case *OptionalType:

@@ -260,11 +260,16 @@ func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultT
 func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic.Type, error) {
 	resultType := s.exprType(expr)
 	recovery := astRecoveryClauseForExpr(expr.Recovery, expr.Fallback, expr.Position)
-	if unionType, ok := s.exprType(expr.Value).(*semantic.ErrorUnionType); ok {
-		fallibleValue, _, err := s.emitExpr(expr.Value, nil)
-		if err != nil {
-			return nil, nil, err
-		}
+	// Decide fallibility from the EMITTED operand type rather than s.exprType:
+	// once a generic combinator is instantiated at R := ∅ anywhere in the
+	// program, the analyzer's shared ExprTypes record for the body's `f()`
+	// collapses to the bare value type, which would otherwise mislead every
+	// other (fallible) instantiation of the same body.
+	fallibleValue, operandType, err := s.emitExpr(expr.Value, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if unionType, ok := operandType.(*semantic.ErrorUnionType); ok {
 		errorValue, err := s.extractErrorUnionCode(fallibleValue, unionType)
 		if err != nil {
 			return nil, nil, err
@@ -361,16 +366,15 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
 		return phi, resultType, nil
 	}
-	optionalType, ok := s.exprType(expr.Value).(*semantic.OptionalType)
+	optionalType, ok := operandType.(*semantic.OptionalType)
 	if !ok {
-		return nil, nil, fmt.Errorf("try requires a lowered fallible operand")
+		// Infallible operand: an `[errorset R]` callback monomorphized at R := ∅
+		// collapses `T error[∅]` to a plain `T`, so `try v` is the identity — it
+		// can never take the error path and any `else` recovery is dead.
+		return fallibleValue, operandType, nil
 	}
 	if recovery == nil {
 		return nil, nil, fmt.Errorf("try without else is only supported for error unions")
-	}
-	fallibleValue, _, err := s.emitExpr(expr.Value, nil)
-	if err != nil {
-		return nil, nil, err
 	}
 	presentValue, err := s.extractOptionalPresent(fallibleValue, optionalType)
 	if err != nil {

@@ -74,6 +74,13 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			return invalidType
 		}
 		errors := substituteErrorSetParams(n.Errors, bindings)
+		// An infallible binding (R := ∅) collapses the union: `T error[∅]` is `T`.
+		// This makes a pure callback's monomorphized signature match its plain
+		// function-pointer ABI (no union return) and the combinator's result a
+		// plain value.
+		if errors.IsEmpty() {
+			return value
+		}
 		return &ErrorUnionType{Value: value, Errors: errors}
 	case *OptionalType:
 		value := a.substituteTypeWithDepth(n.Value, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
@@ -286,4 +293,21 @@ func substituteErrorSetParams(errors *ErrorSetType, bindings map[string]Type) *E
 		return errors
 	}
 	return resolved
+}
+
+// bindErrorSetParamContribution records `name`'s contribution to the call-site
+// type bindings. Repeat encounters JOIN (set union) so inference is
+// argument-order independent — an empty contribution (an infallible callback)
+// is the unit and leaves a real set unchanged.
+func bindErrorSetParamContribution(bindings map[string]Type, name string, contribution *ErrorSetType) {
+	if contribution == nil {
+		return
+	}
+	if existing, bound := bindings[name].(*ErrorSetType); bound {
+		bindings[name] = UnionErrorSets(existing, contribution)
+		return
+	}
+	if _, exists := bindings[name]; !exists {
+		bindings[name] = contribution
+	}
 }
