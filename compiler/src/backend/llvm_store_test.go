@@ -248,12 +248,10 @@ def build(owner: Arena) -> usize:
 }
 
 func TestGenerateLLVMIRIgnoresEffectsDeclarations(t *testing.T) {
-	src := `effectalias FrontendEffects = error[Error] can[Abort.Panic, Memory.Allocate]
-
-error Error:
+	src := `error Error:
     Bad
 
-def build() -> i64 effects FrontendEffects:
+def build() -> i64 error[Error] can[Abort.Panic, Memory.Allocate]:
     return 42
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_effects_decl.elisa", src)

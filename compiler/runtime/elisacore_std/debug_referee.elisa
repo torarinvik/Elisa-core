@@ -78,8 +78,8 @@ const ELISA_TRACE_CAP: usize = 256
 # on language builtins; snprintf+write resolve against libc at final link without
 # pulling in the rest of the runtime. (write(2,...) is portable; the `stderr` global is
 # not a stable cross-platform symbol, e.g. it is __stderrp on macOS.)
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
-extern write(fd: int, buf: void&, count: usize) -> isize effects[Console]
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
+extern write(fd: int, buf: void&, count: usize) -> isize can[Console]
 extern getenv(name: u8&) -> u8&?
 extern signal(sig: int, handler: void&?) -> void&?
 # `raise` is a reserved keyword in Elisa, so re-raise via kill(getpid(), sig).

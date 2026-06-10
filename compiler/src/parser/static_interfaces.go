@@ -86,14 +86,6 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 	effectAliasPos := lexer.Pos{}
 	effectAlias := ""
 	var effects []ast.SignatureEffectItem
-	if p.matchIdentText("effects") {
-		effectAliasPos = p.tokens[p.pos-1].Pos
-		if p.peek() == lexer.TOKEN_LBRACKET {
-			effects = p.parseSignatureEffectsClause()
-		} else {
-			effectAlias = p.parseQualifiedDeclName()
-		}
-	}
 
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {
@@ -244,14 +236,6 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 	effectAliasPos := lexer.Pos{}
 	effectAlias := ""
 	var effects []ast.SignatureEffectItem
-	if p.matchIdentText("effects") {
-		effectAliasPos = p.tokens[p.pos-1].Pos
-		if p.peek() == lexer.TOKEN_LBRACKET {
-			effects = p.parseSignatureEffectsClause()
-		} else {
-			effectAlias = p.parseQualifiedDeclName()
-		}
-	}
 
 	var permissions []ast.PermissionRef
 	if p.matchIdentText("can") {

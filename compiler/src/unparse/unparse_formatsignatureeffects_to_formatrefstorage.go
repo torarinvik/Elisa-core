@@ -6,33 +6,35 @@ import (
 )
 
 func formatSignatureEffects(alias string, effects []ast.SignatureEffectItem) string {
-	if len(effects) == 0 {
-		if alias == "" {
-			return ""
-		}
-		return " effects[" + alias + "]"
-	}
-	parts := make([]string, 0, len(effects)+1)
+	// Errors and capabilities are separate channels: errors render in their own
+	// `error[...]` clause, capabilities (permissions + capability-set aliases) in
+	// `can[...]`. The legacy bundled `effects[...]` spelling is gone.
+	caps := make([]string, 0, len(effects)+1)
+	errParts := make([]string, 0)
 	if alias != "" {
-		parts = append(parts, alias)
+		caps = append(caps, alias)
 	}
 	for _, effect := range effects {
 		if effect.ErrorEffects != nil {
-			parts = append(parts, formatTypeExpr(effect.ErrorEffects))
+			errParts = append(errParts, formatTypeExpr(effect.ErrorEffects))
 			continue
 		}
 		if effect.Permission != nil {
-			parts = append(parts, formatPermissionRef(*effect.Permission))
+			caps = append(caps, formatPermissionRef(*effect.Permission))
 			continue
 		}
 		if effect.Alias != "" {
-			parts = append(parts, effect.Alias)
+			caps = append(caps, effect.Alias)
 		}
 	}
-	if len(parts) == 0 {
-		return ""
+	out := ""
+	for _, e := range errParts {
+		out += " " + e
 	}
-	return " effects[" + strings.Join(parts, ", ") + "]"
+	if len(caps) > 0 {
+		out += " can[" + strings.Join(caps, ", ") + "]"
+	}
+	return out
 }
 func formatWithSignatureClause(bundles []string, params []ast.ParamDecl, order []ast.ImplicitSigItem) string {
 	parts := make([]string, 0, len(bundles)+len(params))

@@ -232,10 +232,10 @@ func parseFunctionHeader(path string, line int, text string) (Function, *Issue) 
 			fn.ABI = fields[1]
 		}
 	}
-	if i := strings.Index(tail, "effects["); i >= 0 {
+	if i := strings.Index(tail, "can["); i >= 0 {
 		end := strings.Index(tail[i:], "]")
 		if end >= 0 {
-			fn.Effects = splitCSV(tail[i+len("effects[") : i+end])
+			fn.Effects = splitCSV(tail[i+len("can[") : i+end])
 		}
 	}
 	return fn, nil

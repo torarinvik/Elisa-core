@@ -51,9 +51,9 @@ struct ArenaMark:
     region: heap Region&?
     count: usize
 
-extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
+extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 
-extern free(ptr: heap void&) effects[Memory.Release]
+extern free(ptr: heap void&) can[Memory.Release]
 
 static if (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
     const PROT_READ = 0x1

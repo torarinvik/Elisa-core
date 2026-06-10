@@ -52,7 +52,7 @@ impl Allocator for BumpAllocator:
 # ------------------------------------------------------------
 # Stateless (the C heap is the implicit state). Use when individual lifetimes
 # don't nest and bulk reclamation doesn't fit.
-extern realloc(ptr: mutable heap void&?, size: usize) -> mutable heap void&? effects[Memory.Allocate]
+extern realloc(ptr: mutable heap void&?, size: usize) -> mutable heap void&? can[Memory.Allocate]
 
 struct MallocAllocator:
     tag: u8

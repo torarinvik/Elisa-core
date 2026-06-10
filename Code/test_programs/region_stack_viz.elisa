@@ -18,7 +18,7 @@ extern DrawRectangleLines(x: i32, y: i32, width: i32, height: i32, color: u32)
 extern DrawText(text: u8&, posX: i32, posY: i32, fontSize: i32, color: u32)
 extern SetTargetFPS(fps: i32)
 extern CloseWindow()
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int effects[Console.Format]
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
 
 # Different heap object types (different per-element byte footprints).
 struct Pixel:

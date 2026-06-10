@@ -670,7 +670,7 @@ func TestRunCLIProjectBuildRequiresEASMEffectsOnExternSurface(t *testing.T) {
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "easm", "guarded.easm"), `module guarded
 target any
-export def guarded_asm() -> void abi c effects[Unsafe.Assembly]:
+export def guarded_asm() -> void abi c can[Unsafe.Assembly]:
     stack: unchanged
     control: returns
     body:

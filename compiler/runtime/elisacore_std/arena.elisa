@@ -81,8 +81,8 @@ struct ArenaMark:
 # region allocation, and other runtime modules (e.g. concurrency) call malloc directly
 # and resolve it via this declaration. Under the mmap/VirtualAlloc backends the arena
 # itself does not use them for regions.
-extern malloc(size: usize) -> mutable heap void&? effects[Memory.Allocate]
-extern free(ptr: heap void&) effects[Memory.Release]
+extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
+extern free(ptr: heap void&) can[Memory.Release]
 
 static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     const PROT_READ = 0x1

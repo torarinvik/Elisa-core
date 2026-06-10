@@ -157,7 +157,7 @@ const enum FileDescriptor of int:
     Error = 2
 
 @link_name(write)
-extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize effects[Console.Write]
+extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize can[Console.Write]
 
 protocol Str:
     def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]

@@ -204,7 +204,7 @@ func (g *llvmGenerator) validateEASMFunctionEffects(fn *easm.Function) error {
 		}
 	}
 	if len(missing) != 0 {
-		return fmt.Errorf("declares effects[%s] but matching Elisa extern does not expose can[%s]", strings.Join(required, ", "), strings.Join(missing, ", "))
+		return fmt.Errorf("declares can[%s] but matching Elisa extern does not expose can[%s]", strings.Join(required, ", "), strings.Join(missing, ", "))
 	}
 	return nil
 }

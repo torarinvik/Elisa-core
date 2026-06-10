@@ -2,7 +2,7 @@ include "../../compiler/runtime/elisacore_std/test.elisa"
 include "../../compiler/runtime/elisacore_std/heap.elisa"
 
 def deque_i64_make_with_capacity(a: mutable Arena&, capacity: usize) -> Deque[i64]:
-    ctor: func(mutable Arena&, usize) -> Deque[i64] effects[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity[i64]
+    ctor: func(mutable Arena&, usize) -> Deque[i64] can[Memory.Allocate, Abort.Panic] = arena_deque_with_capacity[i64]
     return ctor(a, capacity) can Memory.Allocate, Abort.Panic
 
 def deque_i64_make_buffer(buffer: i64&, capacity: usize) -> Deque[i64]:

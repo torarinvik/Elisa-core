@@ -1,7 +1,7 @@
 error FormatError:
     WriteFailed
 
-extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> int effects[Console.Format]
+extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
 
 def checked_format_len(format: static u8&) -> int error[FormatError]:
     written: int = snprintf(null, 0, format, 7, 9) can Console.Format

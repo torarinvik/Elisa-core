@@ -262,9 +262,6 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()
 	}
-	if p.peekIdentText("effectalias") {
-		return p.parseEffectsDecl()
-	}
 	if p.peekIdentText("alias") {
 		return p.parseAliasDecl()
 	}
@@ -601,15 +598,6 @@ func (p *Parser) parseErrorDecl() *ast.ErrorDecl {
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ErrorDecl{Position: pos, Name: name, Tags: tags}
-}
-func (p *Parser) parseEffectsDecl() *ast.EffectsDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("effectalias")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_ASSIGN)
-	errorEffects, permissions := p.parseEffectsSpec()
-	p.expectNewline()
-	return &ast.EffectsDecl{Position: pos, Name: name, ErrorEffects: errorEffects, Permissions: permissions}
 }
 func (p *Parser) parseAliasDecl() *ast.GrantAliasDecl {
 	pos := p.cur().Pos
