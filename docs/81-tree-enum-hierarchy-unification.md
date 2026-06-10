@@ -23,6 +23,16 @@ So §2 below (status as of first draft) is partly shipped already. Remaining: ca
 match arms (`Statement s:`), the `is`-binding form, Phase 4 column scan, Phase 5
 defaults, Phase 6 tree retirement, docs/82 handle dial.
 
+**UPDATE 2026-06-10: Phase 6 EXECUTED (commits 17a99a76, dea019b9, 55099e6f) — `tree`/`node`
+retired, 16 816 lines deleted.** No parse-time desugar was needed: no tracked `.elisa` used
+trees, and breaking the untracked frontends was accepted. `tree`/`attribute` declarations are
+now parse errors pointing here; `visit`, tree `fold`, rewrite-default, `treeview`,
+`children()`/`kind`, tree freeze/clone, and `@derive(parse_builder)` are gone with them.
+Sequence rewrite, fold comprehensions, grammar lowering, and the packed-enum machinery are
+unaffected. docs/82 (handle dial incl. `ptr`) also landed. The one-construct end state holds:
+`enum … is`. Phases 4 (column scan) and 5 (defaults/value-hierarchy tails) remain as
+enum-side feature work, no longer blocked on tree parity.
+
 ### The two parallel subsystems (the problem)
 
 `tree`/`node` and `enum … is` are entirely separate stacks right now:
