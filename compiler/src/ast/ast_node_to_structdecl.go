@@ -125,13 +125,6 @@ type EnumDecl struct {
 	// Child <: Parent.
 	Parent string
 }
-type TreeDecl struct {
-	Position    lexer.Pos
-	Annotations []Annotation
-	Name        string
-	Common      []FieldDecl
-	Members     []TreeMemberDecl
-}
 type GrammarDecl struct {
 	Position               lexer.Pos
 	Extend                 bool
@@ -530,36 +523,6 @@ type GrammarAssignTerm struct {
 type GrammarReturnTerm struct {
 	Position lexer.Pos
 	Term     GrammarTerm
-}
-type AttributeDecl struct {
-	Position   lexer.Pos
-	Receiver   TypeExpr
-	Name       string
-	ReturnType TypeExpr
-	Arms       []VisitArm
-}
-type TreeMemberDecl interface {
-	Node
-	treeMemberDeclTag()
-}
-type TreeCategoryDecl struct {
-	Position    lexer.Pos
-	Annotations []Annotation
-	Name        string
-	Variants    []EnumVariantDecl
-	Nested      []TreeCategoryDecl
-}
-type TreeBlockDecl struct {
-	Position    lexer.Pos
-	Annotations []Annotation
-	Name        string
-	Fields      []FieldDecl
-}
-type TreeStructDecl struct {
-	Position    lexer.Pos
-	Annotations []Annotation
-	Name        string
-	Fields      []FieldDecl
 }
 type EnumVariantDecl struct {
 	Position lexer.Pos

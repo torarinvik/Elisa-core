@@ -19,12 +19,6 @@ func (a *Analyzer) checkDarrayGrowthRegionEscape(receiver ast.Expr, op string) {
 	if a == nil || receiver == nil || a.staticContextDepth != 0 {
 		return
 	}
-	// Growing a safe stdlib darray may touch region storage, but that allocation is a
-	// trusted implementation detail of the container. Explicit Memory.Allocate is
-	// reserved for low-level allocation APIs such as malloc/custom allocators.
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena {
-		return
-	}
 	arenaName, ok := a.ambientArenaLocalValueName()
 	if !ok {
 		return
@@ -160,7 +154,7 @@ func (a *Analyzer) ambientArenaLocalValueName() (string, bool) {
 	if a.currentAllocExpr == nil {
 		return "", false
 	}
-	ident, ok := stripTreeAllocOwnerExpr(a.currentAllocExpr).(*ast.Ident)
+	ident, ok := stripParenExpr(a.currentAllocExpr).(*ast.Ident)
 	if !ok || ident == nil || a.currentScope == nil {
 		return "", false
 	}
@@ -258,7 +252,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
 	}
-	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
@@ -343,7 +337,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray extend requires a mutable darray receiver")
 	}
-	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
 		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "extend")
@@ -409,7 +403,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray reserve requires a mutable darray receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
 		a.errorf(expr.Pos(), "darray reserve requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "reserve")
@@ -472,7 +466,7 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray resize requires a mutable darray receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
 		a.errorf(expr.Pos(), "darray resize requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "resize")
@@ -622,7 +616,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store push requires a mutable store receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.currentTreeAllocOwner.Kind != treeAllocOwnerRegion {
+	if a.currentAllocExpr == nil {
 		a.errorf(expr.Pos(), "store push requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != len(storeType.StoreFieldOrder) {
@@ -665,7 +659,7 @@ func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store reserve requires a mutable store receiver")
 	}
-	if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.currentTreeAllocOwner.Kind != treeAllocOwnerRegion {
+	if a.currentAllocExpr == nil {
 		a.errorf(expr.Pos(), "store reserve requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {

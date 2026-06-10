@@ -549,11 +549,6 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			c.collectStmts(arm.Body)
 		}
-	case *ast.VisitExpr:
-		c.collectExpr(n.Value)
-		for _, arm := range n.Arms {
-			c.collectStmts(arm.Body)
-		}
 	case *ast.EmitExpr:
 		c.collectExpr(n.Value)
 	}

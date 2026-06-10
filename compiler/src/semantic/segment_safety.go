@@ -381,12 +381,6 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 			}
 		}
 		*owner = merged
-	case *ast.VisitExpr:
-		a.validateSegmentFlowExpr(n.Value, owner)
-		for _, arm := range n.Arms {
-			a.validateSegmentFlowExpr(arm.Guard, owner)
-			a.validateSegmentFlowStmts(arm.Body, owner)
-		}
 	case *ast.FoldExpr:
 		a.validateSegmentFlowExpr(n.Value, owner)
 		for _, arm := range n.Arms {
@@ -601,12 +595,6 @@ func (a *Analyzer) validateSegmentAgnosticExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			a.validateSegmentAgnosticStmts(arm.Body)
 		}
-	case *ast.VisitExpr:
-		a.validateSegmentAgnosticExpr(n.Value)
-		for _, arm := range n.Arms {
-			a.validateSegmentAgnosticExpr(arm.Guard)
-			a.validateSegmentAgnosticStmts(arm.Body)
-		}
 	case *ast.FoldExpr:
 		a.validateSegmentAgnosticExpr(n.Value)
 		for _, arm := range n.Arms {
@@ -816,12 +804,6 @@ func (a *Analyzer) validateReentrantSafeExpr(expr ast.Expr) {
 		a.validateReentrantSafeExpr(n.Value)
 		a.validateReentrantSafeExpr(n.Store)
 		for _, arm := range n.Arms {
-			a.validateReentrantSafeStmts(arm.Body)
-		}
-	case *ast.VisitExpr:
-		a.validateReentrantSafeExpr(n.Value)
-		for _, arm := range n.Arms {
-			a.validateReentrantSafeExpr(arm.Guard)
 			a.validateReentrantSafeStmts(arm.Body)
 		}
 	case *ast.FoldExpr:

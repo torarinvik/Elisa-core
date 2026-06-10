@@ -56,32 +56,6 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: substituteType(field.Type, subst, g.result.StaticImpls), Index: i})
 		}
 		return fields, nil
-	case *semantic.TreeBlockType:
-		if tt == nil || tt.Decl == nil {
-			return nil, fmt.Errorf("tree block literal requires declaration metadata")
-		}
-		fields := make([]structLiteralField, 0, len(tt.Decl.Fields))
-		for i, fieldDecl := range tt.Decl.Fields {
-			field, ok := tt.Fields[fieldDecl.Name]
-			if !ok {
-				return nil, fmt.Errorf("missing semantic field %s.%s", tt.Name, fieldDecl.Name)
-			}
-			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: field.Type, Index: i})
-		}
-		return fields, nil
-	case *semantic.TreeStructType:
-		if tt == nil || tt.Decl == nil {
-			return nil, fmt.Errorf("tree struct literal requires declaration metadata")
-		}
-		fields := make([]structLiteralField, 0, len(tt.Decl.Fields))
-		for i, fieldDecl := range tt.Decl.Fields {
-			field, ok := tt.Fields[fieldDecl.Name]
-			if !ok {
-				return nil, fmt.Errorf("missing semantic field %s.%s", tt.Name, fieldDecl.Name)
-			}
-			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: field.Type, Index: i})
-		}
-		return fields, nil
 	default:
 		return nil, fmt.Errorf("struct literal requires a concrete struct type, got %s", t.String())
 	}

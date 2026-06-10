@@ -36,7 +36,7 @@ func (a *Analyzer) genericTypeAsArrayType(expr *ast.GenericType) (*ast.ArrayType
 		return nil, false
 	}
 	switch base.(type) {
-	case *StructType, *OpaqueType, *PackedEnumStoreType, *TreeStoreType:
+	case *StructType, *OpaqueType, *PackedEnumStoreType:
 		return nil, false
 	}
 	sizeTypeExpr, ok := expr.Args[0].(*ast.NamedType)

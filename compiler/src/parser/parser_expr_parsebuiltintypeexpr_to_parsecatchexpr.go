@@ -537,27 +537,6 @@ func recoveryFallbackExpr(recovery *ast.RecoveryClause) ast.Expr {
 		return nil
 	}
 }
-func (p *Parser) parseChildrenCallArgs() ([]ast.Expr, []string) {
-	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil, nil
-	}
-	args := make([]ast.Expr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
-	for {
-		arg := p.parseExpr()
-		if p.peek() == lexer.TOKEN_TO {
-			pos := p.cur().Pos
-			p.advance()
-			target := p.parseTypeExpr()
-			p.errorAt(pos, "the `expr to T` cast has been removed; use `expr.cast[T]` (reinterpret), a constructor `T(expr)` / `expr.T()` (value conversion), or `&expr` (reference)")
-			arg = &ast.CastExpr{Position: arg.Pos(), Operand: arg, Target: target, Origin: ast.CastExprOriginToSyntax}
-		}
-		args = append(args, arg)
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-	}
-	return args, nil
-}
 func (p *Parser) parseOr() ast.Expr {
 	left := p.parseAnd()
 	for p.peek() == lexer.TOKEN_OR {

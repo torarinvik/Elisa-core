@@ -134,41 +134,12 @@ func AssignableTo(dst, src Type) bool {
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}
 	}
-	if dstNode, ok := dst.(*TreeNodeType); ok && dstNode != nil {
-		switch srcTree := StripAggregateStateType(src).(type) {
-		case *TreeCategoryType:
-			return srcTree.Family == dstNode.Family
-		case *TreeVariantViewType:
-			return srcTree.Category != nil && srcTree.Category.Family == dstNode.Family
-		case *TreeBlockType:
-			return srcTree.Family == dstNode.Family
-		case *TreeStructType:
-			return srcTree.Family == dstNode.Family
-		}
-	}
-	if dstCategory, ok := dst.(*TreeCategoryType); ok && dstCategory != nil {
-		if srcCategory, ok := StripAggregateStateType(src).(*TreeCategoryType); ok && treeCategoryDescendsFrom(srcCategory, dstCategory) {
-			return true
-		}
-		if srcView, ok := StripAggregateStateType(src).(*TreeVariantViewType); ok && srcView.Category != nil && treeCategoryDescendsFrom(srcView.Category, dstCategory) {
-			return true
-		}
-	}
 	// Sealed enum refinement (docs/77): a Child enum (a subset of cases) is assignable to its Parent
 	// (the wider union) — `enum Child is Parent:` ⟹ Child <: Parent. Widening only; the reverse
 	// requires an explicit narrowing match/`is` test. Unrelated enums never relate (enumDescendsFrom
 	// returns false), so existing behavior is unchanged.
 	if dstEnum, ok := dst.(*EnumType); ok && dstEnum != nil {
 		if srcEnum, ok := StripAggregateStateType(src).(*EnumType); ok && srcEnum != dstEnum && enumDescendsFrom(srcEnum, dstEnum) {
-			return true
-		}
-	}
-	return false
-}
-
-func treeCategoryDescendsFrom(src *TreeCategoryType, dst *TreeCategoryType) bool {
-	for current := src; current != nil; current = current.Parent {
-		if SameType(current, dst) {
 			return true
 		}
 	}

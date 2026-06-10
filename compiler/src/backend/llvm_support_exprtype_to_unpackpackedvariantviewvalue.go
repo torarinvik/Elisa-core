@@ -44,12 +44,6 @@ func (s *functionState) exprType(expr ast.Expr) semantic.Type {
 					break
 				}
 			}
-			if viewType, ok := s.exprType(n.Object).(*semantic.TreeVariantViewType); ok {
-				if field, ok := viewType.Field(n.Field); ok {
-					t = field.Type
-					break
-				}
-			}
 			objType := s.exprType(n.Object)
 			if objType != nil {
 				fieldType, _, _, _, err := s.g.fieldInfo(objType, n.Field)
@@ -166,12 +160,6 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 		}
 		subst := genericBindingsForArgs(structGenericParams(base), t.Args)
 		return substituteType(field.Type, subst, g.result.StaticImpls), index, t, pointerLike, nil
-	case *semantic.TreeBlockType:
-		index, field, err := fieldInfoFromOrderedFields(t.Name, treeBlockFieldDecls(t), t.Fields, fieldName)
-		return field.Type, index, t, pointerLike, err
-	case *semantic.TreeStructType:
-		index, field, err := fieldInfoFromOrderedFields(t.Name, treeStructFieldDecls(t), t.Fields, fieldName)
-		return field.Type, index, t, pointerLike, err
 	default:
 		return nil, 0, nil, false, fmt.Errorf("field access requires a struct type, got %s", objType.String())
 	}
@@ -303,30 +291,6 @@ func (s *functionState) resolvePackedVariantViewSurfaceTypeExpr(expr ast.TypeExp
 	}
 	viewType := s.g.cachedPackedVariantViewType(enumType, variant)
 	return viewType, nil
-}
-
-// resolveBareTreeVariantWitnessType resolves a bare dotted tree-variant name like `Lua.Expr.Binary`
-// (category `Lua.Expr`, variant `Binary`) to its TreeVariantViewType — the canonical replacement for
-// the removed `treeview[Lua.Expr.Binary]` alias. Returns ok=false for any name that is not a tree
-// category variant, so the caller falls through to its normal unknown-type handling.
-func (s *functionState) resolveBareTreeVariantWitnessType(name string) (semantic.Type, bool) {
-	lastDot := strings.LastIndex(name, ".")
-	if lastDot <= 0 || lastDot >= len(name)-1 {
-		return nil, false
-	}
-	base, ok := s.g.result.NamedTypes[name[:lastDot]]
-	if !ok {
-		return nil, false
-	}
-	categoryType, ok := base.(*semantic.TreeCategoryType)
-	if !ok || categoryType == nil {
-		return nil, false
-	}
-	variant, ok := categoryType.Variant(name[lastDot+1:])
-	if !ok {
-		return nil, false
-	}
-	return categoryType.VariantViewType(variant), true
 }
 
 func (s *functionState) materializePackedVariantViewValue(binding packedVariantViewBinding) (C.LLVMValueRef, semantic.Type, error) {

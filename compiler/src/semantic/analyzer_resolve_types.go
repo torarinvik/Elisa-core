@@ -217,13 +217,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			}
 			args = append(args, a.resolveType(n.Args[0]))
 			return PackedEnumStoreWithState(base, args[0])
-		case *TreeStoreType:
-			if len(n.Args) != 1 {
-				a.errorf(n.Pos(), "tree store type %q expects 1 state argument, got %d", n.Name, len(args))
-				return invalidType
-			}
-			args = append(args, a.resolveType(n.Args[0]))
-			return TreeStoreWithState(base, args[0])
 		case *StructType:
 			params := genericParamsForStructType(base)
 			if len(n.Args) != len(params) {

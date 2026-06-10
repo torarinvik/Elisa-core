@@ -60,20 +60,6 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
 	}
-	if attr, ok := a.lookupTreeAttribute(objType, expr.Field); ok {
-		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
-		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
-		attrType := a.specializeProjectedFunctionFieldType(expr, attr.ReturnType)
-		a.reportInvalidRegionUse(expr, attrType)
-		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(attrType, map[string]bool{}) {
-			a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(attrType), affineValueDisplayName(expr), state.ConsumedBy))
-		}
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, attrType)
-		return attrType
-	}
-	if rowsType, ok := a.frozenTreeRowsFieldType(objType, expr.Field); ok {
-		return rowsType
-	}
 	field, ok := a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
 	if ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
@@ -84,29 +70,10 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
 	}
-	if projectedType, attr, ok := a.lookupProjectedTreeAttributeSequence(objType, expr.Field); ok {
-		a.attributeFieldRefs[expr] = &AttributeFieldRef{Attribute: attr}
-		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
-		a.reportInvalidRegionUse(expr, projectedType)
-		a.reportBorrowedOwnerRefUseAfterConsume(expr, projectedType)
-		return projectedType
-	}
 	a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), true)
 	return invalidType
 }
 
-func (a *Analyzer) frozenTreeRowsFieldType(objType Type, field string) (Type, bool) {
-	storeType, ok := objType.(*TreeStoreType)
-	if !ok || storeType == nil || storeType.Family == nil || !IsFrozenTreeStoreType(storeType) {
-		return nil, false
-	}
-	member, ok := storeType.Family.Member(field)
-	category, _ := member.(*TreeCategoryType)
-	if !ok || category == nil {
-		return nil, false
-	}
-	return &FrozenTreeRowsViewType{Store: storeType, Category: category}, true
-}
 func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field string) (ast.Expr, bool) {
 	return a.resolveProjectedFieldValueExprAtPath(objectExpr, []borrowReturnAnnotationStep{{Field: field}})
 }

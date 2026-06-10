@@ -332,8 +332,6 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.Ident:
 		if s.isUnboundImplicitPackedStoreIdent(n) {
 			value, actualType, err = s.emitImplicitPackedStoreIdent(n, actualType)
-		} else if s.g != nil && s.g.result != nil && s.g.result.RewriteDefaults[n] {
-			value, actualType, err = s.emitTreeRewriteDefaultExpr(n)
 		} else {
 			value, actualType, err = s.emitIdent(n)
 		}
@@ -382,8 +380,6 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 			value, actualType, err = s.emitErrorTagExpr(n, errorType)
 		} else if constEnumType, member, ok := s.constEnumMemberInfo(n); ok {
 			value, actualType, err = s.emitConstEnumMemberExpr(constEnumType, member)
-		} else if treeType, variant, ok := s.treeConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
-			value, actualType, err = s.emitTreeConstructorValue(nil, treeType, variant, nil, nil, nil)
 		} else if enumType, variant, ok := s.enumConstructorInfoFromField(n); ok && variant != nil && len(variant.Payload) == 0 {
 			if enumType != nil && enumType.Packed {
 				store, ok := s.lookupPackedStore(enumType)
@@ -414,8 +410,6 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitAllocExpr(n)
 	case *ast.MatchExpr:
 		value, actualType, err = s.emitMatchExpr(n)
-	case *ast.VisitExpr:
-		value, actualType, err = s.emitVisitExpr(n)
 	case *ast.FoldExpr:
 		value, actualType, err = s.emitFoldExpr(n)
 	case *ast.EmitExpr:

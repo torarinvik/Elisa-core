@@ -89,8 +89,6 @@ func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType se
 		return s.emitCloneErrorUnionValue(sourceValue, sourceType, tt, name)
 	case *semantic.TupleType, *semantic.StructType, *semantic.GenericInstanceType:
 		return s.emitCloneStructLikeValue(sourceValue, targetType, name)
-	case *semantic.TreeNodeType, *semantic.TreeCategoryType, *semantic.TreeBlockType, *semantic.TreeStructType:
-		return s.emitCloneTreeValue(sourceValue, sourceType, targetType, name)
 	default:
 		return nil, fmt.Errorf("clone does not support %s in v1", targetType.String())
 	}
@@ -193,13 +191,9 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		sourcePtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, sourceData, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".src.ptr"))
 		sourceElem := C.LLVMBuildLoad2(s.builder, elemLLVMType, sourcePtr, cStringFree(name+".src.elem"))
-		clonedElem := sourceElem
-		if !treeCloneCanReuseDenseHandle(sourceElemType, targetType.Elem) {
-			cloned, err := s.emitCloneValue(sourceElem, sourceElemType, targetType.Elem, name+".elem")
-			if err != nil {
-				return nil, err
-			}
-			clonedElem = cloned
+		clonedElem, err := s.emitCloneValue(sourceElem, sourceElemType, targetType.Elem, name+".elem")
+		if err != nil {
+			return nil, err
 		}
 		destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
 		C.LLVMBuildStore(s.builder, clonedElem, destPtr)
@@ -278,13 +272,9 @@ func (s *functionState) emitCloneDArrayValue(sourceValue C.LLVMValueRef, sourceT
 		}
 		for i := int64(0); i < st.ConstSize; i++ {
 			sourceElem := C.LLVMBuildExtractValue(s.builder, sourceValue, C.unsigned(i), cStringFree(name+".src.elem"))
-			clonedElem := sourceElem
-			if !treeCloneCanReuseDenseHandle(st.Elem, targetType.Elem) {
-				cloned, err := s.emitCloneValue(sourceElem, st.Elem, targetType.Elem, name+".elem")
-				if err != nil {
-					return nil, err
-				}
-				clonedElem = cloned
+			clonedElem, err := s.emitCloneValue(sourceElem, st.Elem, targetType.Elem, name+".elem")
+			if err != nil {
+				return nil, err
 			}
 			indexValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(i), 0)
 			destPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, allocPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(name+".dst.ptr"))
@@ -400,70 +390,4 @@ func (s *functionState) emitCloneErrorUnionValue(sourceValue C.LLVMValueRef, sou
 	phi := C.LLVMBuildPhi(s.builder, unionLLVMType, cStringFree(name+".result"))
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr([]C.LLVMValueRef{successValue, failureValue}), llvmBlockSlicePtr([]C.LLVMBasicBlockRef{successEnd, failureEnd}), 2)
 	return phi, nil
-}
-
-func (s *functionState) emitCloneTreeValue(sourceValue C.LLVMValueRef, sourceType semantic.Type, targetType semantic.Type, name string) (C.LLVMValueRef, error) {
-	if treeCloneCanReuseDenseHandle(sourceType, targetType) {
-		return s.coerceValue(sourceValue, sourceType, targetType)
-	}
-	rootName := semantic.StripAggregateStateType(targetType).String()
-	switch tt := semantic.StripAggregateStateType(targetType).(type) {
-	case *semantic.TreeCategoryType:
-		if tt != nil && treeCategoryLayoutPlan(tt).isCategoryUnion() {
-			rootName = tt.String()
-		} else if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
-			rootName = tt.Family.NodeType.String()
-		}
-	case *semantic.TreeNodeType:
-		if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
-			rootName = tt.Family.NodeType.String()
-		}
-	case *semantic.TreeBlockType:
-		if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
-			rootName = tt.Family.NodeType.String()
-		}
-	case *semantic.TreeStructType:
-		if tt != nil && tt.Family != nil && tt.Family.NodeType != nil {
-			rootName = tt.Family.NodeType.String()
-		}
-	}
-	rootExpr := &ast.NamedType{Name: rootName}
-	root, err := s.resolveTreeFoldRootInfo(sourceType, rootExpr)
-	if err != nil {
-		return nil, err
-	}
-	helperExpr := &ast.FoldExpr{Keyword: "rewrite", RewriteDefault: true}
-	captures := s.collectTreeFoldCaptures(helperExpr, root.family)
-	envValue, envStruct, err := s.buildTreeFoldEnv(captures, name+".tree.clone")
-	if err != nil {
-		return nil, err
-	}
-	helper, err := s.newTreeFoldHelper(helperExpr, root, root.bindType(), captures, envStruct, true)
-	if err != nil {
-		return nil, err
-	}
-	if err := s.defineTreeFoldHelper(helperExpr, helper); err != nil {
-		return nil, err
-	}
-	return s.emitTreeFoldHelperCall(helper, sourceValue, envValue, name)
-}
-
-func treeCloneCanReuseDenseHandle(sourceType semantic.Type, targetType semantic.Type) bool {
-	sourceType = semantic.StripAggregateStateType(sourceType)
-	targetType = semantic.StripAggregateStateType(targetType)
-	if sourceType == nil || targetType == nil || !semantic.SameType(sourceType, targetType) {
-		return false
-	}
-	switch tt := targetType.(type) {
-	case *semantic.TreeNodeType:
-		return tt != nil && tt.Family != nil && tt.Family.Layout == semantic.TreeLayoutCategoryUnion
-	case *semantic.TreeCategoryType:
-		return tt != nil && tt.Family != nil && tt.Family.Layout == semantic.TreeLayoutCategoryUnion
-	case *semantic.TreeBlockType:
-		return tt != nil && tt.Family != nil && tt.Family.Layout == semantic.TreeLayoutCategoryUnion
-	case *semantic.TreeStructType:
-		return tt != nil && tt.Family != nil && tt.Family.Layout == semantic.TreeLayoutCategoryUnion
-	default:
-		return false
-	}
 }

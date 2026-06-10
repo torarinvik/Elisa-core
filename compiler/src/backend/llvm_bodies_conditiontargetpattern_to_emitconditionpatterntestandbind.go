@@ -69,19 +69,6 @@ func backendMatchableEnumType(actual semantic.Type) (*semantic.EnumType, bool) {
 	return nil, false
 }
 
-func backendMatchableTreeCategoryType(actual semantic.Type) (*semantic.TreeCategoryType, bool) {
-	actual = semantic.StripAggregateStateType(actual)
-	switch tt := actual.(type) {
-	case *semantic.TreeCategoryType:
-		return tt, tt != nil
-	case *semantic.TreeVariantViewType:
-		if tt != nil && tt.Category != nil {
-			return tt.Category, true
-		}
-	}
-	return nil, false
-}
-
 func (s *functionState) conditionAliasBindingType(target ast.Expr, leftType semantic.Type) (string, semantic.Type, bool) {
 	alias, ok := target.(*ast.IsAliasExpr)
 	if !ok || alias == nil || alias.Alias == "" || alias.Alias == "_" {
@@ -91,12 +78,6 @@ func (s *functionState) conditionAliasBindingType(target ast.Expr, leftType sema
 		actualEnum, ok := backendMatchableEnumType(leftType)
 		if ok && actualEnum != nil && actualEnum.Name == enumType.Name {
 			return alias.Alias, variant.PackedViewType(actualEnum), true
-		}
-	}
-	if treeType, variant, _, ok := s.treeIsTargetPattern(alias.Target); ok && treeType != nil && variant != nil {
-		actualTree, ok := backendMatchableTreeCategoryType(leftType)
-		if ok && actualTree != nil && actualTree.Name == treeType.Name {
-			return alias.Alias, actualTree.VariantViewType(variant), true
 		}
 	}
 	// docs/77 §2: `e is Statement s` — a bare-category target binds at the NARROWED category
@@ -453,23 +434,6 @@ func (s *functionState) collectTruthyConditionBindings(expr ast.Expr) ([]conditi
 						return err
 					}
 				}
-			case *semantic.TreeCategoryType:
-				variant, ok := base.Variant(p.Variant)
-				if !ok {
-					return nil
-				}
-				orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
-				if err != nil {
-					return err
-				}
-				for i, arg := range orderedArgs {
-					if arg == nil {
-						continue
-					}
-					if err := collectPattern(arg.Pattern, variant.Payload[i], out); err != nil {
-						return err
-					}
-				}
 			}
 		}
 		return nil
@@ -805,23 +769,6 @@ func (s *functionState) collectMatchPatternBindings(pattern ast.MatchPattern, ex
 	case *ast.MatchVariantPattern:
 		switch base := expected.(type) {
 		case *semantic.EnumType:
-			variant, ok := base.Variant(p.Variant)
-			if !ok {
-				return nil
-			}
-			orderedArgs, err := s.resolveMatchPatternArgs(p, variant)
-			if err != nil {
-				return err
-			}
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				if err := s.collectMatchPatternBindings(arg.Pattern, variant.Payload[i], out); err != nil {
-					return err
-				}
-			}
-		case *semantic.TreeCategoryType:
 			variant, ok := base.Variant(p.Variant)
 			if !ok {
 				return nil

@@ -198,10 +198,6 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		_, ok := viewType.Field(field)
 		return ok
 	}
-	if viewType, ok := objType.(*TreeVariantViewType); ok {
-		_, ok := viewType.Field(field)
-		return ok
-	}
 	if enumType, ok := objType.(*EnumType); ok && enumType != nil && enumType.Packed {
 		if _, ok := enumType.Common[field]; ok {
 			return true
@@ -217,21 +213,6 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 		_, ok = variant.PayloadIndex(field)
 		return ok
 	}
-	if categoryType, ok := objType.(*TreeCategoryType); ok && categoryType != nil {
-		if _, ok := categoryType.Common[field]; ok {
-			return true
-		}
-		guard, ok := g.PackedVariant(expr)
-		if !ok || guard.EnumName != categoryType.Name {
-			return false
-		}
-		variant, ok := categoryType.Variant(guard.VariantName)
-		if !ok || variant == nil {
-			return false
-		}
-		_, ok = variant.PayloadIndex(field)
-		return ok
-	}
 	switch objType.(type) {
 	case *ViewType:
 		return field == "data" || field == "len" || field == "elem_size"
@@ -240,12 +221,6 @@ func (g GuardFactSet) CheckFieldAccess(expr ast.Expr, objType Type, field string
 	}
 	switch t := objType.(type) {
 	case *StructType:
-		_, ok := t.Fields[field]
-		return ok
-	case *TreeBlockType:
-		_, ok := t.Fields[field]
-		return ok
-	case *TreeStructType:
 		_, ok := t.Fields[field]
 		return ok
 	case *GenericInstanceType:

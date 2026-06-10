@@ -77,13 +77,6 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 	}
 }
 
-func (a *Analyzer) validateTreeMatchStore(treeType *TreeCategoryType, storeExpr ast.Expr) {
-	if treeType == nil || storeExpr == nil {
-		return
-	}
-	a.errorf(storeExpr.Pos(), "tree match over %q does not take an in-store clause", treeType.Name)
-}
-
 // silentEnumMatchPatternVariant resolves a variant arm against a hierarchy scrutinee without
 // emitting diagnostics (the erroring twin is resolveEnumMatchPatternCategory) — used by the
 // reachability/coverage walk, which must not double-report.
@@ -269,35 +262,6 @@ func (a *Analyzer) matchPatternCovers(prev ast.MatchPattern, current ast.MatchPa
 				return false
 			}
 			return true
-		case *TreeCategoryType:
-			if variantBase == nil || p.EnumName != currVariant.EnumName || p.Variant != currVariant.Variant {
-				return false
-			}
-			patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(variantBase, p)
-			if !ok {
-				return false
-			}
-			currCategory, currConcrete, ok := a.resolveTreeMatchPatternCategory(variantBase, currVariant)
-			if !ok || currCategory != patternCategory || currConcrete != variant {
-				return false
-			}
-			prevArgs, ok := orderedMatchPatternArgs(p, variant)
-			if !ok {
-				return false
-			}
-			currArgs, ok := orderedMatchPatternArgs(currVariant, variant)
-			if !ok {
-				return false
-			}
-			for i := range prevArgs {
-				if prevArgs[i] == nil || currArgs[i] == nil {
-					return false
-				}
-				if !a.matchPatternCovers(prevArgs[i].Pattern, currArgs[i].Pattern, variant.Payload[i]) {
-					return false
-				}
-			}
-			return true
 		default:
 			return false
 		}
@@ -348,10 +312,6 @@ func structPatternMatchesType(pattern *ast.MatchStructPattern, expected Type) bo
 	case *GenericInstanceType:
 		base, _ := tt.Base.(*StructType)
 		return base != nil && (pattern.TypeName == "" || base.Name == pattern.TypeName) && base.Decl != nil
-	case *TreeBlockType:
-		return tt != nil && (pattern.TypeName == "" || tt.Name == pattern.TypeName)
-	case *TreeStructType:
-		return tt != nil && (pattern.TypeName == "" || tt.Name == pattern.TypeName)
 	default:
 		return false
 	}

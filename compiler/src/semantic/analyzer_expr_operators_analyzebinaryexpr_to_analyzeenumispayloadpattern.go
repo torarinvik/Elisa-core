@@ -545,29 +545,6 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 			}
 			continue
 		}
-		if treeType, variant, ok := a.resolveTreeVariantIsTarget(target); ok {
-			if _, _, ok := resolveMatchableTreeCategoryType(left); !ok {
-				a.errorf(expr.Left.Pos(), "is requires an enum or tree-category value for variant tests, got %s", left)
-				continue
-			}
-			a.recordImplicitTreeStoreUseForType(left)
-			matchableTree, _, _ := resolveMatchableTreeCategoryType(left)
-			if matchableTree == nil || treeType == nil || matchableTree.Name != treeType.Name {
-				expected := "<invalid>"
-				if matchableTree != nil {
-					expected = matchableTree.Name
-				}
-				got := "<invalid>"
-				if treeType != nil && variant != nil {
-					got = treeType.Name + "." + variant.Name
-				}
-				a.errorf(expr.Pos(), "is expects a variant of tree category %q, got %s", expected, got)
-			}
-			if pattern, ok := a.treeVariantIsTargetPattern(target, treeType, variant); ok && pattern != nil {
-				a.validateTreeVariantIsTargetPattern(pattern, treeType, variant)
-			}
-			continue
-		}
 		if pattern, ok := a.structIsTargetPattern(target); ok && pattern != nil {
 			a.validateStructIsTargetPattern(pattern, left)
 			continue
@@ -691,30 +668,6 @@ func (a *Analyzer) validateEnumVariantIsTargetPattern(pattern *ast.MatchVariantP
 		a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
 	}
 }
-func (a *Analyzer) treeVariantIsTargetPattern(expr ast.Expr, treeType *TreeCategoryType, variant *EnumVariant) (*ast.MatchVariantPattern, bool) {
-	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
-		return a.treeVariantIsTargetPattern(alias.Target, treeType, variant)
-	}
-	if testExpr, ok := expr.(*ast.VariantTestExpr); ok && testExpr != nil && testExpr.Pattern != nil {
-		return testExpr.Pattern, true
-	}
-	if treeType == nil || variant == nil {
-		return nil, false
-	}
-	return &ast.MatchVariantPattern{Position: expr.Pos(), EnumName: treeType.Name, Variant: variant.Name}, true
-}
-func (a *Analyzer) validateTreeVariantIsTargetPattern(pattern *ast.MatchVariantPattern, treeType *TreeCategoryType, variant *EnumVariant) {
-	if pattern == nil || treeType == nil || variant == nil {
-		return
-	}
-	orderedArgs := a.resolvePartialMatchPatternArgs(pattern, variant, treeType.Name+"."+pattern.Variant, false)
-	for i, arg := range orderedArgs {
-		if arg == nil {
-			continue
-		}
-		a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
-	}
-}
 func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expected Type) {
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
@@ -751,26 +704,8 @@ func (a *Analyzer) analyzeVariantIsPayloadPattern(pattern ast.MatchPattern, expe
 				}
 				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
 			}
-		case *TreeCategoryType:
-			p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, target.Name)
-			if p.EnumName != target.Name {
-				a.errorf(p.Pos(), "nested variant is pattern expects tree category %q, got %q", target.Name, p.EnumName)
-				return
-			}
-			variant, ok := target.Variant(p.Variant)
-			if !ok {
-				a.errorf(p.Pos(), "tree category %q has no variant %q", target.Name, p.Variant)
-				return
-			}
-			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, target.Name+"."+variant.Name, true)
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				a.analyzeVariantIsPayloadPattern(arg.Pattern, variant.Payload[i])
-			}
 		default:
-			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
+			a.errorf(p.Pos(), "nested variant is pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected)
 		}
 	default:
 		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)

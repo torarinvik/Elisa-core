@@ -82,20 +82,8 @@ func (a *Analyzer) analyzeFreezeCallExpr(expr *ast.CallExpr) Type {
 		}
 		return PackedEnumStoreWithState(packedStore, a.namedTypes["Frozen"])
 	}
-	treeStore, ok := storeType.(*TreeStoreType)
-	if !ok {
-		a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store or tree store, got %s", storeType)
-		return invalidType
-	}
-	if !IsLocalTreeStoreType(treeStore) {
-		a.errorf(expr.Args[0].Pos(), "freeze expects local store type %q, got %s", TreeStoreWithState(treeStore, a.namedTypes["Local"]), treeStore)
-		return invalidType
-	}
-	if _, ok := explicitMoveOperand(expr.Args[0]); !ok {
-		a.errorf(expr.Args[0].Pos(), "local tree store %q must be moved explicitly before freeze", affineValueDisplayName(expr.Args[0]))
-		return invalidType
-	}
-	return TreeStoreWithState(treeStore, a.namedTypes["Frozen"])
+	a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store, got %s", storeType)
+	return invalidType
 }
 func (a *Analyzer) nodeKeyType(enumType *EnumType) Type {
 	if a == nil || enumType == nil {
@@ -512,26 +500,4 @@ func (a *Analyzer) cloneBuiltinTargetType(expr *ast.CallExpr) (Type, bool) {
 		return invalidType, true
 	}
 	return targetType, true
-}
-func cloneBuiltinTreeTargetCompatible(target Type, source Type) bool {
-	target = StripAggregateStateType(target)
-	sourceMember, sourceFamily, ok := resolveTreeVisitSourceType(source)
-	if !ok || sourceFamily == nil {
-		return false
-	}
-	switch tt := target.(type) {
-	case *TreeNodeType:
-		return tt != nil && tt.Family == sourceFamily
-	case *TreeCategoryType:
-		category, _, ok := resolveMatchableTreeCategoryType(source)
-		return ok && category == tt
-	case *TreeBlockType:
-		sourceBlock, ok := sourceMember.(*TreeBlockType)
-		return ok && SameType(sourceBlock, tt)
-	case *TreeStructType:
-		sourceStruct, ok := sourceMember.(*TreeStructType)
-		return ok && SameType(sourceStruct, tt)
-	default:
-		return false
-	}
 }

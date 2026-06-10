@@ -60,22 +60,6 @@ func sequenceRewriteArmBindNameBackend(arm ast.VisitArm) (string, bool) {
 	return "", false
 }
 
-func sequenceRewriteRootExactMembersBackend(root treeFoldRootInfo) []semantic.Type {
-	switch root.kind {
-	case treeFoldRootCategory:
-		return treeCategoryMembersInTagOrder(root.category)
-	case treeFoldRootExact:
-		if root.exact == nil {
-			return nil
-		}
-		return []semantic.Type{root.exact}
-	case treeFoldRootFamily:
-		return semantic.TreeFamilyExactMembersInTagOrder(root.family)
-	default:
-		return nil
-	}
-}
-
 func (s *functionState) resolveSequenceRewriteArmInfoBackend(elemType semantic.Type, arm ast.VisitArm) (sequenceRewriteArmInfoBackend, error) {
 	if arm.Wildcard {
 		return sequenceRewriteArmInfoBackend{alwaysMatches: true}, nil
@@ -83,33 +67,7 @@ func (s *functionState) resolveSequenceRewriteArmInfoBackend(elemType semantic.T
 	if bindName, ok := sequenceRewriteArmBindNameBackend(arm); ok {
 		return sequenceRewriteArmInfoBackend{bindType: elemType, bindName: bindName, alwaysMatches: true}, nil
 	}
-	if arm.ChildResultsName != "" || len(arm.ChildBindings) != 0 {
-		return sequenceRewriteArmInfoBackend{}, fmt.Errorf("sequence rewrite tree-target arms do not support child result bindings")
-	}
-	root, err := s.resolveTreeFoldRootInfo(elemType, nil)
-	if err != nil {
-		return sequenceRewriteArmInfoBackend{}, fmt.Errorf("sequence rewrite arms currently support only `_`, a bare element binding name, or an exact tree target with an optional bind name")
-	}
-	for _, memberType := range sequenceRewriteRootExactMembersBackend(root) {
-		if treeExactMemberSurfaceName(memberType) == arm.TargetName {
-			return sequenceRewriteArmInfoBackend{bindType: memberType, bindName: arm.BindName, alwaysMatches: root.kind == treeFoldRootExact, memberType: memberType}, nil
-		}
-	}
-	return sequenceRewriteArmInfoBackend{}, fmt.Errorf("sequence rewrite arms currently support only `_`, a bare element binding name, or an exact tree target with an optional bind name")
-}
-
-func (s *functionState) emitSequenceRewriteTreeArmMatch(elemValue C.LLVMValueRef, memberType semantic.Type, bodyBB C.LLVMBasicBlockRef, nextBB C.LLVMBasicBlockRef, name string) error {
-	tagValue, err := s.emitTreeHandleTagValue(elemValue, name+".tag")
-	if err != nil {
-		return err
-	}
-	tagConst, err := s.treeExactMemberTagConstant(memberType)
-	if err != nil {
-		return err
-	}
-	matchValue := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree(name+".match"))
-	C.LLVMBuildCondBr(s.builder, matchValue, bodyBB, nextBB)
-	return nil
+	return sequenceRewriteArmInfoBackend{}, fmt.Errorf("sequence rewrite arms currently support only `_` or a bare element binding name")
 }
 
 func (s *functionState) emitSequenceRewriteEmitExpr(expr *ast.EmitExpr) (C.LLVMValueRef, semantic.Type, error) {
@@ -268,14 +226,7 @@ func (s *functionState) emitSequenceRewriteArms(elemValue C.LLVMValueRef, elemTy
 			return err
 		}
 		var nextBB C.LLVMBasicBlockRef
-		if !armInfo.alwaysMatches {
-			bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".tree.body"))
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".tree.next"))
-			if err := s.emitSequenceRewriteTreeArmMatch(elemValue, armInfo.memberType, bodyBB, nextBB, name+".tree"); err != nil {
-				return err
-			}
-			C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-		}
+		_ = nextBB
 		s.pushScope()
 		if armInfo.bindName != "" && armInfo.bindType != nil {
 			if err := s.emitMoveBindLocal(armInfo.bindName, armInfo.bindType, elemValue); err != nil {

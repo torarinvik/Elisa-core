@@ -80,11 +80,7 @@ type functionState struct {
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
 	// region and the returned handle outlives the call. Zero value (nil arenaRef) for ordinary fns.
 	regionPolyOwner              treeAllocOwnerBinding
-	implicitTreeStoreOwners      map[string]treeAllocOwnerBinding
-	treeRewriteDefault           *treeRewriteDefaultContext
 	currentSequenceRewrite       *sequenceRewriteCodegenContext
-	treeImplicitStores           map[treeImplicitStoreCacheKey]treeImplicitStoreSlot
-	treeResolvedStores           map[treeResolvedStoreCacheKey]treeResolvedStoreSlot
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
 	packedStoreValueKey2         packedStoreExtractCacheKey
@@ -100,10 +96,6 @@ type functionState struct {
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
-	treeExactRowPointers         map[treeExactRowCacheKey]C.LLVMValueRef
-	treeExactRowValues           map[treeExactRowCacheKey]C.LLVMValueRef
-	treeDenseKindValues          map[treeDenseValueCacheKey]C.LLVMValueRef
-	treeDensePayloadValues       map[treeDenseValueCacheKey]C.LLVMValueRef
 	scopedCleanups               []scopedCleanupBinding
 	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
@@ -289,43 +281,8 @@ type packedStoreBinding struct {
 	regionArena C.LLVMValueRef
 }
 type treeAllocOwnerBinding struct {
-	isPerm      bool
 	arenaRef    C.LLVMValueRef
 	arenaRefPtr C.LLVMValueRef
-	storePtr    C.LLVMValueRef
-	storeValue  C.LLVMValueRef
-	storeType   *semantic.TreeStoreType
-}
-type treeRewriteDefaultContext struct {
-	memberType      semantic.Type
-	nodeValue       C.LLVMValueRef
-	childViewValue  C.LLVMValueRef
-	childResultType semantic.Type
-}
-type treeImplicitStoreCacheKey struct {
-	family *semantic.TreeType
-	isPerm bool
-	arena  C.LLVMValueRef
-}
-type treeImplicitStoreSlot struct {
-	ptr       C.LLVMValueRef
-	storeType *semantic.TreeStoreType
-}
-type treeResolvedStoreCacheKey struct {
-	block  C.LLVMBasicBlockRef
-	family *semantic.TreeType
-	isPerm bool
-	arena  C.LLVMValueRef
-}
-type treeResolvedStoreSlot struct {
-	value     C.LLVMValueRef
-	storeType *semantic.TreeStoreType
-}
-type treeDenseValueCacheKey struct {
-	block C.LLVMBasicBlockRef
-	kind  string
-	table C.LLVMValueRef
-	row   C.LLVMValueRef
 }
 type packedStoreExtractCacheKey struct {
 	block C.LLVMBasicBlockRef
@@ -395,12 +352,6 @@ type packedVariantPayloadReadCacheKey struct {
 	variant  *semantic.EnumVariant
 	origin   packedReadOriginKey
 	handle   C.LLVMValueRef
-}
-type treeExactRowCacheKey struct {
-	block      C.LLVMBasicBlockRef
-	memberName string
-	table      C.LLVMValueRef
-	row        C.LLVMValueRef
 }
 type packedEnumStorageBinding struct {
 	ptr C.LLVMValueRef
@@ -520,7 +471,6 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		C.LLVMBuildStore(builder, paramValue, alloca)
 		state.defineBinding(name, valueBinding{ptr: alloca, typ: paramType, mutable: mutable})
 		state.bindPackedStoreValue(paramType, paramValue)
-		state.bindImplicitTreeStoreValue(paramType, paramValue)
 		state.bindImplicitTreeOwnerParam(name, paramType, alloca, paramValue)
 		return nil
 	}

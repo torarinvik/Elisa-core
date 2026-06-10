@@ -505,8 +505,15 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		}
 	}
 	if expr.Owner != nil {
-		owner, _, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
-		if !ok || owner.Kind != treeAllocOwnerArena {
+		ownerType := a.analyzeExpr(expr.Owner)
+		arenaType := a.namedTypes["Arena"]
+		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
+		if !isArena {
+			if refT, ok := ownerType.(*RefType); ok && refT != nil && arenaType != nil {
+				isArena = AssignableTo(arenaType, refT.Elem)
+			}
+		}
+		if !isArena {
 			a.errorf(expr.Owner.Pos(), "darray literal owner must be an Arena")
 		}
 		if !useExpectedDArray {
@@ -614,11 +621,18 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 	expectedSet, useExpectedSet := contextualSetLiteralType(expected)
 	regionAvailable := (useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) || (useExpectedDict && a.regionAvailableForContainer(expectedDict)) || (useExpectedSet && a.regionAvailableForContainer(expectedSet))
 	if expr.Owner != nil {
-		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
-		if !ok || owner.Kind != treeAllocOwnerArena {
+		ownerType := a.analyzeExpr(expr.Owner)
+		arenaType := a.namedTypes["Arena"]
+		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
+		if !isArena {
+			if refT, ok := ownerType.(*RefType); ok && refT != nil && arenaType != nil {
+				isArena = AssignableTo(arenaType, refT.Elem)
+			}
+		}
+		if !isArena {
 			a.errorf(expr.Owner.Pos(), "comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
-	} else if a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !regionAvailable {
+	} else if a.activeContainerRegionName() == "" && !regionAvailable {
 		a.errorf(expr.Pos(), "comprehension requires an active in <arena>: scope")
 	}
 	var itemType Type

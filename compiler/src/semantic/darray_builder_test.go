@@ -962,7 +962,7 @@ def has_positive_after_index(items: darray[Expr]) -> bool:
     return any index, item in items.enumerate() where index is Expr.Int(value): value > 0
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `nested variant pattern "Expr.Int" requires an enum, const enum, or tree-category payload, got usize`) {
+	if !strings.Contains(all, `nested variant pattern "Expr.Int" requires an enum or const enum payload, got usize`) {
 		t.Fatalf("expected wrong tuple-field pattern diagnostic, got:\n%s", all)
 	}
 }

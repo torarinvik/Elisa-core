@@ -41,11 +41,6 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			return t, nil
 		}
-		// A bare dotted tree-variant name like `Lua.Expr.Binary` is a refined tree witness (the
-		// canonical replacement for the removed `treeview[Lua.Expr.Binary]` alias).
-		if t, ok := s.resolveBareTreeVariantWitnessType(n.Name); ok {
-			return t, nil
-		}
 		// A bare dotted packed-enum-variant name like `Expr.Lit` is a refined packed witness — the
 		// bare-form analogue of `packedview[Expr.Lit]`, matching the bare tree-variant surface.
 		if t, ok := s.resolveBarePackedVariantWitnessType(n.Name); ok {
@@ -605,11 +600,6 @@ func preferBackendLiveIdentType(cached semantic.Type, live semantic.Type) semant
 	}
 	strippedCached := semantic.StripAggregateStateType(cached)
 	strippedLive := semantic.StripAggregateStateType(live)
-	if cachedView, ok := strippedCached.(*semantic.TreeVariantViewType); ok && cachedView != nil && cachedView.Category != nil {
-		if liveCategory, ok := strippedLive.(*semantic.TreeCategoryType); ok && liveCategory != nil && cachedView.Category.Name == liveCategory.Name {
-			return cached
-		}
-	}
 	if cachedView, ok := strippedCached.(*semantic.PackedVariantViewType); ok && cachedView != nil && cachedView.Enum != nil {
 		if liveEnum, ok := strippedLive.(*semantic.EnumType); ok && liveEnum != nil && cachedView.Enum.Name == liveEnum.Name {
 			return cached

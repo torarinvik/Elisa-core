@@ -287,7 +287,10 @@ func exportTargetImplicitParamsAreBackendOnly(fn *FuncType) bool {
 		return false
 	}
 	for i := range fn.ImplicitParamNames {
-		if _, ok := fn.Params[explicitCount+i].(*TreeStoreType); !ok {
+		switch fn.Params[explicitCount+i].(type) {
+		case *PackedEnumStoreType:
+			// packed store implicit params are backend-only, OK
+		default:
 			return false
 		}
 	}

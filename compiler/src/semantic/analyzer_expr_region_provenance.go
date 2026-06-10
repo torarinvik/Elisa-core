@@ -55,22 +55,6 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return regionRefStateFromDependency(sym, state.Generation), true
 		}
 		if n.Owner != nil {
-			if _, _, _, ok := a.treeAllocConstructorInfo(n.Value); ok {
-				if isTreeAllocPermExpr(n.Owner) {
-					return regionRefState{}, false
-				}
-				if owner, _, ownerOK := a.classifyTreeAllocOwnerExpr(n.Owner); ownerOK && owner.Kind != treeAllocOwnerNone {
-					return regionRefState{}, false
-				}
-			}
-			if _, _, ok := a.treeExactAllocConstructorInfo(n.Value); ok {
-				if isTreeAllocPermExpr(n.Owner) {
-					return regionRefState{}, false
-				}
-				if owner, _, ownerOK := a.classifyTreeAllocOwnerExpr(n.Owner); ownerOK && owner.Kind != treeAllocOwnerNone {
-					return regionRefState{}, false
-				}
-			}
 			if ownerType := a.exprTypes[n.Owner]; ownerType != nil {
 				if _, ok := ownerType.(*PackedEnumStoreType); ok {
 					ownerState, ownerOK := a.regionRefStateForExpr(n.Owner)
@@ -281,9 +265,6 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 			return a.regionRefStateForExpr(freezeStoreArg)
 		}
 		if _, ok := a.packedStoreConstructorCall(n); ok {
-			return regionRefState{}, false
-		}
-		if _, ok := a.treeStoreConstructorCall(n); ok {
 			return regionRefState{}, false
 		}
 		if enumType, variant, ok := a.enumConstructorCall(n); ok && enumType != nil && variant != nil {

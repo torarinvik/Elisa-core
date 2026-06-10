@@ -99,27 +99,9 @@ func matchTypePattern(pattern, actual Type) bool {
 	case *PackedEnumStoreType:
 		a, ok := actual.(*PackedEnumStoreType)
 		return ok && p.Name == a.Name && matchTypePattern(p.State, a.State)
-	case *TreeStoreType:
-		a, ok := actual.(*TreeStoreType)
-		return ok && p.Name == a.Name && matchTypePattern(p.State, a.State)
 	case *PackedVariantViewType:
 		a, ok := actual.(*PackedVariantViewType)
 		return ok && SameType(p.Enum, a.Enum) && p.Variant != nil && a.Variant != nil && p.Variant.Name == a.Variant.Name
-	case *TreeVariantViewType:
-		a, ok := actual.(*TreeVariantViewType)
-		return ok && SameType(p.Category, a.Category) && p.Variant != nil && a.Variant != nil && p.Variant.Name == a.Variant.Name
-	case *TreeType:
-		a, ok := actual.(*TreeType)
-		return ok && p.Name == a.Name
-	case *TreeCategoryType:
-		a, ok := actual.(*TreeCategoryType)
-		return ok && p.Name == a.Name
-	case *TreeBlockType:
-		a, ok := actual.(*TreeBlockType)
-		return ok && p.Name == a.Name
-	case *TreeStructType:
-		a, ok := actual.(*TreeStructType)
-		return ok && p.Name == a.Name
 	case *EnumType:
 		a, ok := actual.(*EnumType)
 		return ok && p.Name == a.Name

@@ -26,35 +26,8 @@ func BasePackedEnumStoreType(t Type) (*PackedEnumStoreType, bool) {
 	return &base, true
 }
 
-func BaseTreeStoreType(t Type) (*TreeStoreType, bool) {
-	storeType, ok := t.(*TreeStoreType)
-	if !ok || storeType == nil {
-		return nil, false
-	}
-	if storeType.Family != nil && storeType.Family.StoreType != nil {
-		return storeType.Family.StoreType, true
-	}
-	base := *storeType
-	base.State = nil
-	return &base, true
-}
-
 func PackedEnumStoreWithState(storeType *PackedEnumStoreType, state Type) *PackedEnumStoreType {
 	if base, ok := BasePackedEnumStoreType(storeType); ok && base != nil {
-		next := *base
-		next.State = state
-		return &next
-	}
-	if storeType == nil {
-		return nil
-	}
-	next := *storeType
-	next.State = state
-	return &next
-}
-
-func TreeStoreWithState(storeType *TreeStoreType, state Type) *TreeStoreType {
-	if base, ok := BaseTreeStoreType(storeType); ok && base != nil {
 		next := *base
 		next.State = state
 		return &next
@@ -75,27 +48,8 @@ func PackedEnumStoreState(t Type) Type {
 	return storeType.State
 }
 
-func TreeStoreState(t Type) Type {
-	storeType, ok := t.(*TreeStoreType)
-	if !ok || storeType == nil {
-		return nil
-	}
-	return storeType.State
-}
-
 func PackedEnumStoreStateName(t Type) string {
 	state := PackedEnumStoreState(t)
-	if state == nil {
-		return ""
-	}
-	if builtin, ok := state.(*BuiltinType); ok {
-		return builtin.Name
-	}
-	return state.String()
-}
-
-func TreeStoreStateName(t Type) string {
-	state := TreeStoreState(t)
 	if state == nil {
 		return ""
 	}
@@ -111,14 +65,6 @@ func IsLocalPackedEnumStoreType(t Type) bool {
 
 func IsFrozenPackedEnumStoreType(t Type) bool {
 	return PackedEnumStoreStateName(t) == "Frozen"
-}
-
-func IsLocalTreeStoreType(t Type) bool {
-	return TreeStoreStateName(t) == "Local"
-}
-
-func IsFrozenTreeStoreType(t Type) bool {
-	return TreeStoreStateName(t) == "Frozen"
 }
 
 func PermissionRefString(ref ast.PermissionRef) string {

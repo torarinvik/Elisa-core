@@ -182,9 +182,7 @@ func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semant
 			value C.LLVMValueRef
 			err   error
 		)
-		if treeType, variant, pattern, ok := s.treeIsTargetPattern(target); ok {
-			value, _, err = s.emitTreeIsTest(expr.Left, treeType, variant, pattern)
-		} else if pattern, ok := s.structIsTargetPattern(target); ok {
+		if pattern, ok := s.structIsTargetPattern(target); ok {
 			value, _, err = s.emitStructIsTest(expr.Left, pattern)
 		} else if enumType, variant, pattern, ok := s.enumIsTargetPattern(target); ok {
 			value, _, err = s.emitEnumIsTest(expr.Left, enumType, variant, pattern)

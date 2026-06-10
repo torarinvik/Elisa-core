@@ -343,65 +343,7 @@ func (s *functionState) emitPackedStoreConstructorValue(expr *ast.CallExpr, stor
 	}
 	return value, storeType, nil
 }
-func (s *functionState) emitTreeStoreConstructorValue(expr *ast.CallExpr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, semantic.Type, error) {
-	if expr == nil || len(expr.Args) != 1 {
-		return nil, nil, fmt.Errorf("tree store constructor expects exactly one arena argument")
-	}
-	value, err := s.emitTreeStoreValue(expr.Args[0], storeType)
-	if err != nil {
-		return nil, nil, err
-	}
-	return value, storeType, nil
-}
-func (s *functionState) emitTreeStoreValue(arenaExpr ast.Expr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
-	if storeType == nil {
-		return nil, fmt.Errorf("missing tree store type")
-	}
-	arenaPtr, _, err := s.emitAddressOrTemp(arenaExpr)
-	if err != nil {
-		return nil, err
-	}
-	return s.emitTreeStoreValueFromArenaRef(arenaPtr, storeType)
-}
-func (s *functionState) emitTreeStoreArenaValue(storeValue C.LLVMValueRef, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
-	if storeType == nil {
-		return nil, fmt.Errorf("missing tree store type")
-	}
-	return s.emitTreeStoreArenaValueNamed(storeValue, "tree.store.arena.value"), nil
-}
-func (s *functionState) emitTreeStoreValueFromExpr(expr ast.Expr) (C.LLVMValueRef, *semantic.TreeStoreType, error) {
-	if expr == nil {
-		return nil, nil, fmt.Errorf("missing tree store expression")
-	}
-	objectType := s.exprType(expr)
-	if objectType == nil {
-		return nil, nil, fmt.Errorf("missing semantic type for tree store expression")
-	}
-	if storeType, ok := objectType.(*semantic.TreeStoreType); ok {
-		value, _, err := s.emitExpr(expr, storeType)
-		if err != nil {
-			return nil, nil, err
-		}
-		return value, storeType, nil
-	}
-	refType, ok := objectType.(*semantic.RefType)
-	if !ok || refType.State != semantic.RefStateNonNull {
-		return nil, nil, fmt.Errorf("tree store access requires a store value or proven non-null store reference")
-	}
-	storeType, ok := refType.Elem.(*semantic.TreeStoreType)
-	if !ok {
-		return nil, nil, fmt.Errorf("tree store access requires a tree store, got %s", objectType.String())
-	}
-	ptrValue, _, err := s.emitExpr(expr, objectType)
-	if err != nil {
-		return nil, nil, err
-	}
-	storeValue, err := s.loadValue(ptrValue, storeType, "tree.store.load")
-	if err != nil {
-		return nil, nil, err
-	}
-	return storeValue, storeType, nil
-}
+
 func (s *functionState) emitPackedStoreValue(arenaExpr ast.Expr, storeType *semantic.PackedEnumStoreType) (C.LLVMValueRef, error) {
 	if storeType == nil {
 		return nil, fmt.Errorf("missing packed enum store type")

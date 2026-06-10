@@ -99,7 +99,6 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						a.registerInitHook(scoped.Namespace, n, initLookupName, fnType, sym)
 					}
 				}
-			case *ast.AttributeDecl:
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
 				a.withGenericParams(n.GenericParams, nil, func() {
@@ -190,7 +189,6 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				linkName, _ := externLinkNameFromAnnotations(n.Annotations)
 				a.validateExternLinkNameSignatureString(qualifiedName, linkName, externLinkNameVarSignatureString(declType), n.Pos())
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolExternVar, Type: declType, Node: n, LinkName: linkName, Mutable: true, Private: scoped.Private}, n.Pos())
-			case *ast.TreeDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
 			case *ast.PermissionDecl:

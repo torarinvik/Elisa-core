@@ -51,23 +51,8 @@ func (a *Analyzer) resolveSequenceRewriteArmInfo(elemType Type, arm ast.VisitArm
 	if bindName, ok := sequenceRewriteArmBindName(arm); ok {
 		return sequenceRewriteArmInfo{BindType: elemType, BindName: bindName, AlwaysMatches: true}, true
 	}
-	if arm.ChildResultsName != "" || len(arm.ChildBindings) != 0 {
-		a.errorf(arm.Position, "sequence rewrite tree-target arms do not support child result bindings")
-		return sequenceRewriteArmInfo{}, false
-	}
-	if _, _, ok := resolveTreeVisitSourceType(elemType); !ok {
-		a.errorf(arm.Position, "sequence rewrite arms currently support only `_`, a bare element binding name, or an exact tree target with an optional bind name")
-		return sequenceRewriteArmInfo{}, false
-	}
-	root, ok := a.resolveVisitRootInfo(elemType, nil, arm.Position)
-	if !ok {
-		return sequenceRewriteArmInfo{}, false
-	}
-	armInfo, ok := a.resolveVisitArmInfo(root, arm)
-	if !ok {
-		return sequenceRewriteArmInfo{}, false
-	}
-	return sequenceRewriteArmInfo{BindType: armInfo.BindType, BindName: arm.BindName, AlwaysMatches: root.Kind == treeVisitRootKindExact}, true
+	a.errorf(arm.Position, "sequence rewrite arm %q: tree-category match patterns have been removed (docs/81)", arm.TargetName)
+	return sequenceRewriteArmInfo{}, false
 }
 
 func (a *Analyzer) analyzeSequenceRewriteArmBody(body []ast.Stmt, scope *Scope) {
@@ -150,7 +135,7 @@ func (a *Analyzer) analyzeSequenceRewriteExprWithExpected(expr *ast.FoldExpr, ex
 	if expectedDArray, ok := contextualDArrayLiteralType(expected); ok && AssignableTo(expectedDArray.Elem, outputElemType) {
 		resultType = expectedDArray
 	}
-	if a.currentTreeAllocOwner.Kind == treeAllocOwnerNone && !a.regionAvailableForContainer(resultType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(resultType) {
 		a.errorf(expr.Pos(), "sequence rewrite requires an active in <owner>: scope")
 	}
 	baselineAffine := a.cloneAffineValueStates()

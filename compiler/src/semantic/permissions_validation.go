@@ -509,12 +509,6 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		for _, arm := range n.Arms {
 			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
 		}
-	case *ast.VisitExpr:
-		a.validatePermissionExpr(n.Value, granted)
-		for _, arm := range n.Arms {
-			a.validatePermissionExpr(arm.Guard, granted)
-			a.validatePermissionStmts(arm.Body, cloneGrantedPermissionFamilies(granted))
-		}
 	case *ast.FoldExpr:
 		a.validatePermissionExpr(n.Value, granted)
 		for _, arm := range n.Arms {

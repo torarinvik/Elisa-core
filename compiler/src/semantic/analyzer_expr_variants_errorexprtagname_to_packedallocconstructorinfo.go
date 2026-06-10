@@ -205,42 +205,6 @@ func (a *Analyzer) analyzeContextualShorthandValueExpr(expr ast.Expr, expected T
 		return nil, false
 	}
 }
-func (a *Analyzer) treeCategoryKindExprType(expr *ast.FieldExpr) (Type, bool) {
-	fullName, ok := qualifiedTypePathFromExpr(expr)
-	if !ok || expr.Field != "Kind" {
-		return nil, false
-	}
-	base, _, ok := a.lookupVisibleType(fullName)
-	if ok {
-		if constEnumType, ok := base.(*ConstEnumType); ok {
-			return constEnumType, true
-		}
-	}
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
-	if !ok {
-		return nil, false
-	}
-	base, _, ok = a.lookupVisibleType(baseName)
-	if !ok {
-		return nil, false
-	}
-	switch tt := base.(type) {
-	case *TreeCategoryType:
-		if tt.KindType == nil {
-			a.errorf(expr.Pos(), "tree category %q has no nested kind type", tt.Name)
-			return invalidType, true
-		}
-		return tt.KindType, true
-	case *TreeNodeType:
-		if tt.KindType == nil {
-			a.errorf(expr.Pos(), "tree root %q has no nested kind type", tt.Name)
-			return invalidType, true
-		}
-		return tt.KindType, true
-	default:
-		return nil, false
-	}
-}
 func (a *Analyzer) constEnumMemberInfoForExpr(expr ast.Expr) (*ConstEnumType, string, *ConstEnumMember, bool) {
 	fullName, ok := qualifiedTypePathFromExpr(expr)
 	if !ok || fullName == "" {
@@ -283,10 +247,6 @@ func (a *Analyzer) constEnumTypeForExpr(expr ast.Expr) (*ConstEnumType, bool) {
 		constEnumType, ok := base.(*ConstEnumType)
 		return constEnumType, ok
 	case *ast.FieldExpr:
-		if kindType, ok := a.treeCategoryKindExprType(n); ok {
-			constEnumType, ok := kindType.(*ConstEnumType)
-			return constEnumType, ok
-		}
 		tagType, ok := a.packedEnumTagExprType(n)
 		if !ok {
 			return nil, false
@@ -372,87 +332,6 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 	copy(params, variant.Payload)
 	return enumType, &FuncType{Name: enumType.Name + "." + variant.Name, Params: params, Return: enumType}, true
 }
-func (a *Analyzer) treeVariantExprType(expr *ast.FieldExpr) (*TreeCategoryType, Type, bool) {
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
-	if !ok {
-		return nil, nil, false
-	}
-	base, _, ok := a.lookupVisibleType(baseName)
-	if !ok {
-		return nil, nil, false
-	}
-	treeType, ok := base.(*TreeCategoryType)
-	if !ok {
-		return nil, nil, false
-	}
-	variant, ok := treeType.Variant(expr.Field)
-	if !ok {
-		a.errorf(expr.Pos(), "tree category %q has no variant %q", treeType.Name, expr.Field)
-		return treeType, invalidType, true
-	}
-	if len(variant.Payload) == 0 {
-		return treeType, nil, true
-	}
-	params := make([]Type, len(variant.Payload))
-	copy(params, variant.Payload)
-	return treeType, &FuncType{Name: treeType.Name + "." + variant.Name, Params: params, Return: treeType}, true
-}
-func treeExactMemberFieldDecls(memberType Type) []ast.FieldDecl {
-	switch tt := StripAggregateStateType(memberType).(type) {
-	case *TreeVariantViewType:
-		return TreeVariantFieldDeclsWithCommon(tt)
-	case *TreeBlockType:
-		return TreeBlockFieldDeclsWithCommon(tt)
-	case *TreeStructType:
-		return TreeStructFieldDeclsWithCommon(tt)
-	default:
-		return nil
-	}
-}
-func (a *Analyzer) treeExactMemberTypeFromFieldExpr(expr *ast.FieldExpr) (Type, bool) {
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
-	if !ok {
-		return nil, false
-	}
-	base, _, ok := a.lookupVisibleType(baseName)
-	if !ok {
-		return nil, false
-	}
-	treeType, ok := base.(*TreeType)
-	if !ok || treeType == nil {
-		return nil, false
-	}
-	memberType, ok := treeType.Member(expr.Field)
-	if !ok {
-		return nil, false
-	}
-	switch StripAggregateStateType(memberType).(type) {
-	case *TreeBlockType, *TreeStructType:
-		return memberType, true
-	default:
-		return nil, false
-	}
-}
-func (a *Analyzer) treeExactMemberExprType(expr *ast.FieldExpr) (Type, Type, bool) {
-	memberType, ok := a.treeExactMemberTypeFromFieldExpr(expr)
-	if !ok {
-		return nil, nil, false
-	}
-	fieldDecls := treeExactMemberFieldDecls(memberType)
-	if len(fieldDecls) == 0 {
-		return memberType, nil, true
-	}
-	params := make([]Type, 0, len(fieldDecls))
-	for _, fieldDecl := range fieldDecls {
-		field, ok := TreeExactFieldInfo(memberType, fieldDecl.Name)
-		if !ok {
-			params = append(params, invalidType)
-			continue
-		}
-		params = append(params, field.Type)
-	}
-	return memberType, &FuncType{Name: memberType.String(), Params: params, Return: memberType}, true
-}
 func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreType, Type, bool) {
 	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
 	if !ok {
@@ -475,68 +354,6 @@ func (a *Analyzer) packedStoreExprType(expr *ast.FieldExpr) (*PackedEnumStoreTyp
 	}
 	localStore := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])
 	return enumType.StoreType, &FuncType{Name: enumType.StoreType.Name, Params: []Type{arenaType}, Return: localStore}, true
-}
-func (a *Analyzer) treeStoreExprType(expr *ast.FieldExpr) (*TreeStoreType, Type, bool) {
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
-	if !ok {
-		return nil, nil, false
-	}
-	base, _, ok := a.lookupVisibleType(baseName)
-	if !ok {
-		return nil, nil, false
-	}
-	treeType, ok := base.(*TreeType)
-	if !ok || expr.Field != "Store" {
-		return nil, nil, false
-	}
-	if treeType.StoreType == nil {
-		return nil, invalidType, true
-	}
-	arenaType, ok := a.namedTypes["Arena"]
-	if !ok {
-		return treeType.StoreType, invalidType, true
-	}
-	localStore := TreeStoreWithState(treeType.StoreType, a.namedTypes["Local"])
-	return treeType.StoreType, &FuncType{Name: treeType.StoreType.Name, Params: []Type{arenaType}, Return: localStore}, true
-}
-func (a *Analyzer) treeStoreConstructorCall(expr *ast.CallExpr) (*TreeStoreType, bool) {
-	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
-	if !ok {
-		return nil, false
-	}
-	storeType, _, ok := a.treeStoreExprType(fieldExpr)
-	if !ok {
-		return nil, false
-	}
-	if len(expr.Args) != 1 {
-		a.errorf(expr.Pos(), "store constructor %q expects 1 argument, got %d", storeType, len(expr.Args))
-		for _, arg := range expr.Args {
-			a.analyzeExpr(arg)
-		}
-		return TreeStoreWithState(storeType, a.namedTypes["Local"]), true
-	}
-	if arenaType, ok := a.namedTypes["Arena"]; ok {
-		actual := a.analyzeValueExpr(expr.Args[0], arenaType)
-		if !AssignableTo(arenaType, actual) {
-			a.errorf(expr.Args[0].Pos(), "store constructor %q expects %s, got %s", storeType, arenaType, actual)
-		}
-		a.markRegionAllocatedByOwnerExpr(expr.Args[0])
-	} else {
-		a.analyzeExpr(expr.Args[0])
-	}
-	return TreeStoreWithState(storeType, a.namedTypes["Local"]), true
-}
-func (a *Analyzer) treeExactMemberConstructorCall(expr *ast.CallExpr) (Type, bool) {
-	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
-	if !ok {
-		return nil, false
-	}
-	a.treeConstructorCallees[fieldExpr] = true
-	memberType, ok := a.treeExactMemberTypeFromFieldExpr(fieldExpr)
-	if !ok {
-		return nil, false
-	}
-	return memberType, true
 }
 func (a *Analyzer) packedStoreConstructorCall(expr *ast.CallExpr) (*PackedEnumStoreType, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
@@ -612,25 +429,6 @@ func (a *Analyzer) enumConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*EnumT
 		return enumType, nil, true
 	}
 	return enumType, variant, true
-}
-func (a *Analyzer) treeConstructorInfoFromFieldExpr(expr *ast.FieldExpr) (*TreeCategoryType, *EnumVariant, bool) {
-	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
-	if !ok {
-		return nil, nil, false
-	}
-	base, _, ok := a.lookupVisibleType(baseName)
-	if !ok {
-		return nil, nil, false
-	}
-	treeType, ok := base.(*TreeCategoryType)
-	if !ok {
-		return nil, nil, false
-	}
-	variant, ok := treeType.Variant(expr.Field)
-	if !ok {
-		return treeType, nil, true
-	}
-	return treeType, variant, true
 }
 func (a *Analyzer) activePackedStoreRegionState(enumType *EnumType) (regionRefState, bool) {
 	if a == nil || enumType == nil {

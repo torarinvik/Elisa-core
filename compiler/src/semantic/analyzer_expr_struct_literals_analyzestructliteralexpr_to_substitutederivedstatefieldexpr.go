@@ -372,7 +372,7 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 	}
 	stripped := StripAggregateStateType(resolvedBaseType)
 	switch stripped.(type) {
-	case *StructType, *GenericInstanceType, *TreeVariantViewType, *TreeBlockType, *TreeStructType:
+	case *StructType, *GenericInstanceType:
 	default:
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)
@@ -381,11 +381,6 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 			a.errorf(expr.Pos(), "record update requires a concrete struct or store-row value, got %s", resolvedBaseType)
 		}
 		return invalidType
-	}
-	if requireTreeOwner {
-		if _, exact := TreeExactTag(stripped); exact {
-			a.requireActiveTreeUpdateOwner(expr.Pos(), stripped)
-		}
 	}
 	fields, ok := a.resolvedStructFields(resolvedBaseType)
 	if !ok {
@@ -439,33 +434,6 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 	}
 	a.consumeAffineValueExpr(expr.Base, resolvedBaseType, "record update")
 	return resultType
-}
-func (a *Analyzer) requireActiveTreeUpdateOwner(pos lexer.Pos, memberType Type) bool {
-	family, ok := TreeFamilyForMemberType(memberType)
-	if !ok || family == nil {
-		return false
-	}
-	switch a.currentTreeAllocOwner.Kind {
-	case treeAllocOwnerPerm, treeAllocOwnerArena:
-		return true
-	case treeAllocOwnerRegion:
-		if a.currentTreeAllocOwner.RegionName != "" {
-			if regionSym, state := a.lookupRegionState(a.currentTreeAllocOwner.RegionName); regionSym == nil || state.Destroyed {
-				a.errorf(pos, "tree update of %q cannot allocate from destroyed region %q", memberType.String(), a.currentTreeAllocOwner.RegionName)
-				return false
-			}
-		}
-		return true
-	case treeAllocOwnerStore:
-		if a.currentTreeAllocOwner.StoreFamily != nil && family != a.currentTreeAllocOwner.StoreFamily {
-			a.errorf(pos, "tree update of %q requires active store %q, got active store for %q", memberType.String(), family.StoreType, a.currentTreeAllocOwner.StoreFamily.Name)
-			return false
-		}
-		return true
-	default:
-		a.errorf(pos, "tree update of %q requires an active in <owner>: scope or explicit new[owner]", memberType.String())
-		return false
-	}
 }
 func (a *Analyzer) structLiteralTargetType(expr *ast.StructLitExpr, expected Type) Type {
 	if expr == nil {

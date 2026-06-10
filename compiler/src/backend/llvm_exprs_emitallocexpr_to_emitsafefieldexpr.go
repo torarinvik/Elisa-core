@@ -132,47 +132,6 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 	if expr.Owner == nil {
 		return s.emitScopedPackedAllocExpr(expr)
 	}
-	if updateExpr, ok := expr.Value.(*ast.RecordUpdateExpr); ok && updateExpr != nil {
-		memberType := semantic.StripAggregateStateType(s.exprType(updateExpr.Base))
-		if _, exact := semantic.TreeExactTag(memberType); exact {
-			owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !ownerOK {
-				return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
-			}
-			return s.emitTreeExactMemberUpdateExpr(updateExpr, memberType, &owner)
-		}
-	}
-	if callExpr, ok := expr.Value.(*ast.CallExpr); ok {
-		if memberType, ok := s.treeExactMemberConstructorCall(callExpr); ok {
-			owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
-			if err != nil {
-				return nil, nil, err
-			}
-			if !ownerOK {
-				return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
-			}
-			return s.emitTreeExactMemberConstructorValue(callExpr, memberType, &owner)
-		}
-	}
-	if treeType, variant, callExpr, ok := s.treeAllocConstructorInfo(expr.Value); ok {
-		if variant == nil {
-			return nil, nil, fmt.Errorf("unknown tree constructor")
-		}
-		owner, ownerOK, err := s.classifyTreeAllocOwnerExpr(expr.Owner)
-		if err != nil {
-			return nil, nil, err
-		}
-		if !ownerOK {
-			return nil, nil, fmt.Errorf("tree allocation owner must be perm, a tree store, an Arena value, or an Arena reference")
-		}
-		return s.emitTreeConstructorValue(callExpr, treeType, variant, treeAllocArgs(callExpr), treeAllocArgNames(callExpr), &owner)
-	}
-	if isTreeAllocPermExpr(expr.Owner) {
-		return nil, nil, fmt.Errorf("new[perm] expects a tree constructor")
-	}
 	if _, ok := s.exprType(expr.Owner).(*semantic.PackedEnumStoreType); ok {
 		return s.emitPackedAllocExpr(expr)
 	}

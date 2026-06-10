@@ -156,18 +156,6 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if len(n.Common) == 0 && len(n.Variants) == 0 {
 			f.writeLine(level+1, "pass") // abstract root that only gathers sub-categories
 		}
-	case *ast.TreeDecl:
-		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, "tree "+n.Name+":")
-		if len(n.Common) > 0 {
-			f.writeLine(level+1, "common:")
-			for _, field := range n.Common {
-				f.writeField(level+2, field)
-			}
-		}
-		for _, member := range n.Members {
-			f.writeTreeMember(level+1, member)
-		}
 	case *ast.GrammarDecl:
 		header := "grammar " + n.Name
 		if n.Extend {

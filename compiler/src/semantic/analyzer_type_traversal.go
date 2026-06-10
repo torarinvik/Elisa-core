@@ -96,18 +96,6 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 			}
 		}
 		return false
-	case *TreeVariantViewType:
-		for _, field := range tt.Category.Common {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
-				return true
-			}
-		}
-		for _, payloadType := range tt.Variant.Payload {
-			if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
-				return true
-			}
-		}
-		return false
 	case *EnumType:
 		for _, field := range tt.Common {
 			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
@@ -119,34 +107,6 @@ func (a *Analyzer) containsAffineHandleValuesWithSeen(t Type, seen map[Type]bool
 				if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
 					return true
 				}
-			}
-		}
-		return false
-	case *TreeCategoryType:
-		for _, field := range tt.Common {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
-				return true
-			}
-		}
-		for _, variant := range tt.Variants {
-			for _, payloadType := range variant.Payload {
-				if a.containsAffineHandleValuesWithSeen(payloadType, seen, depth+1) {
-					return true
-				}
-			}
-		}
-		return false
-	case *TreeBlockType:
-		for _, field := range tt.Fields {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
-				return true
-			}
-		}
-		return false
-	case *TreeStructType:
-		for _, field := range tt.Fields {
-			if a.containsAffineHandleValuesWithSeen(field.Type, seen, depth+1) {
-				return true
 			}
 		}
 		return false
@@ -228,9 +188,6 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 	if _, ok := t.(*PackedEnumStoreType); ok {
 		return true
 	}
-	if _, ok := t.(*TreeStoreType); ok {
-		return true
-	}
 	key := t.String()
 	if seen[key] {
 		return false
@@ -263,18 +220,6 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 			}
 		}
 		return false
-	case *TreeVariantViewType:
-		for _, field := range tt.Category.Common {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
-				return true
-			}
-		}
-		for _, payloadType := range tt.Variant.Payload {
-			if a.typeCanContainRegionRefs(payloadType, seen) {
-				return true
-			}
-		}
-		return false
 	case *StructType:
 		for _, field := range tt.Fields {
 			if a.typeCanContainRegionRefs(field.Type, seen) {
@@ -291,34 +236,6 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 				if a.typeCanContainRegionRefs(payload, seen) {
 					return true
 				}
-			}
-		}
-		return false
-	case *TreeCategoryType:
-		for _, field := range tt.Common {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
-				return true
-			}
-		}
-		for _, variant := range tt.Variants {
-			for _, payloadType := range variant.Payload {
-				if a.typeCanContainRegionRefs(payloadType, seen) {
-					return true
-				}
-			}
-		}
-		return false
-	case *TreeBlockType:
-		for _, field := range tt.Fields {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
-				return true
-			}
-		}
-		return false
-	case *TreeStructType:
-		for _, field := range tt.Fields {
-			if a.typeCanContainRegionRefs(field.Type, seen) {
-				return true
 			}
 		}
 		return false

@@ -170,7 +170,6 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		SinkParams:        append([]bool(nil), base.SinkParams...),
 		SinkParamsKnown:   base.SinkParamsKnown,
 	}
-	semantic.AppendSpecializedBoundaryTreeStoreParams(specialized)
 	return specialized
 }
 

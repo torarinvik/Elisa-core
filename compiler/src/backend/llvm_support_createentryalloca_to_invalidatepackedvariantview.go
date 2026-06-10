@@ -137,29 +137,6 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	if expr == nil {
 		return treeAllocOwnerBinding{}, false, nil
 	}
-	if isTreeAllocPermExpr(expr) {
-		return treeAllocOwnerBinding{isPerm: true}, true, nil
-	}
-	if storeType, ok := s.exprType(expr).(*semantic.TreeStoreType); ok && storeType != nil {
-		storeValue, _, err := s.emitExpr(expr, storeType)
-		if err != nil {
-			return treeAllocOwnerBinding{}, false, err
-		}
-		return treeAllocOwnerBinding{storeValue: storeValue, storeType: storeType}, true, nil
-	}
-	if refType, ok := s.exprType(expr).(*semantic.RefType); ok && refType != nil && refType.State == semantic.RefStateNonNull {
-		if storeType, ok := refType.Elem.(*semantic.TreeStoreType); ok && storeType != nil {
-			storePtr, _, err := s.emitExpr(expr, refType)
-			if err != nil {
-				return treeAllocOwnerBinding{}, false, err
-			}
-			storeValue, err := s.loadValue(storePtr, storeType, "tree.store.load")
-			if err != nil {
-				return treeAllocOwnerBinding{}, false, err
-			}
-			return treeAllocOwnerBinding{storeValue: storeValue, storeType: storeType}, true, nil
-		}
-	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	if arenaType == nil {
 		return treeAllocOwnerBinding{}, false, nil
@@ -188,7 +165,7 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	return treeAllocOwnerBinding{}, false, nil
 }
 func (s *functionState) lookupTreeAllocOwner() (treeAllocOwnerBinding, bool) {
-	if s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil || s.treeAllocOwner.storePtr != nil || s.treeAllocOwner.storeValue != nil {
+	if s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil {
 		return s.treeAllocOwner, true
 	}
 	return treeAllocOwnerBinding{}, false
@@ -309,86 +286,22 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 	}
 	return out
 }
-func (s *functionState) lookupTreeAllocOwnerForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
-	if s != nil && s.treeAllocOwner.isPerm {
-		return s.treeAllocOwner, true
+func (s *functionState) treeOwnerArenaRefValue(owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
+	if owner.arenaRef != nil {
+		return owner.arenaRef, nil
 	}
-	if owner, ok := s.lookupTreeAllocOwner(); ok && owner.storeType != nil && (owner.storeValue != nil || owner.storePtr != nil) {
-		if owner.storeType.Family == family || (owner.storeType.Family != nil && family != nil && owner.storeType.Family.Name == family.Name) {
-			return owner, true
-		}
+	if owner.arenaRefPtr != nil {
+		ptrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+		return C.LLVMBuildLoad2(s.builder, ptrType, owner.arenaRefPtr, cStringFree(name)), nil
 	}
-	if owner, ok := s.lookupImplicitTreeStoreOwnerForFamily(family); ok {
-		if owner.arenaRef == nil && owner.arenaRefPtr == nil {
-			if active, activeOK := s.lookupTreeAllocOwner(); activeOK && active.storeValue == nil && active.storePtr == nil {
-				owner.arenaRef = active.arenaRef
-				owner.arenaRefPtr = active.arenaRefPtr
-			}
-		}
-		return owner, true
-	}
-	if owner, ok := s.lookupTreeAllocOwner(); ok {
-		if (owner.storeValue == nil && owner.storePtr == nil) || owner.storeType == nil || owner.storeType.Family == family {
-			return owner, true
-		}
-		if owner.arenaRef != nil || owner.arenaRefPtr != nil {
-			return treeAllocOwnerBinding{arenaRef: owner.arenaRef, arenaRefPtr: owner.arenaRefPtr}, true
-		}
-		if owner.storeValue != nil && owner.storeType != nil {
-			if arenaRef, err := s.emitTreeStoreArenaValue(owner.storeValue, owner.storeType); err == nil && arenaRef != nil {
-				return treeAllocOwnerBinding{arenaRef: arenaRef}, true
-			}
-		}
-	}
-	return treeAllocOwnerBinding{}, false
-}
-func (s *functionState) lookupImplicitTreeStoreOwnerForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
-	if s == nil || family == nil {
-		return treeAllocOwnerBinding{}, false
-	}
-	if s.implicitTreeStoreOwners != nil {
-		if owner, ok := s.implicitTreeStoreOwners[family.Name]; ok && owner.storeType != nil && (owner.storeValue != nil || owner.storePtr != nil) {
-			return owner, true
-		}
-	}
-	return s.lookupImplicitTreeStoreBindingForFamily(family)
-}
-func (s *functionState) lookupImplicitTreeStoreBindingForFamily(family *semantic.TreeType) (treeAllocOwnerBinding, bool) {
-	if s == nil || family == nil || family.StoreType == nil {
-		return treeAllocOwnerBinding{}, false
-	}
-	binding, ok := s.lookupBinding(semantic.TreeStoreImplicitParamName(family))
-	if !ok || binding.ptr == nil {
-		return treeAllocOwnerBinding{}, false
-	}
-	if storeType, ok := binding.typ.(*semantic.TreeStoreType); ok && storeType != nil && storeType.Family == family {
-		return treeAllocOwnerBinding{storePtr: binding.ptr, storeType: storeType}, true
-	}
-	if storeType, ok := binding.typ.(*semantic.TreeStoreType); ok && storeType != nil && storeType.Family != nil && storeType.Family.Name == family.Name {
-		return treeAllocOwnerBinding{storePtr: binding.ptr, storeType: storeType}, true
-	}
-	return treeAllocOwnerBinding{}, false
-}
-func (s *functionState) bindImplicitTreeStoreValue(t semantic.Type, value C.LLVMValueRef) {
-	storeType, ok := t.(*semantic.TreeStoreType)
-	if !ok || storeType == nil || storeType.Family == nil || value == nil {
-		return
-	}
-	if s.implicitTreeStoreOwners == nil {
-		s.implicitTreeStoreOwners = map[string]treeAllocOwnerBinding{}
-	}
-	s.implicitTreeStoreOwners[storeType.Family.Name] = treeAllocOwnerBinding{storeValue: value, storeType: storeType}
+	return nil, nil
 }
 func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type, ptr C.LLVMValueRef, value C.LLVMValueRef) {
-	if s == nil || s.treeAllocOwner.isPerm || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil || s.treeAllocOwner.storeValue != nil {
+	if s == nil || s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil {
 		return
 	}
 	isRegionParam := name == semantic.RegionPolymorphicImplicitParamName
 	if name != "owner" && name != "alloc" && !isRegionParam {
-		return
-	}
-	if storeType, ok := t.(*semantic.TreeStoreType); ok && storeType != nil && storeType.Family != nil && value != nil {
-		s.treeAllocOwner = treeAllocOwnerBinding{storeValue: value, storeType: storeType}
 		return
 	}
 	arenaType := s.g.result.NamedTypes["Arena"]
@@ -398,8 +311,6 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	if semantic.SameType(t, arenaType) {
 		s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: ptr}
 		if isRegionParam {
-			// docs/75: remember the threaded region so the function's synthesized `__auto_*`
-			// region adopts it (instead of creating a fresh, locally-freed arena).
 			s.regionPolyOwner = s.treeAllocOwner
 		}
 		return
@@ -553,7 +464,6 @@ func (s *functionState) specializeFunctionType(base *semantic.FuncType) *semanti
 		specialized.ExplicitParamDefaultExprs = append([]ast.Expr(nil), base.ExplicitParamDefaultExprs...)
 		specialized.ExplicitParamHasDefault = append([]bool(nil), base.ExplicitParamHasDefault...)
 		specialized.ImplicitParamNames = append([]string(nil), base.ImplicitParamNames...)
-		semantic.AppendSpecializedBoundaryTreeStoreParams(specialized)
 	}
 	s.specializedFuncTypes[base] = specialized
 	return specialized

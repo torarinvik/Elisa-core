@@ -191,14 +191,6 @@ func (a *Analyzer) appendImplicitSinkFlowInstrsForExpr(block *CFGBlock, expr ast
 				a.appendImplicitSinkFlowInstrsForNode(block, stmt)
 			}
 		}
-	case *ast.VisitExpr:
-		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
-		for _, arm := range n.Arms {
-			a.appendImplicitSinkFlowInstrsForExpr(block, arm.Guard)
-			for _, stmt := range arm.Body {
-				a.appendImplicitSinkFlowInstrsForNode(block, stmt)
-			}
-		}
 	case *ast.FoldExpr:
 		a.appendImplicitSinkFlowInstrsForExpr(block, n.Value)
 		for _, arm := range n.Arms {

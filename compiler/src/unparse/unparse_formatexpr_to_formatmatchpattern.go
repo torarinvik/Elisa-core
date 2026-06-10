@@ -367,8 +367,6 @@ func formatExpr(expr ast.Expr) string {
 		return formatExprWithSurfacePermissions(n.Expr, n.Permissions)
 	case *ast.MatchExpr:
 		return formatMatchExpr(n)
-	case *ast.VisitExpr:
-		return formatVisitExpr(n)
 	case *ast.FoldExpr:
 		return formatFoldExpr(n)
 	case *ast.EmitExpr:
@@ -763,21 +761,6 @@ func formatCatchExpr(expr *ast.CatchExpr) string {
 	for _, arm := range expr.Arms {
 		writeArm(arm)
 	}
-	return builder.String()
-}
-func formatVisitExpr(expr *ast.VisitExpr) string {
-	if expr == nil {
-		return "visit <nil>:"
-	}
-	var builder strings.Builder
-	builder.WriteString("visit ")
-	builder.WriteString(formatExpr(expr.Value))
-	if expr.Root != nil {
-		builder.WriteString(" as ")
-		builder.WriteString(formatTypeExpr(expr.Root))
-	}
-	builder.WriteString(":")
-	formatVisitArmsInto(&builder, expr.Arms)
 	return builder.String()
 }
 func formatFoldExpr(expr *ast.FoldExpr) string {

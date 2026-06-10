@@ -8,6 +8,18 @@ import (
 	"elisacore/src/lexer"
 )
 
+func funcTypeHasImplicitParam(ft *FuncType, name string) bool {
+	if ft == nil {
+		return false
+	}
+	for _, n := range ft.ImplicitParamNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) implicitBindingsForCurrentFunction(ft *FuncType) map[string]ast.Expr {
 	if a == nil || ft == nil || len(ft.ImplicitParamNames) == 0 || a.currentScope == nil {
 		return nil
@@ -89,16 +101,6 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 				// (its own implicit param) resolves it via the same-name lookup above; otherwise the
 				// backend creates it on demand at this call site (the root call) and reuses it after.
 				argExpr = packedStoreImplicitArgExpr(packedStoreType)
-				a.exprTypes[argExpr] = expectedType
-				resolved = append(resolved, argExpr)
-				continue
-			} else if storeType, isTreeStore := expectedType.(*TreeStoreType); isTreeStore && storeType != nil {
-				if ownerArg, found := a.recoverImplicitTreeStoreOwnerArg(expr, ft, explicitCount); found {
-					resolved = append(resolved, ownerArg)
-					continue
-				}
-				a.recordImplicitTreeStoreUse(storeType)
-				argExpr = treeStoreImplicitArgExpr(storeType)
 				a.exprTypes[argExpr] = expectedType
 				resolved = append(resolved, argExpr)
 				continue

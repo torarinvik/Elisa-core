@@ -29,48 +29,6 @@ func (a *Analyzer) resolvedStructFields(actual Type) ([]moveBindResolvedField, b
 	switch tt := actual.(type) {
 	case *StructType:
 		base = tt
-	case *TreeVariantViewType:
-		if tt == nil {
-			return nil, false
-		}
-		fieldDecls := treeExactMemberFieldDecls(tt)
-		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
-		for i, fieldDecl := range fieldDecls {
-			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
-			if !ok {
-				continue
-			}
-			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
-		}
-		return fields, true
-	case *TreeBlockType:
-		if tt == nil {
-			return nil, false
-		}
-		fieldDecls := treeExactMemberFieldDecls(tt)
-		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
-		for i, fieldDecl := range fieldDecls {
-			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
-			if !ok {
-				continue
-			}
-			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
-		}
-		return fields, true
-	case *TreeStructType:
-		if tt == nil {
-			return nil, false
-		}
-		fieldDecls := treeExactMemberFieldDecls(tt)
-		fields := make([]moveBindResolvedField, 0, len(fieldDecls))
-		for i, fieldDecl := range fieldDecls {
-			resolved, ok := TreeExactFieldInfo(tt, fieldDecl.Name)
-			if !ok {
-				continue
-			}
-			fields = append(fields, moveBindResolvedField{Name: fieldDecl.Name, Type: resolved.Type, Mutable: resolved.Mutable, Index: i})
-		}
-		return fields, true
 	case *TupleType:
 		if tt == nil {
 			return nil, false
@@ -164,16 +122,6 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 			a.errorf(pattern.Pos(), "move-as destructuring is not supported for builtin struct %q", base.Name)
 			return nil, false
 		}
-	case *TreeBlockType:
-		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
-			a.errorf(pattern.Pos(), "destructuring pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
-			return nil, false
-		}
-	case *TreeStructType:
-		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
-			a.errorf(pattern.Pos(), "destructuring pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
-			return nil, false
-		}
 	case *TupleType:
 		if pattern.TypeName == "" {
 			a.errorf(pattern.Pos(), "destructuring pattern requires a concrete struct or store-row value, got %s", actual)
@@ -257,16 +205,6 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 		}
 		if base.Decl == nil {
 			a.errorf(pattern.Pos(), "struct pattern destructuring is not supported for builtin struct %q", base.Name)
-			return nil, nil, false
-		}
-	case *TreeBlockType:
-		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
-			a.errorf(pattern.Pos(), "struct pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
-			return nil, nil, false
-		}
-	case *TreeStructType:
-		if pattern.TypeName != "" && tt.Name != pattern.TypeName {
-			a.errorf(pattern.Pos(), "struct pattern expects struct %q, got %q", pattern.TypeName, tt.Name)
 			return nil, nil, false
 		}
 	case *TupleType:

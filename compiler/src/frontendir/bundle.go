@@ -153,7 +153,6 @@ func registerBundleTypes() {
 		gob.Register(&ast.AllocExpr{})
 		gob.Register(&ast.CanExpr{})
 		gob.Register(&ast.MatchExpr{})
-		gob.Register(&ast.VisitExpr{})
 		gob.Register(&ast.FoldExpr{})
 
 		// Grammar terms.

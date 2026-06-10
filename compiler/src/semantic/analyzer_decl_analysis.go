@@ -58,8 +58,6 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					a.analyzeStaticAssert(item.Position, item.Cond, item.Message)
 				}
 			case *ast.StaticGenerateDecl:
-			case *ast.AttributeDecl:
-				a.analyzeAttributeDecl(n)
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
 				for _, member := range n.Members {
@@ -70,7 +68,6 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					a.analyzeFunctionAnnotations(fnDecl)
 					a.analyzeFunc(fnDecl)
 				}
-			case *ast.TreeDecl:
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
@@ -271,11 +268,6 @@ func (a *Analyzer) applyFunctionGuardAnnotation(annotation ast.Annotation, fn *a
 		}
 		switch variantBase := base.(type) {
 		case *EnumType:
-			if variantBase == nil {
-				return
-			}
-			signature.GuardEffects = append(signature.GuardEffects, FuncGuardEffect{Kind: FuncGuardKindPackedVariant, ParamIndex: paramIndex, EnumName: variantBase.Name, VariantName: variantName})
-		case *TreeCategoryType:
 			if variantBase == nil {
 				return
 			}
@@ -624,7 +616,7 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 			return false
 		}
 		if !variantBase.Packed {
-			a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
+			a.errorf(annotation.Position, "@guard_variant on function %q currently requires a packed enum variant path, got %q", fn.Name, annotation.Args[1])
 			return false
 		}
 		if _, ok := variantBase.Variant(variantName); !ok {
@@ -633,32 +625,15 @@ func (a *Analyzer) validateFunctionGuardVariantAnnotation(annotation ast.Annotat
 		}
 		paramEnum, _, ok := resolveMatchableEnumType(signature.Params[paramIndex])
 		if !ok || paramEnum == nil || !paramEnum.Packed {
-			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
+			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum parameter, got %s", fn.Name, signature.Params[paramIndex])
 			return false
 		}
 		if paramEnum.Name != variantBase.Name {
 			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramEnum.Name)
 			return false
 		}
-	case *TreeCategoryType:
-		if variantBase == nil {
-			return false
-		}
-		if _, ok := variantBase.Variant(variantName); !ok {
-			a.errorf(annotation.Position, "tree category %q has no variant %q", variantBase.Name, variantName)
-			return false
-		}
-		paramTree, _, ok := resolveMatchableTreeCategoryType(signature.Params[paramIndex])
-		if !ok || paramTree == nil {
-			a.errorf(annotation.Position, "@guard_variant on function %q requires a packed enum or tree-category parameter, got %s", fn.Name, signature.Params[paramIndex])
-			return false
-		}
-		if paramTree.Name != variantBase.Name {
-			a.errorf(annotation.Position, "@guard_variant on function %q expects parameter %q to use variant type %q, got %q", fn.Name, annotation.Args[0], variantBase.Name, paramTree.Name)
-			return false
-		}
 	default:
-		a.errorf(annotation.Position, "@guard_variant on function %q expects a packed enum or tree-category variant path, got %q", fn.Name, annotation.Args[1])
+		a.errorf(annotation.Position, "@guard_variant on function %q expects a packed enum variant path, got %q", fn.Name, annotation.Args[1])
 		return false
 	}
 	return true

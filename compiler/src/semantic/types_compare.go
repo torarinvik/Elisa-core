@@ -201,33 +201,9 @@ func SameType(a, b Type) bool {
 	case *PackedEnumStoreType:
 		tb, ok := b.(*PackedEnumStoreType)
 		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
-	case *TreeStoreType:
-		tb, ok := b.(*TreeStoreType)
-		return ok && ta.Name == tb.Name && SameType(ta.State, tb.State)
-	case *FrozenTreeRowsViewType:
-		tb, ok := b.(*FrozenTreeRowsViewType)
-		return ok && ta.Category != nil && tb.Category != nil && ta.Category.Name == tb.Category.Name && SameType(ta.Store, tb.Store)
 	case *PackedVariantViewType:
 		tb, ok := b.(*PackedVariantViewType)
 		return ok && SameType(ta.Enum, tb.Enum) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name
-	case *TreeVariantViewType:
-		tb, ok := b.(*TreeVariantViewType)
-		return ok && SameType(ta.Category, tb.Category) && ta.Variant != nil && tb.Variant != nil && ta.Variant.Name == tb.Variant.Name
-	case *TreeNodeType:
-		tb, ok := b.(*TreeNodeType)
-		return ok && ta.Name == tb.Name
-	case *TreeType:
-		tb, ok := b.(*TreeType)
-		return ok && ta.Name == tb.Name
-	case *TreeCategoryType:
-		tb, ok := b.(*TreeCategoryType)
-		return ok && ta.Name == tb.Name
-	case *TreeBlockType:
-		tb, ok := b.(*TreeBlockType)
-		return ok && ta.Name == tb.Name
-	case *TreeStructType:
-		tb, ok := b.(*TreeStructType)
-		return ok && ta.Name == tb.Name
 	case *EnumType:
 		tb, ok := b.(*EnumType)
 		return ok && ta.Name == tb.Name

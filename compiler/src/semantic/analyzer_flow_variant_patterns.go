@@ -65,30 +65,6 @@ func (a *Analyzer) resolveMoveBindVariantPattern(stmt *ast.MoveBindStmt, pattern
 	return fields, enumType, storeState, true
 }
 
-func (a *Analyzer) resolveMoveBindTreeVariantPattern(pattern *ast.MoveBindVariantPattern, treeType *TreeCategoryType) ([]moveBindResolvedVariantField, bool) {
-	if pattern == nil || treeType == nil {
-		return nil, false
-	}
-	if treeType.Name != pattern.EnumName {
-		a.errorf(pattern.Pos(), "move-as pattern expects tree category %q, got %q", pattern.EnumName, treeType.Name)
-		return nil, false
-	}
-	variant, ok := treeType.Variant(pattern.Variant)
-	if !ok {
-		a.errorf(pattern.Pos(), "tree category %q has no variant %q", treeType.Name, pattern.Variant)
-		return nil, false
-	}
-	orderedArgs := a.resolveMatchPatternArgs(moveBindVariantAsMatchPattern(pattern), variant, treeType.Name+"."+variant.Name, false)
-	fields := make([]moveBindResolvedVariantField, 0, len(orderedArgs))
-	for i, arg := range orderedArgs {
-		if arg == nil {
-			continue
-		}
-		fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], []string{moveBindVariantFieldKey(variant, i)}, fields)
-	}
-	return fields, true
-}
-
 func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expected Type, path []string, fields []moveBindResolvedVariantField) []moveBindResolvedVariantField {
 	if pattern == nil {
 		return fields
@@ -159,29 +135,7 @@ func (a *Analyzer) collectMoveBindVariantBindings(pattern ast.MatchPattern, expe
 			}
 			return fields
 		}
-		treeType, _, treeOK := resolveMatchableTreeCategoryType(expected)
-		if !treeOK || treeType == nil {
-			a.errorf(p.Pos(), "nested move-as pattern %q requires an enum or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
-			return fields
-		}
-		p.EnumName = a.canonicalizeMatchEnumName(p.EnumName, treeType.Name)
-		if p.EnumName != treeType.Name {
-			a.errorf(p.Pos(), "nested move-as pattern expects tree category %q, got %q", treeType.Name, p.EnumName)
-			return fields
-		}
-		variant, ok := treeType.Variant(p.Variant)
-		if !ok {
-			a.errorf(p.Pos(), "tree category %q has no variant %q", treeType.Name, p.Variant)
-			return fields
-		}
-		orderedArgs := a.resolveMatchPatternArgs(p, variant, treeType.Name+"."+variant.Name, true)
-		for i, arg := range orderedArgs {
-			if arg == nil {
-				continue
-			}
-			childPath := append(append([]string(nil), path...), moveBindVariantFieldKey(variant, i))
-			fields = a.collectMoveBindVariantBindings(arg.Pattern, variant.Payload[i], childPath, fields)
-		}
+		a.errorf(p.Pos(), "nested move-as pattern %q requires an enum payload, got %s", p.EnumName+"."+p.Variant, expected)
 		return fields
 	default:
 		a.errorf(pattern.Pos(), "unsupported move-as nested pattern %T", pattern)
@@ -247,22 +201,6 @@ func (a *Analyzer) resolveVariantPayloadValueExpr(value ast.Expr, typeName strin
 			}
 			return nil, false
 		}
-		treeType, variant, ok := a.treeConstructorCall(n)
-		if !ok || treeType == nil || variant == nil {
-			return nil, false
-		}
-		if treeType.Name != typeName || variant.Name != variantName {
-			return nil, false
-		}
-		orderedArgs, _, ok := a.resolveTreeConstructorArgs(n, treeType, variant)
-		if !ok {
-			return nil, false
-		}
-		for i, arg := range orderedArgs {
-			if moveBindVariantFieldKey(variant, i) == key {
-				return arg, true
-			}
-		}
 		return nil, false
 	default:
 		return nil, false
@@ -293,25 +231,6 @@ func (a *Analyzer) resolveMatchVariantPayloadValueExprPath(value ast.Expr, patte
 	}
 	switch variantBase := base.(type) {
 	case *EnumType:
-		if variantBase == nil {
-			return nil, false
-		}
-		variant, ok := variantBase.Variant(pattern.Variant)
-		if !ok || variant == nil {
-			return nil, false
-		}
-		orderedArgs := a.resolveMatchPatternArgs(pattern, variant, variantBase.Name+"."+variant.Name, true)
-		for i, arg := range orderedArgs {
-			if arg == nil || moveBindVariantFieldKey(variant, i) != path[0] {
-				continue
-			}
-			nested, ok := arg.Pattern.(*ast.MatchVariantPattern)
-			if !ok {
-				return nil, false
-			}
-			return a.resolveMatchVariantPayloadValueExprPath(current, nested, path[1:])
-		}
-	case *TreeCategoryType:
 		if variantBase == nil {
 			return nil, false
 		}

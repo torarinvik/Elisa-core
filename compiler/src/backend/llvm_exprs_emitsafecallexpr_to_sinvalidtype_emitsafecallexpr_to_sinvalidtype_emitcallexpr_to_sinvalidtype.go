@@ -78,24 +78,17 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
-	"strings"
 )
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
-	if storeType, ok := s.treeStoreConstructorCall(expr); ok {
-		return s.emitTreeStoreConstructorValue(expr, storeType)
-	}
 	if callIdentName(expr) == "freeze" {
 		if len(expr.Args) != 1 {
 			return nil, nil, fmt.Errorf("freeze expects 1 argument, got %d", len(expr.Args))
 		}
 		frozenType := s.exprType(expr)
-		if frozenStore, ok := frozenType.(*semantic.TreeStoreType); ok && semantic.IsFrozenTreeStoreType(frozenStore) {
-			return s.emitTreeStoreFreezeCall(expr.Args[0], frozenStore)
-		}
 		return s.emitExpr(expr.Args[0], frozenType)
 	}
 	if value, actualType, handled, err := s.emitDenseKeyHelperCall(expr); handled {
@@ -129,19 +122,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		return s.emitEnumConstructorValue(expr, enumType, variant, expr.Args, expr.ArgNames)
 	}
-	if treeType, variant, ok := s.treeConstructorInfo(expr); ok {
-		if variant == nil {
-			return nil, nil, fmt.Errorf("unknown tree constructor")
-		}
-		return s.emitTreeConstructorValue(expr, treeType, variant, expr.Args, expr.ArgNames, nil)
-	}
-	if memberType, ok := s.treeExactMemberConstructorCall(expr); ok {
-		return s.emitTreeExactMemberConstructorValue(expr, memberType, nil)
-	}
 	if value, actualType, handled, err := s.emitProofCarryingViewHelperCall(expr); handled {
-		return value, actualType, err
-	}
-	if value, actualType, handled, err := s.emitTreeTraversalHelperCall(expr); handled {
 		return value, actualType, err
 	}
 	if value, actualType, handled, err := s.emitAtomicRuntimeCall(expr); handled {
@@ -253,16 +234,6 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if i < len(funcType.Params) {
 			expected = funcType.Params[i]
 		}
-		if expected == nil && backendIsUnexpectedImplicitTreeStoreArg(arg, funcType) {
-			continue
-		}
-		if value, ok, err := s.emitImplicitTreeStoreCallArg(arg, expected, funcType); ok || err != nil {
-			if err != nil {
-				return nil, nil, err
-			}
-			args = append(args, value)
-			continue
-		}
 		value, actual, err := s.emitCallArg(arg, expected, funcType, i)
 		if err != nil {
 			return nil, nil, err
@@ -329,123 +300,6 @@ func backendLoweredCallArgsForFunc(expr *ast.CallExpr, funcType *semantic.FuncTy
 	return out
 }
 
-func backendIsUnexpectedImplicitTreeStoreArg(arg ast.Expr, calleeType *semantic.FuncType) bool {
-	ident, ok := arg.(*ast.Ident)
-	if !ok || ident == nil {
-		return false
-	}
-	if calleeType != nil {
-		for _, name := range calleeType.ImplicitParamNames {
-			if ident.Name == name {
-				return false
-			}
-		}
-	}
-	return strings.HasPrefix(ident.Name, "__tree_store")
-}
-
-func (s *functionState) emitImplicitTreeStoreCallArg(arg ast.Expr, expected semantic.Type, calleeType *semantic.FuncType) (C.LLVMValueRef, bool, error) {
-	storeType, ok := expected.(*semantic.TreeStoreType)
-	ident, ok := arg.(*ast.Ident)
-	if !ok || ident == nil {
-		if storeType == nil || storeType.Family == nil || !backendExprCanCreateTreeStore(s, arg) {
-			return nil, false, nil
-		}
-		value, err := s.emitImplicitTreeStoreValueFromOwnerArg(arg, storeType)
-		return value, true, err
-	}
-	if !ok || storeType == nil || storeType.Family == nil {
-		if calleeType == nil {
-			return nil, false, nil
-		}
-		matchesImplicitParam := false
-		for _, name := range calleeType.ImplicitParamNames {
-			if ident.Name == name {
-				matchesImplicitParam = true
-				break
-			}
-		}
-		if !matchesImplicitParam {
-			return nil, false, nil
-		}
-		for _, typ := range s.g.result.NamedTypes {
-			family, isTree := typ.(*semantic.TreeType)
-			if !isTree || family == nil || family.StoreType == nil {
-				continue
-			}
-			if ident.Name == semantic.TreeStoreImplicitParamName(family) {
-				storeType = family.StoreType
-				ok = true
-				break
-			}
-		}
-		if !ok || storeType == nil || storeType.Family == nil {
-			return nil, false, nil
-		}
-	}
-	if ident.Name != semantic.TreeStoreImplicitParamName(storeType.Family) {
-		if !backendExprCanCreateTreeStore(s, arg) {
-			return nil, false, nil
-		}
-		value, err := s.emitImplicitTreeStoreValueFromOwnerArg(arg, storeType)
-		return value, true, err
-	}
-	owner, ok := s.lookupTreeAllocOwnerForFamily(storeType.Family)
-	if !ok {
-		callee := "<unknown>"
-		if calleeType != nil && calleeType.Name != "" {
-			callee = calleeType.Name
-		}
-		caller := "<helper>"
-		if s != nil && s.decl != nil {
-			caller = s.decl.Name
-		}
-		return nil, true, fmt.Errorf("call from %s to %s requires tree store context for %s; use in owner/in perm around the call", caller, callee, storeType.Family.Name)
-	}
-	value, _, err := s.ensureTreeOwnerStoreValue(owner, storeType.Family)
-	if err != nil {
-		return nil, true, err
-	}
-	return value, true, nil
-}
-
-func (s *functionState) emitImplicitTreeStoreValueFromOwnerArg(arg ast.Expr, storeType *semantic.TreeStoreType) (C.LLVMValueRef, error) {
-	if storeType == nil || storeType.Family == nil {
-		return nil, fmt.Errorf("missing tree store metadata")
-	}
-	owner, ok, err := s.classifyTreeAllocOwnerExpr(arg)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("tree store context for %s requires an Arena or tree store owner", storeType.Family.Name)
-	}
-	if s != nil && s.implicitTreeStoreOwners != nil {
-		if existing, ok := s.implicitTreeStoreOwners[storeType.Family.Name]; ok && existing.storeType != nil && (existing.storeValue != nil || existing.storePtr != nil) {
-			if existing.arenaRef == nil && existing.arenaRefPtr == nil && owner.arenaRef != nil {
-				existing.arenaRef = owner.arenaRef
-			}
-			if existing.arenaRef == nil && existing.arenaRefPtr == nil && owner.arenaRefPtr != nil {
-				existing.arenaRefPtr = owner.arenaRefPtr
-			}
-			value, _, err := s.ensureTreeOwnerStoreValue(existing, storeType.Family)
-			return value, err
-		}
-	}
-	value, _, err := s.ensureTreeOwnerStoreValue(owner, storeType.Family)
-	if err != nil {
-		return nil, err
-	}
-	return value, nil
-}
-
-func backendExprCanCreateTreeStore(s *functionState, expr ast.Expr) bool {
-	if s == nil || expr == nil || s.g == nil || s.g.result == nil {
-		return false
-	}
-	return backendTypeCanCreateTreeStore(s.exprType(expr), s.g.result.NamedTypes)
-}
-
 func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnType *semantic.FuncType) ([]C.LLVMValueRef, error) {
 	if fnType == nil || len(fnType.Params) == 0 {
 		return nil, fmt.Errorf("invalid semantic cast hook for %s", exprLabel)
@@ -454,23 +308,10 @@ func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnT
 	if err != nil {
 		return nil, err
 	}
-	args := []C.LLVMValueRef{arg}
-	for i := 1; i < len(fnType.Params); i++ {
-		storeType, ok := fnType.Params[i].(*semantic.TreeStoreType)
-		if !ok || storeType == nil || storeType.Family == nil {
-			return nil, fmt.Errorf("unsupported semantic cast hook parameter %d for %s", i, exprLabel)
-		}
-		implicitArg := &ast.Ident{Name: semantic.TreeStoreImplicitParamName(storeType.Family)}
-		value, ok, err := s.emitImplicitTreeStoreCallArg(implicitArg, storeType, fnType)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("missing implicit semantic cast hook parameter %d for %s", i, exprLabel)
-		}
-		args = append(args, value)
+	if len(fnType.Params) > 1 {
+		return nil, fmt.Errorf("unsupported semantic cast hook with extra parameters for %s", exprLabel)
 	}
-	return args, nil
+	return []C.LLVMValueRef{arg}, nil
 }
 
 func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

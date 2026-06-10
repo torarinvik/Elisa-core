@@ -227,11 +227,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			var argItems []ast.CallArgItem
 			var hasArgForward bool
 			var argForwardPos lexer.Pos
-			if ident, ok := expr.(*ast.Ident); ok && ident.Name == "children" {
-				args, argNames = p.parseChildrenCallArgs()
-			} else {
-				args, argNames, argShorthand, argItems, hasArgForward, argForwardPos = p.parseCallArgs()
-			}
+			args, argNames, argShorthand, argItems, hasArgForward, argForwardPos = p.parseCallArgs()
 			p.expect(lexer.TOKEN_RPAREN)
 			safe := false
 			callFunc := expr
@@ -488,10 +484,12 @@ func (p *Parser) parsePrimary() ast.Expr {
 			return target
 		}
 		if p.cur().Text == "visit" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
-			return p.parseVisitExpr()
+			p.errorf("the `visit` expression has been removed with the `tree` construct (docs/81); use `match` over the `enum … is` hierarchy")
+			return p.parseExprAfterRemovedPrefixKeyword()
 		}
-		if p.cur().Text == "fold" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
-			return p.parseFoldExpr()
+		if p.cur().Text == "fold" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+			p.errorf("the tree `fold … as … into …` expression has been removed (docs/81); use a recursive function with `match` over the `enum … is` hierarchy")
+			return p.parseExprAfterRemovedPrefixKeyword()
 		}
 		if p.cur().Text == "rewrite" && !(p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN) {
 			return p.parseRewriteExpr()

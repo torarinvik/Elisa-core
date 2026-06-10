@@ -302,15 +302,6 @@ func (c *deferCaptureCollector) collectExpr(expr ast.Expr, locals map[string]boo
 				c.collectStmt(innerStmt, armLocals)
 			}
 		}
-	case *ast.VisitExpr:
-		c.collectExpr(n.Value, locals)
-		for _, arm := range n.Arms {
-			armLocals := cloneParallelForLocals(locals)
-			appendVisitArmLocals(armLocals, arm)
-			for _, innerStmt := range arm.Body {
-				c.collectStmt(innerStmt, armLocals)
-			}
-		}
 	case *ast.FoldExpr:
 		c.collectExpr(n.Value, locals)
 		for _, arm := range n.Arms {

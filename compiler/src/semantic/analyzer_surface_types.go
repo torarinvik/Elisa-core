@@ -76,13 +76,6 @@ func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, b
 		return nil, false
 	}
 	switch tt := base.(type) {
-	case *TreeCategoryType:
-		variant, ok := tt.Variant(variantName)
-		if !ok || variant == nil {
-			a.errorf(named.Pos(), "tree category %q has no variant %q", tt.Name, variantName)
-			return invalidType, true
-		}
-		return tt.VariantViewType(variant), true
 	case *EnumType:
 		variant, ok := tt.Variant(variantName)
 		if !ok || variant == nil {

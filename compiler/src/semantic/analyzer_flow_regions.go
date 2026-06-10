@@ -36,7 +36,6 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
-	savedTreeOwner := a.currentTreeAllocOwner
 	savedAllocExpr := a.currentAllocExpr
 	guardSym := &Symbol{Name: stmt.GuardName, Kind: SymbolLocal, Type: guardType, Node: stmt, Mutable: true}
 	a.currentScope = NewScope(savedScope)
@@ -66,7 +65,6 @@ func (a *Analyzer) analyzeLockStmt(stmt *ast.LockStmt) {
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
-	a.currentTreeAllocOwner = savedTreeOwner
 	a.currentAllocExpr = savedAllocExpr
 }
 
@@ -313,7 +311,6 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	// (see analyzeScopedArenaStmt). This is what makes a forgotten region a
 	// compile error rather than a silent leak.
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, "region owner")
-	a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerRegion, RegionName: stmt.Name}
 	a.currentAllocExpr = &ast.Ident{Position: stmt.Position, Name: stmt.Name}
 	return sym
 }
@@ -322,32 +319,38 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPackedVariantViews := a.currentPackedVariantViews
-	savedTreeAllocOwner := a.currentTreeAllocOwner
 	savedAllocExpr := a.currentAllocExpr
-	if owner, _, ok := a.classifyTreeAllocOwnerExpr(stmt.Store); ok {
-		a.currentTreeAllocOwner = owner
-		if owner.Kind == treeAllocOwnerArena || owner.Kind == treeAllocOwnerRegion {
-			a.currentAllocExpr = stmt.Store
-		} else {
-			a.currentAllocExpr = nil
-		}
-		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
-		a.currentTreeAllocOwner = savedTreeAllocOwner
-		a.currentAllocExpr = savedAllocExpr
-		a.currentPackedVariantViews = savedPackedVariantViews
-		a.currentPackedStores = savedPackedStores
-		a.currentPackedStoreResolutions = savedPackedStoreResolutions
-		return
-	}
 	storeType := a.exprTypes[stmt.Store]
 	if storeType == nil {
 		storeType = a.analyzeExpr(stmt.Store)
 	}
-	if treeStore, ok := storeType.(*TreeStoreType); ok {
-		a.currentTreeAllocOwner = treeAllocOwnerBinding{Kind: treeAllocOwnerStore, StoreFamily: treeStore.Family}
-		a.currentAllocExpr = nil
+	// Arena/region: set the current alloc expr for activeContainerRegionName
+	arenaType := a.namedTypes["Arena"]
+	if arenaType != nil {
+		ownerStripped := stripParenExpr(stmt.Store)
+		ownerT := a.exprTypes[ownerStripped]
+		if ownerT == nil {
+			ownerT = storeType
+		}
+		isArena := SameType(ownerT, arenaType)
+		if !isArena {
+			if refT, ok := ownerT.(*RefType); ok && refT != nil {
+				isArena = SameType(refT.Elem, arenaType)
+			}
+		}
+		if isArena {
+			a.currentAllocExpr = stmt.Store
+			a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+			a.currentAllocExpr = savedAllocExpr
+			a.currentPackedVariantViews = savedPackedVariantViews
+			a.currentPackedStores = savedPackedStores
+			a.currentPackedStoreResolutions = savedPackedStoreResolutions
+			return
+		}
+	}
+	// perm identifier
+	if ident, ok := stripParenExpr(stmt.Store).(*ast.Ident); ok && ident != nil && ident.Name == "perm" {
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
-		a.currentTreeAllocOwner = savedTreeAllocOwner
 		a.currentAllocExpr = savedAllocExpr
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
@@ -356,9 +359,8 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(stmt.Store.Pos(), "in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", storeType)
+		a.errorf(stmt.Store.Pos(), "in-block requires a packed enum store, an Arena value, or an Arena reference, got %s", storeType)
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
-		a.currentTreeAllocOwner = savedTreeAllocOwner
 		a.currentAllocExpr = savedAllocExpr
 		a.currentPackedVariantViews = savedPackedVariantViews
 		a.currentPackedStores = savedPackedStores
@@ -372,7 +374,6 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	}
 	a.currentPackedStores[packedStore.Enum.Name] = packedStore
 	a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
-	a.currentTreeAllocOwner = savedTreeAllocOwner
 	a.currentAllocExpr = savedAllocExpr
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores

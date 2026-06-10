@@ -152,7 +152,6 @@ type llvmGenerator struct {
 	packedVariantPayloadTypes map[*semantic.EnumVariant]C.LLVMTypeRef
 	commonFieldLayouts        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout
 	specializedFuncTypes      map[string]*semantic.FuncType
-	treeAttributeHelpers      map[*semantic.TreeAttribute]*treeAttributeHelperInfo
 	functions                 map[string]C.LLVMValueRef
 	globals                   map[string]C.LLVMValueRef
 	constEvalScopes           []map[string]semantic.ConstValue
@@ -206,7 +205,6 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		packedVariantPayloadTypes: map[*semantic.EnumVariant]C.LLVMTypeRef{},
 		commonFieldLayouts:        map[packedEnumCommonFieldLayoutCacheKey]*packedEnumCommonFieldLayout{},
 		specializedFuncTypes:      map[string]*semantic.FuncType{},
-		treeAttributeHelpers:      map[*semantic.TreeAttribute]*treeAttributeHelperInfo{},
 		functions:                 map[string]C.LLVMValueRef{},
 		globals:                   map[string]C.LLVMValueRef{},
 		noteTypeInProgress:        map[typeMemoKey]bool{},
@@ -380,8 +378,6 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		}
 		_, err := g.ensureEnumBody(qualifiedName, enumType)
 		return err
-	case *ast.TreeDecl:
-		return g.predeclareTreeDeclTypes(n, llvmQualifiedDeclName(namespace, n.Name))
 	case *ast.ExternTypeDecl:
 		_, err := g.ensureNamedStructType(llvmQualifiedDeclName(namespace, n.Name))
 		return err
@@ -463,7 +459,7 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 			}
 		}
 		return nil
-	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl, *ast.AttributeDecl:
+	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl:
 		return nil
 	case *ast.StaticAssertDecl:
 		return g.checkStaticAssertDecl(n)
@@ -566,8 +562,6 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		}
 		_, err := g.ensureEnumBody(qualifiedName, enumType)
 		return err
-	case *ast.TreeDecl:
-		return g.emitTreeDecl(n, llvmQualifiedDeclName(namespace, n.Name))
 	case *ast.FuncDecl:
 		if n.Static {
 			return nil
@@ -650,7 +644,7 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 			}
 		}
 		return nil
-	case *ast.ExternTypeDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
+	case *ast.ExternTypeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
 		return nil
 	case *ast.PermissionDecl:
 		return nil
@@ -686,154 +680,4 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	default:
 		return fmt.Errorf("unsupported declaration %T", decl)
 	}
-}
-func (g *llvmGenerator) predeclareTreeDeclTypes(decl *ast.TreeDecl, qualifiedName string) error {
-	if decl == nil {
-		return nil
-	}
-	familyBase, ok := g.result.NamedTypes[qualifiedName]
-	if !ok {
-		return fmt.Errorf("missing semantic tree type %s", qualifiedName)
-	}
-	familyType, ok := familyBase.(*semantic.TreeType)
-	if !ok || familyType == nil {
-		return fmt.Errorf("declaration %s does not resolve to tree type", qualifiedName)
-	}
-	for _, memberDecl := range flattenLLVMTreeMemberDecls(decl.Members) {
-		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
-		if err != nil {
-			return err
-		}
-		switch tt := memberType.(type) {
-		case *semantic.TreeCategoryType:
-			plan := treeCategoryLayoutPlan(tt)
-			switch {
-			case plan.isPerVariantRows():
-				if _, err := g.ensureTreeCategoryStorageNamedType(tt); err != nil {
-					return err
-				}
-			case plan.isCategoryUnion():
-				if _, err := g.ensureTreeCategoryUnionPayloadType(tt); err != nil {
-					return err
-				}
-				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
-					return err
-				}
-				if err := g.ensureTreeCategoryFrozenLayoutTypes(tt); err != nil {
-					return err
-				}
-			default:
-				return unsupportedTreeLayoutError(plan.name, plan.layout)
-			}
-		case *semantic.TreeBlockType:
-			if _, err := g.ensureNamedStructType(tt.Name); err != nil {
-				return err
-			}
-		case *semantic.TreeStructType:
-			if _, err := g.ensureNamedStructType(tt.Name); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unsupported tree member type %T", memberType)
-		}
-	}
-	for _, memberDecl := range flattenLLVMTreeMemberDecls(decl.Members) {
-		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
-		if err != nil {
-			return err
-		}
-		if err := g.noteType(memberType); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-func (g *llvmGenerator) emitTreeDecl(decl *ast.TreeDecl, qualifiedName string) error {
-	if decl == nil {
-		return nil
-	}
-	familyBase, ok := g.result.NamedTypes[qualifiedName]
-	if !ok {
-		return fmt.Errorf("missing semantic tree type %s", qualifiedName)
-	}
-	familyType, ok := familyBase.(*semantic.TreeType)
-	if !ok || familyType == nil {
-		return fmt.Errorf("declaration %s does not resolve to tree type", qualifiedName)
-	}
-	for _, memberDecl := range decl.Members {
-		memberType, err := g.treeMemberTypeForDecl(familyType, memberDecl)
-		if err != nil {
-			return err
-		}
-		switch tt := memberType.(type) {
-		case *semantic.TreeCategoryType:
-			plan := treeCategoryLayoutPlan(tt)
-			switch {
-			case plan.isPerVariantRows():
-				if _, err := g.ensureTreeCategoryBody(tt); err != nil {
-					return err
-				}
-			case plan.isCategoryUnion():
-				if _, err := g.ensureTreeCategoryUnionPayloadType(tt); err != nil {
-					return err
-				}
-				if _, err := g.ensureTreeCategoryUnionTableType(tt); err != nil {
-					return err
-				}
-				if err := g.ensureTreeCategoryFrozenLayoutTypes(tt); err != nil {
-					return err
-				}
-			default:
-				return unsupportedTreeLayoutError(plan.name, plan.layout)
-			}
-		case *semantic.TreeBlockType:
-			if _, err := g.ensureTreeBlockBody(tt); err != nil {
-				return err
-			}
-		case *semantic.TreeStructType:
-			if _, err := g.ensureTreeStructBody(tt); err != nil {
-				return err
-			}
-		default:
-			return fmt.Errorf("unsupported tree member type %T", memberType)
-		}
-	}
-	return nil
-}
-func (g *llvmGenerator) treeMemberTypeForDecl(familyType *semantic.TreeType, memberDecl ast.TreeMemberDecl) (semantic.Type, error) {
-	if familyType == nil || memberDecl == nil {
-		return nil, fmt.Errorf("missing tree member metadata")
-	}
-	memberName := treeMemberDeclName(memberDecl)
-	memberType, ok := familyType.Member(memberName)
-	if !ok || memberType == nil {
-		return nil, fmt.Errorf("missing semantic tree member type %s.%s", familyType.Name, memberName)
-	}
-	return memberType, nil
-}
-func treeMemberDeclName(memberDecl ast.TreeMemberDecl) string {
-	switch decl := memberDecl.(type) {
-	case *ast.TreeCategoryDecl:
-		return decl.Name
-	case *ast.TreeBlockDecl:
-		return decl.Name
-	case *ast.TreeStructDecl:
-		return decl.Name
-	default:
-		return ""
-	}
-}
-func flattenLLVMTreeMemberDecls(members []ast.TreeMemberDecl) []ast.TreeMemberDecl {
-	out := make([]ast.TreeMemberDecl, 0, len(members))
-	for _, member := range members {
-		out = append(out, member)
-		if category, ok := member.(*ast.TreeCategoryDecl); ok && category != nil {
-			nested := make([]ast.TreeMemberDecl, 0, len(category.Nested))
-			for i := range category.Nested {
-				nested = append(nested, &category.Nested[i])
-			}
-			out = append(out, flattenLLVMTreeMemberDecls(nested)...)
-		}
-	}
-	return out
 }

@@ -279,11 +279,6 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			a.validateDeferStmtBody(arm.Body)
 		}
-	case *ast.VisitExpr:
-		a.validateDeferStmtBodyExpr(n.Value)
-		for _, arm := range n.Arms {
-			a.validateDeferStmtBody(arm.Body)
-		}
 	case *ast.FoldExpr:
 		a.validateDeferStmtBodyExpr(n.Value)
 		for _, arm := range n.Arms {

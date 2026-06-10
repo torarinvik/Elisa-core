@@ -288,17 +288,6 @@ func exprReferencesVariantFields(expr ast.Expr, name string) bool {
 				}
 			}
 		}
-	case *ast.VisitExpr:
-		if exprReferencesVariantFields(n.Value, name) {
-			return true
-		}
-		for _, arm := range n.Arms {
-			for _, inner := range arm.Body {
-				if stmtReferencesVariantFields(inner, name) {
-					return true
-				}
-			}
-		}
 	case *ast.FoldExpr:
 		if exprReferencesVariantFields(n.Value, name) {
 			return true
@@ -374,21 +363,8 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			if len(p.Args) != 0 {
 				a.errorf(p.Pos(), "nested match arm %q expects 0 payload patterns, got %d", variantBase.Name+"."+p.Variant, len(p.Args))
 			}
-		case *TreeCategoryType:
-			patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(variantBase, p)
-			if !ok {
-				return
-			}
-			orderedArgs := a.resolveMatchPatternArgs(p, variant, patternCategory.Name+"."+variant.Name, true)
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-				a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
-			}
 		default:
-			a.errorf(p.Pos(), "nested variant pattern %q requires an enum, const enum, or tree-category payload, got %s", p.EnumName+"."+p.Variant, expected)
+			a.errorf(p.Pos(), "nested variant pattern %q requires an enum or const enum payload, got %s", p.EnumName+"."+p.Variant, expected)
 		}
 	case *ast.MatchStringLiteralPattern:
 		a.analyzeLiteralMatchPatternExpr(p.Pos(), &ast.StringLit{Position: p.Position, Value: p.Value}, expected, "nested literal match pattern")

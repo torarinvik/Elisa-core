@@ -242,10 +242,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			result = tagType
 			return
 		}
-		if kindType, ok := a.treeCategoryKindExprType(n); ok {
-			result = kindType
-			return
-		}
 		if constEnumType, ok := a.constEnumMemberExprType(n); ok {
 			result = constEnumType
 			return
@@ -258,51 +254,11 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			return
 		}
-		if storeType, ctorType, ok := a.treeStoreExprType(n); ok {
-			if ctorType != nil {
-				result = ctorType
-			} else {
-				result = storeType
-			}
-			return
-		}
 		if enumType, ctorType, ok := a.enumVariantExprType(n); ok {
 			if ctorType != nil {
 				result = ctorType
 			} else {
 				result = enumType
-			}
-			return
-		}
-		if treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(n); ok && treeType != nil && variant != nil && len(variant.Payload) == 0 && !a.treeConstructorCallees[n] {
-			a.requireActiveTreeConstructorOwner(n.Pos(), treeType, variant)
-			if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
-				a.errorf(n.Pos(), "tree constructor %q requires explicit common fields; use call syntax with named arguments", treeType.Name+"."+variant.Name)
-				result = invalidType
-				return
-			}
-		}
-		if treeType, ctorType, ok := a.treeVariantExprType(n); ok {
-			if ctorType != nil {
-				result = ctorType
-			} else {
-				result = treeType
-			}
-			return
-		}
-		if memberType, ctorType, ok := a.treeExactMemberExprType(n); ok {
-			if ctorType != nil {
-				result = ctorType
-			} else {
-				if family, ok := TreeFamilyForMemberType(memberType); ok {
-					a.requireActiveTreeFamilyConstructorOwner(n.Pos(), family, memberType.String())
-				}
-				if len(treeExactMemberFieldDecls(memberType)) != 0 {
-					a.errorf(n.Pos(), "tree constructor %q requires explicit constructor arguments", memberType)
-					result = invalidType
-				} else {
-					result = memberType
-				}
 			}
 			return
 		}
@@ -432,9 +388,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.MatchExpr:
 		result = a.analyzeMatchExpr(n)
-		return
-	case *ast.VisitExpr:
-		result = a.analyzeVisitExpr(n)
 		return
 	case *ast.FoldExpr:
 		result = a.analyzeFoldExpr(n)
@@ -673,11 +626,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		inner := a.analyzeExpr(n.Operand)
 		a.suppressUninitReadCheck--
 		a.clearZeroedUninitializedForExpr(n.Operand)
-		if fieldExpr, ok := stripMutationTargetExpr(n.Operand).(*ast.FieldExpr); ok {
-			if _, isTreeField := a.treeSurfaceFieldExprInfo(fieldExpr); isTreeField {
-				a.errorf(n.Pos(), "cannot take address of tree field %q; tree values are handle-lowered and fields are value-only", fieldExpr.Field)
-			}
-		}
 		if a.containsAffineHandleValues(inner, map[string]bool{}) && !isBorrowableAffineOwnerType(inner) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {

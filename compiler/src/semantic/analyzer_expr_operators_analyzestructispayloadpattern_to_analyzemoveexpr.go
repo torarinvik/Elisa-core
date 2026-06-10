@@ -75,48 +75,6 @@ func (a *Analyzer) resolveEnumVariantIsTarget(expr ast.Expr) (*EnumType, *EnumVa
 	}
 	return a.enumVariantTargetFromNamedType(named)
 }
-func (a *Analyzer) resolveTreeVariantIsTarget(expr ast.Expr) (*TreeCategoryType, *EnumVariant, bool) {
-	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
-		return a.resolveTreeVariantIsTarget(paren.Inner)
-	}
-	if alias, ok := expr.(*ast.IsAliasExpr); ok && alias != nil {
-		return a.resolveTreeVariantIsTarget(alias.Target)
-	}
-	if testExpr, ok := expr.(*ast.VariantTestExpr); ok {
-		if testExpr == nil || testExpr.Pattern == nil {
-			return nil, nil, false
-		}
-		base, _, ok := a.lookupVisibleType(testExpr.Pattern.EnumName)
-		if !ok {
-			return nil, nil, false
-		}
-		treeType, ok := base.(*TreeCategoryType)
-		if !ok || treeType == nil {
-			return nil, nil, false
-		}
-		variant, ok := treeType.Variant(testExpr.Pattern.Variant)
-		if !ok || variant == nil {
-			return treeType, nil, false
-		}
-		return treeType, variant, true
-	}
-	if fieldExpr, ok := expr.(*ast.FieldExpr); ok {
-		treeType, variant, ok := a.treeConstructorInfoFromFieldExpr(fieldExpr)
-		if ok && variant != nil {
-			return treeType, variant, true
-		}
-		return nil, nil, false
-	}
-	typedExpr, ok := expr.(*ast.TypeExprExpr)
-	if !ok || typedExpr == nil || typedExpr.Type == nil {
-		return nil, nil, false
-	}
-	named, ok := typedExpr.Type.(*ast.NamedType)
-	if !ok || named == nil {
-		return nil, nil, false
-	}
-	return a.treeVariantTargetFromNamedType(named)
-}
 func (a *Analyzer) enumVariantTargetFromNamedType(named *ast.NamedType) (*EnumType, *EnumVariant, bool) {
 	if named == nil {
 		return nil, nil, false
@@ -141,47 +99,6 @@ func (a *Analyzer) enumVariantTargetFromNamedType(named *ast.NamedType) (*EnumTy
 	}
 	return enumType, variant, true
 }
-func (a *Analyzer) treeVariantTargetFromNamedType(named *ast.NamedType) (*TreeCategoryType, *EnumVariant, bool) {
-	if named == nil {
-		return nil, nil, false
-	}
-	idx := strings.LastIndex(named.Name, ".")
-	if idx <= 0 || idx+1 >= len(named.Name) {
-		return nil, nil, false
-	}
-	treeName := named.Name[:idx]
-	variantName := named.Name[idx+1:]
-	base, _, ok := a.lookupVisibleType(treeName)
-	if !ok {
-		return nil, nil, false
-	}
-	treeType, ok := base.(*TreeCategoryType)
-	if !ok || treeType == nil {
-		return nil, nil, false
-	}
-	variant, ok := treeType.Variant(variantName)
-	if !ok || variant == nil {
-		return treeType, nil, false
-	}
-	return treeType, variant, true
-}
-func resolveMatchableTreeCategoryType(actual Type) (*TreeCategoryType, *TreeVariantViewType, bool) {
-	actual = StripAggregateStateType(actual)
-	switch tt := actual.(type) {
-	case *TreeCategoryType:
-		if tt == nil {
-			return nil, nil, false
-		}
-		return tt, nil, true
-	case *TreeVariantViewType:
-		if tt == nil || tt.Category == nil {
-			return nil, nil, false
-		}
-		return tt.Category, tt, true
-	default:
-		return nil, nil, false
-	}
-}
 func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, bool) {
 	if paren, ok := expr.(*ast.ParenExpr); ok && paren != nil {
 		return a.resolveNamedStateIsTarget(paren.Inner)
@@ -197,7 +114,7 @@ func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, 
 		if idx := strings.LastIndex(named.Name, "."); idx > 0 {
 			if base, _, ok := a.lookupVisibleType(named.Name[:idx]); ok {
 				switch base.(type) {
-				case *EnumType, *TreeCategoryType:
+				case *EnumType:
 					return nil, nil, false
 				}
 			}

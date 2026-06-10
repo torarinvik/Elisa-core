@@ -29,10 +29,6 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 		return false, SameType(target, source)
 	case *TypeParamType, *RefType, *FuncType, *ViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
 		return false, false
-	case *TreeVariantViewType:
-		return false, false
-	case *TreeNodeType, *TreeCategoryType, *TreeBlockType, *TreeStructType:
-		return true, cloneBuiltinTreeTargetCompatible(target, source)
 	case *ArrayType:
 		sourceArray, ok := source.(*ArrayType)
 		if !ok || !arraySizesEqual(tt, sourceArray) {
@@ -118,7 +114,7 @@ func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 		a.errorf(expr.Pos(), "clone cannot clone %s into %s in v1", sourceType, targetType)
 		return invalidType, true
 	}
-	if needsOwner && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone && !a.regionAvailableForContainer(targetType) {
+	if needsOwner && a.currentAllocExpr == nil && !a.regionAvailableForContainer(targetType) {
 		a.errorf(expr.Pos(), "clone of %q requires an active in <owner>: scope", targetType.String())
 		return invalidType, true
 	}

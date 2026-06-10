@@ -120,55 +120,11 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 			}
 		}
 		return true
-	case *TreeCategoryType:
-		if tt == nil {
-			return false
-		}
-		for _, item := range treeCategoryVariantsInTagOrder(tt) {
-			if !covered[item.QualifiedName] {
-				return false
-			}
-		}
-		return true
 	default:
 		return false
 	}
 }
 
-type treeCategoryVariantItem struct {
-	Category      *TreeCategoryType
-	Variant       *EnumVariant
-	QualifiedName string
-}
-
-func treeCategoryVariantsInTagOrder(category *TreeCategoryType) []treeCategoryVariantItem {
-	if category == nil || category.Family == nil || category.Decl == nil {
-		return nil
-	}
-	items := make([]treeCategoryVariantItem, 0, len(category.Variants))
-	var visit func(decl *ast.TreeCategoryDecl)
-	visit = func(decl *ast.TreeCategoryDecl) {
-		if decl == nil {
-			return
-		}
-		memberType, _ := category.Family.Member(decl.Name)
-		memberCategory, _ := memberType.(*TreeCategoryType)
-		if memberCategory != nil {
-			for _, variant := range memberCategory.Variants {
-				items = append(items, treeCategoryVariantItem{
-					Category:      memberCategory,
-					Variant:       variant,
-					QualifiedName: memberCategory.Name + "." + variant.Name,
-				})
-			}
-		}
-		for i := range decl.Nested {
-			visit(&decl.Nested[i])
-		}
-	}
-	visit(category.Decl)
-	return items
-}
 func strconvQuote(s string) string {
 	return "\"" + s + "\""
 }
@@ -228,20 +184,6 @@ func (a *Analyzer) reportNonExhaustiveMatch(pos lexer.Pos, variantBase Type, cov
 			return
 		}
 		a.errorf(pos, "non-exhaustive match over %q; missing tags: %s", tt.Name, strings.Join(missing, ", "))
-	case *TreeCategoryType:
-		if tt == nil {
-			return
-		}
-		missing := make([]string, 0)
-		for _, variant := range tt.Variants {
-			if !covered[variant.Name] {
-				missing = append(missing, tt.Name+"."+variant.Name)
-			}
-		}
-		if len(missing) == 0 {
-			return
-		}
-		a.errorf(pos, "non-exhaustive match over %q; missing variants: %s", tt.Name, strings.Join(missing, ", "))
 	}
 }
 func (a *Analyzer) reportNonExhaustiveStringMatchExpr(pos lexer.Pos, hasWildcard bool) {

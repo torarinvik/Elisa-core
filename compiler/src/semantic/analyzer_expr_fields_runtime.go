@@ -1,7 +1,6 @@
 package semantic
 
 import (
-	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
 
@@ -11,43 +10,6 @@ func (a *Analyzer) lookupField(objType Type, fieldName string, pos lexer.Pos) (F
 
 func (a *Analyzer) lookupFieldNoError(objType Type, fieldName string) (Field, bool) {
 	return a.lookupFieldWithDiagnostics(objType, fieldName, lexer.Pos{}, false)
-}
-
-func (a *Analyzer) lookupTreeSurfaceFieldNoError(objType Type, fieldName string) (Field, bool) {
-	if ref, ok := objType.(*RefType); ok {
-		if ref.State != RefStateNonNull {
-			return Field{}, false
-		}
-		objType = ref.Elem
-	}
-	objType = StripAggregateStateType(objType)
-	if viewType, ok := objType.(*TreeVariantViewType); ok {
-		return TreeVariantSurfaceFieldInfo(viewType, fieldName)
-	}
-	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
-		return field, true
-	}
-	if categoryType, ok := objType.(*TreeCategoryType); ok {
-		return TreeCategorySurfaceFieldInfo(categoryType, fieldName)
-	}
-	if blockType, ok := objType.(*TreeBlockType); ok {
-		return TreeExactSurfaceFieldInfo(blockType, fieldName)
-	}
-	if structType, ok := objType.(*TreeStructType); ok {
-		return TreeExactSurfaceFieldInfo(structType, fieldName)
-	}
-	return Field{}, false
-}
-
-func (a *Analyzer) treeSurfaceFieldExprInfo(expr *ast.FieldExpr) (Field, bool) {
-	if expr == nil || expr.Safe {
-		return Field{}, false
-	}
-	objType, ok := a.exprTypes[expr.Object]
-	if !ok || objType == nil {
-		objType = a.analyzeExpr(expr.Object)
-	}
-	return a.lookupTreeSurfaceFieldNoError(objType, expr.Field)
 }
 
 func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, pos lexer.Pos, emitDiagnostics bool) (Field, bool) {
@@ -95,25 +57,6 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	if field, ok := packedStoreSyntheticField(objType, fieldName); ok {
 		return field, true
 	}
-	if attr, ok := a.lookupTreeAttribute(objType, fieldName); ok {
-		a.recordImplicitTreeStoreUseForTreeAttribute(attr)
-		return Field{Name: fieldName, Type: attr.ReturnType, Mutable: false}, true
-	}
-	if viewType, ok := objType.(*TreeVariantViewType); ok {
-		field, ok := TreeVariantSurfaceFieldInfo(viewType, fieldName)
-		if !ok {
-			if emitDiagnostics {
-				a.errorf(pos, "%s has no field %q", viewType, fieldName)
-			}
-			return Field{}, false
-		}
-		a.recordImplicitTreeStoreUseForType(objType)
-		return field, true
-	}
-	if field, ok := TreeKindFieldInfo(objType); ok && fieldName == field.Name {
-		a.recordImplicitTreeStoreUseForType(objType)
-		return field, true
-	}
 	if viewType, ok := objType.(*PackedVariantViewType); ok {
 		field, ok := viewType.Field(fieldName)
 		if !ok {
@@ -132,17 +75,6 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
-		return field, true
-	}
-	if categoryType, ok := objType.(*TreeCategoryType); ok {
-		field, ok := TreeCategorySurfaceFieldInfo(categoryType, fieldName)
-		if !ok {
-			if emitDiagnostics {
-				a.errorf(pos, "tree category %q has no common field %q", categoryType.Name, fieldName)
-			}
-			return Field{}, false
-		}
-		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	}
 	if runtimeBacked := a.runtimeBackedStructType(objType); runtimeBacked != nil {
@@ -176,26 +108,6 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
-		return field, true
-	case *TreeBlockType:
-		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
-		if !ok {
-			if emitDiagnostics {
-				a.errorf(pos, "tree block %q has no field %q", t.Name, fieldName)
-			}
-			return Field{}, false
-		}
-		a.recordImplicitTreeStoreUseForType(objType)
-		return field, true
-	case *TreeStructType:
-		field, ok := TreeExactSurfaceFieldInfo(t, fieldName)
-		if !ok {
-			if emitDiagnostics {
-				a.errorf(pos, "tree struct %q has no field %q", t.Name, fieldName)
-			}
-			return Field{}, false
-		}
-		a.recordImplicitTreeStoreUseForType(objType)
 		return field, true
 	case *GenericInstanceType:
 		baseStruct, ok := t.Base.(*StructType)

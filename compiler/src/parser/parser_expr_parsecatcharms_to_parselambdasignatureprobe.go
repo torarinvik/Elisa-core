@@ -62,28 +62,6 @@ func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
 	value := p.parseExpr()
 	return []ast.Stmt{&ast.ExprStmt{Position: pos, Expr: value}}
 }
-func (p *Parser) parseVisitExpr() ast.Expr {
-	pos := p.cur().Pos
-	p.expectIdentText("visit")
-	value := p.parseExpr()
-	var root ast.TypeExpr
-	if p.match(lexer.TOKEN_AS) {
-		root = p.parseTypeExpr()
-	}
-	arms := p.parseVisitArms()
-	return &ast.VisitExpr{Position: pos, Value: value, Root: root, Arms: arms}
-}
-func (p *Parser) parseFoldExpr() ast.Expr {
-	pos := p.cur().Pos
-	p.expectIdentText("fold")
-	value := p.parseExpr()
-	p.expect(lexer.TOKEN_AS)
-	root := p.parseTypeExpr()
-	p.expectIdentText("into")
-	resultType := p.parseTypeExpr()
-	arms := p.parseVisitArms()
-	return &ast.FoldExpr{Position: pos, Value: value, Root: root, ResultType: resultType, Arms: arms}
-}
 func (p *Parser) parseRewriteExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("rewrite")
@@ -93,6 +71,12 @@ func (p *Parser) parseRewriteExpr() ast.Expr {
 	rewriteDefault := p.matchIdentText("default")
 	arms := p.parseVisitArms()
 	return &ast.FoldExpr{Position: pos, Keyword: "rewrite", Value: value, Root: root, ResultType: root, RewriteDefault: rewriteDefault, Arms: arms}
+}
+func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
+	// Recovery for removed prefix-keyword expressions (docs/81): consume the keyword and
+	// parse the operand so one clear error is reported instead of a cascade.
+	p.advance()
+	return p.parseExpr()
 }
 func (p *Parser) parseLambdaExpr() ast.Expr {
 	pos := p.cur().Pos

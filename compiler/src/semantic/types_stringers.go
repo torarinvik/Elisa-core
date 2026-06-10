@@ -6,54 +6,46 @@ import (
 	"strings"
 )
 
-func (*InvalidType) isType()            {}
-func (*NeverType) isType()              {}
-func (*NullType) isType()               {}
-func (*BuiltinType) isType()            {}
-func (*BitIntType) isType()             {}
-func (*IDType) isType()                 {}
-func (*AddressSpaceType) isType()       {}
-func (*TypeParamType) isType()          {}
-func (*ConstParamType) isType()         {}
-func (*ConstValueType) isType()         {}
-func (*StructStateCaseType) isType()    {}
-func (*StructStateSetType) isType()     {}
-func (*RefStorageValueType) isType()    {}
-func (*RegionParamType) isType()        {}
-func (*RegionValueType) isType()        {}
-func (*ErrorSetType) isType()           {}
-func (*ErrorUnionType) isType()         {}
-func (*OptionalType) isType()           {}
-func (*TupleType) isType()              {}
-func (*BitGroupType) isType()           {}
-func (*ConstEnumType) isType()          {}
-func (*RefType) isType()                {}
-func (*ArrayType) isType()              {}
-func (*DArrayType) isType()             {}
-func (*ViewType) isType()               {}
-func (*StoreRowsViewType) isType()      {}
-func (*StoreRowViewType) isType()       {}
-func (*DStrType) isType()               {}
-func (*DictType) isType()               {}
-func (*SetType) isType()                {}
-func (*DictEntryType) isType()          {}
-func (*SViewType) isType()              {}
-func (*PackedEnumStoreType) isType()    {}
-func (*TreeStoreType) isType()          {}
-func (*FrozenTreeRowsViewType) isType() {}
-func (*PackedVariantViewType) isType()  {}
-func (*TreeVariantViewType) isType()    {}
-func (*TreeNodeType) isType()           {}
-func (*TreeType) isType()               {}
-func (*TreeCategoryType) isType()       {}
-func (*TreeBlockType) isType()          {}
-func (*TreeStructType) isType()         {}
-func (*EnumType) isType()               {}
-func (*StructType) isType()             {}
-func (*OpaqueType) isType()             {}
-func (*GenericInstanceType) isType()    {}
-func (*AggregateStateType) isType()     {}
-func (*FuncType) isType()               {}
+func (*InvalidType) isType()           {}
+func (*NeverType) isType()             {}
+func (*NullType) isType()              {}
+func (*BuiltinType) isType()           {}
+func (*BitIntType) isType()            {}
+func (*IDType) isType()                {}
+func (*AddressSpaceType) isType()      {}
+func (*TypeParamType) isType()         {}
+func (*ConstParamType) isType()        {}
+func (*ConstValueType) isType()        {}
+func (*StructStateCaseType) isType()   {}
+func (*StructStateSetType) isType()    {}
+func (*RefStorageValueType) isType()   {}
+func (*RegionParamType) isType()       {}
+func (*RegionValueType) isType()       {}
+func (*ErrorSetType) isType()          {}
+func (*ErrorUnionType) isType()        {}
+func (*OptionalType) isType()          {}
+func (*TupleType) isType()             {}
+func (*BitGroupType) isType()          {}
+func (*ConstEnumType) isType()         {}
+func (*RefType) isType()               {}
+func (*ArrayType) isType()             {}
+func (*DArrayType) isType()            {}
+func (*ViewType) isType()              {}
+func (*StoreRowsViewType) isType()     {}
+func (*StoreRowViewType) isType()      {}
+func (*DStrType) isType()              {}
+func (*DictType) isType()              {}
+func (*SetType) isType()               {}
+func (*DictEntryType) isType()         {}
+func (*SViewType) isType()             {}
+func (*PackedEnumStoreType) isType()   {}
+func (*PackedVariantViewType) isType() {}
+func (*EnumType) isType()              {}
+func (*StructType) isType()            {}
+func (*OpaqueType) isType()            {}
+func (*GenericInstanceType) isType()   {}
+func (*AggregateStateType) isType()    {}
+func (*FuncType) isType()              {}
 
 func (*ShapeParam) isShape()    {}
 func (*NamedShape) isShape()    {}
@@ -597,65 +589,9 @@ func (t *PackedEnumStoreType) String() string {
 	}
 	return t.Name
 }
-func (t *TreeStoreType) String() string {
-	if t == nil {
-		return "<invalid-tree-store>"
-	}
-	if t.State != nil {
-		return fmt.Sprintf("%s[%s]", t.Name, t.State.String())
-	}
-	return t.Name
-}
-func (t *FrozenTreeRowsViewType) String() string {
-	if t == nil || t.Category == nil {
-		return "<invalid-frozen-tree-rows>"
-	}
-	return fmt.Sprintf("%s.rows", t.Category.Name)
-}
 func (t *PackedVariantViewType) String() string {
 	if t == nil || t.Enum == nil || t.Variant == nil {
 		return "<invalid-packed-view>"
 	}
 	return fmt.Sprintf("packedview[%s.%s]", t.Enum.Name, t.Variant.Name)
-}
-
-func (t *TreeVariantViewType) SurfaceName() string {
-	if t == nil || t.Category == nil || t.Variant == nil {
-		return "<invalid-tree-view>"
-	}
-	return fmt.Sprintf("%s.%s", t.Category.Name, t.Variant.Name)
-}
-
-func (t *TreeVariantViewType) String() string {
-	return t.SurfaceName()
-}
-func (t *TreeNodeType) String() string {
-	if t == nil {
-		return "<invalid-tree-node>"
-	}
-	return t.Name
-}
-func (t *TreeType) String() string {
-	if t == nil {
-		return "<invalid-tree>"
-	}
-	return t.Name
-}
-func (t *TreeCategoryType) String() string {
-	if t == nil {
-		return "<invalid-tree-category>"
-	}
-	return t.Name
-}
-func (t *TreeBlockType) String() string {
-	if t == nil {
-		return "<invalid-tree-block>"
-	}
-	return t.Name
-}
-func (t *TreeStructType) String() string {
-	if t == nil {
-		return "<invalid-tree-struct>"
-	}
-	return t.Name
 }

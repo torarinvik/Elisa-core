@@ -185,14 +185,6 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 				appendBasicFlowInstrsForNode(block, stmt)
 			}
 		}
-	case *ast.VisitExpr:
-		appendBasicFlowExprInstrs(block, n.Value)
-		for _, arm := range n.Arms {
-			appendBasicFlowExprInstrs(block, arm.Guard)
-			for _, stmt := range arm.Body {
-				appendBasicFlowInstrsForNode(block, stmt)
-			}
-		}
 	case *ast.FoldExpr:
 		appendBasicFlowExprInstrs(block, n.Value)
 		for _, arm := range n.Arms {

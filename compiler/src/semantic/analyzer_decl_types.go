@@ -244,46 +244,6 @@ func (a *Analyzer) collectNamedTypes(decls []scopedDecl) {
 					a.namedTypes[storeName] = storeType
 					markPrivate(storeName)
 				}
-			case *ast.TreeDecl:
-				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				if _, exists := a.namedTypes[qualifiedName]; exists {
-					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
-					return
-				}
-				layout, layoutExplicit := a.treeDeclLayout(n)
-				treeType := &TreeType{Name: qualifiedName, Layout: layout, LayoutExplicit: layoutExplicit, Indexes: a.treeIndexSpecs("tree", n.Name, n.Annotations), Common: map[string]Field{}, MemberTypes: map[string]Type{}, Decl: n}
-				a.namedTypes[qualifiedName] = treeType
-				markPrivate(qualifiedName)
-				nodeQualifiedName := treeMemberTypeName(qualifiedName, "Node")
-				if _, exists := a.namedTypes[nodeQualifiedName]; exists {
-					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(nodeQualifiedName))
-					return
-				}
-				nodeType := &TreeNodeType{Name: nodeQualifiedName, Family: treeType}
-				kindName := treeNodeKindTypeName(nodeQualifiedName)
-				if _, exists := a.namedTypes[kindName]; exists {
-					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(kindName))
-					return
-				}
-				kindType := &ConstEnumType{Name: kindName, Storage: a.namedTypes["u32"], MemberMap: map[string]*ConstEnumMember{}}
-				nodeType.KindType = kindType
-				treeType.NodeType = nodeType
-				a.namedTypes[nodeQualifiedName] = nodeType
-				a.namedTypes[kindName] = kindType
-				markPrivate(nodeQualifiedName)
-				markPrivate(kindName)
-				treeType.MemberTypes["Node"] = nodeType
-				storeName := treeStoreTypeName(qualifiedName)
-				if _, exists := a.namedTypes[storeName]; exists {
-					a.errorf(n.Pos(), "%s", DuplicateTypeMessage(storeName))
-					return
-				}
-				storeType := &TreeStoreType{Name: storeName, Family: treeType}
-				treeType.StoreType = storeType
-				a.namedTypes[storeName] = storeType
-				markPrivate(storeName)
-				treeType.MemberTypes["Store"] = storeType
-				a.registerTreeMemberTypes(qualifiedName, treeType, n.Members, treeType.Layout)
 			case *ast.ExternTypeDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				if _, exists := a.namedTypes[qualifiedName]; exists {

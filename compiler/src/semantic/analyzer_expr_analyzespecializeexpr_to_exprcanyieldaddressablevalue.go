@@ -200,9 +200,6 @@ func (a *Analyzer) exprCanYieldAddressableValue(expr ast.Expr) bool {
 		if _, ok := a.lookupFieldNoError(a.analyzeExpr(n.Object), n.Field); !ok {
 			return false
 		}
-		if _, ok := a.treeSurfaceFieldExprInfo(n); ok {
-			return false
-		}
 		if _, ok := a.exprTypes[n.Object].(*RefType); ok {
 			return true
 		}

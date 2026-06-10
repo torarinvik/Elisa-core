@@ -222,21 +222,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
 			return false
 		}
-	case *TreeStoreType:
-		appendKeyTag(b, "treestore")
-		appendKeyString(b, tt.Name)
-		if !appendTypeIDKey(b, tt.State, active, nextCycleID) {
-			return false
-		}
-	case *FrozenTreeRowsViewType:
-		appendKeyTag(b, "frozen-tree-rows")
-		if tt == nil || tt.Category == nil {
-			return false
-		}
-		appendKeyString(b, tt.Category.Name)
-		if !appendTypeIDKey(b, tt.Store, active, nextCycleID) {
-			return false
-		}
 	case *PackedVariantViewType:
 		if tt == nil || tt.Enum == nil || tt.Variant == nil {
 			return false
@@ -246,30 +231,6 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 			return false
 		}
 		appendKeyString(b, tt.Variant.Name)
-	case *TreeVariantViewType:
-		if tt == nil || tt.Category == nil || tt.Variant == nil {
-			return false
-		}
-		appendKeyTag(b, "treeview")
-		if !appendTypeIDKey(b, tt.Category, active, nextCycleID) {
-			return false
-		}
-		appendKeyString(b, tt.Variant.Name)
-	case *TreeNodeType:
-		appendKeyTag(b, "treenode")
-		appendKeyString(b, tt.Name)
-	case *TreeType:
-		appendKeyTag(b, "tree")
-		appendKeyString(b, tt.Name)
-	case *TreeCategoryType:
-		appendKeyTag(b, "treecategory")
-		appendKeyString(b, tt.Name)
-	case *TreeBlockType:
-		appendKeyTag(b, "treeblock")
-		appendKeyString(b, tt.Name)
-	case *TreeStructType:
-		appendKeyTag(b, "treestruct")
-		appendKeyString(b, tt.Name)
 	case *EnumType:
 		appendKeyTag(b, "enum")
 		appendKeyString(b, tt.Name)

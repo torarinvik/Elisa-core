@@ -236,68 +236,6 @@ func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern,
 		return false
 	}
 }
-func (a *Analyzer) analyzeTopLevelTreeMatchPattern(pattern ast.MatchPattern, treeType *TreeCategoryType, valueExpr ast.Expr, scope *Scope, index int, armCount int, covered map[string]bool) bool {
-	savedScope := a.currentScope
-	a.currentScope = scope
-	defer func() { a.currentScope = savedScope }()
-	switch p := pattern.(type) {
-	case *ast.MatchWildcardPattern:
-		if index != armCount-1 {
-			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
-		}
-		return true
-	case *ast.MatchVariantPattern:
-		patternCategory, variant, ok := a.resolveTreeMatchPatternCategory(treeType, p)
-		if !ok {
-			return false
-		}
-		qualified := patternCategory.Name + "." + variant.Name
-		if covered != nil {
-			covered[qualified] = true
-		}
-		a.bindRefinedExprType(scope, valueExpr, patternCategory.VariantViewType(variant))
-		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
-		for i, arg := range orderedArgs {
-			if arg == nil {
-				continue
-			}
-			payloadExpr, _ := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
-		}
-		return false
-	case *ast.MatchBindPattern:
-		a.errorf(p.Pos(), "top-level match arm must use %q variants or _", treeType.Name)
-		return false
-	default:
-		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
-		return false
-	}
-}
-func (a *Analyzer) resolveTreeMatchPatternCategory(expected *TreeCategoryType, pattern *ast.MatchVariantPattern) (*TreeCategoryType, *EnumVariant, bool) {
-	if expected == nil || pattern == nil {
-		return nil, nil, false
-	}
-	category := expected
-	if pattern.EnumName != expected.Name {
-		base, _, ok := a.lookupVisibleType(pattern.EnumName)
-		if !ok {
-			a.errorf(pattern.Pos(), "match arm expects tree category %q or nested tree category, got %q", expected.Name, pattern.EnumName)
-			return nil, nil, false
-		}
-		resolvedCategory, ok := StripAggregateStateType(base).(*TreeCategoryType)
-		if !ok || resolvedCategory == nil || !treeCategoryDescendsFrom(resolvedCategory, expected) {
-			a.errorf(pattern.Pos(), "match arm expects tree category %q or nested tree category, got %q", expected.Name, pattern.EnumName)
-			return nil, nil, false
-		}
-		category = resolvedCategory
-	}
-	variant, ok := category.Variant(pattern.Variant)
-	if !ok {
-		a.errorf(pattern.Pos(), "tree category %q has no variant %q", category.Name, pattern.Variant)
-		return nil, nil, false
-	}
-	return category, variant, true
-}
 func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, constEnumType *ConstEnumType) {
 	if stmt.Store != nil {
 		a.errorf(stmt.Store.Pos(), "const enum match over %q does not take an in-store clause", constEnumType.Name)

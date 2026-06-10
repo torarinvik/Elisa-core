@@ -439,28 +439,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		enumType, ok := actualType.(*semantic.EnumType)
 		if !ok {
-			treeType, _, treeOK := resolveMatchableTreeCategoryTypeBackend(actualType)
-			if !treeOK || treeType == nil {
-				return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum, const enum, error set, or tree-category type, got %s", p.EnumName, p.Variant, actualType.String())
-			}
-			patternTreeType, variant, ok := s.resolveTreeMatchPatternCategory(treeType, p)
-			if !ok {
-				return nil, packedPayloadValueCache{}, fmt.Errorf("tree category %s has no variant %s", p.EnumName, p.Variant)
-			}
-			tagValue, err := s.extractTreeCategoryTagValue(actualValue, treeType)
-			if err != nil {
-				return nil, packedPayloadValueCache{}, err
-			}
-			tagConst, err := s.enumTagConstant(variant.Tag)
-			if err != nil {
-				return nil, packedPayloadValueCache{}, err
-			}
-			pred := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, tagConst, cStringFree("match.tree.tag"))
-			matchedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tree.pattern.ok"))
-			C.LLVMBuildCondBr(s.builder, pred, matchedBB, failureBB)
-
-			C.LLVMPositionBuilderAtEnd(s.builder, matchedBB)
-			return s.emitMatchedTreeVariantPayloadPatternTest(p, actualValue, patternTreeType, variant, successBB, failureBB)
+			return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum, const enum, or error set type, got %s", p.EnumName, p.Variant, actualType.String())
 		}
 		variant, ok := s.resolveEnumArmVariant(enumType, p)
 		if !ok {
@@ -489,112 +468,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 	}
 }
 func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
-	switch tt := semantic.StripAggregateStateType(actualType).(type) {
-	case *semantic.TreeVariantViewType:
-		family := treeExactMemberFamily(tt)
-		if family == nil {
-			return nil, fmt.Errorf("tree struct pattern source %s is missing tree family metadata", treeExactMemberSurfaceName(tt))
-		}
-		surfaceValue, _, err := s.emitTreeMemberSurfaceFieldValueAtHandle(actualValue, family, tt, field.Decl.Name, name)
-		return surfaceValue, err
-	case *semantic.TreeBlockType, *semantic.TreeStructType:
-		if family := treeExactMemberFamily(tt); family != nil && treeFamilyLayoutPlan(family).isCategoryUnion() {
-			stateValue, err := s.emitTreeCategoryUnionContextStateValue(family, name)
-			if err != nil {
-				return nil, err
-			}
-			tablePtr, err := s.emitTreeRootUnionTablePtr(stateValue, family, name)
-			if err != nil {
-				return nil, err
-			}
-			rowIndex, err := s.emitTreeHandleIndexValue(actualValue, name)
-			if err != nil {
-				return nil, err
-			}
-			fieldValue, fieldType, err := s.emitTreeRootUnionExactFieldValueAtIndex(tablePtr, family, tt, field.Decl.Name, rowIndex, name)
-			if err != nil {
-				return nil, err
-			}
-			surfaceField, ok := semantic.TreeExactSurfaceFieldInfo(tt, field.Decl.Name)
-			if !ok {
-				return nil, fmt.Errorf("%s has no field %s", treeExactMemberSurfaceName(tt), field.Decl.Name)
-			}
-			surfaceValue, _, err := s.treeFieldSurfaceValue(fieldValue, fieldType, surfaceField.Type, name)
-			return surfaceValue, err
-		}
-		access, err := s.emitTreeExactTableAccessFromHandle(actualValue, treeExactMemberFamily(tt), tt, name)
-		if err != nil {
-			return nil, err
-		}
-		surfaceValue, _, err := s.emitTreeExactSurfaceFieldValue(access.tablePtr, tt, field.Decl.Name, access.rowIndex, name)
-		return surfaceValue, err
-	case *semantic.TreeCategoryType:
-		surfaceField, ok := semantic.TreeCategorySurfaceFieldInfo(tt, field.Decl.Name)
-		if !ok {
-			return nil, fmt.Errorf("%s has no field %s", tt.String(), field.Decl.Name)
-		}
-		tagValue, err := s.extractTreeCategoryTagValue(actualValue, tt)
-		if err != nil {
-			return nil, err
-		}
-		var categoryUnionAccess treeCategoryUnionTableAccess
-		if treeCategoryLayoutPlan(tt).isCategoryUnion() {
-			categoryUnionAccess, err = s.emitTreeCategoryUnionTableAccessFromHandle(actualValue, tt.Family, tt, name)
-			if err != nil {
-				return nil, err
-			}
-		}
-		resultBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".result"))
-		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".fail"))
-		switchInst := C.LLVMBuildSwitch(s.builder, tagValue, failBB, C.unsigned(len(tt.Variants)))
-		var incomingValues []C.LLVMValueRef
-		var incomingBlocks []C.LLVMBasicBlockRef
-		for _, variant := range tt.Variants {
-			memberType := tt.VariantViewType(variant)
-			if _, ok := semantic.TreeVariantSurfaceFieldInfo(memberType, field.Decl.Name); !ok {
-				continue
-			}
-			caseBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".case"))
-			tagConst, err := s.enumTagConstant(variant.Tag)
-			if err != nil {
-				return nil, err
-			}
-			C.LLVMAddCase(switchInst, tagConst, caseBB)
-			C.LLVMPositionBuilderAtEnd(s.builder, caseBB)
-			var surfaceValue C.LLVMValueRef
-			if treeCategoryLayoutPlan(tt).isCategoryUnion() {
-				surfaceValue, _, err = s.emitTreeCategoryUnionSurfaceFieldValue(categoryUnionAccess.tablePtr, tt, variant, field.Decl.Name, categoryUnionAccess.rowIndex, name)
-			} else {
-				access, accessErr := s.emitTreeExactTableAccessFromHandle(actualValue, tt.Family, memberType, name)
-				if accessErr != nil {
-					return nil, accessErr
-				}
-				surfaceValue, _, err = s.emitTreeExactSurfaceFieldValue(access.tablePtr, memberType, field.Decl.Name, access.rowIndex, name)
-			}
-			if err != nil {
-				return nil, err
-			}
-			incomingValues = append(incomingValues, surfaceValue)
-			incomingBlocks = append(incomingBlocks, C.LLVMGetInsertBlock(s.builder))
-			C.LLVMBuildBr(s.builder, resultBB)
-		}
-		if len(incomingValues) == 0 {
-			return nil, fmt.Errorf("%s has no field %s", tt.String(), field.Decl.Name)
-		}
-		if err := s.emitTreeChildrenTrapBlock(failBB); err != nil {
-			return nil, err
-		}
-		C.LLVMPositionBuilderAtEnd(s.builder, resultBB)
-		llvmFieldType, err := s.g.lowerType(surfaceField.Type)
-		if err != nil {
-			return nil, err
-		}
-		phi := C.LLVMBuildPhi(s.builder, llvmFieldType, cStringFree(name+".phi"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-		return phi, nil
-	default:
-		return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil
-	}
+	return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil
 }
 func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actualValue C.LLVMValueRef, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
 	if literalExpr == nil {

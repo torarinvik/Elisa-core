@@ -112,12 +112,6 @@ type MatchExpr struct {
 	Store    Expr
 	Arms     []MatchArm
 }
-type VisitExpr struct {
-	Position lexer.Pos
-	Value    Expr
-	Root     TypeExpr
-	Arms     []VisitArm
-}
 type FoldExpr struct {
 	Position       lexer.Pos
 	Keyword        string
@@ -586,7 +580,6 @@ func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *ImportDecl) Pos() lexer.Pos     { return n.Position }
 func (n *EnumDecl) Pos() lexer.Pos       { return n.Position }
-func (n *TreeDecl) Pos() lexer.Pos       { return n.Position }
 func (n *GrammarDecl) Pos() lexer.Pos    { return n.Position }
 func (n *GrammarEnvDecl) Pos() lexer.Pos { return n.Position }
 func (n *LexerDecl) Pos() lexer.Pos      { return n.Position }

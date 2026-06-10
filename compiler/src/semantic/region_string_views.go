@@ -87,7 +87,7 @@ func (a *Analyzer) analyzeBuiltinDarrayCstrCall(expr *ast.CallExpr) (Type, bool)
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray cstr requires a mutable darray receiver (it NUL-terminates in place)")
 	}
-	if a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && !a.regionAvailableForContainer(darrayType) {
+	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
 		a.errorf(expr.Pos(), "darray cstr requires an active in <arena>: scope to NUL-terminate")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "cstr")

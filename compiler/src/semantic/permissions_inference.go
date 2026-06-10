@@ -403,12 +403,6 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		for _, arm := range n.Arms {
 			c.collectStmts(arm.Body)
 		}
-	case *ast.VisitExpr:
-		c.collectExpr(n.Value)
-		for _, arm := range n.Arms {
-			c.collectExpr(arm.Guard)
-			c.collectStmts(arm.Body)
-		}
 	case *ast.FoldExpr:
 		c.collectExpr(n.Value)
 		for _, arm := range n.Arms {

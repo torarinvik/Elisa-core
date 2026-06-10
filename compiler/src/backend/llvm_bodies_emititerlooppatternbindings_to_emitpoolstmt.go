@@ -202,7 +202,6 @@ type iterViewTransformKind int
 const (
 	iterViewTransformEnumerate iterViewTransformKind = iota
 	iterViewTransformWhere
-	iterViewTransformTreeKind
 )
 
 type iterViewTransform struct {
@@ -210,8 +209,6 @@ type iterViewTransform struct {
 	itemType      semantic.Type
 	predicate     C.LLVMValueRef
 	predicateType *semantic.FuncType
-	targetTag     C.LLVMValueRef
-	category      *semantic.TreeCategoryType
 }
 
 func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, bindMode ast.IterBindMode) (C.LLVMValueRef, semantic.Type, []iterViewTransform, error) {
@@ -278,38 +275,6 @@ func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C
 			iterSourceType = innerSourceType
 			continue
 		}
-		if carrierType, ok := semantic.TreeKindFilteredViewInstance(iterSourceType); ok {
-			innerSourceType, ok := semantic.TreeKindFilteredViewSourceType(carrierType)
-			if !ok || innerSourceType == nil {
-				return nil, nil, nil, fmt.Errorf("where_kind carrier is missing its source type")
-			}
-			itemType, ok := semantic.TreeKindFilteredViewItemType(carrierType)
-			if !ok || itemType == nil {
-				return nil, nil, nil, fmt.Errorf("where_kind carrier is missing its item type")
-			}
-			category, ok := itemType.(*semantic.TreeCategoryType)
-			if !ok || category == nil {
-				return nil, nil, nil, fmt.Errorf("where_kind carrier item must be a tree category, got %s", itemType.String())
-			}
-			if bindMode != ast.IterBindValue {
-				return nil, nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
-			}
-			carrierValue, err := s.loadValue(iterSourceAlloca, iterSourceType, sourceName+".where_kind.carrier")
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".where_kind.source", innerSourceType)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			innerSourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".where_kind.source.extract"))
-			targetTag := C.LLVMBuildExtractValue(s.builder, carrierValue, 1, cStringFree(sourceName+".where_kind.tag.extract"))
-			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
-			transforms = append(transforms, iterViewTransform{kind: iterViewTransformTreeKind, itemType: itemType, targetTag: targetTag, category: category})
-			iterSourceAlloca = innerSourceAlloca
-			iterSourceType = innerSourceType
-			continue
-		}
 		return iterSourceAlloca, iterSourceType, transforms, nil
 	}
 }
@@ -327,11 +292,6 @@ func iterLoopBaseSourceExpr(expr ast.Expr) ast.Expr {
 			}
 			expr = call.Args[0]
 		case "where":
-			if len(call.Args) != 2 {
-				return expr
-			}
-			expr = call.Args[0]
-		case "where_kind":
 			if len(call.Args) != 2 {
 				return expr
 			}
@@ -367,22 +327,6 @@ func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.
 			filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("where.filter.body"))
 			C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
 			C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
-		case iterViewTransformTreeKind:
-			if transform.category == nil || transform.targetTag == nil {
-				return nil, nil, fmt.Errorf("where_kind transform is missing metadata")
-			}
-			tagValue, err := s.extractTreeCategoryTagValue(currentValue, transform.category)
-			if err != nil {
-				return nil, nil, err
-			}
-			targetTag, err := s.coerceValue(transform.targetTag, s.g.result.NamedTypes["u32"], s.g.result.NamedTypes["u32"])
-			if err != nil {
-				return nil, nil, err
-			}
-			filterBool := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), tagValue, targetTag, cStringFree("where_kind.cmp"))
-			filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("where_kind.filter.body"))
-			C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
-			C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 		case iterViewTransformEnumerate:
 			enumeratedValue, err := s.buildEnumerateItemValue(transform.itemType, indexValue, currentValue, currentType, sourceName)
 			if err != nil {
@@ -406,102 +350,6 @@ func (s *functionState) emitEqualityCompare(left C.LLVMValueRef, leftType semant
 	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), left, rightValue, cStringFree(name)), nil
 }
 
-type frozenTreeRowFieldEqualityFilter struct {
-	category  *semantic.TreeCategoryType
-	fieldName string
-	fieldType semantic.Type
-	target    ast.Expr
-	negate    bool
-}
-
-func frozenTreeRowFieldEqualityFilterFor(pattern ast.MoveBindPattern, sourceType semantic.Type, filter ast.Expr) (frozenTreeRowFieldEqualityFilter, bool) {
-	binary, ok := filter.(*ast.BinaryExpr)
-	if !ok || binary == nil || (binary.Op != lexer.TOKEN_EQEQ && binary.Op != lexer.TOKEN_BANGEQ) {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	namePattern, ok := pattern.(*ast.MoveBindNamePattern)
-	if !ok || namePattern == nil || namePattern.Name == "_" {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	rowsType, ok := semantic.StripAggregateStateType(sourceType).(*semantic.FrozenTreeRowsViewType)
-	if !ok || rowsType == nil || rowsType.Category == nil {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	if result, ok := frozenTreeRowFieldEqualityOperand(rowsType.Category, namePattern.Name, binary.Left, binary.Right); ok {
-		result.negate = binary.Op == lexer.TOKEN_BANGEQ
-		return result, true
-	}
-	if result, ok := frozenTreeRowFieldEqualityOperand(rowsType.Category, namePattern.Name, binary.Right, binary.Left); ok {
-		result.negate = binary.Op == lexer.TOKEN_BANGEQ
-		return result, true
-	}
-	return frozenTreeRowFieldEqualityFilter{}, false
-}
-
-func frozenTreeRowFieldEqualityOperand(category *semantic.TreeCategoryType, itemName string, fieldExpr ast.Expr, target ast.Expr) (frozenTreeRowFieldEqualityFilter, bool) {
-	field, ok := fieldExpr.(*ast.FieldExpr)
-	if !ok || field == nil || field.Safe {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	ident, ok := field.Object.(*ast.Ident)
-	if !ok || ident == nil || ident.Name != itemName {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	fieldInfo, ok := semantic.TreeCategorySurfaceFieldInfo(category, field.Field)
-	if !ok || fieldInfo.Type == nil {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	if field.Field != "kind" && !frozenTreeRowFieldHasFastColumn(category, field.Field) {
-		return frozenTreeRowFieldEqualityFilter{}, false
-	}
-	return frozenTreeRowFieldEqualityFilter{
-		category:  category,
-		fieldName: field.Field,
-		fieldType: fieldInfo.Type,
-		target:    target,
-	}, true
-}
-
-func frozenTreeRowFieldHasFastColumn(category *semantic.TreeCategoryType, fieldName string) bool {
-	if category == nil {
-		return false
-	}
-	if category.Layout == semantic.TreeLayoutSOA {
-		return true
-	}
-	for _, index := range category.Indexes {
-		if !index.Kind && index.Name == fieldName {
-			return true
-		}
-	}
-	return false
-}
-
-func (s *functionState) emitFrozenTreeRowFieldEqualityFilter(rowValue C.LLVMValueRef, filter frozenTreeRowFieldEqualityFilter, name string) (C.LLVMValueRef, error) {
-	var fieldValue C.LLVMValueRef
-	var err error
-	if filter.fieldName == "kind" {
-		fieldValue, err = s.extractTreeCategoryTagValue(rowValue, filter.category)
-	} else {
-		fieldValue, err = s.emitTreeFrozenColumnFieldFilterValue(rowValue, filter.category, filter.fieldName, filter.fieldType, name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	targetValue, targetType, err := s.emitExpr(filter.target, filter.fieldType)
-	if err != nil {
-		return nil, err
-	}
-	filterBool, err := s.emitEqualityCompare(fieldValue, filter.fieldType, targetValue, targetType, name+".cmp")
-	if err != nil {
-		return nil, err
-	}
-	if filter.negate {
-		filterBool = C.LLVMBuildNot(s.builder, filterBool, cStringFree(name+".not"))
-	}
-	return filterBool, nil
-}
-
 func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, sourceType semantic.Type, rowValue C.LLVMValueRef, filter ast.Expr, passBB C.LLVMBasicBlockRef, failBB C.LLVMBasicBlockRef, name string) error {
 	if filter == nil {
 		C.LLVMBuildBr(s.builder, passBB)
@@ -523,16 +371,6 @@ func (s *functionState) emitIterFilterBranch(pattern ast.MoveBindPattern, source
 			}
 			C.LLVMPositionBuilderAtEnd(s.builder, rightBB)
 			return s.emitIterFilterBranch(pattern, sourceType, rowValue, binary.Right, passBB, failBB, name+".or.right")
-		}
-	}
-	if rowValue != nil {
-		if rowFilter, ok := frozenTreeRowFieldEqualityFilterFor(pattern, sourceType, filter); ok {
-			filterBool, err := s.emitFrozenTreeRowFieldEqualityFilter(rowValue, rowFilter, name+".field")
-			if err != nil {
-				return err
-			}
-			C.LLVMBuildCondBr(s.builder, filterBool, passBB, failBB)
-			return nil
 		}
 	}
 	filterValue, filterType, err := s.emitExpr(filter, nil)
@@ -800,17 +638,9 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 		return err
 	}
 	savedStores := s.packedStores
-	if treeStore, ok := actualType.(*semantic.TreeStoreType); ok {
-		s.treeAllocOwner = treeAllocOwnerBinding{storeValue: storeValue, storeType: treeStore}
-		defer func() {
-			s.treeAllocOwner = savedTreeOwner
-			s.packedStores = savedStores
-		}()
-		return s.emitBlock(stmt.Body, true)
-	}
 	storeType, ok := actualType.(*semantic.PackedEnumStoreType)
 	if !ok {
-		return fmt.Errorf("in-block requires a tree store, packed enum store, perm, an Arena value, or an Arena reference, got %s", actualType.String())
+		return fmt.Errorf("in-block requires a packed enum store, perm, an Arena value, or an Arena reference, got %s", actualType.String())
 	}
 	s.packedStores = s.clonePackedStores()
 	if s.packedStores == nil {

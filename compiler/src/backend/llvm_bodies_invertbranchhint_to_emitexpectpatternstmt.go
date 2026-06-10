@@ -482,10 +482,6 @@ func resolveMatchableStructTypeBackend(actual semantic.Type) bool {
 	case *semantic.GenericInstanceType:
 		base, _ := tt.Base.(*semantic.StructType)
 		return base != nil && base.Decl != nil
-	case *semantic.TreeBlockType:
-		return tt != nil && tt.Decl != nil
-	case *semantic.TreeStructType:
-		return tt != nil && tt.Decl != nil
 	default:
 		return false
 	}
@@ -524,10 +520,6 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	}
 	if optionalType, ok := s.exprType(stmt.Value).(*semantic.OptionalType); ok {
 		return s.emitOptionalMatch(stmt, optionalType)
-	}
-	treeType, _, ok := resolveMatchableTreeCategoryTypeBackend(s.exprType(stmt.Value))
-	if ok {
-		return s.emitTreeMatch(stmt, treeType)
 	}
 	if isStringMatchableType(s.exprType(stmt.Value)) {
 		return s.emitStringMatch(stmt)

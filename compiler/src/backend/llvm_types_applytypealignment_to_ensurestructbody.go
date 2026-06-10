@@ -177,52 +177,8 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.PackedEnumStoreType:
 		return g.lowerPackedEnumStoreType(tt)
-	case *semantic.TreeStoreType:
-		return g.lowerTreeStoreType(tt)
-	case *semantic.FrozenTreeRowsViewType:
-		if tt == nil || tt.Store == nil {
-			return nil, fmt.Errorf("missing frozen tree row view metadata")
-		}
-		return g.lowerTreeStoreType(tt.Store)
 	case *semantic.PackedVariantViewType:
 		return g.ensurePackedVariantViewCarrierType(tt)
-	case *semantic.TreeVariantViewType:
-		family, ok := treeNodeHandleFamily(tt)
-		if !ok || family == nil {
-			return nil, fmt.Errorf("missing tree variant view metadata")
-		}
-		if tt.Category != nil && treeCategoryLayoutPlan(tt.Category).isCategoryUnion() {
-			return g.ensureTreeDenseHandleCarrierType()
-		}
-		return g.ensureTreeHandleCarrierType(family)
-	case *semantic.TreeNodeType:
-		if tt == nil || tt.Family == nil {
-			return nil, fmt.Errorf("missing tree node metadata")
-		}
-		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
-			return g.ensureTreeDenseHandleCarrierType()
-		}
-		return g.ensureTreeHandleCarrierType(tt.Family)
-	case *semantic.TreeType:
-		return nil, fmt.Errorf("tree family %s is not a runtime value type", tt.Name)
-	case *semantic.TreeCategoryType:
-		return g.lowerTreeCategoryType(tt)
-	case *semantic.TreeBlockType:
-		if tt == nil || tt.Family == nil {
-			return nil, fmt.Errorf("missing tree block metadata")
-		}
-		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
-			return g.ensureTreeDenseHandleCarrierType()
-		}
-		return g.ensureTreeHandleCarrierType(tt.Family)
-	case *semantic.TreeStructType:
-		if tt == nil || tt.Family == nil {
-			return nil, fmt.Errorf("missing tree struct metadata")
-		}
-		if treeFamilyLayoutPlan(tt.Family).isCategoryUnion() {
-			return g.ensureTreeDenseHandleCarrierType()
-		}
-		return g.ensureTreeHandleCarrierType(tt.Family)
 	case *semantic.ArrayType:
 		elemType, err := g.lowerType(tt.Elem)
 		if err != nil {
@@ -354,35 +310,7 @@ func (g *llvmGenerator) lowerPackedEnumStoreType(storeType *semantic.PackedEnumS
 		return nil, fmt.Errorf("unsupported packed enum ABI mode %d", g.packedLoweringForStore(storeType))
 	}
 }
-func (g *llvmGenerator) lowerTreeStoreType(storeType *semantic.TreeStoreType) (C.LLVMTypeRef, error) {
-	if storeType == nil {
-		return nil, fmt.Errorf("missing tree store type")
-	}
-	name := treeStoreCarrierName(storeType)
-	ty, err := g.ensureNamedStructType(name)
-	if err != nil {
-		return nil, err
-	}
-	if g.structBodies[name] {
-		return ty, nil
-	}
-	fields := []C.LLVMTypeRef{
-		C.LLVMPointerTypeInContext(g.context, 0),
-		C.LLVMPointerTypeInContext(g.context, 0),
-	}
-	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
-	g.structBodies[name] = true
-	return ty, nil
-}
-func treeStoreCarrierName(storeType *semantic.TreeStoreType) string {
-	if storeType == nil {
-		return "TreeStore"
-	}
-	if storeType.Family != nil && storeType.Family.Name != "" {
-		return sanitizeIdentifier(storeType.Family.Name) + "__TreeStore"
-	}
-	return sanitizeIdentifier(storeType.Name)
-}
+
 func (g *llvmGenerator) ensurePackedEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
 	if enumType == nil || !enumType.Packed {
 		return nil, fmt.Errorf("missing packed enum storage type")

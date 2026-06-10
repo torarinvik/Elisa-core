@@ -122,9 +122,6 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
 	}
-	if storeType, ok := a.treeStoreConstructorCall(expr); ok {
-		return storeType
-	}
 	if callIdentName(expr) == "freeze" {
 		return a.analyzeFreezeCallExpr(expr)
 	}
@@ -132,10 +129,6 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		return helperType
 	}
 	if helperType, ok := a.analyzeProofCarryingViewHelperCall(expr); ok {
-		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
-		return helperType
-	}
-	if helperType, ok := a.analyzeTreeTraversalHelperCall(expr); ok {
 		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
 		return helperType
 	}
@@ -210,18 +203,6 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 			}
 		}
 		return errSet
-	}
-	if treeType, variant, ok := a.treeConstructorCall(expr); ok {
-		if variant != nil {
-			a.requireActiveTreeConstructorOwner(expr.Pos(), treeType, variant)
-		}
-		return a.analyzeTreeConstructorCallExpr(expr, treeType, variant)
-	}
-	if memberType, ok := a.treeExactMemberConstructorCall(expr); ok {
-		if family, ok := TreeFamilyForMemberType(memberType); ok {
-			a.requireActiveTreeFamilyConstructorOwner(expr.Pos(), family, memberType.String())
-		}
-		return a.analyzeTreeExactMemberConstructorCallExpr(expr, memberType)
 	}
 	if targetType, ok := a.analyzeTypeConstructorCall(expr); ok {
 		return targetType

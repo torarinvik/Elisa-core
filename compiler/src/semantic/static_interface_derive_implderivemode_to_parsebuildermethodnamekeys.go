@@ -35,7 +35,6 @@ type parseBuilderField struct {
 type parseBuilderConstructorCandidate struct {
 	QualifiedName string
 	Fields        []parseBuilderField
-	Family        *TreeType
 }
 
 func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
@@ -64,18 +63,9 @@ func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
 			}
 			assocExprs := implAssociatedTypeExprMap(decl)
 			existing := implMethodNameSet(decl)
-			var parseBuilderTree *TreeType
 			if spec.Mode == implDeriveParseBuilder {
-				resolvedTree, _, ok := a.lookupVisibleType(spec.TreeName)
-				if !ok {
-					a.errorf(spec.Annotation.Position, "@derive(parse_builder ...) on impl of %q references unknown tree %q", decl.InterfaceName, spec.TreeName)
-					return
-				}
-				parseBuilderTree, ok = resolvedTree.(*TreeType)
-				if !ok || parseBuilderTree == nil {
-					a.errorf(spec.Annotation.Position, "@derive(parse_builder ...) on impl of %q requires a tree family name, got %s", decl.InterfaceName, resolvedTree.String())
-					return
-				}
+				a.errorf(spec.Annotation.Position, "@derive(parse_builder ...) has been removed with the tree construct (docs/81)")
+				return
 			}
 			synthesized := make([]ast.ImplMember, 0, len(iface.Methods))
 			for _, member := range iface.Decl.Members {
@@ -90,7 +80,7 @@ func (a *Analyzer) synthesizeDerivedImplMembers(decls []scopedDecl) {
 				if sig == nil {
 					continue
 				}
-				body, ok := a.deriveImplMethodBody(decl, spec, methodDecl, sig, parseBuilderTree)
+				body, ok := a.deriveImplMethodBody(decl, spec, methodDecl, sig)
 				if !ok {
 					continue
 				}
@@ -307,7 +297,7 @@ func substituteAssocTypeExpr(expr ast.TypeExpr, assocExprs map[string]ast.TypeEx
 		return expr
 	}
 }
-func (a *Analyzer) deriveImplMethodBody(decl *ast.ImplDecl, spec *implDeriveSpec, method *ast.ExternFuncDecl, sig *derivedMethodSignature, treeType *TreeType) ([]ast.Stmt, bool) {
+func (a *Analyzer) deriveImplMethodBody(decl *ast.ImplDecl, spec *implDeriveSpec, method *ast.ExternFuncDecl, sig *derivedMethodSignature) ([]ast.Stmt, bool) {
 	if method == nil || sig == nil || spec == nil {
 		return nil, false
 	}
@@ -318,13 +308,6 @@ func (a *Analyzer) deriveImplMethodBody(decl *ast.ImplDecl, spec *implDeriveSpec
 	switch spec.Mode {
 	case implDeriveNullBuilder:
 		return deriveNullBuilderBody(method.Position, sig.ReturnType, sig.ResolvedReturn), true
-	case implDeriveParseBuilder:
-		body, ok := a.deriveParseBuilderBody(method, sig, treeType)
-		if !ok {
-			a.errorf(method.Position, "@derive(parse_builder ...) could not synthesize impl method %q in impl of interface %q; add an explicit override", method.Name, decl.InterfaceName)
-			return nil, false
-		}
-		return body, true
 	default:
 		return nil, false
 	}
@@ -341,156 +324,6 @@ func typedZeroedReturnBody(pos lexer.Pos, returnType ast.TypeExpr) []ast.Stmt {
 		&ast.VarDeclStmt{Position: pos, Name: tempName, Type: returnType, Value: &ast.ZeroedLit{Position: pos}},
 		&ast.ReturnStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: tempName}},
 	}
-}
-func (a *Analyzer) deriveParseBuilderBody(method *ast.ExternFuncDecl, sig *derivedMethodSignature, treeType *TreeType) ([]ast.Stmt, bool) {
-	if method == nil || sig == nil || treeType == nil {
-		return nil, false
-	}
-	if body, ok := deriveParseBuilderListInitBody(method, sig); ok {
-		return body, true
-	}
-	if body, ok := deriveParseBuilderListAppendBody(method, sig); ok {
-		return body, true
-	}
-	return a.deriveParseBuilderConstructorBody(method, sig, treeType)
-}
-func deriveParseBuilderListInitBody(method *ast.ExternFuncDecl, sig *derivedMethodSignature) ([]ast.Stmt, bool) {
-	if method == nil || sig == nil || len(sig.Params) != 0 {
-		return nil, false
-	}
-	if _, ok := StripAggregateStateType(sig.ResolvedReturn).(*DArrayType); !ok {
-		return nil, false
-	}
-	return typedZeroedReturnBody(method.Position, sig.ReturnType), true
-}
-func deriveParseBuilderListAppendBody(method *ast.ExternFuncDecl, sig *derivedMethodSignature) ([]ast.Stmt, bool) {
-	if method == nil || sig == nil || len(sig.Params) != 3 {
-		return nil, false
-	}
-	if sig.ResolvedReturn != nil && !isVoidType(sig.ResolvedReturn) {
-		return nil, false
-	}
-	itemsRef, ok := StripAggregateStateType(sig.ResolvedParams[1]).(*RefType)
-	if !ok || itemsRef == nil {
-		return nil, false
-	}
-	itemsType, ok := StripAggregateStateType(itemsRef.Elem).(*DArrayType)
-	if !ok || itemsType == nil {
-		return nil, false
-	}
-	if !SameType(itemsType.Elem, StripAggregateStateType(sig.ResolvedParams[2])) {
-		return nil, false
-	}
-	call := &ast.CallExpr{Position: method.Position, Func: &ast.Ident{Position: method.Position, Name: "arena_da_append"}, Args: []ast.Expr{
-		&ast.Ident{Position: method.Position, Name: sig.Params[0].Name},
-		&ast.Ident{Position: method.Position, Name: sig.Params[1].Name},
-		&ast.Ident{Position: method.Position, Name: sig.Params[2].Name},
-	}}
-	return []ast.Stmt{&ast.DiscardStmt{Position: method.Position, Value: call}}, true
-}
-func (a *Analyzer) deriveParseBuilderConstructorBody(method *ast.ExternFuncDecl, sig *derivedMethodSignature, treeType *TreeType) ([]ast.Stmt, bool) {
-	if method == nil || sig == nil || len(sig.Params) == 0 {
-		return nil, false
-	}
-	candidates := parseBuilderConstructorCandidates(StripAggregateStateType(sig.ResolvedReturn), treeType)
-	if len(candidates) == 0 {
-		return nil, false
-	}
-	params := sig.Params[1:]
-	paramTypes := sig.ResolvedParams[1:]
-	matched := make([]parseBuilderConstructorCandidate, 0, 1)
-	for _, candidate := range candidates {
-		if parseBuilderConstructorMatches(params, paramTypes, candidate.Fields) {
-			matched = append(matched, candidate)
-		}
-	}
-	if len(matched) == 0 {
-		return nil, false
-	}
-	if len(matched) > 1 {
-		filtered := filterParseBuilderCandidatesByMethodName(method.Name, matched)
-		if len(filtered) == 1 {
-			matched = filtered
-		}
-	}
-	if len(matched) != 1 {
-		return nil, false
-	}
-	owner := &ast.Ident{Position: method.Position, Name: sig.Params[0].Name}
-	ctorArgs := make([]ast.Expr, 0, len(matched[0].Fields))
-	ctorArgNames := make([]string, 0, len(matched[0].Fields))
-	for _, field := range matched[0].Fields {
-		ctorArgs = append(ctorArgs, &ast.Ident{Position: method.Position, Name: field.Name})
-		ctorArgNames = append(ctorArgNames, field.Name)
-	}
-	ctor := &ast.CallExpr{Position: method.Position, Func: qualifiedExpr(method.Position, matched[0].QualifiedName), Args: ctorArgs, ArgNames: ctorArgNames}
-	value := &ast.AllocExpr{Position: method.Position, Owner: owner, Value: ctor}
-	return []ast.Stmt{&ast.ReturnStmt{Position: method.Position, Value: value}}, true
-}
-func parseBuilderConstructorCandidates(returnType Type, treeType *TreeType) []parseBuilderConstructorCandidate {
-	if treeType == nil || returnType == nil {
-		return nil
-	}
-	switch tt := returnType.(type) {
-	case *TreeCategoryType:
-		if tt == nil || tt.Family == nil || tt.Family.Name != treeType.Name {
-			return nil
-		}
-		commonDecls := TreeCommonFieldDeclsForFamily(tt.Family)
-		out := make([]parseBuilderConstructorCandidate, 0, len(tt.Variants))
-		for _, variant := range tt.Variants {
-			if variant == nil || !treeVariantHasNamedPayloads(variant) {
-				continue
-			}
-			fields := make([]parseBuilderField, 0, len(commonDecls)+len(variant.Payload))
-			for _, decl := range commonDecls {
-				if field, ok := tt.Common[decl.Name]; ok {
-					fields = append(fields, parseBuilderField{Name: decl.Name, Type: field.Type})
-				}
-			}
-			for i := range variant.Payload {
-				fields = append(fields, parseBuilderField{Name: variant.PayloadLabel(i), Type: variant.Payload[i]})
-			}
-			out = append(out, parseBuilderConstructorCandidate{QualifiedName: tt.Name + "." + variant.Name, Fields: fields, Family: tt.Family})
-		}
-		return out
-	case *TreeBlockType:
-		if tt == nil || tt.Family == nil || tt.Family.Name != treeType.Name {
-			return nil
-		}
-		return []parseBuilderConstructorCandidate{{QualifiedName: tt.Name, Fields: treeFieldDeclsToConstructorFields(TreeBlockFieldDeclsWithCommon(tt), tt.Family.Common, tt.Fields), Family: tt.Family}}
-	case *TreeStructType:
-		if tt == nil || tt.Family == nil || tt.Family.Name != treeType.Name {
-			return nil
-		}
-		return []parseBuilderConstructorCandidate{{QualifiedName: tt.Name, Fields: treeFieldDeclsToConstructorFields(TreeStructFieldDeclsWithCommon(tt), tt.Family.Common, tt.Fields), Family: tt.Family}}
-	default:
-		return nil
-	}
-}
-func treeVariantHasNamedPayloads(variant *EnumVariant) bool {
-	if variant == nil {
-		return false
-	}
-	for i := range variant.Payload {
-		if variant.PayloadLabel(i) == "" {
-			return false
-		}
-	}
-	return true
-}
-func treeFieldDeclsToConstructorFields(decls []ast.FieldDecl, common map[string]Field, exact map[string]Field) []parseBuilderField {
-	fields := make([]parseBuilderField, 0, len(decls))
-	for _, decl := range decls {
-		if field, ok := exact[decl.Name]; ok {
-			fields = append(fields, parseBuilderField{Name: decl.Name, Type: field.Type})
-			continue
-		}
-		if field, ok := common[decl.Name]; ok {
-			fields = append(fields, parseBuilderField{Name: decl.Name, Type: field.Type})
-		}
-	}
-	return fields
 }
 func parseBuilderConstructorMatches(params []ast.ParamDecl, paramTypes []Type, fields []parseBuilderField) bool {
 	if len(params) != len(fields) || len(paramTypes) != len(fields) {

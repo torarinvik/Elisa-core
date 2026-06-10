@@ -483,10 +483,7 @@ func (s *functionState) emitTreeFieldAddress(expr *ast.FieldExpr) (C.LLVMValueRe
 	if refType, ok := baseType.(*semantic.RefType); ok {
 		baseType = semantic.StripAggregateStateType(refType.Elem)
 	}
-	if _, ok := treeNodeHandleFamily(baseType); !ok {
-		return nil, nil, false, nil
-	}
-	return nil, nil, true, fmt.Errorf("tree field address .%s is not supported for handle-lowered tree values", expr.Field)
+	return nil, nil, false, nil
 }
 func (s *functionState) packedEnumStoragePtrFromExprValue(value C.LLVMValueRef, exprType semantic.Type, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType == nil || !enumType.Packed {

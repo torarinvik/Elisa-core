@@ -132,9 +132,6 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 		constEnumType, ok := base.(*semantic.ConstEnumType)
 		return constEnumType, ok
 	case *ast.FieldExpr:
-		if kindType, ok := s.treeCategoryKindTypeForExpr(n); ok {
-			return kindType, true
-		}
 		ident, ok := n.Object.(*ast.Ident)
 		if !ok || n.Field != "Tag" {
 			return nil, false
@@ -180,45 +177,7 @@ func (s *functionState) shorthandConstEnumMemberInfo(expr *ast.ShorthandMemberEx
 	}
 	return constEnumType, member, true
 }
-func (s *functionState) treeCategoryKindTypeForExpr(expr *ast.FieldExpr) (*semantic.ConstEnumType, bool) {
-	if expr == nil || expr.Field != "Kind" {
-		return nil, false
-	}
-	ownerName, _, ok := qualifiedFieldOwnerAndLeaf(expr)
-	if !ok {
-		return nil, false
-	}
-	base, _, ok := s.lookupVisibleNamedType(ownerName)
-	if !ok {
-		return nil, false
-	}
-	categoryType, ok := base.(*semantic.TreeCategoryType)
-	if !ok || categoryType == nil || categoryType.KindType == nil {
-		return nil, false
-	}
-	return categoryType.KindType, true
-}
-func (s *functionState) treeTypeForExpr(expr ast.Expr) (*semantic.TreeType, bool) {
-	if expr == nil {
-		return nil, false
-	}
-	if treeType, ok := s.exprType(expr).(*semantic.TreeType); ok {
-		return treeType, true
-	}
-	switch n := expr.(type) {
-	case *ast.Ident:
-		base, ok := s.g.result.NamedTypes[n.Name]
-		if !ok {
-			return nil, false
-		}
-		treeType, ok := base.(*semantic.TreeType)
-		return treeType, ok
-	case *ast.ParenExpr:
-		return s.treeTypeForExpr(n.Inner)
-	default:
-		return nil, false
-	}
-}
+
 func (s *functionState) emitConstEnumMemberExpr(constEnumType *semantic.ConstEnumType, member *semantic.ConstEnumMember) (C.LLVMValueRef, semantic.Type, error) {
 	if constEnumType == nil || member == nil {
 		return nil, nil, fmt.Errorf("missing const enum member metadata")

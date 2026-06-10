@@ -1,8 +1,6 @@
 package semantic
 
 import (
-	"strings"
-
 	"elisacore/src/ast"
 )
 
@@ -234,57 +232,6 @@ func packedEnumStoreTypeName(enumName string) string {
 
 func packedEnumTagTypeName(enumName string) string {
 	return enumName + ".Tag"
-}
-
-func treeCategoryKindTypeName(categoryName string) string {
-	return categoryName + ".Kind"
-}
-
-func treeNodeKindTypeName(nodeName string) string {
-	return nodeName + ".Kind"
-}
-
-func treeMemberTypeName(treeName string, memberName string) string {
-	return treeName + "." + memberName
-}
-
-func treeStoreTypeName(treeName string) string {
-	return treeName + ".Store"
-}
-
-func treeMemberDeclName(member ast.TreeMemberDecl) string {
-	if member == nil {
-		return ""
-	}
-	switch n := member.(type) {
-	case *ast.TreeCategoryDecl:
-		return n.Name
-	case *ast.TreeBlockDecl:
-		return n.Name
-	case *ast.TreeStructDecl:
-		return n.Name
-	default:
-		return ""
-	}
-}
-
-func treeCategoryParentMemberName(name string) string {
-	idx := strings.LastIndex(name, ".")
-	if idx <= 0 {
-		return ""
-	}
-	return name[:idx]
-}
-
-func cloneTreeCommonFields(fields map[string]Field) map[string]Field {
-	if len(fields) == 0 {
-		return map[string]Field{}
-	}
-	cloned := make(map[string]Field, len(fields))
-	for name, field := range fields {
-		cloned[name] = field
-	}
-	return cloned
 }
 
 func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {

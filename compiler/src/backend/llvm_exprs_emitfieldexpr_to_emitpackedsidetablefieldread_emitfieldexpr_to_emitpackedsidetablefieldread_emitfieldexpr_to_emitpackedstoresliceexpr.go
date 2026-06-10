@@ -84,17 +84,6 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitStaticInterfaceMethodExpr(expr); handled {
 		return value, fieldType, err
 	}
-	if treeType, variant, ok := s.treeConstructorInfoFromField(expr); ok {
-		if variant == nil {
-			return nil, nil, fmt.Errorf("unknown tree constructor %s.%s", treeType.Name, expr.Field)
-		}
-		if len(variant.Payload) == 0 {
-			if treeType.Family != nil && treeType.Family.Decl != nil && len(treeType.Family.Decl.Common) != 0 {
-				return nil, nil, fmt.Errorf("tree constructor %s.%s requires explicit common fields; use call syntax with named arguments", treeType.Name, variant.Name)
-			}
-			return s.emitTreeConstructorValue(nil, treeType, variant, nil, nil, nil)
-		}
-	}
 	if enumType, variant, ok := s.enumConstructorInfoFromField(expr); ok {
 		if variant == nil {
 			return nil, nil, fmt.Errorf("unknown enum constructor %s.%s", enumType.Name, expr.Field)
@@ -118,15 +107,7 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	if value, fieldType, handled, err := s.emitPackedVariantViewFieldExpr(expr); handled {
 		return value, fieldType, err
 	}
-	if value, fieldType, handled, err := s.emitTreeAttributeFieldExpr(expr); handled {
-		return value, fieldType, err
-	}
-	if value, fieldType, handled, err := s.emitFrozenTreeRowsFieldExpr(expr); handled {
-		return value, fieldType, err
-	}
-	if value, fieldType, handled, err := s.emitTreeFieldExpr(expr); handled {
-		return value, fieldType, err
-	}
+
 	if value, fieldType, handled, err := s.emitPackedCommonFieldExpr(expr); handled {
 		return value, fieldType, err
 	}

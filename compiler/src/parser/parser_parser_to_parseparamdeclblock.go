@@ -308,7 +308,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseEnumMapDecl()
 	}
 	if p.peekIdentText("attribute") {
-		return p.parseAttributeDecl()
+		p.errorf("`attribute` declarations have been removed with the `tree` construct (docs/81); write a plain function over the `enum … is` hierarchy instead")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("grammar") {
 		return p.parseGrammarDecl()
@@ -323,7 +325,9 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseGrammarDecl()
 	}
 	if p.peekIdentText("tree") {
-		return p.parseTreeDecl()
+		p.errorf("the `tree` construct has been removed (docs/81); model the AST as a sealed `enum … is` hierarchy")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("layout") {
 		return p.parseLayoutStructDecl()
@@ -341,9 +345,6 @@ func (p *Parser) parseDecl() ast.Decl {
 		annotations := p.parseFuncAnnotations()
 		if p.peekIdentText("impl") {
 			return p.parseImplDeclWithAnnotations(annotations)
-		}
-		if p.peekIdentText("tree") {
-			return p.parseTreeDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("layout") {
 			return p.parseLayoutStructDeclWithAnnotations(annotations)

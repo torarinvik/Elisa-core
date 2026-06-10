@@ -59,8 +59,6 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		return lenValue, nil
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
-	case *semantic.FrozenTreeRowsViewType:
-		return s.emitFrozenTreeRowsCount(sourceAlloca, tt, sourceName)
 	case *semantic.DStrType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
@@ -83,14 +81,6 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		}
 		return s.coerceValue(lenValue, s.g.result.NamedTypes["i64"], usizeType)
 	case *semantic.GenericInstanceType:
-		if sourceNodeType, ok := semantic.TreeChildrenSourceType(tt); ok {
-			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
-			if err != nil {
-				return nil, err
-			}
-			nodeValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.tree.children.node"))
-			return s.emitTreeChildrenCount(sourceNodeType, nodeValue, sourceName)
-		}
 		if projectedSourceType, ok := semantic.TreeAttributeSequenceSourceType(tt); ok {
 			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.projected.source")
 			if err != nil {
@@ -342,8 +332,6 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		return value, elemType, err
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
-	case *semantic.FrozenTreeRowsViewType:
-		return s.emitFrozenTreeRowsItemValue(sourceAlloca, tt, indexValue, sourceName)
 	case *semantic.DStrType, *semantic.SViewType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
@@ -351,55 +339,6 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		}
 		return s.emitIterLoopStringIndexValue(sourceValue, sourceType, indexValue, sourceName+".iter.char")
 	case *semantic.GenericInstanceType:
-		if sourceNodeType, ok := semantic.TreeChildrenSourceType(tt); ok {
-			itemType, ok := semantic.TreeChildrenItemType(tt)
-			if !ok {
-				return nil, nil, fmt.Errorf("unsupported tree children iterable %s", sourceType.String())
-			}
-			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
-			if err != nil {
-				return nil, nil, err
-			}
-			nodeValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.tree.children.node"))
-			value, err := s.emitTreeChildrenValue(sourceNodeType, nodeValue, itemType, indexValue, sourceName)
-			if err != nil {
-				return nil, nil, err
-			}
-			return value, itemType, nil
-		}
-		if projectedSourceType, ok := semantic.TreeAttributeSequenceSourceType(tt); ok {
-			attrRef := treeAttributeFieldRefForExpr(s.g.result, sourceExpr)
-			if attrRef == nil || attrRef.Attribute == nil {
-				return nil, nil, fmt.Errorf("missing projected tree attribute metadata for iterable source")
-			}
-			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.projected.source")
-			if err != nil {
-				return nil, nil, err
-			}
-			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".iter.projected.inner", projectedSourceType)
-			if err != nil {
-				return nil, nil, err
-			}
-			innerSourceValue := C.LLVMBuildExtractValue(s.builder, sourceValue, 0, cStringFree(sourceName+".iter.projected.inner.extract"))
-			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
-			itemValue, itemType, err := s.emitIterLoopElementValue(nil, innerSourceAlloca, projectedSourceType, indexValue, sourceName+".iter.projected")
-			if err != nil {
-				return nil, nil, err
-			}
-			itemValue, err = s.coerceValue(itemValue, itemType, attrRef.Attribute.Receiver)
-			if err != nil {
-				return nil, nil, err
-			}
-			helper, err := s.ensureTreeAttributeHelper(attrRef.Attribute)
-			if err != nil {
-				return nil, nil, err
-			}
-			projectedValue, err := s.emitTreeAttributeHelperCall(helper, itemValue, sourceName+".iter.projected.attr")
-			if err != nil {
-				return nil, nil, err
-			}
-			return projectedValue, attrRef.Attribute.ReturnType, nil
-		}
 		if _, ok := semantic.ChunksExactViewItemType(tt); !ok {
 			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
 		}

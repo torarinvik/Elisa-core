@@ -30,12 +30,6 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeOptionalMatchStmt(stmt, optionalType)
 		return
 	}
-	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
-	if ok {
-		a.recordImplicitTreeStoreUseForType(valueType)
-		a.analyzeTreeMatchStmt(stmt, treeType)
-		return
-	}
 	if isStringMatchableType(valueType) {
 		a.analyzeStringMatchStmt(stmt, valueType)
 		return
@@ -52,7 +46,7 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, optional, tree-category, string, tuple, sequence, or struct value, got %s", valueType)
+	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, optional, string, tuple, sequence, or struct value, got %s", valueType)
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
@@ -196,25 +190,6 @@ func (a *Analyzer) bindExpectPatternLocals(scope *Scope, pattern ast.MatchPatter
 				}
 				a.bindExpectPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
 			}
-		case *TreeCategoryType:
-			variant, ok := variantBase.Variant(p.Variant)
-			if !ok {
-				return
-			}
-			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				var payloadExpr ast.Expr
-				if valueExpr != nil {
-					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-					if ok {
-						payloadExpr = resolvedExpr
-					}
-				}
-				a.bindExpectPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
-			}
 		}
 	}
 }
@@ -291,76 +266,6 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	a.recordAffineDestructureConsumption(stmt.Value, valueType, "match over affine enum")
 }
 
-func (a *Analyzer) analyzeTreeMatchStmt(stmt *ast.MatchStmt, treeType *TreeCategoryType) {
-	a.validateTreeMatchStore(treeType, stmt.Store)
-	baselineCloned := false
-	var baselineAffine map[affineValueKey]affineValueState
-	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
-	var baselineFunctionValues map[*Symbol]*FuncType
-	var baselineSpecializedValueTypes map[*Symbol]Type
-	cloneBaseline := func() {
-		if baselineCloned {
-			return
-		}
-		baselineAffine = a.cloneAffineValueStates()
-		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
-		baselineFunctionValues = a.cloneFunctionValueBindings()
-		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
-		baselineCloned = true
-	}
-	var mergedAffine map[affineValueKey]affineValueState
-	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
-	var mergedFunctionValues map[*Symbol]*FuncType
-	var mergedSpecializedValueTypes map[*Symbol]Type
-	hasFallthrough := false
-	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
-	covered := map[string]bool{}
-	hasWildcard := false
-	for i, arm := range stmt.Arms {
-		if a.matchPatternShadowedByPrevious(arm.Pattern, treeType, priorPatterns) {
-			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
-		}
-		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelTreeMatchPattern(arm.Pattern, treeType, stmt.Value, scope, i, len(stmt.Arms), covered) {
-			hasWildcard = true
-		}
-		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
-		if !blockDefinitelyExits(arm.Body) {
-			if !hasFallthrough {
-				mergedAffine = armSnapshot.Affine
-				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
-				mergedFunctionValues = armSnapshot.FunctionValues
-				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
-				hasFallthrough = true
-			} else {
-				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
-				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
-				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
-				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
-			}
-		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
-	}
-	if !a.matchCoversAllVariants(treeType, covered, hasWildcard) {
-		cloneBaseline()
-		if !hasFallthrough {
-			mergedAffine = baselineAffine
-			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
-			mergedFunctionValues = baselineFunctionValues
-			mergedSpecializedValueTypes = baselineSpecializedValueTypes
-		} else {
-			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
-			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
-			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
-			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
-		}
-	}
-	a.currentAffineValues = mergedAffine
-	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
-	a.currentFunctionValues = mergedFunctionValues
-	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
-}
-
 func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	valueType := a.analyzeExpr(expr.Value)
 	enumType, _, ok := resolveMatchableEnumType(valueType)
@@ -378,10 +283,6 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if optionalType, ok := valueType.(*OptionalType); ok {
 		return a.analyzeOptionalMatchExpr(expr, optionalType)
 	}
-	treeType, _, ok := resolveMatchableTreeCategoryType(valueType)
-	if ok {
-		return a.analyzeTreeMatchExpr(expr, treeType)
-	}
 	if isStringMatchableType(valueType) {
 		return a.analyzeStringMatchExpr(expr, valueType)
 	}
@@ -391,7 +292,7 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, optional, tree-category, string, tuple, or struct value, got %s", valueType)
+	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, optional, string, tuple, or struct value, got %s", valueType)
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}

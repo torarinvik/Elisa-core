@@ -5,20 +5,16 @@ import "elisacore/src/lexer"
 func (n *GrammarReturnTerm) Pos() lexer.Pos {
 	return n.Position
 }
-func (n *AttributeDecl) Pos() lexer.Pos    { return n.Position }
-func (n *TreeCategoryDecl) Pos() lexer.Pos { return n.Position }
-func (n *TreeBlockDecl) Pos() lexer.Pos    { return n.Position }
-func (n *TreeStructDecl) Pos() lexer.Pos   { return n.Position }
-func (n *GlobalDecl) Pos() lexer.Pos       { return n.Position }
-func (n *StructDecl) Pos() lexer.Pos       { return n.Position }
-func (n *StoreDecl) Pos() lexer.Pos        { return n.Position }
-func (n *FuncDecl) Pos() lexer.Pos         { return n.Position }
-func (n *ExternFuncDecl) Pos() lexer.Pos   { return n.Position }
-func (n *ExternVarDecl) Pos() lexer.Pos    { return n.Position }
-func (n *ExternTypeDecl) Pos() lexer.Pos   { return n.Position }
-func (n *TypeAliasDecl) Pos() lexer.Pos    { return n.Position }
-func (n *ExportTypeDecl) Pos() lexer.Pos   { return n.Position }
-func (n *ExportFuncDecl) Pos() lexer.Pos   { return n.Position }
+func (n *GlobalDecl) Pos() lexer.Pos     { return n.Position }
+func (n *StructDecl) Pos() lexer.Pos     { return n.Position }
+func (n *StoreDecl) Pos() lexer.Pos      { return n.Position }
+func (n *FuncDecl) Pos() lexer.Pos       { return n.Position }
+func (n *ExternFuncDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExternVarDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ExternTypeDecl) Pos() lexer.Pos { return n.Position }
+func (n *TypeAliasDecl) Pos() lexer.Pos  { return n.Position }
+func (n *ExportTypeDecl) Pos() lexer.Pos { return n.Position }
+func (n *ExportFuncDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExportGlobalDecl) Pos() lexer.Pos {
 	return n.Position
 }
@@ -119,7 +115,6 @@ func (n *OptionalBindExpr) Pos() lexer.Pos {
 func (n *AllocExpr) Pos() lexer.Pos { return n.Position }
 func (n *CanExpr) Pos() lexer.Pos   { return n.Position }
 func (n *MatchExpr) Pos() lexer.Pos { return n.Position }
-func (n *VisitExpr) Pos() lexer.Pos { return n.Position }
 func (n *FoldExpr) Pos() lexer.Pos  { return n.Position }
 func (n *EmitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
@@ -198,7 +193,6 @@ func (*NamespaceDecl) nodeTag()                        {}
 func (*UsingDecl) nodeTag()                            {}
 func (*ImportDecl) nodeTag()                           {}
 func (*EnumDecl) nodeTag()                             {}
-func (*TreeDecl) nodeTag()                             {}
 func (*GrammarDecl) nodeTag()                          {}
 func (*GrammarEnvDecl) nodeTag()                       {}
 func (*LexerDecl) nodeTag()                            {}
@@ -238,10 +232,6 @@ func (*GrammarApplyTerm) nodeTag()                     {}
 func (*GrammarBindTerm) nodeTag()                      {}
 func (*GrammarAssignTerm) nodeTag()                    {}
 func (*GrammarReturnTerm) nodeTag()                    {}
-func (*AttributeDecl) nodeTag()                        {}
-func (*TreeCategoryDecl) nodeTag()                     {}
-func (*TreeBlockDecl) nodeTag()                        {}
-func (*TreeStructDecl) nodeTag()                       {}
 func (*GlobalDecl) nodeTag()                           {}
 func (*StructDecl) nodeTag()                           {}
 func (*StoreDecl) nodeTag()                            {}
@@ -325,7 +315,6 @@ func (*OptionalBindExpr) nodeTag()                     {}
 func (*AllocExpr) nodeTag()                            {}
 func (*CanExpr) nodeTag()                              {}
 func (*MatchExpr) nodeTag()                            {}
-func (*VisitExpr) nodeTag()                            {}
 func (*FoldExpr) nodeTag()                             {}
 func (*EmitExpr) nodeTag()                             {}
 func (*MatchWildcardPattern) nodeTag()                 {}
@@ -396,11 +385,9 @@ func (*NamespaceDecl) declTag()                        {}
 func (*UsingDecl) declTag()                            {}
 func (*ImportDecl) declTag()                           {}
 func (*EnumDecl) declTag()                             {}
-func (*TreeDecl) declTag()                             {}
 func (*GrammarDecl) declTag()                          {}
 func (*GrammarEnvDecl) declTag()                       {}
 func (*LexerDecl) declTag()                            {}
-func (*AttributeDecl) declTag()                        {}
 func (*GlobalDecl) declTag()                           {}
 func (*StructDecl) declTag()                           {}
 func (*StoreDecl) declTag()                            {}
@@ -420,9 +407,6 @@ func (*StaticGenerateEmitDecl) staticGenerateStmtTag() {}
 func (*StaticGenerateForDecl) staticGenerateStmtTag()  {}
 func (*StaticGenerateIfDecl) staticGenerateStmtTag()   {}
 func (*TypeAliasDecl) nodeTag()                        {}
-func (*TreeCategoryDecl) treeMemberDeclTag()           {}
-func (*TreeBlockDecl) treeMemberDeclTag()              {}
-func (*TreeStructDecl) treeMemberDeclTag()             {}
 func (*GrammarPassTerm) grammarTermTag()               {}
 func (*GrammarTokenTerm) grammarTermTag()              {}
 func (*GrammarTokenKindTerm) grammarTermTag()          {}
@@ -531,7 +515,6 @@ func (*TypeExprExpr) exprTag()                         {}
 func (*ParenExpr) exprTag()                            {}
 func (*RaiseExpr) exprTag()                            {}
 func (*MatchExpr) exprTag()                            {}
-func (*VisitExpr) exprTag()                            {}
 func (*FoldExpr) exprTag()                             {}
 func (*EmitExpr) exprTag()                             {}
 func (*MatchStmt) stmtTag()                            {}

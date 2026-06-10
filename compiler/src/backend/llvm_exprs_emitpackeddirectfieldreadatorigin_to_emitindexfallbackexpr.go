@@ -271,34 +271,12 @@ func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr)
 	}
 	return semantic.PackedEnumStoreWithState(enumType.StoreType, s.g.result.NamedTypes["Local"]), true
 }
-func (s *functionState) treeStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.TreeStoreType, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
-	if !ok {
-		return nil, false
-	}
-	base, ok := s.g.result.NamedTypes[ident.Name]
-	if !ok {
-		return nil, false
-	}
-	treeType, ok := base.(*semantic.TreeType)
-	if !ok || expr.Field != "Store" || treeType.StoreType == nil {
-		return nil, false
-	}
-	return semantic.TreeStoreWithState(treeType.StoreType, s.g.result.NamedTypes["Local"]), true
-}
 func (s *functionState) packedStoreConstructorCall(expr *ast.CallExpr) (*semantic.PackedEnumStoreType, bool) {
 	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
 	if !ok {
 		return nil, false
 	}
 	return s.packedStoreConstructorInfoFromField(fieldExpr)
-}
-func (s *functionState) treeStoreConstructorCall(expr *ast.CallExpr) (*semantic.TreeStoreType, bool) {
-	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
-	if !ok {
-		return nil, false
-	}
-	return s.treeStoreConstructorInfoFromField(fieldExpr)
 }
 func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if value, resultType, handled, err := s.emitPackedStoreSliceExpr(expr); handled {

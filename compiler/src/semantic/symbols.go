@@ -34,12 +34,10 @@ type Result struct {
 	LoweredFile             *ast.File
 	GlobalScope             *Scope
 	NamedTypes              map[string]Type
-	TreeAttributes          map[string]map[string]*TreeAttribute
 	StaticInterfaces        map[string]*StaticInterface
 	StaticImpls             map[string]*StaticImpl
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
-	AttributeFieldRefs      map[*ast.FieldExpr]*AttributeFieldRef
 	RewriteDefaults         map[*ast.Ident]bool
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
@@ -76,17 +74,6 @@ func (r *Result) ActiveFile() *ast.File {
 		return r.LoweredFile
 	}
 	return r.File
-}
-
-type TreeAttribute struct {
-	Name       string
-	Receiver   Type
-	ReturnType Type
-	Decl       *ast.AttributeDecl
-}
-
-type AttributeFieldRef struct {
-	Attribute *TreeAttribute
 }
 
 type SafeCallInfo struct {

@@ -95,8 +95,6 @@ type Analyzer struct {
 	externLinkNames         map[string]externLinkNameSignature
 	constValues             map[string]ConstValue
 	exprTypes               map[ast.Expr]Type
-	treeAttributes          map[string]map[string]*TreeAttribute
-	attributeFieldRefs      map[*ast.FieldExpr]*AttributeFieldRef
 	rewriteDefaults         map[*ast.Ident]bool
 	optionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
@@ -212,8 +210,6 @@ type Analyzer struct {
 	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
 	currentPackedStores           map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions map[*Symbol]packedStoreResolution
-	currentTreeAllocOwner         treeAllocOwnerBinding
-	currentFunctionUsedTreeStores map[string]*TreeStoreType
 	currentRewriteDefault         *rewriteDefaultContext
 	currentSequenceRewrite        *sequenceRewriteContext
 	currentAllocExpr              ast.Expr
@@ -346,22 +342,6 @@ type packedStoreDependencyState struct {
 type packedStoreResolution struct {
 	Symbol *Symbol
 	Type   *PackedEnumStoreType
-}
-
-type treeAllocOwnerKind int
-
-const (
-	treeAllocOwnerNone treeAllocOwnerKind = iota
-	treeAllocOwnerPerm
-	treeAllocOwnerRegion
-	treeAllocOwnerArena
-	treeAllocOwnerStore
-)
-
-type treeAllocOwnerBinding struct {
-	Kind        treeAllocOwnerKind
-	RegionName  string
-	StoreFamily *TreeType
 }
 
 type rewriteDefaultContext struct {
@@ -501,8 +481,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		externLinkNames:                   map[string]externLinkNameSignature{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
-		treeAttributes:                    map[string]map[string]*TreeAttribute{},
-		attributeFieldRefs:                make(map[*ast.FieldExpr]*AttributeFieldRef, exprCapacity/32+8),
 		rewriteDefaults:                   make(map[*ast.Ident]bool, exprCapacity/128+4),
 		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
@@ -566,7 +544,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.populateEnumVariants(activeDecls)
 	a.assignHierarchyEnumTags(activeDecls)
 	a.inheritHierarchyCommonFields(activeDecls)
-	a.populateTreeMembers(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)
 	expandedDecls := a.expandActiveAndGeneratedDecls(activeFile.Decls, generatedDecls)
 	if len(generatedDecls) != 0 {
@@ -592,10 +569,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.populateEnumVariants(generatedScopedDecls)
 		a.assignHierarchyEnumTags(generatedScopedDecls)
 		a.inheritHierarchyCommonFields(generatedScopedDecls)
-		a.populateTreeMembers(generatedScopedDecls)
 	}
 	a.validatePermissionSubsumption()
-	a.collectTreeAttributes(activeDecls)
 	a.synthesizeDerivedImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
@@ -618,12 +593,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		LoweredFile:             loweredFile,
 		GlobalScope:             a.globalScope,
 		NamedTypes:              a.namedTypes,
-		TreeAttributes:          a.treeAttributes,
 		StaticInterfaces:        a.staticInterfaces,
 		StaticImpls:             a.staticImpls,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
-		AttributeFieldRefs:      a.attributeFieldRefs,
 		RewriteDefaults:         a.rewriteDefaults,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
 		InterfaceMethodRefs:     a.interfaceMethodRefs,

@@ -17,8 +17,15 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		a.errorf(expr.Pos(), "query expression value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
 	}
 	if expr.Owner != nil {
-		owner, ownerType, ok := a.classifyTreeAllocOwnerExpr(expr.Owner)
-		if !ok || owner.Kind != treeAllocOwnerArena {
+		ownerType := a.analyzeExpr(expr.Owner)
+		arenaType := a.namedTypes["Arena"]
+		isArena := arenaType != nil && AssignableTo(arenaType, ownerType)
+		if !isArena {
+			if refT, ok := ownerType.(*RefType); ok && refT != nil && arenaType != nil {
+				isArena = AssignableTo(arenaType, refT.Elem)
+			}
+		}
+		if !isArena {
 			a.errorf(expr.Owner.Pos(), "query expression owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
 		if expr.Kind != ast.QueryExprEach {
@@ -46,7 +53,6 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		}
 		a.analyzeNestedMatchPattern(expr.PatternFilter, patternType, valueExpr, loopScope)
 	}
-	expr.Filter = a.rewriteFrozenTreeRowFieldFilterShorthand(loopScope, pattern, sourceType, expr.Filter)
 	if expr.Filter != nil {
 		// When the query source const-folds (compile-time reflection like fields(T), or a
 		// const list), the predicate is evaluated at compile time over interned literals, so
@@ -79,7 +85,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 			result = &OptionalType{Value: info.ItemType}
 		}
 	case ast.QueryExprEach:
-		if expr.Owner == nil && a.staticContextDepth == 0 && a.currentTreeAllocOwner.Kind != treeAllocOwnerArena && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
+		if expr.Owner == nil && a.staticContextDepth == 0 && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
 			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
 		}
 		projectionType := info.ItemType
@@ -241,7 +247,7 @@ func (a *Analyzer) analyzeDictLiteralExpr(expr *ast.ListLitExpr, expected Type) 
 		a.exprTypes[expr] = invalidType
 		return invalidType
 	}
-	if !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+	if !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil {
 		a.errorf(expr.Pos(), "dict literal requires an active in <arena>: scope")
 	}
 	a.recordAnalyzedExprType(expr, dictType)
@@ -274,7 +280,7 @@ func (a *Analyzer) analyzeSetLiteralExpr(expr *ast.ListLitExpr, expected Type) T
 		a.exprTypes[expr] = invalidType
 		return invalidType
 	}
-	if !a.regionAvailableForContainer(setType) && a.currentAllocExpr == nil && a.currentTreeAllocOwner.Kind == treeAllocOwnerNone {
+	if !a.regionAvailableForContainer(setType) && a.currentAllocExpr == nil {
 		a.errorf(expr.Pos(), "set literal requires an active in <arena>: scope")
 	}
 	a.recordAnalyzedExprType(expr, setType)

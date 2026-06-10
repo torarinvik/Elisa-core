@@ -337,11 +337,22 @@ func (a *Analyzer) regionAvailableForContainer(t Type) bool {
 	if a.lookupRegionParam(region) {
 		return true
 	}
-	if a.currentTreeAllocOwner.Kind == treeAllocOwnerRegion && a.currentTreeAllocOwner.RegionName == region {
-		return true
-	}
 	if sym, state := a.lookupRegionState(region); sym != nil && !state.Destroyed {
 		return true
+	}
+	// An Arena value or Arena& ref in scope also satisfies the region requirement.
+	// This covers `darray[T] @alloc` when `alloc: mutable Arena&` is in scope.
+	if a.currentScope != nil && a.namedTypes["Arena"] != nil {
+		if sym, ok := a.currentScope.Lookup(region); ok && sym != nil {
+			arenaType := a.namedTypes["Arena"]
+			st := sym.Type
+			if SameType(st, arenaType) {
+				return true
+			}
+			if refT, ok2 := st.(*RefType); ok2 && refT != nil && SameType(refT.Elem, arenaType) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -416,22 +427,11 @@ func containerOrEntryRegion(t Type) string {
 // activeContainerRegionName is the name of the region of the innermost active
 // `in <arena/region>:` scope, or "" if none.
 func (a *Analyzer) activeContainerRegionName() string {
-	if a == nil {
+	if a == nil || a.currentAllocExpr == nil {
 		return ""
 	}
-	owner := a.currentTreeAllocOwner
-	switch owner.Kind {
-	case treeAllocOwnerRegion:
-		// `region r(...):` — a named region.
-		return owner.RegionName
-	case treeAllocOwnerArena:
-		// plain `in <arena>:` — use the arena variable's name as the region
-		// identity (Phase 1 proxy; proper region identity comes in Phase 3).
-		if ident, ok := stripTreeAllocOwnerExpr(a.currentAllocExpr).(*ast.Ident); ok && ident != nil {
-			return ident.Name
-		}
-		return ""
-	default:
-		return ""
+	if ident, ok := stripParenExpr(a.currentAllocExpr).(*ast.Ident); ok && ident != nil {
+		return ident.Name
 	}
+	return ""
 }

@@ -497,12 +497,6 @@ func (a *Analyzer) conditionAliasBindingType(leftExpr ast.Expr, target ast.Expr,
 			return alias.Alias, variant.PackedViewType(matchableEnum), true
 		}
 	}
-	if treeType, variant, ok := a.resolveTreeVariantIsTarget(alias.Target); ok && treeType != nil && variant != nil {
-		matchableTree, _, ok := resolveMatchableTreeCategoryType(leftType)
-		if ok && matchableTree != nil && matchableTree.Name == treeType.Name {
-			return alias.Alias, matchableTree.VariantViewType(variant), true
-		}
-	}
 	if targetBase, targetState, ok := a.resolveNamedStateIsTarget(alias.Target); ok && targetBase != nil && targetState != nil {
 		leftBase, ok := namedStateStructBase(leftType)
 		if ok && leftBase != nil && leftBase.Name == targetBase.Name {
@@ -589,18 +583,6 @@ func (a *Analyzer) collectConditionStructPatternBindingTypes(pattern ast.MatchPa
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:
-			variant, ok := variantBase.Variant(p.Variant)
-			if !ok {
-				return
-			}
-			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				a.collectConditionStructPatternBindingTypes(arg.Pattern, variant.Payload[i], out)
-			}
-		case *TreeCategoryType:
 			variant, ok := variantBase.Variant(p.Variant)
 			if !ok {
 				return
@@ -1030,25 +1012,6 @@ func (a *Analyzer) bindConditionStructPatternLocals(scope *Scope, pattern ast.Ma
 	case *ast.MatchVariantPattern:
 		switch variantBase := expected.(type) {
 		case *EnumType:
-			variant, ok := variantBase.Variant(p.Variant)
-			if !ok {
-				return
-			}
-			orderedArgs := a.resolvePartialMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
-			for i, arg := range orderedArgs {
-				if arg == nil {
-					continue
-				}
-				var payloadExpr ast.Expr
-				if valueExpr != nil {
-					resolvedExpr, ok := a.resolveMatchVariantPayloadValueExpr(valueExpr, p, moveBindVariantFieldKey(variant, i))
-					if ok {
-						payloadExpr = resolvedExpr
-					}
-				}
-				a.bindConditionStructPatternLocals(scope, arg.Pattern, variant.Payload[i], payloadExpr)
-			}
-		case *TreeCategoryType:
 			variant, ok := variantBase.Variant(p.Variant)
 			if !ok {
 				return

@@ -19,102 +19,6 @@ import (
 	"strings"
 )
 
-func (s *functionState) emitMatchedTreeVariantPayloadPatternTest(pattern *ast.MatchVariantPattern, actualValue C.LLVMValueRef, treeType *semantic.TreeCategoryType, variant *semantic.EnumVariant, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) (C.LLVMValueRef, packedPayloadValueCache, error) {
-	if pattern == nil || variant == nil {
-		C.LLVMBuildBr(s.builder, successBB)
-		return actualValue, packedPayloadValueCache{}, nil
-	}
-	if len(pattern.Args) == 0 {
-		C.LLVMBuildBr(s.builder, successBB)
-		return actualValue, packedPayloadValueCache{}, nil
-	}
-	namedCount := 0
-	for i := range pattern.Args {
-		if pattern.Args[i].Name != "" {
-			namedCount++
-		}
-	}
-	var orderedArgs []*ast.MatchPatternArg
-	if namedCount == 0 {
-		if len(pattern.Args) != len(variant.Payload) {
-			return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s expects %d payload patterns, got %d", pattern.EnumName, pattern.Variant, len(variant.Payload), len(pattern.Args))
-		}
-		orderedArgs = make([]*ast.MatchPatternArg, len(pattern.Args))
-		for i := range pattern.Args {
-			orderedArgs[i] = &pattern.Args[i]
-		}
-	} else {
-		if namedCount != len(pattern.Args) {
-			return nil, packedPayloadValueCache{}, fmt.Errorf("match arm %s.%s cannot mix positional and named payload patterns", pattern.EnumName, pattern.Variant)
-		}
-		var err error
-		orderedArgs, err = s.resolveMatchPatternArgs(pattern, variant)
-		if err != nil {
-			return nil, packedPayloadValueCache{}, err
-		}
-	}
-	lastNestedPattern := -1
-	for i := range orderedArgs {
-		if orderedArgs[i] != nil && orderedArgs[i].Pattern != nil {
-			lastNestedPattern = i
-		}
-	}
-	if lastNestedPattern < 0 {
-		C.LLVMBuildBr(s.builder, successBB)
-		return actualValue, packedPayloadValueCache{}, nil
-	}
-	payloadValues, err := s.extractTreeVariantPayloadValues(actualValue, treeType, variant)
-	if err != nil {
-		return nil, packedPayloadValueCache{}, err
-	}
-	for i := range orderedArgs {
-		arg := orderedArgs[i]
-		if arg == nil || arg.Pattern == nil {
-			continue
-		}
-		nextSuccess := successBB
-		if i != lastNestedPattern {
-			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.tree.pattern.next"))
-		}
-		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], nil, nil, nil, nextSuccess, failureBB); err != nil {
-			return nil, packedPayloadValueCache{}, err
-		}
-		if i != lastNestedPattern {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextSuccess)
-		}
-	}
-	return actualValue, packedPayloadValueCache{}, nil
-}
-func (s *functionState) resolveTreeMatchPatternCategory(expected *semantic.TreeCategoryType, pattern *ast.MatchVariantPattern) (*semantic.TreeCategoryType, *semantic.EnumVariant, bool) {
-	if expected == nil || pattern == nil {
-		return nil, nil, false
-	}
-	category := expected
-	if pattern.EnumName != expected.Name {
-		base, ok := s.g.result.NamedTypes[pattern.EnumName]
-		if !ok {
-			return nil, nil, false
-		}
-		resolvedCategory, ok := semantic.StripAggregateStateType(base).(*semantic.TreeCategoryType)
-		if !ok || resolvedCategory == nil || !treeCategoryDescendsFromBackend(resolvedCategory, expected) {
-			return nil, nil, false
-		}
-		category = resolvedCategory
-	}
-	variant, ok := category.Variant(pattern.Variant)
-	if !ok {
-		return nil, nil, false
-	}
-	return category, variant, true
-}
-func treeCategoryDescendsFromBackend(src *semantic.TreeCategoryType, dst *semantic.TreeCategoryType) bool {
-	for current := src; current != nil; current = current.Parent {
-		if semantic.SameType(current, dst) {
-			return true
-		}
-	}
-	return false
-}
 func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil || len(arms) == 0 {
 		return false
@@ -186,22 +90,6 @@ func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPa
 			got := semantic.StripAggregateStateType(actualType).String()
 			if base != nil {
 				got = base.Name
-			}
-			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
-		}
-	case *semantic.TreeBlockType:
-		if tt == nil || (pattern.TypeName != "" && tt.Name != pattern.TypeName) || tt.Decl == nil {
-			got := "<invalid>"
-			if tt != nil {
-				got = tt.Name
-			}
-			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
-		}
-	case *semantic.TreeStructType:
-		if tt == nil || (pattern.TypeName != "" && tt.Name != pattern.TypeName) || tt.Decl == nil {
-			got := "<invalid>"
-			if tt != nil {
-				got = tt.Name
 			}
 			return nil, nil, fmt.Errorf("struct pattern expects struct %s, got %s", pattern.TypeName, got)
 		}
@@ -409,21 +297,6 @@ func constEnumMatchIsExhaustive(constEnumType *semantic.ConstEnumType, arms []as
 		}
 	}
 	return len(covered) == len(constEnumType.Members)
-}
-func treeMatchIsExhaustive(treeType *semantic.TreeCategoryType, arms []ast.MatchArm) bool {
-	if treeType == nil {
-		return false
-	}
-	covered := map[string]bool{}
-	for _, arm := range arms {
-		switch pattern := arm.Pattern.(type) {
-		case *ast.MatchWildcardPattern:
-			return true
-		case *ast.MatchVariantPattern:
-			covered[pattern.Variant] = true
-		}
-	}
-	return len(covered) == len(treeType.Variants)
 }
 func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType != nil && !enumType.Packed && enumIsTagOnly(enumType) {

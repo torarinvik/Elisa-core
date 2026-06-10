@@ -197,12 +197,6 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 			return invalidType
 		}
 		return PackedEnumStoreWithState(n, state)
-	case *TreeStoreType:
-		state := a.substituteTypeWithDepth(n.State, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
-		if IsInvalidType(state) {
-			return invalidType
-		}
-		return TreeStoreWithState(n, state)
 	case *FuncType:
 		params := make([]Type, 0, len(n.Params))
 		for _, param := range n.Params {

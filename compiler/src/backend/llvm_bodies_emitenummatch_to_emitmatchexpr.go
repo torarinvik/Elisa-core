@@ -201,65 +201,6 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 	}
 	return nil
 }
-func (s *functionState) emitTreeMatch(stmt *ast.MatchStmt, treeType *semantic.TreeCategoryType) error {
-	if treeType == nil {
-		return fmt.Errorf("match requires a tree-category value")
-	}
-	if stmt.Store != nil {
-		return fmt.Errorf("tree match over %q does not take an in-store clause", treeType.Name)
-	}
-	actualType := s.exprType(stmt.Value)
-	treeValue, _, err := s.emitExpr(stmt.Value, nil)
-	if err != nil {
-		return err
-	}
-	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
-	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
-	allTerminated := true
-	exhaustive := treeMatchIsExhaustive(treeType, stmt.Arms)
-
-	for i, arm := range stmt.Arms {
-		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm"))
-		var nextBB C.LLVMBasicBlockRef
-		if i == len(stmt.Arms)-1 {
-			nextBB = failBB
-		} else {
-			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
-		}
-		if _, _, err := s.emitMatchPatternTest(arm.Pattern, treeValue, nil, actualType, nil, stmt.Value, nil, bodyBB, nextBB); err != nil {
-			return err
-		}
-
-		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
-		s.pushScope()
-		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
-			s.popScope()
-			return err
-		}
-		s.popScope()
-		if !s.currentBlockTerminated() {
-			allTerminated = false
-			C.LLVMBuildBr(s.builder, mergeBB)
-		}
-
-		if nextBB != mergeBB {
-			C.LLVMPositionBuilderAtEnd(s.builder, nextBB)
-		}
-	}
-
-	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-	if exhaustive {
-		C.LLVMBuildUnreachable(s.builder)
-	} else {
-		C.LLVMBuildBr(s.builder, mergeBB)
-	}
-
-	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if allTerminated && exhaustive {
-		C.LLVMBuildUnreachable(s.builder)
-	}
-	return nil
-}
 func (s *functionState) emitConstEnumMatch(stmt *ast.MatchStmt, constEnumType *semantic.ConstEnumType) error {
 	if constEnumType == nil {
 		return fmt.Errorf("match requires a const enum value")
@@ -418,10 +359,6 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	}
 	if optionalType, ok := s.exprType(expr.Value).(*semantic.OptionalType); ok {
 		return s.emitOptionalMatchExpr(expr, resultType, optionalType)
-	}
-	treeType, _, ok := resolveMatchableTreeCategoryTypeBackend(s.exprType(expr.Value))
-	if ok {
-		return s.emitTreeMatchExpr(expr, resultType, treeType)
 	}
 	if isStringMatchableType(s.exprType(expr.Value)) {
 		return s.emitStringMatchExpr(expr, resultType)

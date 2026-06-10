@@ -157,12 +157,6 @@ func ConstReflectionVariants(t Type) (ConstValue, bool) {
 			elems = append(elems, constReflectionVariantRecord(variant.Name, int64(i), int64(variant.Tag), variant.PayloadNames, variant.Payload))
 		}
 		return ConstValue{Kind: ConstList, Elems: elems}, true
-	case *TreeCategoryType:
-		elems := make([]ConstValue, 0, len(tt.Variants))
-		for i, variant := range tt.Variants {
-			elems = append(elems, constReflectionVariantRecord(variant.Name, int64(i), int64(variant.Tag), variant.PayloadNames, variant.Payload))
-		}
-		return ConstValue{Kind: ConstList, Elems: elems}, true
 	default:
 		return ConstValue{}, false
 	}
@@ -172,12 +166,6 @@ func ConstReflectionFields(t Type) (ConstValue, bool) {
 	switch tt := StripAggregateStateType(t).(type) {
 	case *StructType:
 		return ConstValue{Kind: ConstList, Elems: constReflectionFieldsFromMap(tt.Fields, structFieldOrder(tt))}, true
-	case *TreeBlockType:
-		return ConstValue{Kind: ConstList, Elems: constReflectionFieldsFromMap(tt.Fields, treeBlockFieldOrder(tt))}, true
-	case *TreeStructType:
-		return ConstValue{Kind: ConstList, Elems: constReflectionFieldsFromMap(tt.Fields, treeStructFieldOrder(tt))}, true
-	case *TreeCategoryType:
-		return ConstValue{Kind: ConstList, Elems: constReflectionFieldsFromMap(tt.Common, sortedFieldNames(tt.Common))}, true
 	case *EnumType:
 		return ConstValue{Kind: ConstList, Elems: constReflectionFieldsFromMap(tt.Common, sortedFieldNames(tt.Common))}, true
 	default:
@@ -275,20 +263,6 @@ func structFieldOrder(t *StructType) []string {
 		names = append(names, field.Name)
 	}
 	return names
-}
-
-func treeBlockFieldOrder(t *TreeBlockType) []string {
-	if t == nil || t.Decl == nil {
-		return nil
-	}
-	return astFieldDeclNames(t.Decl.Fields)
-}
-
-func treeStructFieldOrder(t *TreeStructType) []string {
-	if t == nil || t.Decl == nil {
-		return nil
-	}
-	return astFieldDeclNames(t.Decl.Fields)
 }
 
 func astFieldDeclNames(fields []ast.FieldDecl) []string {
