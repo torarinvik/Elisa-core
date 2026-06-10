@@ -58,11 +58,11 @@ for that target.
 
 ```elisa
 static if ELISA_TARGET_OS_POSIX:
-    extern pthread_mutex_lock(mutex: void&) -> int effects[Sync.Lock]
+    extern pthread_mutex_lock(mutex: void&) -> int can[Sync.Lock]
 
 static elif ELISA_TARGET_OS_WINDOWS:
     @callconv(winapi)
-    extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Sync.Lock]
+    extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void can[Sync.Lock]
 ```
 
 Common target constants include:
@@ -153,7 +153,7 @@ Use `...` at the end of an `extern` parameter list for C varargs such as
 
 ```elisa
 @c_abi(c)
-extern snprintf(buf: mutable u8&?, size: usize, fmt: u8&, ...) -> int effects[Console.Format]
+extern snprintf(buf: mutable u8&?, size: usize, fmt: u8&, ...) -> int can[Console.Format]
 ```
 
 Arguments after the declared fixed parameters are lowered with the C default
@@ -238,7 +238,7 @@ to stdcall; on modern 64-bit Windows it uses the platform C/Win64 convention.
 ```elisa
 static if ELISA_TARGET_OS_WINDOWS:
     @callconv(winapi)
-    extern Sleep(milliseconds: u32) -> void effects[Thread.Sleep]
+    extern Sleep(milliseconds: u32) -> void can[Thread.Sleep]
 
     @callconv(winapi)
     def thread_entry(arg: void&) -> u32:
@@ -384,7 +384,7 @@ static if ELISA_TARGET_OS_WINDOWS:
     extern Win32ConditionVariable
 
     @callconv(winapi)
-    extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void effects[Sync.Lock]
+    extern EnterCriticalSection(section: mutable Win32CriticalSection&) -> void can[Sync.Lock]
 ```
 
 `@c_opaque` records:
@@ -398,8 +398,8 @@ builds automatically generate a small C runtime registry for every active
 `@c_opaque` type. The registry exports:
 
 ```elisa
-extern elisa_c_opaque_alloc(type_name: u8&) -> mutable heap void&? effects[Memory.Allocate]
-extern elisa_c_opaque_free(ptr: heap void&) -> void effects[Memory.Release]
+extern elisa_c_opaque_alloc(type_name: u8&) -> mutable heap void&? can[Memory.Allocate]
+extern elisa_c_opaque_free(ptr: heap void&) -> void can[Memory.Release]
 extern elisa_c_opaque_size(type_name: u8&) -> usize
 extern elisa_c_opaque_align(type_name: u8&) -> usize
 ```

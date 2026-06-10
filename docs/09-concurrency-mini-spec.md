@@ -517,7 +517,7 @@ This is how the type system knows which operations are legal.
 
 ### 4. Permission Families
 
-Concurrency authority is represented as permission/capability families. Older text and declaration rows may still use `effects[...]`, but the preferred user-facing vocabulary is permission/capability authority granted by `can ...:` blocks.
+Concurrency authority is represented as permission/capability families, declared with `alias` and required via `can[...]` signatures / `can ...:` blocks. (The old `effects[...]` spelling has been removed.)
 
 Examples:
 

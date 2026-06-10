@@ -126,4 +126,4 @@ def on_click() -> void:
 ## Notes
 
 - permission rows are surfaced in signatures with `can[...]` and granted locally with `can ...:`
-- docs that still use `effects[...]` are compatibility surface; capability families above remain the same semantic authority model
+- the old `effects[...]` signature spelling has been removed; capability sets are declared with `alias` and required via `can[...]`, over the same semantic authority model as the families above

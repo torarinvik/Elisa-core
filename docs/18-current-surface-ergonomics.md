@@ -140,7 +140,7 @@ def visit_if_present(value: Item?) -> void:
 Use `get` for optional values and checked accesses when you want the absence or bounds check to stay visible in the source.
 
 ```elisa
-def first_or_zero(xs: dview[i32], i: usize) -> i32:
+def first_or_zero(xs: view[i32], i: usize) -> i32:
     return get xs[i] else 0
 
 def require_value(value: i32?) -> i32:
@@ -370,7 +370,7 @@ Current rules:
 - `dense_key(node, frozen)` requires a packed enum value or `packedview[...]` proven to come from the same exact frozen store root
 - `NodeKey[Expr]` may index that exact `Expr.Store[Frozen]` root or a `NodeTable[Expr, T]` built from the same root
 - `node_table_fill.specialize[Expr, T]()(owner, frozen, init)` returns `NodeTable[Expr, T]` with one slot per frozen packed node
-- `NodeTable.values` exposes the backing storage as `dview[T]`
+- `NodeTable.values` exposes the backing storage as `view[T]`
 - `node_table_fill` currently requires explicit specialization in v1
 - these helpers are for packed enum frozen stores rather than ordinary enums or tree stores
 
@@ -385,9 +385,9 @@ only needs the packed tag stream rather than the full nodes.
 
 ```elisa
 def count_ints(frozen: Expr.Store[Frozen]) -> usize:
-    nodes: dview[Expr] = frozen[1:frozen.count]
-    tags: dview[Expr.Tag] = frozen.tags
-    prefix: dview[Expr.Tag] = frozen.tags[0:1]
+    nodes: view[Expr] = frozen[1:frozen.count]
+    tags: view[Expr.Tag] = frozen.tags
+    prefix: view[Expr.Tag] = frozen.tags[0:1]
     count: mutable usize = 0
     for tag in tags:
         if tag == Expr.Tag.Int:
@@ -399,12 +399,12 @@ Current rules:
 
 - `frozen.count` is the dense packed-node extent of that frozen store root
 - `frozen[i]` yields the packed enum value at that dense frozen-store index
-- `frozen[a:b]` yields an ordinary readonly `dview[Expr]` slice over the frozen packed nodes
-- `frozen.tags` exposes the packed tag stream as `dview[Expr.Tag]`
+- `frozen[a:b]` yields an ordinary readonly `view[Expr]` slice over the frozen packed nodes
+- `frozen.tags` exposes the packed tag stream as `view[Expr.Tag]`
 - prefer iterating the view directly, as in `for tag in frozen.tags:`, over
   indexing `0..<frozen.count` unless the numeric index itself is needed
 - packed-store root index results are readonly; assignment through `frozen[i] <- ...` is rejected
-- slicing a frozen tag view keeps the ordinary readonly `dview[Expr.Tag]` surface
+- slicing a frozen tag view keeps the ordinary readonly `view[Expr.Tag]` surface
 - packed-store slice index results are readonly; assignment through `chunk[i] <- ...` is rejected
 - tag-view index results are readonly; assignment through `tags[i] <- ...` is rejected
 
@@ -931,17 +931,17 @@ The parenthesized form is useful when immediately calling another helper on the 
 View helpers can be written either as ordinary free functions or as receiver-style calls. The receiver form is syntax sugar: the compiler rewrites the receiver as the first helper argument, so the same optimization facts and lowering paths are preserved.
 
 ```elisa
-def sum_selected(values: dview[i32]) -> i32:
-    source: dview[i32] = values.readonly()
+def sum_selected(values: view[i32]) -> i32:
+    source: view[i32] = values.readonly()
     return (source where value: keep_positive(value)).reduce_sum(identity)
 
 def check(values: bool[8]) -> bool:
     return all value in values where is_enabled(value)
 
-def chunks(values: dview[i32]) -> ChunksExactView[i32]:
+def chunks(values: view[i32]) -> ChunksExactView[i32]:
     return values.readonly().chunks_exact(4)
 
-def halves(values: dview[i32]) -> SplitView[i32]:
+def halves(values: view[i32]) -> SplitView[i32]:
     return values.split_at(8)
 ```
 
@@ -1301,13 +1301,13 @@ Current rules:
 Inside sequence rewrites, `emit` appends values into the output sequence being built. `emit value` appends one element, `emit all values` appends every element from a `darray` or `dview`, and `emit nothing` leaves the current arm without output.
 
 ```elisa
-def compact(items: dview[u32]) -> darray[u32]:
+def compact(items: view[u32]) -> darray[u32]:
     return rewrite items as sequence[u32]:
         item when item != 0:
             emit item
 
-def concat(left: dview[u32], right: dview[u32]) -> darray[u32]:
-    segments: darray[dview[u32]] = [left, right]
+def concat(left: view[u32], right: view[u32]) -> darray[u32]:
+    segments: darray[view[u32]] = [left, right]
     return rewrite segments as sequence[u32]:
         segment:
             emit all segment
@@ -1650,48 +1650,56 @@ Current rules for `permission` and `signal`:
 - `permission Name:` declares a family directly
 - `permission Name: pass` is the marker-permission form with no members
 - indented names such as `Write` and `Flush` declare members of that family
-- `effect Name:` is accepted as a deprecated compatibility alias for `permission Name:`
-- formatting canonicalizes compatibility `effect` declarations back to `permission`
 - `signal Name` records use of a whole-family permission
 - `signal Name.Member` records use of one concrete member
 - `signal` participates in the same permission inference and local-grant checking as calls to permission-requiring functions
-- family-level signature permissions such as `effects[ConsolePermission]` satisfy member signals and calls from the same family
+- family-level signature permissions such as `can[ConsolePermission]` satisfy member signals and calls from the same family
 - function bodies infer their callable permission surface from effectful operations and local grants
 - explicit signature permissions still matter on surfaces without bodies, such as `extern` declarations and function types
 - explicit signature permissions do not by themselves satisfy local-grant checking inside the body
 
-Top-level `effectalias` declarations package an error-set clause and a permission clause into one reusable alias. Signatures use one bracketed `effects[...]` row, so aliases, direct errors, and direct capabilities can live in the same place.
+Top-level `alias` declarations name a reusable **capability set**, referenced via `can`:
 
 ```elisa
-effectalias FrontendEffects = error[ParseErr] can[Abort.Panic, Memory.Allocate]
+alias FrontendCaps = Abort.Panic, Memory.Allocate
 
-def parse() -> i64 effects[FrontendEffects]:
+def parse() -> i64 can[FrontendCaps]:
     return 1
 
-def parse_checked() -> i64 effects[FrontendEffects, error IoErr, Memory.Allocate]:
+def parse_debug() -> i64 can[FrontendCaps, Console.Write]:
     return 1
 
-def parse_debug() -> i64 effects[FrontendEffects, Console.Write]:
-    return 1
-
-extern register(callback: func() -> void effects[FrontendEffects]) -> void
+extern register(callback: func() -> void can[FrontendCaps]) -> void
 ```
 
-This is compile-time surface only. The alias expands during semantic analysis; it does not create a runtime object or LLVM artifact.
+`alias` is compile-time surface only — it expands during semantic analysis into the existing
+permission model; it creates no runtime object or LLVM artifact.
+
+**Capabilities and errors are separate, un-bundleable channels.** Capabilities go in `can[...]`;
+errors live in the **type system**. An error-bearing signature writes its error union directly
+in the return type, optionally named with a `type` alias:
+
+```elisa
+type FrontendResult = i64 error[ParseErr]
+
+def parse_checked() -> i64 error[ParseErr] can[FrontendCaps]:   # errors + capabilities, side by side
+    return 1
+```
 
 Current rules:
 
-- aliases may be used on function declarations and function types
-- aliases may bundle `error[...]`, `can[...]`, or both
-- bracketed signature rows may include aliases, direct capability refs such as `Abort.Panic`, and direct whole-family error entries such as `error ParseErr`
-- mixed rows such as `effects[FrontendEffects, error IoErr, Memory.Allocate]` are allowed
-- when an alias is used, keep all extra direct error or capability items inside the same bracketed `effects[...]` row rather than combining the alias with separate trailing `error[...]` or `can[...]` clauses
-- `permission` declarations and `effectalias` aliases are compile-time surface only; both lower into the existing semantic permission/effect model rather than a runtime object
-- `effect` declarations remain accepted during migration but are deprecated; prefer `permission`
+- `alias` names a capability set; reference it in `can[...]` (signature) or `can Name:` (block).
+- capabilities (`can`) and errors (`error[...]`) are separate channels — there is no syntax that
+  bundles them, so they cannot be mixed in one clause.
+- `permission` declarations and `alias` capability sets are compile-time surface only; both lower
+  into the existing semantic permission/effect model rather than a runtime object.
+
+> Removed: the old `effectalias`/`effects[...]` keywords (which bundled errors + capabilities) and
+> the legacy `effect` declaration alias (use `permission`).
 
 ### Local `can` grants and formatter normalization
 
-Function types and other body-less surfaces use declaration syntax such as `effects[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
+Function types and other body-less surfaces use declaration syntax such as `can[Console.Write]`. Function declarations with bodies can usually omit signature permissions because effect inference records them from local grants and effectful operations. Inside a body, effectful use sites still need an explicit local grant.
 
 ```elisa
 def write_once(text: u8&) -> int:
@@ -1711,7 +1719,7 @@ Current rules for local grants:
 - local grants use surface syntax: inline `expr can Family.Member` or block `can Family, Family.Member:`
 - local grants are checked against the same effect families as effectful calls and `signal`
 - family grants such as `can ConsoleEffect` satisfy member uses such as `ConsoleEffect.Write`
-- inferred or explicit surface permissions on the enclosing function or alias (`effects[...]`) do not replace an explicit local grant at the use site
+- inferred or explicit surface permissions on the enclosing function or alias (`can[...]`) do not replace an explicit local grant at the use site
 - `-emit fmt` always prints local grants in surface syntax rather than declaration syntax
 - the formatter conservatively inlines simple one-statement grant blocks into `... can ...` form for returns, assignments, declarations, tuple binds, discards, `as` rebinds, and expression statements
 - the formatter keeps block form for multi-statement regions and for statements it cannot safely rewrite, including statement-position `panic(...)`
@@ -1944,26 +1952,31 @@ Current rules:
 - a `can[any]` grant discharges every concrete member/family requirement
 - a `can[any]` requirement falls out of no concrete grant — only `any`/`trusted` discharge it
 
-### Grant aliases for local `can` blocks
+### Capability-set aliases (`alias`)
 
-`grant Name = ref, ref` names a fixed set of permission refs for reuse in local `can` grant blocks. Unlike `effectalias` (which packages a signature `effects[...]` row) it abbreviates *local* grants, and unlike `includes` (whole-family subsumption) it captures an exact cross-family member set — the right tool for a recurring member combo such as `Segment.Host, Unsafe.SegmentMutation`.
+`alias Name = ref, ref` names a fixed set of permission refs for reuse. Unlike `includes`
+(whole-family subsumption) it captures an exact cross-family member set — the right tool for a
+recurring member combo such as `Segment.Host, Unsafe.SegmentMutation`. The same `alias`
+declaration is usable both in a signature `can[Name]` and in a local `can Name:` grant block.
 
 ```elisa
-grant HostSeg = Segment.Host, Unsafe.SegmentMutation
+alias HostSeg = Segment.Host, Unsafe.SegmentMutation
 
-def map_segment() -> i64:
-    can HostSeg:                 # expands to can Segment.Host, Unsafe.SegmentMutation
+def map_segment() -> i64 can[HostSeg]:    # signature: expands to Segment.Host, Unsafe.SegmentMutation
+    can HostSeg:                            # local grant: same expansion
         return install_segment()
 ```
 
 Current rules:
 
-- `grant Name = ...` is a top-level declaration; the right-hand side is a comma-separated permission-ref list (the same surface as `can[...]`, including brace groups like `Disk{Read, Write}`)
-- a grant alias expands to its refs wherever permission refs are resolved — local `can <alias>:` / `expr can <alias>` grants and signature `can[<alias>]` clauses alike
+- `alias Name = ...` is a top-level declaration; the right-hand side is a comma-separated permission-ref list (the same surface as `can[...]`, including brace groups like `Disk{Read, Write}`)
+- an alias expands to its refs wherever permission refs are resolved — local `can <alias>:` / `expr can <alias>` grants and signature `can[<alias>]` clauses alike
 - aliases may reference other aliases (expansion iterates; accidental cycles are broken by a depth cap)
-- a grant alias name may not collide with a permission family name
+- an alias name may not collide with a permission family name
 - it is compile-time surface only: it expands during analysis and lowers into the existing permission model with no runtime object
-- `-emit fmt` preserves the `grant Name = ...` declaration and still inlines simple one-statement `can <alias>:` blocks into `... can <alias>` form
+- `-emit fmt` preserves the `alias Name = ...` declaration and still inlines simple one-statement `can <alias>:` blocks into `... can <alias>` form
+
+> (`alias` replaces the former `grant` keyword, which had the same meaning.)
 
 ### Set-polymorphic effects and error sets
 
@@ -3054,7 +3067,7 @@ struct Pair:
     items: darray[u32]
     root: Lua.Block
 
-def clone_pair(owner: mutable Arena&, source_items: dview[u32], block: Lua.Block) -> Pair:
+def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua.Block) -> Pair:
     can Abort.Panic, Memory.Allocate:
         in owner:
             return Pair{
@@ -3086,18 +3099,18 @@ Current rules:
 The current explicit parallel loop surface is pool-scoped rather than implicit.
 
 ```elisa
-def visit(frozen: Expr.Store[Frozen]) -> void effects[Pool.Submit, Pool.WaitAll]:
+def visit(frozen: Expr.Store[Frozen]) -> void can[Pool.Submit, Pool.WaitAll]:
     pool workers(2):
         parallel for node in frozen:
             pass
 
-def walk_tags(tags: dview[Expr.Tag]) -> void effects[Pool.Submit, Pool.WaitAll]:
+def walk_tags(tags: view[Expr.Tag]) -> void can[Pool.Submit, Pool.WaitAll]:
     pool workers(2):
         parallel for tag at i in tags:
             if tag == Expr.Tag.Add:
                 _ = i
 
-def sum_chunks(chunks: ChunksExactView[i32]) -> void effects[Pool.Submit, Pool.WaitAll]:
+def sum_chunks(chunks: ChunksExactView[i32]) -> void can[Pool.Submit, Pool.WaitAll]:
     pool workers(2):
         parallel for chunk in chunks:
             _ = chunk[0] + chunk[1]

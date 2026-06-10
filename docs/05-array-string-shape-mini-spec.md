@@ -21,16 +21,16 @@ Implemented today:
 
 - exact fixed-array typing for `array[T, N]` and `T[N]`
 - dynamic shape witnesses for `darray[T, shape]` and `cstr[shape]`
-- non-owning view types `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]`
+- non-owning view types `view[T]` (the unified borrowed window; bounds inferred) and `sview[begin, end]`
 - indexing for fixed arrays, dynamic arrays/views, strings, and string views
 - slice syntax producing view-like results:
     - `array[T, N]`, `T[N]`, and their non-null references slice to `view[T, start, end]`
-    - `darray[T, shape]` and `dview[T]` slices produce `dview[T]`
+    - `darray[T, shape]` and `view[T]` slices produce `view[T]`
     - `cstr[shape]`, `str[N]`, and `sview[begin, end]` slices produce `sview[start, end]`
 
 The user-facing built-in spellings are lowercase only: use `str[...]` and `cstr[...]`, not legacy aliases like `string[...]` or `cstring[...]`.
 
-The same rule applies to the runtime-backed container/view family: `darray[...]`, `dview[...]`, and `sview[...]` are the canonical source-level spellings, while `DynArray[...]`, `DynArrayView`, and `StringView` are internal runtime carrier names.
+The same rule applies to the runtime-backed container/view family: `darray[...]`, `view[...]`, and `sview[...]` are the canonical source-level spellings, while `DynArray[...]`, `DynArrayView`, and `StringView` are internal runtime carrier names.
 
 Still deferred:
 
@@ -378,7 +378,7 @@ That said, I would frame it like this:
 Current status:
 
 - `view[T, begin, end]` is the preferred surface for fixed-array slice results
-- `dview[T]` is the preferred surface for dynamic-array slices and runtime-backed array views
+- `view[T]` is the preferred surface for dynamic-array slices and runtime-backed array views
 - `sview[begin, end]` is the preferred surface for string slices and runtime-backed string views
 
 CamelCase carrier names remain useful for runtime/interop implementation details, but ordinary user-facing code should prefer the lowercase surface types.

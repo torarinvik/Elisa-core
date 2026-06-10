@@ -29,7 +29,7 @@ Every value can carry facts from several orthogonal classes:
 | Store deps | packed tree/IR store provenance | `Expr.Store[Local]`, `Expr.Store[Frozen]`, `in store:` |
 | Alias class | which paths may refer to the same mutable cell | ref params, mutable references, call boundaries |
 | Usage | copyable, affine, consumed, moved | `move`, thread/guard protocols |
-| Effects | ambient authority required | `effects[...]`, `can ...:` |
+| Effects | ambient authority required | `can[...]`, `can ...:` |
 | Error path | alternate failure/control exits | `raise`, `try`, nullable `else` recovery |
 | Optimization | readonly, exclusive, contiguous, exact extent | dense loops, frozen scans, parallel legality |
 | Interface | generic protocol conformance | `def f[T: Builder]`, `protocol Builder` |
@@ -253,7 +253,7 @@ store dependency detail (`store_deps=store`) for the produced frozen handle.
 ### Effects and local grants
 
 ```elisacore
-def log(text: u8&) -> void effects[Console.Write]:
+def log(text: u8&) -> void can[Console.Write]:
     return puts(text) can Console.Write
 ```
 

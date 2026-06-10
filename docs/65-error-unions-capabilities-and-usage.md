@@ -9,26 +9,49 @@ checked-exception/`Result` hybrid, but with a key difference from Rust's single-
 
 ### Declaring sets
 ```elisa
-error FooError:
-    Bad1
-    Bad2
-error BarError:
-    Bad3
-    Bad4(n: u32)        # payload-carrying variant
+error LexError:
+    IndentError
+    IllegalCharError
+error ParseError:
+    IllegalExpression
+    LexerError(LexError)       # bare positional payload (matched by position)
+    Detail(span: Span)         # named payload also allowed
 ```
+Payload fields may be **bare positional types** (`LexerError(LexError)`) or **named**
+(`Detail(span: Span)`) — error payloads are matched by position, so the name is optional.
 
-### Function signatures — precise, mixed, brace-subset
+### Function signatures — items in `error[...]`
+A union **combines tags from several sets**. Each item is one of:
+
+| Form | Meaning |
+|---|---|
+| `Variant` (bare name) | the single variant `Variant`, searched across **all** error sets |
+| `Family.Variant` | that specific qualified variant |
+| `Family` (bare, names a set) | the **whole** family (all its variants) |
+| `*Family` | explicit whole-family spread — only *needed* when a name is both a set and a variant |
+| `Family{A, B}` | **brace-subset**: exactly the listed variants |
+
 ```elisa
+# Mix variants by short name across sets — family-qualified only on conflict:
+def parse(...) -> Program error[IndentError, LexerError]:  # -> error[LexError.IndentError, ParseError.LexerError]
+    ...
+
+# Whole families and brace-subsets still work:
 def foo(num: u32) -> i64 error[FooError{Bad1}, BarError{Bad3, Bad4}]:
     ...
 ```
-- A union **combines tags from several sets** (`FooError` + `BarError`).
+- A **bare name** resolves as a whole family if it names a declared set, otherwise as the
+  single variant looked up across every set. A bare variant present in **two or more** sets is
+  **ambiguous** → a compile error telling you to qualify it as `Family.Variant`. Use `*Family`
+  to force the whole-family reading when a name is both a set and a variant.
 - **Brace-subsets** select exact variants: `FooError{Bad1}` is *only* `Bad1`.
-- Membership is **precise**: this union carries exactly `{Bad1, Bad3, Bad4}`. `FooError.Bad2`
+- Membership is **precise**: a union carries exactly its listed variants; an unlisted variant
   cannot occur — raising or matching it is a compile error, and a `catch` is exhaustive over
-  just those three (never forced to handle `Bad2`). A brace-subset that is a *whole* family
-  canonicalizes to the family name in diagnostics.
+  just the carried variants. A selection that covers a *whole* family canonicalizes to the
+  family name in diagnostics.
 - `void error[E]`, value-carrying `T error[E]`, and payload-carrying variants all work.
+- Errors are part of the **type system**: an error union `T error[E]` is a first-class type,
+  nameable with a `type` alias — `type Result = i64 error[LexError]`.
 
 ### Raising
 ```elisa
@@ -98,5 +121,5 @@ Error unions fit **internal, multi-mode, propagate-on-failure** operations. They
 5. Payload-aware cross-set `try`-widening (`remapErrorCode` relocates payload fields).
 6. `catch` arm payload binding `E.Bad2(x):` (earlier phase).
 
-Plus the surface feature **grant aliases** (`grant Name = ref, ref`) for local `can` blocks,
+Plus the surface feature **capability aliases** (`alias Name = ref, ref`) for `can` clauses,
 and the precise brace-subset membership tests.
