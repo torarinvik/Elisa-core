@@ -5,72 +5,6 @@ import (
 	"strings"
 )
 
-func formatWithSignatureClause(bundles []string, params []ast.ParamDecl, order []ast.ImplicitSigItem) string {
-	parts := make([]string, 0, len(bundles)+len(params))
-	if len(order) != 0 {
-		for _, item := range order {
-			if item.IsBundle {
-				parts = append(parts, item.Bundle)
-				continue
-			}
-			parts = append(parts, formatParamDecl(item.Param))
-		}
-	} else {
-		parts = append(parts, bundles...)
-		for _, param := range params {
-			parts = append(parts, formatParamDecl(param))
-		}
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " with " + strings.Join(parts, ", ")
-}
-func formatWithArg(arg ast.WithArg) string {
-	if arg.Shorthand {
-		return arg.Name
-	}
-	if arg.Value == nil {
-		return arg.Name
-	}
-	return arg.Name + " = " + formatExpr(arg.Value)
-}
-func formatNamedArg(arg ast.WithArg) string {
-	if arg.Shorthand {
-		return arg.Name + ":"
-	}
-	if arg.Value == nil {
-		return arg.Name + ":"
-	}
-	return arg.Name + ": " + formatExpr(arg.Value)
-}
-func formatSignatureParamPackUse(pack ast.ParamPackUse) string {
-	return "use " + pack.Name
-}
-func formatValueParamPackUse(pack ast.ParamPackUse) string {
-	if pack.Bare && len(pack.Args) == 0 {
-		return "use " + pack.Name
-	}
-	parts := make([]string, 0, len(pack.Args))
-	for _, arg := range pack.Args {
-		parts = append(parts, formatNamedArg(arg))
-	}
-	return "use " + pack.Name + "(" + strings.Join(parts, ", ") + ")"
-}
-func formatWithBundleUse(bundle ast.WithBundleUse) string {
-	parts := make([]string, 0, len(bundle.Args)+1)
-	if bundle.Spread {
-		parts = append(parts, "..")
-	}
-	for _, arg := range bundle.Args {
-		if arg.Shorthand {
-			parts = append(parts, arg.Name+":")
-			continue
-		}
-		parts = append(parts, arg.Name+" = "+formatExpr(arg.Value))
-	}
-	return bundle.Name + "(" + strings.Join(parts, ", ") + ")"
-}
 func formatNodeSugarValue(expr *ast.AllocExpr) string {
 	if expr == nil || expr.NodeSpan == nil {
 		return formatExpr(expr.Value)
@@ -91,57 +25,17 @@ func formatNodeSugarValue(expr *ast.AllocExpr) string {
 		items := make([]ast.CallArgItem, 0, len(call.ArgItemOrder))
 		removedIndex := len(call.Args) - 1
 		for _, item := range call.ArgItemOrder {
-			if !item.IsPack && item.ArgIndex == removedIndex {
+			if item.ArgIndex == removedIndex {
 				continue
 			}
 			items = append(items, item)
 		}
 		trimmed.ArgItemOrder = items
 	}
-	if len(trimmed.Args) == 0 && len(trimmed.ParamPacks) == 0 && !trimmed.HasArgForward && len(trimmed.WithArgs) == 0 && len(trimmed.WithBundles) == 0 {
+	if len(trimmed.Args) == 0 && !trimmed.HasArgForward {
 		return formatExpr(trimmed.Func)
 	}
 	return formatExpr(&trimmed)
-}
-func formatWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) string {
-	parts := make([]string, 0, len(bundles)+len(args))
-	if len(order) != 0 {
-		for _, item := range order {
-			if item.IsBundle {
-				parts = append(parts, formatWithBundleUse(item.Bundle))
-				continue
-			}
-			parts = append(parts, formatWithArg(item.Arg))
-		}
-	} else {
-		for _, bundle := range bundles {
-			parts = append(parts, formatWithBundleUse(bundle))
-		}
-		for _, arg := range args {
-			parts = append(parts, formatWithArg(arg))
-		}
-	}
-	return strings.Join(parts, ", ")
-}
-func formatArgsScopeClause(packs []ast.ParamPackUse, args []ast.WithArg, order []ast.ArgsScopeItem) string {
-	parts := make([]string, 0, len(packs)+len(args))
-	if len(order) != 0 {
-		for _, item := range order {
-			if item.IsPack {
-				parts = append(parts, formatValueParamPackUse(item.Pack))
-				continue
-			}
-			parts = append(parts, formatNamedArg(item.Arg))
-		}
-		return strings.Join(parts, ", ")
-	}
-	for _, pack := range packs {
-		parts = append(parts, formatValueParamPackUse(pack))
-	}
-	for _, arg := range args {
-		parts = append(parts, formatNamedArg(arg))
-	}
-	return strings.Join(parts, ", ")
 }
 func formatPermissionRefs(refs []ast.PermissionRef) string {
 	if len(refs) == 0 {
@@ -333,7 +227,6 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 			parts = append(parts, "...")
 		}
 		line := "func(" + strings.Join(parts, ", ") + ")"
-		line += formatWithSignatureClause(n.ImplicitBundles, n.ImplicitParams, n.ImplicitItemOrder)
 		if n.Return != nil {
 			line += " -> " + formatTypeExpr(n.Return)
 		}

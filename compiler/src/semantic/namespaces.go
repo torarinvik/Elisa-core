@@ -208,30 +208,6 @@ func (a *Analyzer) lookupVisiblePermission(name string) (*PermissionSet, string,
 	return nil, "", false
 }
 
-func (a *Analyzer) lookupVisibleContextBundle(name string) (*ContextBundle, string, bool) {
-	for _, candidate := range a.visibleNameCandidates(name) {
-		if bundle, ok := a.contextBundles[candidate]; ok {
-			return bundle, candidate, true
-		}
-	}
-	return nil, "", false
-}
-
-func (a *Analyzer) lookupVisibleParamPack(name string) (*ParamPack, string, bool) {
-	if a != nil && !strings.Contains(name, ".") && len(a.currentLocalParamPackScopes) != 0 {
-		frame := a.currentLocalParamPackScopes[len(a.currentLocalParamPackScopes)-1]
-		if pack, ok := frame[name]; ok {
-			return pack, name, true
-		}
-	}
-	for _, candidate := range a.visibleNameCandidates(name) {
-		if pack, ok := a.paramPacks[candidate]; ok {
-			return pack, candidate, true
-		}
-	}
-	return nil, "", false
-}
-
 // identNameResolvesAsValue reports whether a bare name is bound as a value in the
 // current scope or as a visible global value/symbol (used to distinguish a real
 // value receiver from a namespace prefix in `Name.Field`).

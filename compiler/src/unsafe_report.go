@@ -427,10 +427,6 @@ func collectTrustedUnsafeUsesFromStmts(stmts []ast.Stmt, function string, out *[
 			}
 		case *ast.InStoreStmt:
 			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
-		case *ast.WithStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
-		case *ast.ArgsScopeStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
 		case *ast.ScopeStmt:
 			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
 		case *ast.PoolStmt:

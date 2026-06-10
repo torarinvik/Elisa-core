@@ -29,26 +29,3 @@ func pushExprBindingScope(scopes []map[string]ast.Expr, bindings map[string]ast.
 	}
 	return append(append([]map[string]ast.Expr(nil), scopes...), cloneExprBindings(bindings))
 }
-
-func (a *Analyzer) analyzeNestedStmtBodyWithExprBindings(bindingScopes *[]map[string]ast.Expr, bindings map[string]ast.Expr, tempStmts []ast.Stmt, body []ast.Stmt) {
-	if a == nil || bindingScopes == nil {
-		return
-	}
-	scope := NewScope(a.currentScope)
-	savedScope := a.currentScope
-	a.currentScope = scope
-	for _, tempStmt := range tempStmts {
-		a.analyzeStmt(tempStmt)
-	}
-	a.currentScope = savedScope
-	savedBindingScopes := *bindingScopes
-	*bindingScopes = pushExprBindingScope(savedBindingScopes, bindings)
-	a.currentScope = scope
-	a.withLocalParamPackFrame(func() {
-		for _, bodyStmt := range body {
-			a.analyzeStmt(bodyStmt)
-		}
-	})
-	a.currentScope = savedScope
-	*bindingScopes = savedBindingScopes
-}

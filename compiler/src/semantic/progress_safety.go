@@ -338,26 +338,6 @@ func (c *progressCallCollector) collectStmt(stmt ast.Stmt) {
 		c.collectStmts(n.Body)
 	case *ast.CanStmt:
 		c.collectStmts(n.Body)
-	case *ast.WithStmt:
-		for _, arg := range n.Args {
-			c.collectExpr(arg.Value)
-		}
-		for _, bundle := range n.Bundles {
-			for _, arg := range bundle.Args {
-				c.collectExpr(arg.Value)
-			}
-		}
-		c.collectStmts(n.Body)
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			c.collectExpr(arg.Value)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				c.collectExpr(arg.Value)
-			}
-		}
-		c.collectStmts(n.Body)
 	case *ast.PoolStmt:
 		c.collectExpr(n.Workers)
 		c.collectStmts(n.Body)
@@ -449,14 +429,6 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.SafeReceiver)
 		for _, arg := range n.Args {
 			c.collectExpr(arg)
-		}
-		for _, arg := range n.WithArgs {
-			c.collectExpr(arg.Value)
-		}
-		for _, bundle := range n.WithBundles {
-			for _, arg := range bundle.Args {
-				c.collectExpr(arg.Value)
-			}
 		}
 	case *ast.FieldExpr:
 		c.collectExpr(n.Object)

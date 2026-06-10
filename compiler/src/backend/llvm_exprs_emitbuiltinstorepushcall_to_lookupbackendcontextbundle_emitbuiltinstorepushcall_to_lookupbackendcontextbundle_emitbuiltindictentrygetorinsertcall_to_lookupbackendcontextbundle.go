@@ -78,7 +78,6 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
-	"strings"
 )
 
 func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
@@ -242,38 +241,4 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 		}
 	}
 	return s.emitExpr(arg, expected)
-}
-func backendOrderedWithItems(bundles []ast.WithBundleUse, args []ast.WithArg, order []ast.WithItem) []ast.WithItem {
-	if len(order) != 0 {
-		return append([]ast.WithItem(nil), order...)
-	}
-	items := make([]ast.WithItem, 0, len(bundles)+len(args))
-	for _, bundle := range bundles {
-		items = append(items, ast.WithItem{Position: bundle.Position, Bundle: bundle, IsBundle: true})
-	}
-	for _, arg := range args {
-		items = append(items, ast.WithItem{Position: arg.Position, Arg: arg})
-	}
-	return items
-}
-func (s *functionState) lookupBackendContextBundle(name string) (*semantic.ContextBundle, bool) {
-	if s == nil || s.g == nil || s.g.result == nil {
-		return nil, false
-	}
-	if bundle, ok := s.g.result.ContextBundles[name]; ok && bundle != nil {
-		return bundle, true
-	}
-	var matched *semantic.ContextBundle
-	for qualifiedName, bundle := range s.g.result.ContextBundles {
-		if bundle == nil {
-			continue
-		}
-		if qualifiedName == name || strings.HasSuffix(qualifiedName, "."+name) {
-			if matched != nil && matched != bundle {
-				return nil, false
-			}
-			matched = bundle
-		}
-	}
-	return matched, matched != nil
 }

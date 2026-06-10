@@ -44,10 +44,6 @@ func rewriteWhereTupleBinderExpr(expr ast.Expr, tupleName string, binders []stri
 			for i, arg := range n.Args {
 				n.Args[i] = rewrite(arg)
 			}
-			for i, arg := range n.WithArgs {
-				arg.Value = rewrite(arg.Value)
-				n.WithArgs[i] = arg
-			}
 		case *ast.FieldExpr:
 			n.Object = rewrite(n.Object)
 		case *ast.IndexExpr:

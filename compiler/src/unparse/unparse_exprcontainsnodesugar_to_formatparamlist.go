@@ -137,11 +137,6 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			line += " = " + formatExpr(n.Value)
 		}
 		f.writePrefixedMultiline(level, "", line)
-	case *ast.LocalParamsStmt:
-		f.writeLine(level, "args "+n.Name+":")
-		for _, param := range n.Params {
-			f.writeLine(level+1, formatParamDecl(param))
-		}
 	case *ast.LetDestructureStmt:
 		f.writePrefixedMultiline(level, "", "let "+formatMoveBindPattern(n.Pattern)+" = "+formatExpr(n.Value))
 	case *ast.TupleBindStmt:
@@ -294,16 +289,6 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			keyword = "trusted"
 		}
 		f.writeLine(level, keyword+" "+formatPermissionRefSurfaceList(n.Permissions)+":")
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
-		}
-	case *ast.WithStmt:
-		f.writeLine(level, "with "+formatWithValueClause(n.Bundles, n.Args, n.WithItemOrder)+":")
-		for _, stmt := range n.Body {
-			f.writeStmt(level+1, stmt)
-		}
-	case *ast.ArgsScopeStmt:
-		f.writeLine(level, "with args("+formatArgsScopeClause(n.ParamPacks, n.Args, n.ItemOrder)+"):")
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
@@ -522,16 +507,15 @@ func formatAggregateStateSuffix(hasStateParam bool, stateParamCount int) string 
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
 }
-func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
-	line := formatImplMethodHeader(name, genericParams, typeParams, regionParams, permissionParams, params, paramPacks, paramItemOrder, implicitParams, implicitBundles, implicitItemOrder, retType, permissions, ensures, variadic)
+func formatFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+	line := formatImplMethodHeader(name, genericParams, typeParams, regionParams, permissionParams, params, retType, permissions, ensures, variadic)
 	line += ":"
 	return line
 }
-func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "def " + name
 	line += formatGenericParams(genericParams, typeParams, regionParams, permissionParams)
-	line += "(" + formatExplicitParamList(params, paramPacks, paramItemOrder, variadic) + ")"
-	line += formatWithSignatureClause(implicitBundles, implicitParams, implicitItemOrder)
+	line += "(" + formatExplicitParamList(params, variadic) + ")"
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
@@ -539,11 +523,10 @@ func formatImplMethodHeader(name string, genericParams []ast.GenericParam, typeP
 	line += formatEnsuresClauses(ensures)
 	return line
 }
-func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
+func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeParams []string, regionParams []string, permissionParams []string, params []ast.ParamDecl, retType ast.TypeExpr, permissions []ast.PermissionRef, ensures []ast.EnsuresClause, variadic bool) string {
 	line := "extern " + name
 	line += formatGenericParams(genericParams, typeParams, regionParams, permissionParams)
-	line += "(" + formatExplicitParamList(params, paramPacks, paramItemOrder, variadic) + ")"
-	line += formatWithSignatureClause(implicitBundles, implicitParams, implicitItemOrder)
+	line += "(" + formatExplicitParamList(params, variadic) + ")"
 	if retType != nil {
 		line += " -> " + formatTypeExpr(retType)
 	}
@@ -552,7 +535,7 @@ func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeP
 	return line
 }
 func formatExportFuncHeader(n *ast.ExportFuncDecl) string {
-	line := "export func " + n.Name + "(" + formatExplicitParamList(n.Params, nil, nil, false) + ")"
+	line := "export func " + n.Name + "(" + formatExplicitParamList(n.Params, false) + ")"
 	if n.ReturnType != nil {
 		line += " -> " + formatTypeExpr(n.ReturnType)
 	}
@@ -566,20 +549,10 @@ func formatExportFuncHeader(n *ast.ExportFuncDecl) string {
 	}
 	return line
 }
-func formatExplicitParamList(params []ast.ParamDecl, paramPacks []ast.ParamPackUse, order []ast.ParamSigItem, variadic bool) string {
-	parts := make([]string, 0, len(params)+len(paramPacks)+1)
-	if len(order) != 0 {
-		for _, item := range order {
-			if item.IsPack {
-				parts = append(parts, formatSignatureParamPackUse(item.Pack))
-				continue
-			}
-			parts = append(parts, formatParamDecl(item.Param))
-		}
-	} else {
-		for _, param := range params {
-			parts = append(parts, formatParamDecl(param))
-		}
+func formatExplicitParamList(params []ast.ParamDecl, variadic bool) string {
+	parts := make([]string, 0, len(params)+1)
+	for _, param := range params {
+		parts = append(parts, formatParamDecl(param))
 	}
 	if variadic {
 		parts = append(parts, "...")

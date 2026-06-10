@@ -65,15 +65,6 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 		appendBasicFlowExprInstrs(block, n.Workers)
 	case *ast.LockStmt:
 		appendBasicFlowExprInstrs(block, n.Mutex)
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			appendBasicFlowExprInstrs(block, arg.Value)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				appendBasicFlowExprInstrs(block, arg.Value)
-			}
-		}
 	case *ast.MoveBindStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Store)

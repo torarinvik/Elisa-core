@@ -102,31 +102,6 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 		return nil, false
 	}
 	working := map[string]ast.Expr{}
-	for _, item := range backendOrderedWithItems(expr.WithBundles, expr.WithArgs, expr.WithItemOrder) {
-		if item.IsBundle {
-			bundle, ok := s.lookupBackendContextBundle(item.Bundle.Name)
-			if !ok || bundle == nil {
-				return nil, false
-			}
-			explicitValues := make(map[string]ast.Expr, len(item.Bundle.Args))
-			for _, arg := range item.Bundle.Args {
-				explicitValues[arg.Name] = arg.Value
-			}
-			for _, field := range bundle.Fields {
-				if value, ok := explicitValues[field.Name]; ok {
-					working[field.Name] = value
-					continue
-				}
-				value, ok := s.lookupBackendImplicitExpr(field.Name, working)
-				if !ok {
-					return nil, false
-				}
-				working[field.Name] = value
-			}
-			continue
-		}
-		working[item.Arg.Name] = item.Arg.Value
-	}
 	resolved := make([]ast.Expr, 0, len(funcType.ImplicitParamNames))
 	explicitCount := backendExplicitParamCount(funcType, nil)
 	for i, name := range funcType.ImplicitParamNames {

@@ -75,7 +75,7 @@ func unwrapReverseIterableSource(expr ast.Expr) (ast.Expr, bool) {
 	if !ok || call == nil {
 		return expr, false
 	}
-	if len(call.Args) != 1 || len(call.WithArgs) != 0 || len(call.WithBundles) != 0 || len(call.WithItemOrder) != 0 {
+	if len(call.Args) != 1 {
 		return expr, false
 	}
 	if call.ArgName(0) != "" {

@@ -595,10 +595,6 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	}
 	p.expect(lexer.TOKEN_RPAREN)
 
-	var implicitParams []ast.ParamDecl
-	var implicitBundles []string
-	var implicitItemOrder []ast.ImplicitSigItem
-
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
@@ -609,7 +605,7 @@ func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 		permissions = p.parsePermissionRefs(true)
 	}
 
-	return &ast.FuncTypeExpr{Position: pos, Params: params, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, Return: retType, Permissions: permissions, Variadic: variadic}
+	return &ast.FuncTypeExpr{Position: pos, Params: params, Return: retType, Permissions: permissions, Variadic: variadic}
 }
 func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
 	pos := p.cur().Pos

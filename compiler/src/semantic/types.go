@@ -19,34 +19,6 @@ type PermissionSet struct {
 	Builtin   bool
 }
 
-type ContextBundleField struct {
-	Name    string
-	Type    Type
-	Mutable bool
-	Decl    ast.ParamDecl
-}
-
-type ContextBundle struct {
-	Name   string
-	Fields []ContextBundleField
-	Decl   *ast.ContextDecl
-}
-
-type ParamPackField struct {
-	Name    string
-	Type    Type
-	Mutable bool
-	Decl    ast.ParamDecl
-}
-
-type ParamPack struct {
-	Name      string
-	Fields    []ParamPackField
-	Decl      *ast.ParamsDecl
-	Namespace string
-	Usings    []string
-}
-
 type Shape interface {
 	String() string
 	isShape()

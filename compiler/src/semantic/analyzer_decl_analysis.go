@@ -787,9 +787,6 @@ func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
 		return nil, false
 	}
 	params := append([]ast.ParamDecl(nil), a.currentFuncDecl.Params...)
-	if implicitDecls, _ := a.expandImplicitParamDecls(a.currentFuncDecl.Params, a.currentFuncDecl.ImplicitParams, a.currentFuncDecl.ImplicitBundles, a.currentFuncDecl.ImplicitItemOrder, a.currentFuncDecl.Name); len(implicitDecls) != 0 {
-		params = append(params, implicitDecls...)
-	}
 	if index >= len(params) {
 		return nil, false
 	}

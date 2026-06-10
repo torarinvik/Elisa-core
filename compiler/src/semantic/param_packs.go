@@ -5,125 +5,6 @@ import (
 	"elisacore/src/lexer"
 )
 
-func (a *Analyzer) collectParamPacks(decls []scopedDecl) {
-	if a == nil {
-		return
-	}
-	for _, scoped := range decls {
-		decl, ok := scoped.Decl.(*ast.ParamsDecl)
-		if !ok || decl == nil {
-			continue
-		}
-		if decl.DeprecatedSyntax != "" {
-			if decl.DeprecatedReplacement != "" {
-				a.deprecatedf(decl.Pos(), "`%s` is deprecated; use `%s`", decl.DeprecatedSyntax, decl.DeprecatedReplacement)
-			} else {
-				a.deprecatedf(decl.Pos(), "`%s` is deprecated", decl.DeprecatedSyntax)
-			}
-		}
-		qualifiedName := joinQualifiedName(scoped.Namespace, decl.Name)
-		if _, exists := a.paramPacks[qualifiedName]; exists {
-			a.errorf(decl.Pos(), "duplicate explicit bundle %q", qualifiedName)
-			continue
-		}
-		pack := &ParamPack{
-			Name:      qualifiedName,
-			Decl:      decl,
-			Namespace: scoped.Namespace,
-			Usings:    append([]string(nil), scoped.Usings...),
-			Fields:    make([]ParamPackField, 0, len(decl.Params)),
-		}
-		seen := map[string]bool{}
-		paramTypes := make([]Type, 0, len(decl.Params))
-		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			for _, param := range decl.Params {
-				resolvedType := a.resolveType(param.Type)
-				paramTypes = append(paramTypes, resolvedType)
-				if seen[param.Name] {
-					a.errorf(param.Position, "duplicate field %q in explicit bundle %q", param.Name, qualifiedName)
-					continue
-				}
-				seen[param.Name] = true
-				pack.Fields = append(pack.Fields, ParamPackField{Name: param.Name, Type: resolvedType, Mutable: param.Mutable, Decl: param})
-			}
-			a.validateFuncParamDefaults(qualifiedName, decl.Params, paramTypes)
-		})
-		a.paramPacks[qualifiedName] = pack
-	}
-}
-
-func (a *Analyzer) currentLocalParamPackFrame() map[string]*ParamPack {
-	if a == nil || len(a.currentLocalParamPackScopes) == 0 {
-		return nil
-	}
-	return a.currentLocalParamPackScopes[len(a.currentLocalParamPackScopes)-1]
-}
-
-func (a *Analyzer) withLocalParamPackFrame(fn func()) {
-	if a == nil {
-		if fn != nil {
-			fn()
-		}
-		return
-	}
-	savedLen := len(a.currentLocalParamPackScopes)
-	a.currentLocalParamPackScopes = append(a.currentLocalParamPackScopes, map[string]*ParamPack{})
-	defer func() {
-		a.currentLocalParamPackScopes = a.currentLocalParamPackScopes[:savedLen]
-	}()
-	if fn != nil {
-		fn()
-	}
-}
-
-func (a *Analyzer) analyzeLocalParamsStmt(stmt *ast.LocalParamsStmt) {
-	if a == nil || stmt == nil {
-		return
-	}
-	frame := a.currentLocalParamPackFrame()
-	if frame == nil {
-		return
-	}
-	if _, exists := frame[stmt.Name]; exists {
-		a.errorf(stmt.Position, "duplicate local explicit bundle %q in the same block", stmt.Name)
-		return
-	}
-	pack := &ParamPack{
-		Name:      stmt.Name,
-		Namespace: a.currentNamespace,
-		Usings:    append([]string(nil), a.currentUsings...),
-		Fields:    make([]ParamPackField, 0, len(stmt.Params)),
-	}
-	seen := map[string]bool{}
-	for _, param := range stmt.Params {
-		resolvedType := a.resolveType(param.Type)
-		if seen[param.Name] {
-			a.errorf(param.Position, "duplicate field %q in local explicit bundle %q", param.Name, stmt.Name)
-			continue
-		}
-		seen[param.Name] = true
-		if param.DefaultValue != nil && cloneDefaultArgExpr(param.DefaultValue) == nil {
-			a.errorf(param.DefaultValue.Pos(), "default value for field %q on local explicit bundle %q uses unsupported syntax in v1", param.Name, stmt.Name)
-		}
-		pack.Fields = append(pack.Fields, ParamPackField{Name: param.Name, Type: resolvedType, Mutable: param.Mutable, Decl: param})
-	}
-	frame[stmt.Name] = pack
-}
-
-func orderedExplicitSigItems(packs []ast.ParamPackUse, params []ast.ParamDecl, order []ast.ParamSigItem) []ast.ParamSigItem {
-	if len(order) != 0 {
-		return append([]ast.ParamSigItem(nil), order...)
-	}
-	items := make([]ast.ParamSigItem, 0, len(packs)+len(params))
-	for _, pack := range packs {
-		items = append(items, ast.ParamSigItem{Position: pack.Position, Pack: pack, IsPack: true})
-	}
-	for _, param := range params {
-		items = append(items, ast.ParamSigItem{Position: param.Position, Param: param})
-	}
-	return items
-}
-
 type explicitParamSpec struct {
 	Decl             ast.ParamDecl
 	ResolvedType     Type
@@ -132,52 +13,27 @@ type explicitParamSpec struct {
 	DefaultUsings    []string
 }
 
-func (a *Analyzer) expandExplicitParamSpecs(params []ast.ParamDecl, packs []ast.ParamPackUse, order []ast.ParamSigItem, ownerName string) []explicitParamSpec {
-	items := orderedExplicitSigItems(packs, params, order)
-	if len(items) == 0 {
+func (a *Analyzer) expandExplicitParamSpecs(params []ast.ParamDecl, ownerName string) []explicitParamSpec {
+	if len(params) == 0 {
 		return nil
 	}
-	out := make([]explicitParamSpec, 0, len(items))
+	out := make([]explicitParamSpec, 0, len(params))
 	seen := map[string]bool{}
 	appendSpec := func(spec explicitParamSpec, pos lexer.Pos) {
 		if spec.Decl.Name == "" {
 			return
 		}
 		if seen[spec.Decl.Name] {
-			a.errorf(pos, "duplicate explicit parameter %q after explicit bundle expansion on %q", spec.Decl.Name, ownerName)
+			a.errorf(pos, "duplicate explicit parameter %q on %q", spec.Decl.Name, ownerName)
 			return
 		}
 		seen[spec.Decl.Name] = true
 		out = append(out, spec)
 	}
-	for _, item := range items {
-		if item.IsPack {
-			pack, _, ok := a.lookupVisibleParamPack(item.Pack.Name)
-			if !ok || pack == nil {
-				a.errorf(item.Position, "unknown explicit bundle %q", item.Pack.Name)
-				continue
-			}
-			for _, field := range pack.Fields {
-				appendSpec(explicitParamSpec{
-					Decl:             field.Decl,
-					ResolvedType:     field.Type,
-					HasResolvedType:  true,
-					DefaultNamespace: pack.Namespace,
-					DefaultUsings:    append([]string(nil), pack.Usings...),
-				}, explicitSigItemPositionOr(item, field.Decl.Position))
-			}
-			continue
-		}
-		appendSpec(explicitParamSpec{Decl: item.Param}, item.Param.Position)
+	for _, param := range params {
+		appendSpec(explicitParamSpec{Decl: param}, param.Position)
 	}
 	return out
-}
-
-func explicitSigItemPositionOr(item ast.ParamSigItem, fallback lexer.Pos) lexer.Pos {
-	if item.Position.IsZero() {
-		return fallback
-	}
-	return item.Position
 }
 
 func explicitParamDeclsFromSpecs(specs []explicitParamSpec) []ast.ParamDecl {
@@ -191,20 +47,16 @@ func explicitParamDeclsFromSpecs(specs []explicitParamSpec) []ast.ParamDecl {
 	return decls
 }
 
-func (a *Analyzer) expandedExplicitParamDecls(params []ast.ParamDecl, packs []ast.ParamPackUse, order []ast.ParamSigItem, ownerName string) []ast.ParamDecl {
-	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(params, packs, order, ownerName))
-}
-
 func (a *Analyzer) expandedFuncDeclParams(fn *ast.FuncDecl) []ast.ParamDecl {
 	if fn == nil {
 		return nil
 	}
-	return a.expandedExplicitParamDecls(fn.Params, fn.ParamPacks, fn.ParamItemOrder, fn.Name)
+	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(fn.Params, fn.Name))
 }
 
 func (a *Analyzer) expandedExternFuncDeclParams(fn *ast.ExternFuncDecl) []ast.ParamDecl {
 	if fn == nil {
 		return nil
 	}
-	return a.expandedExplicitParamDecls(fn.Params, fn.ParamPacks, fn.ParamItemOrder, fn.Name)
+	return explicitParamDeclsFromSpecs(a.expandExplicitParamSpecs(fn.Params, fn.Name))
 }

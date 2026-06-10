@@ -24,8 +24,6 @@ func (a *Analyzer) forEachFirstLoopBody(stmts []ast.Stmt, visit func([]ast.Stmt)
 				continue
 			}
 			a.forEachFirstLoopBody(s.Body, visit)
-		case *ast.WithStmt:
-			a.forEachFirstLoopBody(s.Body, visit)
 		case *ast.RegionStmt:
 			a.forEachFirstLoopBody(s.Body, visit)
 		case *ast.InStoreStmt:
@@ -54,8 +52,6 @@ func (a *Analyzer) forEachStaticStmtInLoopBody(stmts []ast.Stmt, visit func(ast.
 		case *ast.ScopeStmt:
 			a.forEachStaticStmtInLoopBody(s.Body, visit)
 		case *ast.CanStmt:
-			a.forEachStaticStmtInLoopBody(s.Body, visit)
-		case *ast.WithStmt:
 			a.forEachStaticStmtInLoopBody(s.Body, visit)
 		case *ast.RegionStmt:
 			a.forEachStaticStmtInLoopBody(s.Body, visit)
@@ -143,13 +139,6 @@ func (a *Analyzer) walkPerfLintExprsInLoopStmt(stmt ast.Stmt, visitExpr func(ast
 	case *ast.InStoreStmt:
 		return a.walkStaticExpr(n.Store, visitExpr) || a.walkPerfLintExprsInLoopBody(n.Body, visitExpr)
 	case *ast.CanStmt:
-		return a.walkPerfLintExprsInLoopBody(n.Body, visitExpr)
-	case *ast.WithStmt:
-		for _, arg := range n.Args {
-			if a.walkStaticExpr(arg.Value, visitExpr) {
-				return true
-			}
-		}
 		return a.walkPerfLintExprsInLoopBody(n.Body, visitExpr)
 	default:
 		return a.walkStaticStmt(stmt, visitExpr)

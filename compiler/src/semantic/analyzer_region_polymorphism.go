@@ -166,8 +166,6 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 				}
 			case *ast.CanStmt:
 				walk(s.Body)
-			case *ast.WithStmt:
-				walk(s.Body)
 			case *ast.RegionStmt:
 				walk(s.Body)
 			case *ast.InStoreStmt:
@@ -242,8 +240,6 @@ func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
 				}
 			case *ast.CanStmt:
 				collect(s.Body)
-			case *ast.WithStmt:
-				collect(s.Body)
 			case *ast.RegionStmt:
 				// Only a synthesized auto region threads+adopts; an explicit `region NAME:` does not.
 				if isSynthesizedAutoRegion(s.Name) {
@@ -287,8 +283,6 @@ func functionBuildsAndReturnsLocalContainer(fn *ast.FuncDecl) bool {
 					walk(arm.Body)
 				}
 			case *ast.CanStmt:
-				walk(s.Body)
-			case *ast.WithStmt:
 				walk(s.Body)
 			case *ast.RegionStmt:
 				walk(s.Body)

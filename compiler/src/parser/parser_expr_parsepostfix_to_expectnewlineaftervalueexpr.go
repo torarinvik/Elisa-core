@@ -81,9 +81,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 				}
 				castExpr := &ast.CastExpr{Position: pos, Operand: expr, Target: sig, Origin: ast.CastExprOriginIndirectCall}
 				p.expect(lexer.TOKEN_LPAREN)
-				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
+				args, argNames, argShorthand, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CallExpr{Position: pos, Func: castExpr, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ParamPacks: paramPacks, ArgItemOrder: argItems}
+				expr = &ast.CallExpr{Position: pos, Func: castExpr, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ArgItemOrder: argItems}
 				continue
 			}
 
@@ -192,9 +192,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 				}
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
-				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
+				args, argNames, argShorthand, argItems, hasArgForward, argForwardPos := p.parseCallArgs()
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ParamPacks: paramPacks, ArgItemOrder: argItems}
+				expr = &ast.CallExpr{Position: pos, Func: &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs}, HasArgForward: hasArgForward, ArgForwardPos: argForwardPos, Args: args, ArgNames: argNames, ArgShorthand: argShorthand, ArgItemOrder: argItems}
 				continue
 			}
 			p.advance()
@@ -222,14 +222,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 			var args []ast.Expr
 			var argNames []string
 			var argShorthand []bool
-			var paramPacks []ast.ParamPackUse
 			var argItems []ast.CallArgItem
 			var hasArgForward bool
 			var argForwardPos lexer.Pos
 			if ident, ok := expr.(*ast.Ident); ok && ident.Name == "children" {
 				args, argNames = p.parseChildrenCallArgs()
 			} else {
-				args, argNames, argShorthand, paramPacks, argItems, hasArgForward, argForwardPos = p.parseCallArgs()
+				args, argNames, argShorthand, argItems, hasArgForward, argForwardPos = p.parseCallArgs()
 			}
 			p.expect(lexer.TOKEN_RPAREN)
 			safe := false
@@ -246,7 +245,6 @@ func (p *Parser) parsePostfix() ast.Expr {
 				Args:          args,
 				ArgNames:      argNames,
 				ArgShorthand:  argShorthand,
-				ParamPacks:    paramPacks,
 				ArgItemOrder:  argItems,
 				Safe:          safe,
 			}
@@ -691,12 +689,9 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Ex
 	return args, argNames, spreads
 }
 func (p *Parser) parseStructLiteralParenArgs() ([]ast.Expr, []string) {
-	args, argNames, _, packs, _, hasArgForward, _ := p.parseCallArgs()
+	args, argNames, _, _, hasArgForward, _ := p.parseCallArgs()
 	if hasArgForward {
 		p.errorf("struct constructor arguments do not support call forwarding `..`")
-	}
-	for range packs {
-		p.errorf("struct constructor arguments do not support parameter-pack application")
 	}
 	return args, argNames
 }

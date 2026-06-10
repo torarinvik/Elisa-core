@@ -157,16 +157,6 @@ func (a *Analyzer) validateSegmentFlowStmt(stmt ast.Stmt, owner *segmentOwnerSta
 	case *ast.MoveBindStmt:
 		a.validateSegmentFlowExpr(n.Value, owner)
 		a.validateSegmentFlowExpr(n.Store, owner)
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			a.validateSegmentFlowExpr(arg.Value, owner)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				a.validateSegmentFlowExpr(arg.Value, owner)
-			}
-		}
-		a.validateSegmentFlowStmts(n.Body, owner)
 	case *ast.DeferStmt:
 		snapshot := *owner
 		a.validateSegmentFlowStmts(n.Body, &snapshot)
@@ -429,16 +419,6 @@ func (a *Analyzer) validateSegmentAgnosticStmt(stmt ast.Stmt) {
 	case *ast.MoveBindStmt:
 		a.validateSegmentAgnosticExpr(n.Value)
 		a.validateSegmentAgnosticExpr(n.Store)
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			a.validateSegmentAgnosticExpr(arg.Value)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				a.validateSegmentAgnosticExpr(arg.Value)
-			}
-		}
-		a.validateSegmentAgnosticStmts(n.Body)
 	case *ast.DeferStmt:
 		a.validateSegmentAgnosticStmts(n.Body)
 	case *ast.AssignStmt:
@@ -678,16 +658,6 @@ func (a *Analyzer) validateReentrantSafeStmt(stmt ast.Stmt) {
 	case *ast.MoveBindStmt:
 		a.validateReentrantSafeExpr(n.Value)
 		a.validateReentrantSafeExpr(n.Store)
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			a.validateReentrantSafeExpr(arg.Value)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				a.validateReentrantSafeExpr(arg.Value)
-			}
-		}
-		a.validateReentrantSafeStmts(n.Body)
 	case *ast.DeferStmt:
 		a.validateReentrantSafeStmts(n.Body)
 	case *ast.AssignStmt:

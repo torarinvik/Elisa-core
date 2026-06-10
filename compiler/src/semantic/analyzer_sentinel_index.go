@@ -178,10 +178,6 @@ func (a *Analyzer) collectSentinelTaints(stmts []ast.Stmt, sentinels map[string]
 			if n != nil {
 				a.collectSentinelTaints(n.Body, sentinels, tainted)
 			}
-		case *ast.WithStmt:
-			if n != nil {
-				a.collectSentinelTaints(n.Body, sentinels, tainted)
-			}
 		case *ast.InStoreStmt:
 			if n != nil {
 				a.collectSentinelTaints(n.Body, sentinels, tainted)

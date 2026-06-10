@@ -90,8 +90,6 @@ type Analyzer struct {
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
 	grantAliases            map[string][]ast.PermissionRef
-	contextBundles          map[string]*ContextBundle
-	paramPacks              map[string]*ParamPack
 	globalScope             *Scope
 	functionTypes           map[string]*FuncType
 	externLinkNames         map[string]externLinkNameSignature
@@ -272,16 +270,12 @@ type Analyzer struct {
 	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
 	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
 	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
-	loweredWithStmts                 map[*ast.WithStmt]bool
 	currentNamespace                 string
 	currentUsings                    []string
 	importAliases                    map[string]string
 	resolvedTypeNames                map[ast.TypeExpr]string
 	resolvedValueNames               map[*ast.Ident]string
 	currentImplicitScopes            []map[string]ast.Expr
-	currentExplicitArgScopes         []map[string]ast.Expr
-	currentLocalParamPackScopes      []map[string]*ParamPack
-	implicitTempCounter              int
 	semanticLimitDiagnostics         map[string]bool
 }
 
@@ -495,8 +489,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		grantAliases:                      map[string][]ast.PermissionRef{},
-		contextBundles:                    map[string]*ContextBundle{},
-		paramPacks:                        map[string]*ParamPack{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		externLinkNames:                   map[string]externLinkNameSignature{},
@@ -544,7 +536,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceProgressSafety:             options.EnforceProgressSafety,
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
-		loweredWithStmts:                  map[*ast.WithStmt]bool{},
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
@@ -562,8 +553,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
 	a.collectGrantAliases(activeDecls)
-	a.collectContextBundles(activeDecls)
-	a.collectParamPacks(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
@@ -590,8 +579,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
 		a.collectGrantAliases(generatedScopedDecls)
-		a.collectContextBundles(generatedScopedDecls)
-		a.collectParamPacks(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
 		a.populateConstEnumMembers(generatedScopedDecls)
 		a.populateStructFields(generatedScopedDecls)
@@ -627,8 +614,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		TreeAttributes:          a.treeAttributes,
 		StaticInterfaces:        a.staticInterfaces,
 		StaticImpls:             a.staticImpls,
-		ContextBundles:          a.contextBundles,
-		ParamPacks:              a.paramPacks,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
 		AttributeFieldRefs:      a.attributeFieldRefs,

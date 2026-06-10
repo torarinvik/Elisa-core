@@ -10,7 +10,7 @@ func (a *Analyzer) analyzeTypeConstructorCall(expr *ast.CallExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	if len(expr.Args) != 1 || expr.NamedArgCount() != 0 || len(expr.ArgItemOrder) != 0 && (expr.HasArgForward || len(expr.ParamPacks) != 0) {
+	if len(expr.Args) != 1 || expr.NamedArgCount() != 0 || len(expr.ArgItemOrder) != 0 && expr.HasArgForward {
 		a.errorf(expr.Pos(), "type constructor cast expects exactly 1 positional argument")
 		for _, arg := range expr.Args {
 			a.analyzeExpr(arg)

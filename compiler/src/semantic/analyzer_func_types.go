@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, paramPacks []ast.ParamPackUse, paramItemOrder []ast.ParamSigItem, implicitParams []ast.ParamDecl, implicitBundles []string, implicitItemOrder []ast.ImplicitSigItem, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for i, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamType || param.InterfaceBound == "" {
@@ -17,10 +17,9 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 			resolvedGenericParams[i].InterfaceBound = iface.Name
 		}
 	}
-	explicitSpecs := a.expandExplicitParamSpecs(params, paramPacks, paramItemOrder, name)
+	explicitSpecs := a.expandExplicitParamSpecs(params, name)
 	expandedExplicitParams := explicitParamDeclsFromSpecs(explicitSpecs)
-	expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(expandedExplicitParams, implicitParams, implicitBundles, implicitItemOrder, name)
-	allParams := append(append([]ast.ParamDecl(nil), expandedExplicitParams...), expandedImplicitParams...)
+	allParams := expandedExplicitParams
 	explicitNames := make([]string, 0, len(expandedExplicitParams))
 	for _, p := range expandedExplicitParams {
 		explicitNames = append(explicitNames, p.Name)
@@ -45,9 +44,6 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 							continue
 						}
 						ptypes = append(ptypes, a.resolveType(spec.Decl.Type))
-					}
-					for _, p := range expandedImplicitParams {
-						ptypes = append(ptypes, a.resolveType(p.Type))
 					}
 					if ret != nil {
 						retType = a.resolveType(ret)
@@ -80,7 +76,6 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 		ExplicitParamNames:        explicitNames,
 		ExplicitParamDefaultExprs: append([]ast.Expr(nil), defaultExprs...),
 		ExplicitParamHasDefault:   append([]bool(nil), hasDefaults...),
-		ImplicitParamNames:        implicitNames,
 		Return:                    retType,
 		Variadic:                  variadic,
 		OwnedParams:               ownedParamFlags(allParams),

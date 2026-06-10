@@ -21,11 +21,9 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	a.currentScope = scope
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
-	a.withLocalParamPackFrame(func() {
-		for _, stmt := range stmts {
-			a.analyzeStmt(stmt)
-		}
-	})
+	for _, stmt := range stmts {
+		a.analyzeStmt(stmt)
+	}
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
 	a.currentScope = saved

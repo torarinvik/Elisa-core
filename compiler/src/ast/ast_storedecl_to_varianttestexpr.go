@@ -103,76 +103,21 @@ type EnsuresClause struct {
 	StateCases []string
 	RefState   RefState
 }
-type ContextDecl struct {
-	Position lexer.Pos
-	Name     string
-	Fields   []ParamDecl
-}
-type ParamsDecl struct {
-	Position              lexer.Pos
-	Name                  string
-	Params                []ParamDecl
-	DeprecatedSyntax      string
-	DeprecatedReplacement string
-}
-type WithArg struct {
-	Position  lexer.Pos
-	Name      string
-	Value     Expr
-	Shorthand bool
-}
-type ParamPackUse struct {
-	Position              lexer.Pos
-	Name                  string
-	Args                  []WithArg
-	Bare                  bool
-	DeprecatedSyntax      string
-	DeprecatedReplacement string
-}
-type WithBundleUse struct {
-	Position lexer.Pos
-	Name     string
-	Args     []WithArg
-	Spread   bool
-}
-type ImplicitSigItem struct {
-	Position lexer.Pos
-	Bundle   string
-	Param    ParamDecl
-	IsBundle bool
-}
-type WithItem struct {
-	Position lexer.Pos
-	Arg      WithArg
-	Bundle   WithBundleUse
-	IsBundle bool
-}
-type ParamSigItem struct {
-	Position lexer.Pos
-	Param    ParamDecl
-	Pack     ParamPackUse
-	IsPack   bool
-}
 type FuncDecl struct {
-	Position          lexer.Pos
-	Annotations       []Annotation
-	Static            bool
-	Override          bool
-	Name              string
-	TypeParams        []string
-	RegionParams      []string
-	PermissionParams  []string
-	GenericParams     []GenericParam
-	Permissions       []PermissionRef
-	Ensures           []EnsuresClause
-	Params            []ParamDecl
-	ParamPacks        []ParamPackUse
-	ParamItemOrder    []ParamSigItem
-	ImplicitParams    []ParamDecl
-	ImplicitBundles   []string
-	ImplicitItemOrder []ImplicitSigItem
-	ReturnType        TypeExpr
-	Body              []Stmt
+	Position         lexer.Pos
+	Annotations      []Annotation
+	Static           bool
+	Override         bool
+	Name             string
+	TypeParams       []string
+	RegionParams     []string
+	PermissionParams []string
+	GenericParams    []GenericParam
+	Permissions      []PermissionRef
+	Ensures          []EnsuresClause
+	Params           []ParamDecl
+	ReturnType       TypeExpr
+	Body             []Stmt
 }
 type ParamDecl struct {
 	Position     lexer.Pos
@@ -182,24 +127,19 @@ type ParamDecl struct {
 	DefaultValue Expr
 }
 type ExternFuncDecl struct {
-	Position          lexer.Pos
-	Annotations       []Annotation
-	Override          bool
-	Name              string
-	TypeParams        []string
-	PermissionParams  []string
-	GenericParams     []GenericParam
-	RegionParams      []string
-	Permissions       []PermissionRef
-	Ensures           []EnsuresClause
-	Params            []ParamDecl
-	ParamPacks        []ParamPackUse
-	ParamItemOrder    []ParamSigItem
-	ImplicitParams    []ParamDecl
-	ImplicitBundles   []string
-	ImplicitItemOrder []ImplicitSigItem
-	ReturnType        TypeExpr
-	Variadic          bool
+	Position         lexer.Pos
+	Annotations      []Annotation
+	Override         bool
+	Name             string
+	TypeParams       []string
+	PermissionParams []string
+	GenericParams    []GenericParam
+	RegionParams     []string
+	Permissions      []PermissionRef
+	Ensures          []EnsuresClause
+	Params           []ParamDecl
+	ReturnType       TypeExpr
+	Variadic         bool
 }
 type ExternVarDecl struct {
 	Position    lexer.Pos
@@ -395,14 +335,11 @@ type BuiltinTypeExpr struct {
 	Region string
 }
 type FuncTypeExpr struct {
-	Position          lexer.Pos
-	Params            []TypeExpr
-	ImplicitParams    []ParamDecl
-	ImplicitBundles   []string
-	ImplicitItemOrder []ImplicitSigItem
-	Return            TypeExpr
-	Permissions       []PermissionRef
-	Variadic          bool
+	Position    lexer.Pos
+	Params      []TypeExpr
+	Return      TypeExpr
+	Permissions []PermissionRef
+	Variadic    bool
 }
 type ErrorTagExpr struct {
 	Position lexer.Pos
@@ -515,12 +452,8 @@ type CallExpr struct {
 	Args          []Expr
 	ArgNames      []string
 	ArgShorthand  []bool
-	ParamPacks    []ParamPackUse
 	ArgItemOrder  []CallArgItem
 	Safe          bool
-	WithArgs      []WithArg
-	WithBundles   []WithBundleUse
-	WithItemOrder []WithItem
 
 	ResolvedArgsValid         bool
 	ResolvedArgs              []Expr
@@ -547,8 +480,6 @@ type EnumColumnExpr struct {
 type CallArgItem struct {
 	Position lexer.Pos
 	ArgIndex int
-	Pack     ParamPackUse
-	IsPack   bool
 }
 type ShorthandMemberExpr struct {
 	Position lexer.Pos

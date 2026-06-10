@@ -146,7 +146,6 @@ func (n *AssignStmt) Pos() lexer.Pos                   { return n.Position }
 func (n *AugAssignStmt) Pos() lexer.Pos                { return n.Position }
 func (n *AsRefAssignStmt) Pos() lexer.Pos              { return n.Position }
 func (n *VarDeclStmt) Pos() lexer.Pos                  { return n.Position }
-func (n *LocalParamsStmt) Pos() lexer.Pos              { return n.Position }
 func (n *LetDestructureStmt) Pos() lexer.Pos           { return n.Position }
 func (n *TupleBindStmt) Pos() lexer.Pos                { return n.Position }
 func (n *MoveBindStmt) Pos() lexer.Pos                 { return n.Position }
@@ -163,8 +162,6 @@ func (n *MatchStmt) Pos() lexer.Pos                    { return n.Position }
 func (n *ExpectPatternStmt) Pos() lexer.Pos            { return n.Position }
 func (n *InStoreStmt) Pos() lexer.Pos                  { return n.Position }
 func (n *CanStmt) Pos() lexer.Pos                      { return n.Position }
-func (n *WithStmt) Pos() lexer.Pos                     { return n.Position }
-func (n *ArgsScopeStmt) Pos() lexer.Pos                { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos                     { return n.Position }
@@ -197,8 +194,6 @@ func (*ConstEnumMemberDecl) nodeTag()                  {}
 func (*ErrorDecl) nodeTag()                            {}
 func (*PermissionDecl) nodeTag()                       {}
 func (*GrantAliasDecl) nodeTag()                       {}
-func (*ContextDecl) nodeTag()                          {}
-func (*ParamsDecl) nodeTag()                           {}
 func (*NamespaceDecl) nodeTag()                        {}
 func (*UsingDecl) nodeTag()                            {}
 func (*ImportDecl) nodeTag()                           {}
@@ -351,7 +346,6 @@ func (*AssignStmt) nodeTag()                           {}
 func (*AugAssignStmt) nodeTag()                        {}
 func (*AsRefAssignStmt) nodeTag()                      {}
 func (*VarDeclStmt) nodeTag()                          {}
-func (*LocalParamsStmt) nodeTag()                      {}
 func (*LetDestructureStmt) nodeTag()                   {}
 func (*TupleBindStmt) nodeTag()                        {}
 func (*MoveBindStmt) nodeTag()                         {}
@@ -368,8 +362,6 @@ func (*MatchStmt) nodeTag()                            {}
 func (*ExpectPatternStmt) nodeTag()                    {}
 func (*InStoreStmt) nodeTag()                          {}
 func (*CanStmt) nodeTag()                              {}
-func (*WithStmt) nodeTag()                             {}
-func (*ArgsScopeStmt) nodeTag()                        {}
 func (*ScopeStmt) nodeTag()                            {}
 func (*PoolStmt) nodeTag()                             {}
 func (*LockStmt) nodeTag()                             {}
@@ -400,8 +392,6 @@ func (*ConstEnumDecl) declTag()                        {}
 func (*ErrorDecl) declTag()                            {}
 func (*PermissionDecl) declTag()                       {}
 func (*GrantAliasDecl) declTag()                       {}
-func (*ContextDecl) declTag()                          {}
-func (*ParamsDecl) declTag()                           {}
 func (*NamespaceDecl) declTag()                        {}
 func (*UsingDecl) declTag()                            {}
 func (*ImportDecl) declTag()                           {}
@@ -557,7 +547,6 @@ func (*AssignStmt) stmtTag()                           {}
 func (*AugAssignStmt) stmtTag()                        {}
 func (*AsRefAssignStmt) stmtTag()                      {}
 func (*VarDeclStmt) stmtTag()                          {}
-func (*LocalParamsStmt) stmtTag()                      {}
 func (*LetDestructureStmt) stmtTag()                   {}
 func (*TupleBindStmt) stmtTag()                        {}
 func (*MoveBindStmt) stmtTag()                         {}
@@ -572,8 +561,6 @@ func (*IterForStmt) stmtTag()                          {}
 func (*ParallelForStmt) stmtTag()                      {}
 func (*InStoreStmt) stmtTag()                          {}
 func (*CanStmt) stmtTag()                              {}
-func (*WithStmt) stmtTag()                             {}
-func (*ArgsScopeStmt) stmtTag()                        {}
 func (*ScopeStmt) stmtTag()                            {}
 func (*PoolStmt) stmtTag()                             {}
 func (*LockStmt) stmtTag()                             {}

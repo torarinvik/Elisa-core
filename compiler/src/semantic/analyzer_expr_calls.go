@@ -611,13 +611,10 @@ func (a *Analyzer) analyzeSafeCallExpr(expr *ast.CallExpr) Type {
 		return invalidType
 	}
 	synthetic := &ast.CallExpr{
-		Position:      expr.Position,
-		Func:          &ast.Ident{Position: fieldExpr.Position, Name: resolvedSym.Name},
-		Args:          append([]ast.Expr{&ast.ZeroedLit{Position: fieldExpr.Object.Pos()}}, expr.Args...),
-		ArgNames:      append([]string{""}, expr.ArgNames...),
-		WithArgs:      append([]ast.WithArg(nil), expr.WithArgs...),
-		WithBundles:   append([]ast.WithBundleUse(nil), expr.WithBundles...),
-		WithItemOrder: append([]ast.WithItem(nil), expr.WithItemOrder...),
+		Position: expr.Position,
+		Func:     &ast.Ident{Position: fieldExpr.Position, Name: resolvedSym.Name},
+		Args:     append([]ast.Expr{&ast.ZeroedLit{Position: fieldExpr.Object.Pos()}}, expr.Args...),
+		ArgNames: append([]string{""}, expr.ArgNames...),
 	}
 	orderedArgs, orderedOK := a.resolveFunctionCallArgs(synthetic, ft)
 	if !orderedOK {
@@ -657,13 +654,10 @@ func (a *Analyzer) analyzeSafeTransformCallExpr(expr *ast.CallExpr) Type {
 	}
 	placeholder := &ast.ZeroedLit{Position: expr.SafeReceiver.Pos()}
 	synthetic := &ast.CallExpr{
-		Position:      expr.Position,
-		Func:          expr.Func,
-		Args:          append([]ast.Expr{placeholder}, expr.Args...),
-		ArgNames:      append([]string{""}, expr.ArgNames...),
-		WithArgs:      append([]ast.WithArg(nil), expr.WithArgs...),
-		WithBundles:   append([]ast.WithBundleUse(nil), expr.WithBundles...),
-		WithItemOrder: append([]ast.WithItem(nil), expr.WithItemOrder...),
+		Position: expr.Position,
+		Func:     expr.Func,
+		Args:     append([]ast.Expr{placeholder}, expr.Args...),
+		ArgNames: append([]string{""}, expr.ArgNames...),
 	}
 	resultType := a.analyzeCallExpr(synthetic)
 	resolvedFuncType, _ := a.exprTypes[synthetic.Func].(*FuncType)

@@ -1692,13 +1692,6 @@ func (a *Analyzer) walkStaticStmt(stmt ast.Stmt, visitExpr func(ast.Expr) bool) 
 		return a.walkStaticExpr(n.Store, visitExpr) || a.walkStaticStmts(n.Body, visitExpr)
 	case *ast.CanStmt:
 		return a.walkStaticStmts(n.Body, visitExpr)
-	case *ast.WithStmt:
-		for _, arg := range n.Args {
-			if a.walkStaticExpr(arg.Value, visitExpr) {
-				return true
-			}
-		}
-		return a.walkStaticStmts(n.Body, visitExpr)
 	}
 	return false
 }
@@ -1755,25 +1748,6 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 		for _, arg := range args {
 			if a.walkStaticExpr(arg, visitExpr) {
 				return true
-			}
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				if a.walkStaticExpr(arg.Value, visitExpr) {
-					return true
-				}
-			}
-		}
-		for _, arg := range n.WithArgs {
-			if a.walkStaticExpr(arg.Value, visitExpr) {
-				return true
-			}
-		}
-		for _, bundle := range n.WithBundles {
-			for _, arg := range bundle.Args {
-				if a.walkStaticExpr(arg.Value, visitExpr) {
-					return true
-				}
 			}
 		}
 	case *ast.StructLitExpr:

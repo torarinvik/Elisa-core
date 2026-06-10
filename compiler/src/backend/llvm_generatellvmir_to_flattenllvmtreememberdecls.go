@@ -471,10 +471,6 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		return g.checkStaticAssertBlockDecl(n)
 	case *ast.PermissionDecl:
 		return nil
-	case *ast.ParamsDecl:
-		return nil
-	case *ast.ContextDecl:
-		return nil
 	case *ast.NamespaceDecl:
 		childNamespace := llvmQualifiedDeclName(namespace, n.Name)
 		for _, child := range n.Decls {
@@ -657,10 +653,6 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.ExternTypeDecl, *ast.AttributeDecl, *ast.StaticAssertDecl, *ast.StaticAssertBlockDecl, *ast.StaticGenerateDecl:
 		return nil
 	case *ast.PermissionDecl:
-		return nil
-	case *ast.ParamsDecl:
-		return nil
-	case *ast.ContextDecl:
 		return nil
 	case *ast.NamespaceDecl:
 		childNamespace := llvmQualifiedDeclName(namespace, n.Name)

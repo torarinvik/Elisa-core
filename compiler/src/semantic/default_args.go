@@ -85,24 +85,8 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if (n.Func != nil && fn == nil) || (n.SafeReceiver != nil && safeReceiver == nil) || (len(n.Args) != 0 && args == nil) {
 			return nil
 		}
-		paramPacks := cloneDefaultParamPackUses(n.ParamPacks)
-		if len(n.ParamPacks) != 0 && paramPacks == nil {
-			return nil
-		}
 		argItems := cloneDefaultCallArgItems(n.ArgItemOrder)
 		if len(n.ArgItemOrder) != 0 && argItems == nil {
-			return nil
-		}
-		withArgs := cloneDefaultWithArgs(n.WithArgs)
-		if len(n.WithArgs) != 0 && withArgs == nil {
-			return nil
-		}
-		withBundles := cloneDefaultWithBundles(n.WithBundles)
-		if len(n.WithBundles) != 0 && withBundles == nil {
-			return nil
-		}
-		withItems := cloneDefaultWithItems(n.WithItemOrder)
-		if len(n.WithItemOrder) != 0 && withItems == nil {
 			return nil
 		}
 		return &ast.CallExpr{
@@ -114,12 +98,8 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 			Args:          args,
 			ArgNames:      append([]string(nil), n.ArgNames...),
 			ArgShorthand:  append([]bool(nil), n.ArgShorthand...),
-			ParamPacks:    paramPacks,
 			ArgItemOrder:  argItems,
 			Safe:          n.Safe,
-			WithArgs:      withArgs,
-			WithBundles:   withBundles,
-			WithItemOrder: withItems,
 		}
 	case *ast.CastExpr:
 		operand := cloneDefaultArgExpr(n.Operand)
@@ -325,66 +305,9 @@ func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
 			return nil
 		}
 		return &ast.VarDeclStmt{Position: n.Position, Name: n.Name, Mutable: n.Mutable, Type: n.Type, Value: value, Owner: owner}
-	case *ast.LocalParamsStmt:
-		params := append([]ast.ParamDecl(nil), n.Params...)
-		for i := range params {
-			if params[i].DefaultValue == nil {
-				continue
-			}
-			params[i].DefaultValue = cloneDefaultArgExpr(params[i].DefaultValue)
-			if params[i].DefaultValue == nil {
-				return nil
-			}
-		}
-		return &ast.LocalParamsStmt{Position: n.Position, Name: n.Name, Params: params, DeprecatedSyntax: n.DeprecatedSyntax, DeprecatedReplacement: n.DeprecatedReplacement}
 	default:
 		return nil
 	}
-}
-
-func cloneDefaultWithArgs(args []ast.WithArg) []ast.WithArg {
-	if len(args) == 0 {
-		return nil
-	}
-	cloned := make([]ast.WithArg, 0, len(args))
-	for _, arg := range args {
-		value := cloneDefaultArgExpr(arg.Value)
-		if arg.Value != nil && value == nil {
-			return nil
-		}
-		cloned = append(cloned, ast.WithArg{Position: arg.Position, Name: arg.Name, Value: value, Shorthand: arg.Shorthand})
-	}
-	return cloned
-}
-
-func cloneDefaultWithBundles(bundles []ast.WithBundleUse) []ast.WithBundleUse {
-	if len(bundles) == 0 {
-		return nil
-	}
-	cloned := make([]ast.WithBundleUse, 0, len(bundles))
-	for _, bundle := range bundles {
-		args := cloneDefaultWithArgs(bundle.Args)
-		if len(bundle.Args) != 0 && args == nil {
-			return nil
-		}
-		cloned = append(cloned, ast.WithBundleUse{Position: bundle.Position, Name: bundle.Name, Args: args, Spread: bundle.Spread})
-	}
-	return cloned
-}
-
-func cloneDefaultParamPackUses(packs []ast.ParamPackUse) []ast.ParamPackUse {
-	if len(packs) == 0 {
-		return nil
-	}
-	cloned := make([]ast.ParamPackUse, 0, len(packs))
-	for _, pack := range packs {
-		args := cloneDefaultWithArgs(pack.Args)
-		if len(pack.Args) != 0 && args == nil {
-			return nil
-		}
-		cloned = append(cloned, ast.ParamPackUse{Position: pack.Position, Name: pack.Name, Args: args, Bare: pack.Bare, DeprecatedSyntax: pack.DeprecatedSyntax, DeprecatedReplacement: pack.DeprecatedReplacement})
-	}
-	return cloned
 }
 
 func cloneDefaultCallArgItems(items []ast.CallArgItem) []ast.CallArgItem {
@@ -393,40 +316,7 @@ func cloneDefaultCallArgItems(items []ast.CallArgItem) []ast.CallArgItem {
 	}
 	cloned := make([]ast.CallArgItem, 0, len(items))
 	for _, item := range items {
-		next := ast.CallArgItem{Position: item.Position, ArgIndex: item.ArgIndex, IsPack: item.IsPack}
-		if item.IsPack {
-			packs := cloneDefaultParamPackUses([]ast.ParamPackUse{item.Pack})
-			if packs == nil {
-				return nil
-			}
-			next.Pack = packs[0]
-		}
-		cloned = append(cloned, next)
-	}
-	return cloned
-}
-
-func cloneDefaultWithItems(items []ast.WithItem) []ast.WithItem {
-	if len(items) == 0 {
-		return nil
-	}
-	cloned := make([]ast.WithItem, 0, len(items))
-	for _, item := range items {
-		next := ast.WithItem{Position: item.Position, IsBundle: item.IsBundle}
-		if item.IsBundle {
-			bundles := cloneDefaultWithBundles([]ast.WithBundleUse{item.Bundle})
-			if bundles == nil {
-				return nil
-			}
-			next.Bundle = bundles[0]
-		} else {
-			args := cloneDefaultWithArgs([]ast.WithArg{item.Arg})
-			if args == nil {
-				return nil
-			}
-			next.Arg = args[0]
-		}
-		cloned = append(cloned, next)
+		cloned = append(cloned, ast.CallArgItem{Position: item.Position, ArgIndex: item.ArgIndex})
 	}
 	return cloned
 }

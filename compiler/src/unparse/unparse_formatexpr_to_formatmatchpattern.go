@@ -69,14 +69,14 @@ func formatExpr(expr ast.Expr) string {
 		if n.Safe {
 			if n.SafeReceiver != nil {
 				funcText = formatExpr(n.SafeReceiver) + "?.(" + formatExpr(n.Func) + ")"
-				if len(n.Args) == 0 && len(n.ParamPacks) == 0 && !n.HasArgForward && len(n.WithArgs) == 0 && len(n.WithBundles) == 0 {
+				if len(n.Args) == 0 && !n.HasArgForward {
 					return funcText
 				}
 			} else if fieldExpr, ok := n.Func.(*ast.FieldExpr); ok && fieldExpr != nil {
 				funcText = formatExpr(fieldExpr.Object) + "?." + fieldExpr.Field
 			}
 		}
-		partCapacity := len(n.Args) + len(n.ParamPacks)
+		partCapacity := len(n.Args)
 		if n.HasArgForward {
 			partCapacity++
 		}
@@ -87,10 +87,6 @@ func formatExpr(expr ast.Expr) string {
 		}
 		if len(n.ArgItemOrder) != 0 {
 			for _, item := range n.ArgItemOrder {
-				if item.IsPack {
-					parts = append(parts, formatValueParamPackUse(item.Pack))
-					continue
-				}
 				argText := formatExpr(n.Args[item.ArgIndex])
 				if strings.Contains(argText, "\n") {
 					multiline = true
@@ -129,9 +125,6 @@ func formatExpr(expr ast.Expr) string {
 			line = funcText + "(\n" + strings.Join(parts, ",\n") + "\n)"
 		} else {
 			line = funcText + "(" + strings.Join(parts, ", ") + ")"
-		}
-		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
-			line += " with " + formatWithValueClause(n.WithBundles, n.WithArgs, n.WithItemOrder)
 		}
 		return line
 	case *ast.FieldExpr:
@@ -449,7 +442,7 @@ func formatRecoveryClause(recovery *ast.RecoveryClause, fallback ast.Expr) strin
 }
 
 func formatWhereViewExpr(expr *ast.CallExpr) (string, bool) {
-	if expr == nil || len(expr.Args) != 2 || len(expr.ArgNames) != 0 || len(expr.ParamPacks) != 0 || expr.HasArgForward {
+	if expr == nil || len(expr.Args) != 2 || len(expr.ArgNames) != 0 || expr.HasArgForward {
 		return "", false
 	}
 	ident, ok := expr.Func.(*ast.Ident)

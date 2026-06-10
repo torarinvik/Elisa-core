@@ -201,16 +201,6 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Store != nil {
 			a.validatePermissionExpr(n.Store, granted)
 		}
-	case *ast.ArgsScopeStmt:
-		for _, arg := range n.Args {
-			a.validatePermissionExpr(arg.Value, granted)
-		}
-		for _, pack := range n.ParamPacks {
-			for _, arg := range pack.Args {
-				a.validatePermissionExpr(arg.Value, granted)
-			}
-		}
-		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.DeferStmt:
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.AssignStmt:

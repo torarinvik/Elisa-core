@@ -263,13 +263,6 @@ type VarDeclStmt struct {
 	Value    Expr
 	Owner    Expr
 }
-type LocalParamsStmt struct {
-	Position              lexer.Pos
-	Name                  string
-	Params                []ParamDecl
-	DeprecatedSyntax      string
-	DeprecatedReplacement string
-}
 type LetDestructureStmt struct {
 	Position lexer.Pos
 	Pattern  *MoveBindStructPattern
@@ -405,26 +398,6 @@ type CanStmt struct {
 	Body                        []Stmt
 	SuppressPermissionInference bool
 	As                          string // checked `as <Family>` re-attribution target (Phase 4); "" if absent
-}
-type WithStmt struct {
-	Position      lexer.Pos
-	Args          []WithArg
-	Bundles       []WithBundleUse
-	WithItemOrder []WithItem
-	Body          []Stmt
-}
-type ArgsScopeItem struct {
-	Position lexer.Pos
-	Arg      WithArg
-	Pack     ParamPackUse
-	IsPack   bool
-}
-type ArgsScopeStmt struct {
-	Position   lexer.Pos
-	Args       []WithArg
-	ParamPacks []ParamPackUse
-	ItemOrder  []ArgsScopeItem
-	Body       []Stmt
 }
 type ScopeStmt struct {
 	Position lexer.Pos
@@ -598,8 +571,6 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
 func (n *GrantAliasDecl) Pos() lexer.Pos { return n.Position }
-func (n *ContextDecl) Pos() lexer.Pos    { return n.Position }
-func (n *ParamsDecl) Pos() lexer.Pos     { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *ImportDecl) Pos() lexer.Pos     { return n.Position }

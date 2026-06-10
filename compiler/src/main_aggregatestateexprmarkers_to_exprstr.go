@@ -273,11 +273,10 @@ func typeStr(t ast.TypeExpr) string {
 			parts = append(parts, "...")
 		}
 		ret := ""
-		withClause := formatMainWithSignatureClause(n.ImplicitBundles, n.ImplicitParams)
 		if n.Return != nil {
 			ret = " -> " + typeStr(n.Return)
 		}
-		return "func(" + strings.Join(parts, ", ") + ")" + withClause + ret + formatPermissionRefs(n.Permissions)
+		return "func(" + strings.Join(parts, ", ") + ")" + ret + formatPermissionRefs(n.Permissions)
 	case *ast.ErrorSetExpr:
 		parts := make([]string, 0, len(n.Tags)+1)
 		for _, tag := range n.Tags {
@@ -298,46 +297,6 @@ func typeStr(t ast.TypeExpr) string {
 	default:
 		return "<type>"
 	}
-}
-func formatMainParamDecl(param ast.ParamDecl) string {
-	line := ""
-	if param.Mutable {
-		line += "mutable "
-	}
-	line += param.Name + ": " + typeStr(param.Type)
-	return line
-}
-func formatMainWithSignatureClause(bundles []string, params []ast.ParamDecl) string {
-	parts := make([]string, 0, len(bundles)+len(params))
-	parts = append(parts, bundles...)
-	for _, param := range params {
-		parts = append(parts, formatMainParamDecl(param))
-	}
-	if len(parts) == 0 {
-		return ""
-	}
-	return " with " + strings.Join(parts, ", ")
-}
-func formatMainWithValueClause(bundles []ast.WithBundleUse, args []ast.WithArg) string {
-	parts := make([]string, 0, len(bundles)+len(args))
-	for _, bundle := range bundles {
-		bundleParts := make([]string, 0, len(bundle.Args)+1)
-		if bundle.Spread {
-			bundleParts = append(bundleParts, "..")
-		}
-		for _, arg := range bundle.Args {
-			bundleParts = append(bundleParts, arg.Name+" = "+exprStr(arg.Value))
-		}
-		parts = append(parts, bundle.Name+"("+strings.Join(bundleParts, ", ")+")")
-	}
-	for _, arg := range args {
-		if arg.Shorthand {
-			parts = append(parts, arg.Name)
-			continue
-		}
-		parts = append(parts, arg.Name+" = "+exprStr(arg.Value))
-	}
-	return strings.Join(parts, ", ")
 }
 func exprStr(e ast.Expr) string {
 	if e == nil {
@@ -397,11 +356,7 @@ func exprStr(e ast.Expr) string {
 				return funcText
 			}
 		}
-		line := fmt.Sprintf("%s(%s)", funcText, strings.Join(args, ", "))
-		if len(n.WithArgs) != 0 || len(n.WithBundles) != 0 {
-			line += " with " + formatMainWithValueClause(n.WithBundles, n.WithArgs)
-		}
-		return line
+		return fmt.Sprintf("%s(%s)", funcText, strings.Join(args, ", "))
 	case *ast.AllocExpr:
 		if n.Owner == nil {
 			return fmt.Sprintf("new %s", exprStr(n.Value))

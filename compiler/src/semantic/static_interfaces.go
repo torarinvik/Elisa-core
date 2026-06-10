@@ -459,7 +459,7 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 						a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
 						continue
 					}
-					signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ParamPacks, methodDecl.ParamItemOrder, methodDecl.ImplicitParams, methodDecl.ImplicitBundles, methodDecl.ImplicitItemOrder, methodDecl.ReturnType, methodDecl.Variadic)
+					signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
 					iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
 				}
 			})

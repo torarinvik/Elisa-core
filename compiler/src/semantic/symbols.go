@@ -37,8 +37,6 @@ type Result struct {
 	TreeAttributes          map[string]map[string]*TreeAttribute
 	StaticInterfaces        map[string]*StaticInterface
 	StaticImpls             map[string]*StaticImpl
-	ContextBundles          map[string]*ContextBundle
-	ParamPacks              map[string]*ParamPack
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
 	AttributeFieldRefs      map[*ast.FieldExpr]*AttributeFieldRef

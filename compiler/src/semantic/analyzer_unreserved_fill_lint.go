@@ -31,8 +31,6 @@ func (a *Analyzer) findUnreservedCountingFills(stmts []ast.Stmt) {
 			a.findUnreservedCountingFills(s.Body)
 		case *ast.CanStmt:
 			a.findUnreservedCountingFills(s.Body)
-		case *ast.WithStmt:
-			a.findUnreservedCountingFills(s.Body)
 		case *ast.RegionStmt:
 			a.findUnreservedCountingFills(s.Body)
 		case *ast.InStoreStmt:

@@ -245,59 +245,16 @@ func (p *Parser) finishVisitArmChildBinding(nameTok lexer.Token) ast.VisitArmChi
 	}
 	return binding
 }
-func (p *Parser) parseNamedArgList(endToken lexer.TokenKind, allowSpread bool) ([]ast.WithArg, bool) {
-	args := make([]ast.WithArg, 0, p.estimateCommaSeparatedCount(endToken))
-	spread := false
-	if p.peek() == endToken {
-		return nil, false
-	}
-	for {
-		if allowSpread && p.match(lexer.TOKEN_RANGE) {
-			if spread {
-				p.errorf("with bundle spread `..` can only appear once")
-			}
-			spread = true
-		} else {
-			pos := p.cur().Pos
-			name := p.expect(lexer.TOKEN_IDENT).Text
-			arg := ast.WithArg{Position: pos, Name: name}
-			switch {
-			case p.match(lexer.TOKEN_ASSIGN):
-				arg.Value = p.parseExpr()
-			case p.match(lexer.TOKEN_COLON):
-				if p.peek() == endToken || p.peek() == lexer.TOKEN_COMMA {
-					arg.Value = &ast.Ident{Position: pos, Name: name}
-					arg.Shorthand = true
-				} else {
-					arg.Value = p.parseExpr()
-				}
-			default:
-				p.errorf("expected `=` or `:` after named argument %q", name)
-				arg.Value = &ast.Ident{Position: pos, Name: name}
-				arg.Shorthand = true
-			}
-			args = append(args, arg)
-		}
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
-		}
-		if p.peek() == endToken {
-			break
-		}
-	}
-	return args, spread
-}
-func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackUse, []ast.CallArgItem, bool, lexer.Pos) {
+func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgItem, bool, lexer.Pos) {
 	argCapacity := p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN)
 	args := make([]ast.Expr, 0, argCapacity)
 	argNames := make([]string, 0, argCapacity)
 	argShorthand := make([]bool, 0, argCapacity)
-	packs := make([]ast.ParamPackUse, 0, 1)
 	items := make([]ast.CallArgItem, 0, argCapacity)
 	hasArgForward := false
 	argForwardPos := lexer.Pos{}
 	if p.peek() == lexer.TOKEN_RPAREN {
-		return nil, nil, nil, nil, nil, false, lexer.Pos{}
+		return nil, nil, nil, nil, false, lexer.Pos{}
 	}
 	for {
 		if p.peek() == lexer.TOKEN_RANGE {
@@ -359,10 +316,10 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.ParamPackU
 			}
 		}
 	}
-	if !hasNamed && len(packs) == 0 {
-		return args, nil, nil, nil, nil, hasArgForward, argForwardPos
+	if !hasNamed {
+		return args, nil, nil, nil, hasArgForward, argForwardPos
 	}
-	return args, argNames, argShorthand, packs, items, hasArgForward, argForwardPos
+	return args, argNames, argShorthand, items, hasArgForward, argForwardPos
 }
 func (p *Parser) peekImmediateGroupedBlockExprStart() bool {
 	return p.peek() == lexer.TOKEN_IDENT &&

@@ -228,12 +228,8 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params, paramPacks, paramItemOrder, _ := p.parseExplicitSignatureParamList(true, false)
+	params, _ := p.parseExplicitSignatureParamList(true, false)
 	p.expect(lexer.TOKEN_RPAREN)
-
-	var implicitParams []ast.ParamDecl
-	var implicitBundles []string
-	var implicitItemOrder []ast.ImplicitSigItem
 
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
@@ -264,7 +260,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		body = wrapReclaimableLoopBodies(body)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
 }
 
 func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {
@@ -309,11 +305,11 @@ func (p *Parser) parseParamList(allowDefault bool) []ast.ParamDecl {
 	}
 	return params
 }
-func (p *Parser) parseExplicitSignatureParamList(allowDefault bool, allowVariadic bool) ([]ast.ParamDecl, []ast.ParamPackUse, []ast.ParamSigItem, bool) {
+func (p *Parser) parseExplicitSignatureParamList(allowDefault bool, allowVariadic bool) ([]ast.ParamDecl, bool) {
 	params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	variadic := false
 	if p.peek() == lexer.TOKEN_RPAREN {
-		return params, nil, nil, false
+		return params, false
 	}
 	for {
 		if allowVariadic && p.peek() == lexer.TOKEN_ELLIPSIS {
@@ -326,7 +322,7 @@ func (p *Parser) parseExplicitSignatureParamList(allowDefault bool, allowVariadi
 			break
 		}
 	}
-	return params, nil, nil, variadic
+	return params, variadic
 }
 func (p *Parser) parseParam(allowDefault bool) ast.ParamDecl {
 	pos := p.cur().Pos
@@ -347,20 +343,6 @@ func (p *Parser) parseParam(allowDefault bool) ast.ParamDecl {
 		defaultValue = p.parseExpr()
 	}
 	return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ, DefaultValue: defaultValue}
-}
-func (p *Parser) lookaheadParamDecl() bool {
-	i := p.pos
-	if i >= len(p.tokens) {
-		return false
-	}
-	if p.tokens[i].Kind == lexer.TOKEN_MUTABLE {
-		i++
-	}
-	if i >= len(p.tokens) || p.tokens[i].Kind != lexer.TOKEN_IDENT {
-		return false
-	}
-	i++
-	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_COLON
 }
 func (p *Parser) parseExternDecl() ast.Decl {
 	return p.parseExternDeclWithAnnotations(nil)
@@ -388,12 +370,8 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 
 	// extern name(params...) [-> RetType]  (function)
 	p.expect(lexer.TOKEN_LPAREN)
-	params, paramPacks, paramItemOrder, variadic := p.parseExplicitSignatureParamList(true, true)
+	params, variadic := p.parseExplicitSignatureParamList(true, true)
 	p.expect(lexer.TOKEN_RPAREN)
-
-	var implicitParams []ast.ParamDecl
-	var implicitBundles []string
-	var implicitItemOrder []ast.ImplicitSigItem
 
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
@@ -409,7 +387,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ParamPacks: paramPacks, ParamItemOrder: paramItemOrder, ImplicitParams: implicitParams, ImplicitBundles: implicitBundles, ImplicitItemOrder: implicitItemOrder, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
 }
 func (p *Parser) parseExportDecl() ast.Decl {
 	pos := p.cur().Pos

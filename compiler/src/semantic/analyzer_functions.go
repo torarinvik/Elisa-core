@@ -87,9 +87,6 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	}
 	explicitDecls := a.expandedFuncDeclParams(fn)
 	allParamDecls := append([]ast.ParamDecl(nil), explicitDecls...)
-	if implicitDecls, _ := a.expandImplicitParamDecls(explicitDecls, fn.ImplicitParams, fn.ImplicitBundles, fn.ImplicitItemOrder, sym.Name); len(implicitDecls) != 0 {
-		allParamDecls = append(allParamDecls, implicitDecls...)
-	}
 	a.withGenericParams(fn.GenericParams, nil, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
@@ -131,11 +128,9 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
-					a.withLocalParamPackFrame(func() {
-						for _, stmt := range fn.Body {
-							a.analyzeStmt(stmt)
-						}
-					})
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
 					a.currentImplicitScopes = savedBodyImplicitScopes
 					a.currentTreeAllocOwner = savedBodyTreeOwner
 				})
@@ -317,11 +312,9 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
-					a.withLocalParamPackFrame(func() {
-						for _, stmt := range fn.Body {
-							a.analyzeStmt(stmt)
-						}
-					})
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
 				})
 			})
 		})
@@ -465,11 +458,9 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
-					a.withLocalParamPackFrame(func() {
-						for _, stmt := range fn.Body {
-							a.analyzeStmt(stmt)
-						}
-					})
+					for _, stmt := range fn.Body {
+						a.analyzeStmt(stmt)
+					}
 				})
 			})
 		})

@@ -842,8 +842,6 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedReadCaches()
 		return nil
-	case *ast.LocalParamsStmt:
-		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			if err := s.emitActiveScopedCleanup(); err != nil {
@@ -916,10 +914,6 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.InStoreStmt:
 		return s.emitInStore(n)
 	case *ast.CanStmt:
-		return s.emitBlock(n.Body, true)
-	case *ast.WithStmt:
-		return s.emitBlock(n.Body, true)
-	case *ast.ArgsScopeStmt:
 		return s.emitBlock(n.Body, true)
 	case *ast.PoolStmt:
 		return s.emitPoolStmt(n)

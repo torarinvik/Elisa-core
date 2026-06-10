@@ -123,10 +123,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		for _, param := range n.Params {
 			ptypes = append(ptypes, a.resolveType(param))
 		}
-		expandedImplicitParams, implicitNames := a.expandImplicitParamDecls(nil, n.ImplicitParams, n.ImplicitBundles, n.ImplicitItemOrder, "func")
-		for _, param := range expandedImplicitParams {
-			ptypes = append(ptypes, a.resolveType(param.Type))
-		}
 		retExpr := n.Return
 		permissionRefs := n.Permissions
 		resolvedPermissionRefs := a.resolvePermissionRefs(permissionRefs, true)
@@ -147,7 +143,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			ExplicitParamNames:        nil,
 			ExplicitParamDefaultExprs: make([]ast.Expr, len(n.Params)),
 			ExplicitParamHasDefault:   make([]bool, len(n.Params)),
-			ImplicitParamNames:        implicitNames,
 			Return:                    retType,
 			Variadic:                  n.Variadic,
 		}

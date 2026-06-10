@@ -70,8 +70,6 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
 		}
 		return controlSignal{}, nil
-	case *ast.LocalParamsStmt:
-		return controlSignal{}, nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
 			return controlSignal{kind: signalReturn, value: VoidValue()}, nil
@@ -154,8 +152,6 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		}
 		return controlSignal{}, nil
 	case *ast.CanStmt:
-		return i.execBlock(frame, n.Body)
-	case *ast.WithStmt:
 		return i.execBlock(frame, n.Body)
 	case *ast.RegionStmt:
 		// The interpreter has its own (GC'd) memory model, so a region scope — whether
