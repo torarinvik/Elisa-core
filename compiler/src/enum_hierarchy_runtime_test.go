@@ -797,6 +797,63 @@ def main() -> i64:
 `, "must be declared on the hierarchy root")
 }
 
+// docs/76 Phase 6 tail / docs/82 polish: the narrow-handle width lint. A constant-bounded
+// constructor loop in a region-owning function proves the store's population locally, so a
+// default-width root draws a -Wperf suggestion to narrow the handle; an already-narrowed
+// enum (or an unbounded builder via calls) stays silent.
+func TestNarrowHandleWidthLint(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	build := func(name, src string) string {
+		t.Helper()
+		full := "include \"" + std + "\"\n" + src
+		dir := t.TempDir()
+		path := filepath.Join(dir, name)
+		if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+			t.Fatalf("build failed (exit %d)\nstderr:\n%s", code, stderr.String())
+		}
+		return stderr.String()
+	}
+	body := `
+def main() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        region scratch(1048576)
+        last: mutable Tree = new[auto] Tree.Leaf(value: 0)
+        for i in 0..<100:
+            last <- new[auto] Tree.Leaf(value: i)
+        out: mutable i64 = 0
+        match last:
+            Tree.Leaf(value: v):
+                out <- v
+            _:
+                pass
+        destroy scratch
+        return out - 99
+`
+	wide := build("width_lint_wide.elisa", `
+enum Tree:
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+`+body)
+	if !strings.Contains(wide, "layout(handle: u8)") {
+		t.Fatalf("expected the width lint to suggest a narrow handle for a 100-node bounded loop, got:\n%s", wide)
+	}
+	narrow := build("width_lint_narrow.elisa", `
+enum Tree layout(handle: u8):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+`+body)
+	if strings.Contains(narrow, "layout(handle:") {
+		t.Fatalf("already-narrowed enum must not draw the width lint, got:\n%s", narrow)
+	}
+}
+
 // docs/82: ptr handles require stable addresses — SoA columns relocate, so the combination is
 // rejected at declaration.
 func TestPtrHandleRejectsSoA(t *testing.T) {

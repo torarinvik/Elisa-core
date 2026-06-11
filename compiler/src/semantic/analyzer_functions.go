@@ -140,6 +140,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkAtomicHotLoops(fn)
 	a.checkAwaitHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)
+	a.checkNarrowableHandleWidths(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {
 		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
