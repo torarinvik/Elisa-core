@@ -293,8 +293,6 @@ extern view[T](da: darray[T]) -> view[T]
 
 extern array_view[T, N: usize](arr: T[N]&) -> view[T]
 
-extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
-
 extern inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]
 
 extern new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]

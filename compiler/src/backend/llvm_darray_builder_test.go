@@ -341,7 +341,7 @@ func TestGenerateLLVMIRLowersEnumerateWhereSubjectPatternFilter(t *testing.T) {
 
 def sum_positive_after_index(items: darray[Expr]) -> i64:
     total: mutable i64 = 0
-    for index, item in (items.enumerate() where index, item is Expr.Int(value): value > index):
+    for index, item in items.enumerate() where item is Expr.Int(value): value > index:
         total <- total + index
     return total
 `
@@ -350,7 +350,7 @@ def sum_positive_after_index(items: darray[Expr]) -> i64:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	for _, check := range []string{"match.expr", "match.tag", "icmp sgt", "define i64 @sum_positive_after_index"} {
+	for _, check := range []string{"iter.pattern.filter.body", "match.tag", "icmp sgt", "define i64 @sum_positive_after_index"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected enumerate subject pattern filter IR to contain %q, got:\n%s", check, output)
 		}

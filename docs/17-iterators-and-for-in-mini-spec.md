@@ -551,7 +551,6 @@ Recommended later helper surfaces:
 - `split_at(source, index)` / `source.split_at(index)`
 - `chunks_exact(source, width)` / `source.chunks_exact(width)`
 - `enumerate(source)` / `source.enumerate()`
-- `where(source, predicate)` / `source.where(predicate)`
 - `readonly(source)` / `source.readonly()`
 - `any(source)` / `source.any()`
 - `all(source)` / `source.all()`

@@ -201,14 +201,11 @@ type iterViewTransformKind int
 
 const (
 	iterViewTransformEnumerate iterViewTransformKind = iota
-	iterViewTransformWhere
 )
 
 type iterViewTransform struct {
-	kind          iterViewTransformKind
-	itemType      semantic.Type
-	predicate     C.LLVMValueRef
-	predicateType *semantic.FuncType
+	kind     iterViewTransformKind
+	itemType semantic.Type
 }
 
 func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, bindMode ast.IterBindMode) (C.LLVMValueRef, semantic.Type, []iterViewTransform, error) {
@@ -243,38 +240,6 @@ func (s *functionState) peelIterViewTransforms(sourceName string, sourceAlloca C
 			iterSourceType = innerSourceType
 			continue
 		}
-		if carrierType, ok := semantic.FilteredViewInstance(iterSourceType); ok {
-			innerSourceType, ok := semantic.FilteredViewSourceType(carrierType)
-			if !ok || innerSourceType == nil {
-				return nil, nil, nil, fmt.Errorf("where carrier is missing its source type")
-			}
-			itemType, ok := semantic.FilteredViewItemType(carrierType)
-			if !ok || itemType == nil {
-				return nil, nil, nil, fmt.Errorf("where carrier is missing its item type")
-			}
-			predicateType := semantic.FilteredViewPredicateType(itemType)
-			if predicateType == nil {
-				return nil, nil, nil, fmt.Errorf("where carrier is missing its predicate type")
-			}
-			if bindMode != ast.IterBindValue {
-				return nil, nil, nil, fmt.Errorf("iterable loop does not support ref binding for %s", sourceType.String())
-			}
-			carrierValue, err := s.loadValue(iterSourceAlloca, iterSourceType, sourceName+".where.carrier")
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			innerSourceAlloca, err := s.createEntryAlloca(sourceName+".where.source", innerSourceType)
-			if err != nil {
-				return nil, nil, nil, err
-			}
-			innerSourceValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 0, cStringFree(sourceName+".where.source.extract"))
-			predicateValue := C.LLVMBuildExtractValue(s.builder, carrierValue, 1, cStringFree(sourceName+".where.predicate.extract"))
-			C.LLVMBuildStore(s.builder, innerSourceValue, innerSourceAlloca)
-			transforms = append(transforms, iterViewTransform{kind: iterViewTransformWhere, itemType: itemType, predicate: predicateValue, predicateType: predicateType})
-			iterSourceAlloca = innerSourceAlloca
-			iterSourceType = innerSourceType
-			continue
-		}
 		return iterSourceAlloca, iterSourceType, transforms, nil
 	}
 }
@@ -291,11 +256,6 @@ func iterLoopBaseSourceExpr(expr ast.Expr) ast.Expr {
 				return expr
 			}
 			expr = call.Args[0]
-		case "where":
-			if len(call.Args) != 2 {
-				return expr
-			}
-			expr = call.Args[0]
 		default:
 			return expr
 		}
@@ -308,25 +268,6 @@ func (s *functionState) applyIterViewTransforms(sourceName string, indexValue C.
 	for i := len(transforms) - 1; i >= 0; i-- {
 		transform := transforms[i]
 		switch transform.kind {
-		case iterViewTransformWhere:
-			if transform.predicateType == nil || len(transform.predicateType.Params) != 1 {
-				return nil, nil, fmt.Errorf("where predicate is missing its parameter type")
-			}
-			predicateArg, err := s.coerceValue(currentValue, currentType, transform.predicateType.Params[0])
-			if err != nil {
-				return nil, nil, err
-			}
-			filterValue, err := s.emitFunctionValueCall(transform.predicate, transform.predicateType, []C.LLVMValueRef{predicateArg}, "where.predicate")
-			if err != nil {
-				return nil, nil, err
-			}
-			filterBool, err := s.coerceValue(filterValue, transform.predicateType.Return, s.g.result.NamedTypes["bool"])
-			if err != nil {
-				return nil, nil, err
-			}
-			filterBodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("where.filter.body"))
-			C.LLVMBuildCondBr(s.builder, filterBool, filterBodyBB, stepBB)
-			C.LLVMPositionBuilderAtEnd(s.builder, filterBodyBB)
 		case iterViewTransformEnumerate:
 			enumeratedValue, err := s.buildEnumerateItemValue(transform.itemType, indexValue, currentValue, currentType, sourceName)
 			if err != nil {

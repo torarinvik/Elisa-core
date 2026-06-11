@@ -30,8 +30,8 @@ Current rules:
 
 - `protocol Name:` declares a compile-time capability
 - `static interface Name:` has been removed; use `protocol Name:`
-- legacy `interface Name:` still parses for compatibility
-- interface members may include associated types and method signatures
+- legacy `interface Name:` has been removed; use `protocol Name:`
+- protocol members may include associated types and method signatures
 - `impl Name for Type:` provides the associated types and methods for one concrete type
 - generic parameters may be interface-bounded with `T: InterfaceName`
 - associated types are referenced through the bound parameter, for example `B.Node`
@@ -40,7 +40,7 @@ Current rules:
 Current implementation model:
 
 - protocol use is resolved at compile time and lowered through specialization-style rewriting rather than a runtime vtable carrier
-- interface impl members may also carry annotations such as `@derive(...)`
+- protocol impl members may also carry annotations such as `@derive(...)`
 - `override def` is accepted inside impls when the source wants to mark an intended override explicitly
 
 ## Span-like protocols

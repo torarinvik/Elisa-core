@@ -294,10 +294,6 @@ def array_view[T, N: usize](arr: T[N]&) -> view[T]:
         return DynArrayView(collections_void_from_items[T](&arr[0]), N)
 
 
-def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
-    return FilteredView[S, T](source, predicate)
-
-
 # ------------------------------------------------------------
 # Inline vectors
 # ------------------------------------------------------------

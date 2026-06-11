@@ -131,10 +131,6 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	a.registerBuiltinStructType("EnumerateView", []string{"S", "T"}, false, []builtinFieldSpec{
 		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
 	})
-	a.registerBuiltinStructType("FilteredView", []string{"S", "T"}, false, []builtinFieldSpec{
-		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
-		{name: "predicate", typ: &ast.FuncTypeExpr{Params: []ast.TypeExpr{namedTypeExpr("T", false)}, Return: namedTypeExpr("bool", false)}, mutable: false},
-	})
 	a.registerBuiltinStructType("TreeKindFilteredView", []string{"S", "T"}, false, []builtinFieldSpec{
 		{name: "source", typ: namedTypeExpr("S", false), mutable: false},
 		{name: "tag", typ: namedTypeExpr("u32", false), mutable: false},

@@ -330,7 +330,7 @@ protocol SpanLike:
     def combine(left: Range, right: Range) -> Range
 ```
 
-The older `static interface` spelling has been removed; use `protocol`.
+The older `static interface` and bare `interface` declaration spellings have been removed; use `protocol`.
 
 ## When To Drop Down
 

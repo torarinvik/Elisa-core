@@ -55,37 +55,6 @@ func EnumerateTupleType(item Type) *TupleType {
 	return &TupleType{Fields: []TupleField{{Name: "index", Type: &BuiltinType{Name: "usize"}}, {Name: "value", Type: item}}}
 }
 
-func FilteredViewInstance(t Type) (*GenericInstanceType, bool) {
-	gi, ok := t.(*GenericInstanceType)
-	if !ok || gi == nil || gi.Name != "FilteredView" || len(gi.Args) != 2 {
-		return nil, false
-	}
-	return gi, true
-}
-
-func FilteredViewSourceType(t Type) (Type, bool) {
-	gi, ok := FilteredViewInstance(t)
-	if !ok {
-		return nil, false
-	}
-	return gi.Args[0], true
-}
-
-func FilteredViewItemType(t Type) (Type, bool) {
-	gi, ok := FilteredViewInstance(t)
-	if !ok {
-		return nil, false
-	}
-	return gi.Args[1], true
-}
-
-func FilteredViewPredicateType(item Type) *FuncType {
-	if item == nil {
-		return nil
-	}
-	return &FuncType{Name: "func", Params: []Type{item}, Return: &BuiltinType{Name: "bool"}}
-}
-
 func TreeKindFilteredViewInstance(t Type) (*GenericInstanceType, bool) {
 	gi, ok := t.(*GenericInstanceType)
 	if !ok || gi == nil || gi.Name != "TreeKindFilteredView" || len(gi.Args) != 2 {

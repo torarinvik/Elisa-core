@@ -900,27 +900,10 @@ return any item in items where item.kind == TokenKind.IDENT
 return all value in values where is_enabled(value)
 ```
 
-Keep `source.where(predicate)` for reusable view composition that feeds another view helper.
-
-Expression-level filtered views can use explicit binders:
-
-```elisa
-return all((items where item: item.kind == TokenKind.IDENT))
-return (items where item: item.kind == TokenKind.IDENT).reduce_sum(score_item)
-return (items.enumerate() where index, item: index > 0 and item.kind == TokenKind.IDENT).reduce_sum(score_pair)
-```
-
-They can also use the same variant and struct pattern filters as loop headers. A
-plain pattern keeps matching values; a pattern plus `:` predicate binds payload
-names inside the predicate:
-
-```elisa
-return (exprs where Expr.Int(value)).reduce_sum(score_expr)
-return (exprs where Expr.Int(value): value > 0).reduce_sum(score_expr)
-return (exprs where item is Expr.Int(value): value > 0).reduce_sum(score_expr)
-```
-
-The parenthesized form is useful when immediately calling another helper on the filtered view.
+Do not build reusable filtered-view chains for local predicates. Write the
+predicate directly in the loop/query header, or use a list comprehension when a
+filtered collection is the desired result. This keeps the lowering as one
+obvious loop rather than introducing a lazy iterator pipeline.
 
 ## Proof-carrying view helpers
 
@@ -929,7 +912,10 @@ View helpers can be written either as ordinary free functions or as receiver-sty
 ```elisa
 def sum_selected(values: view[i32]) -> i32:
     source: view[i32] = values.readonly()
-    return (source where value: keep_positive(value)).reduce_sum(identity)
+    total: mutable i32 = 0
+    for value in source where keep_positive(value):
+        total <- total + identity(value)
+    return total
 
 def check(values: bool[8]) -> bool:
     return all value in values where is_enabled(value)
@@ -943,7 +929,6 @@ def halves(values: view[i32]) -> SplitView[i32]:
 
 Current receiver helpers:
 
-- `source.where(predicate)` and `where(source, predicate)`
 - `source.enumerate()` and `enumerate(source)`
 - `source.any()` / `source.all()` and `any(source)` / `all(source)`
 - `source.readonly()` and `readonly(source)`
