@@ -30,8 +30,13 @@ now parse errors pointing here; `visit`, tree `fold`, rewrite-default, `treeview
 `children()`/`kind`, tree freeze/clone, and `@derive(parse_builder)` are gone with them.
 Sequence rewrite, fold comprehensions, grammar lowering, and the packed-enum machinery are
 unaffected. docs/82 (handle dial incl. `ptr`) also landed. The one-construct end state holds:
-`enum … is`. Phases 4 (column scan) and 5 (defaults/value-hierarchy tails) remain as
-enum-side feature work, no longer blocked on tree parity.
+`enum … is`. Phase 4 (hierarchy column scan) landed 2026-06-11 (4820474f): `T of .field`
+over a sub-category resolves layout/offsets via the root and range-filters rows in the loop;
+the same commit made the LOWERING MODE root-derived (a `layout soa` hierarchy previously
+crashed at construction — child resolved AoS against a columnar root store). Phase 5 (value
+hierarchies) was verified already-held: a non-recursive hierarchy is an inline {tag, payload}
+value — no store, no region threading, no allocation — pinned by an IR-level test
+(TestValueHierarchyIsStoreFreeInIR). **All phases of this note are complete.**
 
 ### The two parallel subsystems (the problem)
 

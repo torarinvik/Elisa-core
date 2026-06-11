@@ -656,6 +656,77 @@ def bt() -> void:
 `)
 }
 
+// docs/77 Phase 5: a NON-recursive hierarchy is a VALUE hierarchy — an inline {tag, payload}
+// value with no store, no region threading, and no allocation. This pins the property in IR:
+// the consumer takes the enum BY VALUE (no store param) and the program calls no arena helper.
+func TestValueHierarchyIsStoreFreeInIR(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := `
+enum Shape: pass
+enum Round is Shape:
+    Circle(r: i64)
+    Ellipse(a: i64, b: i64)
+enum Poly is Shape:
+    Square(side: i64)
+
+def area2(s: Shape) -> i64:
+    match s:
+        Round.Circle(r: r):
+            return 3 * r * r
+        Round.Ellipse(a: a, b: b):
+            return 3 * a * b
+        Poly.Square(side: d):
+            return d * d
+
+def main() -> i64:
+    c: Shape = Round.Circle(r: 2)
+    q: Shape = Poly.Square(side: 3)
+    return area2(c) + area2(q) - 21
+`
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, "value_hier_ir.elisa")
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstderr:\n%s", code, stderr.String())
+	}
+	ir := stdout.String()
+	area2Define := ""
+	for _, line := range strings.Split(ir, "\n") {
+		if strings.HasPrefix(line, "define") && strings.Contains(line, "@area2(") {
+			area2Define = line
+		}
+		if strings.HasPrefix(line, "define") && strings.Contains(line, "@main(") {
+			break
+		}
+	}
+	if area2Define == "" {
+		t.Fatal("could not locate @area2 define in IR")
+	}
+	if strings.Contains(area2Define, "Store") || strings.Contains(area2Define, "ptr") {
+		t.Fatalf("value-hierarchy consumer must take the enum by value with no store/region params, got: %s", area2Define)
+	}
+	for _, fn := range []string{"@area2(", "@main("} {
+		a := strings.Index(ir, "define i64 "+fn)
+		if a < 0 {
+			t.Fatalf("missing define for %s", fn)
+		}
+		body := ir[a:]
+		if end := strings.Index(body, "\n}"); end > 0 {
+			body = body[:end]
+		}
+		if strings.Contains(body, "arena_alloc") || strings.Contains(body, "ctx_aos_store") || strings.Contains(body, "ctx_packed_store") {
+			t.Fatalf("value hierarchy must not touch any store/arena helper in %s, got:\n%s", fn, body)
+		}
+	}
+}
+
 // expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
 func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
 	t.Helper()
