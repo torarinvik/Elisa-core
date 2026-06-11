@@ -86,7 +86,11 @@ type Analyzer struct {
 	namedTypes              map[string]Type
 	staticInterfaces        map[string]*StaticInterface
 	staticImpls             map[string]*StaticImpl
-	extensionMethodsByName  map[string][]*ExtensionMethod
+	// regionPolyFn is the function under examination by the region-polymorphism
+	// classification pre-pass; it supplies the generic-param protocol bounds for
+	// resolving `B.method(...)` callees. Nil outside the pre-pass.
+	regionPolyFn           *ast.FuncDecl
+	extensionMethodsByName map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
 	grantAliases            map[string][]ast.PermissionRef

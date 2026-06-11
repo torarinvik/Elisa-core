@@ -224,7 +224,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 			expr.ResolvedImplicitArgs = recovered
 			expr.ResolvedImplicitArgsValid = true
 		} else {
-			return nil, nil, fmt.Errorf("call to %s is missing resolved implicit arguments", funcType.Name)
+			return nil, nil, fmt.Errorf("call to %s is missing resolved implicit arguments (implicit params: %v)", funcType.Name, funcType.ImplicitParamNames)
 		}
 	}
 	loweredArgs := backendLoweredCallArgsForFunc(expr, funcType)

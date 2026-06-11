@@ -543,3 +543,84 @@ def bt() -> void:
 		t.Fatalf("link produced null-bind warnings:\n%s", stderr.String())
 	}
 }
+
+// A generic function dispatching to a region-polymorphic impl method through a protocol
+// bound (`B.make_leaf(...)` with `[B: NodeBuilder]`) must classify region-polymorphic
+// itself and receive the impl's packed-store needs (union over impls), so the root
+// caller creates and threads the store exactly like a direct call chain.
+func TestGenericProtocolDispatchThreadsRegionAndPackedStore(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+enum E:
+    Leaf(value: i64)
+    Pair(left: E, right: E)
+
+struct BuilderA:
+    tag: mutable i8
+
+protocol NodeBuilder:
+    type Node
+    def make_leaf(value: i64) -> Node
+    def combine(left: Node, right: Node) -> Node
+
+impl NodeBuilder for BuilderA:
+    type Node = E
+
+    def make_leaf(value: i64) -> E:
+        return E.Leaf(value: value)
+
+    def combine(left: E, right: E) -> E:
+        return E.Pair(left: left, right: right)
+
+def build_core[B: NodeBuilder]() -> B.Node:
+    can Abort.Panic, Memory.Allocate:
+        a: B.Node = B.make_leaf(41)
+        b: B.Node = B.make_leaf(2)
+        return B.combine(a, b)
+
+@test
+def gp() -> void:
+    can Abort.Panic, Memory.Allocate:
+        e: E = build_core[BuilderA]()
+        if e is E.Pair(l, _):
+            if l is E.Leaf(v):
+                if v != 41:
+                    panic("wrong leaf value through generic protocol dispatch")
+                return
+        panic("generic protocol dispatch did not build the expected tree")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "gp.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+
+	cmd := exec.Command(exePath, "gp")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("generic protocol-dispatch run failed: %v\noutput:\n%s", err, string(out))
+	}
+}

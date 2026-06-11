@@ -207,7 +207,12 @@ func (a *Analyzer) computeTransitiveStoreNeeds(funcs []*ast.FuncDecl, regionBack
 				needs[ft][name] = et
 			}
 		}
+		// regionPolyFn supplies the generic-param protocol bounds so `B.method(...)`
+		// dispatches contribute call-graph edges to every impl (union over impls —
+		// the concrete target is specialization-dependent).
+		a.regionPolyFn = fn
 		a.collectCalleeFuncTypes(fn.Body, callees[ft])
+		a.regionPolyFn = nil
 	}
 	for changed := true; changed; {
 		changed = false
@@ -242,6 +247,11 @@ func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]boo
 			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
 				if ft := a.regionPolyCalleeFuncType(call); ft != nil {
 					out[ft] = true
+				}
+				if fieldExpr, ok := unwrapParenForRegionPoly(call.Func).(*ast.FieldExpr); ok {
+					for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
+						out[ft] = true
+					}
 				}
 			}
 			rec(v.Elem())

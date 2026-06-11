@@ -79,6 +79,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"strings"
 )
 
 func (s *functionState) lookupBackendImplicitExpr(name string, working map[string]ast.Expr) (ast.Expr, bool) {
@@ -106,6 +107,16 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 	for _, name := range funcType.ImplicitParamNames {
 		value, ok := s.lookupBackendImplicitExpr(name, working)
 		if !ok {
+			// Mirror the analyzer's docs/74 fallback (resolveImplicitCallArgs): a root caller
+			// with no store binding threads a synthetic `__packed_store_E` ident, which the
+			// emit path resolves by getting-or-creating the region-backed store on demand.
+			// This call site can only be discovered at backend time when the callee is bound
+			// through generic/protocol dispatch (the analyzer saw the protocol method, not
+			// the impl symbol carrying the implicit param).
+			if strings.HasPrefix(name, "__packed_store_") {
+				resolved = append(resolved, &ast.Ident{Name: name})
+				continue
+			}
 			return nil, false
 		}
 		resolved = append(resolved, value)

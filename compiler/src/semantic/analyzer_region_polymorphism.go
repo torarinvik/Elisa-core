@@ -42,12 +42,14 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			// into the explicit arena (`in alloc:`), not an adoptable inferred region,
 			// so classifying it region-polymorphic would inject a spurious
 			// `__region_auto` param and break its callers.
+			a.regionPolyFn = fn
 			if (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) || functionBuildsAndReturnsLocalContainer(fn) {
 				fnType.RegionPolymorphic = true
 				changed = true
 			}
 		}
 	}
+	a.regionPolyFn = nil
 	// Inference-by-default for CALLERS: a non-region-polymorphic function that calls a
 	// region-polymorphic one needs an ambient region to thread in. The parser's
 	// maybeWrapFunctionBodyInAutoRegion can't see this case (callee polymorphism is a
@@ -78,7 +80,18 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// — they must NOT receive threaded store params (the runtime/export ABI calls them with none).
 		// Every other function receives its full transitive store set threaded in, so a bare handle can
 		// be built/matched without an explicit Store, even across a mutually-recursive enum group.
+		// "Creates stores on demand" needs a region to host them: a store-creating function
+		// (export target, entry point, or region owner) whose body makes store-needing calls
+		// OUTSIDE any region scope gets a synthesized lazy auto region around its body
+		// (previously this shape failed at LLVM lowering with "no active inferred region
+		// arena", so only rejected code is affected).
+		a.regionPolyFn = fn
+		needsStoreHost := a.bodyCallsStoreNeedingOutsideRegion(fn.Body, storeNeeds)
+		a.regionPolyFn = nil
 		if fn.Name != "" && exportTargets[fn.Name] {
+			if needsStoreHost {
+				wrapFuncBodyInLazyAutoRegion(fn)
+			}
 			continue
 		}
 		if fnType.RegionPolymorphic {
@@ -91,10 +104,72 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// transitive set, because they have no region in which to create a callee's store themselves.
 		if funcIsRegionStoreEntryPoint(fn) || funcOwnsRegion(fn) {
 			a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
+			if needsStoreHost {
+				wrapFuncBodyInLazyAutoRegion(fn)
+			}
 		} else {
 			a.injectStoreNeeds(fnType, storeNeeds[fnType])
 		}
 	}
+}
+
+// bodyCallsStoreNeedingOutsideRegion reports whether the statements contain a direct call to a
+// function with non-empty transitive packed-store needs that is not already inside a region scope.
+// Such a call site synthesizes an on-demand store, which requires an active region to host it.
+// Mirrors bodyCallsRegionPolyOutsideRegion's skip rules (region/in-store subtrees, lambdas).
+func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNeeds map[*FuncType]map[string]*EnumType) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.RegionStmt:
+				if len(n.Body) != 0 {
+					return // scoped region hosts on-demand stores for its body
+				}
+			case *ast.InStoreStmt:
+				return // `in <owner>:` establishes an ambient owner
+			case *ast.LambdaExpr:
+				return
+			case *ast.CallExpr:
+				if ft := a.regionPolyCalleeFuncType(n); ft != nil && len(storeNeeds[ft]) != 0 {
+					found = true
+					return
+				}
+				if fieldExpr, ok := unwrapParenForRegionPoly(n.Func).(*ast.FieldExpr); ok {
+					for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
+						if len(storeNeeds[ft]) != 0 {
+							found = true
+							return
+						}
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // collectRegionPolyCandidateFuncs flattens the top-level and impl-member function declarations into
@@ -599,10 +674,15 @@ func (a *Analyzer) regionPolymorphicCallerRegionArg() (ast.Expr, bool) {
 // functions without an Arena param are wrapped: a region-polymorphic caller threads its own
 // `__region_auto`, and an Arena-threading function manages allocation itself.
 func (a *Analyzer) wrapRegionPolyCallerBodies(funcs []*ast.FuncDecl) {
+	defer func() { a.regionPolyFn = nil }()
 	for _, fn := range funcs {
+		a.regionPolyFn = fn
 		fnType := a.funcTypeForRegionPoly(fn)
-		if fnType == nil || fnType.RegionPolymorphic || funcHasArenaParam(fn) || len(fn.Body) == 0 {
+		if fnType == nil || funcHasArenaParam(fn) || len(fn.Body) == 0 {
 			continue
+		}
+		if fnType.RegionPolymorphic {
+			continue // threads its caller's region; no scope of its own needed
 		}
 		if !a.bodyCallsRegionPolyOutsideRegion(fn.Body) {
 			continue
@@ -614,14 +694,23 @@ func (a *Analyzer) wrapRegionPolyCallerBodies(funcs []*ast.FuncDecl) {
 		if !a.bodyCallsRegionPolyOutsideRegion(fn.Body) {
 			continue // every region-poly call now sits inside a loop region
 		}
-		pos := fn.Body[0].Pos()
-		fn.Body = []ast.Stmt{&ast.RegionStmt{
-			Position: pos,
-			Name:     fmt.Sprintf("__auto_%d", pos.Offset),
-			Lazy:     true,
-			Body:     fn.Body,
-		}}
+		wrapFuncBodyInLazyAutoRegion(fn)
 	}
+}
+
+// wrapFuncBodyInLazyAutoRegion wraps a function body in a compiler-synthesized lazy auto
+// region (the semantic analogue of the parser's maybeWrapFunctionBodyInAutoRegion).
+func wrapFuncBodyInLazyAutoRegion(fn *ast.FuncDecl) {
+	if fn == nil || len(fn.Body) == 0 {
+		return
+	}
+	pos := fn.Body[0].Pos()
+	fn.Body = []ast.Stmt{&ast.RegionStmt{
+		Position: pos,
+		Name:     fmt.Sprintf("__auto_%d", pos.Offset),
+		Lazy:     true,
+		Body:     fn.Body,
+	}}
 }
 
 // tightenRegionPolyLoopBodies wraps reclaimable loop bodies containing region-poly calls in a
@@ -767,6 +856,12 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 	case *ast.Ident:
 		name = callee.Name
 	case *ast.FieldExpr:
+		// `B.method(...)` where B is a protocol-bounded generic param of the function
+		// under classification: the concrete impl is specialization-dependent, so the
+		// call is region-polymorphic if ANY impl of the protocol method is.
+		if ft := a.regionPolyProtocolMethodFuncType(callee); ft != nil {
+			return ft
+		}
 		// UFCS method call `self.helper(...)`: methods are plain globals, so
 		// resolve by the field name when it names a visible function.
 		name = callee.Field
@@ -782,4 +877,62 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 	}
 	fnType, _ := sym.Type.(*FuncType)
 	return fnType
+}
+
+// regionPolyProtocolMethodFuncType resolves `B.method(...)` — B a generic param of the
+// function under classification (a.regionPolyFn) bounded by a protocol — to a
+// region-polymorphic impl method FuncType, if any impl of that protocol provides one.
+// The dispatch target is specialization-dependent, so classification must be the union
+// over impls: if any impl threads a caller region, the generic caller must too (a
+// specialization with a value impl merely carries an unused Arena&).
+func (a *Analyzer) regionPolyProtocolMethodFuncType(callee *ast.FieldExpr) *FuncType {
+	for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(callee) {
+		if ft.RegionPolymorphic {
+			return ft
+		}
+	}
+	return nil
+}
+
+// regionPolyProtocolMethodImplFuncTypes returns the FuncTypes of every impl of the
+// protocol method named by `B.method(...)`, where B is a protocol-bounded generic param
+// of the function under classification (a.regionPolyFn). Empty outside the pre-pass or
+// when the callee is not such a dispatch.
+func (a *Analyzer) regionPolyProtocolMethodImplFuncTypes(callee *ast.FieldExpr) []*FuncType {
+	fn := a.regionPolyFn
+	if fn == nil || callee == nil || len(fn.GenericParams) == 0 {
+		return nil
+	}
+	obj, ok := unwrapParenForRegionPoly(callee.Object).(*ast.Ident)
+	if !ok || obj == nil {
+		return nil
+	}
+	bound := ""
+	for _, gp := range fn.GenericParams {
+		if gp.Name == obj.Name {
+			bound = gp.InterfaceBound
+			break
+		}
+	}
+	if bound == "" {
+		return nil
+	}
+	_, ifaceName, ok := a.lookupVisibleStaticInterface(bound)
+	if !ok {
+		return nil
+	}
+	var out []*FuncType
+	for _, impl := range a.staticImpls {
+		if impl == nil || impl.InterfaceName != ifaceName {
+			continue
+		}
+		sym := impl.Methods[callee.Field]
+		if sym == nil {
+			continue
+		}
+		if ft, ok := sym.Type.(*FuncType); ok && ft != nil {
+			out = append(out, ft)
+		}
+	}
+	return out
 }

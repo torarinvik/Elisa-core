@@ -273,7 +273,7 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 		}
 	}
 	if arenaPtr == nil {
-		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena")
+		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena (in %s)", s.fnType.Name)
 	}
 	// docs/77: a sealed hierarchy shares ONE store per root, whose record is the union over all
 	// refinements' leaves. Build (and key) the store on the root.
