@@ -10,8 +10,8 @@ import (
 	"elisacore/src/semantic"
 )
 
-func TestGenerateLLVMIRLowersStoreSugar(t *testing.T) {
-	src := `store PendingGotoStore:
+func TestGenerateLLVMIRUsesExplicitSOAColumns(t *testing.T) {
+	src := `layout soa struct PendingGotoStore:
     name_key: u32
     depth: u32
 
@@ -28,11 +28,16 @@ def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         pending: mutable PendingGotoStore = zeroed
-		pending.reserve(8)
-		pending.push(1, 2)
-		pending.push(3, 4)
-		pending.truncate(1)
-        pending.clear()
+		pending.name_key.reserve(8)
+		pending.depth.reserve(8)
+		pending.name_key.push(1)
+		pending.depth.push(2)
+		pending.name_key.push(3)
+		pending.depth.push(4)
+		pending.name_key.truncate(1)
+		pending.depth.truncate(1)
+        pending.name_key.clear()
+        pending.depth.clear()
         values: mutable dict[cstr[key_shape], i64] = zeroed
         base = 5
         slot = values.get_or_insert("seed", base)
@@ -50,20 +55,11 @@ def build(owner: Arena) -> usize:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	if !strings.Contains(output, "store.name_key.push.slot") {
-		t.Fatalf("expected store push lowering for first column, got:\n%s", output)
+	if !strings.Contains(output, "darray.push.slot") {
+		t.Fatalf("expected darray push lowering for columns, got:\n%s", output)
 	}
-	if !strings.Contains(output, "store.name_key.push.needed.overflow") {
-		t.Fatalf("expected store push count arithmetic to be checked for first column, got:\n%s", output)
-	}
-	if !strings.Contains(output, "store.depth.push.slot") {
-		t.Fatalf("expected store push lowering for second column, got:\n%s", output)
-	}
-	if !strings.Contains(output, "store.depth.push.needed.overflow") {
-		t.Fatalf("expected store push count arithmetic to be checked for second column, got:\n%s", output)
-	}
-	if !strings.Contains(output, "store.name_key.truncate.count") {
-		t.Fatalf("expected store truncate lowering for first column, got:\n%s", output)
+	if !strings.Contains(output, "darray.truncate.count") {
+		t.Fatalf("expected darray truncate lowering for columns, got:\n%s", output)
 	}
 	if !strings.Contains(output, "dict.entry.get") {
 		t.Fatalf("expected dict entry lookup lowering, got:\n%s", output)
@@ -76,8 +72,8 @@ def build(owner: Arena) -> usize:
 	}
 }
 
-func TestGenerateLLVMIRLowersSOASugar(t *testing.T) {
-	src := `soa SymbolRows:
+func TestGenerateLLVMIRLowersSOAIndexing(t *testing.T) {
+	src := `layout soa struct SymbolRows:
     name_id: usize
     flags: u32
 
@@ -214,7 +210,7 @@ def build(owner: Arena) -> i64:
 }
 
 func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
-	src := `store PendingGotoStore:
+	src := `layout soa struct PendingGotoStore:
     name_key: usize
     depth: usize
 

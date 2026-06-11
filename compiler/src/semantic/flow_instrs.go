@@ -110,7 +110,6 @@ func appendBasicFlowExprInstrs(block *CFGBlock, expr ast.Expr) {
 	case *ast.AllocExpr:
 		appendBasicFlowExprInstrs(block, n.Owner)
 		appendBasicFlowExprInstrs(block, n.Value)
-		appendBasicFlowExprInstrs(block, n.NodeSpan)
 	case *ast.AddrOfExpr:
 		appendBasicFlowExprInstrs(block, n.Operand)
 	case *ast.BinaryExpr:
@@ -236,12 +235,6 @@ func appendRebaseFlowInstrForCall(block *CFGBlock, call *ast.CallExpr) {
 }
 
 func allocProduceFlowNote(expr *ast.AllocExpr) string {
-	if expr != nil && expr.NodeSugar {
-		if expr.NodeSpan != nil {
-			return "node construction with span"
-		}
-		return "node construction"
-	}
 	return "allocation produces value"
 }
 

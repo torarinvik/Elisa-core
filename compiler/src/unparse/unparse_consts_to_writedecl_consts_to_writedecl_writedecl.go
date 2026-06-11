@@ -408,11 +408,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.StoreDecl:
 		f.writeAnnotations(level, n.Annotations)
-		keyword := "store"
-		if n.Soa {
-			keyword = "soa"
-		}
-		f.writeLine(level, keyword+" "+n.Name+":")
+		f.writeLine(level, "layout soa struct "+n.Name+":")
 		for _, field := range n.Fields {
 			f.writeField(level+1, field)
 		}

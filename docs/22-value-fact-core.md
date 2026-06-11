@@ -50,7 +50,7 @@ should use when explaining semantic behavior:
 
 | Transform | Meaning | Examples |
 | --- | --- | --- |
-| `produce` | create a value with fresh facts | `new[...]`, `node[...]`, packed constructors, `darray_new`, returns |
+| `produce` | create a value with fresh facts | `new[...]`, packed constructors, `darray_new`, returns |
 | `refine` | gain stronger knowledge | `if p != null`, `assert`, `match`, variant tests |
 | `widen` | intentionally lose precision | unknown ref calls, mutation through aliases, loop joins |
 | `recompute` | derive exact facts after a write | assignment, field mutation with known derived state |
@@ -212,19 +212,19 @@ from `generation_before` and `generation_after` details. That gives reports a
 stable handle for region generation invalidation without forcing the region
 implementation to become stringly typed internally.
 
-### Packed tree construction
+### Packed enum construction
 
 ```elisacore
-return node[span = left.span + right.span] Pascal.Expr.Binary(left: left, right: right)
+return new[alloc] Pascal.Expr.Binary(span: left.span + right.span, left: left, right: right)
 ```
 
 Fact view:
 
 ```text
-require active tree store/allocator
+require active enum store/allocator
 require Memory.Allocate when the selected store backend allocates
 produce Pascal.Expr handle:
-    Representation = packed/tree handle
+    Representation = packed enum handle
     StoreDeps = active Pascal.Expr.Store[Local]
     common.span = left.span + right.span
 ```
@@ -366,14 +366,14 @@ refinement and the equivalence class that must be recomputed after mutation.
 Mutated alias classes additionally emit dependent-path recomputes for typestate,
 shape, store-dependency, and optimization facts.
 
-### Grammar and tree sugar
+### Grammar and packed enum construction
 
-Grammar lowering and `node[...]` tree construction should be treated as normal
+Grammar lowering and packed enum construction should be treated as normal
 fact-producing operations:
 
 ```text
 require parser state and effect facts for recovery/reporting
-produce tree handle with store dependency facts
+produce enum handle with store dependency facts
 produce or handle error-path facts for recovery alternatives
 ```
 

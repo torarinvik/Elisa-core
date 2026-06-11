@@ -64,7 +64,7 @@ const (
 
 // FactTransformKind is the small algebra that operations should lower to when
 // they change static knowledge. Keeping these names explicit makes it easier to
-// explain why surface conveniences such as node[...] or freeze(move store) are
+// explain why surface conveniences such as new[...] or freeze(move store) are
 // still honest: they may hide syntax, but they must not hide fact transitions.
 type FactTransformKind string
 

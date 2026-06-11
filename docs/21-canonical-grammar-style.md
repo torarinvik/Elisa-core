@@ -225,12 +225,13 @@ declarations() -> darray[Pascal.Decl]:
     return node
 ```
 
-## Tree Construction
+## AST Construction
 
-Use tree constructor sugar for ordinary AST construction:
+Use ordinary enum constructors for ordinary AST construction, and explicit
+`new[owner] Enum.Variant(...)` when the value is arena-backed:
 
 ```elisa
-node <- expr(node[span = left.span + right.span] Pascal.Expr.Binary(left: left, op: op, right: right))
+node <- expr(new[alloc] Pascal.Expr.Binary(span: left.span + right.span, left: left, op: op, right: right))
 ```
 
 Use span algebra:
@@ -243,7 +244,7 @@ Avoid new parser code that writes:
 
 ```elisa
 span <- expr(combine_span(start_token.span, end_token.span))
-node <- expr(node[span = combine_span(left.span, right.span)] Pascal.Expr.Binary(left: left, right: right))
+node <- expr(new[alloc] Pascal.Expr.Binary(span: combine_span(left.span, right.span), left: left, right: right))
 ```
 
 Keep low-level constructors available for places where allocation, storage, or field order must be explicit.
@@ -317,7 +318,7 @@ if_expr() -> SML.Expr:
     then_expr = recovered_expr(stop: ThenExprSync)
     required(.ELSE, SMLParseMessageKey.ExpectedElse)
     else_expr = recovered_expr(stop: EndSync)
-    return node[span = if_token.span + else_expr.span] SML.Expr.IfExpr(condition: condition, then_expr: then_expr, else_expr: else_expr)
+    return new[alloc] SML.Expr.IfExpr(span: if_token.span + else_expr.span, condition: condition, then_expr: then_expr, else_expr: else_expr)
 ```
 
 ## Protocols

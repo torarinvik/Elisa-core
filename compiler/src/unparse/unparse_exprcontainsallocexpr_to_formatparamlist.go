@@ -6,88 +6,88 @@ import (
 	"strings"
 )
 
-func exprContainsNodeSugar(expr ast.Expr) bool {
+func exprContainsAllocExpr(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case nil:
 		return false
 	case *ast.AllocExpr:
-		return n.NodeSugar || exprContainsNodeSugar(n.Owner) || exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.NodeSpan)
+		return exprContainsAllocExpr(n.Owner) || exprContainsAllocExpr(n.Value)
 	case *ast.CanExpr:
-		return exprContainsNodeSugar(n.Expr)
+		return exprContainsAllocExpr(n.Expr)
 	case *ast.BinaryExpr:
-		return exprContainsNodeSugar(n.Left) || exprContainsNodeSugar(n.Right)
+		return exprContainsAllocExpr(n.Left) || exprContainsAllocExpr(n.Right)
 	case *ast.UnaryExpr:
-		return exprContainsNodeSugar(n.Operand)
+		return exprContainsAllocExpr(n.Operand)
 	case *ast.CallExpr:
-		if exprContainsNodeSugar(n.Func) {
+		if exprContainsAllocExpr(n.Func) {
 			return true
 		}
-		if exprContainsNodeSugar(n.SafeReceiver) {
+		if exprContainsAllocExpr(n.SafeReceiver) {
 			return true
 		}
 		for _, arg := range n.Args {
-			if exprContainsNodeSugar(arg) {
+			if exprContainsAllocExpr(arg) {
 				return true
 			}
 		}
 		return false
 	case *ast.FieldExpr:
-		return exprContainsNodeSugar(n.Object)
+		return exprContainsAllocExpr(n.Object)
 	case *ast.IndexExpr:
-		return exprContainsNodeSugar(n.Object) || exprContainsNodeSugar(n.Index) || exprContainsNodeSugar(n.Fallback)
+		return exprContainsAllocExpr(n.Object) || exprContainsAllocExpr(n.Index) || exprContainsAllocExpr(n.Fallback)
 	case *ast.SliceExpr:
-		return exprContainsNodeSugar(n.Object) || exprContainsNodeSugar(n.Start) || exprContainsNodeSugar(n.End)
+		return exprContainsAllocExpr(n.Object) || exprContainsAllocExpr(n.Start) || exprContainsAllocExpr(n.End)
 	case *ast.CastExpr:
-		return exprContainsNodeSugar(n.Operand)
+		return exprContainsAllocExpr(n.Operand)
 	case *ast.ListLitExpr:
 		for _, item := range n.Elems {
-			if exprContainsNodeSugar(item) {
+			if exprContainsAllocExpr(item) {
 				return true
 			}
 		}
-		return exprContainsNodeSugar(n.Owner)
+		return exprContainsAllocExpr(n.Owner)
 	case *ast.StructLitExpr:
 		for _, arg := range n.Args {
-			if exprContainsNodeSugar(arg) {
+			if exprContainsAllocExpr(arg) {
 				return true
 			}
 		}
 		return false
 	case *ast.RecordUpdateExpr:
-		if exprContainsNodeSugar(n.Base) {
+		if exprContainsAllocExpr(n.Base) {
 			return true
 		}
 		for _, arg := range n.Args {
-			if exprContainsNodeSugar(arg) {
+			if exprContainsAllocExpr(arg) {
 				return true
 			}
 		}
 		return false
 	case *ast.TupleExpr:
 		for _, elem := range n.Elems {
-			if exprContainsNodeSugar(elem) {
+			if exprContainsAllocExpr(elem) {
 				return true
 			}
 		}
 		return false
 	case *ast.ListComprehensionExpr:
-		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Source) || exprContainsNodeSugar(n.RangeEnd) || exprContainsNodeSugar(n.RangeStep) || exprContainsNodeSugar(n.Filter) || exprContainsNodeSugar(n.Owner)
+		return exprContainsAllocExpr(n.Value) || exprContainsAllocExpr(n.Source) || exprContainsAllocExpr(n.RangeEnd) || exprContainsAllocExpr(n.RangeStep) || exprContainsAllocExpr(n.Filter) || exprContainsAllocExpr(n.Owner)
 	case *ast.ParenExpr:
-		return exprContainsNodeSugar(n.Inner)
+		return exprContainsAllocExpr(n.Inner)
 	case *ast.TernaryExpr:
-		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Cond) || exprContainsNodeSugar(n.Alt)
+		return exprContainsAllocExpr(n.Value) || exprContainsAllocExpr(n.Cond) || exprContainsAllocExpr(n.Alt)
 	case *ast.AddrOfExpr:
-		return exprContainsNodeSugar(n.Operand)
+		return exprContainsAllocExpr(n.Operand)
 	case *ast.SpecializeExpr:
-		return exprContainsNodeSugar(n.Operand)
+		return exprContainsAllocExpr(n.Operand)
 	case *ast.TryExpr:
-		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Fallback)
+		return exprContainsAllocExpr(n.Value) || exprContainsAllocExpr(n.Fallback)
 	case *ast.CatchExpr:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.UnwrapElseExpr:
-		return exprContainsNodeSugar(n.Value) || exprContainsNodeSugar(n.Fallback)
+		return exprContainsAllocExpr(n.Value) || exprContainsAllocExpr(n.Fallback)
 	case *ast.OptionalBindExpr:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	default:
 		return false
 	}

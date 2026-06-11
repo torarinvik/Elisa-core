@@ -493,7 +493,6 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if n.Owner != nil {
 			a.validatePermissionExpr(n.Owner, granted)
 		}
-		a.validatePermissionExpr(n.NodeSpan, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.CanExpr:
 		refs := a.resolvePermissionRefs(n.Permissions, false)

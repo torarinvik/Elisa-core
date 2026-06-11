@@ -166,7 +166,7 @@ func (a *Analyzer) parseImplDeriveAnnotation(decl *ast.ImplDecl, annotation ast.
 		if len(annotation.Args) == 3 && annotation.Args[1] == "tree" {
 			return &implDeriveSpec{Mode: implDeriveParseBuilder, TreeName: annotation.Args[2], Annotation: annotation}, true
 		}
-		a.errorf(annotation.Position, "@derive(parse_builder ...) on impl of %q expects a tree name, for example @derive(parse_builder tree Syntax)", decl.InterfaceName)
+		a.errorf(annotation.Position, "@derive(parse_builder ...) has been removed with the tree construct")
 		return nil, false
 	default:
 		a.errorf(annotation.Position, "unknown @derive mode %q on impl of %q", annotation.Args[0], decl.InterfaceName)

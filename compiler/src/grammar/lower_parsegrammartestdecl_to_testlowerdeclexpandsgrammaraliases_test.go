@@ -405,7 +405,7 @@ grammar DemoGrammar with DemoEnv:
 		"DemoExpr.Pair(span: (left.span + right.span), left: left, right: right)",
 	} {
 		if !strings.Contains(formatted, want) {
-			t.Fatalf("expected lowered inline node construction to contain %q, got:\n%s", want, formatted)
+			t.Fatalf("expected lowered inline enum construction to contain %q, got:\n%s", want, formatted)
 		}
 	}
 }

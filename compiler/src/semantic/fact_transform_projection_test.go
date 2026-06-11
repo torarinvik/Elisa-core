@@ -156,13 +156,13 @@ func TestFactTransformsFromCFGFlowInstrsProjectsErrorAndReturnPaths(t *testing.T
 	}
 }
 
-func TestFlowInstrProduceDetailsIncludeTreeSpanAndStoreProvenance(t *testing.T) {
-	transform, ok := factTransformFromFlowInstr(FlowInstr{Kind: FlowInstrProduce, Location: "node", Source: "expr_store", Note: "node construction with span"})
+func TestFlowInstrProduceDetailsDoNotInventNodeProvenance(t *testing.T) {
+	transform, ok := factTransformFromFlowInstr(FlowInstr{Kind: FlowInstrProduce, Location: "value", Source: "expr_store", Note: "allocation produces value"})
 	if !ok {
-		t.Fatal("expected node construction flow instruction to produce a fact transform")
+		t.Fatal("expected allocation flow instruction to produce a fact transform")
 	}
-	wantDetails := []FactTransformDetail{{Name: "representation", Value: "handle"}, {Name: "store_deps", Value: "expr_store"}, {Name: "span", Value: "present"}}
+	var wantDetails []FactTransformDetail
 	if !reflect.DeepEqual(transform.Details, wantDetails) {
-		t.Fatalf("expected span and store provenance details\nwant %#v\n got %#v", wantDetails, transform.Details)
+		t.Fatalf("expected no node-specific details\nwant %#v\n got %#v", wantDetails, transform.Details)
 	}
 }

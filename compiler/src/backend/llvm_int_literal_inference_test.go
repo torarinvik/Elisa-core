@@ -7,7 +7,7 @@ import (
 
 func TestGenerateLLVMForUnsuffixedIntegerLiteralsInUnsignedContexts(t *testing.T) {
 	src := `
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
 	name_key: usize
 	depth: usize
 

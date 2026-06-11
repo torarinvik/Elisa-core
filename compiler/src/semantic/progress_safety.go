@@ -543,7 +543,6 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner)
 		c.collectExpr(n.Value)
-		c.collectExpr(n.NodeSpan)
 	case *ast.FoldExpr:
 		c.collectExpr(n.Value)
 		for _, arm := range n.Arms {

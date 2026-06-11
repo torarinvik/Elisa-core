@@ -359,7 +359,7 @@ func formatInlineCanStmt(stmt ast.Stmt, permissions []ast.PermissionRef) (string
 	if stmt == nil || len(permissions) == 0 {
 		return "", false
 	}
-	if stmtContainsNodeSugar(stmt) {
+	if stmtContainsAllocExpr(stmt) {
 		return "", false
 	}
 	if stmtContainsCanExpr(stmt) {
@@ -450,7 +450,7 @@ func exprContainsCanExpr(expr ast.Expr) bool {
 	case *ast.CanExpr:
 		return true
 	case *ast.AllocExpr:
-		return exprContainsCanExpr(n.Owner) || exprContainsCanExpr(n.Value) || exprContainsCanExpr(n.NodeSpan)
+		return exprContainsCanExpr(n.Owner) || exprContainsCanExpr(n.Value)
 	case *ast.BinaryExpr:
 		return exprContainsCanExpr(n.Left) || exprContainsCanExpr(n.Right)
 	case *ast.UnaryExpr:
@@ -527,22 +527,22 @@ func exprContainsCanExpr(expr ast.Expr) bool {
 		return false
 	}
 }
-func stmtContainsNodeSugar(stmt ast.Stmt) bool {
+func stmtContainsAllocExpr(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
 	case *ast.AssignStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.AsRefAssignStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.VarDeclStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.TupleBindStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.ReturnStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	case *ast.ExprStmt:
-		return exprContainsNodeSugar(n.Expr)
+		return exprContainsAllocExpr(n.Expr)
 	case *ast.DiscardStmt:
-		return exprContainsNodeSugar(n.Value)
+		return exprContainsAllocExpr(n.Value)
 	default:
 		return false
 	}

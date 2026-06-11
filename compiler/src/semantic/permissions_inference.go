@@ -386,7 +386,6 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Value)
 	case *ast.AllocExpr:
 		c.collectExpr(n.Owner)
-		c.collectExpr(n.NodeSpan)
 		c.collectExpr(n.Value)
 	case *ast.CanExpr:
 		if n.SuppressPermissionInference {

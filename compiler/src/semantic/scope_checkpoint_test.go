@@ -184,7 +184,7 @@ global answer: i64 = 2
 
 func TestAnalyzeStoreAndDictSugar(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "store_dict_sugar.elisa", `
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
     name_key: u32
     depth: u32
 
@@ -241,7 +241,7 @@ def build(owner: Arena, key: cstr[key_shape]) -> usize:
 
 func TestAnalyzeStoreRowsIteration(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "store_rows_iteration.elisa", `
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
     name_key: usize
     depth: usize
 
@@ -267,7 +267,7 @@ def build(owner: Arena) -> usize:
 
 func TestAnalyzeAllowsStoreRowMutation(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "store_rows_mutation.elisa", `
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
     name_key: usize
     depth: usize
 
@@ -290,7 +290,7 @@ def build(owner: Arena) -> usize:
 
 func TestAnalyzeRejectsStoreRowsRefBinding(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_ref_binding.elisa", `
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
     name_key: usize
     depth: usize
 

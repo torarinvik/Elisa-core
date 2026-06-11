@@ -1,10 +1,15 @@
-# Tree capabilities and interface cleanup
+# Removed tree capabilities and interface cleanup
+
+This note is historical. The separate `tree`/`node[...]` surface has been
+removed. Current parser and AST code should use ordinary `enum`/struct shapes,
+typed handles where needed, and explicit `new[owner] Enum.Variant(...)`
+allocation when a packed/arena-backed value is actually being produced.
 
 This note records the canonical direction for keeping Elisa core low-level at the bottom and DSL-like at the top without splitting the language into unrelated feature islands.
 
-The guiding rule is the fact-core rule from `22-value-fact-core.md`: tree and
-grammar sugar may hide constructor boilerplate, but it must not hide fact
-transitions. `node[...]` is a producing operation tied to an allocator/store;
+The guiding rule is the fact-core rule from `22-value-fact-core.md`: grammar
+sugar may hide constructor boilerplate, but it must not hide fact transitions.
+`new[owner] Enum.Variant(...)` is a producing operation tied to an allocator/store;
 `freeze(move store)` is consume + rebase + produce; parser recovery and region
 rollback can invalidate facts derived from speculative allocations.
 
@@ -70,7 +75,7 @@ bundle AllocCtx implicit:
     alloc: mutable Arena&
 
 def make_name_expr(token: Token) with AllocCtx -> Pascal.Expr:
-    return node[span = token.span] Pascal.Expr.Name(name_id: token.lexeme_key)
+    return new[alloc] Pascal.Expr.Name(span: token.span, name_id: token.lexeme_key)
 
 def generated_parser_step(alloc: mutable Arena&, token: Token) -> Pascal.Expr:
     return make_name_expr(token)
@@ -93,11 +98,11 @@ protocol TreeBuilder:
     def make_binary(span: Span, left: ExprNode, right: ExprNode) -> ExprNode
 ```
 
-The language can layer compact DSL syntax over those contracts:
+The language should use ordinary construction over those contracts:
 
 ```elisacore
 span: Span = left.span + right.span
-return node[span = span] Pascal.Expr.Binary(left: left, right: right)
+return new[alloc] Pascal.Expr.Binary(span: span, left: left, right: right)
 ```
 
 With a visible `SpanLike` impl for `Span`, that lowers to static-interface dispatch. The low-level equivalent remains available:
@@ -113,7 +118,7 @@ Use the pyramid deliberately:
 
 - low-level functions keep explicit parameters when allocation ownership, lifetime, or mutation must be obvious
 - helper functions use `with ParseCtx` or a smaller `with AllocCtx` when allocator threading is mechanical
-- grammar actions use canonical tree syntax such as `node[span = ...] Tree.Member(...)`
+- grammar actions use enum constructors or `new[owner] Enum.Variant(...)` when allocation is required
 - grammar channels are a good fit for parser result shapes; prefer named tuple returns for local helper results, and use structs when the shape is shared more broadly. Stateful grammar lowering can synthesize either tuple-shaped or struct-shaped success values from channel names.
 - production-local channels are preferred for helper tuple/struct productions so grammar-wide `node`/`span` channels stay focused on tree productions
 - reusable parser combinators that construct grammar fragments should use `grammar type` instead of plain `grammarfn`

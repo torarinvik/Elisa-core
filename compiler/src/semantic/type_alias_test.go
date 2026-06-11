@@ -170,7 +170,7 @@ def bad_id(exit: ExitFunction) -> GuestEntryPoint:
 
 func TestRowIDTypeRequiresSOATag(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "row_id_type_ok.elisa", `
-soa SymbolRows:
+layout soa struct SymbolRows:
 	name: u32
 
 type SymbolRow = RowId[SymbolRows]

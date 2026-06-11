@@ -222,24 +222,17 @@ func TestParseStructRegionOwnerRejectsDuplicateExplicitRegion(t *testing.T) {
 	}
 }
 
-func TestParseSOADecl(t *testing.T) {
-	file, errs := parseSourceFile(t, `soa PascalSymbols:
+func TestParseSOADeclRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `soa PascalSymbols:
 	name_id: NameId
 	span: Span
 	flags: u32
 `)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+	if len(errs) == 0 {
+		t.Fatalf("expected `soa Name:` to be rejected")
 	}
-	decl, ok := file.Decls[0].(*ast.StoreDecl)
-	if !ok {
-		t.Fatalf("expected SOA decl to parse as a column store decl, got %T", file.Decls[0])
-	}
-	if !decl.Soa {
-		t.Fatalf("expected SOA marker on parsed declaration")
-	}
-	if decl.Name != "PascalSymbols" || len(decl.Fields) != 3 {
-		t.Fatalf("unexpected SOA declaration: %#v", decl)
+	if !strings.Contains(strings.Join(errs, "\n"), "`soa Name:` declarations have been removed") {
+		t.Fatalf("expected removed soa declaration diagnostic, got: %v", errs)
 	}
 }
 

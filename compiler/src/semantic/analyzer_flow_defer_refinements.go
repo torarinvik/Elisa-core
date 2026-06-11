@@ -269,7 +269,6 @@ func (a *Analyzer) validateDeferStmtBodyExpr(expr ast.Expr) {
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.AllocExpr:
 		a.validateDeferStmtBodyExpr(n.Owner)
-		a.validateDeferStmtBodyExpr(n.NodeSpan)
 		a.validateDeferStmtBodyExpr(n.Value)
 	case *ast.CanExpr:
 		a.validateDeferStmtBodyExpr(n.Expr)

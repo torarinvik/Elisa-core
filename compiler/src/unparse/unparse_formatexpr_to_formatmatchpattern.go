@@ -344,21 +344,6 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.OptionalBindExpr:
 		return "let " + n.Name + " = " + formatExpr(n.Value)
 	case *ast.AllocExpr:
-		if n.NodeSugar {
-			options := make([]string, 0, 2)
-			if n.Owner != nil {
-				if ident, ok := n.Owner.(*ast.Ident); !ok || ident.Name != "alloc" {
-					options = append(options, "alloc = "+formatExpr(n.Owner))
-				}
-			}
-			if n.NodeSpan != nil {
-				options = append(options, "span = "+formatExpr(n.NodeSpan))
-			}
-			if len(options) != 0 {
-				return "node[" + strings.Join(options, ", ") + "] " + formatNodeSugarValue(n)
-			}
-			return "node " + formatNodeSugarValue(n)
-		}
 		if n.Owner != nil {
 			return "new[" + formatExpr(n.Owner) + "] " + formatExpr(n.Value)
 		}

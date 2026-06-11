@@ -362,7 +362,6 @@ func (a *Analyzer) validateSegmentFlowExpr(expr ast.Expr, owner *segmentOwnerSta
 		a.validateSegmentFlowExpr(n.Value, owner)
 	case *ast.AllocExpr:
 		a.validateSegmentFlowExpr(n.Owner, owner)
-		a.validateSegmentFlowExpr(n.NodeSpan, owner)
 		a.validateSegmentFlowExpr(n.Value, owner)
 	case *ast.CanExpr:
 		a.validateSegmentFlowExpr(n.Expr, owner)
@@ -581,7 +580,6 @@ func (a *Analyzer) validateSegmentAgnosticExpr(expr ast.Expr) {
 		a.validateSegmentAgnosticExpr(n.Value)
 	case *ast.AllocExpr:
 		a.validateSegmentAgnosticExpr(n.Owner)
-		a.validateSegmentAgnosticExpr(n.NodeSpan)
 		a.validateSegmentAgnosticExpr(n.Value)
 	case *ast.CanExpr:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
@@ -796,7 +794,6 @@ func (a *Analyzer) validateReentrantSafeExpr(expr ast.Expr) {
 		a.validateReentrantSafeExpr(n.Value)
 	case *ast.AllocExpr:
 		a.validateReentrantSafeExpr(n.Owner)
-		a.validateReentrantSafeExpr(n.NodeSpan)
 		a.validateReentrantSafeExpr(n.Value)
 	case *ast.CanExpr:
 		a.validateReentrantSafeExpr(n.Expr)

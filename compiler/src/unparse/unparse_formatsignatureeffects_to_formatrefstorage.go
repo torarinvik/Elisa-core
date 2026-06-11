@@ -5,38 +5,6 @@ import (
 	"strings"
 )
 
-func formatNodeSugarValue(expr *ast.AllocExpr) string {
-	if expr == nil || expr.NodeSpan == nil {
-		return formatExpr(expr.Value)
-	}
-	call, ok := expr.Value.(*ast.CallExpr)
-	if !ok || call == nil || len(call.Args) == 0 || call.ArgName(len(call.Args)-1) != "span" {
-		return formatExpr(expr.Value)
-	}
-	trimmed := *call
-	trimmed.Args = append([]ast.Expr(nil), call.Args[:len(call.Args)-1]...)
-	if len(call.ArgNames) >= len(call.Args) {
-		trimmed.ArgNames = append([]string(nil), call.ArgNames[:len(call.Args)-1]...)
-	}
-	if len(call.ArgShorthand) >= len(call.Args) {
-		trimmed.ArgShorthand = append([]bool(nil), call.ArgShorthand[:len(call.Args)-1]...)
-	}
-	if len(call.ArgItemOrder) != 0 {
-		items := make([]ast.CallArgItem, 0, len(call.ArgItemOrder))
-		removedIndex := len(call.Args) - 1
-		for _, item := range call.ArgItemOrder {
-			if item.ArgIndex == removedIndex {
-				continue
-			}
-			items = append(items, item)
-		}
-		trimmed.ArgItemOrder = items
-	}
-	if len(trimmed.Args) == 0 && !trimmed.HasArgForward {
-		return formatExpr(trimmed.Func)
-	}
-	return formatExpr(&trimmed)
-}
 func formatPermissionRefs(refs []ast.PermissionRef) string {
 	if len(refs) == 0 {
 		return ""

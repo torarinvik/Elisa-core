@@ -90,7 +90,7 @@ func TestRegionParamDictDirectPutAllowed(t *testing.T) {
 }
 
 func TestLiveRegionDictEntryMutationAllowedInOtherOwnerScope(t *testing.T) {
-	res := analyzeTreeTestSourceWithSemanticErrors(t, "live_region_dict_entry_other_owner.elisa", `store Pending:
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "live_region_dict_entry_other_owner.elisa", `layout soa struct Pending:
     id: u32
 
 def fill() -> void:
@@ -108,7 +108,7 @@ def fill() -> void:
 }
 
 func TestRegionScopeStoreGrowthAllowed(t *testing.T) {
-	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_scope_store_growth.elisa", `store Pending:
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_scope_store_growth.elisa", `layout soa struct Pending:
     name_key: u32
     depth: u32
 

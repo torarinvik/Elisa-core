@@ -95,11 +95,9 @@ type OptionalBindExpr struct {
 	FromIs bool
 }
 type AllocExpr struct {
-	Position  lexer.Pos
-	Owner     Expr
-	Value     Expr
-	NodeSugar bool
-	NodeSpan  Expr
+	Position lexer.Pos
+	Owner    Expr
+	Value    Expr
 	// AutoRegion is set for `new[auto] T(...)`: allocate into the innermost active INFERRED region
 	// (the native stack arena), no explicit region/pool. Owner is left nil (so passes that resolve
 	// an explicit owner skip it); AutoRegion distinguishes it from the bracket-less packed-store new.

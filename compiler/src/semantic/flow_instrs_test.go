@@ -46,7 +46,7 @@ func TestPopulateBasicFlowInstrsRecordsProduceAndRebaseFacts(t *testing.T) {
 	cfg := &CFG{Blocks: []CFGBlock{{
 		Nodes: []ast.Node{
 			&ast.VarDeclStmt{Name: "region_node", Value: &ast.AllocExpr{Owner: &ast.Ident{Name: "scratch"}}},
-			&ast.VarDeclStmt{Name: "tree_node", Value: &ast.AllocExpr{Owner: &ast.Ident{Name: "store"}, NodeSugar: true}},
+			&ast.VarDeclStmt{Name: "store_value", Value: &ast.AllocExpr{Owner: &ast.Ident{Name: "store"}}},
 			&ast.VarDeclStmt{Name: "frozen", Value: &ast.CallExpr{
 				Func: &ast.Ident{Name: "freeze"},
 				Args: []ast.Expr{&ast.MoveExpr{Operand: &ast.Ident{Name: "store"}}},
@@ -58,7 +58,7 @@ func TestPopulateBasicFlowInstrsRecordsProduceAndRebaseFacts(t *testing.T) {
 
 	want := []FlowInstr{
 		{Kind: FlowInstrProduce, Location: "region_node", Source: "scratch", Note: "allocation produces value"},
-		{Kind: FlowInstrProduce, Location: "tree_node", Source: "store", Note: "node construction"},
+		{Kind: FlowInstrProduce, Location: "store_value", Source: "store", Note: "allocation produces value"},
 		{Kind: FlowInstrProduce, Location: "frozen", Source: "store", Note: "freeze produces frozen store"},
 		{Kind: FlowInstrRebase, Location: "store", Source: "freeze", Note: "freeze rebases store provenance"},
 		{Kind: FlowInstrConsume, Location: "store", Note: "explicit move"},

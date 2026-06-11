@@ -655,23 +655,22 @@ func TestParseRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 		t.Fatalf("expected legacy reverse iterable loop parser diagnostic, got: %v", errs)
 	}
 }
-func TestParseStoreDecl(t *testing.T) {
-	file, errs := parseSourceFile(t, "store PendingGotoStore:\n    name_key: u32\n    depth: u32\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+func TestParseStoreDeclRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, "store PendingGotoStore:\n    name_key: u32\n    depth: u32\n")
+	if len(errs) == 0 {
+		t.Fatal("expected `store Name:` to be rejected")
 	}
-	storeDecl, ok := file.Decls[0].(*ast.StoreDecl)
-	if !ok {
-		t.Fatalf("expected store decl, got %T", file.Decls[0])
+	if !strings.Contains(strings.Join(errs, "\n"), "`store Name:` declarations have been removed") {
+		t.Fatalf("expected removed store declaration diagnostic, got: %v", errs)
 	}
-	if storeDecl.Name != "PendingGotoStore" {
-		t.Fatalf("expected store name PendingGotoStore, got %q", storeDecl.Name)
+}
+func TestParseNodeConstructorSugarRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, "def make(span: Span, left: Expr, right: Expr) -> Expr:\n    return node[span = span] Expr.Binary(left: left, right: right)\n")
+	if len(errs) == 0 {
+		t.Fatal("expected `node[...]` constructor sugar to be rejected")
 	}
-	if len(storeDecl.Fields) != 2 || storeDecl.Fields[0].Name != "name_key" || storeDecl.Fields[1].Name != "depth" {
-		t.Fatalf("unexpected store fields: %#v", storeDecl.Fields)
-	}
-	if formatted := unparse.FormatDecl(storeDecl); !strings.Contains(formatted, "store PendingGotoStore:") {
-		t.Fatalf("expected formatter to preserve store syntax, got:\n%s", formatted)
+	if !strings.Contains(strings.Join(errs, "\n"), "`node[...] Tree.Member(...)` has been removed") {
+		t.Fatalf("expected removed node constructor diagnostic, got: %v", errs)
 	}
 }
 func TestParseGetOrInsertExplicitDefaultArg(t *testing.T) {

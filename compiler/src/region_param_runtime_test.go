@@ -334,7 +334,7 @@ func TestRunCLIRegionScopeStoreGrowthUsesRegionArena(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_scope_store_growth.elisa")
-	src := `store RegionStoreGrowthRows:
+	src := `layout soa struct RegionStoreGrowthRows:
     name_key: u32
     depth: u32
 

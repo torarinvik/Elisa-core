@@ -73,7 +73,7 @@ The formatter preserves compact bracketed alternatives when they are short and r
 
 ## Optional AST payloads
 
-Optional value types can be used directly in structs and tree payloads, which is preferable to paired `has_*` booleans plus dummy sentinel values.
+Optional value types can be used directly in structs and enum payloads, which is preferable to paired `has_*` booleans plus dummy sentinel values.
 
 ```elisa
 struct SMLDatatypeConstructor:
@@ -81,9 +81,8 @@ struct SMLDatatypeConstructor:
     name_id: NameId
     payload_type: SMLType.Type?
 
-tree SML:
-    node Decl:
-        Structure(name_id: NameId, signature_path?: SMLNamePath, decls: darray[Decl])
+enum SMLDecl:
+    Structure(name_id: NameId, signature_path: SMLNamePath?, decls: darray[SMLDecl])
 ```
 
 Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if value is name:` to unwrap the optional.
@@ -1037,8 +1036,8 @@ For `layout soa struct` stores, `push(...)` returns a typed row handle such as
 handle family directly or through a local alias such as `type SymbolRow =
 RowId[SymbolRows]` when the row id should travel through APIs.
 
-The older `soa SymbolRows:` declaration form still parses as compatibility
-syntax, but canonical source should use `layout soa struct SymbolRows:`.
+The older `soa SymbolRows:` declaration form has been removed; use
+`layout soa struct SymbolRows:`.
 
 That typed row handle is also the indexing key for SoA columns, so expressions
 such as `symbols.flags[id]` and other `store.field[row_id]` reads stay tied to
@@ -1052,7 +1051,11 @@ Use plain `darray[T]` declarations when constructing arena-owned dynamic arrays.
 
 Native frontend suites should consume these helpers through the runtime surface that their runner already links, not by including implementation files such as `collections.elisa` directly into a test module. Direct implementation includes duplicate runtime globals and helper symbols when the native runner also links `native_runtime_support.elisa`. The generated `collections.elisai` interface is kept in sync with the implementation as the declaration source of truth. For native dogfood frontends, keep existing `darray` construction style until generic extern collection helpers either lower through concrete wrappers or the backend can specialize those linked runtime declarations with the same ABI as in-module generic helpers.
 
-Tree declarations have explicit data-layout controls. The default dense category layout keeps source handles compact and store-relative, while `@layout(aos)` and `@layout(soa)` let hot categories declare whether they prefer row locality or frozen column scans. Legacy compatibility code may also pin a tree or category to `@layout(per_variant_rows)` when handles must keep carrying store state inline across APIs; new code should prefer the dense store-relative layouts unless it is intentionally preserving the older handle shape. Nested categories inherit the nearest explicit parent layout when they do not declare one themselves; otherwise the family default remains `@layout(category_union)`. Use `@hot`, `@cold`, `@index(kind)`, and `@index(field_name)` as declarative tuning metadata; the source-level tree construction and pattern APIs stay the same. After `freeze(move store)`, use category row views for scan-oriented work: `frozen.Expr` is iterable and yields category-local handles with the frozen store as implicit context, `frozen.Expr.column("kind")` returns the frozen tag column, and `frozen.Expr.column("span")` returns a common-field column for SoA categories or categories with `@index(span)`.
+The old tree declaration surface has been removed. Use ordinary enum/struct
+shapes, explicit typed handles where needed, and `layout soa struct` rows when a
+frontend really wants columnar storage. After `freeze(move store)`, prefer
+ordinary row views and helper functions for scan-oriented work rather than
+tree-specific tags or columns.
 
 ```elisa
 int_count: usize = count node in frozen.Expr where node.kind == .Int
@@ -1064,14 +1067,13 @@ span_sum: i64 = reduce_sum(frozen.Expr.column("span"), add_i64)
 
 Use ordinary query `where` clauses for row filters. Inside a frozen row-view query, common fields can be used directly in the filter; hot equality predicates over frozen SoA rows, such as `where span == target` or `where kind == .Int and span == target`, lower to direct tag/column comparisons instead of predicate function calls. `where_kind` remains available for explicit kind-only filters. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms have been removed; use row-view queries or `.column(...)` instead. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
 
-`@index(field_name)` is useful when a category should stay AoS for traversal but one common or payload field still needs fast frozen scans. Payload-field filters should be guarded by `kind` so the field is only read on variants that actually carry it:
+For enum-backed row views, payload-field filters should be guarded by `kind` so
+the field is only read on variants that actually carry it:
 
 ```elisa
-tree Pascal:
-    @index(name_id)
-    node Decl:
-        ConstDecl(name_id: NameId, ...)
-        FunctionDecl(name_id: NameId, ...)
+enum PascalDecl:
+    ConstDecl(name_id: NameId, ...)
+    FunctionDecl(name_id: NameId, ...)
 
 matches: usize =
     count decl in frozen.Decl
@@ -2035,177 +2037,63 @@ for {name_key, depth} in pending.rows():
     total <- total + name_key + depth
 ```
 
-## Tree exact updates and `rewrite ... default`
+## Removed tree exact updates and `rewrite ... default`
 
-Exact tree members reuse the same brace-update surface as structs.
+The separate tree/member update surface has been removed. Use ordinary struct or
+enum-variant helpers, and use `new[owner] Enum.Variant(...)` when the operation
+allocates a fresh packed value.
 
 ```elisa
-tree Lua:
-    common:
-        span: i64
-    @role(expr)
-    node Expr:
-        Int(value: i64)
-        Binary(left: Expr, right: Expr)
-    block Block:
-        items: darray[Expr]
-
-def rotate(node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-    in perm:
-        return node{left, right}
-
-def rotate_into(owner: Arena, node: Lua.Expr.Binary, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr.Binary:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    return new[alloc] node{left, right}
-
 def make_binary(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-    return node[span = left.span + right.span] Lua.Expr.Binary(left: left, right: right)
-
-def simplify(node: Lua.Node) -> Lua.Node:
-    in perm:
-        return rewrite node as Lua.Node:
-            Lua.Expr.Int(expr):
-                default
-            Lua.Expr.Binary(expr, left, right):
-                expr{left, right}
-            Lua.Block(block, items: items):
-                default
+    return new[alloc] Lua.Expr.Binary(span: left.span + right.span, left: left, right: right)
 ```
 
 Current rules:
 
-- `member{field, other = value}` works for exact tree members such as nodes, blocks, structs, and exact variants
-- tree exact updates preserve the exact member tag and copy every unchanged field from the source handle
-- bare tree exact updates still require an active tree owner such as `in perm:` or `in owner:` because the result is a fresh tree value
-- `new[owner] member{...}` is the explicit-owner form when no active owner scope should be used
-- `node Tree.Member(...)` is canonical sugar for tree construction through an in-scope `alloc` binding
-- `node[span = expr] Tree.Member(...)` injects the common `span` field without repeating it in the constructor arguments
-- `node[alloc = owner, span = expr] Tree.Member(...)` is the explicit-owner form for parser helpers that name the arena something other than `alloc`
-- in the fact-core model, `node[...]` is a `produce` transform: it creates a fresh tree value with representation, allocator/store, and common-field facts rather than a pure value expression
+- the removed `node` constructor spellings are rejected by the parser
+- exact updates belong on ordinary structs or on explicit helper functions
+- packed enum construction is a normal `produce` transform in the fact-core model
 - `left.span + right.span` is the canonical span algebra form for span-like parser ranges; it first uses a visible `SpanLike` static-interface impl when present, then falls back to legacy helper functions such as `combine_span`
-- inside an exact `rewrite` arm, `default` rebuilds the current exact member using the already rewritten child results
-- `default` is contextual rather than a new global keyword; outside an exact `rewrite` arm it is rejected
-- `default` also rebuilds `children` sequence fields, materializing fresh arrays in the active tree owner when needed
+- the contextual `rewrite ... default` form should not be revived; write the
+  traversal helper explicitly when a pass really needs one
 
-## Nested tree categories
+## Removed nested tree categories
 
-Tree categories can be nested when a branch of the tree wants its own sparse set of exact shapes. A flat payload keeps the shape dense and horizontal:
-
-```elisa
-tree Lua:
-    @role(expr)
-    node Expr:
-        Unary(expr: Expr)
-        Binary(op: LuaOperationType, left: Expr, right: Expr)
-```
-
-Moving the binary operators into a nested category makes the vertical alternatives explicit:
+Nested tree categories have been folded into enum hierarchy and ordinary helper
+style. Model sparse shapes with enum variants or nested enum names; keep
+traversal relationships in helpers instead of introducing `child`, `children`,
+or `link` tree-only declarations.
 
 ```elisa
-tree Lua:
-    @role(expr)
-    node Expr:
-        Unary(expr: Expr)
-        node Binary:
-            Add(left: Lua.Expr, right: Lua.Expr)
-            Sub(left: Lua.Expr, right: Lua.Expr)
-            Div(left: Lua.Expr, right: Lua.Expr)
-```
-
-This declares `Lua.Expr.Binary` as a real tree category under `Lua.Expr`. Its exact variants are named `Lua.Expr.Binary.Add`, `Lua.Expr.Binary.Sub`, and so on. Values from the nested category are assignable to the parent category, so code can return a specific sparse shape through the broader dense handle:
-
-```elisa
-def make_add(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-    return node[alloc = alloc] Lua.Expr.Binary.Add(left: left, right: right)
+enum LuaExpr:
+    Unary(expr: LuaExpr)
+    BinaryAdd(left: LuaExpr, right: LuaExpr)
+    BinarySub(left: LuaExpr, right: LuaExpr)
+    BinaryDiv(left: LuaExpr, right: LuaExpr)
 
 def classify(node: Lua.Expr) -> i64:
     match node:
-        Lua.Expr.Binary.Add(left: _, right: _):
+        Lua.Expr.BinaryAdd(left: _, right: _):
             return 1
         _:
             return 0
 ```
+## Removed tree `visit` expressions
 
-Within a tree family, unqualified sibling names still resolve when they are unambiguous. Use qualified names such as `Lua.Expr` when two trees expose the same local node name, or when the code benefits from saying exactly which family owns the child. Structural `child` and `children` relations are inferred for tree-family payloads; keep explicit `link` for non-structural references that should not be traversed as owned children.
-
-```elisa
-tree Lua:
-    @role(expr)
-    node Expr:
-        Binary(op: LuaBinaryOp, left: Expr, right: Expr)
-        Call(callee: Expr, args: darray[Expr], link source_expr: Expr)
-```
-
-Optional tree payload fields can also use postfix `?` on the payload name:
-
-```elisa
-tree Lua:
-    @role(stmt)
-    node Stmt:
-        IfStmt(condition: Expr, else_block?: Block)
-        NumericFor(step?: Expr, args?: darray[Expr])
-```
-
-Current rules:
-
-- same-family payloads such as `left: Expr`, `right: Expr`, and `callee: Expr` are structural children by default
-- same-family element types inside sequence payloads such as `darray[Expr]` are also traversed as children
-- `link source_expr: Expr` keeps a same-family reference explicit without making it part of `children(node)` traversal
-- `name?: Type` is declaration shorthand for an optional payload field whose underlying payload type is `Type?`
-- optional payload fields still use the same inferred child-vs-link relation rules after unwrapping the optional payload type
-
-## Tree `visit` expressions
-
-`visit value:` is the direct non-recursive tree dispatch surface. It picks an
-arm from the exact tree member of the visited value and returns that arm's
-result.
+The tree-specific `visit value:` expression has been removed. Use ordinary
+`match` on enum variants, or write a named helper when a traversal needs shared
+state.
 
 ```elisa
 def score(node: Lua.Expr) -> i64:
-    return visit node:
+    match node:
         Lua.Expr.Nil(expr):
             expr.span
         Lua.Expr.Int(expr):
             expr.value
         Lua.Expr.Binary(expr):
             expr.left.span + expr.right.span
-
-def stmt_total(block: Lua.Block) -> i64:
-    return visit block:
-        Lua.Block(node):
-            node.stmts.len.i64()
 ```
-
-The arm surface also supports alternatives and guards:
-
-```elisa
-return visit node:
-    Lua.Expr.Int(expr) | Lua.Expr.Float(expr) when expr.span > 0:
-        expr.span
-    _:
-        0
-```
-
-When the source expression is broader than the intended dispatch domain, select
-the domain explicitly with `as Root`:
-
-```elisa
-def score_node(node: Lua.Node) -> i64:
-    return visit node as Lua.Node:
-        Lua.Stmt.ExprStmt(stmt) when stmt.expr.kind == .Call:
-            stmt.span + 1
-        _:
-            0
-```
-
-Current rules:
-
-- `visit value:` dispatches on the exact tree member of a tree family root, category value, exact variant, block, or struct member
-- `visit value as Root:` selects the visit domain explicitly when the source value is broader than the intended tree family root or category
-- each arm binds the exact member value through a binder such as `Lua.Expr.Int(expr):`
-- wildcard `_:` arms are allowed
-- arm alternatives with `|` and arm guards with `when` follow the same surface rules as other pattern arms
-- `visit` is expression-oriented; each arm produces the final value for that branch
 
 ## Tree attributes and projected attribute sequences
 
@@ -2546,7 +2434,8 @@ grammar PascalFrontend over Token using ParserState:
         node <- when(
             header.type_token.kind == TokenKind.IDENT,
             [
-                node[span = name_token.span + header.type_token.span] Pascal.Decl.VarDecl(
+                new[alloc] Pascal.Decl.VarDecl(
+                    span: name_token.span + header.type_token.span,
                     name_id: name_token.lexeme_key,
                     type_name_id: header.type_token.lexeme_key
                 )
@@ -2793,7 +2682,8 @@ Current implementation notes:
 - the grammar header can now decouple token value and token-kind names, for example `grammar SMLExprGrammar over SMLToken using SMLParserState:` with `token_kind SMLTokenKind` and `eof SMLTokenKind.EOF`
 - span algebra `left.span + right.span` resolves through a visible `protocol SpanLike` impl when available, and still recognizes legacy helper functions such as `combine_span` or `lua_span_union` for compatibility
 - recovery and required terms depend on the grammar `cursor` declaration to restore or advance parser state correctly
-- tree AST construction remains ordinary Elisa core code, so teams can use canonical `node[span = ...] Tree.Node(...)` sugar or drop to low-level `new[alloc] Tree.Node(span: ..., ...)` when exact control is clearer
+- AST construction remains ordinary Elisa core code; use enum constructors or
+  `new[alloc] Enum.Variant(span: ..., ...)` when exact allocation control is needed
 
 ## Filtered iterable `for`
 
@@ -2899,12 +2789,12 @@ Current rules:
 - a linear value scheduled for deferred consumption by a `defer function:` body cannot be consumed again inline
 - `defer` is contextual, so ordinary identifiers like `defer_value` and calls like `defer(x)` still parse normally outside defer position
 
-## Stores, rows, and dict helpers
+## SoA Rows And Dict Helpers
 
-The current surface includes compact syntax for row-oriented stores and explicit dictionary helper calls.
+The old `store Name:` and `soa Name:` row-store declaration spellings have been removed. Use ordinary structs with explicit `darray[...]` fields, or `layout soa struct` only when the remaining compiler-known SoA layout is required.
 
 ```elisa
-store PendingGotoStore:
+layout soa struct PendingGotoStore:
     name_key: u32
     depth: u32
 
@@ -2928,7 +2818,8 @@ def build(owner: Arena, values: mutable dict[cstr[key_shape], i64]&, key: cstr[k
 
 Current rules:
 
-- `store Name:` declares a row-oriented storage surface with named fields
+- `store Name:` and `soa Name:` declarations are parser errors
+- `layout soa struct Name:` is the remaining compiler-known SoA declaration form
 - `pending.reserve(n)` preallocates row capacity and requires a mutable store receiver
 - `pending.push(a, b, ...)` appends one row in declared field order
 - `pending.truncate(n)` keeps the first `n` rows
@@ -2953,21 +2844,19 @@ Current rules:
 ## `clone[...]` builtin
 
 `clone[target](value)` is the current deep-copy surface for owner-backed dynamic
-arrays, tree values, and other cloneable aggregate shapes.
+arrays, packed enum values, and other cloneable aggregate shapes.
 
 ```elisa
-tree Lua:
-    common:
-        span: i64
-    @role(expr)
-    node Expr:
-        Int(value: i64)
-    block Block:
-        items: darray[Expr]
+enum LuaExpr:
+    Int(span: i64, value: i64)
+
+struct LuaBlock:
+    span: i64
+    items: darray[LuaExpr]
 
 struct Pair:
     items: darray[u32]
-    root: Lua.Block
+    root: LuaBlock
 
 def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua.Block) -> Pair:
     can Abort.Panic, Memory.Allocate:

@@ -162,7 +162,7 @@ func flowInstrMutationDetails(instr FlowInstr) []FactTransformDetail {
 
 func flowInstrProduceClasses(instr FlowInstr) []FactClass {
 	classes := []FactClass{FactRepresentation, FactStorage}
-	if strings.Contains(instr.Note, "node construction") || strings.Contains(instr.Note, "freeze") {
+	if strings.Contains(instr.Note, "freeze") {
 		classes = append(classes, FactStoreDeps)
 	}
 	return classes
@@ -170,15 +170,6 @@ func flowInstrProduceClasses(instr FlowInstr) []FactClass {
 
 func flowInstrProduceDetails(instr FlowInstr) []FactTransformDetail {
 	details := make([]FactTransformDetail, 0, 2)
-	if strings.Contains(instr.Note, "node construction") {
-		details = append(details, FactTransformDetail{Name: "representation", Value: "handle"})
-		if instr.Source != "" {
-			details = append(details, FactTransformDetail{Name: "store_deps", Value: instr.Source})
-		}
-		if strings.Contains(instr.Note, "span") {
-			details = append(details, FactTransformDetail{Name: "span", Value: "present"})
-		}
-	}
 	if strings.Contains(instr.Note, "freeze") {
 		details = append(details, FactTransformDetail{Name: "operation", Value: "freeze"})
 		if instr.Source != "" {

@@ -333,10 +333,14 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseLayoutStructDecl()
 	}
 	if p.peekIdentText("store") {
-		return p.parseStoreDecl()
+		p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `layout soa struct` only when compiler-known SoA layout is required")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("soa") {
-		return p.parseSoaDecl()
+		p.errorf("`soa Name:` declarations have been removed; use `layout soa struct Name:` for the remaining compiler-known SoA form")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("linear") || p.peekIdentText("affine") {
 		return p.parseStructDecl()
@@ -350,10 +354,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			return p.parseLayoutStructDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("store") {
-			return p.parseStoreDeclWithAnnotations(annotations)
+			p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `layout soa struct` only when compiler-known SoA layout is required")
+			p.skipRejectedDecl()
+			return nil
 		}
 		if p.peekIdentText("soa") {
-			return p.parseSoaDeclWithAnnotations(annotations)
+			p.errorf("`soa Name:` declarations have been removed; use `layout soa struct Name:` for the remaining compiler-known SoA form")
+			p.skipRejectedDecl()
+			return nil
 		}
 		if p.peekIdentText("linear") || p.peekIdentText("affine") {
 			return p.parseStructDeclWithAnnotations(annotations)
@@ -419,14 +427,8 @@ func (p *Parser) parseDecl() ast.Decl {
 		return nil
 	}
 }
-func (p *Parser) parseStoreDecl() *ast.StoreDecl {
-	return p.parseStoreDeclWithAnnotations(nil)
-}
 func (p *Parser) parseLayoutStructDecl() *ast.StructDecl {
 	return p.parseLayoutStructDeclWithAnnotations(nil)
-}
-func (p *Parser) parseSoaDecl() *ast.StoreDecl {
-	return p.parseSoaDeclWithAnnotations(nil)
 }
 func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	pos := p.cur().Pos
@@ -436,9 +438,6 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	target := p.parseTypeExpr()
 	p.expectNewline()
 	return &ast.TypeAliasDecl{Position: pos, Name: name, Target: target}
-}
-func (p *Parser) parseStoreDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
-	return p.parseColumnStoreDeclWithAnnotations("store", false, annotations)
 }
 func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
 	pos := p.cur().Pos
@@ -465,27 +464,6 @@ func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotati
 		p.errorf("unsupported layout-prefixed struct mode %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
 	}
 	return p.parseStructDeclWithLeadingLayout(annotations, layout, reprC, pos)
-}
-func (p *Parser) parseSoaDeclWithAnnotations(annotations []ast.Annotation) *ast.StoreDecl {
-	return p.parseColumnStoreDeclWithAnnotations("soa", true, annotations)
-}
-func (p *Parser) parseColumnStoreDeclWithAnnotations(keyword string, soa bool, annotations []ast.Annotation) *ast.StoreDecl {
-	pos := p.cur().Pos
-	p.expectIdentText(keyword)
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	p.expect(lexer.TOKEN_INDENT)
-	fields := make([]ast.FieldDecl, 0, p.estimateIndentedItemCount())
-	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-		p.skipNewlines()
-		if p.peek() == lexer.TOKEN_DEDENT {
-			break
-		}
-		fields = append(fields, p.parseFieldDecl())
-	}
-	p.expect(lexer.TOKEN_DEDENT)
-	return &ast.StoreDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Soa: soa, Fields: fields}
 }
 func (p *Parser) parseAnnotations() []ast.Annotation {
 	annotations := make([]ast.Annotation, 0, 1)
