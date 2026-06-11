@@ -114,6 +114,14 @@ func (s *functionState) recoverImplicitCallArgs(expr *ast.CallExpr, funcType *se
 			// through generic/protocol dispatch (the analyzer saw the protocol method, not
 			// the impl symbol carrying the implicit param).
 			if strings.HasPrefix(name, "__packed_store_") {
+				// Consumer callees (enum handles in explicit params) must reuse the active
+				// binding, not mint a fresh region store — same rule as the analyzer's
+				// packedStoreImplicitArgExpr (see PackedStoreImplicitUsePrefix).
+				enumName := strings.TrimPrefix(name, "__packed_store_")
+				if semantic.FuncTypeConsumesPackedEnumRoot(funcType, enumName) {
+					resolved = append(resolved, &ast.Ident{Name: semantic.PackedStoreImplicitUsePrefix + enumName})
+					continue
+				}
 				resolved = append(resolved, &ast.Ident{Name: name})
 				continue
 			}

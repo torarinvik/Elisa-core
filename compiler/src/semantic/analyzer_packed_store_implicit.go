@@ -398,14 +398,43 @@ func (a *Analyzer) defineImplicitPackedStoreParamSymbols(fn *ast.FuncDecl, fnTyp
 	}
 }
 
+// PackedStoreImplicitUsePrefix marks a synthetic store argument for a CONSUMER call — the callee
+// receives existing handles of the enum through its explicit params, so the backend must resolve
+// the argument to the store those handles were built against (the active binding), never by
+// creating a fresh region-local store (an empty store makes every handle read undefined).
+const PackedStoreImplicitUsePrefix = "__packed_store_use_"
+
 // packedStoreImplicitArgExpr is the synthetic argument threaded for an implicit packed store param.
 // In a caller that already has the store (its own implicit param), the same-name lookup resolves it;
-// otherwise the backend creates the region-backed store on demand at this call site.
-func packedStoreImplicitArgExpr(storeType *PackedEnumStoreType) ast.Expr {
+// otherwise the backend resolves it on demand at this call site: a pure builder call (enum only in
+// the callee's return type) may create the region-backed store fresh, while a consumer call (enum
+// handles flow IN through explicit params) is marked with PackedStoreImplicitUsePrefix so the
+// backend reuses the binding the handles came from.
+func packedStoreImplicitArgExpr(storeType *PackedEnumStoreType, consume bool) ast.Expr {
 	if storeType == nil || storeType.Enum == nil {
 		return &ast.Ident{Name: "__packed_store_"}
 	}
-	return &ast.Ident{Name: packedStoreImplicitParamName(storeType.Enum.Root().Name)}
+	rootName := storeType.Enum.Root().Name
+	if consume {
+		return &ast.Ident{Name: PackedStoreImplicitUsePrefix + sanitizeImplicitTempBase(rootName)}
+	}
+	return &ast.Ident{Name: packedStoreImplicitParamName(rootName)}
+}
+
+// FuncTypeConsumesPackedEnumRoot reports whether an explicit parameter of ft (directly or through a
+// struct/container, same walk as injection) carries handles of the packed enum hierarchy rooted at
+// rootName — i.e. whether a call to ft consumes pre-existing handles rather than only building new ones.
+func FuncTypeConsumesPackedEnumRoot(ft *FuncType, rootName string) bool {
+	if ft == nil || rootName == "" {
+		return false
+	}
+	enums := map[string]*EnumType{}
+	explicitCount := funcTypeExplicitParamCount(ft)
+	for i := 0; i < explicitCount && i < len(ft.Params); i++ {
+		collectPackedEnumsInType(ft.Params[i], enums)
+	}
+	_, ok := enums[rootName]
+	return ok
 }
 
 // collectPackedEnumsInType records the packed enums appearing in a type, canonicalized to their
@@ -432,9 +461,24 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 	case *ErrorUnionType:
 		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1)
 	case *EnumType:
-		if tt != nil && tt.Packed {
+		if tt == nil {
+			break
+		}
+		if tt.Packed {
 			root := tt.Root()
 			out[root.Name] = root
+			break
+		}
+		// A plain (non-packed) enum can still carry packed-enum handles in its variant payloads
+		// (e.g. a LuaNode wrapper over Expr/Stmt handles) — those handles are only meaningful
+		// against their store, so the wrapper exposes the same store need.
+		for _, variant := range tt.Variants {
+			if variant == nil {
+				continue
+			}
+			for _, payload := range variant.Payload {
+				collectPackedEnumsInTypeDepth(payload, out, depth+1)
+			}
 		}
 	case *PackedVariantViewType:
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {

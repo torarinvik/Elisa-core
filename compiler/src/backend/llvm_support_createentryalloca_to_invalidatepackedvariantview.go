@@ -707,20 +707,50 @@ func (s *functionState) bindPackedVariantViewInternal(name string, viewType *sem
 	}
 	s.scope.packedViewPtrs[name] = binding
 }
+// markPackedVariantViewHandleBlock stamps the just-bound view's handle with the current basic
+// block, marking it as a MEMOIZED load that is only safe to reuse from this block (see
+// packedVariantViewBinding.handleBlock).
+func (s *functionState) markPackedVariantViewHandleBlock(name string) {
+	if name == "" || s.scope == nil {
+		return
+	}
+	block := C.LLVMGetInsertBlock(s.builder)
+	if s.scope.packedViewName == name {
+		s.scope.packedViewBinding.handleBlock = block
+		return
+	}
+	if binding, ok := s.scope.packedViewPtrs[name]; ok {
+		binding.handleBlock = block
+		s.scope.packedViewPtrs[name] = binding
+	}
+}
 func (s *functionState) lookupPackedVariantView(name string) (packedVariantViewBinding, bool) {
 	if name == "" {
 		return packedVariantViewBinding{}, false
 	}
+	currentBlock := C.LLVMGetInsertBlock(s.builder)
+	// A memoized handle load from another block does not dominate this one (see handleBlock);
+	// drop it from the returned copy. The binding stays usable only if a decoded ptr remains.
+	usable := func(binding packedVariantViewBinding) (packedVariantViewBinding, bool) {
+		if binding.typ == nil {
+			return binding, false
+		}
+		if binding.handle != nil && binding.handleBlock != nil && binding.handleBlock != currentBlock {
+			binding.handle = nil
+			binding.handleBlock = nil
+		}
+		return binding, binding.ptr != nil || binding.handle != nil
+	}
 	for scope := s.scope; scope != nil; scope = scope.parent {
 		if scope.packedViewName == name {
-			binding := scope.packedViewBinding
-			if binding.typ != nil && (binding.ptr != nil || binding.handle != nil) {
+			if binding, ok := usable(scope.packedViewBinding); ok {
 				return binding, true
 			}
 		}
-		binding, ok := scope.packedViewPtrs[name]
-		if ok && binding.typ != nil && (binding.ptr != nil || binding.handle != nil) {
-			return binding, true
+		if binding, ok := scope.packedViewPtrs[name]; ok {
+			if binding, ok := usable(binding); ok {
+				return binding, true
+			}
 		}
 	}
 	return packedVariantViewBinding{}, false

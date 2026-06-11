@@ -99,8 +99,10 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 			} else if packedStoreType, isPackedStore := expectedType.(*PackedEnumStoreType); isPackedStore && packedStoreType != nil {
 				// docs/74: thread the region-backed packed store. A caller that already has the store
 				// (its own implicit param) resolves it via the same-name lookup above; otherwise the
-				// backend creates it on demand at this call site (the root call) and reuses it after.
-				argExpr = packedStoreImplicitArgExpr(packedStoreType)
+				// backend resolves it on demand at this call site: created fresh for a builder call,
+				// reused from the active binding for a consumer call (see PackedStoreImplicitUsePrefix).
+				consume := packedStoreType.Enum != nil && FuncTypeConsumesPackedEnumRoot(ft, packedStoreType.Enum.Root().Name)
+				argExpr = packedStoreImplicitArgExpr(packedStoreType, consume)
 				a.exprTypes[argExpr] = expectedType
 				resolved = append(resolved, argExpr)
 				continue

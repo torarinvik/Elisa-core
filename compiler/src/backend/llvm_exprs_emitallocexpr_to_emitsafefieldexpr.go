@@ -96,10 +96,25 @@ func (s *functionState) isUnboundImplicitPackedStoreIdent(n *ast.Ident) bool {
 // emitImplicitPackedStoreIdent resolves an unbound `__packed_store_E` argument by getting-or-creating
 // the region-backed store for E (docs/74), so the root call threads a real store value into the
 // callee and reuses it for subsequent calls in the same region.
+//
+// A CONSUMER call (`__packed_store_use_E`, semantic.PackedStoreImplicitUsePrefix) passes
+// pre-existing handles of E into the callee, so it must resolve to the store those handles were
+// built against: the active binding is reused even when it was created under a DIFFERENT region
+// than the current one. Letting it fall through to getOrCreateRegionPackedStore would mint a fresh
+// EMPTY store (and clobber the binding), making every handle read in the callee undefined — the
+// compile-clean-but-segfaulting storeless cross-function match.
 func (s *functionState) emitImplicitPackedStoreIdent(n *ast.Ident, actualType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	enumType := s.resolveImplicitPackedStoreEnum(n, actualType)
 	if enumType == nil {
 		return nil, nil, fmt.Errorf("cannot resolve enum for implicit packed store %q", n.Name)
+	}
+	if strings.HasPrefix(n.Name, semantic.PackedStoreImplicitUsePrefix) {
+		if binding, ok := s.lookupPackedStore(enumType); ok {
+			return binding.value, binding.typ, nil
+		}
+		// No binding yet: the handles must live in the active region's on-demand store (the
+		// docs/74 entry-point pattern — a callee built them into this region's store, and
+		// get-or-create below resolves to that same instance).
 	}
 	store, err := s.getOrCreateRegionPackedStore(enumType)
 	if err != nil {
@@ -112,7 +127,8 @@ func (s *functionState) resolveImplicitPackedStoreEnum(n *ast.Ident, actualType 
 	if storeType, ok := semantic.StripAggregateStateType(actualType).(*semantic.PackedEnumStoreType); ok && storeType != nil && storeType.Enum != nil {
 		return storeType.Enum
 	}
-	enumName := strings.TrimPrefix(n.Name, "__packed_store_")
+	enumName := strings.TrimPrefix(n.Name, semantic.PackedStoreImplicitUsePrefix)
+	enumName = strings.TrimPrefix(enumName, "__packed_store_")
 	if enumName == "" || s.g == nil || s.g.result == nil {
 		return nil
 	}

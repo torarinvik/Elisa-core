@@ -369,8 +369,13 @@ type packedVariantViewBinding struct {
 	// ptrBlock is the basic block where ptr (the decoded record address) was computed. A
 	// memoized decode is only safe to reuse from the SAME block — a sibling branch is not
 	// dominated by it (LLVM "instruction does not dominate all uses"). Other blocks re-decode.
-	ptrBlock      C.LLVMBasicBlockRef
-	handle        C.LLVMValueRef
+	ptrBlock C.LLVMBasicBlockRef
+	handle   C.LLVMValueRef
+	// handleBlock is the basic block where a MEMOIZED handle load was emitted (emitIdent's
+	// load-and-rebind path). Like ptrBlock, the cached SSA value is only safe to reuse from the
+	// same block — a sibling branch is not dominated by it. nil means the handle is valid
+	// wherever the binding is visible (e.g. a pattern-dispatch extract that dominates the arm).
+	handleBlock   C.LLVMBasicBlockRef
 	store         packedStoreBinding
 	typ           *semantic.PackedVariantViewType
 	payloadValues packedPayloadValueCache

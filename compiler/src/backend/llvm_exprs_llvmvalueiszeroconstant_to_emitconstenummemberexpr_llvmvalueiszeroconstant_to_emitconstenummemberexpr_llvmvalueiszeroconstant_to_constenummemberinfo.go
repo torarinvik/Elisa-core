@@ -588,6 +588,10 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 				} else {
 					s.bindPackedVariantView(expr.Name, viewType, nil, handle, packedStoreBinding{}, packedPayloadValueCache{})
 				}
+				// The memoized handle load is only reusable from this block — a sibling
+				// branch is not dominated by it. lookupPackedVariantView treats the binding
+				// as absent elsewhere, so other blocks re-load from the alloca.
+				s.markPackedVariantViewHandleBlock(expr.Name)
 				return value, viewType, nil
 			}
 		}

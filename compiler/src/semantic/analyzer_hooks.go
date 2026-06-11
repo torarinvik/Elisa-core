@@ -206,6 +206,19 @@ func (a *Analyzer) lookupVisibleCastHook(source Type, target Type) (*Symbol, boo
 	return nil, false
 }
 
+// isSelfCastHook reports whether hookSym is the `__cast__` hook currently being
+// analyzed. Inside its own body, a value conversion that would resolve back to the
+// hook (e.g. `op.i64()` in `__cast__(op: LuaBinaryOp) -> i64`) must fall through to
+// the builtin conversion — routing it through the hook is guaranteed infinite
+// recursion (stack-overflow segfault at runtime).
+func (a *Analyzer) isSelfCastHook(hookSym *Symbol) bool {
+	if a == nil || hookSym == nil || a.currentFuncDecl == nil || a.currentFuncDecl.Name != "__cast__" {
+		return false
+	}
+	current, ok := a.symbolForFuncDecl(a.currentFuncDecl)
+	return ok && current == hookSym
+}
+
 func (a *Analyzer) lookupVisibleInitHooks(target Type) []*Symbol {
 	if a == nil || target == nil {
 		return nil

@@ -169,6 +169,15 @@ func (s *functionState) emitScopeCleanups(scope *codegenScope) error {
 }
 func (s *functionState) emitBlockInCurrentScope(stmts []ast.Stmt) error {
 	scope := s.scope
+	// Like the scoped emitBlock path, snapshot the packed-store bindings: this body (a match arm,
+	// loop body, or deferred body) lands in basic blocks that do not dominate its siblings or
+	// successors, so an implicit region-backed store built here (docs/74 getOrCreateRegionPackedStore)
+	// must not leak out — reusing its SSA value elsewhere fails the LLVM dominance verifier.
+	savedPackedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
+	defer func() {
+		s.packedStores = savedPackedStores
+	}()
 	if err := s.emitBlock(stmts, false); err != nil {
 		s.discardScopeCleanups(scope)
 		return err

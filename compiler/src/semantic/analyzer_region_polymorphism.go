@@ -86,7 +86,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// (previously this shape failed at LLVM lowering with "no active inferred region
 		// arena", so only rejected code is affected).
 		a.regionPolyFn = fn
-		needsStoreHost := a.bodyCallsStoreNeedingOutsideRegion(fn.Body, storeNeeds)
+		needsStoreHost := a.bodyCallsStoreNeedingOutsideRegion(fn.Body, storeNeeds, regionBackedPacked)
 		a.regionPolyFn = nil
 		if fn.Name != "" && exportTargets[fn.Name] {
 			if needsStoreHost {
@@ -117,7 +117,28 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 // function with non-empty transitive packed-store needs that is not already inside a region scope.
 // Such a call site synthesizes an on-demand store, which requires an active region to host it.
 // Mirrors bodyCallsRegionPolyOutsideRegion's skip rules (region/in-store subtrees, lambdas).
-func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNeeds map[*FuncType]map[string]*EnumType) bool {
+// typeExprNeedsRegionBackedStore reports whether a syntactic type expression names a type that
+// carries region-backed packed enum handles (directly or through containers/wrappers).
+func (a *Analyzer) typeExprNeedsRegionBackedStore(typeExpr ast.TypeExpr, regionBacked map[string]bool) bool {
+	named, ok := typeExpr.(*ast.NamedType)
+	if !ok || named == nil {
+		return false
+	}
+	t, ok := a.namedTypes[named.Name]
+	if !ok || t == nil {
+		return false
+	}
+	enums := map[string]*EnumType{}
+	collectPackedEnumsInType(t, enums)
+	for name, et := range enums {
+		if regionBacked[name] && et != nil && !et.HandleIsPointer() {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNeeds map[*FuncType]map[string]*EnumType, regionBacked map[string]bool) bool {
 	found := false
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
@@ -150,6 +171,17 @@ func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNee
 							return
 						}
 					}
+				}
+			}
+			// A cast can resolve to a user `__cast__` hook — a call in disguise. This pre-pass
+			// runs before bodies are analyzed (resolvedCastHooks is still empty), so detect the
+			// site syntactically: if the cast TARGET type carries region-backed packed handles,
+			// the hook (if any) carries the matching store param and this site synthesizes the
+			// on-demand store just like a CallExpr.
+			if castExpr, isCast := v.Interface().(*ast.CastExpr); isCast {
+				if a.typeExprNeedsRegionBackedStore(castExpr.Target, regionBacked) {
+					found = true
+					return
 				}
 			}
 			rec(v.Elem())

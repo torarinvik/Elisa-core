@@ -474,7 +474,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			src = a.analyzeExpr(n.Operand)
 		}
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
-			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok {
+			if hookSym, ok := a.lookupVisibleCastHook(src, dst); ok && !a.isSelfCastHook(hookSym) {
 				a.resolvedCastHooks[n] = hookSym
 				if fnType, ok := hookSym.Type.(*FuncType); ok {
 					a.recordFunctionPermissionRefs(functionPermissionRefs(fnType))

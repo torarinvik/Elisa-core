@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"os"
+	"reflect"
 
 	"elisacore/src/ast"
 )
@@ -109,6 +110,202 @@ func containerRegion(t Type) string {
 // "reference does not outlive its referent".
 func (a *Analyzer) checkReturnRegionContainerEscape(valueExpr ast.Expr, valueType Type) {
 	a.checkRegionContainerEscape(valueExpr, valueType, "return")
+}
+
+// checkRegionAggregateReturnEscape rejects RETURNING a by-value aggregate that
+// carries region-backed storage (an SoA `Store` struct, a container, or a struct
+// transitively containing one) when that aggregate was built into a scope-owned
+// local region — i.e. the value is produced by a call that takes the local
+// `region NAME(...):` block's arena as an argument. The region is freed at the
+// block's exit, so every container/store column inside the returned aggregate
+// dangles (use-after-free at the caller's first read).
+//
+// This is the laundered-through-a-call analogue of checkReturnRegionContainerEscape:
+// that check only sees a container's region when it is stamped directly on the
+// value's TYPE (a `darray[T] @r` value). When the region is instead threaded as an
+// `Arena` argument into a builder that returns a struct-of-stores by value, the
+// region never reaches the return type, so the container check is blind to it. This
+// closes that hole syntactically: scope-owned region passed to an Arena param of a
+// call whose region-carrying result is returned.
+func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Type) {
+	if a == nil || value == nil || !typeCarriesRegionStorage(valueType) {
+		return
+	}
+	region := a.regionAggregateConstructionRegion(value)
+	if region == "" {
+		return
+	}
+	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[region r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
+}
+
+// typeCarriesRegionStorage reports whether a value of type t can transitively hold
+// pointers into an allocation region: a container/view (darray/dict/set/dstr/view/
+// sview), an SoA `Store` struct (its columns are region-backed and relocatable), or
+// a plain struct/aggregate any of whose fields transitively carries such storage.
+// Scalars and pointer-free structs return false, so returning them out of a region
+// block is never flagged.
+func typeCarriesRegionStorage(t Type) bool {
+	return typeCarriesRegionStorageRec(t, map[Type]bool{})
+}
+
+func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *DArrayType, *DictType, *SetType, *DStrType, *SViewType, *ViewType:
+		return true
+	case *RefType:
+		if tt == nil {
+			return false
+		}
+		return typeCarriesRegionStorageRec(tt.Elem, seen)
+	case *AggregateStateType:
+		if tt == nil {
+			return false
+		}
+		return typeCarriesRegionStorageRec(tt.Base, seen)
+	case *StructType:
+		if tt == nil {
+			return false
+		}
+		if tt.Store {
+			return true
+		}
+		for _, f := range tt.Fields {
+			if typeCarriesRegionStorageRec(f.Type, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// regionAggregateConstructionRegion returns the name of a live scope-owned local
+// region that `value` was built into via a call argument, or "" if none. It walks
+// every call in the (possibly try/paren/cast-wrapped) value expression and reports
+// the first call argument that is a live scope-owned region identifier bound to an
+// `Arena` parameter — the signal that the call allocated the returned aggregate in
+// that region.
+func (a *Analyzer) regionAggregateConstructionRegion(value ast.Expr) string {
+	if a == nil || value == nil {
+		return ""
+	}
+	found := ""
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if found != "" || !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Interface, reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if v.CanInterface() {
+				if call, ok := v.Interface().(*ast.CallExpr); ok {
+					if r := a.callConstructionRegion(call); r != "" {
+						found = r
+						return
+					}
+				}
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if found != "" {
+					return
+				}
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				if found != "" {
+					return
+				}
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(value))
+	return found
+}
+
+// callConstructionRegion reports the live scope-owned local region passed as an
+// Arena argument to call, or "" if none. A region PARAMETER (caller-owned) is
+// excluded: it outlives the call, so building into it is sound.
+func (a *Analyzer) callConstructionRegion(call *ast.CallExpr) string {
+	if a == nil || call == nil {
+		return ""
+	}
+	ft, _ := a.exprTypes[call.Func].(*FuncType)
+	if ft == nil {
+		return ""
+	}
+	for i, arg := range call.Args {
+		ident, ok := stripParenExpr(arg).(*ast.Ident)
+		if !ok || ident == nil {
+			continue
+		}
+		if a.lookupRegionParam(ident.Name) {
+			continue // caller-owned region — outlives the call.
+		}
+		if sym, _ := a.lookupRegionState(ident.Name); sym == nil {
+			continue // not a live region owner.
+		}
+		if a.argBindsArenaParam(ft, call, i) {
+			return ident.Name
+		}
+	}
+	return ""
+}
+
+// argBindsArenaParam reports whether argument argIndex of call binds to an
+// Arena-typed parameter of ft (resolving named arguments through the parameter
+// name list).
+func (a *Analyzer) argBindsArenaParam(ft *FuncType, call *ast.CallExpr, argIndex int) bool {
+	if ft == nil {
+		return false
+	}
+	paramIndex := argIndex
+	if argIndex < len(call.ArgNames) && call.ArgNames[argIndex] != "" {
+		paramIndex = -1
+		for pi, pn := range ft.ExplicitParamNames {
+			if pn == call.ArgNames[argIndex] {
+				paramIndex = pi
+				break
+			}
+		}
+	}
+	if paramIndex < 0 || paramIndex >= len(ft.Params) {
+		return false
+	}
+	return isArenaLikeType(ft.Params[paramIndex])
+}
+
+// isArenaLikeType reports whether t is the builtin Arena struct (peeling ref,
+// mutable, and state wrappers).
+func isArenaLikeType(t Type) bool {
+	for {
+		switch tt := t.(type) {
+		case *RefType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+		case *AggregateStateType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Base
+		case *StructType:
+			return tt != nil && tt.Name == "Arena"
+		default:
+			return false
+		}
+	}
 }
 
 // checkStoredRegionContainerEscape rejects storing a scope-owned-region container

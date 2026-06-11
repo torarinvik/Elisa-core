@@ -464,6 +464,69 @@ def region_param_sequence_rewrite_test() -> void:
 	}
 }
 
+// Regression: a `rewrite ... as sequence` whose source is a by-value darray
+// parameter used to spill the 24-byte darray aggregate through a 16-byte `view`
+// alloca, overflowing the adjacent stack slot (the `alloc` arena pointer) at -O0.
+// The result was arena_alloc() seeing a garbage arena (the source darray's
+// capacity field) and segfaulting. This only manifested at -O0; mem2reg hid it
+// at -O2/-O3 by deleting the dead spill. (Was the Lua frontend's nested-vararg
+// RETURN_VARARG crash cluster.)
+func TestRunCLISequenceRewriteOverByValueDArrayParamNoStackOverflow(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "sequence_rewrite_param_overflow.elisa")
+	src := `struct Box:
+    a: i64
+    b: i64
+
+def copy_list(alloc: mutable Arena&, values: darray[Box]) -> darray[Box]:
+    can Abort.Panic, Memory.Allocate:
+        in alloc:
+            return rewrite values as sequence[Box]:
+                value:
+                    emit value
+
+def run(owner: Arena) -> i64 can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+        src: mutable darray[Box] = []
+        in alloc:
+            src <- []
+            src.push(Box(4, 2))
+            src.push(Box(1, 7))
+        out: darray[Box] = copy_list(alloc, src)
+        return out[0].a * 10 + out[1].b
+
+@test
+def sequence_rewrite_param_overflow_test() -> void can[Abort.Panic, Memory.Allocate]:
+    can Abort.Panic, Memory.Allocate:
+        region scratch(65536):
+            if run(scratch) != 47:
+                panic("rewrite over by-value darray param produced wrong result")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write sequence-rewrite overflow fixture: %v", err)
+	}
+
+	// Force -O0: the bug is a dead-store stack overflow that optimization elides.
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", "-O0", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected sequence-rewrite param test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] sequence_rewrite_param_overflow_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected sequence-rewrite param output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
 func TestRunCLIInferredRegionBuildersUseActiveRegion(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")

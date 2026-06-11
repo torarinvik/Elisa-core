@@ -24,7 +24,7 @@ func (a *Analyzer) analyzeTypeConstructorCall(expr *ast.CallExpr) (Type, bool) {
 	} else {
 		sourceType = a.analyzeExpr(expr.Args[0])
 	}
-	if hookSym, ok := a.lookupVisibleCastHook(sourceType, targetType); ok {
+	if hookSym, ok := a.lookupVisibleCastHook(sourceType, targetType); ok && !a.isSelfCastHook(hookSym) {
 		a.resolvedCastHooks[expr] = hookSym
 		if fnType, ok := hookSym.Type.(*FuncType); ok {
 			a.recordFunctionPermissionRefs(functionPermissionRefs(fnType))

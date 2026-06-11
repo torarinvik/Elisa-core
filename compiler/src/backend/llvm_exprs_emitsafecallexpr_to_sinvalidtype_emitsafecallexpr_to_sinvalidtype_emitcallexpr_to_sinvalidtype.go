@@ -308,10 +308,29 @@ func (s *functionState) emitCastHookArgs(exprLabel string, operand ast.Expr, fnT
 	if err != nil {
 		return nil, err
 	}
+	args := []C.LLVMValueRef{arg}
 	if len(fnType.Params) > 1 {
-		return nil, fmt.Errorf("unsupported semantic cast hook with extra parameters for %s", exprLabel)
+		// A cast hook can carry trailing IMPLICIT params (threaded region / packed store —
+		// e.g. its return type holds region-backed enum handles). Resolve them like any other
+		// call site (recoverImplicitCallArgs) and append; only EXPLICIT extras are unsupported.
+		implicitCount := len(fnType.ImplicitParamNames)
+		if len(fnType.Params)-implicitCount != 1 {
+			return nil, fmt.Errorf("unsupported semantic cast hook with extra parameters for %s", exprLabel)
+		}
+		hookCall := &ast.CallExpr{Func: &ast.Ident{Name: fnType.Name}, Args: []ast.Expr{operand}}
+		implicitExprs, ok := s.recoverImplicitCallArgs(hookCall, fnType)
+		if !ok || len(implicitExprs) != implicitCount {
+			return nil, fmt.Errorf("unsupported semantic cast hook with extra parameters for %s", exprLabel)
+		}
+		for i, implicitExpr := range implicitExprs {
+			value, _, err := s.emitExpr(implicitExpr, fnType.Params[len(fnType.Params)-implicitCount+i])
+			if err != nil {
+				return nil, err
+			}
+			args = append(args, value)
+		}
 	}
-	return []C.LLVMValueRef{arg}, nil
+	return args, nil
 }
 
 func (s *functionState) emitTypeConstructorCastCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

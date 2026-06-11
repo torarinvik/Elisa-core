@@ -307,10 +307,6 @@ func (s *functionState) emitSequenceRewriteExpr(expr *ast.FoldExpr) (C.LLVMValue
 		return nil, nil, err
 	}
 	C.LLVMBuildStore(s.builder, zeroOut, outPtr)
-	viewLLVMType, err := s.g.lowerType(sourceViewType)
-	if err != nil {
-		return nil, nil, err
-	}
 	usizeType := s.g.result.NamedTypes["usize"]
 	usizeLLVMType, err := s.g.lowerType(usizeType)
 	if err != nil {
@@ -320,8 +316,11 @@ func (s *functionState) emitSequenceRewriteExpr(expr *ast.FoldExpr) (C.LLVMValue
 	if err != nil {
 		return nil, nil, err
 	}
-	viewTemp := C.LLVMBuildAlloca(s.builder, viewLLVMType, cStringFree("sequence.rewrite.view"))
-	C.LLVMBuildStore(s.builder, sourceViewValue, viewTemp)
+	// NOTE: do not spill sourceViewValue into a `view`-typed alloca here. When the
+	// source is a by-value darray parameter, coerceValue returns the 24-byte darray
+	// aggregate unchanged, and storing it through a 16-byte `view` slot overflows the
+	// adjacent stack slot (clobbering, e.g., the `alloc` arena pointer) at -O0. The
+	// data/len fields are read straight out of sourceViewValue, so the spill was dead.
 	dataValue := C.LLVMBuildExtractValue(s.builder, sourceViewValue, 0, cStringFree("sequence.rewrite.data"))
 	lenValue := C.LLVMBuildExtractValue(s.builder, sourceViewValue, 1, cStringFree("sequence.rewrite.len"))
 	indexPtr := C.LLVMBuildAlloca(s.builder, usizeLLVMType, cStringFree("sequence.rewrite.index"))
