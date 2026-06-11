@@ -30,9 +30,8 @@ func TestRegionPolymorphicDetectedOnNewAutoReturn(t *testing.T) {
     value: i64
 def make() -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            b: Box& = new[auto] Box(7)
-            return b
+        b: Box& = new[auto] Box(7)
+        return b
 `, AnalyzeOptions{})
 	fn := regionPolymorphicFuncType(t, result, "make")
 	if !fn.RegionPolymorphic {
@@ -40,9 +39,9 @@ def make() -> Box&:
 	}
 }
 
-// The classification is inference-driven: it fires even without an explicit `in auto:` block (the
-// region is synthesized for the body), exactly the shape the recursive packed-enum builder needs.
-func TestRegionPolymorphicDetectedWithoutInAuto(t *testing.T) {
+// The classification is inference-driven: no explicit region block is needed (the region is
+// synthesized for the body), exactly the shape the recursive packed-enum builder needs.
+func TestRegionPolymorphicDetectedWithoutExplicitBlock(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rp_inf.elisa", `struct Box:
     value: i64
 def make() -> Box&:

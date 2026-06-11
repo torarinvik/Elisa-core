@@ -24,17 +24,16 @@ def collect(n: usize) -> darray[i64]:
 @test
 def build_local_return_lives() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: darray[i64] = collect(50000)
-            if xs.count != 50000:
-                panic("returned darray lost its count")
-            sum: mutable i64 = 0
-            for v in xs:
-                sum <- sum + v
-            if sum != 2499950000:
-                panic("returned darray elements corrupted (UAF?)")
-            if xs[0] != 0 or xs[49999] != 99998:
-                panic("returned darray boundary corrupted")
+        xs: darray[i64] = collect(50000)
+        if xs.count != 50000:
+            panic("returned darray lost its count")
+        sum: mutable i64 = 0
+        for v in xs:
+            sum <- sum + v
+        if sum != 2499950000:
+            panic("returned darray elements corrupted (UAF?)")
+        if xs[0] != 0 or xs[49999] != 99998:
+            panic("returned darray boundary corrupted")
 `
 
 func TestBuildLocalReturnAdoptedNoUAF(t *testing.T) {
@@ -67,13 +66,12 @@ def pick(c: bool, n: usize) -> darray[i64]:
 @test
 def multi_return_lives() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: darray[i64] = pick(true, 1000)
-            ys: darray[i64] = pick(false, 1000)
-            if xs.count != 1000 or ys.count != 1000:
-                panic("multi-return wrong count")
-            if xs[999] != 999 or ys[999] != 9990:
-                panic("multi-return values corrupted (UAF?)")
+        xs: darray[i64] = pick(true, 1000)
+        ys: darray[i64] = pick(false, 1000)
+        if xs.count != 1000 or ys.count != 1000:
+            panic("multi-return wrong count")
+        if xs[999] != 999 or ys[999] != 9990:
+            panic("multi-return values corrupted (UAF?)")
 `
 
 func TestBuildLocalReturnMultiPathAdoptedNoUAF(t *testing.T) {
@@ -104,13 +102,12 @@ def make_gen[T](n: usize, seed: T) -> darray[T]:
 @test
 def generic_build_local_return_lives() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: darray[i64] = make_gen[i64](5000.usize(), 7.i64())
-            if xs.count != 5000 or xs[4999] != 7:
-                panic("generic i64 builder corrupted (UAF?)")
-            ys: darray[f64] = make_gen[f64](3000.usize(), 2.5)
-            if ys.count != 3000 or ys[2999] != 2.5:
-                panic("generic f64 builder corrupted (UAF?)")
+        xs: darray[i64] = make_gen[i64](5000.usize(), 7.i64())
+        if xs.count != 5000 or xs[4999] != 7:
+            panic("generic i64 builder corrupted (UAF?)")
+        ys: darray[f64] = make_gen[f64](3000.usize(), 2.5)
+        if ys.count != 3000 or ys[2999] != 2.5:
+            panic("generic f64 builder corrupted (UAF?)")
 `
 
 func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
@@ -130,19 +127,18 @@ const byParMapCollectBody = `
 @test
 def by_par_map_collect_lives() -> void:
     can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = [k for k in 0..<8000]
-            doubled: darray[i64] = [x * 2 for x in a by par]
-            if doubled.count != 8000:
-                panic("by par map lost elements")
-            ok: mutable bool = true
-            for i in 0..<a.count:
-                if doubled[i] != a[i] * 2:
-                    ok <- false
-            if not ok:
-                panic("by par map element mismatch (UAF?)")
-            if doubled[7999] != 15998:
-                panic("by par map boundary corrupted")
+        a: mutable darray[i64] = [k for k in 0..<8000]
+        doubled: darray[i64] = [x * 2 for x in a by par]
+        if doubled.count != 8000:
+            panic("by par map lost elements")
+        ok: mutable bool = true
+        for i in 0..<a.count:
+            if doubled[i] != a[i] * 2:
+                ok <- false
+        if not ok:
+            panic("by par map element mismatch (UAF?)")
+        if doubled[7999] != 15998:
+            panic("by par map boundary corrupted")
 `
 
 func TestByParMapCollectAdoptedNoUAF(t *testing.T) {

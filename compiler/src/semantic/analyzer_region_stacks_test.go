@@ -25,11 +25,10 @@ func onlyRegionStack(t *testing.T, result *Result) RegionStackAssignment {
 func TestRegionStacksGivesEachGrowableItsOwnStack(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_two.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            foo: mutable darray[i64] = []
-            bar: mutable darray[i64] = []
-            foo.push(1)
-            bar.push(2)
+        foo: mutable darray[i64] = []
+        bar: mutable darray[i64] = []
+        foo.push(1)
+        bar.push(2)
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if asn.StackOf["foo"] == 0 || asn.StackOf["bar"] == 0 {
@@ -44,12 +43,11 @@ func TestRegionStacksGivesEachGrowableItsOwnStack(t *testing.T) {
 func TestRegionStacksReservedSharesStackZero(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_reserved.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            foo: mutable darray[i64] = []
-            bar: mutable darray[i64] = []
-            foo.reserve(n)
-            foo.push(1)
-            bar.push(2)
+        foo: mutable darray[i64] = []
+        bar: mutable darray[i64] = []
+        foo.reserve(n)
+        foo.push(1)
+        bar.push(2)
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if asn.StackOf["foo"] != 0 {
@@ -67,18 +65,17 @@ func TestRegionStacksReservedSharesStackZero(t *testing.T) {
 func TestRegionStacksReserveCommitForHardBoundedInteriorRef(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                xs.push(i.i64())
-            e0: i64& = &xs[0]
-            plain: mutable darray[i64] = []
-            for i in 0..<n:
-                plain.push(i.i64())
-            sink: i64 = e0[0] + plain[0] + gap
-            if sink < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            xs.push(i.i64())
+        e0: i64& = &xs[0]
+        plain: mutable darray[i64] = []
+        for i in 0..<n:
+            plain.push(i.i64())
+        sink: i64 = e0[0] + plain[0] + gap
+        if sink < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if asn.stackStrategy(asn.StackOf["xs"]) != "reserve_commit" {
@@ -92,14 +89,13 @@ func TestRegionStacksReserveCommitForHardBoundedInteriorRef(t *testing.T) {
 func TestRegionStacksReserveCommitCountsListPushElements(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_list_push.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                xs.push([i.i64(), i.i64()])
-            e0: i64& = &xs[0]
-            if e0[0] + gap < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            xs.push([i.i64(), i.i64()])
+        e0: i64& = &xs[0]
+        if e0[0] + gap < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	stack := asn.StackOf["xs"]
@@ -118,15 +114,14 @@ func TestRegionStacksReserveCommitCountsListPushElements(t *testing.T) {
 func TestRegionStacksReserveCommitFoldsMultiplePushesPerIteration(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_multi_push.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                xs.push(i.i64())
-                xs.push((i + 1).i64())
-            e0: i64& = &xs[0]
-            if e0[0] + gap < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            xs.push(i.i64())
+            xs.push((i + 1).i64())
+        e0: i64& = &xs[0]
+        if e0[0] + gap < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	stack := asn.StackOf["xs"]
@@ -145,15 +140,14 @@ func TestRegionStacksReserveCommitFoldsMultiplePushesPerIteration(t *testing.T) 
 func TestRegionStacksReserveCommitInfersNestedCountingProduct(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_nested_product.elisa", `def f(n: usize, m: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                for j in 0..<m:
-                    xs.push(j.i64())
-            e0: i64& = &xs[0]
-            if e0[0] + gap < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            for j in 0..<m:
+                xs.push(j.i64())
+        e0: i64& = &xs[0]
+        if e0[0] + gap < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	stack := asn.StackOf["xs"]
@@ -175,15 +169,14 @@ func TestRegionStacksReserveCommitInfersNestedCountingProduct(t *testing.T) {
 func TestRegionStacksResizeDisqualifiesHardBound(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_resize_disqualifies.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                xs.push(i.i64())
-            xs.resize(n * 2)
-            e0: i64& = &xs[0]
-            if e0[0] + gap < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            xs.push(i.i64())
+        xs.resize(n * 2)
+        e0: i64& = &xs[0]
+        if e0[0] + gap < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	stack := asn.StackOf["xs"]
@@ -195,15 +188,14 @@ func TestRegionStacksResizeDisqualifiesHardBound(t *testing.T) {
 func TestRegionStacksReserveDisqualifiesHardBound(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_rc_reserve_disqualifies.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            gap: i64 = 0
-            for i in 0..<n:
-                xs.push(i.i64())
-            xs.reserve(n * 2)
-            e0: i64& = &xs[0]
-            if e0[0] + gap < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        gap: i64 = 0
+        for i in 0..<n:
+            xs.push(i.i64())
+        xs.reserve(n * 2)
+        e0: i64& = &xs[0]
+        if e0[0] + gap < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	stack := asn.StackOf["xs"]
@@ -219,14 +211,13 @@ func TestRegionStacksReserveDisqualifiesHardBound(t *testing.T) {
 func TestRegionStacksUnboundedGrowableGetsDefaultReserveCommit(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_unbounded.elisa", `def f(n: usize) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            xs.push(0)
-            e0: i64& = &xs[0]
-            for i in 1..<n:
-                xs.push(i.i64())
-            if e0[0] < 0:
-                panic("x")
+        xs: mutable darray[i64] = []
+        xs.push(0)
+        e0: i64& = &xs[0]
+        for i in 1..<n:
+            xs.push(i.i64())
+        if e0[0] < 0:
+            panic("x")
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if asn.stackStrategy(asn.StackOf["xs"]) != "reserve_commit" {
@@ -241,13 +232,12 @@ func TestRegionStacksUnboundedGrowableGetsDefaultReserveCommit(t *testing.T) {
 func TestDefaultBackingFallsBackToChainedOnWindows(t *testing.T) {
 	src := `def f(n: usize) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            xs: mutable darray[i64] = []
-            i: mutable usize = 0u
-            while i < n:
-                xs.push(i.i64())
-                i <- i + 1u
-            return xs.count.i64()
+        xs: mutable darray[i64] = []
+        i: mutable usize = 0u
+        while i < n:
+            xs.push(i.i64())
+            i <- i + 1u
+        return xs.count.i64()
 `
 	win := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_win.elisa", src,
 		AnalyzeOptions{TargetTriple: "x86_64-pc-windows-msvc"})
@@ -286,14 +276,13 @@ func TestDefaultReserveCommitAcceptsInteriorRefAcrossGrowth(t *testing.T) {
 func TestRegionStacksEarlyFreesDeadUnaliasedObject(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "b2_dead.elisa", `def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            big: mutable darray[i64] = []
-            big.push(1)
-            big.push(2)
-            total: mutable i64 = big.count.i64()
-            rest: mutable darray[i64] = []
-            rest.push(3)
-            return total + rest.count.i64()
+        big: mutable darray[i64] = []
+        big.push(1)
+        big.push(2)
+        total: mutable i64 = big.count.i64()
+        rest: mutable darray[i64] = []
+        rest.push(3)
+        return total + rest.count.i64()
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if _, ok := asn.StackEarlyFreeAfter[asn.StackOf["big"]]; !ok {
@@ -309,13 +298,12 @@ func TestRegionStacksEarlyFreesDeadUnaliasedObject(t *testing.T) {
 func TestRegionStacksDoesNotEarlyFreeAliasedObject(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "b2_aliased.elisa", `def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            big: mutable darray[i64] = []
-            big.push(1)
-            p: i64& = &big[0]
-            rest: mutable darray[i64] = []
-            rest.push(2)
-            return p[0] + rest.count.i64()
+        big: mutable darray[i64] = []
+        big.push(1)
+        p: i64& = &big[0]
+        rest: mutable darray[i64] = []
+        rest.push(2)
+        return p[0] + rest.count.i64()
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)
 	if _, ok := asn.StackEarlyFreeAfter[asn.StackOf["big"]]; ok {

@@ -83,7 +83,7 @@ def bt() -> void:
 
 // docs/77 Phase 3: a RECURSIVE hierarchy (Expr.Add references the root Node) is region-backed with one
 // store per root, shared by all refinements. Single-function (no cross-function threading yet): build a
-// depth-1 tree in `in auto:` and fold it with nested storeless matches. 5 + 7 = 12.
+// depth-1 tree (allocations infer their region) and fold it with nested storeless matches. 5 + 7 = 12.
 func TestRecursiveEnumHierarchySingleFunction(t *testing.T) {
 	runEnumHierarchyProgram(t, "rec_hier.elisa", `
 enum Node: pass
@@ -94,27 +94,26 @@ enum Expr is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(value: 5)
-            b: Node = new[auto] Expr.Lit(value: 7)
-            root: Node = new[auto] Expr.Add(left: a, right: b)
-            sum: mutable i64 = 0
-            match root:
-                Expr.Add(left: l, right: r):
-                    match l:
-                        Expr.Lit(value: lv):
-                            sum <- sum + lv
-                        Expr.Add(left: l2, right: r2):
-                            sum <- sum + 0
-                    match r:
-                        Expr.Lit(value: rv):
-                            sum <- sum + rv
-                        Expr.Add(left: l3, right: r3):
-                            sum <- sum + 0
-                Expr.Lit(value: v):
-                    sum <- v
-            if sum != 12:
-                panic("recursive hierarchy fold produced wrong sum")
+        a: Node = new[auto] Expr.Lit(value: 5)
+        b: Node = new[auto] Expr.Lit(value: 7)
+        root: Node = new[auto] Expr.Add(left: a, right: b)
+        sum: mutable i64 = 0
+        match root:
+            Expr.Add(left: l, right: r):
+                match l:
+                    Expr.Lit(value: lv):
+                        sum <- sum + lv
+                    Expr.Add(left: l2, right: r2):
+                        sum <- sum + 0
+                match r:
+                    Expr.Lit(value: rv):
+                        sum <- sum + rv
+                    Expr.Add(left: l3, right: r3):
+                        sum <- sum + 0
+            Expr.Lit(value: v):
+                sum <- v
+        if sum != 12:
+            panic("recursive hierarchy fold produced wrong sum")
 `)
 }
 
@@ -143,10 +142,9 @@ def eval(n: Node) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Node = make(10)
-            if eval(root) != 1024:
-                panic("cross-function recursive hierarchy produced wrong sum")
+        root: Node = make(10)
+        if eval(root) != 1024:
+            panic("cross-function recursive hierarchy produced wrong sum")
 `)
 }
 
@@ -163,22 +161,21 @@ enum Expr is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(span: 10, value: 5)
-            b: Node = new[auto] Expr.Lit(span: 20, value: 7)
-            root: Node = new[auto] Expr.Add(span: 30, left: a, right: b)
-            if a.span != 10:
-                panic("common field read wrong: a.span should be 10")
-            if root.span != 30:
-                panic("common field read wrong: root.span should be 30")
-            total: mutable i64 = 0
-            match root:
-                Expr.Add(left: l, right: r):
-                    total <- total + root.span
-                Expr.Lit(value: v):
-                    total <- total + root.span + v
-            if total != 30:
-                panic("common field read in match arm wrong")
+        a: Node = new[auto] Expr.Lit(span: 10, value: 5)
+        b: Node = new[auto] Expr.Lit(span: 20, value: 7)
+        root: Node = new[auto] Expr.Add(span: 30, left: a, right: b)
+        if a.span != 10:
+            panic("common field read wrong: a.span should be 10")
+        if root.span != 30:
+            panic("common field read wrong: root.span should be 30")
+        total: mutable i64 = 0
+        match root:
+            Expr.Add(left: l, right: r):
+                total <- total + root.span
+            Expr.Lit(value: v):
+                total <- total + root.span + v
+        if total != 30:
+            panic("common field read in match arm wrong")
 `)
 }
 
@@ -227,19 +224,18 @@ enum Stmt is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            lit: Node = new[auto] Expr.Lit(value: 5)
-            ret: Node = new[auto] Stmt.Ret(value: lit)
-            if not (lit is Expr):
-                panic("Lit must test as Expr")
-            if lit is Stmt:
-                panic("Lit must not test as Stmt")
-            if not (ret is Stmt):
-                panic("Ret must test as Stmt")
-            if ret is Expr:
-                panic("Ret must not test as Expr")
-            if not (ret is Node):
-                panic("widening test must be true")
+        lit: Node = new[auto] Expr.Lit(value: 5)
+        ret: Node = new[auto] Stmt.Ret(value: lit)
+        if not (lit is Expr):
+            panic("Lit must test as Expr")
+        if lit is Stmt:
+            panic("Lit must not test as Stmt")
+        if not (ret is Stmt):
+            panic("Ret must test as Stmt")
+        if ret is Expr:
+            panic("Ret must not test as Expr")
+        if not (ret is Node):
+            panic("widening test must be true")
 `)
 }
 
@@ -307,15 +303,14 @@ def describe(n: Node) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(value: 5)
-            b: Node = new[auto] Expr.Lit(value: 7)
-            root: Node = new[auto] Expr.Add(left: a, right: b)
-            nop: Node = new[auto] Stmt.Nop
-            if describe(root) != 12:
-                panic("Expr category arm with binder must narrow and eval to 12")
-            if describe(nop) != 100:
-                panic("Stmt category arm must match Nop")
+        a: Node = new[auto] Expr.Lit(value: 5)
+        b: Node = new[auto] Expr.Lit(value: 7)
+        root: Node = new[auto] Expr.Add(left: a, right: b)
+        nop: Node = new[auto] Stmt.Nop
+        if describe(root) != 12:
+            panic("Expr category arm with binder must narrow and eval to 12")
+        if describe(nop) != 100:
+            panic("Stmt category arm must match Nop")
 `)
 }
 
@@ -349,13 +344,12 @@ def describe(n: Node) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            lit: Node = new[auto] Expr.Lit(value: 42)
-            nop: Node = new[auto] Stmt.Nop
-            if describe(lit) != 42:
-                panic("is-binding form must narrow Expr and eval to 42")
-            if describe(nop) != 100:
-                panic("is-binding (as-alias) form must match Stmt")
+        lit: Node = new[auto] Expr.Lit(value: 42)
+        nop: Node = new[auto] Stmt.Nop
+        if describe(lit) != 42:
+            panic("is-binding form must narrow Expr and eval to 42")
+        if describe(nop) != 100:
+            panic("is-binding (as-alias) form must match Stmt")
 `)
 }
 
@@ -384,10 +378,9 @@ def total(t: Tree) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Tree = make(8)
-            if total(root) != 256:
-                panic("u16-handle tree built or traversed wrong")
+        root: Tree = make(8)
+        if total(root) != 256:
+            panic("u16-handle tree built or traversed wrong")
 `)
 }
 
@@ -405,29 +398,28 @@ enum Stmt is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(value: 5)
-            b: Node = new[auto] Expr.Lit(value: 7)
-            root: Node = new[auto] Expr.Add(left: a, right: b)
-            if not (root is Expr):
-                panic("category test must hold at u16 width")
-            sum: mutable i64 = 0
-            match root:
-                Expr.Add(left: l, right: r):
-                    match l:
-                        Expr.Lit(value: lv):
-                            sum <- sum + lv
-                        _:
-                            pass
-                    match r:
-                        Expr.Lit(value: rv):
-                            sum <- sum + rv
-                        _:
-                            pass
-                _:
-                    pass
-            if sum != 12:
-                panic("u16-handle hierarchy fold produced wrong sum")
+        a: Node = new[auto] Expr.Lit(value: 5)
+        b: Node = new[auto] Expr.Lit(value: 7)
+        root: Node = new[auto] Expr.Add(left: a, right: b)
+        if not (root is Expr):
+            panic("category test must hold at u16 width")
+        sum: mutable i64 = 0
+        match root:
+            Expr.Add(left: l, right: r):
+                match l:
+                    Expr.Lit(value: lv):
+                        sum <- sum + lv
+                    _:
+                        pass
+                match r:
+                    Expr.Lit(value: rv):
+                        sum <- sum + rv
+                    _:
+                        pass
+            _:
+                pass
+        if sum != 12:
+            panic("u16-handle hierarchy fold produced wrong sum")
 `)
 }
 
@@ -456,8 +448,7 @@ def chain(depth: i64) -> Chain:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            c: Chain = chain(300)
+        c: Chain = chain(300)
 `
 	full := "include \"" + std + "\"\n" + src
 	dir := t.TempDir()
@@ -501,10 +492,9 @@ def total(t: Tree) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Tree = make(8)
-            if total(root) != 256:
-                panic("ptr-handle tree built or traversed wrong")
+        root: Tree = make(8)
+        if total(root) != 256:
+            panic("ptr-handle tree built or traversed wrong")
 `)
 }
 
@@ -522,32 +512,31 @@ enum Stmt is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(value: 5)
-            b: Node = new[auto] Expr.Lit(value: 7)
-            root: Node = new[auto] Expr.Add(left: a, right: b)
-            if not (root is Expr):
-                panic("category test must hold with ptr handles")
-            if root is Stmt:
-                panic("negative category test must fail with ptr handles")
-            sum: mutable i64 = 0
-            if root is Expr e:
-                match e:
-                    Expr.Add(left: l, right: r):
-                        match l:
-                            Expr.Lit(value: lv):
-                                sum <- sum + lv
-                            _:
-                                pass
-                        match r:
-                            Expr.Lit(value: rv):
-                                sum <- sum + rv
-                            _:
-                                pass
-                    _:
-                        pass
-            if sum != 12:
-                panic("ptr-handle hierarchy fold produced wrong sum")
+        a: Node = new[auto] Expr.Lit(value: 5)
+        b: Node = new[auto] Expr.Lit(value: 7)
+        root: Node = new[auto] Expr.Add(left: a, right: b)
+        if not (root is Expr):
+            panic("category test must hold with ptr handles")
+        if root is Stmt:
+            panic("negative category test must fail with ptr handles")
+        sum: mutable i64 = 0
+        if root is Expr e:
+            match e:
+                Expr.Add(left: l, right: r):
+                    match l:
+                        Expr.Lit(value: lv):
+                            sum <- sum + lv
+                        _:
+                            pass
+                    match r:
+                        Expr.Lit(value: rv):
+                            sum <- sum + rv
+                        _:
+                            pass
+                _:
+                    pass
+        if sum != 12:
+            panic("ptr-handle hierarchy fold produced wrong sum")
 `)
 }
 
@@ -633,26 +622,25 @@ enum Stmt is Node:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Node = new[auto] Expr.Lit(span: 1, value: 5)
-            b: Node = new[auto] Expr.Lit(span: 2, value: 7)
-            c: Node = new[auto] Expr.Add(span: 4, left: a, right: b)
-            d: Node = new[auto] Stmt.Print(span: 8, target: c)
-            all_total: mutable i64 = 0
-            for s in Node of .span:
-                all_total <- all_total + s
-            if all_total != 15:
-                panic("root column scan produced wrong sum")
-            expr_total: mutable i64 = 0
-            for s in Expr of .span:
-                expr_total <- expr_total + s
-            if expr_total != 7:
-                panic("category column scan must range-filter to Expr rows")
-            stmt_total: mutable i64 = 0
-            for s in Stmt of .span:
-                stmt_total <- stmt_total + s
-            if stmt_total != 8:
-                panic("category column scan must range-filter to Stmt rows")
+        a: Node = new[auto] Expr.Lit(span: 1, value: 5)
+        b: Node = new[auto] Expr.Lit(span: 2, value: 7)
+        c: Node = new[auto] Expr.Add(span: 4, left: a, right: b)
+        d: Node = new[auto] Stmt.Print(span: 8, target: c)
+        all_total: mutable i64 = 0
+        for s in Node of .span:
+            all_total <- all_total + s
+        if all_total != 15:
+            panic("root column scan produced wrong sum")
+        expr_total: mutable i64 = 0
+        for s in Expr of .span:
+            expr_total <- expr_total + s
+        if expr_total != 7:
+            panic("category column scan must range-filter to Expr rows")
+        stmt_total: mutable i64 = 0
+        for s in Stmt of .span:
+            stmt_total <- stmt_total + s
+        if stmt_total != 8:
+            panic("category column scan must range-filter to Stmt rows")
 `)
 }
 
@@ -750,13 +738,12 @@ def total(t: Tree) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Tree = new[auto] Tree.Leaf(value: 3)
-            b: Tree = new[auto] Tree.Leaf(value: 7)
-            both: Tree = new[auto] Tree.Node(left: a, right: b)
-            lone: Tree = new[auto] Tree.Node(left: both, right: null)
-            if total(lone) != 10:
-                panic("optional-niche tree summed wrong")
+        a: Tree = new[auto] Tree.Leaf(value: 3)
+        b: Tree = new[auto] Tree.Leaf(value: 7)
+        both: Tree = new[auto] Tree.Node(left: a, right: b)
+        lone: Tree = new[auto] Tree.Node(left: both, right: null)
+        if total(lone) != 10:
+            panic("optional-niche tree summed wrong")
 `)
 }
 
@@ -783,10 +770,9 @@ def probe(n: Tree) -> i64:
 
 def main() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Tree = new[auto] Tree.Leaf(value: 1)
-            n: Tree = new[auto] Tree.Node(left: a, right: null)
-            return probe(n)
+        a: Tree = new[auto] Tree.Leaf(value: 1)
+        n: Tree = new[auto] Tree.Node(left: a, right: null)
+        return probe(n)
 `
 	full := "include \"" + std + "\"\n" + src
 	dir := t.TempDir()
@@ -839,9 +825,8 @@ def total(t: Tree) -> i64:
 
 def main() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Tree = make(2)
-            return total(root) - 4
+        root: Tree = make(2)
+        return total(root) - 4
 `
 		full := "include \"" + std + "\"\n" + src
 		dir := t.TempDir()

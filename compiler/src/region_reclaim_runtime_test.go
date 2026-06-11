@@ -12,7 +12,7 @@ import (
 	"time"
 )
 
-// A scoped region (`in auto:` / `region`) is freed at SCOPE exit, so a region inside a loop
+// A scoped region (inferred loop-body region / `region`) is freed at SCOPE exit, so a region inside a loop
 // reclaims its arena every iteration instead of leaking it until function return. Before the
 // fix this leaked ~10-16 KB/iteration (1M iterations ≈ 10 GB); after, peak RSS is a few MB
 // regardless of iteration count. This execs the built binary and asserts peak RSS stays bounded.
@@ -34,11 +34,10 @@ def region_loop() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         acc: mutable i64 = 0
         for i in 0..<1000000:
-            in auto:
-                xs: mutable darray[i64] = []
-                xs.push(7)
-                xs.push(11)
-                acc <- acc + xs[0] + xs[1]
+            xs: mutable darray[i64] = []
+            xs.push(7)
+            xs.push(11)
+            acc <- acc + xs[0] + xs[1]
         if acc != 18000000:
             panic("region loop produced wrong result")
 `
@@ -89,7 +88,7 @@ def region_loop() -> void:
 	t.Logf("region-in-loop peak RSS = %d MB over %d iterations (bounded)", maxRSSBytes/(1024*1024), iterations)
 }
 
-// Automatic loop-body region tightening: a loop-local allocation with NO manual `in auto:` is
+// Automatic loop-body region tightening: a loop-local allocation with NO manual region scope is
 // auto-wrapped so it reclaims per iteration. Without the auto-wrap it would accumulate in the
 // function region for the whole loop (~GBs at 1M iters); with it, peak RSS stays a few MB.
 func TestRegionAutoWrapLoopBoundsMemory(t *testing.T) {
@@ -153,7 +152,7 @@ def auto_loop() -> void:
 		t.Fatalf("auto-wrapped loop peak RSS = %d MB over 1M iterations — expected bounded (<512 MB); loop-body auto-tightening did not apply",
 			maxRSSBytes/(1024*1024))
 	}
-	t.Logf("auto-wrapped loop peak RSS = %d MB over 1M iterations (bounded, no manual `in auto:`)", maxRSSBytes/(1024*1024))
+	t.Logf("auto-wrapped loop peak RSS = %d MB over 1M iterations (bounded, no manual region scope)", maxRSSBytes/(1024*1024))
 }
 
 // A region inside a hot loop reuses its arena across iterations (reset, not free+realloc), so it
@@ -456,7 +455,7 @@ def lbiref() -> void:
 		"loop-body reserve_commit interior ref did not survive within-iteration growth")
 }
 
-// new[auto] is inference-driven: with NO explicit `in auto:`, a function using it gets its region
+// new[auto] is inference-driven: with NO explicit region scope, a function using it gets its region
 // synthesized, and an iteration-local new[auto] inside a loop is auto-tightened into a PER-ITERATION
 // region (reserved once, reset-reused) — its lifetime detected and placed in the matching region
 // exactly like a container. 100k allocations are correct and (as measured) churn- and growth-free.

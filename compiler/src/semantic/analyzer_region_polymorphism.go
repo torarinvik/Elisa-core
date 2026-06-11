@@ -752,7 +752,18 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 		return nil
 	}
 	name := ""
-	switch callee := unwrapParenForRegionPoly(call.Func).(type) {
+	callee := unwrapParenForRegionPoly(call.Func)
+	// Unwrap generic value-form specialization: `fn[A, B](...)` parses as a SpecializeExpr
+	// callee, and single-arg `fn[T](...)` as an IndexExpr over the function identifier (the
+	// analyzer reinterprets it later via AsSpecialize). For ordinary indexing the Object names
+	// a variable, whose symbol type is not a FuncType, so the lookup below returns nil anyway.
+	switch wrapped := callee.(type) {
+	case *ast.SpecializeExpr:
+		callee = unwrapParenForRegionPoly(wrapped.Operand)
+	case *ast.IndexExpr:
+		callee = unwrapParenForRegionPoly(wrapped.Object)
+	}
+	switch callee := callee.(type) {
 	case *ast.Ident:
 		name = callee.Name
 	case *ast.FieldExpr:

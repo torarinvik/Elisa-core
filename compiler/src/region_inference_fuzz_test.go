@@ -9,12 +9,13 @@ import (
 
 // Property-based fuzzer for AUTOMATIC REGION INFERENCE.
 //
-// Elisa infers one region per lexical scope: an `in auto:` block (or an inferred
-// function-body region) owns every allocation in it and frees it at scope exit.
-// Objects with DIFFERENT lifetimes are expressed by NESTING — a value that should
-// die earlier lives in an inner `in auto:`; longer-lived values in the enclosing one.
+// Elisa infers regions by default: a function body with region-less allocations gets a
+// synthesized auto region, and loop-body allocations are auto-tightened into a
+// per-iteration region. Objects with DIFFERENT lifetimes are expressed by NESTING —
+// a value that should die earlier lives in an inner (loop-body) scope; longer-lived
+// values in the enclosing one.
 //
-// This fuzzer generates random trees of nested `in auto:` scopes. Each node:
+// This fuzzer generates random trees of nested scopes. Each node:
 //   - allocates a darray in its own (inferred) region,
 //   - pushes a run of linear values into it,
 //   - recursively emits child scopes whose darrays die at their inner scope exit
@@ -75,9 +76,8 @@ func emitRegionNode(b *strings.Builder, n *rnode, indent int, ctr *int, sink str
 		fmt.Fprintf(b, "%sfor rep%d in 0..<%d:\n", regionIndent(indent), id, n.rep)
 		autoIndent = indent + 1
 	}
-	inner := autoIndent + 1
+	inner := autoIndent
 	d := fmt.Sprintf("d%d", id)
-	fmt.Fprintf(b, "%sin auto:\n", regionIndent(autoIndent))
 	fmt.Fprintf(b, "%s%s: mutable darray[i64] = []\n", regionIndent(inner), d)
 	fmt.Fprintf(b, "%sfor k%d in 0..<%d:\n", regionIndent(inner), id, n.count)
 	fmt.Fprintf(b, "%s%s.push(%d.i64() + k%d.i64() * %d.i64())\n", regionIndent(inner+1), d, n.base, id, n.step)
@@ -106,8 +106,8 @@ func generateRegionProgram(seed int64) (string, int64) {
 }
 
 // Explicit differing-lifetime test: a long-lived darray in the outer inferred region
-// survives while 50 short-lived inner `in auto:` regions are created, filled, summed,
-// and freed. If the inner region's teardown corrupted the surviving outer darray (or
+// survives while 50 short-lived per-iteration (auto-tightened) regions are created,
+// filled, summed, and freed. If the inner region's teardown corrupted the surviving outer darray (or
 // the outer darray were grown from the wrong/short-lived arena), the checksum breaks.
 func TestRegionInferenceDifferingLifetimes(t *testing.T) {
 	if testing.Short() {
@@ -117,22 +117,20 @@ func TestRegionInferenceDifferingLifetimes(t *testing.T) {
 @test
 def differing_lifetimes() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            longlived: mutable darray[i64] = []
-            for round in 0..<50:
-                in auto:
-                    scratch: mutable darray[i64] = []
-                    for k in 0..<100:
-                        scratch.push((round.i64() * 100) + k.i64())
-                    s: mutable i64 = 0
-                    for v in scratch:
-                        s <- s + v
-                    longlived.push(s)
-            total: mutable i64 = 0
-            for v in longlived:
-                total <- total + v
-            if total != 12497500:
-                panic("long-lived value corrupted or scratch use-after-free")
+        longlived: mutable darray[i64] = []
+        for round in 0..<50:
+            scratch: mutable darray[i64] = []
+            for k in 0..<100:
+                scratch.push((round.i64() * 100) + k.i64())
+            s: mutable i64 = 0
+            for v in scratch:
+                s <- s + v
+            longlived.push(s)
+        total: mutable i64 = 0
+        for v in longlived:
+            total <- total + v
+        if total != 12497500:
+            panic("long-lived value corrupted or scratch use-after-free")
 `
 	exit, stdout, stderr := runStressProgram(t, "differing_lifetimes", body)
 	assertAllPassed(t, exit, stdout, stderr, "differing_lifetimes")

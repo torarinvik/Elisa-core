@@ -5,36 +5,34 @@ import (
 	"testing"
 )
 
-// `in auto:` is region inference: the compiler synthesizes a scoped region for the
-// block's allocations and frees it at block exit. A value that stays inside the block
-// (only a plain i64 is returned here) is fine — no explicit region needed.
+// Region inference is the default: a function body with region-less allocations gets
+// a compiler-synthesized auto region, freed at function exit. A value that stays inside
+// the function (only a plain i64 is returned here) is fine — no explicit region needed.
 func TestAnalyzeAcceptsInAutoBlockWithNonEscapingValue(t *testing.T) {
 	src := `def f() -> i64:
-	in auto:
-		xs: mutable darray[i64] = []
-		xs.push(7)
-		xs.push(8)
-		return xs[0] + xs[1]
+	xs: mutable darray[i64] = []
+	xs.push(7)
+	xs.push(8)
+	return xs[0] + xs[1]
 `
 	_, errs := parseAndAnalyze(t, "in_auto_non_escaping_ok.elisa", src)
 	if len(errs) != 0 {
-		t.Fatalf("expected `in auto:` with a non-escaping value to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("expected an inferred-region function with a non-escaping value to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
-// Returning a value built in an `in auto:` block no longer leaks or errors:
+// Returning a value built in an inferred auto region neither leaks nor errors:
 // region-return inference makes the function region-polymorphic, threading the
-// synthesized region out to the caller instead of freeing it at block exit.
+// synthesized region out to the caller instead of freeing it at function exit.
 func TestAnalyzeAcceptsRegionPolymorphicReturnFromInAutoBlock(t *testing.T) {
 	src := `def f() -> darray[i64]:
-	in auto:
-		xs: mutable darray[i64] = []
-		xs.push(7)
-		return xs
+	xs: mutable darray[i64] = []
+	xs.push(7)
+	return xs
 `
 	_, errs := parseAndAnalyze(t, "in_auto_return_region_poly.elisa", src)
 	if len(errs) != 0 {
-		t.Fatalf("expected build-and-return from `in auto:` to be accepted as region-polymorphic, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("expected build-and-return with an inferred region to be accepted as region-polymorphic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
@@ -43,10 +41,9 @@ func TestAnalyzeAcceptsRegionPolymorphicReturnFromInAutoBlock(t *testing.T) {
 // around its body, so the threaded region always has an owner — no ceremony needed.
 func TestAnalyzeAcceptsRegionPolymorphicCallViaInferredCallerRegion(t *testing.T) {
 	src := `def build() -> darray[i64]:
-	in auto:
-		xs: mutable darray[i64] = []
-		xs.push(7)
-		return xs
+	xs: mutable darray[i64] = []
+	xs.push(7)
+	return xs
 
 def use() -> i64:
 	ys: darray[i64] = build()

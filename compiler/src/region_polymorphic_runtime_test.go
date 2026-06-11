@@ -10,7 +10,7 @@ import (
 )
 
 // docs/74 steps 2-3, single function (no cross-function threading): `new[auto] Expr.V(...)` for a
-// packed enum allocates into an implicit region-backed store (columns on the `in auto:` arena), and
+// packed enum allocates into an implicit region-backed store (columns on the inferred-region arena), and
 // storeless `match node:` (no `in Store:`) recovers that store from the active binding. Builds
 // Add(Int 5, Int 7) and reads it back via nested storeless matches → 12. A broken store binding
 // would read garbage or fail to compile.
@@ -32,27 +32,26 @@ packed enum Expr:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Expr = new[auto] Expr.Int(span: 0, value: 5)
-            b: Expr = new[auto] Expr.Int(span: 0, value: 7)
-            root: Expr = new[auto] Expr.Add(span: 0, left: a, right: b)
-            sum: mutable i64 = 0
-            match root:
-                Expr.Int(value: v):
-                    sum <- v
-                Expr.Add(left: l, right: r):
-                    match l:
-                        Expr.Int(value: lv):
-                            sum <- sum + lv
-                        Expr.Add(left: l2, right: r2):
-                            sum <- sum + 100
-                    match r:
-                        Expr.Int(value: rv):
-                            sum <- sum + rv
-                        Expr.Add(left: l3, right: r3):
-                            sum <- sum + 100
-            if sum != 12:
-                panic("region-backed packed enum produced wrong sum")
+        a: Expr = new[auto] Expr.Int(span: 0, value: 5)
+        b: Expr = new[auto] Expr.Int(span: 0, value: 7)
+        root: Expr = new[auto] Expr.Add(span: 0, left: a, right: b)
+        sum: mutable i64 = 0
+        match root:
+            Expr.Int(value: v):
+                sum <- v
+            Expr.Add(left: l, right: r):
+                match l:
+                    Expr.Int(value: lv):
+                        sum <- sum + lv
+                    Expr.Add(left: l2, right: r2):
+                        sum <- sum + 100
+                match r:
+                    Expr.Int(value: rv):
+                        sum <- sum + rv
+                    Expr.Add(left: l3, right: r3):
+                        sum <- sum + 100
+        if sum != 12:
+            panic("region-backed packed enum produced wrong sum")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bt_packed.elisa")
@@ -115,10 +114,9 @@ def eval(node: Expr) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Expr = make(10)
-            if eval(root) != 1024:
-                panic("plain recursive enum produced wrong sum")
+        root: Expr = make(10)
+        if eval(root) != 1024:
+            panic("plain recursive enum produced wrong sum")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "plain.elisa")
@@ -169,15 +167,14 @@ enum Expr layout soa:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: Expr = new[auto] Expr.Int(span: 10, value: 5)
-            b: Expr = new[auto] Expr.Int(span: 20, value: 7)
-            root: Expr = new[auto] Expr.Add(span: 30, left: a, right: b)
-            total: mutable i64 = 0
-            for s in Expr of .span:
-                total <- total + s
-            if total != 60:
-                panic("column scan over .span produced wrong sum")
+        a: Expr = new[auto] Expr.Int(span: 10, value: 5)
+        b: Expr = new[auto] Expr.Int(span: 20, value: 7)
+        root: Expr = new[auto] Expr.Add(span: 30, left: a, right: b)
+        total: mutable i64 = 0
+        for s in Expr of .span:
+            total <- total + s
+        if total != 60:
+            panic("column scan over .span produced wrong sum")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "colscan.elisa")
@@ -209,7 +206,7 @@ def bt() -> void:
 // docs/74 + docs/75 milestone: the recursive region-backed packed-enum binary tree with ZERO
 // ceremony — no explicit Store, no `in store:`, no hand-threaded params. `make` (region-polymorphic,
 // returns Expr) builds a depth-10 Add-tree of 1024 Int leaves via `new[auto] Expr.V`; the implicit
-// region-backed store is created in `bt`'s `in auto:` and auto-threaded into both `make` and the
+// region-backed store is created in `bt`'s inferred region and auto-threaded into both `make` and the
 // consumer `eval` (which matches storelessly). eval recursively sums the leaves → 1024. A broken
 // store thread would read garbage across the function boundary.
 func TestRegionBackedPackedTreeRecursiveBuildAndEval(t *testing.T) {
@@ -243,10 +240,9 @@ def eval(node: Expr) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            root: Expr = make(10)
-            if eval(root) != 1024:
-                panic("region-backed packed tree produced wrong sum")
+        root: Expr = make(10)
+        if eval(root) != 1024:
+            panic("region-backed packed tree produced wrong sum")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bt_rec.elisa")
@@ -275,7 +271,7 @@ def bt() -> void:
 	}
 }
 
-// docs/76 regression: a region-OWNING function (one with `in auto:` blocks, here several — a fresh
+// docs/76 regression: a region-OWNING function (one with its own region scopes, here several — a fresh
 // tree per loop iteration, the binary-trees shape) must CREATE its region-backed store on demand per
 // region, NOT receive a single threaded store. `run` calls `make`/`check` but owns its regions, so the
 // transitive store-need injection must skip it (funcOwnsRegion); otherwise all per-iteration trees
@@ -312,8 +308,7 @@ def run(reps: i64) -> i64:
         total: mutable i64 = 0
         i: mutable i64 = 0
         while i < reps:
-            in auto:
-                total <- total + check(make(8))
+            total <- total + check(make(8))
             i <- i + 1
         return total
 
@@ -404,9 +399,8 @@ def sumF(f: Forest) -> i64:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            if sumT(branch(4)) != 10:
-                panic("mutually-recursive plain enums produced wrong sum")
+        if sumT(branch(4)) != 10:
+            panic("mutually-recursive plain enums produced wrong sum")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "mutual.elisa")
@@ -436,7 +430,7 @@ def bt() -> void:
 }
 
 // docs/75: a recursive `new[auto]` builder. `make` is region-polymorphic — it threads the caller's
-// region (the `in auto:` in `bt`) through every recursive call, so all 101 nodes land in ONE region
+// region (`bt`'s inferred region) through every recursive call, so all 101 nodes land in ONE region
 // and each survives to be read by the next level. depth-100 adds 1 per level → value 101. If
 // threading were broken (a per-call arena freed on return), `inner.value` would read freed memory
 // and the result would be wrong or crash. This is the end-to-end proof that the region is threaded.
@@ -462,10 +456,9 @@ def make(depth: i64) -> Box&:
 @test
 def bt() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            b: Box& = make(100)
-            if b.value != 101:
-                panic("region-polymorphic recursive build produced wrong value")
+        b: Box& = make(100)
+        if b.value != 101:
+            panic("region-polymorphic recursive build produced wrong value")
 `
 	dir := t.TempDir()
 	path := filepath.Join(dir, "bt.elisa")

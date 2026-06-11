@@ -13,13 +13,12 @@ import (
 func TestRegionLifetimeAutoSplitsInterleaved(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_inter.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            a.push(1)
-            b.push(2)
-            a.push(3)
-            b.push(4)
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        a.push(1)
+        b.push(2)
+        a.push(3)
+        b.push(4)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "interleaved object lifetimes") {
 		t.Fatalf("multi-stack regions must auto-split crossing growables; no error expected, got:\n%s", allDiagnostics(result))
@@ -31,24 +30,22 @@ func TestRegionLifetimeAutoSplitsInterleaved(t *testing.T) {
 func TestRegionLifetimeAllowsNestedAndDisjoint(t *testing.T) {
 	nested := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_nested.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            b.push(1)
-            b.push(2)
-            a.push(3)
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        b.push(1)
+        b.push(2)
+        a.push(3)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(nested), "interleaved") {
 		t.Fatalf("nested lifetimes must not be flagged, got:\n%s", allDiagnostics(nested))
 	}
 	disjoint := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_disjoint.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            a.push(1)
-            a.push(2)
-            b: mutable darray[i64] = []
-            b.push(3)
+        a: mutable darray[i64] = []
+        a.push(1)
+        a.push(2)
+        b: mutable darray[i64] = []
+        b.push(3)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(disjoint), "interleaved") {
 		t.Fatalf("disjoint lifetimes must not be flagged, got:\n%s", allDiagnostics(disjoint))
@@ -60,12 +57,11 @@ func TestRegionLifetimeAllowsNestedAndDisjoint(t *testing.T) {
 func TestRegionLifetimeLoopClampingNoFalsePositive(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_loop.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            for i in 0..<10:
-                a.push(i.i64())
-                b.push(i.i64())
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        for i in 0..<10:
+            a.push(i.i64())
+            b.push(i.i64())
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "interleaved") {
 		t.Fatalf("loop-clamped equal lifetimes must not be flagged, got:\n%s", allDiagnostics(result))
@@ -96,20 +92,19 @@ func TestRegionLifetimeFixViaExplicitRegionAnnotation(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_fixed.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(4096):
-            in auto:
-                a: mutable darray[i64] = []
-                b: mutable darray[i64] @scratch = []
-                a.push(1)
-                b.push(2)
-                a.push(3)
-                b.push(4)
+            a: mutable darray[i64] = []
+            b: mutable darray[i64] @scratch = []
+            a.push(1)
+            b.push(2)
+            a.push(3)
+            b.push(4)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "interleaved") {
 		t.Fatalf("pinning one object to an explicit region must resolve the warning, got:\n%s", allDiagnostics(result))
 	}
 }
 
-// Auto-wrap: a loop-local allocation (no manual `in auto:`) is automatically wrapped in an
+// Auto-wrap: a loop-local allocation (no explicit region) is automatically wrapped in an
 // inferred region so it reclaims per iteration. It must compile cleanly — the wrap is gated so it
 // never introduces an escape error.
 func TestRegionAutoWrapLoopLocalCompilesClean(t *testing.T) {
@@ -145,7 +140,7 @@ func TestRegionAutoWrapSkipsAccumulator(t *testing.T) {
 	}
 }
 
-// Differential fuzz: generate random straight-line `in auto:` scopes with 2-4 darrays and a random
+// Differential fuzz: generate random straight-line function bodies with 2-4 darrays and a random
 // push sequence. Every darray here is an unreserved growable, and 4 <= the stack cap, so multi-stack
 // regions give each its own parallel stack — ALL crossings auto-split. The analyzer must therefore
 // never raise an interleaved-lifetime error on these, regardless of how the (oracle-computed)
@@ -161,25 +156,25 @@ func TestRegionLifetimeFuzzAutoSplitsAllSmallScopes(t *testing.T) {
 	}
 }
 
-// generateInterleaveScope emits an `in auto:` block declaring 2-4 darrays followed by a random
+// generateInterleaveScope emits a function body declaring 2-4 darrays followed by a random
 // straight-line push sequence (one push per statement). It returns the source and whether any
 // pair of object lifetimes crosses (birth_i < birth_j < death_i < death_j on statement indices)
 // — the exact rule the analyzer applies at statement granularity.
 func generateInterleaveScope(rng *rand.Rand) (string, bool) {
 	k := 2 + rng.Intn(3)
 	var b strings.Builder
-	b.WriteString("def f() -> void:\n    can Memory.Allocate, Memory.Release, Abort.Panic:\n        in auto:\n")
+	b.WriteString("def f() -> void:\n    can Memory.Allocate, Memory.Release, Abort.Panic:\n")
 	birth := make([]int, k)
 	death := make([]int, k)
 	for i := 0; i < k; i++ {
-		fmt.Fprintf(&b, "            d%d: mutable darray[i64] = []\n", i)
+		fmt.Fprintf(&b, "        d%d: mutable darray[i64] = []\n", i)
 		birth[i] = i
 		death[i] = i
 	}
 	step := k
 	for p, m := 0, 4+rng.Intn(9); p < m; p++ {
 		r := rng.Intn(k)
-		fmt.Fprintf(&b, "            d%d.push(%d)\n", r, p)
+		fmt.Fprintf(&b, "        d%d.push(%d)\n", r, p)
 		death[r] = step
 		step++
 	}
@@ -201,17 +196,16 @@ func generateInterleaveScope(rng *rand.Rand) (string, bool) {
 func TestRegionLifetimeRejectsCrossingInMergeStack(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_merge.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            c: mutable darray[i64] = []
-            d: mutable darray[i64] = []
-            e: mutable darray[i64] = []
-            e.push(1)
-            g: mutable darray[i64] = []
-            g.push(2)
-            e.push(3)
-            g.push(4)
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        e.push(1)
+        g: mutable darray[i64] = []
+        g.push(2)
+        e.push(3)
+        g.push(4)
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "interleaved object lifetimes") {
 		t.Fatalf("a crossing forced into the merge stack must still be rejected, got:\n%s", all)
@@ -224,12 +218,11 @@ func TestRegionLifetimeRejectsCrossingInMergeStack(t *testing.T) {
 func TestRegionGrowthTwoGrowablesAutoSplitNoWarning(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_split.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            a.push(1)
-            b: mutable darray[i64] = []
-            b.push(2)
-            a.push(3)
+        a: mutable darray[i64] = []
+        a.push(1)
+        b: mutable darray[i64] = []
+        b.push(2)
+        a.push(3)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("two growables now get separate stacks; the interior-growth warning must not fire, got:\n%s", allDiagnostics(result))
@@ -243,16 +236,15 @@ func TestRegionGrowthTwoGrowablesAutoSplitNoWarning(t *testing.T) {
 func TestRegionGrowthMergeStackStillWarns(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_merge.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            c: mutable darray[i64] = []
-            d: mutable darray[i64] = []
-            e: mutable darray[i64] = []
-            e.push(1)
-            g: mutable darray[i64] = []
-            g.push(2)
-            e.push(3)
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        e.push(1)
+        g: mutable darray[i64] = []
+        g.push(2)
+        e.push(3)
 `, AnalyzeOptions{})
 	if !strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("merge-stack interior growth must still warn, got:\n%s", allDiagnostics(result))
@@ -264,13 +256,12 @@ func TestRegionGrowthMergeStackStillWarns(t *testing.T) {
 func TestRegionGrowthReserveSuppresses(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_reserve.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            a.reserve(8)
-            a.push(1)
-            b: mutable darray[i64] = []
-            b.push(2)
-            a.push(3)
+        a: mutable darray[i64] = []
+        a.reserve(8)
+        a.push(1)
+        b: mutable darray[i64] = []
+        b.push(2)
+        a.push(3)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("reserve() must suppress the growth warning, got:\n%s", allDiagnostics(result))
@@ -282,13 +273,12 @@ func TestRegionGrowthReserveSuppresses(t *testing.T) {
 func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_tail.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            a.push(1)
-            a.push(2)
-            b: mutable darray[i64] = []
-            b.push(3)
-            b.push(4)
+        a: mutable darray[i64] = []
+        a.push(1)
+        a.push(2)
+        b: mutable darray[i64] = []
+        b.push(3)
+        b.push(4)
 `, AnalyzeOptions{})
 	if strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("tail-ordered growth must not warn, got:\n%s", allDiagnostics(result))
@@ -298,16 +288,15 @@ func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
 func TestRegionGrowthResizeWarns(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_resize.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            a: mutable darray[i64] = []
-            b: mutable darray[i64] = []
-            c: mutable darray[i64] = []
-            d: mutable darray[i64] = []
-            e: mutable darray[i64] = []
-            e.push(1)
-            g: mutable darray[i64] = []
-            g.push(2)
-            e.resize(4)
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        e.push(1)
+        g: mutable darray[i64] = []
+        g.push(2)
+        e.resize(4)
 `, AnalyzeOptions{})
 	if !strings.Contains(allDiagnostics(result), "no longer the arena tail") {
 		t.Fatalf("resize can grow and must participate in tail-growth diagnostics, got:\n%s", allDiagnostics(result))

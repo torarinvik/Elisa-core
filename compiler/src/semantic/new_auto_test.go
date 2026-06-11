@@ -6,19 +6,18 @@ import (
 )
 
 // new[auto] heap-allocates a struct into the innermost active inferred region (the native stack
-// arena), no explicit region/pool. Inside an `in auto:` it compiles cleanly and the value is used
+// arena), no explicit region/pool. It compiles cleanly and the value is used
 // within the region.
 func TestNewAutoAllocatesInInferredRegionCleanly(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "na_ok.elisa", `struct Box:
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            b: Box& = new[auto] Box(7)
-            return b.value
+        b: Box& = new[auto] Box(7)
+        return b.value
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("new[auto] inside an in-auto region must compile cleanly, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("new[auto] in an inferred region must compile cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
@@ -31,9 +30,8 @@ func TestNewAutoReturnIsRegionPolymorphic(t *testing.T) {
     value: i64
 def f() -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            b: Box& = new[auto] Box(7)
-            return b
+        b: Box& = new[auto] Box(7)
+        return b
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("returning a new[auto] value must compile (region-polymorphic), got:\n%s", strings.Join(errs, "\n"))
@@ -61,11 +59,11 @@ def f() -> Box&:
 	}
 }
 
-// new[auto] is inference-driven like a container: a function that uses it WITHOUT any explicit
-// `in auto:` has the region synthesized for it automatically (the lifetime is detected and the
+// new[auto] is inference-driven like a container: a function that uses it without any explicit
+// region block has the region synthesized for it automatically (the lifetime is detected and the
 // allocation placed in the matching inferred region). So it compiles cleanly — no "undefined
 // identifier auto", no "needs a region".
-func TestNewAutoInfersRegionWithoutInAuto(t *testing.T) {
+func TestNewAutoInfersRegionWithoutExplicitBlock(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "na_inf.elisa", `struct Box:
     value: i64
 def f() -> i64:

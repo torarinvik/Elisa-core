@@ -25,23 +25,22 @@ def make_dict(n: usize) -> dict[i64, i64]:
 @test
 def dict_build_local_return_lives() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            d: dict[i64, i64] = make_dict(5000)
-            if d.count != 5000:
-                panic("returned dict lost entries")
-            sum: mutable i64 = 0
-            i: mutable usize = 0
-            while i < 5000:
-                if not d.contains(i.i64()):
-                    panic("returned dict missing key (UAF?)")
-                slot: i64&? = d.get(i.i64())
-                if slot == null:
-                    panic("returned dict get failed")
-                else:
-                    sum <- sum + slot
-                i <- i + 1
-            if sum != 37492500:
-                panic("returned dict values corrupted")
+        d: dict[i64, i64] = make_dict(5000)
+        if d.count != 5000:
+            panic("returned dict lost entries")
+        sum: mutable i64 = 0
+        i: mutable usize = 0
+        while i < 5000:
+            if not d.contains(i.i64()):
+                panic("returned dict missing key (UAF?)")
+            slot: i64&? = d.get(i.i64())
+            if slot == null:
+                panic("returned dict get failed")
+            else:
+                sum <- sum + slot
+            i <- i + 1
+        if sum != 37492500:
+            panic("returned dict values corrupted")
 `
 
 func TestBuildLocalReturnDictAdoptedNoUAF(t *testing.T) {
@@ -66,15 +65,14 @@ def make_set(n: usize) -> set[i64]:
 @test
 def set_build_local_return_lives() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
-            s: set[i64] = make_set(5000)
-            i: mutable usize = 0
-            while i < 5000:
-                if not s.contains(i.i64()):
-                    panic("returned set missing member (UAF?)")
-                i <- i + 1
-            if s.contains(5000.i64()):
-                panic("returned set has phantom member")
+        s: set[i64] = make_set(5000)
+        i: mutable usize = 0
+        while i < 5000:
+            if not s.contains(i.i64()):
+                panic("returned set missing member (UAF?)")
+            i <- i + 1
+        if s.contains(5000.i64()):
+            panic("returned set has phantom member")
 `
 
 func TestBuildLocalReturnSetAdoptedNoUAF(t *testing.T) {

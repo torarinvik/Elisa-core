@@ -193,7 +193,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeScopeStmt(n)
 	case *ast.RegionStmt:
 		if n.UserAuto {
-			a.deprecatedf(n.Pos(), "`in auto:` is deprecated: allocations infer their region by default, so the block is no longer needed — remove it, or use `region NAME(size):` for an explicit scope")
+			a.errorf(n.Pos(), "`in auto:` is no longer supported: allocations infer their region by default, so the block is not needed — remove it, or use `region NAME(size):` for an explicit scope")
 		}
 		if len(n.Body) != 0 || n.OwnerName != "" {
 			a.analyzeScopedArenaStmt(n)
