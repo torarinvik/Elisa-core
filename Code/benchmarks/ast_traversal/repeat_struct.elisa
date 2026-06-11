@@ -24,7 +24,7 @@ def sum_spans(node: Expr&, bias: i64) -> i64:
 @test
 def bench() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        in auto:
+        region bench_scope(1 << 28):
             root: Expr& = make(20)
             acc: mutable i64 = 0
             for k in 0..<100:

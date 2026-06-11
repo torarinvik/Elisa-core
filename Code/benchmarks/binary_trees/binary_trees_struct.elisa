@@ -24,16 +24,16 @@ def run(max_depth: i64) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         min_depth: i64 = 4
         total: mutable i64 = 0
-        in auto:
+        region stretch_scope(1 << 25):
             total <- total + check(make(max_depth + 1))
-        in auto:
+        region long_lived_scope(1 << 28):
             long_lived: Tree& = make(max_depth)
             depth: mutable i64 = min_depth
             while depth <= max_depth:
                 iterations: i64 = 1 << (max_depth - depth + min_depth)
                 d_sum: mutable i64 = 0
                 for i in 0..<iterations:
-                    in auto:
+                    region iter_scope(1 << 25):
                         d_sum <- d_sum + check(make(depth))
                 total <- total + d_sum
                 depth <- depth + 2
