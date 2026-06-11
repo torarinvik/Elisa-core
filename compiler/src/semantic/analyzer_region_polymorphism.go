@@ -157,6 +157,19 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 				}
 			}
 		case *ast.ListLitExpr:
+			// A region-less container literal allocates into the inferred region — even an
+			// empty `[]` seed that gets pushed into (the build-local-return shape).
+			if e.Owner == nil {
+				return true
+			}
+			for _, item := range e.Elems {
+				if item != nil && regiony(item) {
+					return true
+				}
+			}
+		case *ast.TupleExpr:
+			// Lowered grammar try-productions return (matched, committed, value) tuples;
+			// a region-allocated value inside makes the whole return region-allocated.
 			for _, item := range e.Elems {
 				if item != nil && regiony(item) {
 					return true
