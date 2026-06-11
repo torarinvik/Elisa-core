@@ -40,27 +40,26 @@ func TestCastIntToPtrNotFlagged(t *testing.T) {
 	}
 }
 
-// The `x.ref[T]` reference shorthand is deprecated in favor of explicit `&x`/`(&x).cast[T]`.
-// The deprecation points at the right replacement: a same-pointee borrow on a writable place
-// -> `&x`; a type-pun / mutability-forcing reinterpret -> `(&x).cast[T]`.
-func TestRefShorthandDeprecatedPointsAtReplacement(t *testing.T) {
+// The `x.ref[T]` reference shorthand has been removed. The error points at the right replacement:
+// a same-pointee borrow on a writable place -> `&x`; a type-pun / mutability-forcing reinterpret -> `(&x).cast[T]`.
+func TestRefShorthandRemovedPointsAtReplacement(t *testing.T) {
 	borrow := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ref_borrow.elisa", `def f() -> i64:
     a: mutable i64 = 0
     p: i64& = a.ref[i64&]
     return p.i64()
 `, AnalyzeOptions{})
-	borrowDep := strings.Join(borrow.Deprecations(), "\n")
-	if !strings.Contains(borrowDep, "reference shorthand is deprecated") ||
-		!strings.Contains(borrowDep, "`&x` to borrow") {
-		t.Fatalf("expected a borrow deprecation pointing at `&x`, got:\n%s", borrowDep)
+	borrowErrs := strings.Join(borrow.Errors(), "\n")
+	if !strings.Contains(borrowErrs, "reference shorthand has been removed") ||
+		!strings.Contains(borrowErrs, "`&x` to borrow") {
+		t.Fatalf("expected a borrow removal error pointing at `&x`, got:\n%s", borrowErrs)
 	}
 	reinterpret := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ref_reint.elisa", `def f() -> i64:
     a: mutable i64 = 0
     p: mutable u8& = a.ref[mutable u8&]
     return p.i64()
 `, AnalyzeOptions{})
-	reintDep := strings.Join(reinterpret.Deprecations(), "\n")
-	if !strings.Contains(reintDep, "`(&x).cast[T]` to reinterpret") {
-		t.Fatalf("expected a reinterpret deprecation pointing at `(&x).cast[T]`, got:\n%s", reintDep)
+	reintErrs := strings.Join(reinterpret.Errors(), "\n")
+	if !strings.Contains(reintErrs, "`(&x).cast[T]` to reinterpret") {
+		t.Fatalf("expected a reinterpret removal error pointing at `(&x).cast[T]`, got:\n%s", reintErrs)
 	}
 }

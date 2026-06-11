@@ -393,22 +393,20 @@ def explicit_any_still_works(box: heap Box&?) -> Box&?:
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 }
-func TestAnalyzeRefSugarAddressCast(t *testing.T) {
+func TestAnalyzeRejectsRefShorthand(t *testing.T) {
 	src := `struct Box:
 	value: int
 
 def widen_param(box: Box&) -> Box&:
 	return box.ref[Box&]
-
-def bytes_param(buf: u8[4]&) -> u8&:
-	return buf.ref[u8&]
-
-def keep_explicit_heap(box: heap Box&) -> heap Box&:
-	return box.ref[heap Box&]
 `
-	result, errs := parseAndAnalyze(t, "ref_sugar_address_cast.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
+	_, errs := parseAndAnalyze(t, "ref_sugar_address_cast.elisa", src)
+	if len(errs) == 0 {
+		t.Fatal("expected error for x.ref[T] shorthand, got none")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "`x.ref[T]` reference shorthand has been removed") {
+		t.Fatalf("expected removal error for x.ref[T], got:\n%s", strings.Join(errs, "\n"))
+	}
 }
 func TestAnalyzeRejectsLegacyCastSyntax(t *testing.T) {
 	src := `struct Box:

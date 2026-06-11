@@ -12,7 +12,7 @@ func TestRunCLIInterpretsIndexFallback(t *testing.T) {
 
 def main() -> i64:
     xs: darray[i64] = [3, 5]
-    return (xs[1u] else explode()) + (xs[9u] else 10)
+    return (get xs[1] else explode()) + (get xs[9] else 10)
 `)
 
 	var stdout bytes.Buffer
@@ -28,7 +28,7 @@ def main() -> i64:
 
 func TestRunCLIEmitsIndexFallbackLLVM(t *testing.T) {
 	sourcePath := writeImplicitContextFixture(t, "index_fallback_llvm.elisa", `def read(xs: darray[i64], i: usize) -> i64:
-    return xs[i] else 99
+    return get xs[i] else 99
 `)
 
 	var stdout bytes.Buffer

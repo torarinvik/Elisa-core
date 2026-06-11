@@ -100,7 +100,7 @@ extern fill(h: mutable ThingId&) -> void
 
 def ok() -> ThingId:
     h: mutable ThingId = zeroed
-    fill(h.ref[mutable ThingId&])
+    fill(&h)
     return h
 `)
 	if errs := result.Errors(); len(errs) != 0 {

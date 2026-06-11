@@ -172,7 +172,7 @@ func TestGenerateLLVMIRLowersValueOptionalsAndTryElse(t *testing.T) {
 
 
 def fallback_value(flag: bool) -> int:
-	return try maybe_value(flag) else 11
+	return get maybe_value(flag) else 11
 `
 	result := parseAndAnalyze(t, "backend_value_optionals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -206,7 +206,7 @@ def maybe_value(flag: bool) -> int?:
 	return null
 
 def optional_return(flag: bool) -> int:
-	return maybe_value(flag) else return 11
+	return get maybe_value(flag) else return 11
 
 def try_error_binding(flag: bool) -> int:
 	return try read_value(flag) else err:
@@ -221,7 +221,7 @@ def try_error_binding(flag: bool) -> int:
 	checks := []string{
 		"define i64 @optional_return(i1",
 		"define i64 @try_error_binding(i1",
-		"unwrap.fallback",
+		"get.fallback",
 		"try.fallback",
 		"ret i64 11",
 		"ret i64 13",

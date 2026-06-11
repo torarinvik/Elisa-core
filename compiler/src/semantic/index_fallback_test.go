@@ -8,8 +8,10 @@ import (
 )
 
 func TestAnalyzeIndexFallbackContextualizesFallback(t *testing.T) {
+	// `get xs[0] else 0`: the `else 0` is consumed at the postfix `[0]` level, so
+	// the AST is GetExpr{Value: IndexExpr{xs, 0, Fallback: 0}, Fallback: nil}.
 	result := analyzeFunctionAnalysisTestSource(t, "index_fallback_contextual.elisa", `def read(xs: darray[usize]) -> usize:
-	return xs[0] else 0
+	return get xs[0] else 0
 `)
 	sym, ok := result.GlobalScope.Lookup("read")
 	if !ok {
@@ -23,9 +25,13 @@ func TestAnalyzeIndexFallbackContextualizesFallback(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected return stmt, got %T", decl.Body[0])
 	}
-	indexExpr, ok := ret.Value.(*ast.IndexExpr)
+	getExpr, ok := ret.Value.(*ast.GetExpr)
 	if !ok {
-		t.Fatalf("expected index expr, got %T", ret.Value)
+		t.Fatalf("expected get expr, got %T", ret.Value)
+	}
+	indexExpr, ok := getExpr.Value.(*ast.IndexExpr)
+	if !ok {
+		t.Fatalf("expected index expr inside get, got %T", getExpr.Value)
 	}
 	if got := result.ExprTypes[indexExpr.Index].String(); got != "usize" {
 		t.Fatalf("expected index to contextualize to usize, got %s", got)
@@ -36,8 +42,9 @@ func TestAnalyzeIndexFallbackContextualizesFallback(t *testing.T) {
 }
 
 func TestAnalyzeIndexFallbackContextualizesStringReferenceFallback(t *testing.T) {
+	// Same postfix-level consumption: AST is GetExpr{IndexExpr{xs, i, Fallback: ""}}.
 	result := analyzeFunctionAnalysisTestSource(t, "index_fallback_string_ref.elisa", `def read(xs: darray[u8&], i: usize) -> u8&:
-	return xs[i] else ""
+	return get xs[i] else ""
 `)
 	sym, ok := result.GlobalScope.Lookup("read")
 	if !ok {
@@ -51,21 +58,37 @@ func TestAnalyzeIndexFallbackContextualizesStringReferenceFallback(t *testing.T)
 	if !ok {
 		t.Fatalf("expected return stmt, got %T", decl.Body[0])
 	}
-	indexExpr, ok := ret.Value.(*ast.IndexExpr)
+	getExpr, ok := ret.Value.(*ast.GetExpr)
 	if !ok {
-		t.Fatalf("expected index expr, got %T", ret.Value)
+		t.Fatalf("expected get expr, got %T", ret.Value)
+	}
+	indexExpr, ok := getExpr.Value.(*ast.IndexExpr)
+	if !ok {
+		t.Fatalf("expected index expr inside get, got %T", getExpr.Value)
 	}
 	if got := result.ExprTypes[indexExpr].String(); got != "u8&" {
-		t.Fatalf("expected index fallback result to be u8&, got %s", got)
+		t.Fatalf("expected index result to be u8&, got %s", got)
 	}
 	if got := result.ExprTypes[indexExpr.Fallback].String(); got != "u8&" {
 		t.Fatalf("expected fallback to contextualize to u8&, got %s", got)
 	}
 }
 
-func TestAnalyzeIndexFallbackRejectsTypeMismatch(t *testing.T) {
+func TestAnalyzeIndexFallbackRejectsImplicitElse(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "index_fallback_implicit_else.elisa", `def read(xs: darray[int], i: usize) -> int:
+	return xs[i] else 0
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "implicit `else` index fallback has been removed") {
+		t.Fatalf("expected hard-rejection diagnostic, got:\n%s", all)
+	}
+}
+
+func TestAnalyzeGetIndexFallbackRejectsTypeMismatch(t *testing.T) {
+	// Simple-value fallbacks are consumed at the postfix `[i]` level (get xs[i] else v
+	// = GetExpr{IndexExpr{Fallback: v}}) so the type-mismatch fires from analyzeIndexExpr.
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "index_fallback_type_mismatch.elisa", `def read(xs: darray[int], i: usize) -> int:
-	return xs[i] else false
+	return get xs[i] else false
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, "index fallback expects int, got bool") {

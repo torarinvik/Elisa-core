@@ -104,11 +104,12 @@ def darray_growth_realloc() -> void:
 def dict_scale() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region r(4194304):
-            m: mutable dict[i64, i64] = arena_dict_new[i64, i64](r.ref[mutable Arena&], 16)
+            alloc: mutable Arena& = &r
+            m: mutable dict[i64, i64] = arena_dict_new[i64, i64](alloc, 16)
             for i in 0..<8000:
-                _ = arena_dict_put_checked[i64, i64](r.ref[mutable Arena&], m.ref[mutable dict[i64, i64]&], i.i64(), i.i64() * 3)
+                _ = arena_dict_put_checked[i64, i64](alloc, &m, i.i64(), i.i64() * 3)
             for i in 0..<8000:
-                v: mutable i64&? = arena_dict_get[i64, i64](m.ref[dict[i64, i64]&], i.i64())
+                v: mutable i64&? = arena_dict_get[i64, i64](&m, i.i64())
                 if v == null:
                     panic("dict lost a key")
                 elif v[0] != i.i64() * 3:
@@ -147,13 +148,13 @@ func TestMemoryStressAllocation(t *testing.T) {
 }
 
 const concurrencyStressBody = `
-global STRESS_SHARED: atomic[i64] = zeroed
+global STRESS_SHARED: mutable atomic[i64] = zeroed
 
 def stress_bump(n: i64) -> i64:
     can Atomics.Rmw:
         trusted Perf.HotLoop:
             for i in 0..<n:
-                _ = fetch_add(STRESS_SHARED.ref[mutable atomic[i64]&], 1, MemoryOrder.SeqCst)
+                _ = fetch_add((&STRESS_SHARED).cast[mutable atomic[i64]&], 1, MemoryOrder.SeqCst)
         return 0
 
 def stress_sq(x: i64) -> i64:
@@ -162,7 +163,7 @@ def stress_sq(x: i64) -> i64:
 @test
 def atomic_contention() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Rmw, Atomics.Load, Atomics.Store, Atomics.CompareExchange, Abort.Panic:
-        store(STRESS_SHARED.ref[mutable atomic[i64]&], 0, MemoryOrder.SeqCst)
+        store((&STRESS_SHARED).cast[mutable atomic[i64]&], 0, MemoryOrder.SeqCst)
         t0: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
         t1: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
         t2: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
@@ -179,7 +180,7 @@ def atomic_contention() -> void:
         _ = join(move t5)
         _ = join(move t6)
         _ = join(move t7)
-        total: i64 = load(STRESS_SHARED.ref[atomic[i64]&], MemoryOrder.SeqCst)
+        total: i64 = load((&STRESS_SHARED).cast[mutable atomic[i64]&], MemoryOrder.SeqCst)
         if total != 800000:
             panic("atomic contention lost increments (race / non-atomic RMW)")
 
@@ -197,25 +198,25 @@ def spawn_churn() -> void:
 @test
 def pool_scale() -> void:
     can Pool.Create, Pool.Submit, Pool.Await, Pool.Shutdown, Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Load, Atomics.CompareExchange, Abort.Panic:
-        pool: ThreadPool = pool_new(8)
+        pool: mutable ThreadPool = pool_new(8)
         acc: mutable i64 = 0
         trusted Perf.HotLoop:
             for i in 0..<500:
-                task: Task[i64, Pending] = pool_submit1(pool.ref[mutable ThreadPool&], stress_sq, i.i64())
+                task: Task[i64, Pending] = pool_submit1(&pool, stress_sq, i.i64())
                 acc <- acc + pool_await(move task)
         if acc != 41541750:
             panic("pool scale sum wrong")
-        pool_shutdown(pool.ref[mutable ThreadPool&])
+        pool_shutdown(&pool)
 
 @test
 def mutex_lock_churn() -> void:
     can Memory.Allocate, Memory.Release, Sync.Lock, Sync.Unlock, Abort.Panic:
-        mu: Mutex = mutex()
+        mu: mutable Mutex = mutex()
         trusted Perf.HotLoop:
             for i in 0..<10000:
-                guard: MutexGuard[Held] = mutex_lock(mu.ref[mutable Mutex&])
+                guard: MutexGuard[Held] = mutex_lock(&mu)
                 mutex_unlock(move guard)
-        mutex_dispose(mu.ref[mutable Mutex&])
+        mutex_dispose(&mu)
 `
 
 // Concurrency stress: 800k concurrent atomic increments across 8 threads (atomicity),

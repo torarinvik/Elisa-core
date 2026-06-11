@@ -47,7 +47,7 @@ struct PoolNode:
 def region_pool_acquire_reuse_release() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             h.ptr.left <- 11
@@ -89,7 +89,7 @@ struct PoolNode:
 def use_after_release() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             pool.release(move h)
@@ -121,7 +121,7 @@ struct PoolNode:
 def double_release() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             pool.release(move h)
@@ -156,7 +156,7 @@ struct PoolNode:
 def interior_borrow_uaf(flag: bool) -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
 ` + body + "\n"
@@ -214,7 +214,7 @@ struct PoolNode:
 def interior_borrow_valid() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = h.ptr
@@ -253,7 +253,7 @@ struct Holder:
 def struct_store_uaf() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             holder: mutable Holder = Holder(h.ptr)
@@ -288,7 +288,7 @@ struct Holder:
 def struct_store_valid() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             holder: mutable Holder = Holder(h.ptr)
@@ -333,7 +333,7 @@ def passthrough(p: mutable heap PoolNode&) -> mutable heap PoolNode&:
 def xfn_uaf() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = ` + tc.bind + `
@@ -371,7 +371,7 @@ def passthrough(p: mutable heap PoolNode&) -> mutable heap PoolNode&:
 def xfn_valid() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            owner: mutable Arena& = scratch.ref[mutable Arena&]
+            owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
             b: mutable heap PoolNode& = passthrough(h.ptr)
@@ -410,7 +410,8 @@ struct PoolNode:
 def idiomatic_pool() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(64):
-            pool: mutable RegionPool[PoolNode] = region_pool_new(scratch.ref[mutable Arena&])
+            owner: mutable Arena& = &scratch
+            pool: mutable RegionPool[PoolNode] = region_pool_new(owner)
             h = pool.acquire()
             h.ptr.left <- 11
             h.ptr.right <- 12

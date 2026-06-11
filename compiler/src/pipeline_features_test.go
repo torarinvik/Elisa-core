@@ -135,7 +135,7 @@ def main() -> i64:
 	if PlayGoHle::current() != 1:
 		return 3
 	value: mutable PlayGoHle::OrbisPlayGoInstallSpeed = 0
-	PlayGoHle::write_speed(value.ref[mutable PlayGoHle::OrbisPlayGoInstallSpeed&])
+	PlayGoHle::write_speed(&value)
 	if value != PlayGoHle::ORBIS_PLAYGO_INSTALL_SPEED_TRICKLE:
 		return 4
 	return 42

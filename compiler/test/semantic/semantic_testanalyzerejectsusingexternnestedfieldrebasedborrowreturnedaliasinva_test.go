@@ -378,7 +378,7 @@ extern alloc(size: usize) -> heap void&?
 extern read_file(path: u8&) -> cstr[file_text] error[IoError]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError]:
-	ptr: heap void& = alloc(size) else raise MemoryError.OutOfMemory
+	ptr: heap void& = get alloc(size) else raise MemoryError.OutOfMemory
 	return ptr
 
 def load_text(path: u8&) -> cstr[file_text] error[IoError]:

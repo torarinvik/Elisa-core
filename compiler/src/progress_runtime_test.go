@@ -25,7 +25,7 @@ def progress_budget_probe() -> i64:
     budget: mutable ProgressBudget = progress_budget_steps(3)
     i: mutable i64 = 0
     while i < 3:
-        progress_tick(budget.ref[mutable ProgressBudget&]) can Progress.Tick, Progress.CheckCancel, Abort.Panic
+        progress_tick(&budget) can Progress.Tick, Progress.CheckCancel, Abort.Panic
         i <- i + 1
     return budget.remaining_steps
 `, preludeInclude)

@@ -13,8 +13,8 @@ error FileError:
 extern read_value(flag: bool) -> i64 error[FileError]
 
 def fallback_value(maybe: i64?, flag: bool) -> i64:
-	a: i64 = maybe else 11
-	b: i64 = maybe else return 12
+	a: i64 = get maybe else 11
+	b: i64 = get maybe else return 12
 	c: i64 = try read_value(flag) else err:
 		return 13
 	return a + b + c
@@ -120,8 +120,9 @@ def score(maybe: Expr?) -> i64:
 `)
 }
 
-func TestAnalyzeParenthesizedIndexCanUseOptionalElseRecovery(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "parenthesized_index_optional_else.elisa", `def read(xs: darray[u8&?], i: usize) -> u8&:
-	return (xs[i]) else ""
+func TestAnalyzeOptionalElementCanUseGetElse(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "optional_element_get_else.elisa", `def read(xs: darray[u8&?], i: usize) -> u8&:
+	val: u8&? = xs[i]
+	return get val else ""
 `)
 }

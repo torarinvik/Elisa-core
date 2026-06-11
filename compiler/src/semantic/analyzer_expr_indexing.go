@@ -62,7 +62,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
 			if !a.getWrappedIndexExprs[expr] {
-				a.deprecatedf(expr.Pos(), "implicit `else` index fallback is deprecated; write `get <expr>[<index>] else ...` to make the bounds check explicit")
+				a.errorf(expr.Pos(), "implicit `else` index fallback has been removed; write `get <expr>[<index>] else ...` to make the bounds check explicit")
 			}
 			if !safeIndexFallbackOperandType(objType) {
 				a.errorf(expr.Pos(), "index fallback requires an array, darray, view, packed store, or a proven non-null reference to one, got %s", objType)

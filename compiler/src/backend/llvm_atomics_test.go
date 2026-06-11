@@ -50,8 +50,8 @@ def fence(order: MemoryOrder):
 
 def atomics_order_roundtrip() -> i64:
 	can Atomics.Load, Atomics.Store, Atomics.CompareExchange, Atomics.Rmw, Atomics.Fence:
-		slot: atomic[i64] = zeroed
-		slot_ref: mutable atomic[i64]& = slot.ref[atomic[i64]&]
+		slot: mutable atomic[i64] = zeroed
+		slot_ref: mutable atomic[i64]& = &slot
 		store(slot_ref, 1, MemoryOrder.Release)
 		prior: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
 		updated: bool = compare_exchange(slot_ref, 2, 3, MemoryOrder.AcqRel, MemoryOrder.Acquire)

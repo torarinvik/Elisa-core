@@ -396,7 +396,8 @@ def keep() -> void:
 
 func TestGenerateLLVMIREvaluatesStaticConstIndexFallback(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_static_def_const_index_fallback.elisa", `static def read_or_default() -> i64:
-    return [3, 5, 7][9] else 11
+    items: i64[3] = [3, 5, 7]
+    return get items[9] else 11
 
 def keep() -> void:
     static assert read_or_default() == 11
@@ -478,7 +479,7 @@ func TestGenerateLLVMIREvaluatesStaticConstQueries(t *testing.T) {
     assert selected.count == 2
     first_large = first item in items where item > 8
     missing = first item in items where item > 20
-    return selected[0] + selected[1] + (first_large else 0) + (missing else 5)
+    return selected[0] + selected[1] + (get first_large else 0) + (get missing else 5)
 
 def keep() -> void:
     static assert score() == 35

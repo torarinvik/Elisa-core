@@ -312,7 +312,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if optionalType, ok := valueType.(*OptionalType); ok {
-			a.deprecatedf(n.Pos(), "`try` on optional values is deprecated; use `value else ...`")
+			a.errorf(n.Pos(), "`try` on optional values has been removed; write `get <expr> else ...` to make the absence check explicit (`try` is reserved for error unions)")
 			if recovery == nil {
 				a.errorf(n.Pos(), "try without else requires an error union, got %s", valueType)
 				result = optionalType.Value
@@ -333,7 +333,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCatchExpr(n)
 		return
 	case *ast.UnwrapElseExpr:
-		a.deprecatedf(n.Pos(), "implicit `else` unwrap is deprecated; write `get <expr> else ...` to make the absence check explicit")
+		a.errorf(n.Pos(), "implicit `else` unwrap has been removed; write `get <expr> else ...` to make the absence check explicit")
 		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
 		valueType := a.analyzeExpr(n.Value)
 		var resultType Type
@@ -517,7 +517,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					}
 				}
 			}
-			a.deprecatedf(n.Pos(), "`x.ref[T]` reference shorthand is deprecated; use %s", replacement)
+			a.errorf(n.Pos(), "`x.ref[T]` reference shorthand has been removed; use %s", replacement)
 		}
 		// `value.cast[T&]` where the value's own type IS T reinterprets the value's bits as a
 		// pointer (a wild pointer), not a reference to it — `.cast` does not take an address.

@@ -53,7 +53,7 @@ func TestRunCLIImmutableScalarRefArithmeticUsesValue(t *testing.T) {
 def ref_scalar_arith_test() -> void:
     can Memory.Allocate, Abort.Panic:
         x: mutable i64 = 10
-        if add_via_ref(x.ref[i64&], 20) != 30:
+        if add_via_ref(&x, 20) != 30:
             panic("immutable i64& + n must be value arithmetic (expected 30)")
         arena: mutable Arena = zeroed
         in arena:

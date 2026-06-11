@@ -485,7 +485,7 @@ func TestAnalyzeAcceptsValueOptionalsAndTryElse(t *testing.T) {
 
 def fallback_value(flag: bool) -> int:
 	value: int? = maybe_value(flag)
-	return try value else 11
+	return get value else 11
 `
 	result, errs := parseAndAnalyze(t, "value_optionals_try_else.elisa", src)
 	requireNoErrors(t, errs)

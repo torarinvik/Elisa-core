@@ -91,7 +91,7 @@ def f(out: mutable Box&, s: static u8&) -> void:
 // an escape and must be accepted.
 func TestReturnStoredRefElementIsAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "return_stored_ref_elem.elisa", `def read(xs: darray[u8&], i: usize) -> u8&:
-    return xs[i] else ""
+    return get xs[i] else ""
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("expected stored-ref element return to be accepted, got:\n%s", strings.Join(errs, "\n"))

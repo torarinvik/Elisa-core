@@ -357,8 +357,8 @@ extern k_create(type_: int, out_error: mutable int&?) -> void&?
 extern k_destroy(handle: void&?) -> int
 
 def use_them() -> int:
-    e: int = 0
-    h: void&? = k_create(0, e.ref[mutable int&])
+    e: mutable int = 0
+    h: void&? = k_create(0, &e)
     return k_destroy(h)
 `)
 }

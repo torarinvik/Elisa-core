@@ -15,7 +15,7 @@ func TestRefStorageOutlivesRequiresOptOutForRegionAsStatic(t *testing.T) {
     in owner:
         out.push(65)
         out.push(0)
-    return out[0].ref[static u8&]
+    return (&out[0]).cast[static u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	if !strings.Contains(allDiagnostics(result), "can Unsafe.PointerCast") {
 		t.Fatalf("expected the region->static cast to require an Unsafe.PointerCast opt-out, got:\n%s", allDiagnostics(result))
@@ -43,7 +43,7 @@ func TestRefStorageOutlivesOptOutSatisfiesGate(t *testing.T) {
         out.push(65)
         out.push(0)
     can Unsafe.PointerCast, Unsafe.UncheckedIndex, Unsafe.BufferReinterpret:
-        return out[0].ref[static u8&]
+        return (&out[0]).cast[static u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if strings.Contains(all, "requires") {
@@ -68,7 +68,7 @@ func TestRefStorageOutlivesAcceptsStringLiteral(t *testing.T) {
 // unchecked-index diagnostic on path[i] is expected and ignored here).
 func TestRefStorageOutlivesAcceptsStaticParamReborrow(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "outlives_static_param.elisa", `def at(path: static u8&, i: usize) -> static u8&:
-    return path[i].ref[static u8&]
+    return (&path[i]).cast[static u8&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	if strings.Contains(allDiagnostics(result), "lifetime-widening") {
 		t.Fatalf("expected no lifetime-widening diagnostic for static-param reborrow, got:\n%s", allDiagnostics(result))

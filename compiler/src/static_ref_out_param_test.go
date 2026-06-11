@@ -61,11 +61,11 @@ def set_out_from_heap_slice(out: mutable static u8&) -> void:
 def static_string_ref_out_param_rebinds_caller_slot() -> void:
 	can Abort.Panic:
 		value: mutable static u8& = ""
-		set_out(value.ref[mutable static u8&])
+		set_out((&value).cast[mutable static u8&])
 		assert_eq(value, "D4yla3vx4tY")
-		set_out_from_call(value.ref[mutable static u8&])
+		set_out_from_call((&value).cast[mutable static u8&])
 		assert_eq(value, "libkernel")
-		set_out_from_heap_slice(value.ref[mutable static u8&])
+		set_out_from_heap_slice((&value).cast[mutable static u8&])
 		assert_true(cstr_eq(value, "D4yla3vx4tY"))
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

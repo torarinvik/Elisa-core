@@ -105,8 +105,8 @@ def sort_and_ordering() -> void:
             assert_eq(xs.is_sorted(asc), true)
             assert_eq(xs[0], 1)
             assert_eq(xs[4], 9)
-            assert_eq(xs.min_element(asc) else 0, 1)
-            assert_eq(xs.max_element(asc) else 0, 9)
+            assert_eq(get xs.min_element(asc) else 0, 1)
+            assert_eq(get xs.max_element(asc) else 0, 9)
             xs.sort(desc)
             assert_eq(xs[0], 9)
             assert_eq(xs[4], 1)
@@ -362,7 +362,7 @@ def eqd(d: dstr, lit: static u8&) -> bool:
 def fs_join() -> void:
     can Memory.Allocate, Abort.Panic:
         region scratch(256):
-            o: mutable Arena& = scratch.ref[mutable Arena&]
+            o: mutable Arena& = &scratch
             assert_eq(eqd(Fs::join(o, sview("a/b", 0, -1), sview("c", 0, -1)), "a/b/c"), true)
             assert_eq(eqd(Fs::join(o, sview("a/b/", 0, -1), sview("c", 0, -1)), "a/b/c"), true)
             assert_eq(eqd(Fs::join(o, sview("a", 0, -1), sview("/abs", 0, -1)), "/abs"), true)

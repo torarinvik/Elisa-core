@@ -12,7 +12,7 @@ func TestUnboundedStringFromDArrayElementIsFlagged(t *testing.T) {
     data: mutable darray[u8]
 
 def name_at(self: Blob&, off: usize) -> static u8&:
-    return self.data[off].ref[u8&].cast[static u8&]
+    return (&self.data[off]).cast[static u8&]
 `)
 	joined := strings.Join(result.Warnings(), "\n")
 	if !strings.Contains(joined, "out-of-bounds") {
@@ -42,7 +42,7 @@ struct Blob:
     data: mutable darray[u8]
 
 def header_at(self: Blob&, off: usize) -> Header&:
-    return self.data[off].ref[u8&].cast[Header&]
+    return (&self.data[off]).cast[Header&]
 `)
 	joined := strings.Join(result.Warnings(), "\n")
 	if !strings.Contains(joined, "out-of-bounds") {
@@ -59,7 +59,7 @@ struct Blob:
     data: mutable darray[u8]
 
 def header_at(self: Blob&, off: usize) -> Header&:
-    return self.data[off].ref[u8&].cast[Header&]
+    return (&self.data[off]).cast[Header&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if !strings.Contains(all, "buffer reinterpret cast requires can[Unsafe]") || !strings.Contains(all, "Unsafe.BufferReinterpret") {
@@ -77,7 +77,7 @@ struct Blob:
 
 def header_at(self: Blob&, off: usize) -> Header&:
     trusted Unsafe.BufferReinterpret:
-        return self.data[off].ref[u8&].cast[Header&]
+        return (&self.data[off]).cast[Header&]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if strings.Contains(all, "buffer reinterpret cast requires") {
@@ -91,7 +91,7 @@ func TestWideScalarReinterpretFromByteDArrayIsFlagged(t *testing.T) {
     data: mutable darray[u8]
 
 def word_at(self: Blob&, off: usize) -> u32&:
-    return self.data[off].ref[u8&].cast[u32&]
+    return (&self.data[off]).cast[u32&]
 `)
 	joined := strings.Join(result.Warnings(), "\n")
 	if !strings.Contains(joined, "out-of-bounds") {
@@ -106,7 +106,7 @@ func TestMutableByteRefFromDArrayIsAccepted(t *testing.T) {
     data: mutable darray[u8]
 
 def first(self: mutable Blob&) -> u8:
-    r: mutable u8& = self.data[0].ref[mutable u8&]
+    r: mutable u8& = &self.data[0]
     return r
 `)
 	if errs := result.Errors(); len(errs) != 0 {

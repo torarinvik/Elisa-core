@@ -9,7 +9,7 @@ def maybe_value(flag: bool) -> int?:
 
 
 def fallback_value(flag: bool) -> int:
-	return try maybe_value(flag) else 11
+	return get maybe_value(flag) else 11
 
 
 def maybe_box(flag: bool) -> Box?:

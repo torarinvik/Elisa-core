@@ -231,7 +231,7 @@ static def score() -> i64:
 	for field in fields(Pair) where field.name != "right":
 		field_count <- field_count + 1
 	first_payload = variant.name for first variant in variants(Maybe) where variant.has_field("value")
-	if (first_payload else "") == "Some":
+	if (get first_payload else "") == "Some":
 		return variant_count * 10 + payload_count * 5 + field_count + 1
 	return 0
 
@@ -331,7 +331,8 @@ def keep() -> void:
 
 func TestAnalyzeStaticFunctionConstIndexFallback(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "static_def_const_index_fallback.elisa", `static def read_or_default() -> i64:
-	return [3, 5, 7][9] else 11
+	items: i64[3] = [3, 5, 7]
+	return get items[9] else 11
 
 def keep() -> void:
 	static assert read_or_default() == 11
@@ -398,7 +399,7 @@ func TestAnalyzeStaticFunctionCanUseConstQueries(t *testing.T) {
 	assert selected.count == 2
 	first_large = first item in items where item > 8
 	missing = first item in items where item > 20
-	return selected[0] + selected[1] + (first_large else 0) + (missing else 5)
+	return selected[0] + selected[1] + (get first_large else 0) + (get missing else 5)
 
 def keep() -> void:
 	static assert score() == 35

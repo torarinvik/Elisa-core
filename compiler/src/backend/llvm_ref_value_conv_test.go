@@ -19,7 +19,7 @@ def read_value(off: mutable usize&) -> u64:
 	return off.u64()
 
 def take_address(x: mutable u32&) -> uintptr:
-	return x.ref[u32&].uintptr()
+	return (&x).cast[u32&].uintptr()
 `)
 
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)

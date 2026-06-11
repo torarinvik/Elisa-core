@@ -98,7 +98,7 @@ func TestRunCLIEmitProgressRecognizesRuntimeProgressTickEvidence(t *testing.T) {
 def spin(flag: bool) -> void:
     budget: mutable ProgressBudget = progress_budget_steps(3)
     while flag:
-        progress_tick(budget.ref[mutable ProgressBudget&]) can Progress.Tick, Progress.CheckCancel, Abort.Panic
+        progress_tick(&budget) can Progress.Tick, Progress.CheckCancel, Abort.Panic
 `, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write progress fixture: %v", err)

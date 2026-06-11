@@ -537,16 +537,17 @@ def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.
 def allocator_interface_test() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region a(4096):
-            before: ArenaMark = arena_snapshot(a.ref[Arena&])
-            bump_sum: u64 = fill_and_sum[BumpAllocator](a.ref[mutable Arena&], 10)
+            alloc: mutable Arena& = &a
+            before: ArenaMark = arena_snapshot(alloc)
+            bump_sum: u64 = fill_and_sum[BumpAllocator](alloc, 10)
             if bump_sum != 55u64:
                 panic("bump: expected 55 (1..10)")
-            arena_rewind(a.ref[mutable Arena&], before)
-            again: u64 = fill_and_sum[BumpAllocator](a.ref[mutable Arena&], 10)
+            arena_rewind(alloc, before)
+            again: u64 = fill_and_sum[BumpAllocator](alloc, 10)
             if again != 55u64:
                 panic("bump after rewind: expected 55")
         m: mutable MallocAllocator = MallocAllocator(0)
-        malloc_sum: u64 = fill_and_sum[MallocAllocator](m.ref[mutable MallocAllocator&], 10)
+        malloc_sum: u64 = fill_and_sum[MallocAllocator](&m, 10)
         if malloc_sum != 55u64:
             panic("malloc: expected 55 (1..10)")
 `
