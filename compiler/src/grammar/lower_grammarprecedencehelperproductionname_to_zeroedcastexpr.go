@@ -294,7 +294,7 @@ func lowerStatefulPublicProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLo
 		GenericParams:    append([]ast.GenericParam(nil), grammarDecl.GenericParams...),
 		Params:           append([]ast.ParamDecl(nil), ctx.production.Params...),
 		ReturnType:       ctx.production.ReturnType,
-		Body:             grammarCanBlock(ctx.production.Position, body),
+		Body:             grammarAllocScopedCanBlock(ctx.production.Position, grammarDecl, ctx.allocExpr, body),
 	}
 }
 func lowerStatefulPublicTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLowerContext) *ast.FuncDecl {
@@ -420,7 +420,7 @@ func lowerStatefulTryProduction(grammarDecl *ast.GrammarDecl, ctx *statefulLower
 		GenericParams:    append([]ast.GenericParam(nil), grammarDecl.GenericParams...),
 		Params:           append([]ast.ParamDecl(nil), ctx.production.Params...),
 		ReturnType:       grammarInternalTryReturnTypeExpr(ctx.production.Position, ctx.production.ReturnType),
-		Body:             grammarCanBlock(ctx.production.Position, body),
+		Body:             grammarAllocScopedCanBlock(ctx.production.Position, grammarDecl, ctx.allocExpr, body),
 	}
 }
 func grammarInternalTryReturnTypeExpr(pos lexer.Pos, valueType ast.TypeExpr) ast.TypeExpr {
@@ -550,6 +550,27 @@ func grammarCanBlock(pos lexer.Pos, body []ast.Stmt) []ast.Stmt {
 		return nil
 	}
 	return []ast.Stmt{&ast.CanStmt{Position: pos, Permissions: grammarDefaultPermissions(pos), Body: body, SuppressPermissionInference: true}}
+}
+
+// grammarAllocScopedCanBlock wraps a generated production body in `in <alloc>:` (when the
+// grammarenv declares an allocator) inside the usual can-block. The arena scope makes the whole
+// production a place "where a region can be inferred": bare region-backed enum constructors and
+// region-polymorphic helper calls inside the production allocate into the parser's arena with no
+// explicit threading — the docs/75 inference story applied to lowered grammars.
+func grammarAllocScopedCanBlock(pos lexer.Pos, grammarDecl *ast.GrammarDecl, allocExpr ast.Expr, body []ast.Stmt) []ast.Stmt {
+	if len(body) == 0 {
+		return nil
+	}
+	// Only an EXPLICIT grammarenv `alloc` directive opts productions into the arena scope —
+	// the state-owner fallback would fabricate `in state.owner:` against states that have no
+	// such field (and changes nothing for grammars that never allocate nodes).
+	if grammarDecl == nil || grammarDecl.AllocExpr == nil {
+		allocExpr = nil
+	}
+	if allocExpr != nil {
+		body = []ast.Stmt{&ast.InStoreStmt{Position: pos, Store: cloneHeaderExprAtPos(allocExpr, pos), Body: body}}
+	}
+	return grammarCanBlock(pos, body)
 }
 func grammarDefaultPermissions(pos lexer.Pos) []ast.PermissionRef {
 	return []ast.PermissionRef{

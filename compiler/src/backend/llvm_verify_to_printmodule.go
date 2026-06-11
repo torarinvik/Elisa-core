@@ -19,6 +19,7 @@ import "C"
 
 import (
 	"fmt"
+	"os"
 	"strings"
 )
 
@@ -35,6 +36,9 @@ func (g *llvmGenerator) verify() error {
 	if message != nil {
 		errText = strings.TrimSpace(C.GoString(message))
 		C.LLVMDisposeMessage(message)
+	}
+	if os.Getenv("ELISACORE_DUMP_MODULE_ON_VERIFY_FAILURE") == "1" {
+		fmt.Fprintln(os.Stderr, g.printModule())
 	}
 	return fmt.Errorf("%s", errText)
 }

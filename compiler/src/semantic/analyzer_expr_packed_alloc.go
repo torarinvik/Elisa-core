@@ -92,7 +92,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 			a.analyzeExpr(orderedArgs[i])
 		}
 	}
-	for _, commonDecl := range enumType.Decl.Common {
+	for _, commonDecl := range enumType.Root().Decl.Common { // docs/77: common(...) lives on the root
 		arg, ok := commonArgs[commonDecl.Name]
 		if !ok {
 			continue

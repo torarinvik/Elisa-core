@@ -237,7 +237,8 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			value, err := s.emitPackedSideTableFieldRead(binding.handle, binding.typ.Enum, &binding.store, fieldType, layout.SideWordOffset, layout.WordCount, origin, "packed.view.common.side")
 			return value, fieldType, true, err
 		}
-		if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
+		if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != C.LLVMGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
+			binding.ptr = nil // stale cross-block decode: recompute in the current block
 			ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 			if ok && ops.canDirectWordRead() {
 				fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(binding.typ.Enum, layout.RowFieldIndex)
@@ -257,6 +258,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 				return nil, nil, true, err
 			}
 			binding.ptr = decodedPtr
+			binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
 			if hasName {
 				s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 			}
@@ -272,7 +274,8 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 	if cachedValue, ok := binding.payloadValues.lookup(expr.Field); ok && cachedValue != nil {
 		return cachedValue, field.Type, true, nil
 	}
-	if binding.ptr == nil && binding.handle != nil && binding.store.typ != nil {
+	if (binding.ptr == nil || (binding.ptrBlock != nil && binding.ptrBlock != C.LLVMGetInsertBlock(s.builder))) && binding.handle != nil && binding.store.typ != nil {
+		binding.ptr = nil // stale cross-block decode: recompute in the current block
 		ops, ok := s.packedStoreOpsFromBinding(&binding.store)
 		if ok && ops.canDirectWordRead() {
 			payloadValues, ok, err := s.readPackedEnumVariantPayloadWithStore(binding.handle, binding.typ.Enum, binding.typ.Variant, &binding.store, origin)
@@ -292,6 +295,7 @@ func (s *functionState) emitPackedVariantViewFieldExpr(expr *ast.FieldExpr) (C.L
 			return nil, nil, true, err
 		}
 		binding.ptr = decodedPtr
+		binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
 		if hasName {
 			s.updatePackedVariantViewDecodedPtr(name, decodedPtr)
 		}

@@ -136,9 +136,93 @@ func (a *Analyzer) injectRegionPolymorphicParam(fnType *FuncType) {
 // nested closure is correctly excluded.
 func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	found := false
+	// Locals fed by region-allocated values (a `result` accumulated across branches from
+	// region-polymorphic calls / bare region-backed constructors): returning one is returning a
+	// region-allocated value — the same local-tracking functionBuildsAndReturnsLocalContainer
+	// does for container literals.
+	regionLocals := map[string]bool{}
+	// regiony extends exprResultIsRegionAllocated with local knowledge: an ident naming a
+	// region-fed local, a struct literal wrapping one, or a region-less container literal
+	// (allocated in the inferred region) all carry region-allocated data.
+	var regiony func(value ast.Expr) bool
+	regiony = func(value ast.Expr) bool {
+		value = unwrapParenForRegionPoly(value)
+		switch e := value.(type) {
+		case *ast.Ident:
+			return regionLocals[e.Name]
+		case *ast.StructLitExpr:
+			for _, arg := range e.Args {
+				if arg != nil && regiony(arg) {
+					return true
+				}
+			}
+		case *ast.ListLitExpr:
+			for _, item := range e.Elems {
+				if item != nil && regiony(item) {
+					return true
+				}
+			}
+		}
+		return a.exprResultIsRegionAllocated(value)
+	}
+	var collect func(stmts []ast.Stmt)
+	collect = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.VarDeclStmt:
+				if s.Value != nil && regiony(s.Value) {
+					regionLocals[s.Name] = true
+				}
+			case *ast.AssignStmt:
+				if target, ok := s.Target.(*ast.Ident); ok && target != nil && s.Value != nil && regiony(s.Value) {
+					regionLocals[target.Name] = true
+				}
+			case *ast.IfStmt:
+				collect(s.Then)
+				for _, elif := range s.Elifs {
+					collect(elif.Body)
+				}
+				collect(s.Else)
+			case *ast.WhileStmt:
+				collect(s.Body)
+			case *ast.ForStmt:
+				collect(s.Body)
+			case *ast.IterForStmt:
+				collect(s.Body)
+			case *ast.ScopeStmt:
+				collect(s.Body)
+			case *ast.CanStmt:
+				collect(s.Body)
+			case *ast.InStoreStmt:
+				collect(s.Body)
+			case *ast.RegionStmt:
+				// The parser wraps allocating bodies in a synthesized `__auto_*` region; the
+				// values inside are exactly the ones a region-polymorphic caller adopts, so
+				// the classifier must see through it. Explicit named regions stay opaque
+				// (their values die with the region — returning them is a separate error).
+				if isSynthesizedAutoRegion(s.Name) {
+					collect(s.Body)
+				}
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					collect(arm.Body)
+				}
+			}
+		}
+	}
+	if fn != nil {
+		// Fixpoint: locals feed locals (`d := ctor; decls := [d]; return Result{decls}`).
+		for {
+			before := len(regionLocals)
+			collect(fn.Body)
+			if len(regionLocals) == before {
+				break
+			}
+		}
+	}
 	var walk func(stmts []ast.Stmt)
 	check := func(value ast.Expr) {
-		if value != nil && a.exprResultIsRegionAllocated(value) {
+		if value != nil && regiony(value) {
 			found = true
 		}
 	}
@@ -406,6 +490,16 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		if et, ok := a.regionBackedEnumConstructor(e); ok && et != nil {
 			return true
 		}
+	case *ast.StructLitExpr:
+		// A struct literal wrapping region-allocated values (the parse-result pattern:
+		// `return Result{ast: ..., decls: decls}`) carries its fields' region — returning
+		// it returns region-allocated data, so the function must thread the caller region
+		// instead of freeing a local auto-region under the returned handles.
+		for _, arg := range e.Args {
+			if arg != nil && a.exprResultIsRegionAllocated(arg) {
+				return true
+			}
+		}
 	}
 	return false
 }
@@ -482,11 +576,21 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 	if call == nil {
 		return nil
 	}
-	ident, ok := unwrapParenForRegionPoly(call.Func).(*ast.Ident)
-	if !ok || ident == nil {
+	name := ""
+	switch callee := unwrapParenForRegionPoly(call.Func).(type) {
+	case *ast.Ident:
+		name = callee.Name
+	case *ast.FieldExpr:
+		// UFCS method call `self.helper(...)`: methods are plain globals (docs: @method
+		// removed), so resolve by the field name when it names a visible function.
+		name = callee.Field
+	default:
 		return nil
 	}
-	sym, _, ok := a.lookupVisibleGlobal(ident.Name)
+	if name == "" {
+		return nil
+	}
+	sym, _, ok := a.lookupVisibleGlobal(name)
 	if !ok || sym == nil {
 		return nil
 	}

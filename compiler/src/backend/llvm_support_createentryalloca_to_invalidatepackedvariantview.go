@@ -570,7 +570,7 @@ func (s *functionState) bindPackedEnumStorage(name string, enumType *semantic.En
 	if s.scope.packedEnumPtrs == nil {
 		s.scope.packedEnumPtrs = map[string]packedEnumStorageBinding{}
 	}
-	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, typ: enumType}
+	s.scope.packedEnumPtrs[name] = packedEnumStorageBinding{ptr: ptr, block: C.LLVMGetInsertBlock(s.builder), typ: enumType}
 }
 func (s *functionState) bindPackedCommonFieldValues(name string, enumType *semantic.EnumType, values packedPayloadValueCache) {
 	if name == "" || enumType == nil || !enumType.Packed || values.empty() {

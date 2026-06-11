@@ -56,6 +56,8 @@ func (g *llvmGenerator) structLiteralFields(t semantic.Type) ([]structLiteralFie
 			fields = append(fields, structLiteralField{Decl: fieldDecl, Type: substituteType(field.Type, subst, g.result.StaticImpls), Index: i})
 		}
 		return fields, nil
+	case nil:
+		return nil, fmt.Errorf("struct literal has no recorded semantic type (analysis missed this expression)")
 	default:
 		return nil, fmt.Errorf("struct literal requires a concrete struct type, got %s", t.String())
 	}

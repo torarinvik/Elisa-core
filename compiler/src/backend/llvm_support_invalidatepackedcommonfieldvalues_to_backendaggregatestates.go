@@ -64,6 +64,7 @@ func (s *functionState) updatePackedVariantViewDecodedPtr(name string, ptr C.LLV
 				continue
 			}
 			binding.ptr = ptr
+			binding.ptrBlock = C.LLVMGetInsertBlock(s.builder)
 			scope.packedViewBinding = binding
 			return
 		}
@@ -85,7 +86,7 @@ func (s *functionState) lookupPackedEnumStorage(name string, enumType *semantic.
 		if !ok {
 			continue
 		}
-		if binding.typ == enumType && binding.ptr != nil {
+		if binding.typ == enumType && binding.ptr != nil && (binding.block == nil || binding.block == C.LLVMGetInsertBlock(s.builder)) {
 			return binding.ptr, true
 		}
 	}

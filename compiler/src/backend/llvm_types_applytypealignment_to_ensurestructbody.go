@@ -342,8 +342,10 @@ func (g *llvmGenerator) ensurePackedVariantViewCarrierType(viewType *semantic.Pa
 		return nil, err
 	}
 	fields := []C.LLVMTypeRef{handleType}
-	if viewType.Enum.StoreType != nil {
-		storeType, err := g.lowerPackedEnumStoreType(viewType.Enum.StoreType)
+	// docs/77: a sealed hierarchy shares ONE store per root, so the carrier embeds the
+	// ROOT's store type (the store value flowing in IS the root store).
+	if root := viewType.Enum.Root(); root.StoreType != nil {
+		storeType, err := g.lowerPackedEnumStoreType(root.StoreType)
 		if err != nil {
 			return nil, err
 		}

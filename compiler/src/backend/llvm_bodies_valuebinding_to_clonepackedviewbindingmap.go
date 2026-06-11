@@ -355,14 +355,21 @@ type packedVariantPayloadReadCacheKey struct {
 }
 type packedEnumStorageBinding struct {
 	ptr C.LLVMValueRef
-	typ *semantic.EnumType
+	// block is where ptr (the decoded record address) was computed; reuse is only sound
+	// from the same basic block (a sibling branch is not dominated by it).
+	block C.LLVMBasicBlockRef
+	typ   *semantic.EnumType
 }
 type packedCommonFieldValueBinding struct {
 	typ    *semantic.EnumType
 	values packedPayloadValueCache
 }
 type packedVariantViewBinding struct {
-	ptr           C.LLVMValueRef
+	ptr C.LLVMValueRef
+	// ptrBlock is the basic block where ptr (the decoded record address) was computed. A
+	// memoized decode is only safe to reuse from the SAME block — a sibling branch is not
+	// dominated by it (LLVM "instruction does not dominate all uses"). Other blocks re-decode.
+	ptrBlock      C.LLVMBasicBlockRef
 	handle        C.LLVMValueRef
 	store         packedStoreBinding
 	typ           *semantic.PackedVariantViewType
