@@ -60,7 +60,7 @@ def f(out: mutable Box&) -> void:
 // equeue.elisa false positive.)
 func TestRebindLocalRefToLocalIsAccepted(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rebind_local_ref.elisa", `def use(p: u32&?) -> u32:
-    return p else 0
+    return get p else 0
 
 def f(have: bool) -> u32:
     v: mutable u32 = 7

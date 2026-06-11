@@ -216,6 +216,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			if p.peek() == lexer.TOKEN_ELSE && !p.elseIntroducesRecoveryClause() {
 				p.advance()
 				expr.(*ast.IndexExpr).Fallback = p.parseOr()
+				expr.(*ast.IndexExpr).LegacyElseFallback = true
 			}
 
 		case lexer.TOKEN_LPAREN:

@@ -288,9 +288,7 @@ When ordinary Elisa core support code needs to return an optional value only aft
 
 ```elisa
 def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
-    if let lower_value = integer_literal(lower),
-           upper_value = integer_literal(upper),
-           actual_value = integer_literal(value):
+    if integer_literal(lower) is lower_value and integer_literal(upper) is upper_value and integer_literal(value) is actual_value:
         return actual_value >= lower_value and actual_value <= upper_value
     return null
 ```
@@ -298,8 +296,7 @@ def integer_range_contains(lower: Expr, upper: Expr, value: Expr) -> bool?:
 Use the same multi-binding form when the present branch performs diagnostics, mutation, or multiple statements:
 
 ```elisa
-if let lower_value = integer_literal(lower),
-       upper_value = integer_literal(upper):
+if integer_literal(lower) is lower_value and integer_literal(upper) is upper_value:
     lower_value > upper_value then:
         record_diagnostic()
     return

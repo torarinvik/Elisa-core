@@ -136,8 +136,8 @@ func isRuntimeStdPermissionInternal(path string) bool {
 // runtimeStdBaseNames is the set of trusted stdlib source files, by bare name. Keep in sync
 // with runtime/elisacore_std/*.elisa (the directory check above covers full-path builds).
 var runtimeStdBaseNames = map[string]bool{
-	"allocator.elisa": true, "arena.elisa": true, "builders.elisa": true,
-	"collections.elisa": true, "cxx_parity.elisa": true, "debug_referee.elisa": true,
+	"allocator.elisa": true, "arena.elisa": true,
+	"collections.elisa": true, "debug_referee.elisa": true,
 	"deque.elisa": true, "elisacore_runtime.elisa": true, "elisacore_runtime_concurrency.elisa": true,
 	"elisacore_runtime_prelude.elisa": true, "elisacore_runtime_strings.elisa": true,
 	"elisacore_runtime_system_bridge.elisa": true, "heap.elisa": true, "names.elisa": true,

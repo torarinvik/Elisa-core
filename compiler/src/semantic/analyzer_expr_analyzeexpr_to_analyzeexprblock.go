@@ -333,7 +333,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeCatchExpr(n)
 		return
 	case *ast.UnwrapElseExpr:
-		a.errorf(n.Pos(), "implicit `else` unwrap has been removed; write `get <expr> else ...` to make the absence check explicit")
+		if n.LegacyImplicitElse {
+			a.errorf(n.Pos(), "implicit `else` unwrap has been removed; write `get <expr> else ...` to make the absence check explicit")
+		}
 		recovery := recoveryClauseForExpr(n.Recovery, n.Fallback, n.Position)
 		valueType := a.analyzeExpr(n.Value)
 		var resultType Type

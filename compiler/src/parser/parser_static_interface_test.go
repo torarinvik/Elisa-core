@@ -233,7 +233,7 @@ struct Box:
 def read(maybe_box: Box?, maybe_ref: Box&?) -> int:
     _ = maybe_box?.value
     _ = maybe_box?.scale(2)
-    return maybe_ref?.value else 0
+    return get maybe_ref?.value else 0
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

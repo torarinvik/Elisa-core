@@ -10,6 +10,30 @@ func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	return a.analyzeCallExprWithExpected(expr, nil)
 }
 
+func (a *Analyzer) maybeEmitDirectCallDeprecation(expr *ast.CallExpr) {
+	if a == nil || expr == nil || expr.Func == nil {
+		return
+	}
+	var sym *Symbol
+	switch fn := expr.Func.(type) {
+	case *ast.Ident:
+		s, _, ok := a.lookupVisibleGlobal(fn.Name)
+		if ok {
+			sym = s
+		}
+	case *ast.SpecializeExpr:
+		if ident, ok := fn.Operand.(*ast.Ident); ok {
+			s, _, found := a.lookupVisibleGlobal(ident.Name)
+			if found {
+				sym = s
+			}
+		}
+	}
+	if sym != nil && sym.Deprecated != "" {
+		a.deprecatedf(expr.Pos(), "%s", sym.Deprecated)
+	}
+}
+
 func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
@@ -216,6 +240,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		}
 		return invalidType
 	}
+	a.maybeEmitDirectCallDeprecation(expr)
 	if a.enforceUnsafePermissions && isIndirectCallTarget(expr.Func) {
 		a.recordFunctionPermissionRefs(unsafeIndirectCallRefs(expr.Pos()))
 	}

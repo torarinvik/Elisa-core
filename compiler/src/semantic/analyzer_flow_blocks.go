@@ -422,8 +422,8 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 	})
 }
 
-// optionalBindBoundType resolves the type bound by an `if let NAME = VALUE:`
-// condition. A slice operand (`if let s = arr[a:b]:`) is a bounds-checked slice:
+// optionalBindBoundType resolves the type bound by an `if VALUE is NAME:`
+// condition. A slice operand (`if arr[a:b] is s:`) is a bounds-checked slice:
 // it is marked checked (so codegen emits the runtime bounds test) and binds the
 // bounded view, taking the else arm when out of range. All other operands fall
 // back to the standard optional / nullable-reference unwrap.

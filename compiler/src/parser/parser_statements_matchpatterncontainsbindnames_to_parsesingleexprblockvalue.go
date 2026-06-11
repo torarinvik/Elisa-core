@@ -56,7 +56,7 @@ func (p *Parser) parseGuardStmt() ast.Stmt {
 	p.advance()
 	cond := p.parseGuardConditionExpr()
 	if guardConditionIntroducesBindings(cond) {
-		p.errorf("guard conditions do not support bindings; use `if let ...` or `if ... is Variant(bind)` directly")
+		p.errorf("guard conditions do not support bindings; use `if value is name:` or `if ... is Variant(bind):` directly")
 	}
 	p.expect(lexer.TOKEN_ELSE)
 	elseStmt := p.parseStmt()

@@ -61,7 +61,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	}
 	finish := func(result Type) Type {
 		if expr.Fallback != nil {
-			if !a.getWrappedIndexExprs[expr] {
+			if expr.LegacyElseFallback && !a.getWrappedIndexExprs[expr] {
 				a.errorf(expr.Pos(), "implicit `else` index fallback has been removed; write `get <expr>[<index>] else ...` to make the bounds check explicit")
 			}
 			if !safeIndexFallbackOperandType(objType) {

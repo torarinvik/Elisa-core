@@ -232,8 +232,8 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 // binding in the current codegen scope chain. Such a local shadows any same-named
 // global function, so a call through it must dispatch on the local value rather
 // than re-resolving (and specializing) the global by bare name. Only function-
-// typed locals divert a call: a non-function local of the same name (e.g. a
-// `builder: Builder[i32]` shadowing a global `def builder[T](...)`) is not a call
+// typed locals divert a call: a non-function local of the same name (e.g. an
+// `item: Box[i32]` shadowing a global `def item[T](...)`) is not a call
 // target, so calls to the global must still resolve normally — matching how the
 // analyzer resolved them.
 func (s *functionState) identIsLocalBinding(name string) bool {

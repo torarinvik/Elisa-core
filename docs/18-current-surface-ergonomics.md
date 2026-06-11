@@ -86,10 +86,10 @@ tree SML:
         Structure(name_id: NameId, signature_path?: SMLNamePath, decls: darray[Decl])
 ```
 
-Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if let` to unwrap the optional.
+Constructors use the ordinary optional surface: pass the present value when it exists, or `null` when it does not. Consumers should use `if value is name:` to unwrap the optional.
 
 ```elisa
-if let payload_type = constructor.payload_type:
+if constructor.payload_type is payload_type:
     use_payload(payload_type)
 ```
 
@@ -103,23 +103,23 @@ def check_format_arg(self: mutable State&, precision: Expr?) -> void:
     precision?.(self.check_expr)
 ```
 
-When the present branch needs a real block, use an `if let` condition binding. The binding is available only in the truthy branch, and the bound value is the non-optional payload.
+When the present branch needs a real block, use an `is` condition binding. The binding is available only in the truthy branch, and the bound value is the non-optional payload.
 
 ```elisa
 def check_else_branch(self: mutable State&, else_stmt: Stmt?) -> void:
-    if let stmt = else_stmt:
+    if else_stmt is stmt:
         self.check_stmt(stmt)
         self.record_reachable_branch(stmt.span)
 ```
 
-`if let` also works for nullable references. In the then-branch the binding has the non-null reference type, so ordinary field access and member calls are allowed without repeating a null guard.
+The same `is` bind form also works for nullable references. In the then-branch the binding has the non-null reference type, so ordinary field access and member calls are allowed without repeating a null guard.
 
 ```elisa
 struct Node:
     value: i64
 
 def read(node: Node&?) -> i64:
-    if let present = node:
+    if node is present:
         return present.value
     return 0
 ```
@@ -545,13 +545,11 @@ guard maybe != null else return 0
 require enabled else return INVALID_SYMBOL_ID
 ```
 
-When an early optional result depends on several optional inputs, prefer multi-binding `if let`. Each binding unwraps an optional in order, and the branch runs only when all bindings are present.
+When an early optional result depends on several optional inputs, chain `is` bindings with `and`. Each binding unwraps an optional in order, and the branch runs only when all bindings are present.
 
 ```elisa
 def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
-    if let lower_value = lower,
-           upper_value = upper,
-           value_int = value:
+    if lower is lower_value and upper is upper_value and value is value_int:
         return value_int >= lower_value and value_int <= upper_value
     return null
 ```
@@ -559,8 +557,7 @@ def in_range(lower: i64?, upper: i64?, value: i64?) -> bool?:
 The same form works when the present branch performs diagnostics, mutation, or several statements.
 
 ```elisa
-if let actual_lower = lower_value,
-       actual_upper = upper_value:
+if lower_value is actual_lower and upper_value is actual_upper:
     actual_lower > actual_upper then:
         record_diagnostic()
     return
@@ -568,21 +565,20 @@ if let actual_lower = lower_value,
 
 This lowers to the same ordinary optional-bind ladder you would write by hand. A short condition can be kept as a statement block with `then:` when that makes the guard read naturally.
 
-`elif let` continues the same optional-bind family in the fallback branch, which keeps multi-stage optional selection flatter than a second nested `if let`.
+`elif value is name:` continues the same optional-bind family in the fallback branch, which keeps multi-stage optional selection flatter than a second nested `if`.
 
 ```elisa
-if let actual_lower = lower,
-       actual_upper = upper:
+if lower is actual_lower and upper is actual_upper:
     return
-elif let actual_fallback = fallback:
+elif fallback is actual_fallback:
     return
 ```
 
-When the present branch immediately wants to match on the unwrapped value, combine `if let` with an ordinary `match`.
+When the present branch immediately wants to match on the unwrapped value, combine an `is` bind with an ordinary `match`.
 
 ```elisa
 def describe(maybe: Expr?) -> i64:
-    if let expr = maybe:
+    if maybe is expr:
         match expr:
             Expr.Int(value):
                 return value
@@ -597,23 +593,23 @@ If the true branch contains another low-precedence operator, wrap it so the inte
 return (left == right) if rhs is Value.Int(right) else false
 ```
 
-Slice operands also work with `if let`. In that form, the slice acts as a checked view construction: the branch runs only when the slice bounds are valid, and the bound name has the resulting bounded view type inside the branch.
+Slice operands also work with `is` binds. In that form, the slice acts as a checked view construction: the branch runs only when the slice bounds are valid, and the bound name has the resulting bounded view type inside the branch.
 
 ```elisa
 def sum_prefix(xs: darray[i32]&) -> i32:
-    if let s = xs[0:3]:
+    if xs[0:3] is s:
         return s[0] + s[1] + s[2]
     return -1
 ```
 
 Current rules:
 
-- `if let name = value:` accepts value optionals such as `T?` and nullable references such as `T&?`
-- `if let a = first, b = second:` runs only when every optional binding is present; bindings are evaluated left-to-right
-- `elif let name = value:` is the optional-bind continuation form for an `if let` chain
+- `if value is name:` accepts value optionals such as `T?` and nullable references such as `T&?`
+- `if first is a and second is b:` runs only when every optional binding is present; bindings are evaluated left-to-right
+- `elif value is name:` is the optional-bind continuation form for an `if` chain
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
-- `if let name = source[a:b]:` performs a checked slice bind and exposes the bounded view only when the slice is in range
-- `if let` composes with ordinary boolean conditions using `and`, so `if let value = maybe and value > 0:` is valid
+- `if source[a:b] is name:` performs a checked slice bind and exposes the bounded view only when the slice is in range
+- `is` binds compose with ordinary boolean conditions using `and`, so `if maybe is value and value > 0:` is valid
 - `condition then:` lowers to an ordinary `if condition:` statement block and is intended for short guard-style branches
 - `value return if condition` returns `value` only when `condition` is true; otherwise execution continues with the next statement
 - `value if expr is Pattern(bindings) else fallback` exposes the pattern bindings only in the true branch
@@ -684,7 +680,7 @@ Current rules:
 - `expect value as {field: pattern}` matches fields on a known struct/tree-block value
 - `expect let Pattern = value:` keeps the existing block form and lowers to a match with a panic fallback
 - failed expectations panic through the same `Abort.Panic` path as existing `expect ... as ...`
-- use `if let name = optional:` for optional unwrapping; `expect let` is for pattern matching over concrete values
+- use `if optional is name:` for optional unwrapping; `expect let` is for pattern matching over concrete values
 
 ## Typed string literal coercion
 
@@ -1021,18 +1017,17 @@ params.push(param)
 ```
 
 ```elisa
-builder: Builder[Pascal.Decl] @owner
-builder.push(decl)
-decls: darray[Pascal.Decl] = builder.finish()
+decls: darray[Pascal.Decl] @owner = []
+decls.push(decl)
 
 for decl in decls.view():
     visit_decl(decl)
 ```
 
 ```elisa
-symbols: SymbolTable[NameId, PascalSymbol] = symtab.new(owner)
-id: SymbolId = symbols.declare(name_id, PascalSymbol{...})
-symbol: PascalSymbol? = symbols.lookup(name_id)
+symbols: IndexMap[NameId, PascalSymbol] = indexmap.new(owner)
+id: SymbolId = symbol_table_id_from_index(symbols.set(name_id, PascalSymbol{...}))
+symbol: PascalSymbol? = symbols.get(name_id)
 
 for entry in symbols.entry_view():
     visit(entry.key, entry.value)
@@ -1078,7 +1073,7 @@ Use `Flags[T]` for typed sets of const-enum values that grow or flow through API
 
 Use `InlineVec[T, N]` for tiny hot lists where most values fit inline but occasional spill to an arena-owned `darray` is acceptable. Parser and semantic scratch lists such as params, labels, directives, and duplicate-detection sets are the intended shape.
 
-Use `Builder[T] @owner` when constructing arena-owned dynamic arrays. The declaration creates a mutable builder from the owner while keeping the owner relationship visible at the declaration site. `Builder[T]` is the idiomatic surface name for the arena-backed dynamic-array builder; it lowers through the same `DArrayBuilder[T]` runtime storage and helper methods. `owner.builder()` remains available when an expression form is clearer.
+Use plain `darray[T]` declarations when constructing arena-owned dynamic arrays. `xs: darray[T] @owner = []` keeps the owner relationship visible at the declaration site, while an active `in owner:` scope can infer the region for `xs: mutable darray[T] = []`. The old builder wrapper surface has been removed.
 
 Native frontend suites should consume these helpers through the runtime surface that their runner already links, not by including implementation files such as `collections.elisa` directly into a test module. Direct implementation includes duplicate runtime globals and helper symbols when the native runner also links `native_runtime_support.elisa`. The generated `collections.elisai` interface is kept in sync with the implementation as the declaration source of truth. For native dogfood frontends, keep existing `darray` construction style until generic extern collection helpers either lower through concrete wrappers or the backend can specialize those linked runtime declarations with the same ABI as in-module generic helpers.
 
@@ -1298,7 +1293,7 @@ Current rules:
 - generated declarations are parsed as normal Elisa declarations and then use the normal semantic and backend paths
 - generated declarations are inserted where the generator appears, so ordinary declaration visibility and duplicate-name diagnostics apply
 
-Inside sequence rewrites, `emit` appends values into the output sequence being built. `emit value` appends one element, `emit all values` appends every element from a `darray` or `dview`, and `emit nothing` leaves the current arm without output.
+Inside sequence rewrites, `emit` appends values into the output sequence being built. `emit value` appends one element, `emit all values` appends every element from a `darray` or `view`, and `emit nothing` leaves the current arm without output.
 
 ```elisa
 def compact(items: view[u32]) -> darray[u32]:
@@ -2974,7 +2969,7 @@ Current rules:
 - SOA store roots also expose `store.valid(row_id)` to check whether a `RowId[Store]` still names a live row in that exact store root
 - `for ref row in pending.rows():` is rejected; `rows()` is not an addressable array-like ref-binder source
 - the current runtime-backed dict helper family also exposes `values.get(key)`, `values.put(key, value)`, `values.contains(key)`, `values.remove(key)`, `values.clear()`, and `values.reserve(n)` when matching helper overloads are in scope
-- `values.get(key)` returns an optional mutable slot reference in the tested runtime-backed helper family, so `if let found = values.get(key): ...` is the common read/update shape
+- `values.get(key)` returns an optional mutable slot reference in the tested runtime-backed helper family, so `if values.get(key) is found: ...` is the common read/update shape
 - `values.entry(key)` exposes entry-oriented helpers such as `.found`, `.value`, `.insert(value)`, and `.get_or_insert(value)`
 - `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
 - `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface

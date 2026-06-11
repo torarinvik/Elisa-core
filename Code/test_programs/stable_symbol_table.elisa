@@ -6,35 +6,36 @@ struct FixtureSymbol:
 
 def stable_symbol_table_smoke(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.with_capacity(a, 4)
+        map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.with_capacity(a, 4)
 
-        alpha_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
-        beta_id: SymbolTableId = table.declare("beta", FixtureSymbol{value: 3})
-        _ = table.update(alpha_id, FixtureSymbol{value: 11})
+        alpha_id: SymbolTableId = symbol_table_id_from_index(map.set("alpha", FixtureSymbol{value: 7}))
+        beta_id: SymbolTableId = symbol_table_id_from_index(map.set("beta", FixtureSymbol{value: 3}))
+        _ = map.update_at(symbol_table_index(alpha_id), FixtureSymbol{value: 11})
 
         -1 return if alpha_id == SYMBOL_TABLE_INVALID_ID
         -2 return if beta_id == SYMBOL_TABLE_INVALID_ID
         -3 return if alpha_id == beta_id
 
-        found_alpha_id: SymbolTableId = table.lookup_id("alpha")
+        found_alpha_index: usize = get index_map_find_index[cstr[key_shape], FixtureSymbol](map, "alpha") else return -4
+        found_alpha_id: SymbolTableId = symbol_table_id_from_index(found_alpha_index)
         -4 return if found_alpha_id != alpha_id
-        -5 return if not table.has("beta")
-        -6 return if table.count() != 2
+        -5 return if not map.has("beta")
+        -6 return if map.count() != 2
 
         total: mutable i32 = 0
-        for entry in table.entry_view():
+        for entry in map.entry_view():
             total <- total + entry.value.value
 
-        alpha: FixtureSymbol = get table.lookup("alpha") else return -7
-        beta: FixtureSymbol = table.value(beta_id)
+        alpha: FixtureSymbol = get map.get("alpha") else return -7
+        beta: FixtureSymbol = map.value(symbol_table_index(beta_id))
         return alpha.value + beta.value + total
 
 
 def stable_symbol_table_default_capacity(a: mutable Arena&) -> i32:
     can Memory.Allocate, Abort.Panic:
-        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.new(a)
-        symbol_id: SymbolTableId = table.declare("gamma", FixtureSymbol{value: 19})
-        symbol: FixtureSymbol? = table.lookup("gamma")
+        map: mutable IndexMap[cstr[key_shape], FixtureSymbol] = indexmap.new(a)
+        symbol_id: SymbolTableId = symbol_table_id_from_index(map.set("gamma", FixtureSymbol{value: 19}))
+        symbol: FixtureSymbol? = map.get("gamma")
         -1 return if symbol_id == SYMBOL_TABLE_INVALID_ID
         found: FixtureSymbol = get symbol else return -2
         return found.value

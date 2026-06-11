@@ -69,12 +69,15 @@ def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_resu
 def rt_concat2_scratch(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_result]:
     return concat2_scratch(lhs, rhs) can Memory.Allocate, Abort.Panic
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `rt_concat2_scratch(...)` plus existing value-to-string conversions like `rt_int_to_string(...)`")
 def rt_string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
     return string_builder_new(initial) can Memory.Allocate, Abort.Panic
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `rt_concat2_scratch(...)` plus existing value-to-string conversions like `rt_int_to_string(...)`")
 def rt_string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
     return string_builder_append(builder, suffix) can Memory.Allocate, Abort.Panic
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `rt_concat2_scratch(...)` plus existing value-to-string conversions like `rt_int_to_string(...)`")
 def rt_string_builder_finish(builder: heap StringBuilder&?) -> cstr[shape_out]:
     return string_builder_finish(builder).cast[u8&] can Memory.Allocate, Abort.Panic
 

@@ -15,7 +15,7 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
         ys: mutable darray[i64] = [3, 4]
         return xs.count + ys.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_push.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
@@ -31,41 +31,15 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 	}
 }
 
-func TestGenerateLLVMIRLowersBuilderAlias(t *testing.T) {
-	src := `struct DArrayBuilder[T]:
-    value: T
-
-def builder(owner: Arena&) -> DArrayBuilder[i64]:
-    _ = owner
-    return DArrayBuilder[i64]{value: 12}
-
-def build(owner: Arena) -> i64:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    items: Builder[i64] in alloc
-    return items.value
-`
-	result := parseAndAnalyzeBackendTest(t, "backend_builder_alias.elisa", src)
-	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
-	if err != nil {
-		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
-	}
-	if !strings.Contains(output, "DArrayBuilder") {
-		t.Fatalf("expected Builder alias to lower through DArrayBuilder runtime storage, got:\n%s", output)
-	}
-	if !strings.Contains(output, "call %DArrayBuilder__i64 @builder") {
-		t.Fatalf("expected Builder alias local to use DArrayBuilder values, got:\n%s", output)
-	}
-}
-
 func TestGenerateLLVMIRSpecializesGenericExternMethodBuilderPush(t *testing.T) {
-	src := `struct DArrayBuilder[T]:
+	src := `struct MethodBox[T]:
     count: usize
 
 
-extern push[T](builder: mutable DArrayBuilder[T]&, item: T) -> void
+extern push[T](box: mutable MethodBox[T]&, item: T) -> void
 
 def build() -> void:
-    items: mutable DArrayBuilder[i64] = zeroed
+    items: mutable MethodBox[i64] = zeroed
     items.push(7)
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_generic_extern_method_builder_push.elisa", src)
@@ -76,7 +50,7 @@ def build() -> void:
 	if !strings.Contains(output, "call void @push__i64(ptr %items, i64 7)") {
 		t.Fatalf("expected generic extern UFCS call to use a specialized i64 symbol, got:\n%s", output)
 	}
-	if strings.Contains(output, "DArrayBuilder_T__push(ptr %items, i64 7)") {
+	if strings.Contains(output, "MethodBox_T__push(ptr %items, i64 7)") {
 		t.Fatalf("expected generic extern UFCS call to avoid unspecialized T ABI, got:\n%s", output)
 	}
 }
@@ -481,7 +455,7 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugarAcrossElementTypes(t *testing.T) 
         names.push(7u32)
         return ints.count + names.count
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_darray_builder_multi_type.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_push_multi_type.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)

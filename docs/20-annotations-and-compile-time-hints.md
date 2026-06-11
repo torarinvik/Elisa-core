@@ -232,11 +232,11 @@ For full progress-safety behavior, see [25-progress-safety.md](/Users/torarinvik
 Current surface includes method-style extension hooks, internal visibility markers, and type constructor hooks.
 
 ```elisa
-struct DArrayBuilder[T]:
+struct IndexMap[K, T]:
     marker: u8
 
 
-extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+extern count[K, T](items: IndexMap[K, T]&) -> usize
 
 @internal
 def hidden_identity(value: i64) -> i64:
@@ -357,7 +357,7 @@ Current rules:
 
 - `likely` and `unlikely` are contextual statement hints for `if` and `while`
 - the raw condition expression remains the same expression the compiler would analyze without the hint
-- branch hints do not combine with `if let ...:` optional binders or pattern-binder `if` forms; use an ordinary boolean condition when a hint is needed
+- branch hints do not combine with optional-bind or pattern-binder `if` forms; use an ordinary boolean condition when a hint is needed
 - current LLVM lowering turns these into branch-weight metadata rather than a different source-level control-flow rule
 
 ## Practical caveats

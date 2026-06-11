@@ -125,7 +125,8 @@ func (p *Parser) parseExpr() ast.Expr {
 			getExpr.Fallback = fallback
 			return getExpr
 		}
-		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: fallback, Recovery: recovery}
+		p.errorAt(pos, "implicit `else` unwrap has been removed; write `get <expr> else ...` to make the absence check explicit")
+		return &ast.UnwrapElseExpr{Position: pos, Value: expr, Fallback: fallback, Recovery: recovery, LegacyImplicitElse: true}
 	}
 	if p.matchIdentText("can") {
 		permissions := p.parsePermissionRefs(false)

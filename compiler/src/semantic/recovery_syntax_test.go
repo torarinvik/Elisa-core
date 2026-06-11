@@ -75,9 +75,9 @@ def bad(flag: bool) -> i64:
 func TestAnalyzeRejectsElseVoidInValueContext(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "else_void_value_context.elisa", `
 def bad(maybe: i64?) -> i64:
-	return maybe else void
+	return get maybe else void
 `)
-	if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, "else fallback cannot use else void") {
+	if got := strings.Join(result.Errors(), "\n"); !strings.Contains(got, "get fallback cannot use else void") {
 		t.Fatalf("expected else void diagnostic, got:\n%s", got)
 	}
 }

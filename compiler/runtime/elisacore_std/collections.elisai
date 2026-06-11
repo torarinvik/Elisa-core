@@ -238,9 +238,6 @@ struct IndexMap[K, T]:
     entries: mutable darray[IndexMapEntry[K, T]]
     by_key: mutable dict[K, usize]
 
-struct SymbolTable[K, T]:
-    items: mutable IndexMap[K, T]
-
 struct InlineVec[T, N: usize]:
     owner: mutable Arena&?
     inline_items: mutable T[N]
@@ -248,23 +245,13 @@ struct InlineVec[T, N: usize]:
     len: mutable usize
     is_spilled: mutable bool
 
-struct DArrayBuilder[T]:
-    owner: mutable Arena&?
-    items: mutable darray[T]
-
 struct Flags[T]:
     bits: mutable u64
 
 struct IndexMapNamespace:
     _unused: u8
 
-struct SymbolTableNamespace:
-    _unused: u8
-
 struct InlineVecNamespace:
-    _unused: u8
-
-struct DArrayBuilderNamespace:
     _unused: u8
 
 struct FlagsNamespace:
@@ -272,11 +259,7 @@ struct FlagsNamespace:
 
 extern indexmap: IndexMapNamespace
 
-extern symtab: SymbolTableNamespace
-
 extern inlinevec: InlineVecNamespace
-
-extern arraybuilder: DArrayBuilderNamespace
 
 extern flags: FlagsNamespace
 
@@ -311,44 +294,6 @@ extern view[T](da: darray[T]) -> view[T]
 extern array_view[T, N: usize](arr: T[N]&) -> view[T]
 
 extern where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]
-
-extern darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
-
-extern new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]
-
-extern builder[T](owner: mutable Arena&) -> DArrayBuilder[T]
-
-extern darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize
-
-extern count[T](builder: DArrayBuilder[T]&) -> usize
-
-extern darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool
-
-extern is_empty[T](builder: DArrayBuilder[T]&) -> bool
-
-extern darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T
-
-extern get[T](builder: DArrayBuilder[T]&, index: usize) -> T
-
-extern darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
-
-extern reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize)
-
-extern darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T)
-
-extern push[T](builder: mutable DArrayBuilder[T]&, item: T)
-
-extern darray_builder_view[T](builder: DArrayBuilder[T]&) -> view[T]
-
-extern view[T](builder: DArrayBuilder[T]&) -> view[T]
-
-extern darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]
-
-extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
-
-extern darray_builder_clear[T](builder: mutable DArrayBuilder[T]&)
-
-extern clear[T](builder: mutable DArrayBuilder[T]&)
 
 extern inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]
 
@@ -620,52 +565,6 @@ extern clear[K, T](map: mutable IndexMap[K, T]&)
 extern symbol_table_index(symbol_id: SymbolTableId) -> usize
 
 extern symbol_table_id_from_index(index: usize) -> SymbolTableId
-
-extern symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]
-
-extern new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]
-
-extern with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]
-
-extern symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize
-
-extern count[K, T](table: SymbolTable[K, T]&) -> usize
-
-extern symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool
-
-extern symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId
-
-extern symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool
-
-extern has[K, T](table: SymbolTable[K, T]&, key: K) -> bool
-
-extern symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
-
-extern symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
-
-extern symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]
-
-extern entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]
-
-extern value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
-
-extern entry_view[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]
-
-extern symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId
-
-extern declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId
-
-extern lookup_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId
-
-extern get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T
-
-extern lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?
-
-extern symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool
-
-extern update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool
-
-extern symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&)
 
 protocol Store:
     type Elem

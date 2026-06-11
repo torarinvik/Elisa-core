@@ -212,7 +212,7 @@ PLANNED (in priority order):
    blocker is NOT a handful of renames. `@method` (UFCS-only) is masking real
    resolution ambiguities — dropping it breaks the stdlib in subtle ways:
    - Wrong overload selection: a call like `clear[K, T](table.items)` resolves to
-     the first-registered global `clear` (DArrayBuilder.clear, 1 type-arg) instead
+     the first-registered global `clear` (an old builder clear overload, 1 type-arg) instead
      of `IndexMap.clear` (2 type-args). ROOT CAUSE (corrected): bare-ident free-call
      overloading already disambiguates by arg type — the bug was that the EXPLICIT
      type-arg form `name[TypeArgs](args)` parses as a SpecializeExpr wrapping the
@@ -229,11 +229,9 @@ PLANNED (in priority order):
      and mis-bound the local to the global function's type. FIXED: functionValueTypeForExpr
      now short-circuits (returns not-a-function-value) once the name resolves to a local,
      never consulting the global (TestRunCLILocalParamShadowsSameNamedGlobalFunction).
-   - Duplicate definitions: NOT A REAL BLOCKER. builders.elisa is a standalone
-     interface-emission test fixture (TestRuntimeBuildersInterfaceMatchesImplementation,
-     `-emit iface`), NOT part of the stdlib include graph — collections.elisa is the
-     real DArrayBuilder provider, and the two never co-compile. The earlier "duplicate"
-     finding was a probe artifact (manually including both in one file).
+   - Duplicate definitions: no longer applicable. The standalone builders runtime
+     fixture and the old builder wrapper surface were removed; `darray[T]` is the
+     construction surface.
    STATUS (measured 2026-06-03): with `@method` made inert, the stdlib now compiles
    with ZERO `.elisa` errors — only 3 fixture tests fail, and on inspection they are
    NOT 3 independent code bugs but two consequences of the `@method` -> non-UFCSOnly
@@ -242,9 +240,9 @@ PLANNED (in priority order):
      * FORMAT (DONE, commit dbc6af70): ReceiverOverloadSymbolName mangled the receiver
        via TypeIdentityKey = `%T:%s`, leaking the Go runtime type as `semantic_RefType_`
        into emitted names. Switched to the receiver's `String()` (the clean scheme
-       mangleGenericType already uses), so secondary-overload names are now
-       `ovl__has__SymbolTable_K_T__has__...` not `ovl__has__semantic_RefType_SymbolTable_
-       K_T__has__...`. Unique per receiver; no duplicate-symbol link errors. Tests updated.
+       mangleGenericType already uses), so secondary-overload names are now receiver-based
+       rather than Go-runtime-type-prefixed. Unique per receiver; no duplicate-symbol link
+       errors. Tests updated.
      * ORDER-DETERMINISM (PENDING, belongs in the drop session): which overload keeps the
        clean BARE name (`set__...`) vs gets `ovl__...` is registration-order-dependent
        ("first registered keeps bare"). Dropping `@method` changes overload-set membership

@@ -64,21 +64,12 @@ struct IndexMap[K, T]:
     by_key: mutable dict[K, usize]
 
 
-struct SymbolTable[K, T]:
-    items: mutable IndexMap[K, T]
-
-
 struct InlineVec[T, N: usize]:
     owner: mutable Arena&?
     inline_items: mutable T[N]
     overflow: mutable darray[T]
     len: mutable usize
     is_spilled: mutable bool
-
-
-struct DArrayBuilder[T]:
-    owner: mutable Arena&?
-    items: mutable darray[T]
 
 
 struct Flags[T]:
@@ -89,15 +80,7 @@ struct IndexMapNamespace:
     _unused: u8
 
 
-struct SymbolTableNamespace:
-    _unused: u8
-
-
 struct InlineVecNamespace:
-    _unused: u8
-
-
-struct DArrayBuilderNamespace:
     _unused: u8
 
 
@@ -106,9 +89,7 @@ struct FlagsNamespace:
 
 
 global indexmap: IndexMapNamespace = IndexMapNamespace(0)
-global symtab: SymbolTableNamespace = SymbolTableNamespace(0)
 global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
-global arraybuilder: DArrayBuilderNamespace = DArrayBuilderNamespace(0)
 global flags: FlagsNamespace = FlagsNamespace(0)
 
 @internal
@@ -315,101 +296,6 @@ def array_view[T, N: usize](arr: T[N]&) -> view[T]:
 
 def where[S, T](source: S, predicate: func(T) -> bool) -> FilteredView[S, T]:
     return FilteredView[S, T](source, predicate)
-
-
-# ------------------------------------------------------------
-# Arena-owned dynamic array builders
-# ------------------------------------------------------------
-
-def darray_builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
-    result: mutable DArrayBuilder[T] = zeroed
-    result.owner as & <- owner
-    return result
-
-
-def new[T](api: DArrayBuilderNamespace, owner: mutable Arena&) -> DArrayBuilder[T]:
-    _ = api
-    return darray_builder[T](owner)
-
-
-def builder[T](owner: mutable Arena&) -> DArrayBuilder[T]:
-    return darray_builder[T](owner)
-
-
-def darray_builder_count[T](builder: DArrayBuilder[T]&) -> usize:
-    return builder.items.count
-
-
-def count[T](builder: DArrayBuilder[T]&) -> usize:
-    return darray_builder_count[T](builder)
-
-
-def darray_builder_is_empty[T](builder: DArrayBuilder[T]&) -> bool:
-    return builder.items.count == 0
-
-
-def is_empty[T](builder: DArrayBuilder[T]&) -> bool:
-    return darray_builder_is_empty[T](builder)
-
-
-def darray_builder_get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
-    assert index < builder.items.count
-    return builder.items[index]
-
-
-def get[T](builder: DArrayBuilder[T]&, index: usize) -> T:
-    return darray_builder_get[T](builder, index)
-
-
-def darray_builder_reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
-    can Memory.Allocate, Abort.Panic:
-        assert builder.owner != null
-        owner: mutable Arena& = builder.owner
-        in owner:
-            _ = builder.items.reserve(capacity)
-
-
-def reserve[T](builder: mutable DArrayBuilder[T]&, capacity: usize):
-    can Memory.Allocate, Abort.Panic:
-        darray_builder_reserve[T](builder, capacity)
-
-
-def darray_builder_push[T](builder: mutable DArrayBuilder[T]&, item: T):
-    can Memory.Allocate, Abort.Panic:
-        assert builder.owner != null
-        owner: mutable Arena& = builder.owner
-        in owner:
-            builder.items.push(item)
-
-
-def push[T](builder: mutable DArrayBuilder[T]&, item: T):
-    can Memory.Allocate, Abort.Panic:
-        darray_builder_push[T](builder, item)
-
-
-def darray_builder_view[T](builder: DArrayBuilder[T]&) -> view[T]:
-    DynArrayView(null, 0) return if builder.items.items == null or builder.items.count == 0
-    return DynArrayView(collections_void_from_items[T](builder.items.items), builder.items.count)
-
-
-def view[T](builder: DArrayBuilder[T]&) -> view[T]:
-    return darray_builder_view[T](builder)
-
-
-def darray_builder_finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
-    return builder.items
-
-
-def finish[T](builder: DArrayBuilder[T]&) -> darray[T]:
-    return darray_builder_finish[T](builder)
-
-
-def darray_builder_clear[T](builder: mutable DArrayBuilder[T]&):
-    builder.items.count <- 0
-
-
-def clear[T](builder: mutable DArrayBuilder[T]&):
-    darray_builder_clear[T](builder)
 
 
 # ------------------------------------------------------------
@@ -1528,116 +1414,6 @@ def symbol_table_index(symbol_id: SymbolTableId) -> usize:
 
 def symbol_table_id_from_index(index: usize) -> SymbolTableId:
     return (index + 1).u32().SymbolTableId()
-
-
-def symbol_table[K, T](owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
-    can Memory.Allocate, Abort.Panic:
-        table: mutable SymbolTable[K, T] = zeroed
-        table.items <- index_map[K, T](owner, initial_capacity)
-        return table
-
-
-def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
-    can Memory.Allocate, Abort.Panic:
-        _ = api
-        return symbol_table[K, T](owner, 32)
-
-
-def with_capacity[K, T](api: SymbolTableNamespace, owner: mutable Arena&, initial_capacity: usize) -> SymbolTable[K, T]:
-    can Memory.Allocate, Abort.Panic:
-        _ = api
-        return symbol_table[K, T](owner, initial_capacity)
-
-
-def symbol_table_count[K, T](table: SymbolTable[K, T]&) -> usize:
-    return index_map_count[K, T](table.items)
-
-
-def count[K, T](table: SymbolTable[K, T]&) -> usize:
-    return symbol_table_count[K, T](table)
-
-
-def symbol_table_valid_id[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> bool:
-    false return if symbol_id == SYMBOL_TABLE_INVALID_ID
-    return index_map_valid_index[K, T](table.items, symbol_table_index(symbol_id))
-
-
-def symbol_table_find_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
-    index: usize = get index_map_find_index[K, T](table.items, key) else return SYMBOL_TABLE_INVALID_ID
-    return symbol_table_id_from_index(index)
-
-
-def symbol_table_contains[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
-    return symbol_table_find_id[K, T](table, key) != SYMBOL_TABLE_INVALID_ID
-
-
-def has[K, T](table: SymbolTable[K, T]&, key: K) -> bool:
-    return symbol_table_contains[K, T](table, key)
-
-
-def symbol_table_entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
-    assert symbol_table_valid_id[K, T](table, symbol_id)
-    entry: IndexMapEntry[K, T] = index_map_entry[K, T](table.items, symbol_table_index(symbol_id))
-    return SymbolEntry[K, T]{key: entry.key, value: entry.value}
-
-
-def symbol_table_value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
-    return symbol_table_entry[K, T](table, symbol_id).value
-
-
-def symbol_table_entries[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]:
-    return index_map_entries[K, T](table.items)
-
-
-def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[K, T]:
-    return symbol_table_entry[K, T](table, symbol_id)
-
-
-def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
-    return symbol_table_value[K, T](table, symbol_id)
-
-
-def entry_view[K, T](table: SymbolTable[K, T]&) -> view[IndexMapEntry[K, T]]:
-    return symbol_table_entries[K, T](table)
-
-
-def symbol_table_put[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
-    can Memory.Allocate, Abort.Panic:
-        index: usize = index_map_put[K, T](table.items, key, value)
-        return symbol_table_id_from_index(index)
-
-
-def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
-    can Memory.Allocate, Abort.Panic:
-        return symbol_table_put[K, T](table, key, value)
-
-
-def lookup_id[K, T](table: SymbolTable[K, T]&, key: K) -> SymbolTableId:
-    return symbol_table_find_id[K, T](table, key)
-
-
-def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
-    return symbol_table_value[K, T](table, symbol_id)
-
-
-def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
-    symbol_id: SymbolTableId = symbol_table_find_id[K, T](table, key)
-    null return if symbol_id == SYMBOL_TABLE_INVALID_ID
-    value: T = symbol_table_value[K, T](table, symbol_id)
-    return value
-
-
-def symbol_table_replace[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
-    false return if not symbol_table_valid_id[K, T](table, symbol_id)
-    return update_at[K, T](table.items, symbol_table_index(symbol_id), value)
-
-
-def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
-    return symbol_table_replace[K, T](table, symbol_id, value)
-
-
-def symbol_table_clear[K, T](table: mutable SymbolTable[K, T]&):
-    clear[K, T](table.items)
 
 
 # --- Store / Handle unification (docs/69) -----------------------------------

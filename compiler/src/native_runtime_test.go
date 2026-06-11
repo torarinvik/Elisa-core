@@ -1093,17 +1093,13 @@ func TestRunCLINativeRuntimeStringBuilderShortStringRegression(t *testing.T) {
 def make_queue_label(vqid: int) -> cstr:
 	can Memory.Allocate, Abort.Panic, Console.Format:
 		queue: cstr = "GFX" if vqid > 254 else "ASC"
-		builder: mutable heap StringBuilder& = rt_string_builder_new(queue)
-		builder <- rt_string_builder_append(builder, "[")
-		builder <- rt_string_builder_append(builder, rt_int_to_string((vqid %% 260).i64()))
-		builder <- rt_string_builder_append(builder, "]")
-		return rt_string_builder_finish(builder)
+		prefix: cstr = rt_concat2_scratch(queue, "[")
+		numbered: cstr = rt_concat2_scratch(prefix, rt_int_to_string((vqid %% 260).i64()))
+		return rt_concat2_scratch(numbered, "]")
 
 def make_queue_label_with_suffix(vqid: int, suffix: cstr) -> cstr:
 	can Memory.Allocate, Abort.Panic, Console.Format:
-		builder: mutable heap StringBuilder& = rt_string_builder_new(make_queue_label(vqid))
-		builder <- rt_string_builder_append(builder, suffix)
-		return rt_string_builder_finish(builder)
+		return rt_concat2_scratch(make_queue_label(vqid), suffix)
 
 @test
 def short_string_builder_finish_regression() -> void:
@@ -1147,10 +1143,8 @@ def short_string_builder_cross_path_stress_regression() -> void:
 		total: mutable i64 = 0
 		for i in 0..<16000:
 			base: cstr = make_queue_label((i %% 260).int())
-			builder: mutable heap StringBuilder& = rt_string_builder_new(base)
-			builder <- rt_string_builder_append(builder, ":")
-			builder <- rt_string_builder_append(builder, rt_int_to_string((ctx_strlen(base) + (i %% 11).i64()).i64()))
-			label: cstr = rt_string_builder_finish(builder)
+			with_colon: cstr = rt_concat2_scratch(base, ":")
+			label: cstr = rt_concat2_scratch(with_colon, rt_int_to_string((ctx_strlen(base) + (i %% 11).i64()).i64()))
 			assert ctx_strlen(label) >= 8
 			assert ctx_strlen(label) <= 12
 			total += ctx_strlen(label)

@@ -62,7 +62,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Fallback != nil && fallback == nil) {
 			return nil
 		}
-		return &ast.IndexExpr{Position: n.Position, Object: object, Index: index, Fallback: fallback}
+		return &ast.IndexExpr{Position: n.Position, Object: object, Index: index, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
 	case *ast.SliceExpr:
 		object := cloneDefaultArgExpr(n.Object)
 		start := cloneDefaultArgExpr(n.Start)
@@ -218,7 +218,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if (n.Value != nil && value == nil) || (n.Fallback != nil && fallback == nil) {
 			return nil
 		}
-		return &ast.UnwrapElseExpr{Position: n.Position, Value: value, Fallback: fallback}
+		return &ast.UnwrapElseExpr{Position: n.Position, Value: value, Fallback: fallback, Recovery: n.Recovery, LegacyImplicitElse: n.LegacyImplicitElse}
 	case *ast.GetExpr:
 		value := cloneDefaultArgExpr(n.Value)
 		fallback := cloneDefaultArgExpr(n.Fallback)

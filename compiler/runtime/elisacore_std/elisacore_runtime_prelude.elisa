@@ -273,6 +273,7 @@ def string_builder_next_cap(min_cap: i64) -> i64:
 			cap *= 2
 	return cap
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
 def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
 		src: u8& = initial if initial != null else ""
@@ -289,6 +290,7 @@ def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
 		builder.data[len] <- 0
 		return builder
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
 def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
 	can Memory.Allocate, Abort.Panic:
 		src: u8& = suffix if suffix != null else ""
@@ -320,6 +322,7 @@ def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -
 		b.data[b.len.usize()] <- 0
 		return b
 
+@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
 def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
 	can Memory.Allocate, Abort.Panic:
 		if builder == null:

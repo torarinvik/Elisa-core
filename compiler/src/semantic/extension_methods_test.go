@@ -290,51 +290,51 @@ func TestAnalyzeUFCSRuntimeReceiverMethodsOnGenericStructs(t *testing.T) {
 struct FixtureSymbol:
     value: mutable i32
 
-struct SymbolTableNamespace:
+struct RegistryNamespace:
     marker: u8
 
-struct SymbolTable[K, T]:
+struct Registry[K, T]:
     marker: u8
 
-extern SymbolTableSlot
-type SymbolTableId = id[SymbolTableSlot]
+extern RegistrySlot
+type RegistryId = id[RegistrySlot]
 
-global symtab: SymbolTableNamespace = SymbolTableNamespace(0u8)
+global registry: RegistryNamespace = RegistryNamespace(0u8)
 
-def new[K, T](api: SymbolTableNamespace, owner: mutable Arena&) -> SymbolTable[K, T]:
+def new[K, T](api: RegistryNamespace, owner: mutable Arena&) -> Registry[K, T]:
     _ = api
     _ = owner
     return zeroed
 
-def declare[K, T](table: mutable SymbolTable[K, T]&, key: K, value: T) -> SymbolTableId:
+def declare[K, T](table: mutable Registry[K, T]&, key: K, value: T) -> RegistryId:
     _ = table
     _ = key
     _ = value
-    return 1u32.cast[SymbolTableId]
+    return 1u32.cast[RegistryId]
 
-def lookup[K, T](table: SymbolTable[K, T]&, key: K) -> T?:
+def lookup[K, T](table: Registry[K, T]&, key: K) -> T?:
     _ = table
     _ = key
     return null
 
-def update[K, T](table: mutable SymbolTable[K, T]&, symbol_id: SymbolTableId, value: T) -> bool:
+def update[K, T](table: mutable Registry[K, T]&, item_id: RegistryId, value: T) -> bool:
     _ = table
-    _ = symbol_id
+    _ = item_id
     _ = value
     return true
 
-def get[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+def get[K, T](table: Registry[K, T]&, item_id: RegistryId) -> T:
     _ = table
-    _ = symbol_id
+    _ = item_id
     return zeroed
 
 def read(a: mutable Arena&) -> i32:
     can Global.Read, Memory.Allocate, Abort.Panic:
-        table: mutable SymbolTable[cstr[key_shape], FixtureSymbol] = symtab.new(a)
-        symbol_id: SymbolTableId = table.declare("alpha", FixtureSymbol{value: 7})
+        table: mutable Registry[cstr[key_shape], FixtureSymbol] = registry.new(a)
+        item_id: RegistryId = table.declare("alpha", FixtureSymbol{value: 7})
         if table.lookup("alpha") is found:
-            _ = table.update(symbol_id, found)
-        return table.get(symbol_id).value
+            _ = table.update(item_id, found)
+        return table.get(item_id).value
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -748,32 +748,32 @@ def read(flag: bool) -> (value: bool, after: usize):
 	}
 }
 
-func TestAnalyzeMethodFunctionSupportsSymbolTableStyleReceiverCalls(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "method_symbol_table_receivers.elisa", `
-extern SymbolTableSlot
-type SymbolTableId = id[SymbolTableSlot]
+func TestAnalyzeMethodFunctionSupportsGenericReceiverCalls(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "method_generic_receivers.elisa", `
+extern RegistrySlot
+type RegistryId = id[RegistrySlot]
 
 struct SymbolEntry[T]:
     value: T
 
-struct SymbolTable[K, T]:
+struct Registry[K, T]:
     marker: u8
 
 
-def value[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> T:
+def value[K, T](table: Registry[K, T]&, item_id: RegistryId) -> T:
     _ = table
-    _ = symbol_id
+    _ = item_id
     return zeroed
 
 
-def entry[K, T](table: SymbolTable[K, T]&, symbol_id: SymbolTableId) -> SymbolEntry[T]:
+def entry[K, T](table: Registry[K, T]&, item_id: RegistryId) -> SymbolEntry[T]:
     _ = table
-    _ = symbol_id
+    _ = item_id
     return zeroed
 
-def read[T](table: SymbolTable[cstr, T]&, symbol_id: SymbolTableId) -> T:
-    _ = table.entry(symbol_id)
-    return table.value(symbol_id)
+def read[T](table: Registry[cstr, T]&, item_id: RegistryId) -> T:
+    _ = table.entry(item_id)
+    return table.value(item_id)
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -781,15 +781,15 @@ def read[T](table: SymbolTable[cstr, T]&, symbol_id: SymbolTableId) -> T:
 }
 
 func TestAnalyzeExternMethodFunctionSupportsReceiverCall(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "extern_method_builder.elisa", `
-struct DArrayBuilder[T]:
+	result := analyzeFunctionAnalysisTestSource(t, "extern_method_receiver.elisa", `
+struct ReadBox[T]:
     marker: u8
 
 
-extern finish[T](builder: DArrayBuilder[T]&) -> darray[T]
+extern finish[T](box: ReadBox[T]&) -> darray[T]
 
-def read(builder: DArrayBuilder[i64]&) -> darray[i64]:
-    return builder.finish()
+def read(box: ReadBox[i64]&) -> darray[i64]:
+    return box.finish()
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)

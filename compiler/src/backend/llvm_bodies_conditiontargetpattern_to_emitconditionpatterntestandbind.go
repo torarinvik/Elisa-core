@@ -162,7 +162,7 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 }
 
 // backendOptionalBindBoundType mirrors the analyzer's optionalBindBoundType: a
-// slice operand (`if let s = arr[a:b]:`) binds the bounded view, so its slot is
+// slice operand (`if arr[a:b] is s:`) binds the bounded view, so its slot is
 // allocated with the view type; other operands use the optional/nullable unwrap.
 func (s *functionState) backendOptionalBindBoundType(expr *ast.OptionalBindExpr) (semantic.Type, bool) {
 	if _, ok := unwrapToSliceForBind(expr.Value); ok {
@@ -193,7 +193,7 @@ func (s *functionState) emitOptionalBindTest(expr *ast.OptionalBindExpr) (C.LLVM
 	if expr == nil || expr.Value == nil {
 		return nil, nil, nil, fmt.Errorf("invalid let condition")
 	}
-	// `if let s = arr[a:b]:` — a bounds-checked slice. "Present" means the bounds
+	// `if arr[a:b] is s:` — a bounds-checked slice. "Present" means the bounds
 	// are within the source; the bound value is the bounded view.
 	if slice, ok := unwrapToSliceForBind(expr.Value); ok {
 		usizeType := s.g.result.NamedTypes["usize"]

@@ -31,6 +31,9 @@ def read(xs: darray[int], i: usize) -> int:
 	if indexExpr.Fallback == nil {
 		t.Fatal("expected index fallback expression")
 	}
+	if !indexExpr.LegacyElseFallback {
+		t.Fatal("expected legacy index fallback marker")
+	}
 	if got := unparse.FormatExpr(indexExpr); got != "xs[i] else 0" {
 		t.Fatalf("expected canonical index fallback, got %q", got)
 	}

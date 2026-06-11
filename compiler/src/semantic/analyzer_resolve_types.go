@@ -180,11 +180,6 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		args := make([]Type, 0, len(n.Args))
 		surfaceName := n.Name
 		lookupName := n.Name
-		if n.Name == "Builder" {
-			if _, _, ok := a.lookupVisibleType("DArrayBuilder"); ok {
-				lookupName = "DArrayBuilder"
-			}
-		}
 		base, canonical, ok := a.lookupVisibleType(lookupName)
 		if !ok {
 			if qualified, owner, privateHit := a.inaccessiblePrivateName(lookupName); privateHit {

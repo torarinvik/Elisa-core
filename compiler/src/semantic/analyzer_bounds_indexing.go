@@ -70,7 +70,7 @@ func (a *Analyzer) constSliceLength(expr *ast.SliceExpr) (int64, bool) {
 }
 
 // applyViewStaticLenForCondition records static-length facts for views bound by
-// `if let s = arr[a:b]:` conditions, so constant inner indexing inside the
+// `if arr[a:b] is s:` conditions, so constant inner indexing inside the
 // truthy block is provably in bounds. Runs inside the block's scoped fact map.
 func (a *Analyzer) applyViewStaticLenForCondition(cond ast.Expr, truthy bool) {
 	if a == nil || !truthy {

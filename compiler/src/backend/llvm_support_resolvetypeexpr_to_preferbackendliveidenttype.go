@@ -172,11 +172,6 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			return t, err
 		}
 		lookupName := n.Name
-		if n.Name == "Builder" {
-			if _, ok := s.g.result.NamedTypes["DArrayBuilder"]; ok {
-				lookupName = "DArrayBuilder"
-			}
-		}
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {
 			if canon, ok := s.g.result.ResolvedTypeNames[n]; ok {
 				// Canonicalize so the generic instance name matches the analyzer's

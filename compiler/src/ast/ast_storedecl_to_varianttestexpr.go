@@ -490,6 +490,10 @@ type IndexExpr struct {
 	Object   Expr
 	Index    Expr
 	Fallback Expr
+	// LegacyElseFallback marks a postfix `xs[i] else fallback` parsed directly from
+	// source. `get xs[i] else ...` still reuses IndexExpr.Fallback internally, so
+	// later stages use this marker to reject only the legacy implicit form.
+	LegacyElseFallback bool
 	// AsSpecialize is set by the analyzer when `fn[T]` over a generic function is reinterpreted
 	// as a single-type-arg value specialization (the single-arg counterpart of the multi-arg
 	// `fn[A, B]` SpecializeExpr the parser produces). When non-nil, codegen emits this instead

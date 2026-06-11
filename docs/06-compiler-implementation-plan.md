@@ -18,7 +18,7 @@ Implemented today:
 - fresh post-operation shapes for shape-changing APIs such as `resize`, `push`, `concat`, and `strcat`
 - indexing for `darray`, `view`, `cstr`, `str`, and `sview`
 - slice syntax for `darray`, `view`, fixed arrays, `cstr`, `str`, and `sview`
-- the built-in `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` surface syntax, with `view[T]` retained as a shorthand for compile-time array views
+- the built-in `view[T, begin, end]` and `sview[begin, end]` surface syntax, with `view[T]` retained as the dynamic-array view spelling
 - pointer arithmetic lowering (`ref + int`, `int + ref`, `ref - int`)
 - explicit reference comparisons (`ref == null`, `ref != null`, `ref == ref`)
 - end-to-end fixture coverage through the real CLI pipeline for `Code/test_programs/pointer_alloc.elisa` and `Code/test_programs/shape_ops.elisa`
@@ -91,7 +91,7 @@ This phase should focus on:
 
 not on complicated inference.
 
-Status: complete for `darray[T, shape]`, `cstr[shape]`, `view[T, begin, end]`, `dview[T]`, and `sview[begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `cstr`, bare `sview`, and `dview[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` surface has been removed from the language.
+Status: complete for `darray[T, shape]`, `cstr[shape]`, `view[T, begin, end]`, and `sview[begin, end]` under the current lightweight shape-witness model. The compiler accepts lowercase shape-erasing shorthand such as `darray[T]`, bare `cstr`, bare `sview`, and `view[T]` when code does not need to preserve an explicit logical shape relationship. The older `DList` / `DListView` and `dview[T]` surfaces have been removed from the language.
 
 ### Phase 3 — teach shape-changing APIs to produce fresh post-state shapes
 
@@ -444,10 +444,10 @@ Recommended rollout is now:
 
 The codebase is already following this staged approach:
 
-- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringBuilder`, `StringView`, and raw `u8&` string values
+- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringView`, and raw `u8&` string values; `StringBuilder` remains only as deprecated legacy runtime glue
 - `arena.elisa` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
 - `elisacore_runtime.elisa` stage 1 wrappers now expose typed logical APIs such as `rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
-- `arena.elisa` now also exposes typed non-owning `dview[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
+- `arena.elisa` now also exposes typed non-owning `view[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`
 - the semantic layer bridges these wrappers back onto the underlying runtime representations rather than forcing an immediate full runtime rewrite
 
 For example, the stage 1 wrappers now look like this:
@@ -460,10 +460,10 @@ def rt_concat2(lhs: cstr[shape_left], rhs: cstr[shape_right]) -> cstr[shape_resu
     text: cstr[shape_result] = concat2(lhs, rhs) else raise RuntimeError.AllocationFailed
     return text
 
-def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
+def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> sview:
     return sview(value, start, end)
 
-def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
+def ctx_string_from_view(view: sview) -> cstr[shape_out]:
     return string_view_copy(view)
 ```
 
@@ -478,7 +478,7 @@ def arena_da_append_many[T](a: Arena&, da: darray[T, shape_in]&, new_items: T&, 
     # implementation grows/copies as needed
     return da
 
-def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> dview[T]:
+def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
     # implementation creates a typed runtime-backed non-owning view
     return DynArrayView(null, 0, size_of(T))
 ```
@@ -489,12 +489,12 @@ More concretely, the current semantic bridge is intentionally narrow and wrapper
 
 - `cstr[shape_id]` is allowed to flow across the runtime boundary as raw `u8&` / `u8&?` string values
 - `darray[T, shape_id]` can likewise ride on the existing `DynArray[T]` representation for arena-backed helpers
-- `dview[T]` is allowed to flow across the runtime boundary as `DynArrayView`
+- `view[T]` is allowed to flow across the runtime boundary as `DynArrayView`
 - `sview[begin, end]` / `StringView` is allowed to flow across the runtime boundary as the raw string-view carrier
 
 Naming policy: lowercase forms are the canonical user-facing spellings, while CamelCase forms such as `DynArray`, `DynArrayView`, `StringView`, and `DynDict` are runtime carrier types that should stay confined to runtime/interop code.
 
-Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone; dynamic collection work now goes through lowercase `darray`, compile-time `view`, and runtime `dview` only.
+Legacy raw list wrappers and carriers have been removed entirely. The older typed `DList` / `DListView` surface is also gone, and `dview[T]` has been removed in favor of `view[T]`; dynamic collection work now goes through lowercase `darray` and `view` only.
 
 That means the typechecker can track logical shape states at the wrapper/API level while still reusing the existing low-level runtime layouts internally, and the public wrappers can expose typed `error[...]` returns when allocation or growth may fail.
 
@@ -513,7 +513,7 @@ If I were choosing the concrete first implementation boundary, it would be:
 - no arithmetic shape expressions yet
 - no full generic dependent inference
 
-Status: this MVP boundary has effectively been reached and pushed beyond. The current compiler also includes runtime-backed indexing/slicing, `view` / `dview` / `sview` surface types, string helper lowering, pointer arithmetic, reference comparisons, and CLI-level fixture tests.
+Status: this MVP boundary has effectively been reached and pushed beyond. The current compiler also includes runtime-backed indexing/slicing, `view` / `sview` surface types, string helper lowering, pointer arithmetic, reference comparisons, and CLI-level fixture tests.
 
 String indexing now yields `char`; convert explicitly with `.i64()` when you want a numeric code unit.
 
@@ -590,7 +590,7 @@ Recommended internal split:
 This matches the current style where:
 
 - `darray[T, shape]` bridges to `DynArray[T]`
-- `dview[T]` bridges to `DynArrayView`
+- `view[T]` bridges to `DynArrayView`
 - `cstr[shape]` bridges to raw `u8&`
 - `sview[begin, end]` bridges to `StringView`
 

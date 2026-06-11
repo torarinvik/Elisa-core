@@ -18,7 +18,7 @@ def dict_i64_growth_churn_impl(repeats: i64) -> i64:
 		for i in 0..<n:
 			d.put(i, i * 3)
 		for i in 0..<n:
-			slot: i64& = get d.get(i) else return -1
+			slot: i64& = get d[i] else return -1
 			total <- total + slot[0]
 		for i in 0..<n:
 			if i % 3 == 0:
@@ -28,7 +28,7 @@ def dict_i64_growth_churn_impl(repeats: i64) -> i64:
 			if i % 3 == 0:
 				d.put(i, i * 5)
 		for i in 0..<n:
-			slot: i64& = get d.get(i) else return -3
+			slot: i64& = get d[i] else return -3
 			total <- total + slot[0]
 		total <- total + d.count.i64() + d.used.i64() + d.capacity.i64()
 		return dict_bench_escape(total)
@@ -47,9 +47,9 @@ def dict_cstr_lookup_impl(repeats: i64) -> i64:
 		}
 		total: mutable i64 = 0
 		for _ in 0..<repeats:
-			a: i64& = get d.get("alpha") else return -11
-			g: i64& = get d.get("gamma") else return -12
-			t: i64& = get d.get("theta") else return -13
+			a: i64& = get d["alpha"] else return -11
+			g: i64& = get d["gamma"] else return -12
+			t: i64& = get d["theta"] else return -13
 			total <- total + a[0] + g[0] + t[0]
 			if d.contains("missing"):
 				return -14
@@ -66,10 +66,10 @@ def dict_enum_bool_impl(repeats: i64) -> i64:
 		flags: mutable dict[bool, i64] = {true: 13, false: 17}
 		total: mutable i64 = 0
 		for _ in 0..<repeats:
-			a: i64& = get kinds.get(DictBenchKind.Alpha) else return -21
-			d: i64& = get kinds.get(DictBenchKind.Delta) else return -22
-			t: i64& = get flags.get(true) else return -23
-			f: i64& = get flags.get(false) else return -24
+			a: i64& = get kinds[DictBenchKind.Alpha] else return -21
+			d: i64& = get kinds[DictBenchKind.Delta] else return -22
+			t: i64& = get flags[true] else return -23
+			f: i64& = get flags[false] else return -24
 			total <- total + a[0] + d[0] + t[0] + f[0]
 			kinds.put(DictBenchKind.Beta, total)
 		return dict_bench_escape(total)

@@ -8,7 +8,7 @@ import (
 )
 
 func TestAnalyzeDArrayBuilderLiteralAndPushSugar(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_builder_push.elisa", `def build(owner: Arena) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_push.elisa", `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]
     in alloc:
         xs: mutable darray[i64] = []
@@ -97,43 +97,6 @@ def build() -> usize:
 	arena, ok := canStmt.Body[0].(*ast.RegionStmt)
 	if !ok || arena.Name != "scratch" || arena.OwnerName != "owner" || len(arena.Body) != 3 {
 		t.Fatalf("expected scoped arena shorthand to analyze as region body, got %T %#v", canStmt.Body[0], canStmt.Body[0])
-	}
-}
-
-func TestAnalyzeBuilderAliasResolvesToDArrayBuilder(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "builder_alias.elisa", `struct LocalBuilder[T]:
-    value: T
-
-struct DArrayBuilder[T]:
-    value: T
-
-def builder(owner: Arena&) -> DArrayBuilder[i64]:
-    _ = owner
-    return DArrayBuilder[i64]{value: 11}
-
-def build(owner: Arena) -> i64:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    items: Builder[i64] in alloc
-    return items.value
-`)
-
-	var decl *ast.VarDeclStmt
-	for _, node := range result.File.Decls {
-		fn, ok := node.(*ast.FuncDecl)
-		if !ok || fn.Name != "build" {
-			continue
-		}
-		decl, _ = fn.Body[1].(*ast.VarDeclStmt)
-	}
-	if decl == nil {
-		t.Fatal("expected builder declaration")
-	}
-	typ, ok := result.ExprTypes[decl.Value].(*GenericInstanceType)
-	if !ok || typ.Name != "DArrayBuilder" {
-		t.Fatalf("expected Builder[T] to resolve through DArrayBuilder[T], got %T %#v", result.ExprTypes[decl.Value], result.ExprTypes[decl.Value])
-	}
-	if builtin, ok := typ.Args[0].(*BuiltinType); !ok || builtin.Name != "i64" {
-		t.Fatalf("expected builder element type i64, got %#v", typ.Args[0])
 	}
 }
 

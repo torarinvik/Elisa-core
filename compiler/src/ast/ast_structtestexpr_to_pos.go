@@ -80,6 +80,11 @@ type UnwrapElseExpr struct {
 	Value    Expr
 	Fallback Expr
 	Recovery *RecoveryClause
+	// LegacyImplicitElse marks a parser-recovered `value else ...` optional unwrap.
+	// The modern surface spelling is `get value else ...`; this flag lets later
+	// stages preserve the shared recovery shape without accepting the legacy syntax
+	// as an ordinary source construct.
+	LegacyImplicitElse bool
 }
 type OptionalBindExpr struct {
 	Position lexer.Pos
