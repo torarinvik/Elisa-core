@@ -616,6 +616,46 @@ def main() -> i64:
 	}
 }
 
+// docs/77 Phase 4: hierarchy column scan. The SOA hierarchy shares ONE root store, so a root
+// scan streams every node's common column, and a SUB-CATEGORY scan range-filters rows by tag
+// (`tag - LeafTagLo <u LeafTagCount`) before reading the column. Expr nodes carry spans 1,2,4
+// and the Stmt node 8: root sum = 15, Expr-only sum = 7, Stmt-only sum = 8.
+func TestHierarchyColumnScanRangeFilters(t *testing.T) {
+	runEnumHierarchyProgram(t, "hier_colscan.elisa", `
+enum Node layout soa:
+    common(span: i64)
+enum Expr is Node:
+    Lit(value: i64)
+    Add(left: Node, right: Node)
+enum Stmt is Node:
+    Print(target: Node)
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Node = new[auto] Expr.Lit(span: 1, value: 5)
+            b: Node = new[auto] Expr.Lit(span: 2, value: 7)
+            c: Node = new[auto] Expr.Add(span: 4, left: a, right: b)
+            d: Node = new[auto] Stmt.Print(span: 8, target: c)
+            all_total: mutable i64 = 0
+            for s in Node of .span:
+                all_total <- all_total + s
+            if all_total != 15:
+                panic("root column scan produced wrong sum")
+            expr_total: mutable i64 = 0
+            for s in Expr of .span:
+                expr_total <- expr_total + s
+            if expr_total != 7:
+                panic("category column scan must range-filter to Expr rows")
+            stmt_total: mutable i64 = 0
+            for s in Stmt of .span:
+                stmt_total <- stmt_total + s
+            if stmt_total != 8:
+                panic("category column scan must range-filter to Stmt rows")
+`)
+}
+
 // expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
 func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
 	t.Helper()

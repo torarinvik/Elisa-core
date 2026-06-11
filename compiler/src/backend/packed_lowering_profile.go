@@ -67,8 +67,13 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 	if p.hasExplicitMode {
 		return p.explicitMode
 	}
-	if enumType.HasPackedABIOverride {
-		if abi, err := ParsePackedEnumABI(enumType.PackedABIOverride); err == nil {
+	// docs/77: the lowering mode is a ROOT-level fact — a sealed hierarchy shares ONE store, so
+	// every sub-category must resolve the same mode as the root that shaped it (a child carries no
+	// layout suffix of its own; consulting the child's fields here would split the hierarchy
+	// between AoS constructors and a columnar root store).
+	root := enumType.Root()
+	if root.HasPackedABIOverride {
+		if abi, err := ParsePackedEnumABI(root.PackedABIOverride); err == nil {
 			if mode, err := abi.mode(); err == nil {
 				return mode
 			}
@@ -78,7 +83,7 @@ func (p PackedLoweringProfile) packedModeForPackedEnum(enumType *semantic.EnumTy
 	// per node, dense index handle) — the speed default — unless the author opted into the columnar
 	// layout with `enum X layout soa`. Verified at scale (binary-trees N=18: 0.38s/22MB, ~5.5x faster
 	// and 4x lighter than SoA, beating the struct form and hand-written C++/Rust arenas).
-	if enumType.RecursivePlain && !(enumType.LayoutSet && enumType.Layout == ast.StructLayoutSOA) {
+	if root.RecursivePlain && !(root.LayoutSet && root.Layout == ast.StructLayoutSOA) {
 		return packedEnumABIAoS
 	}
 	return p.canonicalPackedMode()

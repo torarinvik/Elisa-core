@@ -65,7 +65,7 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 		if err != nil {
 			return nil, nil, err
 		}
-		tagType := enumType.TagType
+		tagType := enumType.Root().TagType
 		if tagType == nil {
 			return nil, nil, fmt.Errorf("enum %q has no tag type for column scan", enumType.Name)
 		}
@@ -76,14 +76,16 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 		return coerced, tagType, nil
 	}
 
-	layout, err := s.g.packedEnumCommonFieldLayout(enumType, colExpr.Field)
+	// docs/77 Phase 4: the row shape (and so every column offset) is the ROOT's — one store,
+	// one shape, shared by every sub-category.
+	layout, err := s.g.packedEnumCommonFieldLayout(enumType.Root(), colExpr.Field)
 	if err != nil {
 		return nil, nil, err
 	}
 	if !layout.StoredInline {
 		return nil, nil, fmt.Errorf("column scan `%s of .%s` over a side-tabled common field is not yet supported", colExpr.Enum, colExpr.Field)
 	}
-	fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(enumType, layout.RowFieldIndex)
+	fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(enumType.Root(), layout.RowFieldIndex)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -101,4 +103,37 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 		return nil, nil, err
 	}
 	return value, layout.Field.Type, nil
+}
+
+// emitEnumColumnScanCategoryFilter is the docs/77 Phase 4 range filter: when the scanned type is
+// a strict sub-category of its hierarchy root, the shared root store also holds rows of OTHER
+// categories, so each row's tag is range-tested (`tag - LeafTagLo <u LeafTagCount`) and
+// non-matching rows jump to the loop's step block. Root scans (and flat enums, which are their
+// own root) emit nothing. Returns true when a filter branch was emitted; the caller must then
+// position at the returned match block.
+func (s *functionState) emitEnumColumnScanCategoryFilter(colExpr *ast.EnumColumnExpr, indexValue C.LLVMValueRef, stepBB C.LLVMBasicBlockRef, name string) (bool, error) {
+	enumType, ops, err := s.resolveColumnScanStore(colExpr)
+	if err != nil {
+		return false, err
+	}
+	root := enumType.Root()
+	if enumType == root {
+		return false, nil
+	}
+	stateValue, err := ops.stateValue(name + ".col.filter.state")
+	if err != nil {
+		return false, err
+	}
+	tagValue, err := ops.loadIndexSOATagDirect(stateValue, indexValue, name+".col.filter.tag")
+	if err != nil {
+		return false, err
+	}
+	inRange, _, err := s.emitTagRangeTest(tagValue, enumType.LeafTagLo, enumType.LeafTagCount)
+	if err != nil {
+		return false, err
+	}
+	matchBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(name+".col.filter.match"))
+	C.LLVMBuildCondBr(s.builder, inRange, matchBB, stepBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, matchBB)
+	return true, nil
 }

@@ -453,6 +453,12 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		lastIndex := C.LLVMBuildSub(s.builder, countValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.rev.last"))
 		iterIndexValue = C.LLVMBuildSub(s.builder, lastIndex, indexValue, cStringFree("iter.rev.index"))
 	}
+	if colExpr, ok := iterSourceExpr.(*ast.EnumColumnExpr); ok {
+		if _, err := s.emitEnumColumnScanCategoryFilter(colExpr, iterIndexValue, stepBB, sourceName); err != nil {
+			s.popScope()
+			return err
+		}
+	}
 	var boundItemValue C.LLVMValueRef
 	var boundItemPtr C.LLVMValueRef
 	if stmt.Mode == ast.IterBindValue {

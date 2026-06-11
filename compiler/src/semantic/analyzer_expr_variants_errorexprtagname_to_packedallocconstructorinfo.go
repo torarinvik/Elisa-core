@@ -109,18 +109,21 @@ func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
 		a.errorf(expr.Pos(), "column scan requires an enum type, got %s", base)
 		return invalidType
 	}
-	if !enumType.Packed || !enumType.LayoutSet || enumType.Layout != ast.StructLayoutSOA {
-		a.errorf(expr.Pos(), "column scan `%s of .%s` requires `enum %s layout soa`; the default layout stores nodes row-major (AoS), which has no dense columns", expr.Enum, expr.Field, expr.Enum)
+	// docs/77 Phase 4: the column layout is a ROOT-level fact — a sealed hierarchy shares one
+	// store, so a sub-category scan reads the root's columns filtered to the category's tag range.
+	root := enumType.Root()
+	if !root.Packed || !root.LayoutSet || root.Layout != ast.StructLayoutSOA {
+		a.errorf(expr.Pos(), "column scan `%s of .%s` requires `enum %s layout soa`; the default layout stores nodes row-major (AoS), which has no dense columns", expr.Enum, expr.Field, root.Name)
 		return invalidType
 	}
 	var elem Type
 	switch {
 	case expr.Field == "tag":
-		if enumType.TagType == nil {
-			a.errorf(expr.Pos(), "enum %q has no tag column", enumType.Name)
+		if root.TagType == nil {
+			a.errorf(expr.Pos(), "enum %q has no tag column", root.Name)
 			return invalidType
 		}
-		elem = enumType.TagType
+		elem = root.TagType
 	default:
 		field, ok := enumType.Common[expr.Field]
 		if !ok {
