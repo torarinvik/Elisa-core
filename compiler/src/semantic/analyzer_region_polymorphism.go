@@ -31,7 +31,13 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			if fnType == nil || fnType.RegionPolymorphic {
 				continue
 			}
-			if a.functionReturnsRegionAllocatedValue(fn) || functionBuildsAndReturnsLocalContainer(fn) {
+			// A function that threads an allocator (`Arena&` param) manages its own
+			// allocation — same gate as functionBuildsAndReturnsLocalContainer and the
+			// parser's maybeWrapFunctionBodyInAutoRegion: its returned node was built
+			// into the explicit arena (`in alloc:`), not an adoptable inferred region,
+			// so classifying it region-polymorphic would inject a spurious
+			// `__region_auto` param and break its callers.
+			if (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) || functionBuildsAndReturnsLocalContainer(fn) {
 				fnType.RegionPolymorphic = true
 				changed = true
 			}

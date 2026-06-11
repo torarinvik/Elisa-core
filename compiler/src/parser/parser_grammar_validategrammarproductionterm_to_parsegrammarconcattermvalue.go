@@ -155,7 +155,18 @@ func (p *Parser) parseGrammarProductionDecls() []ast.GrammarProductionDecl {
 	var recoverUntil []ast.GrammarTerm
 	var recoverValue ast.Expr
 	if p.match(lexer.TOKEN_ARROW) {
-		retType = p.parseTypeExpr()
+		// `-> Stmt recover(...)`: the bare name followed by the recover spec must parse as
+		// type `Stmt`, not as the removed `region T&` two-ident prefix type — intercept a
+		// dotted ident chain whose next tokens are exactly `recover (` and take it whole.
+		if name, width, ok := p.peekDottedIdentBeforeRecoverSpec(); ok {
+			typePos := p.cur().Pos
+			for i := 0; i < width; i++ {
+				p.advance()
+			}
+			retType = &ast.NamedType{Position: typePos, Name: name}
+		} else {
+			retType = p.parseTypeExpr()
+		}
 	}
 	if p.peekIdentText("recover") {
 		recoverPolicy, recoverMsg, recoverUntil, recoverValue = p.parseGrammarRecoverSpec()
@@ -488,4 +499,23 @@ func (p *Parser) parseGrammarConcatTermValue() ast.GrammarTerm {
 		terms = append(terms, p.parseGrammarAtomicTermValue())
 	}
 	return &ast.GrammarConcatTerm{Position: term.Pos(), Terms: terms}
+}
+
+// peekDottedIdentBeforeRecoverSpec reports a dotted identifier chain at the cursor that is
+// immediately followed by `recover (` — the grammar-production return type position where the
+// removed region-prefix grammar would otherwise swallow `recover` as a reference's base name.
+func (p *Parser) peekDottedIdentBeforeRecoverSpec() (string, int, bool) {
+	if p.peek() != lexer.TOKEN_IDENT {
+		return "", 0, false
+	}
+	name := p.tokens[p.pos].Text
+	width := 1
+	for p.pos+width+1 < len(p.tokens) && p.tokens[p.pos+width].Kind == lexer.TOKEN_DOT && p.tokens[p.pos+width+1].Kind == lexer.TOKEN_IDENT {
+		name += "." + p.tokens[p.pos+width+1].Text
+		width += 2
+	}
+	if p.pos+width+1 < len(p.tokens) && p.tokens[p.pos+width].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+width].Text == "recover" && p.tokens[p.pos+width+1].Kind == lexer.TOKEN_LPAREN {
+		return name, width, true
+	}
+	return "", 0, false
 }

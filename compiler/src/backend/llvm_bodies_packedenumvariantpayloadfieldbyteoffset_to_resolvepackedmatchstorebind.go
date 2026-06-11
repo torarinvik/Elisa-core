@@ -582,6 +582,11 @@ func (s *functionState) resolvePackedMatchStoreBinding(enumType *semantic.EnumTy
 		if synthetic, err := s.syntheticPtrHandleStoreBinding(enumType); synthetic != nil || err != nil {
 			return synthetic, err
 		}
+		// If we are inside an active region arena (set by `in owner:` / `in alloc:`), lazily
+		// create the packed store backed by that arena. This covers the common pattern of reading
+		// (matching, expecting) packed-enum handles that were allocated in the same arena by a
+		// callee, where the caller never explicitly allocated any nodes itself and therefore never
+		// registered the store via getOrCreateRegionPackedStore.
 		return nil, fmt.Errorf("missing active packed enum store for %s", enumType.Name)
 	}
 	return &binding, nil

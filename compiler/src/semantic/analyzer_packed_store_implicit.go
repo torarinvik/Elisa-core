@@ -401,14 +401,26 @@ func packedStoreImplicitArgExpr(storeType *PackedEnumStoreType) ast.Expr {
 // collectPackedEnumsInType records the packed enums appearing in a type, canonicalized to their
 // hierarchy ROOT (docs/77) — a sealed hierarchy shares ONE store per root, so threading keys, param
 // names, and store types are all the root's. For a plain enum the root is itself.
+// Struct fields and darray/slice elements are walked recursively so that a function whose signature
+// mentions a struct or container holding packed-enum handles (e.g. a parse-result struct wrapping a
+// darray[Stmt]) also receives the implicit store threading it needs.
 func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
+	collectPackedEnumsInTypeDepth(t, out, 0)
+}
+
+const collectPackedEnumsMaxDepth = 8 // guard against infinite recursion in recursive types
+
+func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) {
+	if depth > collectPackedEnumsMaxDepth {
+		return
+	}
 	switch tt := StripAggregateStateType(t).(type) {
 	case *RefType:
-		collectPackedEnumsInType(tt.Elem, out)
+		collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1)
 	case *OptionalType:
-		collectPackedEnumsInType(tt.Value, out)
+		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1)
 	case *ErrorUnionType:
-		collectPackedEnumsInType(tt.Value, out)
+		collectPackedEnumsInTypeDepth(tt.Value, out, depth+1)
 	case *EnumType:
 		if tt != nil && tt.Packed {
 			root := tt.Root()
@@ -418,6 +430,22 @@ func collectPackedEnumsInType(t Type, out map[string]*EnumType) {
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {
 			root := tt.Enum.Root()
 			out[root.Name] = root
+		}
+	case *DArrayType:
+		if tt != nil {
+			collectPackedEnumsInTypeDepth(tt.Elem, out, depth+1)
+		}
+	case *StructType:
+		if tt != nil {
+			for _, field := range tt.Fields {
+				collectPackedEnumsInTypeDepth(field.Type, out, depth+1)
+			}
+		}
+	case *TupleType:
+		if tt != nil {
+			for _, field := range tt.Fields {
+				collectPackedEnumsInTypeDepth(field.Type, out, depth+1)
+			}
 		}
 	}
 }

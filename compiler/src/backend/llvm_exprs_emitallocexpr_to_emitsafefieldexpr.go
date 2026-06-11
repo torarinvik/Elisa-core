@@ -251,11 +251,24 @@ func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LL
 // as the active store so subsequent new[auto] allocations and storeless `match` resolve to it.
 func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType) (packedStoreBinding, error) {
 	arenaPtr := s.treeAllocOwner.arenaRef
+	// regionKey is the stable identity for the arena so that the "is this the same arena?" check below
+	// uses a compile-time-constant SSA value (an alloca pointer) rather than a loaded pointer value that
+	// is a fresh SSA each time. For direct Arena values (arenaRef), the alloca IS the stable key. For
+	// Arena& references (arenaRefPtr), use the alloca that holds the reference pointer.
+	regionKey := arenaPtr
+	if arenaPtr == nil && s.treeAllocOwner.arenaRefPtr != nil {
+		regionKey = s.treeAllocOwner.arenaRefPtr
+		loaded, err := s.treeOwnerArenaRefValue(s.treeAllocOwner, "packed.store.owner.arena")
+		if err != nil {
+			return packedStoreBinding{}, err
+		}
+		arenaPtr = loaded
+	}
 	if binding, ok := s.lookupPackedStore(enumType); ok {
 		// Reuse an explicit/threaded store (regionArena nil) unconditionally, or an implicit store
 		// built on the CURRENT region arena. An implicit store from an outer region (different arena)
 		// falls through to build a fresh one so nested-region trees stay region-local.
-		if binding.regionArena == nil || binding.regionArena == arenaPtr {
+		if binding.regionArena == nil || binding.regionArena == regionKey {
 			return binding, nil
 		}
 	}
@@ -276,7 +289,7 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 	if s.packedStores == nil {
 		s.packedStores = map[string]packedStoreBinding{}
 	}
-	binding := packedStoreBinding{value: storeValue, typ: storeType, regionArena: arenaPtr}
+	binding := packedStoreBinding{value: storeValue, typ: storeType, regionArena: regionKey}
 	s.packedStores[packedStoreKey(enumType)] = binding
 	return binding, nil
 }

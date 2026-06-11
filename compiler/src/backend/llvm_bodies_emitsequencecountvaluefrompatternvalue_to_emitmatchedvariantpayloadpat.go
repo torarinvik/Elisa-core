@@ -441,6 +441,11 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if !ok {
 			return nil, packedPayloadValueCache{}, fmt.Errorf("variant pattern %s.%s requires enum, const enum, or error set type, got %s", p.EnumName, p.Variant, actualType.String())
 		}
+		if enumType.Packed && store == nil {
+			if b, ok2 := s.lookupPackedStore(enumType); ok2 {
+				store = &b
+			}
+		}
 		variant, ok := s.resolveEnumArmVariant(enumType, p)
 		if !ok {
 			return nil, packedPayloadValueCache{}, fmt.Errorf("enum %s has no variant %s", enumType.Name, p.Variant)

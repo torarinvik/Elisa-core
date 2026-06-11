@@ -885,7 +885,17 @@ func (s *functionState) emitConditionPatternTestAndBind(pattern ast.MatchPattern
 		}
 		return nil
 	}
-	if _, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, nil, actualExpr, nil, successBB, failureBB); err != nil {
+	var storeBinding *packedStoreBinding
+	if _, ok := pattern.(*ast.MatchVariantPattern); ok {
+		if enumType, ok2 := resolveMatchableEnumType(actualType); ok2 && enumType != nil && enumType.Packed {
+			resolved, err := s.resolvePackedMatchStoreBinding(enumType, actualExpr, nil)
+			if err != nil {
+				return err
+			}
+			storeBinding = resolved
+		}
+	}
+	if _, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, storeBinding, actualExpr, nil, successBB, failureBB); err != nil {
 		return err
 	}
 	return nil

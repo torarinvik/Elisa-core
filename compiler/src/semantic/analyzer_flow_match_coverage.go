@@ -63,6 +63,13 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 		if _, ok := a.lookupPackedStore(enumType); ok {
 			return
 		}
+		// docs/74/77 consumer ergonomics: a region-backed (recursive-plain) enum matched under an
+		// ACTIVE arena scope (`in owner:`) resolves its store on demand at codegen — the same
+		// get-or-create the entry-point call sites use, so handles parsed into that arena match
+		// against the same store instance.
+		if enumType.RecursivePlain && a.currentAllocExpr != nil {
+			return
+		}
 		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
 		return
 	}
