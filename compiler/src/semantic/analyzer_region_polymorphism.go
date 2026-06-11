@@ -1,6 +1,11 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"fmt"
+	"reflect"
+
+	"elisacore/src/ast"
+)
 
 // RegionPolymorphicImplicitParamName is the synthetic name of the hidden region parameter threaded
 // into a region-polymorphic function (docs/75). It carries the caller's region as an Arena& value;
@@ -43,6 +48,11 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			}
 		}
 	}
+	// Inference-by-default for CALLERS: a non-region-polymorphic function that calls a
+	// region-polymorphic one needs an ambient region to thread in. The parser's
+	// maybeWrapFunctionBodyInAutoRegion can't see this case (callee polymorphism is a
+	// cross-file semantic fact), so wrap such bodies here, after the fixpoint settled.
+	a.wrapRegionPolyCallerBodies(funcs)
 	// docs/74: only enums actually built with `new[auto]` somewhere in the program are region-backed
 	// and eligible for implicit store threading; explicit-store enums must be left untouched.
 	regionBackedPacked := a.collectRegionBackedPackedEnums(funcs)
@@ -580,6 +590,158 @@ func (a *Analyzer) regionPolymorphicCallerRegionArg() (ast.Expr, bool) {
 		return &ast.Ident{Name: region}, true
 	}
 	return nil, false
+}
+
+// wrapRegionPolyCallerBodies wraps the body of each function that calls a region-polymorphic
+// callee outside any region scope in a synthesized lazy auto region, so the call site has a
+// region to thread (mirroring the parser's maybeWrapFunctionBodyInAutoRegion, which handles
+// direct allocations but cannot know callee polymorphism). Only non-region-polymorphic
+// functions without an Arena param are wrapped: a region-polymorphic caller threads its own
+// `__region_auto`, and an Arena-threading function manages allocation itself.
+func (a *Analyzer) wrapRegionPolyCallerBodies(funcs []*ast.FuncDecl) {
+	for _, fn := range funcs {
+		fnType := a.funcTypeForRegionPoly(fn)
+		if fnType == nil || fnType.RegionPolymorphic || funcHasArenaParam(fn) || len(fn.Body) == 0 {
+			continue
+		}
+		if !a.bodyCallsRegionPolyOutsideRegion(fn.Body) {
+			continue
+		}
+		// Tighten loops first (the semantic analogue of the parser's wrapReclaimableLoopBodies):
+		// a loop whose region-poly call results are iteration-local gets a per-iteration region,
+		// so each iteration's trees are reclaimed instead of accumulating for the whole loop.
+		a.tightenRegionPolyLoopBodies(fn.Body)
+		if !a.bodyCallsRegionPolyOutsideRegion(fn.Body) {
+			continue // every region-poly call now sits inside a loop region
+		}
+		pos := fn.Body[0].Pos()
+		fn.Body = []ast.Stmt{&ast.RegionStmt{
+			Position: pos,
+			Name:     fmt.Sprintf("__auto_%d", pos.Offset),
+			Lazy:     true,
+			Body:     fn.Body,
+		}}
+	}
+}
+
+// tightenRegionPolyLoopBodies wraps reclaimable loop bodies containing region-poly calls in a
+// per-iteration lazy region. Deliberately does NOT descend into explicit region/in-store scopes:
+// code there already compiled with accumulation semantics and must not change behavior. Only
+// previously-rejected code (region-poly calls with no ambient region) is affected.
+func (a *Analyzer) tightenRegionPolyLoopBodies(stmts []ast.Stmt) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ForStmt:
+			s.Body = a.tightenRegionPolyLoopBody(s.Body)
+		case *ast.WhileStmt:
+			s.Body = a.tightenRegionPolyLoopBody(s.Body)
+		case *ast.IterForStmt:
+			s.Body = a.tightenRegionPolyLoopBody(s.Body)
+		case *ast.IfStmt:
+			a.tightenRegionPolyLoopBodies(s.Then)
+			a.tightenRegionPolyLoopBodies(s.Else)
+		case *ast.CanStmt:
+			a.tightenRegionPolyLoopBodies(s.Body)
+		case *ast.ScopeStmt:
+			a.tightenRegionPolyLoopBodies(s.Body)
+		case *ast.MatchStmt:
+			for i := range s.Arms {
+				a.tightenRegionPolyLoopBodies(s.Arms[i].Body)
+			}
+		}
+	}
+}
+
+func (a *Analyzer) tightenRegionPolyLoopBody(body []ast.Stmt) []ast.Stmt {
+	a.tightenRegionPolyLoopBodies(body) // tighten nested loops first
+	if !a.loopBodyRegionPolyReclaimable(body) {
+		return body
+	}
+	pos := body[0].Pos()
+	return []ast.Stmt{&ast.RegionStmt{
+		Position: pos,
+		Name:     fmt.Sprintf("__auto_%d", pos.Offset),
+		Lazy:     true,
+		Body:     body,
+	}}
+}
+
+// loopBodyRegionPolyReclaimable reports whether a loop body's region-poly allocations are all
+// iteration-local, so a per-iteration region is safe and useful. Conservative: a region-allocated
+// RESULT bound to a name must be iteration-local; one assigned to an existing (possibly outer)
+// target disqualifies the loop; growing an outer container disqualifies it. A region-poly call
+// consumed within an expression (`acc <- acc + check(make(d))` yields a scalar) is always fine.
+func (a *Analyzer) loopBodyRegionPolyReclaimable(body []ast.Stmt) bool {
+	if len(body) == 0 || !a.bodyCallsRegionPolyOutsideRegion(body) {
+		return false
+	}
+	if ast.LoopBodyGrowsOuterContainer(body) {
+		return false
+	}
+	for _, stmt := range body {
+		switch s := stmt.(type) {
+		case *ast.VarDeclStmt:
+			if a.exprResultIsRegionAllocated(s.Value) && !ast.AllocationIsIterationLocal(s.Name, body) {
+				return false
+			}
+		case *ast.AssignStmt:
+			if a.exprResultIsRegionAllocated(s.Value) {
+				return false // the target may outlive the iteration
+			}
+		}
+	}
+	return true
+}
+
+// bodyCallsRegionPolyOutsideRegion reports whether the statements contain a direct call to a
+// region-polymorphic function that is not already inside a region scope (`region NAME:` /
+// `in owner:` subtrees supply their own ambient region and are skipped). Lambda bodies are
+// skipped too: a lambda runs in its eventual caller's context, not this function's.
+func (a *Analyzer) bodyCallsRegionPolyOutsideRegion(stmts []ast.Stmt) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.RegionStmt:
+				if len(n.Body) != 0 {
+					return // scoped region supplies the ambient region for its body
+				}
+			case *ast.InStoreStmt:
+				return // `in <owner>:` establishes an ambient owner
+			case *ast.LambdaExpr:
+				return
+			case *ast.CallExpr:
+				if ft := a.regionPolyCalleeFuncType(n); ft != nil && ft.RegionPolymorphic {
+					found = true
+					return
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // regionPolyCalleeFuncType resolves a direct call's callee to its FuncType when the callee is a plain

@@ -38,10 +38,10 @@ func TestAnalyzeAcceptsRegionPolymorphicReturnFromInAutoBlock(t *testing.T) {
 	}
 }
 
-// The safety boundary moves to the call site: a region-polymorphic function
-// (one that returns a region-threaded value) may only be called from inside an
-// inferred region, so the threaded region always has an owner.
-func TestAnalyzeRejectsRegionPolymorphicCallOutsideInferredRegion(t *testing.T) {
+// Inference-by-default extends to CALLERS: a function calling a region-polymorphic
+// callee with no explicit region gets a compiler-synthesized auto region wrapped
+// around its body, so the threaded region always has an owner — no ceremony needed.
+func TestAnalyzeAcceptsRegionPolymorphicCallViaInferredCallerRegion(t *testing.T) {
 	src := `def build() -> darray[i64]:
 	in auto:
 		xs: mutable darray[i64] = []
@@ -52,9 +52,9 @@ def use() -> i64:
 	ys: darray[i64] = build()
 	return ys[0]
 `
-	_, errs := parseAndAnalyze(t, "region_poly_call_reject.elisa", src)
-	if !strings.Contains(strings.Join(errs, "\n"), "region-polymorphic") {
-		t.Fatalf("expected calling a region-polymorphic function outside an inferred region to be rejected, got:\n%s", strings.Join(errs, "\n"))
+	_, errs := parseAndAnalyze(t, "region_poly_call_inferred_caller.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected a region-polymorphic call to infer the caller's region, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
