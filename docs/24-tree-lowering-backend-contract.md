@@ -29,9 +29,8 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 - `@index(field_name)` also materializes a frozen field column for dense AoS categories that should keep row-local payloads but still need one fast scalar scan path.
 - Payload-field indexes are supported when every variant that carries the field uses the same field type. Rows whose variant does not carry the field are zero-filled, so unguarded equality scans can match default-zero values accidentally.
 - Guard payload-field scans by `kind` when querying a specific variant, for example `count expr in frozen.Expr where kind == .Name and name_index == target`. If a query intentionally wants “any payload field with this name across all variants that carry it,” an unguarded scan is valid as long as `target` cannot be confused with the zero fill value or the caller accepts that semantics.
-- `tree_tags(frozen, "Category")` returns a readonly contiguous `view[u32]` over the frozen category tag column.
-- `tree_column(frozen, "Category", "field")` returns a readonly contiguous `view[T]` over a frozen common-field or indexed payload-field column.
-- These column views are SIMD-friendly query primitives and are intended to compose with `reduce_sum`, `chunks_exact`, `any`, `all`, and later `where_kind`.
+- Row-view queries and `.column(...)` are the public SIMD-friendly query primitives over frozen tag/common-field/indexed payload-field columns.
+- The old `tree_tags(frozen, "Category")` and `tree_column(frozen, "Category", "field")` helper spellings have been removed.
 - Dense `category_union` code should prefer explicit stores:
   `store = Tree.Store(owner)` followed by `in store:` around constructors, reads, visits, folds, rewrites, clones, and attributes.
 - `in owner:` remains valid for short-lived local construction/read scopes, but values that escape the scope should also carry an explicit store somewhere in the surrounding data model.

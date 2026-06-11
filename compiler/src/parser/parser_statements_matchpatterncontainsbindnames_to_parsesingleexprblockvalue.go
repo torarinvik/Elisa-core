@@ -189,7 +189,7 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 	}
 	return tail[0]
 }
-func buildOptionalIfLetChain(pos lexer.Pos, bindings []optionalReturnWithBinding, cond ast.Expr, body []ast.Stmt, elseBlock []ast.Stmt, index int) ast.Stmt {
+func buildOptionalIfLetChain(pos lexer.Pos, bindings []optionalIfBinding, cond ast.Expr, body []ast.Stmt, elseBlock []ast.Stmt, index int) ast.Stmt {
 	if index >= len(bindings) {
 		if cond != nil {
 			return &ast.IfStmt{Position: pos, Cond: cond, Then: body, Else: elseBlock}
@@ -539,14 +539,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		p.advance()
 		p.advance()
 		value := p.parseValueExprAllowTuple()
-		usedBlockDefault := false
-		if p.peek() == lexer.TOKEN_COLON {
-			value = p.rewriteGetOrInsertBlockValue(pos, value)
-			usedBlockDefault = true
-		}
-		if !usedBlockDefault {
-			p.expectNewlineAfterValueExpr(value)
-		}
+		p.expectNewlineAfterValueExpr(value)
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
 
@@ -613,14 +606,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	case lexer.TOKEN_LARROW:
 		p.advance()
 		value := p.parseValueExprAllowTuple()
-		usedBlockDefault := false
-		if p.peek() == lexer.TOKEN_COLON {
-			value = p.rewriteGetOrInsertBlockValue(pos, value)
-			usedBlockDefault = true
-		}
-		if !usedBlockDefault {
-			p.expectNewlineAfterValueExpr(value)
-		}
+		p.expectNewlineAfterValueExpr(value)
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
 	case lexer.TOKEN_QASSIGN:
@@ -663,44 +649,6 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 
 	p.expectNewlineAfterValueExpr(expr)
 	return &ast.ExprStmt{Position: pos, Expr: expr}
-}
-func (p *Parser) rewriteGetOrInsertBlockValue(pos lexer.Pos, value ast.Expr) ast.Expr {
-	call, ok := value.(*ast.CallExpr)
-	if !ok || call == nil {
-		p.errorf("block default syntax requires a call expression before ':'")
-		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		_ = p.parseBlock()
-		return value
-	}
-	fieldExpr, ok := call.Func.(*ast.FieldExpr)
-	if !ok || fieldExpr == nil || fieldExpr.Field != "get_or_insert" {
-		p.errorf("block default syntax currently requires a .get_or_insert(...) call before ':'")
-		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		_ = p.parseBlock()
-		return value
-	}
-	directDictCall := len(call.Args) == 1
-	entryDictCall := len(call.Args) == 0 && isDictEntryCallExpr(fieldExpr.Object)
-	if !directDictCall && !entryDictCall {
-		p.errorf("block default syntax requires either dict.get_or_insert(key) or dict.entry(key).get_or_insert() before ':'")
-		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		_ = p.parseBlock()
-		return value
-	}
-	defaultExpr := p.parseSingleExprBlockValue()
-	call.Args = append(call.Args, defaultExpr)
-	return call
-}
-func isDictEntryCallExpr(expr ast.Expr) bool {
-	call, ok := expr.(*ast.CallExpr)
-	if !ok || call == nil {
-		return false
-	}
-	fieldExpr, ok := call.Func.(*ast.FieldExpr)
-	return ok && fieldExpr != nil && fieldExpr.Field == "entry"
 }
 func (p *Parser) parseSingleExprBlockValue() ast.Expr {
 	pos := p.cur().Pos

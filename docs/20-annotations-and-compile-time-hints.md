@@ -256,8 +256,7 @@ def build(start: i64) -> Span:
 
 Current rules:
 
-- `@method` takes no arguments and requires at least one receiver parameter
-- `@method` works on both `def` and `extern` functions and enables receiver-call syntax
+- `@method` has been removed; receiver-call syntax is available for visible functions through the ordinary overload/UFCS path
 - `@internal` takes no arguments and marks internal-only surface
 - `@init` accepts zero arguments or one return-type name
 - `@init` function must be non-generic, non-variadic, and return a concrete struct type

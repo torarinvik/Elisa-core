@@ -139,8 +139,8 @@ def read(node: Node&?) -> i64:
 	return 0
 `)
 }
-func TestAnalyzeReturnQuestionEarlyReturnsOptionalPayload(t *testing.T) {
-	analyzeFunctionAnalysisTestSource(t, "return_question_optional_payload.elisa", `def first(left: i64?, right: i64?) -> i64?:
+func TestAnalyzeGetElseReturnEarlyReturnsOptionalPayload(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "get_else_return_optional_payload.elisa", `def first(left: i64?, right: i64?) -> i64?:
 	return get left else return null
 	return get right else return null
 	return null

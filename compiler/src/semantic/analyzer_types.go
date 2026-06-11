@@ -33,30 +33,6 @@ func (a *Analyzer) defineReceiverOverloadGlobal(visibleName string, sym *Symbol,
 		a.defineGlobal(sym, pos)
 		return
 	}
-	if sym.UFCSOnly {
-		newReceiver, newOK := receiverOverloadType(sym)
-		if !newOK {
-			a.errorf(pos, "@method function %q must take at least one receiver parameter", visibleName)
-			return
-		}
-		for _, existing := range a.ufcsFunctionsByName[visibleName] {
-			existingReceiver, existingOK := receiverOverloadType(existing)
-			if existingOK && SameType(existingReceiver, newReceiver) {
-				a.errorf(pos, "%s", DuplicateDeclarationMessage(visibleName, sym.Kind))
-				return
-			}
-		}
-		sym.Name = ReceiverOverloadSymbolName(visibleName, newReceiver, visibleName)
-		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
-			fnType.Name = sym.Name
-		}
-		if _, ok := a.globalScope.Define(sym); !ok {
-			a.errorf(pos, "%s", DuplicateDeclarationMessage(visibleName, sym.Kind))
-			return
-		}
-		a.registerUFCSFunction(visibleName, sym)
-		return
-	}
 	if existing, ok := a.globalScope.Lookup(visibleName); ok && existing != nil {
 		existingReceiver, existingHasRecv := receiverOverloadType(existing)
 		newReceiver, newHasRecv := receiverOverloadType(sym)

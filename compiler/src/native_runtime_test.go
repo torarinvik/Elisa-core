@@ -477,7 +477,7 @@ func TestRunCLIZeroParamFreeFunctionOverloadsWithReceiverMethod(t *testing.T) {
 	// `Flush(IOFile&)` form a legal overload set, disambiguated by arity: a 0-arg
 	// call resolves to the free function (which owns the bare global name), while a
 	// 1-arg call — as UFCS dot `f.Flush()` or free `Flush(f)` — resolves to the
-	// receiver method. This is what dropping @method relies on (e.g. the emulator's
+	// receiver method. This is what the removed @method path relied on (e.g. the emulator's
 	// `Flush()` in logging coexisting with `IOFile.Flush()`).
 	src := fmt.Sprintf(`# include %q
 

@@ -230,18 +230,8 @@ func (p *Parser) parseReturn() ast.Stmt {
 	p.expect(lexer.TOKEN_RETURN)
 	if p.match(lexer.TOKEN_QUESTION) {
 		p.errorAt(pos, "`return?` is no longer supported; use `return value else return null`")
-		// Best-effort recovery so the rest of the file still parses. The legacy
-		// `return? with ...:` block form is skipped; the simple forms consume their value.
-		if p.peek() == lexer.TOKEN_WITH {
-			p.skipLegacyReturnQuestionWithBlock()
-			return &ast.ReturnStmt{Position: pos}
-		}
-		value := p.withTernaryDisabled(p.parseValueExprAllowTuple)
-		if p.match(lexer.TOKEN_IF) {
-			_ = p.parseExpr() // discard the legacy guard condition
-		}
-		p.expectNewlineAfterValueExpr(value)
-		return &ast.ReturnStmt{Position: pos, Value: value}
+		p.skipRemovedQuestionStmtTail()
+		return &ast.ReturnStmt{Position: pos}
 	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
@@ -251,24 +241,16 @@ func (p *Parser) parseReturn() ast.Stmt {
 	return &ast.ReturnStmt{Position: pos, Value: value}
 }
 
-type optionalReturnWithBinding struct {
-	name  string
-	value ast.Expr
-}
-
-// skipLegacyReturnQuestionWithBlock consumes a removed `return? with ...:` form (the `with`
-// keyword, its binding list, and the indented value block) so parsing can resume cleanly after
-// the hard-error diagnostic. It does not build any AST — the legacy desugaring is gone.
-func (p *Parser) skipLegacyReturnQuestionWithBlock() {
-	p.expect(lexer.TOKEN_WITH)
-	// The binding list (`name = value, ...`) can span multiple lines; its first `:` is the block
-	// header. Skip everything up to it, then skip the indented value block.
-	for p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_COLON {
+func (p *Parser) skipRemovedQuestionStmtTail() {
+	sawColon := false
+	for p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT {
+		if p.peek() == lexer.TOKEN_COLON {
+			sawColon = true
+		}
 		p.advance()
 	}
-	p.match(lexer.TOKEN_COLON)
-	p.skipNewlines()
-	if p.match(lexer.TOKEN_INDENT) {
+	p.match(lexer.TOKEN_NEWLINE)
+	if sawColon && p.match(lexer.TOKEN_INDENT) {
 		depth := 1
 		for depth > 0 && p.peek() != lexer.TOKEN_EOF {
 			switch p.peek() {
@@ -371,8 +353,13 @@ type ifClause struct {
 	Value            ast.Expr
 	Store            ast.Expr
 	Patterns         []ast.MatchPattern
-	OptionalBindings []optionalReturnWithBinding
+	OptionalBindings []optionalIfBinding
 	Body             []ast.Stmt
+}
+
+type optionalIfBinding struct {
+	name  string
+	value ast.Expr
 }
 
 func (p *Parser) parseBranchHint() ast.BranchHint {
@@ -472,12 +459,12 @@ func (p *Parser) parseIfClause(isElif bool) ifClause {
 func (p *Parser) parseIfLetClause(pos lexer.Pos, hint ast.BranchHint, isElif bool) ifClause {
 	p.errorf("`if let` is no longer supported; use `if EXPR is NAME:` instead (e.g. `if v is value:`)")
 	p.expectIdentText("let")
-	bindings := make([]optionalReturnWithBinding, 0, 2)
+	bindings := make([]optionalIfBinding, 0, 2)
 	for {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
 		value := p.parseNot()
-		bindings = append(bindings, optionalReturnWithBinding{name: name, value: value})
+		bindings = append(bindings, optionalIfBinding{name: name, value: value})
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}

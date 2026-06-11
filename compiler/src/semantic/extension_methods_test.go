@@ -826,7 +826,7 @@ def read(box: Box) -> i64:
 
 // `recv.PascalCase()` (zero-arg postfix shorthand) is parsed as a cast to type
 // `PascalCase`; when that name is not a type it falls back to the call
-// `PascalCase(recv)`, so PascalCase names resolve to UFCS @methods just like the
+// `PascalCase(recv)`, so PascalCase names resolve to UFCS methods just like the
 // lowercase and multi-arg forms.
 func TestAnalyzePostfixShorthandFallsBackToPascalCaseUFCSMethod(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "postfix_pascalcase_ufcs.elisa", `

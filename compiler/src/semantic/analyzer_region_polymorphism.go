@@ -767,8 +767,8 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 	case *ast.Ident:
 		name = callee.Name
 	case *ast.FieldExpr:
-		// UFCS method call `self.helper(...)`: methods are plain globals (docs: @method
-		// removed), so resolve by the field name when it names a visible function.
+		// UFCS method call `self.helper(...)`: methods are plain globals, so
+		// resolve by the field name when it names a visible function.
 		name = callee.Field
 	default:
 		return nil

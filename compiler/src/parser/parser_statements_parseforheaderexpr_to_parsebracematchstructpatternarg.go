@@ -197,15 +197,8 @@ func (p *Parser) parseMatch() ast.Stmt {
 	p.expect(lexer.TOKEN_MATCH)
 	if p.match(lexer.TOKEN_QUESTION) {
 		p.errorAt(pos, "`match?` is no longer supported; use `match ...:` with a `null` arm")
-		// Recovery: consume the optional binder + head + arms and return a plain match so
-		// the rest of the file still parses. The legacy optional-bind desugaring is gone.
-		if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
-			p.advance()
-			p.advance()
-		}
-		value := p.parseMatchHeadExpr()
-		arms := p.parseMatchArms()
-		return &ast.MatchStmt{Position: pos, Value: value, Arms: arms}
+		p.skipRemovedQuestionStmtTail()
+		return &ast.MatchStmt{Position: pos}
 	}
 	value := p.parseMatchHeadExpr()
 	// `match <expr> as <ok>:` is sugar for a catch over an error union: the `ok:` arm

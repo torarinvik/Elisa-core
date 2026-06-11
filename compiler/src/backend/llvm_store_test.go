@@ -34,16 +34,14 @@ def build(owner: Arena) -> usize:
 		pending.truncate(1)
         pending.clear()
         values: mutable dict[cstr[key_shape], i64] = zeroed
-        slot = values.get_or_insert("seed"):
-            base = 5
-            base
+        base = 5
+        slot = values.get_or_insert("seed", base)
         _ = slot
         _ = values.entry("name").found
         _ = values.entry("name").value
         _ = values.entry("name").insert(7)
         _ = values.entry("name").get_or_insert(9)
-		entry_slot = values.entry("other").get_or_insert():
-			11
+		entry_slot = values.entry("other").get_or_insert(11)
 		_ = entry_slot
         return pending.name_key.count + pending.depth.count
 `
@@ -279,8 +277,7 @@ def build(owner: Arena, key: f64) -> usize:
     in alloc:
         values: mutable dict[f64, i64] = zeroed
         _ = values.get(key)
-        slot = values.get_or_insert(key):
-            5
+        slot = values.get_or_insert(key, 5)
         _ = slot
         _ = values.entry(key).found
         _ = values.entry(key).get_or_insert(7)

@@ -18,6 +18,9 @@ struct DynArrayView:
     data: mutable void&?
     len: mutable usize
 
+def view_from_parts[T](data: void&?, len: usize) -> view[T]:
+    return DynArrayView(data, len)
+
 # Open-addressing slot: `state` is 0=empty, 1=occupied, 2=tombstone (deleted, but probing
 # must continue past it). A zeroed bucket is therefore an empty slot.
 struct DictBucket[K, T]:

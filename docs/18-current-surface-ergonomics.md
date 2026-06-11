@@ -218,36 +218,38 @@ def load_flag(flag: bool) -> i64:
             1
 ```
 
-`return?`, `match?`, and `try? ... default` remain accepted as migration syntax, but the preferred spelling is the explicit recovery surface: `get value else ...` or `get access else ...` for optional/checked-access recovery, and `try expr else ...` for handled error unions.
+The old recovery shortcuts `return?`, `match?`, and `try? ... default` have been removed. Use the explicit recovery surface: `get value else ...` or `get access else ...` for optional/checked-access recovery, and `try expr else ...` for handled error unions.
 
-One legacy migration form still accepted by the parser is `return? with ...:`. It lowers to the same multi-binding optional ladder as `if let`, but new code should prefer the explicit `if let` spelling.
+For multi-binding optional recovery, use ordinary `if value is name:` blocks or factor the recovery into helper functions.
 
 ```elisa
-return? with lower_value = lower,
-             upper_value = upper,
-             value_int = value:
-    value_int >= lower_value and value_int <= upper_value
+if lower is lower_value:
+    if upper is upper_value:
+        if value is value_int:
+            return value_int >= lower_value and value_int <= upper_value
+return false
 ```
 
-The simplest legacy shorthand remains accepted as `return? value`. It returns the present payload and otherwise returns `null`. New code should prefer the explicit recovery form.
+For early-returning optional payloads, write the fallback explicitly.
 
 ```elisa
 def first(found: i64?) -> i64?:
-    return? found
-    return null
+    return get found else return null
 ```
 
-The legacy `match?` form also remains accepted, including the named-binder spelling. It lowers to an optional bind followed by an ordinary `match`, so new code should prefer an explicit `if let` plus `match` or a normal `match` with a null arm.
+Optional values match directly; use a `null:` arm for the absent case and regular payload patterns for the present case.
 
 ```elisa
-match? node = maybe:
+match maybe:
+    null:
+        return 0
     Expr.Int(value):
         return value
     _:
-        return 0
+        return 2
 ```
 
-Ordinary `match` also accepts optionals directly. Use a `null:` arm for the absent case and regular payload patterns for the present case.
+The same form works as a match expression:
 
 ```elisa
 def score(maybe: Expr?) -> i64:
@@ -260,28 +262,17 @@ def score(maybe: Expr?) -> i64:
             return 2
 ```
 
-The same form works as a match expression:
+Handled error-union fallback uses `try ... else ...`.
 
 ```elisa
-return match maybe:
-    null:
-        0
-    Expr.Int(value):
-        value
-    _:
-        2
+value: i64 = try read_value() else 2
 ```
 
-Likewise, `try? expr default fallback` is still parsed as the old handled-error shorthand, but new code should use `try expr else fallback`.
+Packed/tree store refinement uses `match value in store:` with pattern arms. The old conditional form `if value in store as Pattern:` is a parser error.
 
 ```elisa
-legacy: i64 = try? read_value() default 2
-```
-
-Packed/tree store refinement also has a deprecated conditional form. `if value in store as Pattern:` is still accepted, but new code should prefer `match value in store:` with pattern arms.
-
-```elisa
-if node in store as Expr.Int(value: value):
+match node in store:
+case Expr.Int(value: value):
     return value
 ```
 
@@ -292,9 +283,8 @@ store proof should scope a block or a set of pattern arms.
 When a successful refinement needs to survive as a first-class value, packed
 enums and trees use exact view types. Packed enums spell the refined witness as
 `packedview[Enum.Variant]`. Trees use the bare exact member type, such as
-`Lua.Expr.Binary`; the older `treeview[Lua.Expr.Binary]` spelling still parses
-for compatibility, but canonical formatting and type strings use the bare
-concrete variant type.
+`Lua.Expr.Binary`; the older `treeview[Lua.Expr.Binary]` spelling has been
+removed.
 
 ```elisa
 def score_lit(view_node: packedview[Expr.Int]) -> int:
@@ -337,7 +327,7 @@ Current rules:
 
 - `packedview[Enum.Variant]` is the first-class exact packed-variant type after a successful packed refinement
 - exact tree variants use the bare concrete member type such as `Lua.Expr.Binary`
-- `treeview[Lua.Expr.Binary]` remains accepted as a compatibility alias, but canonical source should write `Lua.Expr.Binary`
+- `treeview[Lua.Expr.Binary]` has been removed; write the bare concrete member type
 - these exact refined types can appear in parameters, returns, and local bindings
 - `if value as Expr.Variant(payload...)` supports both named and unnamed payload destructuring
 - exact `packedview[...]` values may be re-matched with the same `if value as Pattern:` surface
@@ -1072,7 +1062,7 @@ target_ints: usize = count node in frozen.Expr where kind == .Int and span == ta
 span_sum: i64 = reduce_sum(frozen.Expr.column("span"), add_i64)
 ```
 
-Use ordinary query `where` clauses for row filters. Inside a frozen row-view query, common fields can be used directly in the filter; hot equality predicates over frozen SoA rows, such as `where span == target` or `where kind == .Int and span == target`, lower to direct tag/column comparisons instead of predicate function calls. `where_kind` remains available for explicit kind-only filters. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms remain compatibility spellings, but row-view queries are the idiomatic surface. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
+Use ordinary query `where` clauses for row filters. Inside a frozen row-view query, common fields can be used directly in the filter; hot equality predicates over frozen SoA rows, such as `where span == target` or `where kind == .Int and span == target`, lower to direct tag/column comparisons instead of predicate function calls. `where_kind` remains available for explicit kind-only filters. The older `tree_tags(frozen, "Expr")` and `tree_column(frozen, "Expr", "span")` helper forms have been removed; use row-view queries or `.column(...)` instead. The design goal is that a tree can be tuned for recursive traversal, vectorized passes, or parallel chunk processing by changing layout metadata rather than rewriting the compiler frontend.
 
 `@index(field_name)` is useful when a category should stay AoS for traversal but one common or payload field still needs fast frozen scans. Payload-field filters should be guarded by `kind` so the field is only read on variants that actually carry it:
 
@@ -2909,9 +2899,9 @@ Current rules:
 - a linear value scheduled for deferred consumption by a `defer function:` body cannot be consumed again inline
 - `defer` is contextual, so ordinary identifiers like `defer_value` and calls like `defer(x)` still parse normally outside defer position
 
-## Stores, rows, and dict defaulting sugar
+## Stores, rows, and dict helpers
 
-The current surface includes compact syntax for row-oriented stores and defaulting dictionary helpers.
+The current surface includes compact syntax for row-oriented stores and explicit dictionary helper calls.
 
 ```elisa
 store PendingGotoStore:
@@ -2927,8 +2917,7 @@ def build(owner: Arena, values: mutable dict[cstr[key_shape], i64]&, key: cstr[k
         pending.push(3, 4)
         pending.truncate(1)
 
-        slot = values.get_or_insert(key):
-            42
+        slot = values.get_or_insert(key, 42)
 
         for {name_key, depth} in pending.rows():
             return name_key.i64() + depth.i64()
@@ -2956,8 +2945,8 @@ Current rules:
 - the current runtime-backed dict helper family also exposes `values.get(key)`, `values.put(key, value)`, `values.contains(key)`, `values.remove(key)`, `values.clear()`, and `values.reserve(n)` when matching helper overloads are in scope
 - `values.get(key)` returns an optional mutable slot reference in the tested runtime-backed helper family, so `if values.get(key) is found: ...` is the common read/update shape
 - `values.entry(key)` exposes entry-oriented helpers such as `.found`, `.value`, `.insert(value)`, and `.get_or_insert(value)`
-- `values.get_or_insert(key): ...` rewrites the trailing block into the default-value argument for `get_or_insert`
-- `values.entry(key).get_or_insert(): ...` does the same thing for the entry API surface
+- the old block-default form `values.get_or_insert(key): ...` has been removed; pass the default value explicitly as `values.get_or_insert(key, value)`
+- the old entry block-default form `values.entry(key).get_or_insert(): ...` has been removed; pass the default value explicitly as `values.entry(key).get_or_insert(value)`
 - the generic syntax parses for more than one key family, but the current runtime-backed helper surface is primarily validated for `dict[cstr[key_shape], V]` unless matching helper overloads are supplied
 - packed and row store values should be read through the fact-core lens: mutable local stores carry store-dependency facts, `freeze(move store)` consumes the local store and rebases handles onto frozen-store facts, and row scans may add optimization facts such as readonly, contiguous, or exact extent
 
@@ -3293,7 +3282,7 @@ Current rules:
 - ordinary explicit `.cast[T]` conversions continue to use normal cast rules rather than hook dispatch
 - the postfix hook surface is intentionally exact-source/exact-target rather than a broad overload search
 - legacy postfix reference-cast shorthand such as `bits.u8&()` is no longer supported; use `.cast[T&]` when retargeting an existing pointer/reference-like value explicitly, or `.ref[T&]` when reinterpreting an lvalue slot
-- legacy expression-arrow casts such as `value -> T` are deprecated; new code should use `.cast[T]`, hook-backed `T(value)` / `value.T()`, or other current conversion surfaces as appropriate
+- legacy expression-arrow casts such as `value -> T` are no longer supported; use `.cast[T]`, hook-backed `T(value)` / `value.T()`, or other current conversion surfaces as appropriate
 - legacy `.cast[T]()` call-style syntax is no longer supported; use `.cast[T]`
 
 That distinction matters when reading code: `value.cast[T]` is the explicit cast surface, `slot.ref[T&]` is a reference reinterpretation, `value.T()` and `T(value)` are hook-backed conversion shorthands, and `value.T?()` is the same hook mechanism returning an optional.

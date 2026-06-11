@@ -201,6 +201,8 @@ struct DynArrayView:
     data: mutable void&?
     len: mutable usize
 
+extern view_from_parts[T](data: void&?, len: usize) -> view[T]
+
 struct DictBucket[K, T]:
     key: mutable K
     value: mutable T

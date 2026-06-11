@@ -204,9 +204,8 @@ PLANNED (in priority order):
    same-named global (frontend_lexer_core's `is_empty` local vs global `def is_empty[T]`)
    resolved to the global generic and failed type-param binding; fixed by consulting
    lookupBinding first for function-typed locals (the backend analogue of the analyzer
-   shadowing fix 27e019a5). The `@method` annotation itself remains a supported-but-unused
-   optional feature; stripping the UFCSOnly plumbing is a separate low-value cleanup.
-   The historical diagnosis below is kept for context.
+   shadowing fix 27e019a5). The `@method` annotation and UFCS-only symbol plumbing
+   have now been removed; the historical diagnosis below is kept for context.
 
    DIAGNOSIS (measured by making `@method` inert + running the suite): the
    blocker is NOT a handful of renames. `@method` (UFCS-only) is masking real

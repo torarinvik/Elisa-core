@@ -370,17 +370,6 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
-	if annotation.Name == "method" {
-		if len(annotation.Args) != 0 {
-			a.errorf(annotation.Position, "@method on function %q does not take arguments", fn.Name)
-			return false
-		}
-		if len(signature.Params) == 0 {
-			a.errorf(annotation.Position, "@method function %q must take at least one receiver parameter", fn.Name)
-			return false
-		}
-		return true
-	}
 	if annotation.Name == "init" {
 		return a.validateFunctionInitAnnotation(annotation, fn, signature)
 	}
@@ -727,7 +716,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "method", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
+	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	case "boundary_pointer_args":
 		return true

@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "method", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	default:
 		return false
@@ -484,13 +484,6 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				continue
 			}
 			fnType.CallConv = "stdcall"
-		case "method":
-			if len(annotation.Args) != 0 {
-				a.errorf(annotation.Position, "@method on extern function %q does not take arguments", fn.Name)
-			}
-			if len(fnType.Params) == 0 {
-				a.errorf(annotation.Position, "@method extern function %q must take at least one receiver parameter", fn.Name)
-			}
 		case "internal":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@internal on extern function %q does not take arguments", fn.Name)

@@ -219,16 +219,14 @@ def build(owner: Arena, key: cstr[key_shape]) -> usize:
         pending.clear()
         values: mutable dict[cstr[key_shape], i64] = zeroed
         _ = values.put(key, 7)
-        slot = values.get_or_insert(key):
-            base = 9
-            base
+        base = 9
+        slot = values.get_or_insert(key, base)
         _ = slot
         if values.entry(key).found == false:
             _ = values.entry(key).insert(11)
         _ = values.entry(key).value
         _ = values.entry(key).get_or_insert(13)
-        entry_slot = values.entry(key).get_or_insert():
-            17
+        entry_slot = values.entry(key).get_or_insert(17)
         _ = entry_slot
         _ = values.get(key)
         _ = values.contains(key)
@@ -342,8 +340,7 @@ def build(owner: Arena, key: Key, id: u32) -> usize:
         counts: mutable dict[u32, i64] = zeroed
         keyed: mutable dict[Key, i64] = zeroed
         _ = counts.put(id, 7)
-        count_slot = counts.get_or_insert(id):
-            9
+        count_slot = counts.get_or_insert(id, 9)
         _ = count_slot
         _ = keyed.get(key)
         _ = keyed.contains(key)

@@ -1,15 +1,15 @@
 def json_empty_node_view() -> view[JsonNode]:
-    return DynArrayView(null, 0)
+    return view_from_parts[JsonNode](null, 0)
 def json_empty_field_view() -> view[JsonField]:
-    return DynArrayView(null, 0)
+    return view_from_parts[JsonField](null, 0)
 def json_node_items_view(items_ptr: JsonNode&?, item_count: usize) -> view[JsonNode]:
     if items_ptr == null or item_count == 0:
         return json_empty_node_view()
-    return DynArrayView(items_ptr.cast[void&], item_count)
+    return view_from_parts[JsonNode](items_ptr.cast[void&], item_count)
 def json_field_items_view(fields_ptr: JsonField&?, field_count: usize) -> view[JsonField]:
     if fields_ptr == null or field_count == 0:
         return json_empty_field_view()
-    return DynArrayView(fields_ptr.cast[void&], field_count)
+    return view_from_parts[JsonField](fields_ptr.cast[void&], field_count)
 def json_ast_array_items_view(node: JsonNode, store: JsonNode.Store[Local]) -> view[JsonNode]:
     if node in store is JsonNode.Array(items_ptr: items_ptr, item_count: item_count):
         return json_node_items_view(items_ptr, item_count)

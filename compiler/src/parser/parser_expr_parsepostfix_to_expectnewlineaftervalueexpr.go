@@ -445,11 +445,8 @@ func (p *Parser) parsePrimary() ast.Expr {
 		p.advance()
 		if p.match(lexer.TOKEN_QUESTION) {
 			p.errorAt(pos, "`try? ... default` is no longer supported; use `try ... else ...`")
-			value := p.parseOr()
-			if p.matchIdentText("default") {
-				_ = p.parseExpr() // consume and discard the legacy fallback for recovery
-			}
-			return &ast.TryExpr{Position: pos, Value: value}
+			p.skipRemovedQuestionExprTail()
+			return &ast.Ident{Position: pos, Name: "__invalid_removed_try_question"}
 		}
 		value := p.parseOr()
 		return &ast.TryExpr{Position: pos, Value: value}
@@ -789,6 +786,12 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 		p.errorAt(pos, "the `expr as T` cast has been removed; use `expr.cast[T]` (reinterpret), a constructor `T(expr)` / `expr.T()` (value conversion), or `&expr` (reference)")
 	}
 	p.expectNewline()
+}
+
+func (p *Parser) skipRemovedQuestionExprTail() {
+	for p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_COMMA {
+		p.advance()
+	}
 }
 
 func exprHasBlockRecovery(expr ast.Expr) bool {

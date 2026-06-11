@@ -442,7 +442,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		// Postfix-shorthand `recv.Name()` parses as a cast to type `Name` (this is
 		// how `x.u64()` works). But `recv.Name()` is meant to read as `Name(recv)`:
 		// when `Name` is a type it is a constructor/cast, and otherwise it is a
-		// function — including a UFCS `@method`. When the target does NOT resolve to
+		// function — including a UFCS method. When the target does NOT resolve to
 		// a type, re-interpret the cast as the call `Name(recv)` so PascalCase method
 		// names work the same as the lowercase / multi-arg forms already do.
 		if n.Origin == ast.CastExprOriginPostfixShorthand {
