@@ -262,14 +262,14 @@ func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVarian
 		return C.LLVMVoidTypeInContext(g.context), nil
 	}
 	if len(variant.Payload) == 1 {
-		return g.lowerType(variant.Payload[0])
+		return g.lowerEnumPayloadFieldType(variant.Payload[0])
 	}
 	if cached := g.packedVariantPayloadTypes[variant]; cached != nil {
 		return cached, nil
 	}
 	fields := make([]C.LLVMTypeRef, 0, len(variant.Payload))
 	for _, payload := range variant.Payload {
-		fieldType, err := g.lowerType(payload)
+		fieldType, err := g.lowerEnumPayloadFieldType(payload)
 		if err != nil {
 			return nil, err
 		}

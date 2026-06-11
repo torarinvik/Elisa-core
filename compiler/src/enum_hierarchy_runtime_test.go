@@ -727,6 +727,151 @@ def main() -> i64:
 	}
 }
 
+// docs/76 free-null niche (docs/82 polish): an optional enum child `Tree?` in an AoS record is
+// stored as the BARE handle with the null sentinel meaning absent — no presence flag in the
+// record. The generic carrier remains the ABI outside the record; conversion happens at the
+// record boundary. This runs a tree with one present and one absent optional child.
+func TestOptionalEnumChildNicheRuntime(t *testing.T) {
+	runEnumHierarchyProgram(t, "optional_niche.elisa", `
+enum Tree:
+    Node(left: Tree, right: Tree?)
+    Leaf(value: i64)
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            sum: mutable i64 = total(l)
+            if r is rt:
+                sum <- sum + total(rt)
+            return sum
+        Tree.Leaf(value: v):
+            return v
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Tree = new[auto] Tree.Leaf(value: 3)
+            b: Tree = new[auto] Tree.Leaf(value: 7)
+            both: Tree = new[auto] Tree.Node(left: a, right: b)
+            lone: Tree = new[auto] Tree.Node(left: both, right: null)
+            if total(lone) != 10:
+                panic("optional-niche tree summed wrong")
+`)
+}
+
+// IR pin for the niche: the Node payload is two bare handles ({ i32, i32 }, no i1 presence
+// flag) and the absent marker is a select against the width's sentinel (-1 at u32).
+func TestOptionalEnumChildNicheIR(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := `
+enum Tree:
+    Node(left: Tree, right: Tree?)
+    Leaf(value: i64)
+
+def probe(n: Tree) -> i64:
+    match n:
+        Tree.Node(left: l, right: r):
+            if r is rr:
+                return 1
+            return 0
+        _:
+            return 2
+
+def main() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            a: Tree = new[auto] Tree.Leaf(value: 1)
+            n: Tree = new[auto] Tree.Node(left: a, right: null)
+            return probe(n)
+`
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, "niche_ir.elisa")
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstderr:\n%s", code, stderr.String())
+	}
+	ir := stdout.String()
+	// The absent write folds to the bare -1 sentinel constant (a present child would emit the
+	// niche.pack select); the read side must rebuild the carrier by comparing against it.
+	if !strings.Contains(ir, "niche.unpack.present = icmp ne i32") || !strings.Contains(ir, ", -1") {
+		t.Fatalf("expected the payload read to unpack the optional child against the -1 sentinel, IR:\n%s", ir[:min(len(ir), 4000)])
+	}
+	if strings.Contains(ir, "insertvalue { i32, %Optional__Tree }") || strings.Contains(ir, "{ i32, { i1, i32 } }") {
+		t.Fatal("optional child must occupy a bare-handle record slot, not the generic carrier")
+	}
+}
+
+// docs/82 tight-payload pin: the handle dial changes the RECORD size, not just the value ABI —
+// Tree{Node(l,r),Leaf(i64)} rows are 16 bytes at handle u16/u32 (tag + widest payload = Leaf i64)
+// and 24 at u64 (two 8-byte edges widen the union past the i64 leaf).
+func TestHandleDialShrinksRecordRows(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	rowBytes := func(width string) string {
+		t.Helper()
+		src := `
+enum Tree layout(handle: ` + width + `):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            return total(l) + total(r)
+        Tree.Leaf(value: v):
+            return v
+
+def main() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        in auto:
+            root: Tree = make(2)
+            return total(root) - 4
+`
+		full := "include \"" + std + "\"\n" + src
+		dir := t.TempDir()
+		path := filepath.Join(dir, "row_"+width+".elisa")
+		if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		var stdout, stderr bytes.Buffer
+		if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+			t.Fatalf("build failed at %s (exit %d)\nstderr:\n%s", width, code, stderr.String())
+		}
+		for _, line := range strings.Split(stdout.String(), "\n") {
+			if idx := strings.Index(line, "row_bytes = insertvalue %Tree__Store "); idx >= 0 {
+				parts := strings.Split(line, ", ")
+				if len(parts) >= 2 {
+					return strings.TrimSpace(strings.TrimPrefix(parts[len(parts)-2], "i64 "))
+				}
+			}
+		}
+		t.Fatalf("could not find row_bytes for %s", width)
+		return ""
+	}
+	if got := rowBytes("u16"); got != "16" {
+		t.Fatalf("u16-handle rows must be 16 bytes (tight payload), got %s", got)
+	}
+	if got := rowBytes("u64"); got != "24" {
+		t.Fatalf("u64-handle rows must be 24 bytes, got %s", got)
+	}
+}
+
 // expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
 func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
 	t.Helper()

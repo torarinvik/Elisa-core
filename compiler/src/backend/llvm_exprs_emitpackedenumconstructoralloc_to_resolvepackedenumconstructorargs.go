@@ -336,6 +336,9 @@ func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.
 	if err != nil {
 		return nil, err
 	}
+	if enumType, ok := s.g.optionalEnumNicheField(variant.Payload[index]); ok {
+		return s.packOptionalEnumNicheValue(argValue, enumType, "packed.enum.payload")
+	}
 	return argValue, nil
 }
 func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {

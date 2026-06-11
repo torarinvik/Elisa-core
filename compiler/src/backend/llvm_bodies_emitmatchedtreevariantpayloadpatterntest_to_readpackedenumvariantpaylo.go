@@ -385,14 +385,32 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 	if err != nil {
 		return nil, err
 	}
+	// docs/76 free-null niche: record slots for optional enum children hold the bare handle;
+	// rebuild the generic carrier as each field value crosses the record boundary.
+	unpackNiche := func(value C.LLVMValueRef, fieldType semantic.Type) (C.LLVMValueRef, error) {
+		nicheEnum, ok := s.g.optionalEnumNicheField(fieldType)
+		if !ok {
+			return value, nil
+		}
+		return s.unpackOptionalEnumNicheValue(value, fieldType.(*semantic.OptionalType), nicheEnum, "match.payload")
+	}
 	if len(variant.Payload) == 1 {
 		value := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+		value, err := unpackNiche(value, variant.Payload[0])
+		if err != nil {
+			return nil, err
+		}
 		return []C.LLVMValueRef{value}, nil
 	}
 	aggregate := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
 	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
-	for i := range variant.Payload {
-		values = append(values, C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field")))
+	for i, fieldType := range variant.Payload {
+		value := C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field"))
+		value, err := unpackNiche(value, fieldType)
+		if err != nil {
+			return nil, err
+		}
+		values = append(values, value)
 	}
 	return values, nil
 }
@@ -455,6 +473,20 @@ func (s *functionState) readPackedEnumVariantPayloadWithStore(handleValue C.LLVM
 		}
 		if !ok {
 			return nil, false, nil
+		}
+		if nicheEnum, isNiche := s.g.optionalEnumNicheField(payloadType); isNiche {
+			// docs/76 free-null niche: the record slot is the bare handle; rebuild the
+			// generic {present, handle} carrier at the boundary.
+			raw, err := s.emitPackedDirectFieldReadAtOrigin(ops, handleValue, enumType, nicheEnum, fieldOffsetBytes, origin, "packed.payload.niche")
+			if err != nil {
+				return nil, false, err
+			}
+			carrier, err := s.unpackOptionalEnumNicheValue(raw, payloadType.(*semantic.OptionalType), nicheEnum, "packed.payload")
+			if err != nil {
+				return nil, false, err
+			}
+			values = append(values, carrier)
+			continue
 		}
 		coerced, err := s.emitPackedDirectFieldReadAtOrigin(ops, handleValue, enumType, payloadType, fieldOffsetBytes, origin, "packed.payload")
 		if err != nil {

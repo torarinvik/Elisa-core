@@ -149,11 +149,13 @@ Plug points in docs/81 Phase 3:
    at the allocation site when a narrowed store's index reaches the width's null
    sentinel (u8 chain >254 nodes verified to trap, never wrap). Default-u32 IR is
    unchanged (resize no-ops, guard skipped at ≥32 bits).
-   *Honest scoping note:* the dial currently sets the handle's VALUE/ABI width —
-   function signatures, container elements (`darray[Tree]` at u16 = 2 B/elem), struct
-   fields. In-record payload slots remain word-sized (the AoS payload is a uintptr-word
-   array), so the per-edge memory win inside node records needs the tight-payload
-   layout work, tracked separately.
+   *Scoping note (corrected 2026-06-11):* the dial sets BOTH the value/ABI width and the
+   in-record edge width — payload slots are typed by the lowered field types, so a u16
+   tree's `Node(left, right)` payload is `{i16, i16}` and the whole row shrinks (16 B at
+   u16/u32 vs 24 B at u64 for the canonical Tree; the i64 `Leaf` floors the union).
+   Pinned by TestHandleDialShrinksRecordRows. The earlier "word-sized slots" caveat
+   described the word-granular read helpers, not the layout — tight-payload was already
+   real.
 3. **CORE DONE (2026-06-10).** `ptr` kind: the handle is the record address carried as a
    uintptr-width integer (so all width machinery — coercion, switches, phis — applies
    unchanged; `ResolvedIndexWidthBits()` reports 64). Exactly two codegen sites are
@@ -172,6 +174,13 @@ Plug points in docs/81 Phase 3:
    synthetic undef binding no read path can touch). IR-verified: `total(t: Tree)`
    lowers to `@total(i64)` with zero implicit params; a builder still threads
    region + store. This is the §ptr point-1 ABI win, delivered.
-4. `-Wperf`/memory lint pointing at `u16` for bounded stores stays the docs/76 Phase 6
-   tail. Free null sentinel for optional children (`Tree?` niche) also remains TODO —
-   optionals still use the generic carrier.
+4. **DONE (2026-06-11).** The `-Wperf` width lint fires on constant-bounded constructor
+   loops in region-owning functions (suggests u8/u16; any call in the loop mutes it).
+   The free-null niche for optional children is implemented for AoS roots: a `Tree?`
+   payload field is stored as the BARE handle with the width's null sentinel meaning
+   absent (no presence flag in the record — `{handle, handle}` payloads); the generic
+   `{bool, handle}` carrier remains the ABI outside the record, converted exactly at
+   the constructor-write / payload-read boundary. `index:` is deprecation-warned.
+   Known gap: an optional-only self-reference (`next: Tree?` with no bare edge) does
+   not yet promote the enum to region-backed (computeRecursiveEnumSet counts only bare
+   payload types).
