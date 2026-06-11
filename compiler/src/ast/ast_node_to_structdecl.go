@@ -116,10 +116,11 @@ type EnumDecl struct {
 	// Layout selects the physical layout of a recursive enum (docs/76): the `enum X layout soa|aos:`
 	// suffix. StructLayoutDefault means the compiler's default (AoS-in-arena for a recursive enum).
 	// LayoutSet records whether a `layout` suffix was written at all.
-	Layout       StructLayoutMode
-	LayoutSet    bool
-	LayoutSparse bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
-	IndexWidth   string // the `(index: uN)` sub-option: "u8"|"u16"|"u32"|"u64"; "" = default (u32)
+	Layout                   StructLayoutMode
+	LayoutSet                bool
+	LayoutSparse             bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
+	IndexWidth               string // the `(index: uN)` sub-option: "u8"|"u16"|"u32"|"u64"; "" = default (u32)
+	IndexWidthLegacySpelling bool   // wrote the deprecated `index:` key instead of `handle:` (docs/82)
 	// Parent is the qualified name of the enum this one refines (docs/77): the `enum Child is Parent:`
 	// sealed-refinement suffix. "" means a root (no parent). Child's cases are a subset of Parent's, so
 	// Child <: Parent.

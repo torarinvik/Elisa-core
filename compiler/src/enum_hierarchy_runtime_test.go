@@ -750,6 +750,53 @@ func expectEnumProgramError(t *testing.T, fixture string, src string, want strin
 	}
 }
 
+// docs/82 polish: the legacy `(index: uN)` spelling is deprecation-warned (canonical: `handle:`).
+func TestLegacyIndexSpellingWarns(t *testing.T) {
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := `
+enum Tree layout(index: u16):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def main() -> i64:
+    return 0
+`
+	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
+	full := "include \"" + std + "\"\n" + src
+	dir := t.TempDir()
+	path := filepath.Join(dir, "index_legacy.elisa")
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("legacy index: spelling must still compile (deprecation, not removal); exit %d\nstderr:\n%s", code, stderr.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "deprecated") || !strings.Contains(combined, "handle: u16") {
+		t.Fatalf("expected a deprecation warning naming the `handle:` spelling, got:\n%s", combined)
+	}
+}
+
+// docs/77: common(...) is a ROOT-level fact; a sub-category declaring its own is rejected at the
+// declaration (previously it passed analysis and failed deep in codegen offset lookup).
+func TestSubCategoryCommonFieldsRejected(t *testing.T) {
+	expectEnumProgramError(t, "subcat_common.elisa", `
+enum Node:
+    common(span: i64)
+enum Expr is Node:
+    common(prec: i64)
+    Lit(value: i64)
+    Add(left: Node, right: Node)
+
+def main() -> i64:
+    return 0
+`, "must be declared on the hierarchy root")
+}
+
 // docs/82: ptr handles require stable addresses — SoA columns relocate, so the combination is
 // rejected at declaration.
 func TestPtrHandleRejectsSoA(t *testing.T) {

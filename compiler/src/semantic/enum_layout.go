@@ -181,8 +181,20 @@ func enumDeclHasDirectSelfReference(n *ast.EnumDecl) bool {
 // and `soa` are enum layouts (`c`/`packed` are struct-FFI layouts), `(sparse)` is SoA-only, and
 // `(index: uN)` is meaningful only for the columnar/array layouts that carry handles.
 func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType) {
-	if enumDecl == nil || !enumDecl.LayoutSet {
+	if enumDecl == nil {
 		return
+	}
+	// docs/77: `common(...)` fields live on the hierarchy ROOT — one store, one row shape. A
+	// sub-category cannot add its own (the root's row has no slot for it; accepting it here only
+	// to fail at codegen offset lookup would be a worse error).
+	if len(enumDecl.Common) > 0 && enumType != nil && enumType.Parent != nil {
+		a.errorf(enumDecl.Pos(), "enum %q: `common(...)` fields must be declared on the hierarchy root %q, not on a sub-category (one store, one row shape)", enumDecl.Name, enumType.Root().Name)
+	}
+	if !enumDecl.LayoutSet {
+		return
+	}
+	if enumDecl.IndexWidthLegacySpelling {
+		a.deprecatedf(enumDecl.Pos(), "`(index: %s)` is deprecated; use the canonical `(handle: %s)` spelling (docs/82)", enumDecl.IndexWidth, enumDecl.IndexWidth)
 	}
 	// docs/82 `handle: ptr` constraints, enforced as compile errors:
 	// pointer handles need stable record addresses (the AoS chunk store never relocates;
