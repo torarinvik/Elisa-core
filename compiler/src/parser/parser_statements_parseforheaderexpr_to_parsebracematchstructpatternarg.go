@@ -484,6 +484,26 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			if (s.Type == nil && (isInferredDArrayBuilder(s.Value) || blockLaterUsesUntypedListLiteralAsDArray(stmts, s.Name))) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
 				return true
 			}
+		case *ast.ReturnStmt:
+			// A function that directly `return`s a region-less COMPREHENSION
+			// (`return [x for x in xs]`) needs a synthesized auto region so the comprehension
+			// has an active scope — without it the comprehension scope check rejects the body
+			// before the region-poly classifier (which adopts the region into the caller) ever
+			// runs. A directly-returned plain list LITERAL (`return [first, ...rest]`) does NOT
+			// need this: it allocates region-poly without a scope check, and wrapping it would
+			// only change its parse shape, so it is deliberately excluded here.
+			if rv := s.Value; rv != nil {
+				for {
+					paren, ok := rv.(*ast.ParenExpr)
+					if !ok {
+						break
+					}
+					rv = paren.Inner
+				}
+				if lit, ok := rv.(*ast.ListComprehensionExpr); ok && lit.Owner == nil {
+					return true
+				}
+			}
 		}
 	}
 	return false

@@ -30,6 +30,7 @@ static char* elisacorePrintType(LLVMTypeRef Type) {
 import "C"
 
 import (
+	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 	"unsafe"
@@ -251,7 +252,19 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return g.ensureEnumBody(tt.Name, tt)
 	case *semantic.StructType:
-		if len(structGenericParams(tt)) == 0 {
+		// Region parameters carry provenance, not layout: an `@owner` container/ref field
+		// has the same representation regardless of which region backs it. So a struct
+		// parameterized ONLY over regions (`struct State[region owner]:`) lowers to a
+		// concrete body directly — it is the no-Arena-field replacement for arena-carrying
+		// state structs. Only TYPE/state parameters genuinely require concrete arguments.
+		needsConcrete := false
+		for _, gp := range structGenericParams(tt) {
+			if gp.Kind != ast.GenericParamRegion {
+				needsConcrete = true
+				break
+			}
+		}
+		if !needsConcrete {
 			return g.ensureStructBody(tt.Name, tt)
 		}
 		return nil, fmt.Errorf("cannot lower generic struct %s without concrete type arguments", tt.Name)

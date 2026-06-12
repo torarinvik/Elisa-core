@@ -282,6 +282,16 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 			}
 			break
 		}
+		// No-argument binding path: the region appears in neither an argument nor the
+		// return type, but the call site is inside an in-scope region of the same name
+		// (`region owner(...):`). Thread that region's arena directly — mirrors the
+		// semantic binding fallback (analyzer_expr_calls.go) that lets a builder allocate
+		// into the caller's named region with no threaded Arena& parameter.
+		if arena == nil {
+			if owner, ok := s.regionArenaOwner(regionParam); ok {
+				arena = owner.arenaRef
+			}
+		}
 		out = append(out, arena)
 	}
 	return out

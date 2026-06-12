@@ -284,6 +284,16 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 					return true
 				}
 			}
+		case *ast.ListComprehensionExpr:
+			// A region-less comprehension (`[x for x in xs]`, list/dict/set) allocates its
+			// result into the inferred region exactly like a container literal — returning one
+			// makes the function region-polymorphic. The parser wraps such a body in a
+			// synthesized auto region (functionBodyNeedsAutoRegion's ReturnStmt case) so the
+			// comprehension has an active scope; classification here adopts that region into
+			// the caller so the result outlives the call.
+			if e.Owner == nil {
+				return true
+			}
 		case *ast.TupleExpr:
 			// Lowered grammar try-productions return (matched, committed, value) tuples;
 			// a region-allocated value inside makes the whole return region-allocated.
@@ -683,6 +693,35 @@ func (a *Analyzer) defineRegionPolymorphicParamSymbol(fn *ast.FuncDecl, fnType *
 	arenaRef := &RefType{Elem: a.namedTypes["Arena"], State: RefStateNonNull, Storage: RefStorageAny, Mutable: true}
 	sym := &Symbol{Name: regionPolymorphicImplicitParamName, Kind: SymbolParam, Type: arenaRef, Node: fn, ParamIndex: idx}
 	a.defineLocal(sym, fn.Pos())
+}
+
+// defineRegionParamValueSymbols makes each explicit `[region owner]` parameter referenceable as an
+// Arena VALUE inside the function body (not just as an `@owner` annotation). A region param is bound
+// as a SymbolRegion exactly like a `region owner(...):` declaration, so `owner` resolves where an
+// arena value is expected — e.g. a runtime container constructor that threads an explicit arena
+// (`indexmap.new(owner)`, SoA stores). The backend already keys its region environment by name
+// (state.regions), so it resolves the reference to the threaded hidden Arena& param. This is the
+// no-Arena-field replacement for `owner: mutable Arena&` state fields: the region rides the type,
+// and the value form is recovered from the same region param.
+func (a *Analyzer) defineRegionParamValueSymbols(fn *ast.FuncDecl) {
+	if fn == nil || len(fn.RegionParams) == 0 {
+		return
+	}
+	arenaType, ok := a.namedTypes["Arena"]
+	if !ok || arenaType == nil {
+		return
+	}
+	arenaRef := &RefType{Elem: arenaType, State: RefStateNonNull, Storage: RefStorageAny, Mutable: true}
+	for _, name := range fn.RegionParams {
+		if _, exists := a.currentScope.Lookup(name); exists {
+			continue // an explicit value parameter of the same name wins
+		}
+		sym := &Symbol{Name: name, Kind: SymbolRegion, Type: arenaRef, Node: fn, Mutable: true}
+		a.defineLocal(sym, fn.Pos())
+		if a.currentRegions != nil {
+			a.currentRegions[sym] = regionState{Backing: normalizeBacking(""), DeclScope: a.currentScope}
+		}
+	}
 }
 
 // regionPolymorphicCallerRegionArg produces the expression that threads the caller's ambient inferred

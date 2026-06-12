@@ -604,6 +604,16 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
 		return value, binding.typ, err
 	}
+	if owner, ok := s.regionArenaOwner(expr.Name); ok && owner.arenaRef != nil {
+		// A reference to an explicit `[region owner]` parameter by name yields the threaded
+		// hidden Arena& parameter as a value — so `owner` can be passed where an arena value is
+		// expected (a runtime container constructor like `indexmap.new(owner)`), the no-Arena-field
+		// replacement for an `owner: mutable Arena&` state field. The arena param is already a
+		// `mutable Arena&` pointer value, so it is returned directly with no load.
+		arenaType := s.g.result.NamedTypes["Arena"]
+		refType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, Mutable: true}
+		return owner.arenaRef, refType, nil
+	}
 	if sym, resolvedName, ok := s.lookupVisibleGlobalSymbol(expr.Name); ok {
 		switch sym.Kind {
 		case semantic.SymbolFunc, semantic.SymbolExternFunc:

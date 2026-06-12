@@ -114,6 +114,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if fnType != nil && fnType.RegionPolymorphic {
 						a.defineRegionPolymorphicParamSymbol(fn, fnType)
 					}
+					a.defineRegionParamValueSymbols(fn)
 					if fnType != nil {
 						a.defineImplicitPackedStoreParamSymbols(fn, fnType)
 					}
@@ -303,6 +304,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
+					a.defineRegionParamValueSymbols(fn)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -450,6 +452,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
 					}
+					a.defineRegionParamValueSymbols(fn)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}

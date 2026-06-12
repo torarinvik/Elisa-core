@@ -1157,14 +1157,18 @@ func TestAnalyzeEachQueryUsesExpectedRegionParam(t *testing.T) {
 	}
 }
 
-func TestAnalyzeRejectsListComprehensionOutsideArenaScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "list_comprehension_requires_scope.elisa", `def build(items: darray[i64]) -> darray[i64]:
+func TestAnalyzeListComprehensionReturnIsRegionPolymorphic(t *testing.T) {
+	// A function that returns a region-less comprehension is region-polymorphic (docs/75): the
+	// parser wraps its body in a synthesized auto region (so the comprehension has an active
+	// scope) and the classifier adopts that region into the caller. No `in <arena>:` ceremony,
+	// no threaded allocator — the inferred-region default that lets frontends drop arena params.
+	result := analyzeFunctionAnalysisTestSource(t, "list_comprehension_region_poly.elisa", `def build(items: darray[i64]) -> darray[i64]:
     return [item + 1 for item in items]
 `)
 
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `comprehension requires an active in <arena>: scope`) {
-		t.Fatalf("expected list comprehension scope diagnostic, got:\n%s", all)
+	if strings.Contains(all, `comprehension requires an active in <arena>: scope`) {
+		t.Fatalf("comprehension-returning function should be region-polymorphic, got scope error:\n%s", all)
 	}
 }
 
