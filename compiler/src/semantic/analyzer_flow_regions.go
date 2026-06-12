@@ -320,6 +320,18 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedAllocExpr := a.currentAllocExpr
+	// `in perm:` names the permanent arena, not a value in scope — resolve it structurally
+	// BEFORE expression analysis (which would emit a spurious "undefined identifier perm").
+	if ident, ok := stripParenExpr(stmt.Store).(*ast.Ident); ok && ident != nil && ident.Name == "perm" {
+		if _, inScope := a.currentScope.Lookup("perm"); !inScope {
+			a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+			a.currentAllocExpr = savedAllocExpr
+			a.currentPackedVariantViews = savedPackedVariantViews
+			a.currentPackedStores = savedPackedStores
+			a.currentPackedStoreResolutions = savedPackedStoreResolutions
+			return
+		}
+	}
 	storeType := a.exprTypes[stmt.Store]
 	if storeType == nil {
 		storeType = a.analyzeExpr(stmt.Store)

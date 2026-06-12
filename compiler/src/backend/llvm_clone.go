@@ -89,6 +89,13 @@ func (s *functionState) emitCloneValue(sourceValue C.LLVMValueRef, sourceType se
 		return s.emitCloneErrorUnionValue(sourceValue, sourceType, tt, name)
 	case *semantic.TupleType, *semantic.StructType, *semantic.GenericInstanceType:
 		return s.emitCloneStructLikeValue(sourceValue, targetType, name)
+	case *semantic.EnumType:
+		// Store-backed enum: the value IS the opaque handle (an integer); clone copies it.
+		// The semantic layer only admits Packed enums here.
+		if tt.Packed {
+			return s.coerceValue(sourceValue, sourceType, targetType)
+		}
+		return nil, fmt.Errorf("clone does not support value enum %s in v1", targetType.String())
 	default:
 		return nil, fmt.Errorf("clone does not support %s in v1", targetType.String())
 	}

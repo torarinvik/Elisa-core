@@ -133,6 +133,15 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 			result[start] = true
 		}
 	}
+	// `common(...)` fields are per-node shared metadata, and the store row is where they live: the
+	// value layout has no slot for them (constructor args were rejected, reads failed). Declaring
+	// commons therefore promotes the hierarchy to the region-backed store machinery even without
+	// by-value recursion — "you asked for node metadata; you have nodes, and nodes live in stores".
+	for name, ed := range byName {
+		if !ed.Packed && len(ed.Common) > 0 {
+			result[name] = true
+		}
+	}
 	// If any member of a hierarchy is recursive, the whole hierarchy is region-backed (it shares one
 	// store), so promote the root and every refinement — including non-recursive leaves and the root.
 	rootOf := func(name string) string {

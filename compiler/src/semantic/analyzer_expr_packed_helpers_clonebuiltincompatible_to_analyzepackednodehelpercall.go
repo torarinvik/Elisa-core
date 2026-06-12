@@ -29,6 +29,15 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 		return false, SameType(target, source)
 	case *TypeParamType, *RefType, *FuncType, *ViewType, *PackedVariantViewType, *StoreRowsViewType, *StoreRowViewType, *DictType, *DictEntryType:
 		return false, false
+	case *EnumType:
+		// A store-backed (packed/promoted) enum value is an opaque handle to an immutable store
+		// node; cloning it copies the handle — node sharing is the handle model everywhere else.
+		// Value enums stay unsupported: their payload union may hold owning containers, and clone
+		// cannot promise independence without per-variant deep-copy codegen.
+		if tt.Packed {
+			return false, SameType(target, source)
+		}
+		return false, false
 	case *ArrayType:
 		sourceArray, ok := source.(*ArrayType)
 		if !ok || !arraySizesEqual(tt, sourceArray) {

@@ -252,6 +252,21 @@ func (a *Analyzer) collectCalleeFuncTypes(body []ast.Stmt, out map[*FuncType]boo
 					for _, ft := range a.regionPolyProtocolMethodImplFuncTypes(fieldExpr) {
 						out[ft] = true
 					}
+					// Extension-method callee: impl methods live in the per-receiver registry, not
+					// the global namespace, so the name-based resolution above misses them. The
+					// receiver type isn't analyzed yet in this pre-pass, so union over every
+					// registered method with this name — the same conservative shape as the
+					// protocol-impl union (extra edges only thread extra store params).
+					for _, candidate := range a.visibleNameCandidates(fieldExpr.Field) {
+						for _, method := range a.extensionMethodsByName[candidate] {
+							if method == nil || method.Symbol == nil {
+								continue
+							}
+							if ft, ok := method.Symbol.Type.(*FuncType); ok && ft != nil {
+								out[ft] = true
+							}
+						}
+					}
 				}
 			}
 			rec(v.Elem())

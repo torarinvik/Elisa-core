@@ -212,6 +212,15 @@ func (s *functionState) emitRecoveryClause(recovery *ast.RecoveryClause, resultT
 	if recovery == nil {
 		return nil, false, fmt.Errorf("missing recovery clause")
 	}
+	// The recovery clause is emitted in a fallback basic block that does not dominate the merge
+	// continuation. Snapshot the packed-store bindings (same discipline as emitBlockInCurrentScope):
+	// an implicit region-backed store created while emitting the fallback value must not leak its
+	// SSA value to successors — that fails the LLVM dominance verifier.
+	savedPackedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
+	defer func() {
+		s.packedStores = savedPackedStores
+	}()
 	switch recovery.Kind {
 	case ast.RecoveryValue:
 		value, _, err := s.emitExpr(recovery.Value, resultType)
