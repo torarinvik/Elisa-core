@@ -606,7 +606,7 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 		if i != lastNestedPattern {
 			nextSuccess = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.pattern.next"))
 		}
-		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], store, nil, nil, nextSuccess, failureBB); err != nil {
+		if _, _, err := s.emitMatchPatternTest(arg.Pattern, payloadValues[i], nil, variant.Payload[i], s.nestedPayloadPatternStore(variant.Payload[i], enumType, store), nil, nil, nextSuccess, failureBB); err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
 		if i != lastNestedPattern {
@@ -614,4 +614,24 @@ func (s *functionState) emitMatchedVariantPayloadPatternTest(pattern *ast.MatchV
 		}
 	}
 	return matchedDecodedValue, cachedPayloads, nil
+}
+
+// nestedPayloadPatternStore picks the store binding to thread into a NESTED payload pattern.
+// Stores are per hierarchy ROOT (docs/77): the outer scrutinee's store is only meaningful for a
+// payload field handle of the SAME root. A payload of a different packed hierarchy (`Decl.TypeDecl`
+// carrying a `Type` handle) must NOT inherit the outer store — reading the inner handle's tag
+// against the wrong store yields garbage and a silent false mismatch. Passing nil instead lets the
+// nested MatchVariantPattern case resolve the field enum's own store via lookupPackedStore.
+func (s *functionState) nestedPayloadPatternStore(fieldType semantic.Type, outerEnum *semantic.EnumType, store *packedStoreBinding) *packedStoreBinding {
+	if store == nil {
+		return nil
+	}
+	fieldEnum, ok := semantic.StripAggregateStateType(fieldType).(*semantic.EnumType)
+	if !ok || fieldEnum == nil || !fieldEnum.Packed {
+		return store
+	}
+	if outerEnum != nil && fieldEnum.Root() == outerEnum.Root() {
+		return store
+	}
+	return nil
 }

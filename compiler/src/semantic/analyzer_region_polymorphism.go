@@ -294,6 +294,17 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			if e.Owner == nil {
 				return true
 			}
+		case *ast.QueryExpr:
+			// An `each` query (`X{...} for each v in src`) builds a fresh darray in the
+			// inferred region — the QueryExpr analogue of the list comprehension above. It
+			// MUST classify region-poly: if the function also calls a region-poly callee,
+			// wrapRegionPolyCallerBodies gives its body a synthesized LOCAL region, so the
+			// query compiles — but without this classification the local region is never
+			// adopted by the caller and dies at return, leaving the returned darray's buffer
+			// dangling (count reads fine, element reads segfault).
+			if e.Kind == ast.QueryExprEach && e.Owner == nil {
+				return true
+			}
 		case *ast.TupleExpr:
 			// Lowered grammar try-productions return (matched, committed, value) tuples;
 			// a region-allocated value inside makes the whole return region-allocated.

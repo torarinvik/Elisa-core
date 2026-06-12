@@ -486,12 +486,14 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			}
 		case *ast.ReturnStmt:
 			// A function that directly `return`s a region-less COMPREHENSION
-			// (`return [x for x in xs]`) needs a synthesized auto region so the comprehension
-			// has an active scope — without it the comprehension scope check rejects the body
-			// before the region-poly classifier (which adopts the region into the caller) ever
-			// runs. A directly-returned plain list LITERAL (`return [first, ...rest]`) does NOT
-			// need this: it allocates region-poly without a scope check, and wrapping it would
-			// only change its parse shape, so it is deliberately excluded here.
+			// (`return [x for x in xs]`) or an allocating `each` QUERY
+			// (`return X{...} for each v in src`) needs a synthesized auto region so the
+			// builder has an active scope — without it the scope check rejects the body
+			// before the region-poly classifier (which adopts the region into the caller)
+			// ever runs. A directly-returned plain list LITERAL (`return [a, ...rest]`)
+			// does NOT need this: it allocates region-poly without a scope check, and
+			// wrapping it would only change its parse shape, so it is deliberately
+			// excluded here.
 			if rv := s.Value; rv != nil {
 				for {
 					paren, ok := rv.(*ast.ParenExpr)
@@ -500,8 +502,15 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 					}
 					rv = paren.Inner
 				}
-				if lit, ok := rv.(*ast.ListComprehensionExpr); ok && lit.Owner == nil {
-					return true
+				switch lit := rv.(type) {
+				case *ast.ListComprehensionExpr:
+					if lit.Owner == nil {
+						return true
+					}
+				case *ast.QueryExpr:
+					if lit.Kind == ast.QueryExprEach && lit.Owner == nil {
+						return true
+					}
 				}
 			}
 		}

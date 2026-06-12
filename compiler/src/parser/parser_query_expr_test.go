@@ -9,15 +9,32 @@ import (
 	"elisacore/src/unparse"
 )
 
+// firstBodyStmtThroughAutoRegion returns a function's first body statement, looking through the
+// synthesized lazy auto region the parser wraps around a body whose returned `each` query
+// allocates (functionBodyNeedsAutoRegion's ReturnStmt case). The wrap is load-bearing — it is
+// what lets the region-poly classifier adopt the query's region into the caller — and the query's
+// own parse shape is unchanged inside it.
+func firstBodyStmtThroughAutoRegion(t *testing.T, decl *ast.FuncDecl) ast.Stmt {
+	t.Helper()
+	if len(decl.Body) == 0 {
+		t.Fatalf("empty function body")
+	}
+	stmt := decl.Body[0]
+	if region, ok := stmt.(*ast.RegionStmt); ok && region.Lazy && len(region.Body) != 0 {
+		return region.Body[0]
+	}
+	return stmt
+}
+
 func TestParseQueryExprFamily(t *testing.T) {
 	file, errs := parseSourceFile(t, "def keep(items: darray[i64]) -> bool:\n    return any item in items where item > 0\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	ret, ok := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected return stmt, got %T", firstBodyStmtThroughAutoRegion(t, decl))
 	}
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
@@ -41,9 +58,9 @@ func TestParseFirstProjectionQueryExpr(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	ret, ok := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected return stmt, got %T", firstBodyStmtThroughAutoRegion(t, decl))
 	}
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
@@ -64,9 +81,9 @@ func TestParseEachProjectionQueryExpr(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	ret, ok := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected return stmt, got %T", firstBodyStmtThroughAutoRegion(t, decl))
 	}
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
@@ -87,9 +104,9 @@ func TestParseEachIdentityQueryExpr(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	ret, ok := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected return stmt, got %T", firstBodyStmtThroughAutoRegion(t, decl))
 	}
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
@@ -110,9 +127,9 @@ func TestParseEachIdentityQueryPatternFilter(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	ret, ok := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected return stmt, got %T", decl.Body[0])
+		t.Fatalf("expected return stmt, got %T", firstBodyStmtThroughAutoRegion(t, decl))
 	}
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
@@ -133,7 +150,7 @@ func TestParseProjectionQueryPatternFilter(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
 		t.Fatalf("expected query expr, got %T", ret.Value)
@@ -153,7 +170,7 @@ func TestParseQuerySubjectIsPatternFilter(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
 		t.Fatalf("expected query expr, got %T", ret.Value)
@@ -173,7 +190,7 @@ func TestParseQueryTupleSubjectIsPatternFilter(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
 		t.Fatalf("expected query expr, got %T", ret.Value)
@@ -200,7 +217,7 @@ func TestParseWhereViewSubjectIsPatternFilter(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call, ok := ret.Value.(*ast.CallExpr)
 	if !ok {
 		t.Fatalf("expected aggregate call expr, got %T", ret.Value)
@@ -224,7 +241,7 @@ func TestParseProjectionQueryPatternFilterGuard(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	query, ok := ret.Value.(*ast.QueryExpr)
 	if !ok {
 		t.Fatalf("expected query expr, got %T", ret.Value)
@@ -264,7 +281,7 @@ func TestParseExpressionWhereViewWithExplicitBinder(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call, ok := ret.Value.(*ast.CallExpr)
 	if !ok {
 		t.Fatalf("expected all call, got %T", ret.Value)
@@ -300,7 +317,7 @@ func TestParseExpressionWhereViewWithEnumerateBinders(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[0].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call := ret.Value.(*ast.CallExpr)
 	paren := call.Args[0].(*ast.ParenExpr)
 	whereCall := paren.Inner.(*ast.CallExpr)
@@ -320,7 +337,7 @@ func TestParseExpressionWhereViewWithEnumerateSubjectPattern(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call := ret.Value.(*ast.CallExpr)
 	paren := call.Args[0].(*ast.ParenExpr)
 	whereCall := paren.Inner.(*ast.CallExpr)
@@ -343,7 +360,7 @@ func TestParseExpressionWhereViewWithVariantPattern(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call := ret.Value.(*ast.CallExpr)
 	paren := call.Args[0].(*ast.ParenExpr)
 	whereCall := paren.Inner.(*ast.CallExpr)
@@ -371,7 +388,7 @@ func TestParseExpressionWhereViewWithVariantPatternPredicate(t *testing.T) {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
 	decl := file.Decls[1].(*ast.FuncDecl)
-	ret := decl.Body[0].(*ast.ReturnStmt)
+	ret := firstBodyStmtThroughAutoRegion(t, decl).(*ast.ReturnStmt)
 	call := ret.Value.(*ast.CallExpr)
 	paren := call.Args[0].(*ast.ParenExpr)
 	whereCall := paren.Inner.(*ast.CallExpr)

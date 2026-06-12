@@ -11,6 +11,10 @@ static int elisacoreLLVMIsZeroValue(LLVMValueRef value) {
 	return LLVMIsAConstant(value) != NULL && LLVMIsNull(value);
 }
 
+static char* elisa_coreEnumCtorPrintType(LLVMTypeRef Type) {
+	return LLVMPrintTypeToString(Type);
+}
+
 static LLVMMetadataRef elisa_coreAliasMDString(LLVMContextRef ctx, const char* value) {
 	if (value == NULL) {
 		return LLVMMDStringInContext2(ctx, "", 0);
@@ -125,6 +129,16 @@ func (s *functionState) emitEnumConstructorValue(callExpr *ast.CallExpr, enumTyp
 			if err != nil {
 				return nil, nil, err
 			}
+			// docs/76 free-null niche: the payload slot for an optional packed-enum child holds
+			// the bare handle (sentinel = absent). The generic {bool, handle} carrier converts at
+			// the record boundary — pack on write here, mirroring emitPackedEnumConstructorPayloadValue
+			// (the match-read path already unpacks symmetrically for plain enums).
+			if nicheEnum, ok := s.g.optionalEnumNicheField(variant.Payload[0]); ok {
+				argValue, err = s.packOptionalEnumNicheValue(argValue, nicheEnum, "enum.payload")
+				if err != nil {
+					return nil, nil, err
+				}
+			}
 			if !llvmValueIsZeroConstant(argValue) {
 				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
 			}
@@ -139,6 +153,26 @@ func (s *functionState) emitEnumConstructorValue(callExpr *ast.CallExpr, enumTyp
 				argValue, _, err := s.emitExpr(orderedArgs[i], payload)
 				if err != nil {
 					return nil, nil, err
+				}
+				// docs/76 free-null niche: pack the {bool, handle} carrier into the bare-handle
+				// slot at the record boundary (see the single-payload branch above).
+				if nicheEnum, ok := s.g.optionalEnumNicheField(payload); ok {
+					argValue, err = s.packOptionalEnumNicheValue(argValue, nicheEnum, "enum.payload")
+					if err != nil {
+						return nil, nil, err
+					}
+				}
+				// An insertvalue with a mismatched operand type only fails much later, at module
+				// verification, with no source context. Catch it here and name the enum, variant,
+				// field, and both types so the miscompile is diagnosable.
+				if expectedField := C.LLVMStructGetTypeAtIndex(payloadType, C.unsigned(i)); C.LLVMTypeOf(argValue) != expectedField {
+					fieldName := ""
+					if i < len(variant.PayloadNames) {
+						fieldName = variant.PayloadNames[i]
+					}
+					gotStr := C.GoString(C.elisa_coreEnumCtorPrintType(C.LLVMTypeOf(argValue)))
+					wantStr := C.GoString(C.elisa_coreEnumCtorPrintType(expectedField))
+					return nil, nil, fmt.Errorf("enum constructor %s.%s payload field %d (%s: %s): argument lowers to LLVM type %s but the payload slot expects %s", enumType.Name, variant.Name, i, fieldName, payload, gotStr, wantStr)
 				}
 				if !llvmValueIsZeroConstant(argValue) {
 					allZero = false

@@ -481,12 +481,20 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 		}
 		if tt.Packed {
 			root := tt.Root()
+			if _, already := out[root.Name]; already {
+				// Already collected this root — its payloads were (or are being) walked. Stop to
+				// avoid re-walking a recursive payload (`Ty.Ptr(inner: Ty)`) past the depth guard.
+				break
+			}
 			out[root.Name] = root
-			break
 		}
-		// A plain (non-packed) enum can still carry packed-enum handles in its variant payloads
-		// (e.g. a LuaNode wrapper over Expr/Stmt handles) — those handles are only meaningful
-		// against their store, so the wrapper exposes the same store need.
+		// Recurse into variant payloads — for a PACKED enum too. A payload may be a packed enum of a
+		// DIFFERENT root (`Decl.VarDecl` carries a `Type` handle, `Stmt.Compound` a `Block` holding
+		// `darray[Decl]`/`darray[Stmt]`): destructuring the outer handle yields the inner handle,
+		// whose `match` needs ITS root's store threaded in. Without this, a function that receives a
+		// `Decl` and `expect`s its `type_expr` as a `Type.Name(...)` fails with "match over Type
+		// requires an in Type.Store clause", because only Decl's store was collected. Hierarchy
+		// children are walked so a root/category param exposes every reachable leaf's payloads.
 		for _, variant := range tt.Variants {
 			if variant == nil {
 				continue
@@ -494,6 +502,9 @@ func collectPackedEnumsInTypeDepth(t Type, out map[string]*EnumType, depth int) 
 			for _, payload := range variant.Payload {
 				collectPackedEnumsInTypeDepth(payload, out, depth+1)
 			}
+		}
+		for _, child := range tt.Children {
+			collectPackedEnumsInTypeDepth(child, out, depth+1)
 		}
 	case *PackedVariantViewType:
 		if tt != nil && tt.Enum != nil && tt.Enum.Packed {
