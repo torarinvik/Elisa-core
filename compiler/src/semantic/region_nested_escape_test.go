@@ -81,6 +81,113 @@ def f() -> i64:
 	}
 }
 
+// Bulk extend copies an inner-region source container's elements into an
+// outer-region target; the copied nested-container element headers dangle once
+// the source region is freed. The element type carries region storage, so the
+// source container's own region is the proxy for the elements' lifetime.
+func TestNestedRegionBulkExtendRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "nested_extend_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            outer_list: mutable darray[darray[u8]] @outer = []
+            region a(4096):
+                v: mutable darray[u8] @a = []
+                v.push(66)
+                src: mutable darray[darray[u8]] @a = []
+                src.push(v)
+                outer_list.extend(src)
+            return i64(outer_list[0][0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "dangling") {
+		t.Fatalf("expected bulk extend of inner-region elements into outer darray to be rejected; got: %s", all)
+	}
+}
+
+// Bulk push (push of a whole darray/view/array source) is the same hole as extend.
+func TestNestedRegionBulkPushRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "nested_bulkpush_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            outer_list: mutable darray[darray[u8]] @outer = []
+            region a(4096):
+                v: mutable darray[u8] @a = []
+                v.push(66)
+                src: mutable darray[darray[u8]] @a = []
+                src.push(v)
+                outer_list.push(src)
+            return i64(outer_list[0][0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "dangling") {
+		t.Fatalf("expected bulk push of inner-region elements into outer darray to be rejected; got: %s", all)
+	}
+}
+
+// Scalar (pointer-free) elements can never dangle, so a bulk extend of an inner
+// region's u8 elements into an outer u8 darray must stay accepted.
+func TestNestedRegionScalarExtendAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "nested_scalar_extend_ok.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            outer_list: mutable darray[u8] @outer = []
+            region a(4096):
+                src: mutable darray[u8] @a = []
+                src.push(66)
+                outer_list.extend(src)
+            return i64(outer_list[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "dangling") {
+		t.Fatalf("scalar-element extend cannot dangle and must be accepted; got: %s", all)
+	}
+}
+
+// Copying a region-less struct whose interior darray field was filled from an
+// inner region into an outer-living local launders the dangling field past the
+// region's death; the struct type carries no region, so the interior-taint
+// side-table supplies it. Propagation must also catch a copy chain.
+func TestStructCopyInteriorFieldEscapeRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "struct_copy_interior_escape.elisa", `struct Holder:
+    xs: mutable darray[u8]
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable Holder = zeroed
+        region a(4096):
+            v: mutable darray[u8] @a = []
+            v.push(65)
+            inner: mutable Holder = zeroed
+            inner.xs <- v
+            mid: mutable Holder = inner
+            out <- mid
+        return i64(out.xs[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "outlives the region") {
+		t.Fatalf("expected struct copy laundering an inner-region interior field to be rejected; got: %s", all)
+	}
+}
+
+// A struct whose interior field points at an OUTER region copied out is sound and
+// must stay accepted — the taint must record the field's true (outer) region.
+func TestStructCopyOuterInteriorFieldAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "struct_copy_outer_field_ok.elisa", `struct Holder:
+    xs: mutable darray[u8]
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            ov: mutable darray[u8] @outer = []
+            ov.push(70)
+            out: mutable Holder = zeroed
+            region a(4096):
+                inner: mutable Holder = zeroed
+                inner.xs <- ov
+                out <- inner
+            return i64(out.xs[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "dangling") {
+		t.Fatalf("struct copy of an outer-region interior field must be accepted; got: %s", all)
+	}
+}
+
 // Positive controls: same-region nesting and region-less bindings declared
 // INSIDE the region block die with the block — no escape, must stay accepted.
 func TestNestedRegionSameRegionAndInsideBlockAccepted(t *testing.T) {

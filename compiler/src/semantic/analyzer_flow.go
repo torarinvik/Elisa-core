@@ -82,6 +82,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordFunctionValueBinding(sym, n.Value)
 		a.recordImmutableSymbolOptimizationFacts(sym, n.Value)
 		a.recordRegionRefBinding(sym, n.Value)
+		// Propagate interior-region taint through `let dest = src` so a copied
+		// region-less aggregate carries its dangling interior field forward.
+		a.recordStructInteriorRegionTaint(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, valueType)
 		a.recordStorageViewBinding(sym, n.Value)
 		aliasAccessType := declType
 		if n.Type == nil || typeExprHasExplicitMutableRef(n.Type) {
@@ -289,6 +292,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// outlives-lattice, independent of whether the target outlives the
 		// function (the function-outliving case is handled just above).
 		a.checkNestedRegionStoreEscape(n.Target, targetType, valueType)
+		// Struct copy-by-value can launder a dangling interior region-container
+		// field (whose region is not on the struct type) past the region's death;
+		// the interior-taint side-table makes that region visible to the check.
+		a.checkStructCopyInteriorRegionEscape(n.Target, targetType, n.Value, valueType)
+		a.recordStructInteriorRegionTaint(n.Target, n.Value, valueType)
 		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {

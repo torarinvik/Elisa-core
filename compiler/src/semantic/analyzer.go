@@ -193,6 +193,14 @@ type Analyzer struct {
 	currentRegionMarks           map[*Symbol]regionMarkState
 	currentCheckpoints           map[*Symbol]checkpointState
 	currentRegionRefs            map[*Symbol]regionRefState
+	// currentStructInteriorRegionTaint records, per region-less aggregate local,
+	// the innermost (shortest-lived) region name that one of its interior
+	// container/view fields was stored a value from. A struct's TYPE never carries
+	// its fields' regions, so copying such a struct out to a longer-lived binding
+	// would otherwise launder a dangling interior reference past the region's death
+	// undetected. Consumed only by checkStructCopyInteriorRegionEscape; kept off the
+	// shared region-ref provenance map to avoid perturbing promote/packed/invalidation.
+	currentStructInteriorRegionTaint map[*Symbol]string
 	currentAffineValues          map[affineValueKey]affineValueState
 	currentBorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
 	currentFunctionValues        map[*Symbol]*FuncType

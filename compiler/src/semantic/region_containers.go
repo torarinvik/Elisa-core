@@ -444,6 +444,169 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	}
 }
 
+// checkNestedRegionBulkStoreEscape is the bulk form of the element-store check
+// (darray.extend, bulk darray.push from a darray/view/array source). The values
+// copied in are the SOURCE container's elements; when the element type itself
+// carries region storage (a nested container/view/ref), those elements live in
+// the source container's region, so copying them into a longer-lived target
+// container leaves dangling references once the source region is freed. Scalar
+// (pointer-free) elements can never dangle, so they are exempt — a per-element
+// region stamp is never available for a bulk source, so the source container's
+// own region is the proxy for its elements' lifetime.
+func (a *Analyzer) checkNestedRegionBulkStoreEscape(sourceExpr, receiverExpr ast.Expr, containerType, elemType, sourceType Type) {
+	if a == nil || sourceExpr == nil {
+		return
+	}
+	if !typeCarriesRegionStorage(elemType) {
+		return // scalar / pointer-free elements can't dangle.
+	}
+	valueRegion := containerRegion(sourceType)
+	if valueRegion == "" {
+		return
+	}
+	targetRegion := containerOrEntryRegion(elemType)
+	if targetRegion == "" {
+		targetRegion = containerRegion(containerType)
+	}
+	if targetRegion == "" {
+		// Region-less target container (a plain local declared outside the
+		// source's region block): dangles if its scope outlives the region.
+		if receiverExpr != nil {
+			a.checkRegionlessTargetStoreEscape(receiverExpr, valueRegion)
+		}
+		return
+	}
+	if a.regionOutlives(targetRegion, valueRegion) {
+		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+	}
+}
+
+// structInteriorTaintRegion returns the innermost region a region-less aggregate
+// local was tainted with (an interior container/view field stored an inner-region
+// value), peeling parens/casts/moves down to the root identifier. "" when the
+// expression is not a tainted local.
+func (a *Analyzer) structInteriorTaintRegion(expr ast.Expr) string {
+	if a == nil || a.currentScope == nil || a.currentStructInteriorRegionTaint == nil {
+		return ""
+	}
+	ident, ok := stripParenExpr(expr).(*ast.Ident)
+	if !ok || ident == nil {
+		return ""
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return ""
+	}
+	return a.currentStructInteriorRegionTaint[sym]
+}
+
+// valueStoreRegion returns the innermost (shortest-lived) tracked region a stored
+// value carries: a container/view's own stamped region, or — for a region-less
+// aggregate — the interior-field taint recorded for its source local. Only
+// lattice-comparable (tracked-local) regions are reported; "" otherwise.
+func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
+	if r := containerRegion(valueType); r != "" {
+		if _, ok := a.regionLifetimeOrdinal(r); ok {
+			return r
+		}
+	}
+	if r := a.structInteriorTaintRegion(expr); r != "" {
+		return r
+	}
+	return ""
+}
+
+// innerRegion returns whichever of two regions is shorter-lived (higher lifetime
+// ordinal). Incomparable regions defer to the comparable one.
+func (a *Analyzer) innerRegion(r1, r2 string) string {
+	if r1 == "" {
+		return r2
+	}
+	if r2 == "" || r1 == r2 {
+		return r1
+	}
+	o1, ok1 := a.regionLifetimeOrdinal(r1)
+	o2, ok2 := a.regionLifetimeOrdinal(r2)
+	if !ok1 {
+		return r2
+	}
+	if !ok2 {
+		return r1
+	}
+	if o2 > o1 {
+		return r2
+	}
+	return r1
+}
+
+// recordStructInteriorRegionTaint maintains the interior-field taint side-table on
+// an assignment/binding. A field store `base.field <- v` (or any deeper path with a
+// local root) taints the root aggregate with v's region; a whole-aggregate copy
+// `dest <- src`/`let dest = src` of a tainted region-less struct propagates the
+// taint so the dangling interior reference is tracked through copy chains. This is
+// what lets checkStructCopyInteriorRegionEscape reject laundering a region-less
+// struct's dangling interior field out past the region's death.
+func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, valueType Type) {
+	if a == nil || a.currentStructInteriorRegionTaint == nil || a.currentScope == nil {
+		return
+	}
+	root := rootIdentExpr(target)
+	if root == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil {
+		return
+	}
+	if _, isField := stripParenExpr(target).(*ast.FieldExpr); isField {
+		// Field store into an aggregate: taint the root with the value's region.
+		region := a.valueStoreRegion(value, valueType)
+		if region == "" {
+			return
+		}
+		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
+		return
+	}
+	// Whole-aggregate assignment to a plain local: propagate the source's taint.
+	if _, isIdent := stripParenExpr(target).(*ast.Ident); !isIdent {
+		return
+	}
+	if !typeCarriesRegionStorage(valueType) || containerRegion(valueType) != "" {
+		return
+	}
+	if region := a.structInteriorTaintRegion(value); region != "" {
+		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
+	}
+}
+
+// checkStructCopyInteriorRegionEscape rejects copying a region-less aggregate that
+// holds an interior reference into an inner region (recorded via interior taint)
+// into storage that outlives that region. A struct's TYPE never carries its
+// fields' regions, so checkNestedRegionStoreEscape (which keys off the value type's
+// region) is blind to this laundering; the taint side-table supplies the region.
+func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targetType Type, valueExpr ast.Expr, valueType Type) {
+	if a == nil || targetExpr == nil {
+		return
+	}
+	// Only aggregates: a stamped container value's region is on its type and is
+	// already handled by checkNestedRegionStoreEscape.
+	if !typeCarriesRegionStorage(valueType) || containerRegion(valueType) != "" {
+		return
+	}
+	valueRegion := a.structInteriorTaintRegion(valueExpr)
+	if valueRegion == "" {
+		return
+	}
+	targetRegion := containerOrEntryRegion(targetType)
+	if targetRegion == "" {
+		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+		return
+	}
+	if a.regionOutlives(targetRegion, valueRegion) {
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+	}
+}
+
 // checkRegionlessTargetStoreEscape rejects storing region-allocated data into a
 // region-less binding that outlives the region's block. The target outlives the
 // region exactly when its defining scope strictly encloses the region's

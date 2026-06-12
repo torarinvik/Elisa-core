@@ -279,6 +279,10 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 			a.errorf(expr.Args[0].Pos(), "bulk darray push does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
 		}
+		// Nested-region escape: bulk-pushing the elements of an inner-region source
+		// container into a longer-lived target leaves dangling element references
+		// once the source region is freed.
+		a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, argType)
 	} else {
 		// Nested-region escape: pushing an inner-@r value into a darray whose element
 		// region outlives it would leave the longer-lived buffer holding a dangling
@@ -352,6 +356,10 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
 	}
+	// Nested-region escape: extending from an inner-region source container into a
+	// longer-lived target leaves dangling element references once the source
+	// region is freed.
+	a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, sourceType)
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{
