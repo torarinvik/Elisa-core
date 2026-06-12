@@ -522,6 +522,15 @@ func (i *Interpreter) lookupValue(frame *frame, name string) (Value, error) {
 			return FunctionValue(candidate), nil
 		}
 	}
+	if name == "perm" {
+		// The perm program-lifetime region: the interpreter has no arenas (values are
+		// GC-managed), so a threaded region argument is satisfied by a zero Arena.
+		return StructInstanceValue("Arena", []string{"begin", "end", "end_index"}, map[string]Value{
+			"begin":     NullValue(),
+			"end":       NullValue(),
+			"end_index": IntValue(0),
+		}), nil
+	}
 	return VoidValue(), fmt.Errorf("undefined name %q", name)
 }
 func (i *Interpreter) resolveSlot(frame *frame, expr ast.Expr) (*valueSlot, error) {

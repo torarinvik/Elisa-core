@@ -523,6 +523,12 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 	if expr.Owner == nil && len(expr.Elems) > 0 && useExpectedDArray && expectedDArray.Region != "" && !a.lookupRegionParam(expectedDArray.Region) {
 		expr.Owner = &ast.Ident{Position: expr.Position, Name: expectedDArray.Region}
 	}
+	// A region-less expected darray (e.g. a global's declared type) under the perm
+	// ambient region allocates in perm: route the literal there explicitly, since the
+	// expected type carries no region for the backend to resolve.
+	if expr.Owner == nil && len(expr.Elems) > 0 && useExpectedDArray && expectedDArray.Region == "" && a.activeContainerRegionName() == "perm" {
+		expr.Owner = &ast.Ident{Position: expr.Position, Name: "perm"}
+	}
 	if len(expr.Elems) == 0 {
 		switch {
 		case useExpectedArray:

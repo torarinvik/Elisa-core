@@ -50,6 +50,52 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		}
 	}
 	a.regionPolyFn = nil
+	// A region-polymorphic function whose body allocates containers outside any region
+	// scope (e.g. a comprehension assigned to a local that is later returned) needs a
+	// synthesized auto region: the backend adopts it into the threaded caller region
+	// (regionPolyAutoAdopts), so the allocations land in the caller's arena. The parser
+	// wraps the common shapes (return-position literals); this covers the rest.
+	for _, fn := range funcs {
+		fnType := a.funcTypeForRegionPoly(fn)
+		if fnType == nil || !fnType.RegionPolymorphic || len(fn.Body) == 0 {
+			continue
+		}
+		if bodyAllocatesInferredContainers(fn.Body) {
+			wrapFuncBodyInLazyAutoRegion(fn)
+		}
+	}
+	// A function returning a `static T&` asserts a PROGRAM-lifetime result. When such a
+	// function builds local containers (the C-string-builder shape: `out: dstr = []`,
+	// push bytes, `return (&out[0]).cast[static u8&]`), the only region that honors the
+	// asserted lifetime is the permanent one — so bind its body's ambient region to perm.
+	// This is what lets these builders be written with no region annotations at all.
+	for _, fn := range funcs {
+		fnType := a.funcTypeForRegionPoly(fn)
+		if fnType == nil || fnType.RegionPolymorphic || funcHasArenaParam(fn) || len(fn.Body) == 0 {
+			continue
+		}
+		if !returnTypeIsStaticRef(fn.ReturnType) {
+			continue
+		}
+		// The parser may already have wrapped the body in a synthesized auto region
+		// (which would scope the allocations to the FUNCTION — freed on return, the
+		// opposite of the asserted static lifetime). Look through it and replace it.
+		body := fn.Body
+		if len(body) == 1 {
+			if rs, isRegion := body[0].(*ast.RegionStmt); isRegion && rs != nil && isSynthesizedAutoRegion(rs.Name) {
+				body = rs.Body
+			}
+		}
+		if !bodyAllocatesInferredContainers(body) {
+			continue
+		}
+		pos := body[0].Pos()
+		fn.Body = []ast.Stmt{&ast.InStoreStmt{
+			Position: pos,
+			Store:    &ast.Ident{Position: pos, Name: "perm"},
+			Body:     body,
+		}}
+	}
 	// Inference-by-default for CALLERS: a non-region-polymorphic function that calls a
 	// region-polymorphic one needs an ambient region to thread in. The parser's
 	// maybeWrapFunctionBodyInAutoRegion can't see this case (callee polymorphism is a
@@ -642,12 +688,33 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 			return true
 		}
 	case *ast.StructLitExpr:
+		// Pre-analysis, `Name(args)` parses as a StructLitExpr whether Name is a struct
+		// or a function — so a constructor-style CALL of a region-polymorphic function
+		// (`return Manager(Users_New(), -1)` / `return Users_New()`) lands here, not in
+		// the CallExpr case. Resolve the name: a region-poly function makes the value
+		// region-allocated.
+		if sym, _, ok := a.lookupVisibleGlobal(e.Name); ok && sym != nil {
+			if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && ft.RegionPolymorphic {
+				return true
+			}
+		}
 		// A struct literal wrapping region-allocated values (the parse-result pattern:
 		// `return Result{ast: ..., decls: decls}`) carries its fields' region — returning
 		// it returns region-allocated data, so the function must thread the caller region
 		// instead of freeing a local auto-region under the returned handles.
 		for _, arg := range e.Args {
-			if arg != nil && a.exprResultIsRegionAllocated(arg) {
+			if arg == nil {
+				continue
+			}
+			if a.exprResultIsRegionAllocated(arg) {
+				return true
+			}
+			// Region-less container literals/comprehensions as constructor args allocate
+			// into the inferred region (the regiony() rule, applied transitively here).
+			if lit, isLit := unwrapParenForRegionPoly(arg).(*ast.ListLitExpr); isLit && lit != nil && lit.Owner == nil {
+				return true
+			}
+			if comp, isComp := unwrapParenForRegionPoly(arg).(*ast.ListComprehensionExpr); isComp && comp != nil && comp.Owner == nil {
 				return true
 			}
 		}
@@ -894,6 +961,18 @@ func (a *Analyzer) bodyCallsRegionPolyOutsideRegion(stmts []ast.Stmt) bool {
 					found = true
 					return
 				}
+			case *ast.StructLitExpr:
+				// Pre-analysis, `Name(args)` parses as a StructLitExpr whether Name is a
+				// struct or a function — a constructor-style call of a region-polymorphic
+				// function needs an ambient region exactly like a CallExpr.
+				if n != nil && n.Name != "" {
+					if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok && sym != nil {
+						if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil && ft.RegionPolymorphic {
+							found = true
+							return
+						}
+					}
+				}
 			}
 			rec(v.Elem())
 		case reflect.Interface:
@@ -1017,4 +1096,76 @@ func (a *Analyzer) regionPolyProtocolMethodImplFuncTypes(callee *ast.FieldExpr) 
 		}
 	}
 	return out
+}
+
+// returnTypeIsStaticRef reports whether a syntactic return type is a reference with
+// `static` storage (peeling mutable/optional wrappers): `static u8&`, `mutable static T&?`.
+func returnTypeIsStaticRef(typ ast.TypeExpr) bool {
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.OptionalTypeExpr:
+			typ = t.Value
+		case *ast.RefType:
+			return t.Storage == ast.RefStorageStatic
+		default:
+			return false
+		}
+	}
+}
+
+// bodyAllocatesInferredContainers reports whether the statements contain a region-less
+// container literal or comprehension outside any explicit region/in-store scope — the
+// allocations a synthesized ambient region would capture.
+func bodyAllocatesInferredContainers(stmts []ast.Stmt) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.RegionStmt:
+				if len(n.Body) != 0 {
+					return
+				}
+			case *ast.InStoreStmt:
+				return
+			case *ast.LambdaExpr:
+				return
+			case *ast.ListLitExpr:
+				if n.Owner == nil {
+					found = true
+					return
+				}
+			case *ast.ListComprehensionExpr:
+				if n.Owner == nil {
+					found = true
+					return
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }

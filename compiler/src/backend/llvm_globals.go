@@ -45,6 +45,12 @@ func (g *llvmGenerator) defineGlobal(name string, decl *ast.GlobalDecl, typ sema
 	if decl == nil || global == nil {
 		return nil
 	}
+	// Runtime singleton globals (the `__elisa_` prefix) may be defined both by the
+	// default runtime object and by a program that includes a runtime fragment
+	// directly. Weak linkage dedupes them to one definition at link time.
+	if strings.HasPrefix(name, "__elisa_") {
+		C.LLVMSetLinkage(global, C.LLVMWeakAnyLinkage)
+	}
 	if decl.Value == nil {
 		zero, err := g.constZero(typ)
 		if err != nil {

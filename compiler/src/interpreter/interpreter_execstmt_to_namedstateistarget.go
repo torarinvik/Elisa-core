@@ -158,6 +158,10 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		// written explicitly or synthesized by inference (`in auto:`, the per-function auto
 		// region) — is just a transparent block: run its body, no separate arena.
 		return i.execBlock(frame, n.Body)
+	case *ast.InStoreStmt:
+		// Same memory-model transparency as RegionStmt: `in <arena>:` / `in perm:` only
+		// route allocations, which the interpreter's GC'd values don't model.
+		return i.execBlock(frame, n.Body)
 	case *ast.StaticIfStmt:
 		cond, err := i.evalExpr(frame, n.Cond)
 		if err != nil {

@@ -200,12 +200,33 @@ func functionPermissionRefs(fnType *FuncType) []ast.PermissionRef {
 	if fnType == nil {
 		return nil
 	}
-	if len(fnType.PermissionRefs) != 0 {
-		return fnType.PermissionRefs
+	refs := fnType.PermissionRefs
+	if len(refs) == 0 {
+		refs = make([]ast.PermissionRef, 0, len(fnType.Permissions))
+		for _, family := range fnType.Permissions {
+			refs = append(refs, ast.PermissionRef{Name: family})
+		}
 	}
-	refs := make([]ast.PermissionRef, 0, len(fnType.Permissions))
-	for _, family := range fnType.Permissions {
-		refs = append(refs, ast.PermissionRef{Name: family})
+	// A permission-generic callee (`def f[permission P](cb: func() can[P])`) carries its
+	// PARAMETER (a bare "P") in its refs. From the caller's view that ref is satisfied by
+	// the callback argument's own effects — which the collector gathers from the argument
+	// expression itself — so the unsubstituted parameter must not leak into caller facts
+	// (it would surface as `unknown permission "P"` in synthesized wrappers).
+	if len(fnType.PermissionParams) != 0 {
+		filtered := make([]ast.PermissionRef, 0, len(refs))
+		for _, ref := range refs {
+			isParam := false
+			for _, p := range fnType.PermissionParams {
+				if ref.Name == p {
+					isParam = true
+					break
+				}
+			}
+			if !isParam {
+				filtered = append(filtered, ref)
+			}
+		}
+		refs = filtered
 	}
 	return refs
 }

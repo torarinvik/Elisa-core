@@ -324,6 +324,9 @@ func (a *Analyzer) analyzeInStoreStmt(stmt *ast.InStoreStmt) {
 	// BEFORE expression analysis (which would emit a spurious "undefined identifier perm").
 	if ident, ok := stripParenExpr(stmt.Store).(*ast.Ident); ok && ident != nil && ident.Name == "perm" {
 		if _, inScope := a.currentScope.Lookup("perm"); !inScope {
+			// perm is the program-lifetime region: make it the ambient alloc context so
+			// container literals stamp Region "perm" and region-polymorphic calls thread it.
+			a.currentAllocExpr = stmt.Store
 			a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
 			a.currentAllocExpr = savedAllocExpr
 			a.currentPackedVariantViews = savedPackedVariantViews

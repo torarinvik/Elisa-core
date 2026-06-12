@@ -266,14 +266,34 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.suppressGlobalReadCheck--
 		a.suppressUninitReadCheck--
+		isGlobalTarget := false
 		if sym, ok := a.globalStorageRoot(n.Target); ok {
+			isGlobalTarget = true
 			a.recordFunctionPermissionRefs(globalWriteRefs(n.Target.Pos()))
 			if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Target.Pos()))
 			}
 		}
 		a.clearPackedVariantViewExpr(n.Target)
+		// A store into a global is program-lifetime by definition: when no region is
+		// ambient, bind the RHS to the permanent region so container literals and
+		// region-polymorphic calls just work (`g_state <- Build_State()`) instead of
+		// demanding an explicit region the value would immediately escape anyway.
+		savedAllocExpr := a.currentAllocExpr
+		restoreAllocExpr := false
+		// A synthesized (function-local) ambient auto region must not capture a value
+		// stored into a global — it dies at function return. A USER-written region or
+		// `in <owner>:` scope is explicit intent and is respected.
+		ambientIsSynthesized := isSynthesizedAutoRegion(a.activeContainerRegionName())
+		if isGlobalTarget && (a.currentAllocExpr == nil || ambientIsSynthesized) &&
+			(a.currentFuncType == nil || !a.currentFuncType.RegionPolymorphic) {
+			a.currentAllocExpr = &ast.Ident{Position: n.Value.Pos(), Name: "perm"}
+			restoreAllocExpr = true
+		}
 		valueType := a.analyzeValueExpr(n.Value, targetType)
+		if restoreAllocExpr {
+			a.currentAllocExpr = savedAllocExpr
+		}
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)

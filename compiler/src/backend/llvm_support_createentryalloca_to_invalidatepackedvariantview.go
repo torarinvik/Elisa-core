@@ -141,6 +141,17 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	if arenaType == nil {
 		return treeAllocOwnerBinding{}, false, nil
 	}
+	// `in perm:` — the program-lifetime region. Resolved structurally (the ident is
+	// not a value in scope, mirroring the analyzer's special case).
+	if isTreeAllocPermExpr(expr) {
+		if _, bound := s.lookupBinding("perm"); !bound {
+			owner, err := s.permTreeAllocOwner()
+			if err != nil {
+				return treeAllocOwnerBinding{}, false, err
+			}
+			return owner, true, nil
+		}
+	}
 	ownerType := s.exprType(expr)
 	stripped := stripTreeAllocOwnerExpr(expr)
 	if ident, ok := stripped.(*ast.Ident); ok && semantic.SameType(ownerType, arenaType) {
@@ -205,6 +216,16 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 	for i := len(s.regions) - 1; i >= 0; i-- {
 		if s.regions[i].name == region && s.regions[i].ptr != nil {
 			return treeAllocOwnerBinding{arenaRef: s.regions[i].ptr}, true
+		}
+	}
+	// The perm program-lifetime region is module-global, not a function-local
+	// region binding. A local binding named "perm" (checked above via s.regions
+	// and by callers via lookupBinding) shadows it.
+	if region == "perm" {
+		if _, bound := s.lookupBinding("perm"); !bound {
+			if owner, err := s.permTreeAllocOwner(); err == nil {
+				return owner, true
+			}
 		}
 	}
 	return treeAllocOwnerBinding{}, false
