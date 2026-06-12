@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 	"unicode"
 
 	"elisacore/src/ast"
@@ -81,6 +82,22 @@ func (a *Analyzer) resolveImplicitCallArgs(expr *ast.CallExpr, ft *FuncType, bin
 			continue
 		}
 		expectedType := a.substituteType(ft.Params[paramIndex], bindings, shapeBindings, regionBindings, permissionBindings)
+		// An enclosing `in <store>:` block takes precedence over the caller's own threaded
+		// store param for that enum: a callee must build/read nodes in the store the caller
+		// is explicitly operating in, so its handles share that store's handle space and stay
+		// valid after the call (a long-lived REPL session re-evaluating an AST handle captured
+		// by an earlier eval's thunk). When no `in <store>:` overrides, the active binding IS
+		// the threaded param store, so this resolves to the same value as the same-name path.
+		if strings.HasPrefix(name, "__packed_store_") {
+			if pst, isStore := expectedType.(*PackedEnumStoreType); isStore && pst != nil && pst.Enum != nil {
+				if active, found := a.lookupPackedStore(pst.Enum); found && active != nil {
+					reuseExpr := packedStoreImplicitArgExpr(active, true)
+					a.exprTypes[reuseExpr] = expectedType
+					resolved = append(resolved, reuseExpr)
+					continue
+				}
+			}
+		}
 		argExpr, ok := working[name]
 		if !ok || argExpr == nil {
 			if fallback, found := a.lookupSameNameImplicitExpr(name, working); found {
