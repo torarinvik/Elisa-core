@@ -143,6 +143,13 @@ func (s *functionState) emitPackedSideTableFieldRead(handleValue C.LLVMValueRef,
 	if !ok {
 		return nil, fmt.Errorf("packed enum %s side-tabled common-field read requires store context", enumType.Name)
 	}
+	return s.emitPackedSideTableFieldReadWithOps(ops, handleValue, enumType, fieldType, sideWordOffset, wordCount, origin, name)
+}
+
+// emitPackedSideTableFieldReadWithOps is the ops-based core of the side-table read: it assembles the
+// field value from its parallel side column(s) given an already-resolved store ops. Callers that hold
+// a *packedStoreOps directly (the column scan) use it without a packedStoreBinding round-trip.
+func (s *functionState) emitPackedSideTableFieldReadWithOps(ops *packedStoreOps, handleValue C.LLVMValueRef, enumType *semantic.EnumType, fieldType semantic.Type, sideWordOffset uint64, wordCount uint64, origin packedReadOriginKey, name string) (C.LLVMValueRef, error) {
 	fieldSizeBytes, err := s.g.abiSizeOfType(fieldType)
 	if err != nil {
 		return nil, err

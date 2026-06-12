@@ -385,8 +385,19 @@ type packedEnumCommonFieldLayoutCacheKey struct {
 	field string
 }
 
-func packedFieldUsesSideTable(field semantic.Field) bool {
-	return field.PackedStorage == semantic.PackedFieldStorageSideTable
+// packedFieldUsesSideTable resolves a common field's placement. Commons are per-node metadata that
+// hot paths (match/dispatch) never touch, so the unannotated Default is the COLD side table whenever
+// the ABI's handle can index a parallel array; `handle: ptr` (and any non-dense mode) has no second
+// array to index, so Default falls back to inline-in-row there. @storage(inline|side_table) overrides.
+func (g *llvmGenerator) packedFieldUsesSideTable(enumType *semantic.EnumType, field semantic.Field) bool {
+	switch field.PackedStorage {
+	case semantic.PackedFieldStorageSideTable:
+		return true
+	case semantic.PackedFieldStorageInline:
+		return false
+	default:
+		return g.packedEnumSupportsSideTableCommonFields(enumType)
+	}
 }
 func (g *llvmGenerator) packedEnumSupportsSideTableCommonFields(enumType *semantic.EnumType) bool {
 	if enumType == nil {
@@ -395,7 +406,13 @@ func (g *llvmGenerator) packedEnumSupportsSideTableCommonFields(enumType *semant
 	return packedModeUsesDenseIndexHandle(g.packedModeForEnum(enumType))
 }
 func (g *llvmGenerator) packedEnumInlineCommonFieldCount(enumType *semantic.EnumType) (int, error) {
-	if enumType == nil || enumType.Decl == nil {
+	if enumType == nil {
+		return 0, nil
+	}
+	// docs/77: common(...) lives on the hierarchy root; a child enum's own Decl.Common is empty, so
+	// resolve against the root or this miscounts to 0 for every promoted hierarchy.
+	enumType = enumType.Root()
+	if enumType.Decl == nil {
 		return 0, nil
 	}
 	count := 0
@@ -404,14 +421,20 @@ func (g *llvmGenerator) packedEnumInlineCommonFieldCount(enumType *semantic.Enum
 		if !ok {
 			return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
 		}
-		if !packedFieldUsesSideTable(field) {
+		if !g.packedFieldUsesSideTable(enumType, field) {
 			count++
 		}
 	}
 	return count, nil
 }
 func (g *llvmGenerator) packedEnumCommonSideTableWordCount(enumType *semantic.EnumType) (uint64, error) {
-	if enumType == nil || enumType.Decl == nil {
+	if enumType == nil {
+		return 0, nil
+	}
+	// docs/77: common(...) lives on the hierarchy root; resolve against it so a child enum (whose
+	// own Decl.Common is empty) reports the same side-word count as the constructor/read paths.
+	enumType = enumType.Root()
+	if enumType.Decl == nil {
 		return 0, nil
 	}
 	if !g.packedEnumSupportsSideTableCommonFields(enumType) {
@@ -420,7 +443,7 @@ func (g *llvmGenerator) packedEnumCommonSideTableWordCount(enumType *semantic.En
 			if !ok {
 				return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
 			}
-			if packedFieldUsesSideTable(field) {
+			if g.packedFieldUsesSideTable(enumType, field) {
 				return 0, fmt.Errorf("packed enum %s common field %s uses @storage(side_table), but packed ABI %q does not support side-tabled common fields", enumType.Name, fieldDecl.Name, packedModeName(g.packedModeForEnum(enumType)))
 			}
 		}
@@ -436,7 +459,7 @@ func (g *llvmGenerator) packedEnumCommonSideTableWordCount(enumType *semantic.En
 		if !ok {
 			return 0, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
 		}
-		if !packedFieldUsesSideTable(field) {
+		if !g.packedFieldUsesSideTable(enumType, field) {
 			continue
 		}
 		sizeBytes, err := g.abiSizeOfType(field.Type)
@@ -475,7 +498,7 @@ func (g *llvmGenerator) packedEnumCommonFieldLayout(enumType *semantic.EnumType,
 		if !ok {
 			return nil, fmt.Errorf("missing packed enum common field %s.%s", enumType.Name, fieldDecl.Name)
 		}
-		storedInline := !packedFieldUsesSideTable(field)
+		storedInline := !g.packedFieldUsesSideTable(enumType, field)
 		wordCount := uint64(0)
 		if !storedInline {
 			if !g.packedEnumSupportsSideTableCommonFields(enumType) {

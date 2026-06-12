@@ -685,7 +685,7 @@ func (ops *packedStoreOps) recordPrefixWords(rowPtr C.LLVMValueRef, _ string) er
 	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, rowPtr, stateValue}, "")
 	return nil
 }
-func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, _ string) error {
+func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, handleValue C.LLVMValueRef, _ string) error {
 	if ops == nil || ops.s == nil || ops.s.g == nil || ops.storeType == nil || ops.storeType.Enum == nil {
 		return nil
 	}
@@ -700,10 +700,23 @@ func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, _ string) er
 	if err != nil {
 		return err
 	}
-	recordType := ops.cachedRuntimeHelperType("ctx_packed_store_record_side_words", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "ctx_packed_store_record_side_words", Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType()}, Return: ops.s.g.result.NamedTypes["void"]}
+	// The write is addressed by the node's OWN handle: a parent's record is allocated before its
+	// payload args (children) are emitted, so an append/"last allocated" contract would land the
+	// parent's commons on the last child. AoS stores write lockstep side chunks; column stores
+	// write side columns — same (arena, words, state, index) contract.
+	u32Type := ops.s.g.result.NamedTypes["u32"]
+	indexValue, err := ops.s.coerceValue(handleValue, ops.storeType.Enum, u32Type)
+	if err != nil {
+		return err
+	}
+	helperName := "ctx_packed_store_record_side_words_at"
+	if packedModeIsAoS(ops.s.g.packedLoweringForStore(ops.storeType)) {
+		helperName = "ctx_aos_store_record_side_words_at"
+	}
+	recordType := ops.cachedRuntimeHelperType(helperName, func() *semantic.FuncType {
+		return &semantic.FuncType{Name: helperName, Params: []semantic.Type{ops.arenaRefType(), ops.voidRefType(), ops.voidRefType(), u32Type}, Return: ops.s.g.result.NamedTypes["void"]}
 	})
-	recordCallee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_record_side_words", recordType)
+	recordCallee, err := ops.s.g.ensureFunctionDeclared(helperName, recordType)
 	if err != nil {
 		return err
 	}
@@ -711,6 +724,6 @@ func (ops *packedStoreOps) recordSideWords(wordsPtr C.LLVMValueRef, _ string) er
 	if err != nil {
 		return err
 	}
-	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, wordsPtr, stateValue}, "")
+	ops.s.buildCall(recordLLVMType, recordCallee, []C.LLVMValueRef{arenaValue, wordsPtr, stateValue, indexValue}, "")
 	return nil
 }

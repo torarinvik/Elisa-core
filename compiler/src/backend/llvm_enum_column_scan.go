@@ -83,7 +83,17 @@ func (s *functionState) emitEnumColumnScanElement(colExpr *ast.EnumColumnExpr, i
 		return nil, nil, err
 	}
 	if !layout.StoredInline {
-		return nil, nil, fmt.Errorf("column scan `%s of .%s` over a side-tabled common field is not yet supported", colExpr.Enum, colExpr.Field)
+		// Cold commons (Stage 2): the field lives in a parallel side column — which is itself exactly
+		// what a column scan walks — so read each row's value from the side table by its dense handle.
+		handleValue, err := s.coerceValue(indexValue, s.g.result.NamedTypes["usize"], enumType)
+		if err != nil {
+			return nil, nil, err
+		}
+		value, err := s.emitPackedSideTableFieldReadWithOps(ops, handleValue, enumType.Root(), layout.Field.Type, layout.SideWordOffset, layout.WordCount, packedReadOriginKey{}, name+".col.side")
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, layout.Field.Type, nil
 	}
 	fieldOffsetBytes, ok, err := s.packedEnumDirectFieldByteOffset(enumType.Root(), layout.RowFieldIndex)
 	if err != nil {

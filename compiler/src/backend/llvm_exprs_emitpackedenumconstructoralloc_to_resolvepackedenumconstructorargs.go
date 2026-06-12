@@ -224,7 +224,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 				return nil, nil, err
 			}
 		}
-		if err := ops.recordSideWords(sideBufferPtr, "packed.side.record"); err != nil {
+		if err := ops.recordSideWords(sideBufferPtr, enumValue, "packed.side.record"); err != nil {
 			return nil, nil, err
 		}
 	}

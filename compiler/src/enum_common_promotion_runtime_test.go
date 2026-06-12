@@ -207,3 +207,36 @@ def bt() -> void:
             assert_eq(total(c), 5)
 `)
 }
+
+// Stage 2: unannotated common(...) fields default to the COLD side table (a parallel dense array
+// indexed by the node handle), not inline in the record. This pins the AoS round-trip through nested
+// construction — where a parent record is allocated before its children, so the side write must be
+// addressed by each node's OWN handle, not "last allocated". span and weight live in the side array;
+// the read assembles them back per node.
+func TestColdCommonsSideTableAoSRoundTrip(t *testing.T) {
+	runEnumHierarchyProgram(t, "cold_commons_aos.elisa", `
+enum N:
+    common(span: i64, weight: i64)
+    Lit(x: i64)
+    Pair(left: N, right: N)
+
+def build(owner: mutable Arena&) -> N:
+    can Abort.Panic, Memory.Allocate:
+        return N.Pair(span: 100, weight: 7, left: N.Lit(span: 10, weight: 1, x: 2), right: N.Lit(span: 20, weight: 2, x: 3))
+
+def span_sum(n: N) -> i64:
+    match n:
+        N.Lit(x):
+            return n.span + n.weight
+        N.Pair(left, right):
+            return n.span + n.weight + span_sum(left) + span_sum(right)
+
+@test
+def bt() -> void:
+    can Abort.Panic, Memory.Allocate:
+        with arena scratch(8192) as owner:
+            n: N = build(owner)
+            # spans 100+10+20 = 130, weights 7+1+2 = 10 -> 140
+            assert_eq(span_sum(n), 140)
+`)
+}

@@ -178,7 +178,9 @@ func isSupportedPackedCommonFieldAnnotation(name string) bool {
 }
 
 func (a *Analyzer) analyzePackedCommonFieldAnnotations(enumDecl *ast.EnumDecl, fieldDecl ast.FieldDecl) PackedFieldStorageMode {
-	storage := PackedFieldStorageInline
+	// Unannotated commons stay Default: placement is an ABI-mode decision (cold side table when the
+	// handle can index a parallel array, inline otherwise) and the mode is only known in the backend.
+	storage := PackedFieldStorageDefault
 	if enumDecl == nil || len(fieldDecl.Annotations) == 0 {
 		return storage
 	}

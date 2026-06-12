@@ -120,7 +120,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 			if !ok {
 				return nil, fmt.Errorf("missing packed enum common field %s.%s", enum.Name, fieldDecl.Name)
 			}
-			if packedFieldUsesSideTable(field) {
+			if g.packedFieldUsesSideTable(enum, field) {
 				if !g.packedEnumSupportsSideTableCommonFields(enum) {
 					return nil, fmt.Errorf("packed enum %s common field %s uses @storage(side_table), but packed ABI %q does not support side-tabled common fields", enum.Name, fieldDecl.Name, packedModeName(g.packedModeForEnum(enum)))
 				}

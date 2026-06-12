@@ -10,6 +10,7 @@ import (
 func TestGenerateLLVMIRUsesIndexReadHelperForRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -65,7 +66,7 @@ def fold_common() -> int:
 	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_variant_sparse_with_side_words(") {
 		t.Fatalf("expected canonical packed lowering to allocate side columns for side-tabled common fields, got:\n%s", output)
 	}
-	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words(") {
+	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words_at(") {
 		t.Fatalf("expected canonical packed constructor lowering to record side-table common-field words, got:\n%s", output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
@@ -101,7 +102,7 @@ def fold_common() -> int:
 	if !strings.Contains(output, "call ptr @ctx_packed_store_state_new_with_side_words(") {
 		t.Fatalf("expected index-soa packed lowering to allocate side columns for side-tabled common fields, got:\n%s", output)
 	}
-	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words(") {
+	if !strings.Contains(output, "call void @ctx_packed_store_record_side_words_at(") {
 		t.Fatalf("expected index-soa packed constructor lowering to record side-table common-field words, got:\n%s", output)
 	}
 	readCalls := strings.Count(output, "call i64 @ctx_packed_store_read_side_word(")
@@ -115,6 +116,7 @@ def fold_common() -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForFrozenRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -146,6 +148,7 @@ def fold_common_frozen() -> int:
 func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheForFrozenRepeatedCommonFieldReads(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -179,6 +182,7 @@ def fold_common_frozen() -> int:
 func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheAcrossMatchedAccessorPatterns(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Wrap(child: Expr)
@@ -216,6 +220,7 @@ def fold_child_common_frozen() -> int:
 func TestGenerateLLVMIRUsesCanonicalDirectReadsForFrozenMatchedValueFieldAccess(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	End
@@ -247,7 +252,9 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 func TestGenerateLLVMIRPreloadsCanonicalMatchedValueCommonFieldsAcrossArms(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
+		@storage(inline)
 		weight: int
 	Lit(value: int)
 	End
@@ -282,7 +289,9 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 func TestGenerateLLVMIRPreloadsIndexSOAMatchedValueCommonFieldsAcrossArms(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
+		@storage(inline)
 		weight: int
 	Lit(value: int)
 	End
@@ -317,6 +326,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 func TestGenerateLLVMIRUsesCanonicalDirectReadsForNestedMatchedValueFieldAccess(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	Wrap(child: Expr)
@@ -356,6 +366,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 func TestGenerateLLVMIRUsesSwitchForCanonicalFrozenUniqueVariantMatch(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	Wrap(child: Expr)
@@ -412,6 +423,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -441,6 +453,7 @@ def fold_common_frozen_direct() -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForFrozenHelperWrappedRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -477,6 +490,7 @@ def fold_common_frozen_wrapped_direct() -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForHelperIndexedFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 

@@ -157,6 +157,7 @@ func TestGenerateLLVMIRUsesEnumPackedProfileBuildHeavy(t *testing.T) {
 	src := `@packed_profile(build_heavy)
 packed enum Pair:
 	common:
+		@storage(inline)
 		span: int
 	Both(left: int, right: int)
 	End

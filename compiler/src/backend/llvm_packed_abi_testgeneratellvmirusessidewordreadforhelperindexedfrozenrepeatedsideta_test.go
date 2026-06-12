@@ -53,6 +53,7 @@ def fold_side_common_frozen_helper_indexed_direct() -> int:
 func TestGenerateLLVMIRAvoidsDecodeForFrozenHelperWrappedCommonFieldReadsAfterFieldAssignmentInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -89,6 +90,7 @@ def fold_common_frozen_wrapped_reassign() -> int:
 func TestGenerateLLVMIRAvoidsDecodeForFrozenHelperIndexedCommonFieldReadsAfterFieldAssignmentInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -132,6 +134,7 @@ def fold_common_frozen_helper_indexed_reassign() -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForNestedRebasedHelperIndexedFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -174,6 +177,7 @@ def fold_common_frozen_nested_helper_indexed_direct() -> int:
 func TestGenerateLLVMIRUsesIndexWordReadForNestedWildcardRebasedHelperIndexedFrozenRepeatedCommonFieldReadsOutsideCheckpoint(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -216,6 +220,7 @@ def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
 func TestGenerateLLVMIRAvoidsDecodeForNestedWildcardRebasedHelperIndexedFrozenCommonFieldReadsAfterFieldAssignmentInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -262,6 +267,7 @@ def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
 func TestGenerateLLVMIRAvoidsDecodeForNestedRebasedHelperIndexedFrozenCommonFieldReadsAfterFieldAssignmentInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -308,6 +314,7 @@ def fold_common_frozen_nested_helper_indexed_reassign() -> int:
 func TestGenerateLLVMIRLowersDenseNodeKeysInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	Add(left: Expr, right: Expr)
@@ -343,6 +350,7 @@ def read(owner: Arena) -> int:
 func TestGenerateLLVMIRLowersDenseNodeKeysFromHiddenFrozenStoreFieldRootsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	Add(left: Expr, right: Expr)
@@ -385,6 +393,7 @@ def read(owner: Arena) -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Hold(value: i32&)
 	End
@@ -417,6 +426,7 @@ def fold_common_frozen_mixed() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenMatchedPayloadRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Hold(value: i32&)
@@ -461,6 +471,7 @@ def fold_child_common_frozen_mixed() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Hold(value: i32&)
@@ -515,6 +526,7 @@ def fold_helper_indexed_child_common_frozen_mixed() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForNestedRebasedHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Hold(value: i32&)

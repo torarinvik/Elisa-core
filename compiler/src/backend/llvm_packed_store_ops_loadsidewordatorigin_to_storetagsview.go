@@ -29,10 +29,16 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 	if err != nil {
 		return nil, err
 	}
-	helperType := ops.cachedRuntimeHelperType("ctx_packed_store_read_side_word", func() *semantic.FuncType {
-		return &semantic.FuncType{Name: "ctx_packed_store_read_side_word", Params: []semantic.Type{ops.voidRefType(), u32Type, usizeType}, Return: uintptrType}
+	// AoS stores read cold commons from their lockstep side chunks; column stores from side
+	// columns. Same (state, index, word_offset) -> word contract.
+	helperName := "ctx_packed_store_read_side_word"
+	if packedModeIsAoS(ops.s.g.packedLoweringForStore(ops.storeType)) {
+		helperName = "ctx_aos_store_read_side_word"
+	}
+	helperType := ops.cachedRuntimeHelperType(helperName, func() *semantic.FuncType {
+		return &semantic.FuncType{Name: helperName, Params: []semantic.Type{ops.voidRefType(), u32Type, usizeType}, Return: uintptrType}
 	})
-	callee, err := ops.s.g.ensureFunctionDeclared("ctx_packed_store_read_side_word", helperType)
+	callee, err := ops.s.g.ensureFunctionDeclared(helperName, helperType)
 	if err != nil {
 		return nil, err
 	}

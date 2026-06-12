@@ -10,6 +10,7 @@ import (
 func TestGenerateLLVMIRUsesIndexReadHelpersForNestedWildcardRebasedHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Hold(value: i32&)
@@ -67,6 +68,7 @@ def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPayloadlessPackedMatchWithMatchedValueFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Flag:
 	common:
+		@storage(inline)
 		span: int
 	Yes
 	No
@@ -141,6 +143,7 @@ def choose() -> int:
 func TestGenerateOptimizedLLVMIRUsesDirectPrefixColumnLoadsForFrozenRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 
@@ -174,6 +177,7 @@ def fold_common_frozen() -> int:
 func TestGenerateOptimizedLLVMIRUsesDirectDenseMetadataLoadsForFrozenPackedMatchInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	End
@@ -217,6 +221,7 @@ func TestGenerateOptimizedLLVMIRUsesDirectAllWordsPrefixLoadsForRetainedReadsFro
 	src := `@packed_profile(retained_reads)
 packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 		cost: int
 	Leaf(value: int)
@@ -260,6 +265,7 @@ def fold_export() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfPatternInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	End
@@ -295,6 +301,7 @@ def fold_if_pattern() -> int:
 func TestGenerateLLVMIRAvoidsEagerDecodeForFrozenMixedPackedMatchInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	End
@@ -332,6 +339,7 @@ def fold() -> int:
 func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfVariantViewInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Lit(value: int)
 	End
@@ -404,6 +412,7 @@ def fold_view() -> int:
 func TestGenerateLLVMIRLowersPackedStoreCountAndIndexForIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Add(left: Expr, right: Expr)
@@ -449,6 +458,7 @@ def walk(owner: Arena) -> int:
 func TestGenerateLLVMIRLowersPackedStoreSliceForIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Add(left: Expr, right: Expr)

@@ -2,6 +2,7 @@ include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
 packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Add(left: Expr, right: Expr)

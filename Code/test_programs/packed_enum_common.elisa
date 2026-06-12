@@ -1,11 +1,13 @@
 packed enum Expr:
 	common:
+		@storage(inline)
 		span: int
 	Int(value: int)
 	Add(left: Expr, right: Expr)
 
 packed enum Token:
 	common:
+		@storage(inline)
 		span: int
 	Region
 

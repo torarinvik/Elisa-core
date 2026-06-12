@@ -138,6 +138,25 @@ def ctx_packed_store_record_side_words(a: mutable Arena&, words: void&, state_bi
         assert state_bits != null
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         packed_store_append_side_words(a, state, words)
+# Record side-tabled common words at the row addressed by the node's OWN dense index handle. The
+# append-based ctx_packed_store_record_side_words assumes "last allocated", which breaks for nested
+# constructors (a parent's record is allocated before its children are built).
+def ctx_packed_store_record_side_words_at(a: mutable Arena&, words: void&, state_bits: mutable void&, index: u32):
+    can Memory.Allocate, Abort.Panic:
+        assert state_bits != null
+        state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
+        if state.side_words == 0:
+            return
+        row_index: usize = index.usize()
+        assert row_index < state.side_column_capacity
+        assert state.side_columns.items != null
+        assert state.side_columns.count >= state.side_words
+        column_ptrs: uintptr& = state.side_columns.items
+        source_words: uintptr& = words.cast[uintptr&]
+        for i in 0..<state.side_words:
+            assert column_ptrs[i] != 0.uintptr()
+            column: mutable uintptr& = column_ptrs[i].cast[heap u8&].cast[mutable uintptr&]
+            column[row_index] <- source_words[i]
 def ctx_packed_store_read_side_word(state_bits: mutable void&, index: u32, word_offset: usize) -> uintptr:
     can Abort.Panic:
         assert state_bits != null

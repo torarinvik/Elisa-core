@@ -10,6 +10,11 @@
 # its children — so records must not relocate). Growth allocates a new chunk and appends its base to
 # a pointer list; the list may reallocate, but the chunks (and the records they hold) stay put. Index
 # handles map to (chunk, offset), so they stay valid regardless.
+#
+# COLD COMMONS (Stage 2): side-tabled common fields live in a parallel dense array — side chunks
+# allocated in lockstep with record chunks, indexed by the SAME handle. Hot paths (match/dispatch,
+# payload reads) touch only the records; common-field reads index the side chunks. Each record's
+# side slot is `side_words` uintptr words.
 # ============================================================
 
 struct PackedAoSStore:
@@ -17,6 +22,8 @@ struct PackedAoSStore:
     count: mutable usize
     record_bytes: mutable usize
     chunk_records: mutable usize
+    side_chunks: mutable darray[uintptr]
+    side_words: mutable usize
 
 const PACKED_AOS_CHUNK_RECORDS: usize = 256
 
@@ -27,10 +34,20 @@ def ctx_aos_store_new(a: mutable Arena&, record_bytes: usize) -> mutable heap vo
         state.count <- 0
         state.record_bytes <- record_bytes
         state.chunk_records <- PACKED_AOS_CHUNK_RECORDS
+        state.side_chunks <- zeroed
+        state.side_words <- 0
         return state.cast[heap void&]
 
+def ctx_aos_store_new_with_side_words(a: mutable Arena&, record_bytes: usize, side_words: usize) -> mutable heap void&:
+    can Memory.Allocate, Abort.Panic:
+        state_bits: mutable heap void& = ctx_aos_store_new(a, record_bytes)
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        state.side_words <- side_words
+        return state_bits
+
 # Allocate one node record. Returns its (stable) address and its dense index handle. Allocates a new
-# chunk from arena `a` when the current one is full; existing chunks/records never move.
+# chunk from arena `a` when the current one is full; existing chunks/records never move. The side
+# chunk (cold commons) grows in lockstep so the same handle indexes both arrays.
 def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
@@ -39,6 +56,10 @@ def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedS
             new_chunk: heap u8& = arena_alloc(a, state.chunk_records * state.record_bytes).cast[heap u8&]
             in a:
                 state.chunks.push(new_chunk.uintptr())
+            if state.side_words > 0:
+                new_side_chunk: heap u8& = arena_alloc(a, state.chunk_records * state.side_words * size_of(uintptr)).cast[heap u8&]
+                in a:
+                    state.side_chunks.push(new_side_chunk.uintptr())
         offset_in_chunk: usize = (state.count - chunk_index * state.chunk_records) * state.record_bytes
         chunk_base: uintptr = state.chunks[chunk_index]
         row: mutable heap u8& = (chunk_base + offset_in_chunk).cast[mutable heap u8&]
@@ -53,3 +74,36 @@ def ctx_aos_store_record(state_bits: mutable void&, index: usize) -> mutable hea
     offset_in_chunk: usize = (index - chunk_index * state.chunk_records) * state.record_bytes
     chunk_base: uintptr = state.chunks[chunk_index]
     return (chunk_base + offset_in_chunk).cast[mutable heap void&]
+
+# Record the side-tabled common words for the record at `index`. The write is addressed by the
+# node's OWN handle, not "last allocated": a parent's record is allocated before its payload args
+# (children) are built, so by the time the parent's commons are recorded, later records exist.
+def ctx_aos_store_record_side_words_at(a: mutable Arena&, words: void&, state_bits: mutable void&, index: u32):
+    can Abort.Panic:
+        assert state_bits != null
+        state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
+        if state.side_words == 0:
+            return
+        index_usize: usize = index.usize()
+        assert index_usize < state.count
+        chunk_index: usize = index_usize / state.chunk_records
+        offset_in_chunk: usize = (index_usize - chunk_index * state.chunk_records) * state.side_words
+        side_base: uintptr = state.side_chunks[chunk_index]
+        dst: mutable uintptr& = side_base.cast[mutable heap u8&].cast[mutable uintptr&]
+        src: uintptr& = words.cast[uintptr&]
+        for w in 0..<state.side_words:
+            dst[offset_in_chunk + w] <- src[w]
+
+# Read one side-table word for a record by its dense index handle.
+def ctx_aos_store_read_side_word(state_bits: mutable void&, index: u32, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        assert state_bits != null
+        state: PackedAoSStore& = state_bits.cast[PackedAoSStore&]
+        index_usize: usize = index.usize()
+        assert index_usize < state.count
+        assert word_offset < state.side_words
+        chunk_index: usize = index_usize / state.chunk_records
+        offset_in_chunk: usize = (index_usize - chunk_index * state.chunk_records) * state.side_words
+        side_base: uintptr = state.side_chunks[chunk_index]
+        side: uintptr& = side_base.cast[heap u8&].cast[uintptr&]
+        return side[offset_in_chunk + word_offset]

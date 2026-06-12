@@ -400,7 +400,15 @@ func (s *functionState) emitPackedStoreValueFromArenaPtr(arenaPtr C.LLVMValueRef
 	if s.g.packedLoweringForStore(storeType) == packedEnumABIAoS {
 		// docs/76 Slice 2: AoS store creation — same (arena, record_bytes) signature, lean record-array
 		// backing instead of columns. record_bytes is the node-record (rowType) size already computed.
-		stateHelperName = "ctx_aos_store_new"
+		if sideWords > 0 {
+			// Cold commons (Stage 2): the AoS store grows a parallel dense side array — lockstep
+			// chunks indexed by the same handle as the records.
+			stateHelperName = "ctx_aos_store_new_with_side_words"
+			stateHelperParams = []semantic.Type{arenaRefType, usizeType, usizeType}
+			stateArgs = append(stateArgs, C.LLVMConstInt(usizeLLVMType, C.ulonglong(sideWords), 0))
+		} else {
+			stateHelperName = "ctx_aos_store_new"
+		}
 	} else if s.g.packedLoweringForStore(storeType) == packedEnumABIVariantSparse {
 		if sideWords > 0 {
 			stateHelperName = "ctx_packed_store_state_new_variant_sparse_with_side_words"

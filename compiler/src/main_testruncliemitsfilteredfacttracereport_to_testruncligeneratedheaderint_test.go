@@ -411,7 +411,7 @@ func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.
 func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "packed_info.elisa")
-	src := "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        @storage(side_table)\n        span: i64\n        kind: u32\n    Lit(value: i64)\n    End\n"
+	src := "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        @storage(side_table)\n        span: i64\n        @storage(inline)\n        kind: u32\n    Lit(value: i64)\n    End\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write packed info fixture: %v", err)
 	}
