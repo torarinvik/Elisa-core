@@ -545,8 +545,11 @@ func (p *Parser) peekDottedIdentBeforeRecoverSpec() (string, int, bool) {
 		name += "." + p.tokens[p.pos+width+1].Text
 		width += 2
 	}
-	if p.pos+width+1 < len(p.tokens) && p.tokens[p.pos+width].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+width].Text == "recover" && p.tokens[p.pos+width+1].Kind == lexer.TOKEN_LPAREN {
-		return name, width, true
+	if p.pos+width < len(p.tokens) && p.tokens[p.pos+width].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+width].Text == "recover" {
+		next := p.pos + width + 1
+		if next < len(p.tokens) && (p.tokens[next].Kind == lexer.TOKEN_LPAREN || p.tokens[next].Kind == lexer.TOKEN_IDENT) {
+			return name, width, true
+		}
 	}
 	return "", 0, false
 }
