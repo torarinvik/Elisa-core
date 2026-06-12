@@ -540,6 +540,7 @@ func rewriteGrammarInfixTablesTokenAliases(tables []ast.GrammarInfixTableDecl, a
 			Name:     table.Name,
 			Result:   table.Result,
 			Levels:   rewriteGrammarPrecedenceLevelsTokenAliases(table.Levels, aliases),
+			Dynamic:  table.Dynamic,
 		})
 	}
 	return rewritten

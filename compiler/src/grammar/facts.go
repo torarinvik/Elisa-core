@@ -206,6 +206,8 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 		return grammarFirstTermsForTerm(n.Term, productions, seen)
 	case *ast.GrammarListTerm:
 		return grammarFirstTermsForTerm(n.Elem, productions, seen)
+	case *ast.GrammarDynamicClimbTerm:
+		return grammarFirstTermsForTerm(n.Spec.Atom, productions, seen)
 	case *ast.GrammarRepeatTerm:
 		terms, elemNullable := grammarFirstTermsForTerm(n.Elem, productions, seen)
 		if n.MinOne {
@@ -255,6 +257,8 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 
 func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 	switch n := term.(type) {
+	case *ast.GrammarDynamicClimbTerm:
+		return true
 	case *ast.GrammarTokenTerm:
 		return true
 	case *ast.GrammarTokenKindTerm:
@@ -333,6 +337,8 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 
 func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExpr {
 	switch n := term.(type) {
+	case *ast.GrammarDynamicClimbTerm:
+		return grammarResolvedValueTypeExpr(n.Position, n.Spec.ReturnType)
 	case *ast.GrammarTokenTerm:
 		return ctx.tokenType
 	case *ast.GrammarTokenKindTerm:

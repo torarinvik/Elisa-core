@@ -645,6 +645,9 @@ func (n *GrammarListTerm) Pos() lexer.Pos { return n.Position }
 func (n *GrammarRepeatTerm) Pos() lexer.Pos {
 	return n.Position
 }
+func (n *GrammarDynamicClimbTerm) Pos() lexer.Pos {
+	return n.Position
+}
 func (n *GrammarFlatRepeatTerm) Pos() lexer.Pos {
 	return n.Position
 }

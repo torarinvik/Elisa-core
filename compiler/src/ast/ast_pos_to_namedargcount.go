@@ -219,6 +219,7 @@ func (*GrammarAttemptTerm) nodeTag()                   {}
 func (*GrammarCutTerm) nodeTag()                       {}
 func (*GrammarListTerm) nodeTag()                      {}
 func (*GrammarRepeatTerm) nodeTag()                    {}
+func (*GrammarDynamicClimbTerm) nodeTag()              {}
 func (*GrammarFlatRepeatTerm) nodeTag()                {}
 func (*GrammarWhileTerm) nodeTag()                     {}
 func (*GrammarSeparatedTerm) nodeTag()                 {}
@@ -429,6 +430,7 @@ func (*GrammarAttemptTerm) grammarTermTag()            {}
 func (*GrammarCutTerm) grammarTermTag()                {}
 func (*GrammarListTerm) grammarTermTag()               {}
 func (*GrammarRepeatTerm) grammarTermTag()             {}
+func (*GrammarDynamicClimbTerm) grammarTermTag()       {}
 func (*GrammarFlatRepeatTerm) grammarTermTag()         {}
 func (*GrammarWhileTerm) grammarTermTag()              {}
 func (*GrammarSeparatedTerm) grammarTermTag()          {}

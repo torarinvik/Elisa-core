@@ -654,3 +654,42 @@ grammar DemoGrammar with DemoEnv:
 		}
 	}
 }
+
+func TestLowerFileDynamicInfixTableClimbs(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammarenv DemoEnv over DemoToken using DemoParserState:
+    cursor state
+    alloc alloc
+
+grammar DemoGrammar with DemoEnv:
+    token:
+        EOF
+        IDENT
+    dynamic infix table ExprTable(state.lookup_fixity) -> DemoExpr:
+        atom = atom_expr()
+        combine(left, op_token, right, info) = combine_demo_infix(left, op_token, right, info)
+    atom_expr() -> DemoExpr:
+        token = .IDENT
+        return demo_name_expr(token)
+    expression() -> DemoExpr:
+        node = infix(ExprTable)
+        return node
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		// infix(ExprTable) becomes a call to the synthesized climb production at min precedence 0
+		"__grammar_try__DemoGrammar____dyninfix_ExprTable(state, alloc, 0)",
+		// the climb fetches fixity from the host callback for the current token
+		"state.lookup_fixity(state.current_token())",
+		// operator consumption goes through the env advance fn
+		"state.advance_token()",
+		// the recursive right-operand climb passes the adjusted minimum precedence
+		"__grammar_try__DemoGrammar____dyninfix_ExprTable(state, alloc, __",
+		// the fold applies the table's combine expression
+		"combine_demo_infix(left, op_token, right, info)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected dynamic infix lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}

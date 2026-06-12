@@ -292,6 +292,31 @@ type GrammarInfixTableDecl struct {
 	Name     string
 	Result   string
 	Levels   []GrammarPrecedenceLevel
+	// Dynamic marks a runtime-fixity table (`dynamic infix table T(state.lookup) -> V:`);
+	// nil for static tables.
+	Dynamic *GrammarDynamicInfixSpec
+}
+
+// GrammarDynamicInfixSpec describes a dynamic infix table: precedence climbing
+// with binding power fetched from a host fixity callback instead of static levels.
+type GrammarDynamicInfixSpec struct {
+	// FixityRef is the dotted host callback: token -> (active: bool,
+	// precedence: i64, right_assoc: bool, info: T-opaque).
+	FixityRef string
+	ReturnType TypeExpr
+	Atom GrammarTerm
+	// CombineParams names (left, op_token, right, info) for the Combine expr.
+	CombineParams []string
+	Combine Expr
+}
+
+// GrammarDynamicClimbTerm is the synthesized body of a dynamic infix table's
+// climb production; it never appears in user-written grammars.
+type GrammarDynamicClimbTerm struct {
+	Position lexer.Pos
+	TableName string
+	MinPrecName string
+	Spec *GrammarDynamicInfixSpec
 }
 type GrammarProductionDecl struct {
 	Position      lexer.Pos

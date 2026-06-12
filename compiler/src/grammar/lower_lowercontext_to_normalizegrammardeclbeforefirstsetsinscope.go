@@ -540,6 +540,43 @@ func normalizeGrammarDeclBeforeFirstSetsInScope(decl *ast.GrammarDecl, grammarSc
 		normalized.Productions = append(normalized.Productions, rewritten)
 	}
 	normalized.Productions = expandAugmentedGrammarProductions(normalized.Productions)
+	// Synthesize climb productions only for tables DECLARED here — used
+	// grammars synthesize their own during their normalization; cross-grammar
+	// `infix(T)` references resolve to the owner's production like any rule.
+	for _, table := range normalizedDecl.InfixTables {
+		if table.Dynamic == nil {
+			continue
+		}
+		// Resolve the atom term with the same per-term passes the production
+		// rewrite loop applies, then synthesize the climb production. Its body is
+		// a single GrammarDynamicClimbTerm which lowerAttempt turns into the
+		// precedence-climbing loop (recursing through the standard try protocol).
+		atom := expandGrammarTermGrammarAliases(table.Dynamic.Atom, grammarAliases, nil)
+		atom = expandGrammarTermGrammarFns(atom, grammarFns, nil)
+		atom = rewriteGrammarTermTokenAliases(atom, aliasByLiteral)
+		atom = resolveGrammarTermTokenSets(atom, tokenSets)
+		atom = resolveGrammarTermInfixTables(atom, infixTables)
+		spec := &ast.GrammarDynamicInfixSpec{
+			FixityRef:     table.Dynamic.FixityRef,
+			ReturnType:    table.Dynamic.ReturnType,
+			Atom:          atom,
+			CombineParams: table.Dynamic.CombineParams,
+			Combine:       table.Dynamic.Combine,
+		}
+		climb := &ast.GrammarDynamicClimbTerm{Position: table.Position, TableName: table.Name, MinPrecName: "min_precedence", Spec: spec}
+		valueName := "__dyn_value"
+		normalized.Productions = append(normalized.Productions, ast.GrammarProductionDecl{
+			Position:     table.Position,
+			Name:         grammarDynamicInfixProductionName(table.Name),
+			HasParamList: true,
+			Params:       []ast.ParamDecl{{Position: table.Position, Name: "min_precedence", Type: builtinTypeExpr(table.Position, "i64")}},
+			ReturnType:   table.Dynamic.ReturnType,
+			Terms: []ast.GrammarTerm{
+				&ast.GrammarBindTerm{Position: table.Position, Name: valueName, Term: climb},
+				&ast.GrammarReturnTerm{Position: table.Position, Term: &ast.GrammarExprTerm{Position: table.Position, Expr: &ast.Ident{Position: table.Position, Name: valueName}}},
+			},
+		})
+	}
 	finalProductions := make([]ast.GrammarProductionDecl, 0, len(normalized.Productions))
 	for _, production := range normalized.Productions {
 		finalProductions = append(finalProductions, normalizeGrammarProductionForLowering(&normalized, production))

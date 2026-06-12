@@ -388,3 +388,51 @@ structs, `single_/prepend_/empty_*_infix_tail*` helpers,
 `build_sml_{expr,pattern}_infix_{chain,at}`, `SMLInfixBuildCursor`, and the
 `infix_operator_token` external rule (subsumed by the table's own consumption).
 `lower_sml_dynamic_infix_{expr,pattern}` remain as the `combine` callbacks.
+
+## Phase 4 results (2026-06-12) — dynamic infix tables LANDED
+
+Implemented per the addendum, with two deviations discovered during
+implementation:
+
+1. **Surface gained a result type** (the addendum omitted it):
+   `dynamic infix table T(state.lookup) -> ValueType:` — needed for the climb
+   production's return type.
+2. **The recursion rides the standard production machinery** rather than a
+   hand-built FuncDecl: normalization synthesizes a `__dyninfix_T(min_precedence:
+   i64)` production whose body is a single internal `GrammarDynamicClimbTerm`;
+   `infix(T)` resolves to a plain call to it at precedence 0 (cross-grammar
+   refs resolve like any rule; the owner grammar synthesizes exactly once).
+   `lowerAttempt` turns the climb term into the loop — fixity fetch via the
+   host callback, operator consumption through the env advance fn, the right
+   operand recursing through the production's own try entry, fold via the
+   table's `combine` expr. Orthogonality holds: everything lowers through the
+   existing attempt/loop builders.
+
+SML migration: both `dynamic_infix_expr` and `dynamic_infix_pattern` are now
+3-line table declarations + a 2-line rule each. Retired: the tail-collection
+rules and `*_items` aliases, `SMLExprInfixTail`/`SMLPatternInfixTail`/
+`SMLInfixBuildCursor` structs, `build_sml_{expr,pattern}_infix_{chain,at}`,
+all tail prepend/single/empty helpers, `consume_sml_pattern_infix_operator_token`,
+the `is_*_infix_token_here` predicates, and the `ExprInfixChainStop` tokenset
+(11 functions + 3 structs + 1 tokenset + 6 productions). `lower_sml_dynamic_
+infix_{expr,pattern}` live on as the `combine` callbacks, and the host adapters
+are ~8 lines each.
+
+**Resolved open question #2 (mid-climb failure) — with a real finding.** The
+suite caught one behavioral seam (`sml_symbolic_fixity_declaration_is_not_
+retroactive`): the legacy consume-helper *recorded an error and consumed* an
+operator-shaped token with no active fixity, where the naive climb gate
+silently stopped — losing the diagnostic and leaving junk decls. The fix lives
+in the **host adapter**, not the DSL: SML's `lookup_sml_expr_binding` records
+the error and reports the token active at default precedence, reproducing the
+legacy diagnostic while keeping a better parse tree (the infix node survives
+instead of being silently dropped). The pattern-side adapter keeps the
+{ACTIVE, FALLBACK} gate — the two sides genuinely differ and the 4-tuple
+contract expresses both without DSL extensions.
+
+With this, all four docs/83 phases are complete: the grammar DSL's repetition
+family is canonical (`*`, `+`, `separated`, `flatrepeat`), tokensets compose
+(`+`/`-`, families), grammarenv is convention-defaulted, host delegation is a
+declared seam (external rules), and user-defined operator fixity — the
+biggest leak — is a first-class table. The SML/Lua/Perl oracle is green
+throughout.

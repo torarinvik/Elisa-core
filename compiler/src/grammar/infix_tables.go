@@ -85,6 +85,11 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 		if !ok {
 			return n
 		}
+		if table.Dynamic != nil {
+			// Dynamic tables climb at runtime: `infix(T)` becomes a plain call to
+			// the synthesized climb production at minimum precedence 0.
+			return &ast.GrammarCallTerm{Position: n.Position, Name: grammarDynamicInfixProductionName(n.TableName), Explicit: true, Args: []ast.Expr{&ast.IntLit{Position: n.Position, Value: "0"}}}
+		}
 		return &ast.GrammarPrecedenceTerm{Position: n.Position, Result: table.Result, Levels: resolveGrammarPrecedenceLevelsInfixTables(table.Levels, tables)}
 	default:
 		return term
@@ -147,4 +152,8 @@ func resolveGrammarPrecedenceLevelsInfixTables(levels []ast.GrammarPrecedenceLev
 		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermInfixTables(level.Seed, tables), Arms: resolveGrammarPrecedenceArmsInfixTables(level.Arms, tables)})
 	}
 	return resolved
+}
+
+func grammarDynamicInfixProductionName(tableName string) string {
+	return "__dyninfix_" + tableName
 }

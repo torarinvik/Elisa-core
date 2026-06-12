@@ -133,6 +133,8 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 			recoveryPolicies = append(recoveryPolicies, p.parseGrammarRecoveryDecl())
 		case p.peekGrammarInfixTableDecl():
 			infixTables = append(infixTables, p.parseGrammarInfixTableDecl())
+		case p.peekGrammarDynamicInfixTableDecl():
+			infixTables = append(infixTables, p.parseGrammarDynamicInfixTableDecl())
 		default:
 			return false
 		}
@@ -668,4 +670,76 @@ func lowerDottedNameExpr(pos lexer.Pos, name string) ast.Expr {
 		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: part}
 	}
 	return expr
+}
+
+func (p *Parser) peekGrammarDynamicInfixTableDecl() bool {
+	return p.peekIdentText("dynamic") && p.pos+1 < len(p.tokens) &&
+		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "infix"
+}
+
+// parseGrammarDynamicInfixTableDecl parses
+//
+//	dynamic infix table Name(state.lookup_fixity) -> ValueType:
+//	    atom = atom_rule()
+//	    combine(left, op_token, right, info) = host_expr
+//
+// The fixity callback contract: token -> (active: bool, precedence: i64,
+// right_assoc: bool, info) with `info` passed opaquely to combine.
+func (p *Parser) parseGrammarDynamicInfixTableDecl() ast.GrammarInfixTableDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("dynamic")
+	p.expectIdentText("infix")
+	p.expectIdentText("table")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_LPAREN)
+	fixityRef := p.parseQualifiedDeclName()
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_ARROW)
+	returnType := p.parseGrammarHeaderTypeExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	spec := &ast.GrammarDynamicInfixSpec{FixityRef: fixityRef, ReturnType: returnType}
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		switch {
+		case p.peekIdentText("atom"):
+			p.expectIdentText("atom")
+			p.expect(lexer.TOKEN_ASSIGN)
+			spec.Atom = p.parseGrammarRecoverableTermValue()
+			p.expectNewline()
+		case p.peekIdentText("combine"):
+			p.expectIdentText("combine")
+			p.expect(lexer.TOKEN_LPAREN)
+			params := make([]string, 0, 4)
+			for p.peek() != lexer.TOKEN_RPAREN {
+				params = append(params, p.expect(lexer.TOKEN_IDENT).Text)
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+			if len(params) != 4 {
+				p.errorAt(pos, "dynamic infix table combine expects exactly 4 parameters (left, op_token, right, info), got %d", len(params))
+			}
+			spec.CombineParams = params
+			p.expect(lexer.TOKEN_ASSIGN)
+			spec.Combine = p.parseExpr()
+			p.expectNewline()
+		default:
+			p.errorf("expected `atom = ...` or `combine(...) = ...` in dynamic infix table")
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	if spec.Atom == nil {
+		p.errorAt(pos, "dynamic infix table %q is missing its `atom = ...` clause", name)
+	}
+	if spec.Combine == nil {
+		p.errorAt(pos, "dynamic infix table %q is missing its `combine(...) = ...` clause", name)
+	}
+	return ast.GrammarInfixTableDecl{Position: pos, Name: name, Dynamic: spec}
 }

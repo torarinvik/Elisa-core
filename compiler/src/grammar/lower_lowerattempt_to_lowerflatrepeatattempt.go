@@ -177,6 +177,8 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return ctx.lowerOptionalAttempt(n)
 	case *ast.GrammarListTerm:
 		return ctx.lowerListAttempt(n)
+	case *ast.GrammarDynamicClimbTerm:
+		return ctx.lowerDynamicClimbAttempt(n)
 	case *ast.GrammarRepeatTerm:
 		att := ctx.lowerListAttempt(repeatTermAsList(n))
 		if n.MinOne {
@@ -559,4 +561,128 @@ func (ctx *statefulLowerContext) lowerFlatRepeatAttempt(term *ast.GrammarFlatRep
 		loopStmt,
 	}
 	return loweredAttempt{Stmts: body, Matched: &ast.Ident{Position: term.Position, Name: matchedName}, Committed: &ast.Ident{Position: term.Position, Name: committedName}, Value: &ast.Ident{Position: term.Position, Name: resultName}}
+}
+
+// lowerDynamicClimbAttempt emits the precedence-climbing loop of a dynamic
+// infix table (docs/83 Phase 4): parse atom, then while the host fixity
+// callback reports an active operator with sufficient binding power, consume
+// it, climb the right operand by recursing through the standard try protocol,
+// and fold with the table's combine expression.
+func (ctx *statefulLowerContext) lowerDynamicClimbAttempt(term *ast.GrammarDynamicClimbTerm) loweredAttempt {
+	pos := term.Position
+	spec := term.Spec
+	leftName := spec.CombineParams[0]
+	opName := spec.CombineParams[1]
+	rightName := spec.CombineParams[2]
+	infoName := spec.CombineParams[3]
+	valueType := grammarResolvedValueTypeExpr(pos, spec.ReturnType)
+
+	seed := ctx.lowerAttempt(spec.Atom)
+	matchedName := ctx.fresh("dyninfix_matched")
+	committedName := ctx.fresh("dyninfix_committed")
+	stopName := ctx.fresh("dyninfix_stop")
+	activeName := ctx.fresh("dyninfix_active")
+	precName := ctx.fresh("dyninfix_prec")
+	rassocName := ctx.fresh("dyninfix_rassoc")
+	nextMinName := ctx.fresh("dyninfix_next_min")
+
+	stmts := append([]ast.Stmt{}, seed.Stmts...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: pos, Name: matchedName, Mutable: true, Type: builtinTypeExpr(pos, "bool"), Value: seed.Matched},
+		&ast.VarDeclStmt{Position: pos, Name: committedName, Mutable: true, Type: builtinTypeExpr(pos, "bool"), Value: &ast.BoolLit{Position: pos, Value: false}},
+	)
+	stmts = append(stmts, markCommittedStmts(committedName, pos, seed.Committed)...)
+	stmts = append(stmts,
+		&ast.VarDeclStmt{Position: pos, Name: leftName, Mutable: true, Type: valueType, Value: seed.Value},
+		&ast.VarDeclStmt{Position: pos, Name: stopName, Mutable: true, Type: builtinTypeExpr(pos, "bool"), Value: &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: pos, Name: matchedName}}},
+	)
+
+	// Loop body: fetch fixity for the current token.
+	fixityCall := &ast.CallExpr{
+		Position: pos,
+		Func:     lowerQualifiedCalleeExpr(pos, spec.FixityRef),
+		Args:     []ast.Expr{ctx.currentTokenExpr(pos)},
+	}
+	loopBody := []ast.Stmt{
+		&ast.TupleBindStmt{
+			Position: pos,
+			Names: []ast.TupleBindName{
+				{Position: pos, Name: activeName},
+				{Position: pos, Name: precName},
+				{Position: pos, Name: rassocName},
+				{Position: pos, Name: infoName},
+			},
+			Declare: true,
+			Value:   fixityCall,
+		},
+	}
+
+	// Inactive operator or insufficient binding power: stop the climb.
+	stopCond := &ast.BinaryExpr{
+		Position: pos,
+		Op:       lexer.TOKEN_OR,
+		Left:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: pos, Name: activeName}},
+		Right: &ast.BinaryExpr{
+			Position: pos,
+			Op:       lexer.TOKEN_LT,
+			Left:     &ast.Ident{Position: pos, Name: precName},
+			Right:    &ast.Ident{Position: pos, Name: term.MinPrecName},
+		},
+	}
+
+	// Active path: capture and consume the operator, climb the right side via
+	// the synthesized production's own try entry (standard call resolution),
+	// and fold with the combine expression.
+	rightCallTerm := &ast.GrammarCallTerm{
+		Position: pos,
+		Name:     ctx.production.Name,
+		Explicit: true,
+		Args:     []ast.Expr{&ast.Ident{Position: pos, Name: nextMinName}},
+	}
+	rightAttempt := ctx.lowerAttempt(rightCallTerm)
+	activeStmts := []ast.Stmt{
+		&ast.VarDeclStmt{Position: pos, Name: opName, Value: ctx.currentTokenExpr(pos)},
+		&ast.ExprStmt{Position: pos, Expr: &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: ctx.tokenReceiver}, Field: ctx.advanceFunc}}},
+		&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: committedName}, Value: &ast.BoolLit{Position: pos, Value: true}},
+		&ast.VarDeclStmt{Position: pos, Name: nextMinName, Mutable: true, Type: builtinTypeExpr(pos, "i64"), Value: &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: &ast.Ident{Position: pos, Name: precName}, Right: &ast.IntLit{Position: pos, Value: "1"}}},
+		// Right-associative operators climb at equal precedence.
+		&ast.IfStmt{Position: pos, Cond: &ast.Ident{Position: pos, Name: rassocName}, Then: []ast.Stmt{
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: nextMinName}, Value: &ast.Ident{Position: pos, Name: precName}},
+		}},
+	}
+	activeStmts = append(activeStmts, rightAttempt.Stmts...)
+	activeStmts = append(activeStmts, markCommittedStmts(committedName, pos, rightAttempt.Committed)...)
+	activeStmts = append(activeStmts, &ast.IfStmt{
+		Position: pos,
+		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: rightAttempt.Matched},
+		Then: []ast.Stmt{
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: matchedName}, Value: &ast.BoolLit{Position: pos, Value: false}},
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: stopName}, Value: &ast.BoolLit{Position: pos, Value: true}},
+		},
+		Else: []ast.Stmt{
+			&ast.VarDeclStmt{Position: pos, Name: rightName, Value: rightAttempt.Value},
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: leftName}, Value: spec.Combine},
+		},
+	})
+
+	loopBody = append(loopBody, &ast.IfStmt{
+		Position: pos,
+		Cond:     stopCond,
+		Then: []ast.Stmt{
+			&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: stopName}, Value: &ast.BoolLit{Position: pos, Value: true}},
+		},
+		Else: activeStmts,
+	})
+
+	stmts = append(stmts, &ast.WhileStmt{
+		Position: pos,
+		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: &ast.Ident{Position: pos, Name: stopName}},
+		Body:     loopBody,
+	})
+	return loweredAttempt{
+		Stmts:     stmts,
+		Matched:   &ast.Ident{Position: pos, Name: matchedName},
+		Committed: &ast.Ident{Position: pos, Name: committedName},
+		Value:     &ast.Ident{Position: pos, Name: leftName},
+	}
 }
