@@ -84,8 +84,6 @@ func resolveGrammarTermRecoveryPolicies(term ast.GrammarTerm, policies map[strin
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
-	case *ast.GrammarWhileTerm:
-		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermRecoveryPolicies(n.Elem, policies), Separator: resolveGrammarTermRecoveryPolicies(n.Separator, policies), Until: resolveGrammarTermListRecoveryPolicies(n.Until, policies)}
 	case *ast.GrammarSuffixTerm:

@@ -70,8 +70,6 @@ func inferLowerContextTermType(term ast.GrammarTerm, fallback ast.TypeExpr) ast.
 		return listTypeExpr(n.Position, inferLowerContextTermType(n.Elem, fallback))
 	case *ast.GrammarFlatRepeatTerm:
 		return inferLowerContextTermType(n.Elem, fallback)
-	case *ast.GrammarWhileTerm:
-		return inferLowerContextTermType(n.Elem, fallback)
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, inferLowerContextTermType(n.Elem, fallback))
 	case *ast.GrammarSuffixTerm:

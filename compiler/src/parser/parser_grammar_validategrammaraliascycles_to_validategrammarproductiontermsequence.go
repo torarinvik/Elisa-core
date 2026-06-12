@@ -109,11 +109,6 @@ func grammarAliasRefs(term ast.GrammarTerm, aliases map[string]ast.GrammarAliasD
 			for _, until := range n.Until {
 				walk(until)
 			}
-		case *ast.GrammarWhileTerm:
-			walk(n.Elem)
-			for _, until := range n.Until {
-				walk(until)
-			}
 		case *ast.GrammarSeparatedTerm:
 			walk(n.Elem)
 			walk(n.Separator)
@@ -374,9 +369,6 @@ func (p *Parser) validateGrammarFnApplicationInTerm(term ast.GrammarTerm, gramma
 		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarFlatRepeatTerm:
-		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
-		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, aliases, tokenSetNames)
-	case *ast.GrammarWhileTerm:
 		p.validateGrammarFnApplicationInTerm(n.Elem, grammarFns, aliases, tokenSetNames)
 		p.validateGrammarFnApplicationsInTerms(n.Until, grammarFns, aliases, tokenSetNames)
 	case *ast.GrammarSeparatedTerm:

@@ -433,10 +433,13 @@ func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarOptionalTerm{Position: pos, Term: term}
 }
+// parseGrammarListTerm parses the REMOVED `list(...)` spelling, emits a hard error,
+// and recovers into the canonical repetition IR (a separated term when a separator
+// is given, otherwise a plain repetition) so downstream passes stay well-formed.
 func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("list")
-	p.deprecatedAt(pos, "the `list(...)` grammar spelling is legacy; use the postfix repetition `term* until(stop)` or `separated term by sep until(stop)`")
+	p.errorAt(pos, "the `list(...)` grammar spelling has been removed; use the postfix repetition `term* until(stop)`, or `separated term by sep until(stop)`")
 	if p.peek() != lexer.TOKEN_LPAREN {
 		elem := p.parseGrammarRecoverableTermValue()
 		var separator ast.GrammarTerm
@@ -449,7 +452,7 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 		if p.peekIdentText("until") {
 			until = p.parseGrammarUntilClause()
 		}
-		return &ast.GrammarListTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+		return recoveredRepetitionTerm(pos, elem, separator, until)
 	}
 	p.expect(lexer.TOKEN_LPAREN)
 	elem := p.parseGrammarRecoverableTermValue()
@@ -466,12 +469,25 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
-	return &ast.GrammarListTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+	return recoveredRepetitionTerm(pos, elem, separator, until)
 }
+
+// recoveredRepetitionTerm builds the canonical repetition node for legacy-spelling
+// error recovery: a separated term when a separator is present, otherwise a plain
+// repetition.
+func recoveredRepetitionTerm(pos lexer.Pos, elem, separator ast.GrammarTerm, until []ast.GrammarTerm) ast.GrammarTerm {
+	if separator != nil {
+		return &ast.GrammarSeparatedTerm{Position: pos, Elem: elem, Separator: separator, Until: until}
+	}
+	return &ast.GrammarRepeatTerm{Position: pos, Elem: elem, Until: until}
+}
+
+// parseGrammarRepeatTerm parses the REMOVED `repeat ...` spelling, emits a hard
+// error, and recovers into the canonical `term*` repetition node.
 func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("repeat")
-	p.deprecatedAt(pos, "the `repeat ...` grammar spelling is legacy; use the postfix repetition `term* until(stop)` (or `term+` for one-or-more)")
+	p.errorAt(pos, "the `repeat ...` grammar spelling has been removed; use the postfix repetition `term* until(stop)` (or `term+` for one-or-more)")
 	if p.peek() != lexer.TOKEN_LPAREN {
 		elem := p.parseGrammarRecoverableTermValue()
 		var until []ast.GrammarTerm
@@ -536,9 +552,12 @@ func (p *Parser) isGrammarWhileTermStart() bool {
 	}
 	return false
 }
+// parseGrammarWhileTerm parses the REMOVED `[term] while tok in tokens != [...]`
+// spelling, emits a hard error, and recovers into the canonical `flatrepeat term
+// until(stop)` node so the legacy GrammarWhileTerm is never produced.
 func (p *Parser) parseGrammarWhileTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
-	p.deprecatedAt(pos, "the `[term] while tok in tokens != [...]` grammar spelling is legacy; use `flatrepeat term until(stop)`")
+	p.errorAt(pos, "the `[term] while tok in tokens != [...]` grammar spelling has been removed; use `flatrepeat term until(stop)`")
 	p.expect(lexer.TOKEN_LBRACKET)
 	elem := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RBRACKET)
@@ -558,5 +577,5 @@ func (p *Parser) parseGrammarWhileTerm() ast.GrammarTerm {
 		}
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
-	return &ast.GrammarWhileTerm{Position: pos, Elem: elem, Until: until}
+	return &ast.GrammarFlatRepeatTerm{Position: pos, Elem: elem, Until: until}
 }

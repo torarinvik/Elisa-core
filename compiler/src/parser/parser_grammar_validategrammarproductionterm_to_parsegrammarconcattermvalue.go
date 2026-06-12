@@ -29,7 +29,7 @@ func (p *Parser) validateGrammarProductionTerm(productionName string, term ast.G
 		*ast.GrammarLookaheadTerm, *ast.GrammarGuardTerm, *ast.GrammarAttemptTerm,
 		*ast.GrammarWhenTerm, *ast.GrammarMatchTerm, *ast.GrammarRecoverTerm:
 		// valid
-	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarWhileTerm, *ast.GrammarSeparatedTerm:
+	case *ast.GrammarListTerm, *ast.GrammarRepeatTerm, *ast.GrammarFlatRepeatTerm, *ast.GrammarSeparatedTerm:
 		// valid
 	case *ast.GrammarSuffixTerm, *ast.GrammarPostfixTerm, *ast.GrammarPrecedenceTerm:
 		// valid

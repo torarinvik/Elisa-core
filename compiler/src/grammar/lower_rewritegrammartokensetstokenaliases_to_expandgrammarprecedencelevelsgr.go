@@ -184,8 +184,6 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
-	case *ast.GrammarWhileTerm:
-		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Separator: expandGrammarTermGrammarAliases(n.Separator, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarSuffixTerm:
@@ -392,8 +390,6 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 	case *ast.GrammarRepeatTerm:
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
-		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
-	case *ast.GrammarWhileTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Separator: expandGrammarTermGrammarFns(n.Separator, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}

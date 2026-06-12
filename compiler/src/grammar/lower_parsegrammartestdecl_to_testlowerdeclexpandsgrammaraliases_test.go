@@ -95,7 +95,7 @@ func TestLowerDeclPreservesChoiceOptionalAndListAsOrdinaryCalls(t *testing.T) {
     block() -> Pascal.Block:
         declarations = optional(variable_section())
         expect("begin")
-        statements = list(statement(), ";")
+        statements = separated statement() by ";"
         expect("end")
     statement() -> Pascal.Stmt:
         choice(assignment(), compound_statement(), if_statement(), while_statement())
@@ -108,7 +108,7 @@ func TestLowerDeclPreservesChoiceOptionalAndListAsOrdinaryCalls(t *testing.T) {
 	for _, want := range []string{
 		"declarations = optional(variable_section())",
 		"expect(\"begin\")",
-		"statements = list(statement(), expect(\";\"))",
+		"statements = separated(statement(), expect(\";\"))",
 		"expect(\"end\")",
 		"return zeroed",
 	} {
@@ -127,14 +127,14 @@ func TestLowerDeclPreservesChoiceOptionalAndListAsOrdinaryCalls(t *testing.T) {
 func TestLowerDeclPreservesListUntilStopSetAsOrdinaryCall(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     block() -> Pascal.Block:
-        statements = list(statement(), ";", until("end", token(TokenKind.EOF)))
+        statements = separated statement() by ";" until("end", token(TokenKind.EOF))
 `)
 	funcs := LowerDecl(decl)
 	if len(funcs) != 1 {
 		t.Fatalf("expected one lowered function, got %d", len(funcs))
 	}
 	formatted := unparse.FormatDecl(funcs[0])
-	if !strings.Contains(formatted, "statements = list(statement(), expect(\";\"), until(\"end\", token(TokenKind.EOF)))") {
+	if !strings.Contains(formatted, "statements = separated(statement(), expect(\";\"), until(\"end\", token(TokenKind.EOF)))") {
 		t.Fatalf("expected lowered function to preserve until stop set, got:\n%s", formatted)
 	}
 }
@@ -471,7 +471,7 @@ func TestLowerDeclExpandsGrammarHelperShorthandNoneAndPipeTokenSets(t *testing.T
 		node <- expr(make_demo_value())
 		return node
 	values() -> darray[DemoValue]:
-		node = [present_value()] while token in tokens != [Stop]
+		node = flatrepeat present_value() until(Stop)
 		return node
 `)
 	formattedSource := unparse.FormatFile(file)

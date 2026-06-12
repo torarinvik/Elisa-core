@@ -160,7 +160,7 @@ func TestLowerFileStatefulInjectsHeaderAllocIntoListsAndBareCalls(t *testing.T) 
     cursor parser
     alloc alloc
     atom() -> darray[Token]:
-        items = list(.IDENT)
+        items = .IDENT*
         return items
     expr() -> darray[Token]:
         value = atom()
@@ -190,7 +190,7 @@ func TestLowerFileStatefulInjectsHeaderArgsIntoRecoveredProductionCalls(t *testi
         .IDENT(tok)
 		return zeroed.cast[Pascal.Stmt]
 	block() -> darray[Pascal.Stmt]:
-        items = list(statement(), ";", until(token(TokenKind.EOF)))
+        items = separated statement() by ";" until(token(TokenKind.EOF))
         return items
 `)
 	lowered := LowerFile(file)

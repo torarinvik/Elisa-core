@@ -460,11 +460,6 @@ type GrammarFlatRepeatTerm struct {
 	Elem     GrammarTerm
 	Until    []GrammarTerm
 }
-type GrammarWhileTerm struct {
-	Position lexer.Pos
-	Elem     GrammarTerm
-	Until    []GrammarTerm
-}
 type GrammarSeparatedTerm struct {
 	Position  lexer.Pos
 	Elem      GrammarTerm

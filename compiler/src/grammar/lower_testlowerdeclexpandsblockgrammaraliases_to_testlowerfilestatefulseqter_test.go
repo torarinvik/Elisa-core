@@ -193,9 +193,9 @@ func TestLowerDeclExpandsParameterizedAliasConcatWithGrammarTypeContinuation(t *
 			sep
 			group()
 	grammar alias group_items(stop: tokenset, sep: grammar = .SEMICOLON):
-		group() + [group_tail(sep)] while token in tokens != [stop]
+		group() + flatrepeat group_tail(sep) until(stop)
 	group() -> darray[Token]:
-		values = list(token(TokenKind.IDENT), until(GroupStop))
+		values = token(TokenKind.IDENT)* until(GroupStop)
 		return values
 	items() -> darray[Token]:
 		values = group_items(stop: EndSync)
@@ -337,9 +337,9 @@ func TestLowerDeclExpandsParameterizedGrammarAliasExprParams(t *testing.T) {
 func TestLowerDeclPreservesRepeatAndSeparatedAsOrdinaryCalls(t *testing.T) {
 	decl := parseGrammarTestDecl(t, `grammar PascalFrontend:
     block() -> darray[Pascal.Stmt]:
-        items = repeat(statement(), until("end", token(TokenKind.EOF)))
+        items = statement()* until("end", token(TokenKind.EOF))
     args() -> darray[Pascal.Expr]:
-        values = separated(expression(), ",", until(")", token(TokenKind.EOF)))
+        values = separated expression() by "," until(")", token(TokenKind.EOF))
 `)
 	funcs := LowerDecl(decl)
 	if len(funcs) != 2 {
@@ -413,7 +413,7 @@ func TestLowerDeclRoutesTokenKindMatcherThroughStateReceiverWhenPresent(t *testi
 func TestLowerFileStatefulListCollectsValuesIntoDarray(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     collect(state: mutable ParserState&) -> Token:
-        items = list(token(TokenKind.IDENT))
+        items = token(TokenKind.IDENT)*
         return items[0u]
 `)
 	lowered := LowerFile(file)
@@ -431,7 +431,7 @@ func TestLowerFileStatefulListCollectsValuesIntoDarray(t *testing.T) {
 func TestLowerFileStatefulListChecksUntilStopSetBeforeParsingNextItem(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     collect(state: mutable ParserState&) -> darray[Token]:
-        items = list(token(TokenKind.IDENT), until("end", token(TokenKind.EOF)))
+        items = token(TokenKind.IDENT)* until("end", token(TokenKind.EOF))
         return items
 `)
 	lowered := LowerFile(file)
@@ -454,10 +454,10 @@ func TestLowerFileStatefulListChecksUntilStopSetBeforeParsingNextItem(t *testing
 func TestLowerFileStatefulFlatRepeatTermFlattensNestedLists(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     group(state: mutable ParserState&) -> darray[Token]:
-        values = list(token(TokenKind.IDENT), until(";", token(TokenKind.EOF)))
+        values = token(TokenKind.IDENT)* until(";", token(TokenKind.EOF))
         return values
     groups(state: mutable ParserState&) -> darray[Token]:
-        values = flatrepeat(group(), until("end", token(TokenKind.EOF)))
+        values = flatrepeat group() until("end", token(TokenKind.EOF))
         return values
 `)
 	lowered := LowerFile(file)
@@ -477,13 +477,13 @@ func TestLowerFileStatefulFlatRepeatTermFlattensNestedLists(t *testing.T) {
 		t.Fatalf("expected lowered groups production, got:\n%s", formatted)
 	}
 }
-func TestLowerFileStatefulBracketWhileTermUsesFlatRepeatLowering(t *testing.T) {
+func TestLowerFileStatefulFlatRepeatTermUsesFlatRepeatLowering(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     group(state: mutable ParserState&) -> darray[Token]:
-        values = list(token(TokenKind.IDENT), until(";", token(TokenKind.EOF)))
+        values = token(TokenKind.IDENT)* until(";", token(TokenKind.EOF))
         return values
     groups(state: mutable ParserState&) -> darray[Token]:
-        values = [group()] while token in tokens != ["end", token(TokenKind.EOF)]
+        values = flatrepeat group() until("end", token(TokenKind.EOF))
         return values
 `)
 	lowered := LowerFile(file)

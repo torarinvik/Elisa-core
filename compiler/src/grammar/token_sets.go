@@ -214,8 +214,6 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
-	case *ast.GrammarWhileTerm:
-		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Separator: resolveGrammarTermTokenSets(n.Separator, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarSuffixTerm:

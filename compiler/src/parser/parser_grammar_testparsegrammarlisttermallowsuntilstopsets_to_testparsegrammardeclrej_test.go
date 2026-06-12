@@ -11,9 +11,9 @@ import (
 func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     block(state: mutable ParserState&) -> Pascal.Block:
-        statements = list(state.statement(), ";", until("end", token(TokenKind.EOF)))
+        statements = separated state.statement() by ";" until("end", token(TokenKind.EOF))
     declarations(state: mutable ParserState&) -> darray[Pascal.Decl]:
-        items = list(state.variable_decl(), until("begin"))
+        items = state.variable_decl()* until("begin")
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -26,12 +26,12 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected block production binding, got %T", decl.Productions[0].Terms[0])
 	}
-	blockList, ok := blockBind.Term.(*ast.GrammarListTerm)
+	blockList, ok := blockBind.Term.(*ast.GrammarSeparatedTerm)
 	if !ok {
-		t.Fatalf("expected block binding to be list term, got %T", blockBind.Term)
+		t.Fatalf("expected block binding to be separated term, got %T", blockBind.Term)
 	}
 	if blockList.Separator == nil {
-		t.Fatal("expected block list term to preserve separator")
+		t.Fatal("expected block separated term to preserve separator")
 	}
 	if len(blockList.Until) != 2 {
 		t.Fatalf("expected two stop terms, got %d", len(blockList.Until))
@@ -46,12 +46,12 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected declarations binding, got %T", decl.Productions[1].Terms[0])
 	}
-	declList, ok := declBind.Term.(*ast.GrammarListTerm)
+	declList, ok := declBind.Term.(*ast.GrammarRepeatTerm)
 	if !ok {
-		t.Fatalf("expected declarations binding to be list term, got %T", declBind.Term)
+		t.Fatalf("expected declarations binding to be repeat term, got %T", declBind.Term)
 	}
-	if declList.Separator != nil {
-		t.Fatalf("expected declarations list to omit separator, got %#v", declList.Separator)
+	if declList.MinOne {
+		t.Fatalf("expected declarations repeat (`*`) to be zero-or-more, got MinOne")
 	}
 	if len(declList.Until) != 1 {
 		t.Fatalf("expected one stop term without separator, got %d", len(declList.Until))
@@ -59,7 +59,7 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"statements = separated state.statement() by \";\" until(\"end\", token(TokenKind.EOF))",
-		"items = list(state.variable_decl(), until(\"begin\"))",
+		"items = repeat(state.variable_decl(), until(\"begin\"))",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
@@ -69,9 +69,9 @@ func TestParseGrammarListTermAllowsUntilStopSets(t *testing.T) {
 func TestParseGrammarRepeatAndSeparatedTerms(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
-        items = repeat(state.statement(), until("end", token(TokenKind.EOF)))
+        items = state.statement()* until("end", token(TokenKind.EOF))
     args(state: mutable ParserState&) -> darray[Pascal.Expr]:
-        values = separated(state.expression(), ",", until(")", token(TokenKind.EOF)))
+        values = separated state.expression() by "," until(")", token(TokenKind.EOF))
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -160,7 +160,7 @@ func TestParseGrammarDeclAllowsOptionalAndRepeatSuffixShorthand(t *testing.T) {
 func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
 	file, errs := parseSourceFile(t, `grammar PascalFrontend:
     block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
-        statements = list statement() separated by .SEMICOLON until(.END, token(TokenKind.EOF))
+        statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
         declarations = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
         values = separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF))
         maybe = optional .IDENT
@@ -180,12 +180,12 @@ func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
 	}
-	stmtsList, ok := stmtsBind.Term.(*ast.GrammarListTerm)
+	stmtsList, ok := stmtsBind.Term.(*ast.GrammarSeparatedTerm)
 	if !ok {
-		t.Fatalf("expected readable list sugar to produce GrammarListTerm, got %T", stmtsBind.Term)
+		t.Fatalf("expected readable separated sugar to produce GrammarSeparatedTerm, got %T", stmtsBind.Term)
 	}
 	if stmtsList.Separator == nil || len(stmtsList.Until) != 2 {
-		t.Fatalf("expected readable list sugar to preserve separator and stops, got %#v", stmtsList)
+		t.Fatalf("expected readable separated sugar to preserve separator and stops, got %#v", stmtsList)
 	}
 	declsBind, ok := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
 	if !ok {
@@ -211,41 +211,6 @@ func TestParseGrammarListFamilyReadableSugar(t *testing.T) {
 	}
 	if _, ok := maybeBind.Term.(*ast.GrammarOptionalTerm); !ok {
 		t.Fatalf("expected readable optional sugar to produce GrammarOptionalTerm, got %T", maybeBind.Term)
-	}
-}
-func TestParseGrammarDeclAllowsBracketWhileTerm(t *testing.T) {
-	file, errs := parseSourceFile(t, `grammar PascalFrontend:
-    block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
-        declarations = [variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]
-        return declarations
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[0].(*ast.GrammarDecl)
-	if !ok {
-		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
-	}
-	bind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
-	if !ok {
-		t.Fatalf("expected binding term, got %T", decl.Productions[0].Terms[0])
-	}
-	whileTerm, ok := bind.Term.(*ast.GrammarWhileTerm)
-	if !ok {
-		t.Fatalf("expected GrammarWhileTerm, got %T", bind.Term)
-	}
-	if len(whileTerm.Until) != 2 {
-		t.Fatalf("expected two stop terms, got %#v", whileTerm.Until)
-	}
-	if _, ok := whileTerm.Until[0].(*ast.GrammarTokenKindTerm); !ok {
-		t.Fatalf("expected first stop term to preserve token kind term, got %T", whileTerm.Until[0])
-	}
-	if _, ok := whileTerm.Until[1].(*ast.GrammarCallTerm); !ok {
-		t.Fatalf("expected second stop term to preserve token call, got %T", whileTerm.Until[1])
-	}
-	formatted := unparse.FormatFile(file)
-	if !strings.Contains(formatted, "[variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]") {
-		t.Fatalf("expected formatted output to preserve bracket while term, got:\n%s", formatted)
 	}
 }
 func TestParseGrammarSeqBlockAndPrefixSugar(t *testing.T) {
@@ -606,28 +571,49 @@ func TestParseGrammarPlusPostfixDoesNotBreakConcat(t *testing.T) {
 	}
 }
 
-func TestParseGrammarLegacyRepetitionSpellingsWarnDeprecated(t *testing.T) {
-	src := `grammar PascalFrontend over Token using ParserState:
+func TestParseGrammarRemovedRepetitionSpellingsRejected(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{
+			name: "list call form",
+			src: `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	args(state: mutable ParserState&) -> darray[Pascal.Expr]:
+		values = list(state.expression(), until(")"))
+`,
+		},
+		{
+			name: "repeat form",
+			src: `grammar PascalFrontend over Token using ParserState:
 	cursor state
 	block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
 		items = repeat(state.statement(), until("end", token(TokenKind.EOF)))
-	args(state: mutable ParserState&) -> darray[Pascal.Expr]:
-		values = list(state.expression(), until(")"))
-`
-	l := lexer.New("test.elisa", []byte(src))
-	tokens := l.Tokenize()
-	p := New(tokens)
-	p.ParseFile("test.elisa")
-	if errs := p.Errors(); len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+`,
+		},
+		{
+			name: "bracket while form",
+			src: `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
+		items = [state.statement()] while token in tokens != [".END"]
+`,
+		},
 	}
-	notices := p.Notices()
-	if len(notices) != 2 {
-		t.Fatalf("expected 2 deprecation notices (repeat, list), got %d: %v", len(notices), notices)
-	}
-	for i, want := range []string{"`repeat ...` grammar spelling is legacy", "`list(...)` grammar spelling is legacy"} {
-		if !strings.Contains(notices[i], "deprecated:") || !strings.Contains(notices[i], want) {
-			t.Fatalf("expected notice %d to contain %q, got %q", i, want, notices[i])
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			l := lexer.New("test.elisa", []byte(tc.src))
+			tokens := l.Tokenize()
+			p := New(tokens)
+			p.ParseFile("test.elisa")
+			errs := p.Errors()
+			if len(errs) == 0 {
+				t.Fatalf("expected parse error for removed spelling, got none")
+			}
+			if !strings.Contains(strings.Join(errs, "\n"), "has been removed") {
+				t.Fatalf("expected removal error, got %v", errs)
+			}
+		})
 	}
 }

@@ -326,7 +326,7 @@ func TestLowerFileStatefulListCallsRecoveredProductionDirectly(t *testing.T) {
         stmt = choice(state.assignment(), state.compound_statement())
         return stmt
     block(state: mutable ParserState&) -> Pascal.Block:
-        statements = list(state.statement(), ";", until("end", token(TokenKind.EOF)))
+        statements = separated state.statement() by ";" until("end", token(TokenKind.EOF))
         return zeroed.cast[Pascal.Block]
 `)
 	lowered := LowerFile(file)

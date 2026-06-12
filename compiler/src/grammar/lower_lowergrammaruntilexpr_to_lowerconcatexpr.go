@@ -361,8 +361,6 @@ func lowerTermExpr(ctx lowerContext, term ast.GrammarTerm) ast.Expr {
 		return &ast.CallExpr{Position: n.Position, Func: &ast.Ident{Position: n.Position, Name: "repeat"}, Args: args}
 	case *ast.GrammarFlatRepeatTerm:
 		return lowerTermExpr(ctx, n.Elem)
-	case *ast.GrammarWhileTerm:
-		return lowerTermExpr(ctx, n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		args := []ast.Expr{lowerTermExpr(ctx, n.Elem), lowerTermExpr(ctx, n.Separator)}
 		if len(n.Until) != 0 {

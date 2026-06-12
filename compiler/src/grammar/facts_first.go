@@ -87,8 +87,6 @@ func resolveGrammarTermFirstSets(term ast.GrammarTerm, productions map[string]re
 		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
-	case *ast.GrammarWhileTerm:
-		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarSeparatedTerm:
 		return &ast.GrammarSeparatedTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Separator: resolveGrammarTermFirstSets(n.Separator, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarSuffixTerm:

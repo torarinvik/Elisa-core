@@ -217,9 +217,6 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 	case *ast.GrammarFlatRepeatTerm:
 		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)
 		return terms, true
-	case *ast.GrammarWhileTerm:
-		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)
-		return terms, true
 	case *ast.GrammarSeparatedTerm:
 		return grammarFirstTermsForTerm(n.Elem, productions, seen)
 	case *ast.GrammarSuffixTerm:
@@ -316,8 +313,6 @@ func (ctx *statefulLowerContext) termCanFail(term ast.GrammarTerm) bool {
 		return false
 	case *ast.GrammarFlatRepeatTerm:
 		return false
-	case *ast.GrammarWhileTerm:
-		return false
 	case *ast.GrammarSeparatedTerm:
 		return false
 	case *ast.GrammarSuffixTerm:
@@ -404,8 +399,6 @@ func (ctx *statefulLowerContext) inferTermType(term ast.GrammarTerm) ast.TypeExp
 	case *ast.GrammarRepeatTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))
 	case *ast.GrammarFlatRepeatTerm:
-		return ctx.inferTermType(n.Elem)
-	case *ast.GrammarWhileTerm:
 		return ctx.inferTermType(n.Elem)
 	case *ast.GrammarSeparatedTerm:
 		return listTypeExpr(n.Position, ctx.inferTermType(n.Elem))

@@ -241,7 +241,7 @@ func TestLowerFileStatefulConcatTermFlattensListOperands(t *testing.T) {
 	cursor parser
 	channel decls
 	declarations() -> darray[Token]:
-		decls <- expr[darray[Token]]([]) + list(token(TokenKind.IDENT)) + expr[darray[Token]]([])
+		decls <- expr[darray[Token]]([]) + flatrepeat token(TokenKind.IDENT) until(token(TokenKind.EOF)) + expr[darray[Token]]([])
 		pass
 `)
 	lowered := LowerFile(file)

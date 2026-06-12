@@ -403,7 +403,7 @@ func TestParseGrammarChoiceOptionalAndListTerms(t *testing.T) {
     block() -> Pascal.Block:
         declarations = optional(variable_section())
         expect("begin")
-        statements = list(statement(), ";")
+        statements = separated statement() by ";"
         expect("end")
     statement() -> Pascal.Stmt:
         choice(assignment(), compound_statement(), if_statement(), while_statement())
@@ -427,12 +427,12 @@ func TestParseGrammarChoiceOptionalAndListTerms(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected statements term to be binding, got %T", block.Terms[2])
 	}
-	listTerm, ok := stmtsBind.Term.(*ast.GrammarListTerm)
+	listTerm, ok := stmtsBind.Term.(*ast.GrammarSeparatedTerm)
 	if !ok {
-		t.Fatalf("expected statements binding to list term, got %T", stmtsBind.Term)
+		t.Fatalf("expected statements binding to separated term, got %T", stmtsBind.Term)
 	}
 	if listTerm.Separator == nil {
-		t.Fatal("expected list term to record a separator")
+		t.Fatal("expected separated term to record a separator")
 	}
 	choiceProd := decl.Productions[1]
 	choiceTerm, ok := choiceProd.Terms[0].(*ast.GrammarChoiceTerm)

@@ -171,7 +171,7 @@ func TestLowerDeclPreservesReturnSeqBlockTermWithoutPlaceholder(t *testing.T) {
 		t.Fatalf("expected explicit return seq to suppress placeholder zeroed return, got:\n%s", formatted)
 	}
 }
-func TestLowerFileReturnSeqResolvesNestedBracketWhileUntil(t *testing.T) {
+func TestLowerFileReturnSeqResolvesNestedFlatRepeatUntil(t *testing.T) {
 	file := parseGrammarTestFile(t, `struct Token:
 	kind: TokenKind
 
@@ -207,7 +207,7 @@ grammar Demo with DemoEnv:
 	section() -> darray[Token]:
 		return seq:
 			.RESOURCESTRING
-			[item()] while token in tokens != [SectionSync]
+			flatrepeat item() until(SectionSync)
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)

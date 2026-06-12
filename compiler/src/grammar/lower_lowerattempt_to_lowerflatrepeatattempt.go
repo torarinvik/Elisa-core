@@ -199,8 +199,6 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 		return att
 	case *ast.GrammarFlatRepeatTerm:
 		return ctx.lowerFlatRepeatAttempt(n)
-	case *ast.GrammarWhileTerm:
-		return ctx.lowerFlatRepeatAttempt(&ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: n.Elem, Until: n.Until})
 	case *ast.GrammarSeparatedTerm:
 		return ctx.lowerListAttempt(separatedTermAsList(n))
 	case *ast.GrammarSuffixTerm:
