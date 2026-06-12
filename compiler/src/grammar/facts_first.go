@@ -32,7 +32,7 @@ func resolveGrammarTokenSetsFirstSets(tokenSets []ast.GrammarTokenSetDecl, produ
 	}
 	resolved := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
 	for _, tokenSet := range tokenSets {
-		resolved = append(resolved, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: resolveGrammarFirstRefsInStopList(tokenSet.Terms, productions)})
+		resolved = append(resolved, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: resolveGrammarFirstRefsInStopList(tokenSet.Terms, productions), Excluded: resolveGrammarFirstRefsInStopList(tokenSet.Excluded, productions)})
 	}
 	return resolved
 }
@@ -84,7 +84,7 @@ func resolveGrammarTermFirstSets(term ast.GrammarTerm, productions map[string]re
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Separator: resolveGrammarTermFirstSets(n.Separator, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermFirstSets(n.Elem, productions), Until: resolveGrammarFirstRefsInStopList(n.Until, productions)}
 	case *ast.GrammarWhileTerm:

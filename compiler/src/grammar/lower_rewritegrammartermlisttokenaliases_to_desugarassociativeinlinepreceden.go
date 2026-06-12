@@ -99,7 +99,7 @@ func rewriteGrammarTermTokenAliases(term ast.GrammarTerm, aliases map[string]str
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Separator: rewriteGrammarTermTokenAliases(n.Separator, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: rewriteGrammarTermTokenAliases(n.Elem, aliases), Until: rewriteGrammarTermListTokenAliases(n.Until, aliases)}
 	case *ast.GrammarWhileTerm:
@@ -453,7 +453,7 @@ func desugarNamedPrecedenceTerm(grammarName string, production ast.GrammarProduc
 			until = append(until, rewritten)
 			helpers = append(helpers, extra...)
 		}
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: elem, Until: until}, helpers
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: elem, Until: until, MinOne: n.MinOne}, helpers
 	case *ast.GrammarFlatRepeatTerm:
 		elem, helpers := desugarNamedPrecedenceTerm(grammarName, production, n.Elem, counter)
 		until := make([]ast.GrammarTerm, 0, len(n.Until))

@@ -148,3 +148,114 @@ In priority order:
 Each phase ends with all four frontends + the golden suite green; the frontends
 are the usage oracle — any DSL feature they still can't express cleanly after
 Phase 4 is a candidate for *removal*, not further extension.
+
+## Phase 0 results (2026-06-12) — SML/Lua/Perl oracle
+
+Scope decision: Pascal + ATPL deferred (blocked on the `tree` and
+`bundle AllocCtx` removals — separate, large migrations). The oracle for
+Phases 1–4 is SML (156 tests), Lua (236), Perl (30), all green before and
+after every step below.
+
+**First correction to the plan: Lua uses no grammar DSL at all** — it is a
+fully hand-written recursive-descent parser. The effective DSL oracle is
+SML + Perl. (Whether Lua *should* migrate to the DSL is a separate question;
+as-is it contributes nothing to the feature matrix.)
+
+### Migrations performed (user-code only, zero compiler changes)
+
+1. **Hand-rolled recursion eliminated — SML now has zero self-recursive
+   productions.** Audited mechanically (script over every `grammar` block);
+   Perl had none to begin with (its one hit was an alias wrapper, not
+   recursion). Three SML families migrated:
+   - `qualified_type_name_tail` / `qualified_expr_name_tail` (DOT-path
+     prepend-recursion) → segment rule + `segment()*` + one host fold
+     (`sml_name_path_from_tokens`).
+   - `declaration_group_semicolon_continuation` (skip-extra-semicolons
+     recursion) → bare token repetition `.SEMICOLON*` in statement position.
+   - `sig_where_type_tail` + `sig_where_type_realization(_after_and)` (a
+     *parameterized* seed+fold recursion, `atom (WHERE clause (AND clause)*)*`)
+     → clause-struct (`SMLWhereTypeClause`) + two `*` repetitions + host
+     apply (`apply_sml_where_type_clauses`). Notably **`suffix()` was not
+     needed**: collect-with-`*` + host fold is simpler than an op-arm fold
+     and kills the accumulator-parameter idiom entirely.
+2. **Inline token unions → named `token family`s, 40 sites.**
+   `required(.IDENT | .CONSTR_IDENT, …)` ×33 (+1 `lookahead`) →
+   `SMLNameIdent`; `.IDENT | .INTEGER` ×4 → `SMLRecordLabel`;
+   `.IDENT | .CONSTR_IDENT | .SYMBOL_IDENT` ×2 → `SMLBindableName`.
+   Zero inline unions remain in SML/Perl.
+
+### Verified feature matrix
+
+| Feature | Status | Evidence |
+|---|---|---|
+| `term*` on rule calls | works | `qualified_*_segment()*`, `sig_where_type_and_clause()*` |
+| `term*` on bare token terms, statement position | works | `.SEMICOLON*` |
+| `term*` binding a darray-returning rule (`darray[darray[T]]`) | works | `sig_where_type_group()*` |
+| `token family` in `required()`/`lookahead()` | works | `SMLNameIdent`/`SMLRecordLabel`/`SMLBindableName`, 40 sites |
+| `token family` cross-grammar via `uses` | works | families declared in SMLTypeGrammar/SMLDeclGrammar, used in 6 files |
+| tokenset in `required()` | works (pre-existing) | `required(SMLOperatorName, …)` |
+| `separated … by … until`, infix tables, generic combinators, `|>`, `grammar alias`, `recover` | heavily used (pre-existing) | throughout SML/Perl |
+| `suffix()` | exists, **unneeded** for the oracle's folds | sig_where migration |
+
+No position rejecting a tokenset/family ref was found — the "fix any position
+that rejects a tokenset ref" line item turned out to be empty for this oracle.
+
+### Findings that adjust the later phases
+
+- **`flatrepeat` is not a redundant spelling of `*`** (the plan's Phase 2
+  framing is wrong on this point): `term*` collects into `darray[elem]`,
+  while `flatrepeat` *flattens* darray-valued elems into one accumulator
+  (`lowerFlatRepeatLoopBody` pushes indexed items). SML has 38 live
+  `flatrepeat … until(stop)` uses relying on flattening. Phase 2 must either
+  keep `flatrepeat` under a canonical name or give `*` a flatten variant —
+  plain deprecation would regress the oracle.
+- **The dominant remaining wart is `when(state.current_token().kind == X, a, b)`**
+  — ad-hoc token-gated dispatch, used pervasively (SML ~30+ sites) where a
+  declarative token-gated choice belongs. The DSL already parses
+  `TOKEN? then … else …` (parser: `parseGrammarOptionalTokenGateTerm`) but the
+  frontends don't use it. Evaluating a migration (and whether the gate form
+  covers rule-call gating, not just token gating) should be added to Phase 1.
+- `+` would have expressed both halves of the semicolon migration
+  (`.SEMICOLON+`) and the where-group chain; Phase 1's case for `+` is
+  confirmed by real sites.
+
+## Phase 1 results (2026-06-12) — ergonomics landed
+
+All four items shipped (parser + lowering only; the pure-desugaring invariant
+holds — no semantic/backend changes anywhere):
+
+1. **`term+` one-or-more** (`GrammarRepeatTerm.MinOne`). Postfix `+` after any
+   term, with optional `until(stop)`. Disambiguation vs binary concat `a() + b()`:
+   `+` is postfix iff the next token cannot start a term (newline, `)`, `|`,
+   `|>`, `?`, `->`, `until`, `recover`); concat parsing yields in that case.
+   Lowers to the existing list loop plus `matched = count != 0` — zero items
+   fails the attempt uncommitted (cursor already restored). FIRST-set facts:
+   `+` is nullable only if its elem is. SML migrated:
+   `.SEMICOLON .SEMICOLON*` → `.SEMICOLON+`.
+2. **Tokenset `+`/`-` operators** (`GrammarTokenSetDecl.Excluded`).
+   `tokenset A = B + C - D` in the `=` form (`,`/`|`/`+` all union; `-`
+   excludes); block form accepts `- ITEM` lines. Difference resolves
+   recursively (excluded items may be whole sets) and applies after union;
+   only token kinds / leaf refs are excludable. SML proof: 8 sync sets
+   collapsed to one-liners, e.g. `ValPatternSync = DeclarationSync + EQ`,
+   `DatatypeDeclGroupStop = DatatypeConstructorSync - AND`, including a pure
+   alias `FunClauseGroupSync = DeclarationSync`.
+3. **grammarenv defaulting.** Conventional clauses now default:
+   `token_kind` → `<over-type>Kind` (name convention), `eof` →
+   `<token_kind>.EOF`, `token_field` → `kind`, `current` → `current_token`,
+   `advance` → `advance_token`, `expect` → `expect`, `expect_kind` →
+   `expect_kind`, `record_error` → `record_parse_error` (the observed oracle
+   convention, not `record_error` as originally drafted). Both SML and Perl
+   envs shrank from 11 clauses to `cursor state` + `alloc alloc`.
+4. **Token-gate evaluation (finding).** The parsed-but-unused
+   `TOKEN? then … else …` gate is NOT the replacement for the ~80
+   `when(state.current_token().kind == X, a, b)` sites: the gate *consumes*
+   the token, the when-sites *peek*. The correct existing construct is ordered
+   `choice:` (attempt + rollback) — verified by migrating the two worst
+   nested chains (`type_var_sequence`, `sig_expr` 3-deep) to `choice:`;
+   suites green. The remaining ~76 sites are mechanical; bulk migration moves
+   to Phase 2 alongside a lint that flags peeking when()-gates.
+
+Verified after each item: SML 156, Lua 236, Perl 30, full `go test ./...`.
+New compiler tests: plus-postfix parse/disambiguation, tokenset
+union/difference lowering, grammarenv-defaults lowering.

@@ -105,7 +105,7 @@ func desugarGrammarWhileTerm(term ast.GrammarTerm) ast.GrammarTerm {
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Separator: desugarGrammarWhileTerm(n.Separator), Until: desugarGrammarWhileTerms(n.Until)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: desugarGrammarWhileTerm(n.Elem), Until: desugarGrammarWhileTerms(n.Until)}
 	case *ast.GrammarWhileTerm:

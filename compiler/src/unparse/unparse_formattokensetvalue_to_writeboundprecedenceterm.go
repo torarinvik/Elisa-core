@@ -137,6 +137,9 @@ func (f *formatter) writeGrammarTokenSetDecl(level int, tokenSet ast.GrammarToke
 	for _, term := range tokenSet.Terms {
 		f.writeLine(level+1, formatGrammarTokenSetItem(term))
 	}
+	for _, term := range tokenSet.Excluded {
+		f.writeLine(level+1, "- "+formatGrammarTokenSetItem(term))
+	}
 }
 func (f *formatter) writeGrammarAliasDecl(level int, alias ast.GrammarAliasDecl) {
 	name := alias.Name

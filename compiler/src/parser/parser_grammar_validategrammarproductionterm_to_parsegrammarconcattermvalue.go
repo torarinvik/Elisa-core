@@ -436,9 +436,36 @@ func (p *Parser) parseGrammarTermValue() ast.GrammarTerm {
 				until = p.parseGrammarUntilClause()
 			}
 			term = &ast.GrammarRepeatTerm{Position: term.Pos(), Elem: term, Until: until}
+		case p.peek() == lexer.TOKEN_PLUS && p.grammarPlusIsPostfix():
+			p.advance()
+			var until []ast.GrammarTerm
+			if p.peekIdentText("until") {
+				until = p.parseGrammarUntilClause()
+			}
+			term = &ast.GrammarRepeatTerm{Position: term.Pos(), Elem: term, Until: until, MinOne: true}
 		default:
 			return term
 		}
+	}
+}
+
+// grammarPlusIsPostfix reports whether a TOKEN_PLUS at the cursor is the
+// one-or-more postfix (`term+`) rather than binary term concatenation
+// (`a() + b()`): postfix iff the token after `+` cannot start a grammar term.
+func (p *Parser) grammarPlusIsPostfix() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return true
+	}
+	next := p.tokens[p.pos+1]
+	switch next.Kind {
+	case lexer.TOKEN_NEWLINE, lexer.TOKEN_DEDENT, lexer.TOKEN_EOF, lexer.TOKEN_RPAREN,
+		lexer.TOKEN_COMMA, lexer.TOKEN_PIPE, lexer.TOKEN_PIPEGT, lexer.TOKEN_QUESTION,
+		lexer.TOKEN_ARROW:
+		return true
+	case lexer.TOKEN_IDENT:
+		return next.Text == "until" || next.Text == "recover"
+	default:
+		return false
 	}
 }
 func (p *Parser) parseGrammarOptionalTokenGateTerm(tokenKind *ast.GrammarTokenKindTerm) ast.GrammarTerm {
@@ -491,11 +518,15 @@ func (p *Parser) parseGrammarPipelineStep(input ast.GrammarTerm) ast.GrammarTerm
 }
 func (p *Parser) parseGrammarConcatTermValue() ast.GrammarTerm {
 	term := p.parseGrammarAtomicTermValue()
-	if !p.match(lexer.TOKEN_PLUS) {
+	// A `+` whose right side cannot start a term is the one-or-more postfix,
+	// handled by parseGrammarTermValue — leave it unconsumed here.
+	if p.peek() != lexer.TOKEN_PLUS || p.grammarPlusIsPostfix() {
 		return term
 	}
+	p.advance()
 	terms := []ast.GrammarTerm{term, p.parseGrammarAtomicTermValue()}
-	for p.match(lexer.TOKEN_PLUS) {
+	for p.peek() == lexer.TOKEN_PLUS && !p.grammarPlusIsPostfix() {
+		p.advance()
 		terms = append(terms, p.parseGrammarAtomicTermValue())
 	}
 	return &ast.GrammarConcatTerm{Position: term.Pos(), Terms: terms}

@@ -207,7 +207,10 @@ func grammarFirstTermsForTerm(term ast.GrammarTerm, productions map[string]resol
 	case *ast.GrammarListTerm:
 		return grammarFirstTermsForTerm(n.Elem, productions, seen)
 	case *ast.GrammarRepeatTerm:
-		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)
+		terms, elemNullable := grammarFirstTermsForTerm(n.Elem, productions, seen)
+		if n.MinOne {
+			return terms, elemNullable
+		}
 		return terms, true
 	case *ast.GrammarFlatRepeatTerm:
 		terms, _ := grammarFirstTermsForTerm(n.Elem, productions, seen)

@@ -13,6 +13,7 @@ func rewriteGrammarTokenSetsTokenAliases(tokenSets []ast.GrammarTokenSetDecl, al
 			Name:        tokenSet.Name,
 			TokenFamily: tokenSet.TokenFamily,
 			Terms:       rewriteGrammarTermListTokenAliases(tokenSet.Terms, aliases),
+			Excluded:    rewriteGrammarTermListTokenAliases(tokenSet.Excluded, aliases),
 		})
 	}
 	return rewritten
@@ -180,7 +181,7 @@ func expandGrammarTermGrammarAliases(term ast.GrammarTerm, aliases map[string]as
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Separator: expandGrammarTermGrammarAliases(n.Separator, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarAliases(n.Elem, aliases, seen), Until: expandGrammarTermListGrammarAliases(n.Until, aliases, seen)}
 	case *ast.GrammarWhileTerm:
@@ -389,7 +390,7 @@ func expandGrammarTermGrammarFns(term ast.GrammarTerm, grammarFns map[string]ast
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Separator: expandGrammarTermGrammarFns(n.Separator, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: expandGrammarTermGrammarFns(n.Elem, grammarFns, bindings), Until: expandGrammarTermListGrammarFns(n.Until, grammarFns, bindings)}
 	case *ast.GrammarWhileTerm:

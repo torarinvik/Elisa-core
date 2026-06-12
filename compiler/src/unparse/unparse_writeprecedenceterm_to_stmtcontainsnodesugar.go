@@ -228,6 +228,13 @@ func formatGrammarTerm(term ast.GrammarTerm) string {
 		}
 		return "list(" + strings.Join(parts, ", ") + ")"
 	case *ast.GrammarRepeatTerm:
+		if n.MinOne {
+			out := formatGrammarTerm(n.Elem) + "+"
+			if len(n.Until) != 0 {
+				out += " " + formatGrammarUntil(n.Until)
+			}
+			return out
+		}
 		parts := []string{formatGrammarTerm(n.Elem)}
 		if len(n.Until) != 0 {
 			parts = append(parts, formatGrammarUntil(n.Until))

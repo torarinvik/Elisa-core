@@ -135,7 +135,7 @@ func rewriteNamedPrecedenceHelperCalls(term ast.GrammarTerm, helperNames map[str
 		for _, stop := range n.Until {
 			until = append(until, rewriteNamedPrecedenceHelperCalls(stop, helperNames, paramArgs))
 		}
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: rewriteNamedPrecedenceHelperCalls(n.Elem, helperNames, paramArgs), Until: until, MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		until := make([]ast.GrammarTerm, 0, len(n.Until))
 		for _, stop := range n.Until {

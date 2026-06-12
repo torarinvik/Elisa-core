@@ -29,7 +29,11 @@ func rewriteGrammarTokenSetBareRefsToKinds(tokenSets []ast.GrammarTokenSetDecl, 
 		for _, term := range tokenSet.Terms {
 			terms = append(terms, rewriteGrammarTokenSetBareRefToKind(term, setMap))
 		}
-		rewritten = append(rewritten, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: terms})
+		excluded := make([]ast.GrammarTerm, 0, len(tokenSet.Excluded))
+		for _, term := range tokenSet.Excluded {
+			excluded = append(excluded, rewriteGrammarTokenSetBareRefToKind(term, setMap))
+		}
+		rewritten = append(rewritten, ast.GrammarTokenSetDecl{Position: tokenSet.Position, Name: tokenSet.Name, TokenFamily: tokenSet.TokenFamily, Terms: terms, Excluded: excluded})
 	}
 	return rewritten
 }
@@ -85,7 +89,7 @@ func resolveGrammarTokenSetsTokenSets(tokenSets []ast.GrammarTokenSetDecl, setMa
 			Position:    tokenSet.Position,
 			Name:        tokenSet.Name,
 			TokenFamily: tokenSet.TokenFamily,
-			Terms:       resolveGrammarTokenSetRefsInStopList(tokenSet.Terms, setMap),
+			Terms:       resolveGrammarTokenSetTermsWithExclusion(tokenSet, setMap),
 		})
 	}
 	return resolved
@@ -122,8 +126,38 @@ func resolveGrammarTokenSetStop(stop ast.GrammarTerm, tokenSets map[string]ast.G
 	for _, term := range tokenSet.Terms {
 		resolved = append(resolved, resolveGrammarTokenSetStop(term, tokenSets, seen)...)
 	}
+	if len(tokenSet.Excluded) != 0 {
+		excludedKeys := make(map[string]bool)
+		for _, term := range tokenSet.Excluded {
+			for _, flat := range resolveGrammarTokenSetStop(term, tokenSets, seen) {
+				if key := grammarTokenSetTermKey(flat); key != "" {
+					excludedKeys[key] = true
+				}
+			}
+		}
+		kept := resolved[:0]
+		for _, term := range resolved {
+			if key := grammarTokenSetTermKey(term); key != "" && excludedKeys[key] {
+				continue
+			}
+			kept = append(kept, term)
+		}
+		resolved = kept
+	}
 	delete(seen, ref.Name)
 	return resolved
+}
+
+// grammarTokenSetTermKey returns the identity used for tokenset difference:
+// token kinds and unresolved leaf refs are excludable; structured terms are not.
+func grammarTokenSetTermKey(term ast.GrammarTerm) string {
+	switch n := term.(type) {
+	case *ast.GrammarTokenKindTerm:
+		return n.Kind
+	case *ast.GrammarTokenSetRefTerm:
+		return n.Name
+	}
+	return ""
 }
 
 func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.GrammarTokenSetDecl) ast.GrammarTerm {
@@ -177,7 +211,7 @@ func resolveGrammarTermTokenSets(term ast.GrammarTerm, tokenSets map[string]ast.
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Separator: resolveGrammarTermTokenSets(n.Separator, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermTokenSets(n.Elem, tokenSets), Until: resolveGrammarTokenSetRefsInStopList(n.Until, tokenSets)}
 	case *ast.GrammarWhileTerm:
@@ -251,4 +285,29 @@ func resolveGrammarPrecedenceLevelsTokenSets(levels []ast.GrammarPrecedenceLevel
 		resolved = append(resolved, ast.GrammarPrecedenceLevel{Position: level.Position, Assoc: level.Assoc, Name: level.Name, LeftName: level.LeftName, Seed: resolveGrammarTermTokenSets(level.Seed, tokenSets), Arms: resolveGrammarPrecedenceArmsTokenSets(level.Arms, tokenSets)})
 	}
 	return resolved
+}
+
+// resolveGrammarTokenSetTermsWithExclusion flattens a tokenset's Terms against
+// setMap and removes everything matched by its Excluded items.
+func resolveGrammarTokenSetTermsWithExclusion(tokenSet ast.GrammarTokenSetDecl, setMap map[string]ast.GrammarTokenSetDecl) []ast.GrammarTerm {
+	resolved := resolveGrammarTokenSetRefsInStopList(tokenSet.Terms, setMap)
+	if len(tokenSet.Excluded) == 0 {
+		return resolved
+	}
+	excludedKeys := make(map[string]bool)
+	for _, term := range tokenSet.Excluded {
+		for _, flat := range resolveGrammarTokenSetStop(term, setMap, nil) {
+			if key := grammarTokenSetTermKey(flat); key != "" {
+				excludedKeys[key] = true
+			}
+		}
+	}
+	kept := resolved[:0]
+	for _, term := range resolved {
+		if key := grammarTokenSetTermKey(term); key != "" && excludedKeys[key] {
+			continue
+		}
+		kept = append(kept, term)
+	}
+	return kept
 }

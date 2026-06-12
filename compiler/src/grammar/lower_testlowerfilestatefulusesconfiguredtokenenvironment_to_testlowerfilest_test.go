@@ -539,3 +539,87 @@ grammar PerlFrontend over Token using ParserState:
 		t.Fatalf("expected grammar-wide node channel not to shape helper struct, got:\n%s", formatted)
 	}
 }
+
+func TestLowerFileStatefulTokenSetUnionAndDifferenceOperators(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	token_kind TokenKind
+	token_field kind
+	current current_token
+	advance advance_token
+	expect expect
+	expect_kind expect_kind
+	token:
+		EOF
+		IDENT
+		RPAREN ")"
+		COMMA ","
+		SEMICOLON ";"
+	tokenset BaseSync:
+		EOF
+		RPAREN
+		COMMA
+	tokenset NoCommaSync = BaseSync - COMMA
+	tokenset WideSync = BaseSync + SEMICOLON - RPAREN
+	items() -> darray[Token]:
+		values = .IDENT* until(NoCommaSync)
+		wide = .IDENT* until(WideSync)
+		return values
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		"TokenKind.EOF",
+		"TokenKind.RPAREN",
+		"TokenKind.SEMICOLON",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected tokenset operator lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+	// NoCommaSync = BaseSync - COMMA: the first until must not test COMMA.
+	// WideSync = BaseSync + SEMICOLON - RPAREN: must test COMMA and SEMICOLON.
+	// Count comparisons per kind to pin both sets.
+	eofCount := strings.Count(formatted, "TokenKind.EOF")
+	commaCount := strings.Count(formatted, "state.current_token().kind == TokenKind.COMMA")
+	rparenCount := strings.Count(formatted, "state.current_token().kind == TokenKind.RPAREN")
+	if eofCount < 2 {
+		t.Fatalf("expected EOF in both stop sets, got %d occurrences:\n%s", eofCount, formatted)
+	}
+	if commaCount != 1 {
+		t.Fatalf("expected exactly one COMMA stop comparison (WideSync only), got %d:\n%s", commaCount, formatted)
+	}
+	if rparenCount != 1 {
+		t.Fatalf("expected exactly one RPAREN stop comparison (NoCommaSync only), got %d:\n%s", rparenCount, formatted)
+	}
+}
+
+func TestLowerFileGrammarEnvDefaultsConventionalClauses(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammarenv MinimalEnv over DemoToken using DemoParserState:
+    cursor state
+    alloc alloc
+
+grammar DemoGrammar with MinimalEnv:
+    token:
+        EOF
+        IDENT
+        COMMA ","
+    items() -> darray[DemoToken]:
+        first = .IDENT
+        required(.COMMA, 1)
+        rest = .IDENT* until(.EOF)
+        return rest
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		// token_kind defaults to <over-type>Kind; expect_kind to expect_kind
+		"state.expect_kind(DemoTokenKind.IDENT)",
+		// token_field defaults to kind, current to current_token
+		"state.current_token().kind == DemoTokenKind.EOF",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected env-defaulted lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}

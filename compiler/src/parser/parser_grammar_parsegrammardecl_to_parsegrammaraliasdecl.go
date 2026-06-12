@@ -282,6 +282,37 @@ func (p *Parser) parseGrammarEnvDecl() *ast.GrammarEnvDecl {
 		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
+	// Conventional-name defaulting: a grammarenv only has to spell out cursor
+	// (and alloc when used); everything else follows the standard host-state
+	// conventions and can be overridden explicitly.
+	if tokenKindType == nil {
+		if overName, ok := grammarHeaderTypeName(overType); ok {
+			tokenKindType = &ast.NamedType{Position: pos, Name: overName + "Kind"}
+		}
+	}
+	if eofExpr == nil {
+		if kindName, ok := grammarHeaderTypeName(tokenKindType); ok {
+			eofExpr = &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: kindName}, Field: "EOF"}
+		}
+	}
+	if tokenKindField == "" {
+		tokenKindField = "kind"
+	}
+	if currentFunc == "" {
+		currentFunc = "current_token"
+	}
+	if advanceFunc == "" {
+		advanceFunc = "advance_token"
+	}
+	if expectFunc == "" {
+		expectFunc = "expect"
+	}
+	if expectKindFunc == "" {
+		expectKindFunc = "expect_kind"
+	}
+	if recordErrorFunc == "" {
+		recordErrorFunc = "record_parse_error"
+	}
 	return &ast.GrammarEnvDecl{
 		Position:         pos,
 		Name:             name,
@@ -464,15 +495,22 @@ func (p *Parser) parseGrammarTokenFamilyDecl() ast.GrammarTokenSetDecl {
 }
 func (p *Parser) finishGrammarTokenSetDecl(pos lexer.Pos, name string, tokenFamily bool) ast.GrammarTokenSetDecl {
 	terms := make([]ast.GrammarTerm, 0, 4)
+	excluded := make([]ast.GrammarTerm, 0)
 	if p.match(lexer.TOKEN_ASSIGN) {
 		for {
 			terms = append(terms, p.parseGrammarTokenSetItem())
-			if !p.match(lexer.TOKEN_COMMA) && !p.match(lexer.TOKEN_PIPE) {
+			if p.match(lexer.TOKEN_MINUS) {
+				excluded = append(excluded, p.parseGrammarTokenSetItem())
+				for p.match(lexer.TOKEN_MINUS) {
+					excluded = append(excluded, p.parseGrammarTokenSetItem())
+				}
+			}
+			if !p.match(lexer.TOKEN_COMMA) && !p.match(lexer.TOKEN_PIPE) && !p.match(lexer.TOKEN_PLUS) {
 				break
 			}
 		}
 		p.expectNewline()
-		return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms}
+		return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms, Excluded: excluded}
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
@@ -482,11 +520,15 @@ func (p *Parser) finishGrammarTokenSetDecl(pos lexer.Pos, name string, tokenFami
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		terms = append(terms, p.parseGrammarTokenSetItem())
+		if p.match(lexer.TOKEN_MINUS) {
+			excluded = append(excluded, p.parseGrammarTokenSetItem())
+		} else {
+			terms = append(terms, p.parseGrammarTokenSetItem())
+		}
 		p.expectNewline()
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms}
+	return ast.GrammarTokenSetDecl{Position: pos, Name: name, TokenFamily: tokenFamily, Terms: terms, Excluded: excluded}
 }
 func (p *Parser) parseGrammarTokenSetItem() ast.GrammarTerm {
 	pos := p.cur().Pos
@@ -517,17 +559,24 @@ func normalizeGrammarTokenSetItemNames(tokenSets []ast.GrammarTokenSetDecl) []as
 		}
 	}
 	normalized := make([]ast.GrammarTokenSetDecl, 0, len(tokenSets))
-	for _, tokenSet := range tokenSets {
-		terms := make([]ast.GrammarTerm, 0, len(tokenSet.Terms))
-		for _, term := range tokenSet.Terms {
+	normalizeItems := func(items []ast.GrammarTerm) []ast.GrammarTerm {
+		if len(items) == 0 {
+			return items
+		}
+		out := make([]ast.GrammarTerm, 0, len(items))
+		for _, term := range items {
 			ref, ok := term.(*ast.GrammarTokenSetRefTerm)
 			if !ok || setNames[ref.Name] {
-				terms = append(terms, term)
+				out = append(out, term)
 				continue
 			}
-			terms = append(terms, &ast.GrammarTokenKindTerm{Position: ref.Position, Kind: ref.Name})
+			out = append(out, &ast.GrammarTokenKindTerm{Position: ref.Position, Kind: ref.Name})
 		}
-		tokenSet.Terms = terms
+		return out
+	}
+	for _, tokenSet := range tokenSets {
+		tokenSet.Terms = normalizeItems(tokenSet.Terms)
+		tokenSet.Excluded = normalizeItems(tokenSet.Excluded)
 		normalized = append(normalized, tokenSet)
 	}
 	return normalized
@@ -557,4 +606,14 @@ func (p *Parser) parseGrammarAliasDecl() ast.GrammarAliasDecl {
 	}
 	p.expectNewline()
 	return ast.GrammarAliasDecl{Position: pos, Name: name, Params: params, Term: term}
+}
+
+// grammarHeaderTypeName extracts the plain name of a grammar header type
+// (`over SMLToken`, `token_kind SMLTokenKind`); false for anything structured.
+func grammarHeaderTypeName(t ast.TypeExpr) (string, bool) {
+	named, ok := t.(*ast.NamedType)
+	if !ok || named == nil || named.Name == "" || named.Name == "<invalid>" {
+		return "", false
+	}
+	return named.Name, true
 }

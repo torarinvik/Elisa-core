@@ -67,7 +67,7 @@ func resolveGrammarTermInfixTables(term ast.GrammarTerm, tables map[string]ast.G
 	case *ast.GrammarListTerm:
 		return &ast.GrammarListTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Separator: resolveGrammarTermInfixTables(n.Separator, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
 	case *ast.GrammarRepeatTerm:
-		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
+		return &ast.GrammarRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables), MinOne: n.MinOne}
 	case *ast.GrammarFlatRepeatTerm:
 		return &ast.GrammarFlatRepeatTerm{Position: n.Position, Elem: resolveGrammarTermInfixTables(n.Elem, tables), Until: resolveGrammarTermListInfixTables(n.Until, tables)}
 	case *ast.GrammarWhileTerm:

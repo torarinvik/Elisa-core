@@ -178,7 +178,23 @@ func (ctx *statefulLowerContext) lowerAttempt(term ast.GrammarTerm) loweredAttem
 	case *ast.GrammarListTerm:
 		return ctx.lowerListAttempt(n)
 	case *ast.GrammarRepeatTerm:
-		return ctx.lowerListAttempt(repeatTermAsList(n))
+		att := ctx.lowerListAttempt(repeatTermAsList(n))
+		if n.MinOne {
+			// `term+`: zero matched items means the attempt itself fails
+			// (uncommitted — the list loop already restored the cursor).
+			att.Matched = &ast.BinaryExpr{
+				Position: n.Position,
+				Op:       lexer.TOKEN_AND,
+				Left:     att.Matched,
+				Right: &ast.BinaryExpr{
+					Position: n.Position,
+					Op:       lexer.TOKEN_BANGEQ,
+					Left:     &ast.FieldExpr{Position: n.Position, Object: att.Value, Field: "count"},
+					Right:    &ast.IntLit{Position: n.Position, Value: "0"},
+				},
+			}
+		}
+		return att
 	case *ast.GrammarFlatRepeatTerm:
 		return ctx.lowerFlatRepeatAttempt(n)
 	case *ast.GrammarWhileTerm:

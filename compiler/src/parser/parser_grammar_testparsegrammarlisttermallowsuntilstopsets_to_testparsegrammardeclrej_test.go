@@ -531,3 +531,76 @@ func TestParseGrammarDeclRejectsAssociativityOnNamedPrecedenceHeader(t *testing.
 		t.Fatalf("expected named-header associativity error, got %v", errs)
 	}
 }
+
+func TestParseGrammarPlusPostfixShorthand(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	items() -> darray[Token]:
+		many = .IDENT+ until(")", token(TokenKind.EOF))
+		bare = .IDENT+
+		return many
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	manyBind, ok := decl.Productions[0].Terms[0].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected first term to be binding, got %T", decl.Productions[0].Terms[0])
+	}
+	manyRepeat, ok := manyBind.Term.(*ast.GrammarRepeatTerm)
+	if !ok {
+		t.Fatalf("expected plus shorthand to parse as repeat term, got %T", manyBind.Term)
+	}
+	if !manyRepeat.MinOne {
+		t.Fatalf("expected plus shorthand to set MinOne")
+	}
+	if len(manyRepeat.Until) != 2 {
+		t.Fatalf("expected plus shorthand to preserve until stop set, got %d stops", len(manyRepeat.Until))
+	}
+	bareBind, ok := decl.Productions[0].Terms[1].(*ast.GrammarBindTerm)
+	if !ok {
+		t.Fatalf("expected second term to be binding, got %T", decl.Productions[0].Terms[1])
+	}
+	bareRepeat, ok := bareBind.Term.(*ast.GrammarRepeatTerm)
+	if !ok || !bareRepeat.MinOne {
+		t.Fatalf("expected bare plus shorthand to be MinOne repeat, got %T", bareBind.Term)
+	}
+	formatted := unparse.FormatFile(file)
+	for _, want := range []string{
+		"many = .IDENT+ until(\")\", token(TokenKind.EOF))",
+		"bare = .IDENT+",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}
+
+func TestParseGrammarPlusPostfixDoesNotBreakConcat(t *testing.T) {
+	file, errs := parseSourceFile(t, `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	grammar alias both(stop: tokenset):
+		first_rule() + flatrepeat second_rule() until(stop)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.GrammarDecl)
+	if !ok {
+		t.Fatalf("expected grammar decl, got %T", file.Decls[0])
+	}
+	if len(decl.GrammarAliases) != 1 {
+		t.Fatalf("expected one alias, got %d", len(decl.GrammarAliases))
+	}
+	concat, ok := decl.GrammarAliases[0].Term.(*ast.GrammarConcatTerm)
+	if !ok {
+		t.Fatalf("expected binary + to stay concat, got %T", decl.GrammarAliases[0].Term)
+	}
+	if len(concat.Terms) != 2 {
+		t.Fatalf("expected concat of two terms, got %d", len(concat.Terms))
+	}
+}

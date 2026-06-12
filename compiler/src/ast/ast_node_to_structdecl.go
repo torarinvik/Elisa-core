@@ -247,6 +247,9 @@ type GrammarTokenSetDecl struct {
 	Name        string
 	TokenFamily bool
 	Terms       []GrammarTerm
+	// Excluded holds `- item` difference operands: token kinds (or whole
+	// tokensets, resolved recursively) removed from the union of Terms.
+	Excluded []GrammarTerm
 }
 type GrammarAliasDecl struct {
 	Position lexer.Pos
@@ -418,6 +421,9 @@ type GrammarRepeatTerm struct {
 	Position lexer.Pos
 	Elem     GrammarTerm
 	Until    []GrammarTerm
+	// MinOne marks one-or-more repetition (`term+`): the repetition fails as an
+	// uncommitted attempt when zero items match, instead of yielding an empty list.
+	MinOne bool
 }
 type GrammarFlatRepeatTerm struct {
 	Position lexer.Pos
