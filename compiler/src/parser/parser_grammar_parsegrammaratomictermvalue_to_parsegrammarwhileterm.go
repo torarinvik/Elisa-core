@@ -436,6 +436,7 @@ func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("list")
+	p.deprecatedAt(pos, "the `list(...)` grammar spelling is legacy; use the postfix repetition `term* until(stop)` or `separated term by sep until(stop)`")
 	if p.peek() != lexer.TOKEN_LPAREN {
 		elem := p.parseGrammarRecoverableTermValue()
 		var separator ast.GrammarTerm
@@ -470,6 +471,7 @@ func (p *Parser) parseGrammarListTerm() ast.GrammarTerm {
 func (p *Parser) parseGrammarRepeatTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
 	p.expectIdentText("repeat")
+	p.deprecatedAt(pos, "the `repeat ...` grammar spelling is legacy; use the postfix repetition `term* until(stop)` (or `term+` for one-or-more)")
 	if p.peek() != lexer.TOKEN_LPAREN {
 		elem := p.parseGrammarRecoverableTermValue()
 		var until []ast.GrammarTerm
@@ -536,6 +538,7 @@ func (p *Parser) isGrammarWhileTermStart() bool {
 }
 func (p *Parser) parseGrammarWhileTerm() ast.GrammarTerm {
 	pos := p.cur().Pos
+	p.deprecatedAt(pos, "the `[term] while tok in tokens != [...]` grammar spelling is legacy; use `flatrepeat term until(stop)`")
 	p.expect(lexer.TOKEN_LBRACKET)
 	elem := p.parseGrammarRecoverableTermValue()
 	p.expect(lexer.TOKEN_RBRACKET)

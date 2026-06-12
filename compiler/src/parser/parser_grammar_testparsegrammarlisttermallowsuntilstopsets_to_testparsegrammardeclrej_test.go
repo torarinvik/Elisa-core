@@ -2,6 +2,7 @@ package parser
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 	"strings"
 	"testing"
@@ -602,5 +603,31 @@ func TestParseGrammarPlusPostfixDoesNotBreakConcat(t *testing.T) {
 	}
 	if len(concat.Terms) != 2 {
 		t.Fatalf("expected concat of two terms, got %d", len(concat.Terms))
+	}
+}
+
+func TestParseGrammarLegacyRepetitionSpellingsWarnDeprecated(t *testing.T) {
+	src := `grammar PascalFrontend over Token using ParserState:
+	cursor state
+	block(state: mutable ParserState&) -> darray[Pascal.Stmt]:
+		items = repeat(state.statement(), until("end", token(TokenKind.EOF)))
+	args(state: mutable ParserState&) -> darray[Pascal.Expr]:
+		values = list(state.expression(), until(")"))
+`
+	l := lexer.New("test.elisa", []byte(src))
+	tokens := l.Tokenize()
+	p := New(tokens)
+	p.ParseFile("test.elisa")
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	notices := p.Notices()
+	if len(notices) != 2 {
+		t.Fatalf("expected 2 deprecation notices (repeat, list), got %d: %v", len(notices), notices)
+	}
+	for i, want := range []string{"`repeat ...` grammar spelling is legacy", "`list(...)` grammar spelling is legacy"} {
+		if !strings.Contains(notices[i], "deprecated:") || !strings.Contains(notices[i], want) {
+			t.Fatalf("expected notice %d to contain %q, got %q", i, want, notices[i])
+		}
 	}
 }

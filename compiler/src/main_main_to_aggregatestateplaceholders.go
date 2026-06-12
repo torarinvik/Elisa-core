@@ -95,6 +95,14 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 	p := parser.New(tokens)
 	file := p.ParseFile(filename)
 	frontendTimingLog("parse", parseStart)
+	if warns := p.Notices(); len(warns) > 0 {
+		for _, w := range warns {
+			if shouldSuppressDeprecatedWarningsForTests(w) {
+				continue
+			}
+			fmt.Fprintf(stderr, "%s\n", w)
+		}
+	}
 	if errs := p.Errors(); len(errs) > 0 {
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)

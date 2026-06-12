@@ -259,3 +259,33 @@ holds — no semantic/backend changes anywhere):
 Verified after each item: SML 156, Lua 236, Perl 30, full `go test ./...`.
 New compiler tests: plus-postfix parse/disambiguation, tokenset
 union/difference lowering, grammarenv-defaults lowering.
+
+## Phase 2 results (2026-06-12) — canonicalization
+
+1. **Legacy repetition spellings deprecation-warned.** `repeat …`/`repeat(…)`,
+   `list(…)`, and the bracketed `[term] while tok in tokens != […]` form now
+   emit parse-time deprecation notices pointing at the canonical family
+   (`term*`, `term+`, `separated … by … until`, `flatrepeat` for flattening).
+   This added the parser's first non-fatal diagnostics channel
+   (`Parser.Notices()`, printed by the driver alongside semantic notices).
+   The frontends had **zero** uses of any legacy spelling — only compiler
+   tests exercise them (kept, as deprecation-period coverage). Hard removal
+   can follow the standard pattern in a later pass.
+2. **`flatrepeat` kept as canonical.** Per the Phase 0 finding it is the
+   flatten form, not a duplicate spelling; it does not warn.
+3. **when()-gate bulk migration: 45 of 80 SML sites → ordered `choice:`**
+   (2 nested chains by hand in Phase 1, 43 single-level scripted). The script
+   migrated only the provably-safe shape: gate kind == the called rule's
+   *bare leading token match* (rules leading with `required(.K)` were excluded
+   — required records an error instead of failing the attempt, so choice
+   would change recovery behavior). Host-fn else-arms were wrapped in
+   `expr(…)`. Perl had zero gate sites. The 35 remaining SML sites are
+   legitimately context-sensitive (tokenset-membership conditions, multi-token
+   lookahead, non-first-token dispatch) and stay as `when()` — they are the
+   honest residue, not migration debt. The planned "peeking-gate lint" was
+   dropped: with the mechanical sites migrated, a lint would only nag the
+   legitimate residue.
+4. **`term* while(pred)` deferred.** Its motivating user is Pascal's
+   predicate-bounded recursion, and Pascal is out of the oracle until the
+   tree/AllocCtx revival. Building it now would violate
+   frontends-are-the-oracle; revisit when Pascal returns.
