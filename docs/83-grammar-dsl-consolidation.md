@@ -308,3 +308,83 @@ called as a plain rule from both grammars. The `state.build_sml_*_infix_chain`
 sites stay as `expr(…)` — they are pure post-parse chain builders (no cursor
 contact) and retire wholesale in Phase 4. `state.push/restore_sml_fixity_scope`
 likewise stay: state mutation, not parsing.
+
+## Phase 4 design addendum (2026-06-12) — dynamic infix tables
+
+Grounded in the machinery to be retired (`sml_support_fixity.elisa`): SML
+parses `first` + greedily collects `(op_token, right)` tails (gated by
+`is_sml_active_*_infix_token`), then `build_sml_*_infix_at` does a recursive
+precedence climb over the collected tails with `min_precedence`, INFIXR
+recursing at equal precedence, and a per-op lowering callback
+(`lower_sml_dynamic_infix_expr`: declared ops → `SMLExpr.Infix`, fallback
+symbolic ops → curried `Apply`, patterns additionally special-case `Cons`).
+The whole apparatus is duplicated for expressions and patterns.
+
+### Proposed surface
+
+```
+dynamic infix table ExprTable(state.lookup_sml_expr_binding):
+    atom = application_expr()
+    combine(left, op_token, right, fixity) =
+        expr(lower_sml_dynamic_infix_expr(left, op_token, right, fixity))
+```
+
+used like a static table: `node <- infix(ExprTable)`.
+
+### Contract
+
+- The header callback `state.lookup_…(token) -> (active: bool, precedence: i64,
+  right_assoc: bool, info: T)` — a 4-tuple. The first three drive the climb;
+  the opaque `info` (host's own fixity record, e.g. `SMLFixityInfo`) is passed
+  through to `combine` untouched so per-op lowering keeps full fidelity.
+  SML writes one ~5-line adapter per table projecting `SMLFixityInfo` into the
+  tuple; the contortion it replaces is 3 helpers × 2 (expr/pattern) plus the
+  tail structs and prepend/single helpers.
+- `combine` is an expr-position callback receiving the accumulated left value,
+  the consumed operator token, the climbed right value, and `info`.
+
+### Lowering (parse-as-you-climb, no collect-then-rebuild)
+
+A synthesized recursive FuncDecl per table, following the existing production
+calling convention (state, alloc) → (matched, committed, value):
+
+```
+climb(min_prec):
+    left = atom()                      # standard try-protocol call
+    loop:
+        (active, prec, rassoc, info) = state.lookup(state.current_token())
+        if not active or prec < min_prec: break
+        op_token = state.current_token(); state.advance_token()
+        right = climb(rassoc ? prec : prec + 1)
+        left = combine(left, op_token, right, info)
+    return left
+```
+
+This must be emitted in the lowering layer (grammar bodies reject general
+statements), exactly like static infix tables already emit precedence-climbing
+loops — the dynamic variant swaps statically-expanded binding powers for the
+callback fetch. No semantic/backend involvement: the synthesized FuncDecl is
+plain Elisa, preserving the orthogonality invariant.
+
+### Open questions (to resolve during implementation)
+
+1. Whether `atom` may be a choice/pipeline term or must be a rule call
+   (static tables allow full terms; keep parity).
+2. Climb failure semantics: if `atom` fails uncommitted at `min_prec > 0`
+   (i.e. after an operator), match the current behavior of
+   `build_sml_*_infix_at` — the chain builder cannot fail mid-chain today
+   because tails were pre-parsed; the climb form CAN, and should propagate the
+   committed failure (an operator was consumed). This is a real (desirable)
+   error-reporting improvement but must be verified against the SML recovery
+   tests.
+3. Whether `combine` needs a block form (bindings + `->` value) like postfix
+   arms; start expr-only, extend if SML's pattern table needs it.
+
+### What retires when this lands
+
+`dynamic_infix_expr`/`dynamic_infix_pattern` productions, `expr_infix_tail`/
+pattern twin + `*_items` aliases, `SMLExprInfixTail`/`SMLPatternInfixTail`
+structs, `single_/prepend_/empty_*_infix_tail*` helpers,
+`build_sml_{expr,pattern}_infix_{chain,at}`, `SMLInfixBuildCursor`, and the
+`infix_operator_token` external rule (subsumed by the table's own consumption).
+`lower_sml_dynamic_infix_{expr,pattern}` remain as the `combine` callbacks.
