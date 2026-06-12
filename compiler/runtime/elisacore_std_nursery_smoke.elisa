@@ -2,8 +2,8 @@ include "./elisacore_std/elisacore_runtime.elisa"
 
 def nursery_bump(slot: uintptr) -> i64:
 	can Atomic:
-		c: mutable atomic[i64]& = slot.cast[mutable atomic[i64]&]
-		_ = fetch_add(c, 1, MemoryOrder.AcqRel)
+		c: mutable AtomicCell[i64]& = slot.cast[mutable AtomicCell[i64]&]
+		_ = atomic_fetch_add_acqrel(c, 1)
 		return 0
 
 # A nursery guarantees every submitted task is joined before the scope exits, so the

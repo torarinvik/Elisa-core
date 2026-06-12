@@ -454,6 +454,11 @@ type CallExpr struct {
 	ArgShorthand  []bool
 	ArgItemOrder  []CallArgItem
 	Safe          bool
+	// SafeConcurrencySugar marks a call node that the parser synthesized from a
+	// safe concurrency construct (e.g. `submit`/`pool` scope lowering to a
+	// `pool_submit1` call). User code never wrote the raw primitive, so the
+	// raw-concurrency-surface-removed diagnostic must not fire on it.
+	SafeConcurrencySugar bool
 
 	ResolvedArgsValid         bool
 	ResolvedArgs              []Expr

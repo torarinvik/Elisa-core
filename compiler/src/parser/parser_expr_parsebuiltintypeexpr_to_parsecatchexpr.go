@@ -910,6 +910,9 @@ func (p *Parser) parseUnary() ast.Expr {
 				call.Func,
 				call.Args[0],
 			},
+			// Synthesized from the safe `submit` / `pool` sugar, not a hand-written
+			// raw pool_submit1 call — exempt from the raw-surface-removed diagnostic.
+			SafeConcurrencySugar: true,
 		}
 		// Inside a nursery (implicit pool), auto-collect the task into the nursery's group so
 		// it is joined at scope exit. The submit then yields void (fire-into-nursery): for an

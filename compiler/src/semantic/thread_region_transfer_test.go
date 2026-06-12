@@ -5,7 +5,11 @@ import (
 	"testing"
 )
 
-const threadRegionPrelude = `def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+// The thread-share / region-transfer safety net keys on the `pool_submit1`
+// name (the lowering target of the safe `submit` sugar). Raw `spawn1` was
+// removed from the public surface, so these tests drive the net through
+// `submit[&pool] worker(arg)` — exercising the same checker branch.
+const threadRegionPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
     return zeroed
 extern new_arena(cap: usize) -> Arena
 struct Node[region owner]:
@@ -23,9 +27,10 @@ def worker(r: owned Arena) -> i64:
 // permitted when moved.
 func TestSpawnMovesOwnedRegionIntoWorker(t *testing.T) {
 	analyzeTreeTestSource(t, "thread_move_ok.elisa", threadRegionPrelude+`
-def start() -> Thread[i64, Joinable]:
+def start() -> Task[i64, Pending]:
+    pool: mutable ThreadPool = zeroed
     r: owned Arena = new_arena(64)
-    return spawn1(worker, move r)
+    return submit[&pool] worker(move r)
 `)
 }
 
@@ -33,9 +38,10 @@ def start() -> Thread[i64, Joinable]:
 // handle into the thread while the caller still owns it — rejected.
 func TestSpawnRequiresMoveForOwnedRegion(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "thread_no_move.elisa", threadRegionPrelude+`
-def start() -> Thread[i64, Joinable]:
+def start() -> Task[i64, Pending]:
+    pool: mutable ThreadPool = zeroed
     r: owned Arena = new_arena(64)
-    return spawn1(worker, r)
+    return submit[&pool] worker(r)
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "must be moved") {
 		t.Fatalf("expected spawn of un-moved owned region to require move; got: %s", all)
@@ -47,8 +53,9 @@ def start() -> Thread[i64, Joinable]:
 func TestRegionUnavailableAfterMovedToThread(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "thread_after.elisa", threadRegionPrelude+`
 def start() -> void:
+    pool: mutable ThreadPool = zeroed
     r: owned Arena = new_arena(64)
-    _ = spawn1(worker, move r)
+    _ = submit[&pool] worker(move r)
     destroy r
 `)
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "already been destroyed") && !strings.Contains(all, "cannot") {

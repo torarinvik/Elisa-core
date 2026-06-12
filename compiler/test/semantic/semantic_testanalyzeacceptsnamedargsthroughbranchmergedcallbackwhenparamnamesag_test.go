@@ -372,50 +372,6 @@ def ok(group: mutable TaskGroup) -> void:
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
-func TestAnalyzeAcceptsNotifySyntax(t *testing.T) {
-	src := `extern notify_one(cv: CondVar&) -> void
-extern notify_all(cv: CondVar&) -> void
-
-def ok(cv: mutable CondVar, broadcast: bool) -> void:
-    if broadcast:
-        notify all cv
-    else:
-        notify one cv
-`
-	result, errs := parseAndAnalyze(t, "notify_syntax_ok.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "ok", "void")
-}
-func TestAnalyzeAcceptsAtomicRmwBuiltins(t *testing.T) {
-	src := `enum MemoryOrder:
-	Relaxed
-	Acquire
-	Release
-	AcqRel
-	SeqCst
-
-extern fetch_add(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_sub(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_or(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_and(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-extern fetch_xor(slot: atomic[i64]&, value: i64, order: MemoryOrder) -> i64 can[Atomics.Rmw]
-
-def ok(slot: mutable atomic[i64]) -> i64:
-	can Atomics.Rmw:
-		slot_ref: atomic[i64]& = (&slot).cast[atomic[i64]&]
-		add: i64 = fetch_add(slot_ref, 1, MemoryOrder.AcqRel)
-		sub: i64 = fetch_sub(slot_ref, 2, MemoryOrder.AcqRel)
-		or_bits: i64 = fetch_or(slot_ref, 4, MemoryOrder.AcqRel)
-		and_bits: i64 = fetch_and(slot_ref, 8, MemoryOrder.AcqRel)
-		xor_bits: i64 = fetch_xor(slot_ref, 16, MemoryOrder.AcqRel)
-		return add + sub + or_bits + and_bits + xor_bits
-`
-	result, errs := parseAndAnalyze(t, "atomic_rmw_ok.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "ok", "i64")
-}
 func TestAnalyzeRejectsAtomicRmwOnBoolPayload(t *testing.T) {
 	src := `enum MemoryOrder:
 	Relaxed
@@ -461,22 +417,6 @@ def bad(slot: mutable atomic[u8&], value: u8&) -> u8& can[Atomics.Rmw]:
 	if !strings.Contains(all, "argument to \"fetch_xor\" requires atomic_numeric(T), got atomic[u8&]") {
 		t.Fatalf("expected atomic_numeric pointer diagnostic, got:\n%s", all)
 	}
-}
-func TestAnalyzeAcceptsLockSyntax(t *testing.T) {
-	src := `extern mutex_lock(mu: Mutex&) -> MutexGuard[Held]
-extern mutex_unlock(g: MutexGuard[Held]) -> void
-extern cond_wait(cv: CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]
-
-def ok(mu: mutable Mutex, cv: mutable CondVar, ready: bool) -> void:
-	can Sync.Lock, Sync.Unlock, Sync.Wait:
-		lock mu as g:
-			while not ready:
-				g <- cond_wait((&cv).cast[CondVar&], move g)
-`
-	result, errs := parseAndAnalyze(t, "lock_scope_ok.elisa", src)
-	requireNoErrors(t, errs)
-	requireNoWarnings(t, result)
-	requireFunctionReturnTypeString(t, result, "ok", "void")
 }
 func TestAnalyzeAcceptsPoolScopeSyntax(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool

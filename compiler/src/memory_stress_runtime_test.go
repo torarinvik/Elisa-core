@@ -148,13 +148,13 @@ func TestMemoryStressAllocation(t *testing.T) {
 }
 
 const concurrencyStressBody = `
-global STRESS_SHARED: mutable atomic[i64] = zeroed
+global STRESS_SHARED: mutable AtomicCell[i64] = zeroed
 
 def stress_bump(n: i64) -> i64:
     can Atomics.Rmw:
         trusted Perf.HotLoop:
             for i in 0..<n:
-                _ = fetch_add((&STRESS_SHARED).cast[mutable atomic[i64]&], 1, MemoryOrder.SeqCst)
+                _ = atomic_fetch_add_acqrel((&STRESS_SHARED).cast[mutable AtomicCell[i64]&], 1)
         return 0
 
 def stress_sq(x: i64) -> i64:
@@ -163,24 +163,24 @@ def stress_sq(x: i64) -> i64:
 @test
 def atomic_contention() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Atomics.Rmw, Atomics.Load, Atomics.Store, Atomics.CompareExchange, Abort.Panic:
-        store((&STRESS_SHARED).cast[mutable atomic[i64]&], 0, MemoryOrder.SeqCst)
-        t0: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t1: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t2: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t3: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t4: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t5: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t6: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        t7: Thread[i64, Joinable] = spawn1(stress_bump, 100000)
-        _ = join(move t0)
-        _ = join(move t1)
-        _ = join(move t2)
-        _ = join(move t3)
-        _ = join(move t4)
-        _ = join(move t5)
-        _ = join(move t6)
-        _ = join(move t7)
-        total: i64 = load((&STRESS_SHARED).cast[mutable atomic[i64]&], MemoryOrder.SeqCst)
+        atomic_store_release((&STRESS_SHARED).cast[mutable AtomicCell[i64]&], 0)
+        t0: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t1: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t2: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t3: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t4: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t5: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t6: Thread[i64, Joinable] = task(stress_bump, 100000)
+        t7: Thread[i64, Joinable] = task(stress_bump, 100000)
+        _ = future_get(move t0)
+        _ = future_get(move t1)
+        _ = future_get(move t2)
+        _ = future_get(move t3)
+        _ = future_get(move t4)
+        _ = future_get(move t5)
+        _ = future_get(move t6)
+        _ = future_get(move t7)
+        total: i64 = atomic_load_acquire(&STRESS_SHARED)
         if total != 800000:
             panic("atomic contention lost increments (race / non-atomic RMW)")
 
@@ -190,8 +190,8 @@ def spawn_churn() -> void:
         acc: mutable i64 = 0
         trusted Perf.HotLoop:
             for i in 0..<500:
-                t: Thread[i64, Joinable] = spawn1(stress_sq, i.i64())
-                acc <- acc + join(move t)
+                t: Thread[i64, Joinable] = task(stress_sq, i.i64())
+                acc <- acc + future_get(move t)
         if acc != 41541750:
             panic("spawn churn sum wrong")
 
@@ -202,7 +202,7 @@ def pool_scale() -> void:
         acc: mutable i64 = 0
         trusted Perf.HotLoop:
             for i in 0..<500:
-                task: Task[i64, Pending] = pool_submit1(&pool, stress_sq, i.i64())
+                task: Task[i64, Pending] = submit[&pool] stress_sq(i.i64())
                 acc <- acc + pool_await(move task)
         if acc != 41541750:
             panic("pool scale sum wrong")

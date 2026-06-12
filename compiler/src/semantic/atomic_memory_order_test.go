@@ -47,7 +47,9 @@ def bad(slot: mutable atomic[i64]&):
 	}
 }
 
-func TestLegacyRawAtomicsAreDeprecated(t *testing.T) {
+// Raw atomic ops are removed from the public surface: user code must go through
+// AtomicCell[T] helpers, so direct slot calls are always hard errors.
+func TestLegacyRawAtomicsAreRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "legacy_raw_atomics.elisa", atomicOrderTestPrelude+`
 def use_raw(slot: mutable atomic[i64]&):
     _ = load(slot, MemoryOrder.Acquire)
@@ -55,24 +57,25 @@ def use_raw(slot: mutable atomic[i64]&):
     _ = compare_exchange(slot, 1, 2, MemoryOrder.AcqRel, MemoryOrder.Acquire)
     fence(MemoryOrder.SeqCst)
 `, AnalyzeOptions{})
-	deprecations := strings.Join(result.Deprecations(), "\n")
+	errors := strings.Join(result.Errors(), "\n")
 	for _, check := range []string{
-		"`load` is legacy raw atomic surface",
+		"raw concurrency surface removed: `load` is legacy raw atomic surface",
 		"AtomicCell[T]",
-		"`store` is legacy raw atomic surface",
-		"`compare_exchange` is legacy raw atomic surface",
-		"`fence` is legacy raw atomic surface",
+		"raw concurrency surface removed: `store` is legacy raw atomic surface",
+		"raw concurrency surface removed: `compare_exchange` is legacy raw atomic surface",
+		"raw concurrency surface removed: `fence` is legacy raw atomic surface",
 	} {
-		if !strings.Contains(deprecations, check) {
-			t.Fatalf("expected deprecation %q, got:\n%s", check, deprecations)
+		if !strings.Contains(errors, check) {
+			t.Fatalf("expected error %q, got:\n%s", check, errors)
 		}
 	}
-	if errors := strings.Join(result.Errors(), "\n"); strings.Contains(errors, "strict concurrency error") {
-		t.Fatalf("legacy raw atomics should remain deprecations by default, got errors:\n%s", errors)
+	if deprecations := strings.Join(result.Deprecations(), "\n"); strings.Contains(deprecations, "legacy raw atomic surface") {
+		t.Fatalf("raw atomics should be hard errors, not deprecations, got:\n%s", deprecations)
 	}
 }
 
-func TestStrictConcurrencyPromotesLegacyRawAtomicsToErrors(t *testing.T) {
+// The warning flag is now redundant but must stay accepted and keep erroring.
+func TestStrictConcurrencyFlagStillRejectsLegacyRawAtomics(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "strict_raw_atomics.elisa", atomicOrderTestPrelude+`
 def use_raw(slot: mutable atomic[i64]&):
     _ = load(slot, MemoryOrder.Acquire)
@@ -82,18 +85,14 @@ def use_raw(slot: mutable atomic[i64]&):
 `, AnalyzeOptions{EnforceStrictConcurrency: true})
 	errors := strings.Join(result.Errors(), "\n")
 	for _, check := range []string{
-		"strict concurrency error: `load` is legacy raw atomic surface",
-		"AtomicCell[T]",
-		"strict concurrency error: `store` is legacy raw atomic surface",
-		"strict concurrency error: `compare_exchange` is legacy raw atomic surface",
-		"strict concurrency error: `fence` is legacy raw atomic surface",
+		"raw concurrency surface removed: `load` is legacy raw atomic surface",
+		"raw concurrency surface removed: `store` is legacy raw atomic surface",
+		"raw concurrency surface removed: `compare_exchange` is legacy raw atomic surface",
+		"raw concurrency surface removed: `fence` is legacy raw atomic surface",
 	} {
 		if !strings.Contains(errors, check) {
-			t.Fatalf("expected strict concurrency error %q, got:\n%s", check, errors)
+			t.Fatalf("expected error %q, got:\n%s", check, errors)
 		}
-	}
-	if deprecations := strings.Join(result.Deprecations(), "\n"); strings.Contains(deprecations, "legacy raw atomic surface") {
-		t.Fatalf("strict concurrency should promote raw atomic diagnostics to errors, got deprecations:\n%s", deprecations)
 	}
 }
 

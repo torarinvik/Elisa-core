@@ -6,10 +6,7 @@ import (
 )
 
 func TestRunCLIConcurrencyPerfLintCatalog(t *testing.T) {
-	out := compileAndCaptureStderr(t, "concurrency_perf_catalog.elisa", `def spawn1(f: i64, arg: i64) -> i64:
-    return arg
-
-def pool_new(workers: i64) -> i64:
+	out := compileAndCaptureStderr(t, "concurrency_perf_catalog.elisa", `def pool_new(workers: i64) -> i64:
     return workers
 
 def task_group_new() -> i64:
@@ -30,7 +27,6 @@ def task_group_wait_all(group: i64):
 def catalog() -> i64:
     acc: mutable i64 = 0
     for i in 0..<4:
-        acc <- acc + spawn1(0, i.i64())
         acc <- acc + pool_new(2)
         acc <- acc + task_group_new()
         acc <- acc + mutex_lock(i.i64())
@@ -40,7 +36,6 @@ def catalog() -> i64:
     return acc
 `)
 	for _, marker := range []string{
-		"spawns a fresh OS thread on every iteration",
 		"creates a thread pool on every iteration",
 		"creates a task group on every iteration",
 		"acquires a lock on every iteration",

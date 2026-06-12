@@ -583,20 +583,23 @@ def use_raw(slot: mutable atomic[i64]&) -> i64:
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode != 0 {
-		t.Fatalf("expected ordinary semantic emit to succeed, exit=%d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	// Raw atomic surface is removed from public code: even a plain semantic emit
+	// (no warning flag) must reject it as a hard error.
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode == 0 {
+		t.Fatalf("expected semantic emit to reject raw atomic surface\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "`load` is legacy raw atomic surface") {
-		t.Fatalf("expected ordinary semantic emit to report raw atomic deprecation, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "raw concurrency surface removed: `load` is legacy raw atomic surface") {
+		t.Fatalf("expected semantic emit to report raw atomic removal, got:\n%s", stderr.String())
 	}
 
 	stdout.Reset()
 	stderr.Reset()
+	// The now-redundant -Wconcurrency flag stays accepted and yields the same error.
 	if exitCode := runCLI([]string{"-Wconcurrency", "-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode == 0 {
 		t.Fatalf("expected -Wconcurrency semantic emit to fail\nstdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
-	if !strings.Contains(stderr.String(), "strict concurrency error: `load` is legacy raw atomic surface") {
-		t.Fatalf("expected -Wconcurrency to promote raw atomic diagnostic, got:\n%s", stderr.String())
+	if !strings.Contains(stderr.String(), "raw concurrency surface removed: `load` is legacy raw atomic surface") {
+		t.Fatalf("expected -Wconcurrency raw atomic removal error, got:\n%s", stderr.String())
 	}
 }
 

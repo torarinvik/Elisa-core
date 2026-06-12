@@ -2,8 +2,8 @@ include "./elisacore_std/elisacore_runtime.elisa"
 
 def encaps_bump(slot: uintptr) -> i64:
 	can Atomic:
-		c: mutable atomic[i64]& = slot.cast[mutable atomic[i64]&]
-		_ = fetch_add(c, 1, MemoryOrder.AcqRel)
+		c: mutable AtomicCell[i64]& = slot.cast[mutable AtomicCell[i64]&]
+		_ = atomic_fetch_add_acqrel(c, 1)
 		return 0
 
 # Sync-encapsulation: the persistent pool synchronizes internally with mutex/condvar
@@ -23,7 +23,7 @@ def std_sync_containment_smoke():
 		pool: mutable ThreadPool = pool_new(3.usize())
 		group: mutable TaskGroup = task_group_new()
 		for k in 0..<64:
-			task: Task[i64, Pending] = pool_submit1(&pool, encaps_bump, cb)
+			task: Task[i64, Pending] = submit[&pool] encaps_bump(cb)
 			task_group_add(&group, move task)
 		task_group_wait_all(&group)
 		pool_shutdown(&pool)

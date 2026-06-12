@@ -382,7 +382,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		if a.enforceUnsafePermissions && isIndirectCallTarget(n.Func) {
 			a.warnOnMissingLocalGrant(n.Pos(), "indirect call", unsafeIndirectCallRefs(n.Position), granted)
 		}
-		a.validateCallPermissions(n.Position, n.Func, granted)
+		a.validateCallPermissions(n.Position, n.Func, granted, n.SafeConcurrencySugar)
 		if a.enforceUnsafePermissions {
 			if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
 				if fnType.Name == "spawn1" && len(n.Args) > 1 {
@@ -523,12 +523,14 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 	}
 }
 
-func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, granted map[string]bool) {
+func (a *Analyzer) validateCallPermissions(pos lexer.Pos, fnExpr ast.Expr, granted map[string]bool, safeConcurrencySugar bool) {
 	fnType, ok := a.exprTypes[fnExpr].(*FuncType)
 	if !ok {
 		return
 	}
-	a.warnOnLegacyRawConcurrencyCall(pos, fnType)
+	if !safeConcurrencySugar {
+		a.warnOnLegacyRawConcurrencyCall(pos, fnType)
+	}
 	a.validateRequiredPermissions(pos, fnType, granted)
 }
 
@@ -536,12 +538,12 @@ func (a *Analyzer) warnOnLegacyRawConcurrencyCall(pos lexer.Pos, fnType *FuncTyp
 	if fnType == nil || fnType.Name == "" || isRuntimeStdPermissionInternal(pos.File) {
 		return
 	}
+	// Raw concurrency primitives were removed from the public surface: the safe
+	// APIs (nursery/pool/AtomicCell/predicate_wait/each/reduce) are the only way
+	// in for user code. The stdlib still builds those wrappers on the raw
+	// primitives, so it stays exempt via isRuntimeStdPermissionInternal above.
 	emit := func(format string, args ...interface{}) {
-		if a.enforceStrictConcurrency {
-			a.errorf(pos, "strict concurrency error: "+format, args...)
-			return
-		}
-		a.deprecatedf(pos, format, args...)
+		a.errorf(pos, "raw concurrency surface removed: "+format, args...)
 	}
 	switch fnType.Name {
 	case "cond_wait":

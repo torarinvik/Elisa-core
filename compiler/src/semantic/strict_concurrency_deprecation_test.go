@@ -5,49 +5,45 @@ import (
 	"testing"
 )
 
-func TestLegacyRawConcurrencyCallsAreDeprecated(t *testing.T) {
+// Raw concurrency primitives were removed from the public surface: calls from
+// user code are always hard errors, regardless of any warning flag. The stdlib
+// stays exempt so the safe wrappers can keep building on them internally.
+func TestLegacyRawConcurrencyCallsAreRejected(t *testing.T) {
 	result := analyzeLegacyRawConcurrencySource(t, AnalyzeOptions{})
-	deprecations := strings.Join(result.Deprecations(), "\n")
-	for _, check := range []string{
-		"`cond_wait` is legacy raw condition-variable surface",
-		"predicate_wait(cv, move guard, predicate)",
-		"`notify_one` is legacy raw notification surface",
-		"predicate_notify_one",
-		"`spawn1` is low-level escaped-task surface",
-		"nursery workers(N)",
-		"`detach` is a detached-task escape hatch",
-		"`pool_submit1` is low-level pool submission surface",
-		"task-group structure",
-	} {
-		if !strings.Contains(deprecations, check) {
-			t.Fatalf("expected deprecation %q, got:\n%s", check, deprecations)
-		}
-	}
-	if errors := strings.Join(result.Errors(), "\n"); errors != "" {
-		t.Fatalf("legacy raw concurrency migration diagnostics should be soft deprecations for now, got errors:\n%s", errors)
-	}
-}
-
-func TestStrictConcurrencyPromotesLegacyRawConcurrencyCallsToErrors(t *testing.T) {
-	result := analyzeLegacyRawConcurrencySource(t, AnalyzeOptions{EnforceStrictConcurrency: true})
 	errors := strings.Join(result.Errors(), "\n")
 	for _, check := range []string{
-		"strict concurrency error: `cond_wait` is legacy raw condition-variable surface",
+		"raw concurrency surface removed: `cond_wait` is legacy raw condition-variable surface",
 		"predicate_wait(cv, move guard, predicate)",
-		"strict concurrency error: `notify_one` is legacy raw notification surface",
+		"raw concurrency surface removed: `notify_one` is legacy raw notification surface",
 		"predicate_notify_one",
-		"strict concurrency error: `spawn1` is low-level escaped-task surface",
+		"raw concurrency surface removed: `spawn1` is low-level escaped-task surface",
 		"nursery workers(N)",
-		"strict concurrency error: `detach` is a detached-task escape hatch",
-		"strict concurrency error: `pool_submit1` is low-level pool submission surface",
+		"raw concurrency surface removed: `detach` is a detached-task escape hatch",
+		"raw concurrency surface removed: `pool_submit1` is low-level pool submission surface",
 		"task-group structure",
 	} {
 		if !strings.Contains(errors, check) {
-			t.Fatalf("expected strict concurrency error %q, got:\n%s", check, errors)
+			t.Fatalf("expected error %q, got:\n%s", check, errors)
 		}
 	}
-	if deprecations := strings.Join(result.Deprecations(), "\n"); deprecations != "" {
-		t.Fatalf("strict concurrency should promote these diagnostics to errors, got deprecations:\n%s", deprecations)
+	if deprecations := strings.Join(result.Deprecations(), "\n"); strings.Contains(deprecations, "legacy raw") {
+		t.Fatalf("raw concurrency calls should be hard errors, not deprecations, got:\n%s", deprecations)
+	}
+}
+
+// The warning flag is now redundant — removal is unconditional — but it must
+// stay accepted and keep producing the same hard errors for backward compat.
+func TestStrictConcurrencyFlagStillRejectsLegacyRawConcurrencyCalls(t *testing.T) {
+	result := analyzeLegacyRawConcurrencySource(t, AnalyzeOptions{EnforceStrictConcurrency: true})
+	errors := strings.Join(result.Errors(), "\n")
+	for _, check := range []string{
+		"raw concurrency surface removed: `cond_wait` is legacy raw condition-variable surface",
+		"raw concurrency surface removed: `spawn1` is low-level escaped-task surface",
+		"raw concurrency surface removed: `pool_submit1` is low-level pool submission surface",
+	} {
+		if !strings.Contains(errors, check) {
+			t.Fatalf("expected error %q, got:\n%s", check, errors)
+		}
 	}
 }
 

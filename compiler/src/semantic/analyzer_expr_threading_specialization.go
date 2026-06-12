@@ -288,11 +288,10 @@ func (a *Analyzer) warnOnLegacyRawAtomicFenceCall(pos lexer.Pos, fnType *FuncTyp
 }
 
 func (a *Analyzer) emitLegacyRawAtomicDiagnostic(pos lexer.Pos, format string, args ...interface{}) {
-	if a.enforceStrictConcurrency {
-		a.errorf(pos, "strict concurrency error: "+format, args...)
-		return
-	}
-	a.deprecatedf(pos, format, args...)
+	// Raw atomic ops are no longer part of the public surface; user code goes
+	// through AtomicCell[T] helpers. Stdlib internals stay exempt via the
+	// isRuntimeStdPermissionInternal guard at the call sites above.
+	a.errorf(pos, "raw concurrency surface removed: "+format, args...)
 }
 
 func (a *Analyzer) validateThreadTransferArg(callName string, arg ast.Expr, argType Type) {

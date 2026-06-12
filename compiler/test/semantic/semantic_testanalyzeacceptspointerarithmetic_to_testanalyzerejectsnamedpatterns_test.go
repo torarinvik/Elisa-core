@@ -131,7 +131,7 @@ func TestAnalyzeAcceptsBuiltinConcurrencyPermissionFamilies(t *testing.T) {
 	)
 }
 func TestAnalyzeAcceptsBuiltinConcurrencyCarrierTypes(t *testing.T) {
-	src := `extern detach(thread: Thread[i64, Joinable]) -> void
+	src := `extern join(thread: Thread[i64, Joinable]) -> i64
 extern mutex_unlock(g: MutexGuard[Held]) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
@@ -145,7 +145,7 @@ def touch(thread: Thread[i64, Joinable], task: Task[i64, Pending], pool: ThreadP
 	_ = cv.handle
 	copy: atomic[i64] = slot
 	_ = copy
-	detach(move thread)
+	_ = join(move thread)
 	mutex_unlock(move guard)
 	_ = pool_await(move task)
 `

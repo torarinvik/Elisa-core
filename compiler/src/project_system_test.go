@@ -1018,7 +1018,7 @@ def main(slot: atomic[i64]&) -> i64:
 		check  string
 	}{
 		{target: "perf", check: "`fetch_add` performs an atomic read-modify-write/compare-exchange on every iteration"},
-		{target: "concurrency", check: "strict concurrency error: `load` is legacy raw atomic surface"},
+		{target: "concurrency", check: "raw concurrency surface removed: `load` is legacy raw atomic surface"},
 		{target: "strict", check: "unchecked index requires"},
 	} {
 		var stdout bytes.Buffer
