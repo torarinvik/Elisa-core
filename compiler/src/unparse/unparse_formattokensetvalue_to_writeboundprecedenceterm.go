@@ -60,6 +60,10 @@ func (f *formatter) writeGrammarChannelDecl(level int, channel ast.GrammarChanne
 	f.writeLine(level, line)
 }
 func (f *formatter) writeGrammarProduction(level int, production ast.GrammarProductionDecl) {
+	if production.ExternalHost != "" {
+		f.writeLine(level, "grammar "+production.Name+" -> "+formatTypeExpr(production.ReturnType)+" = "+production.ExternalHost)
+		return
+	}
 	header := ""
 	if production.Public {
 		header += "pub "

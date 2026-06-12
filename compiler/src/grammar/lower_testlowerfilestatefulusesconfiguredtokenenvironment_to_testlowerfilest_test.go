@@ -623,3 +623,34 @@ grammar DemoGrammar with MinimalEnv:
 		}
 	}
 }
+
+func TestLowerFileExternalRuleDelegatesToHost(t *testing.T) {
+	file := parseGrammarTestFile(t, `grammarenv DemoEnv over DemoToken using DemoParserState:
+    cursor state
+    alloc alloc
+
+grammar DemoGrammar with DemoEnv:
+    token:
+        EOF
+        LPAREN "("
+        RPAREN ")"
+    grammar expression -> DemoExpr = state.parse_expression
+    paren_expr() -> DemoExpr:
+        .LPAREN
+        inner = expression()
+        required(.RPAREN, 1)
+        return inner
+`)
+	lowered := LowerFile(file)
+	formatted := unparse.FormatFile(lowered)
+	for _, want := range []string{
+		// The external rule lowers to a production forwarding to the host fn...
+		"state.parse_expression()",
+		// ...and is callable from other rules through the standard try protocol.
+		"__grammar_try__DemoGrammar__expression(state, alloc)",
+	} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("expected external-rule lowering to contain %q, got:\n%s", want, formatted)
+		}
+	}
+}

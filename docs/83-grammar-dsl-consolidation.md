@@ -289,3 +289,22 @@ union/difference lowering, grammarenv-defaults lowering.
    predicate-bounded recursion, and Pascal is out of the oracle until the
    tree/AllocCtx revival. Building it now would violate
    frontends-are-the-oracle; revisit when Pascal returns.
+
+## Phase 3 results (2026-06-12) — external rules
+
+`grammar name -> Type = state.host_fn` is in: a rule whose body is a single
+host-function reference, callable from other rules like any production.
+Implementation is **pure parse-time desugaring** — the form parses directly to
+a `GrammarProductionDecl` whose body is one host-call return term, so lowering
+needed zero changes and the orthogonality invariant is untouched
+(`ExternalHost` on the production preserves the declared seam for formatting).
+The form is unambiguous: combinator shorthands always carry a param list, so
+`grammar NAME ->` was free syntax space.
+
+SML migration: the two cursor-consuming `expr(state.consume_sml_infix_operator_token())`
+smuggling sites became one declared seam
+(`grammar infix_operator_token -> SMLToken = state.consume_sml_infix_operator_token`)
+called as a plain rule from both grammars. The `state.build_sml_*_infix_chain`
+sites stay as `expr(…)` — they are pure post-parse chain builders (no cursor
+contact) and retire wholesale in Phase 4. `state.push/restore_sml_fixity_scope`
+likewise stay: state mutation, not parsing.

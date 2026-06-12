@@ -307,6 +307,11 @@ type GrammarProductionDecl struct {
 	RecoverValue  Expr
 	Channels      []GrammarChannelDecl
 	Terms         []GrammarTerm
+	// ExternalHost records the dotted host-function reference of an external
+	// rule (`grammar name -> T = state.parse_fn`). The decl is already desugared
+	// to a single return term at parse time; this field only preserves the
+	// declared seam for formatting.
+	ExternalHost string
 }
 type GrammarTerm interface {
 	Node

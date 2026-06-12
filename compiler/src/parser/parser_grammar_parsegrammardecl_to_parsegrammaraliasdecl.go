@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -140,6 +142,10 @@ func (p *Parser) parseGrammarDecl() *ast.GrammarDecl {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
+		}
+		if p.peekGrammarExternalRuleDecl() {
+			productions = append(productions, p.parseGrammarExternalRuleDecl())
+			continue
 		}
 		if parseSupportDecl() {
 			continue
@@ -616,4 +622,50 @@ func grammarHeaderTypeName(t ast.TypeExpr) (string, bool) {
 		return "", false
 	}
 	return named.Name, true
+}
+
+// peekGrammarExternalRuleDecl reports `grammar NAME ->` — the external-rule
+// host-delegation form. (Combinator shorthands always carry a param list, so
+// `grammar NAME (` never collides.)
+func (p *Parser) peekGrammarExternalRuleDecl() bool {
+	if !p.peekIdentText("grammar") || p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	name := p.tokens[p.pos+1]
+	return name.Kind == lexer.TOKEN_IDENT && name.Text != "type" && name.Text != "alias" &&
+		p.tokens[p.pos+2].Kind == lexer.TOKEN_ARROW
+}
+
+// parseGrammarExternalRuleDecl parses `grammar NAME -> Type = host.fn` and
+// desugars it to a production whose body is a single host-call return —
+// the declared grammar↔host seam, with no special lowering.
+func (p *Parser) parseGrammarExternalRuleDecl() ast.GrammarProductionDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("grammar")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_ARROW)
+	returnType := p.parseGrammarHeaderTypeExpr()
+	p.expect(lexer.TOKEN_ASSIGN)
+	hostPos := p.cur().Pos
+	hostRef := p.parseQualifiedDeclName()
+	p.expectNewline()
+	callee := lowerDottedNameExpr(hostPos, hostRef)
+	call := &ast.CallExpr{Position: hostPos, Func: callee}
+	return ast.GrammarProductionDecl{
+		Position:     pos,
+		Name:         name,
+		ReturnType:   returnType,
+		Terms:        []ast.GrammarTerm{&ast.GrammarReturnTerm{Position: pos, Term: &ast.GrammarExprTerm{Position: hostPos, Expr: call}}},
+		ExternalHost: hostRef,
+	}
+}
+
+// lowerDottedNameExpr turns "state.parse_expression" into a field-access chain.
+func lowerDottedNameExpr(pos lexer.Pos, name string) ast.Expr {
+	parts := strings.Split(name, ".")
+	var expr ast.Expr = &ast.Ident{Position: pos, Name: parts[0]}
+	for _, part := range parts[1:] {
+		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: part}
+	}
+	return expr
 }
