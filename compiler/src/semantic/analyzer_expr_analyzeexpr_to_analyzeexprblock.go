@@ -575,23 +575,14 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = dst
 		return
 	case *ast.SizeofExpr:
-		if n.DeprecatedSyntax != "" {
-			a.deprecatedf(n.Pos(), "`%s` is deprecated; use `%s`", n.DeprecatedSyntax, n.DeprecatedReplacement)
-		}
 		a.resolveType(n.Type)
 		result = a.namedTypes["usize"]
 		return
 	case *ast.AlignofExpr:
-		if n.DeprecatedSyntax != "" {
-			a.deprecatedf(n.Pos(), "`%s` is deprecated; use `%s`", n.DeprecatedSyntax, n.DeprecatedReplacement)
-		}
 		a.resolveType(n.Type)
 		result = a.namedTypes["usize"]
 		return
 	case *ast.OffsetofExpr:
-		if n.DeprecatedSyntax != "" {
-			a.deprecatedf(n.Pos(), "`%s` is deprecated; use `%s`", n.DeprecatedSyntax, n.DeprecatedReplacement)
-		}
 		t := a.resolveType(n.Type)
 		a.lookupField(t, n.Field, n.Pos())
 		result = a.namedTypes["usize"]

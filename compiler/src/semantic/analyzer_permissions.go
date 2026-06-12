@@ -21,13 +21,6 @@ func (a *Analyzer) collectPermissionDecls(decls []scopedDecl) {
 			if decl == nil {
 				continue
 			}
-			if decl.DeprecatedSyntax != "" {
-				if decl.DeprecatedReplacement != "" {
-					a.deprecatedf(decl.Position, "`%s` is deprecated; use `%s`", decl.DeprecatedSyntax, decl.DeprecatedReplacement)
-				} else {
-					a.deprecatedf(decl.Position, "`%s` is deprecated", decl.DeprecatedSyntax)
-				}
-			}
 			name = decl.Name
 			members = decl.Members
 			includes = decl.Includes

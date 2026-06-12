@@ -202,9 +202,6 @@ func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType
 	if !enumDecl.LayoutSet {
 		return
 	}
-	if enumDecl.IndexWidthLegacySpelling {
-		a.deprecatedf(enumDecl.Pos(), "`(index: %s)` is deprecated; use the canonical `(handle: %s)` spelling (docs/82)", enumDecl.IndexWidth, enumDecl.IndexWidth)
-	}
 	// docs/82 `handle: ptr` constraints, enforced as compile errors:
 	// pointer handles need stable record addresses (the AoS chunk store never relocates;
 	// SoA's darray-backed columns do), and only a recursive region-backed enum has a

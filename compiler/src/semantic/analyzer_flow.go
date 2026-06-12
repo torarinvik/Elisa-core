@@ -476,13 +476,6 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "continue is only valid inside a loop")
 		}
 	case *ast.IfStmt:
-		if n.DeprecatedSyntax != "" {
-			if n.DeprecatedReplacement != "" {
-				a.deprecatedf(n.Pos(), "`%s` is deprecated; use `%s`", n.DeprecatedSyntax, n.DeprecatedReplacement)
-			} else {
-				a.deprecatedf(n.Pos(), "`%s` is deprecated", n.DeprecatedSyntax)
-			}
-		}
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType)

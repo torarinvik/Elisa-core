@@ -78,12 +78,10 @@ type GrantAliasDecl struct {
 	Refs     []PermissionRef
 }
 type PermissionDecl struct {
-	Position              lexer.Pos
-	Name                  string
-	Members               []string
-	Includes              []string // families this one subsumes: `includes Disk, FileSystem`
-	DeprecatedSyntax      string
-	DeprecatedReplacement string
+	Position lexer.Pos
+	Name     string
+	Members  []string
+	Includes []string // families this one subsumes: `includes Disk, FileSystem`
 }
 type NamespaceDecl struct {
 	Position lexer.Pos
@@ -118,9 +116,8 @@ type EnumDecl struct {
 	// LayoutSet records whether a `layout` suffix was written at all.
 	Layout                   StructLayoutMode
 	LayoutSet                bool
-	LayoutSparse             bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
-	IndexWidth               string // the `(index: uN)` sub-option: "u8"|"u16"|"u32"|"u64"; "" = default (u32)
-	IndexWidthLegacySpelling bool   // wrote the deprecated `index:` key instead of `handle:` (docs/82)
+	LayoutSparse bool   // the `soa(sparse)` sub-option: variant-sparse payload columns
+	IndexWidth   string // the `(handle: uN)` sub-option: "u8"|"u16"|"u32"|"u64"|"ptr"; "" = default (u32)
 	// Parent is the qualified name of the enum this one refines (docs/77): the `enum Child is Parent:`
 	// sealed-refinement suffix. "" means a root (no parent). Child's cases are a subset of Parent's, so
 	// Child <: Parent.

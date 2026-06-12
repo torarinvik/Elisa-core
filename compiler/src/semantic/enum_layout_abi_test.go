@@ -44,14 +44,14 @@ func TestEnumSparseRequiresSoa(t *testing.T) {
 	}
 }
 
-// `(index: uN)` is carried and accepted on soa/aos.
+// `(handle: uN)` is carried and accepted on soa/aos.
 func TestEnumIndexWidthAcceptedOnAos(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "idxaos.elisa", `packed enum Expr layout aos(index: u16):
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "idxaos.elisa", `packed enum Expr layout aos(handle: u16):
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("layout aos(index: u16) must be accepted, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("layout aos(handle: u16) must be accepted, got:\n%s", strings.Join(errs, "\n"))
 	}
 	et := enumTypeByName(t, result, "Expr")
 	if et.ResolvedIndexWidthBits() != 16 {

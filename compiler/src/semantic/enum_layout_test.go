@@ -44,16 +44,16 @@ func TestEnumLayoutSoaCarried(t *testing.T) {
 	}
 }
 
-// The `(index: u16)` and `(sparse)` sub-options are carried.
+// The `(handle: u16)` and `(sparse)` sub-options are carried.
 func TestEnumLayoutSubOptionsCarried(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_opts.elisa", `packed enum Expr layout soa(sparse, index: u16):
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_opts.elisa", `packed enum Expr layout soa(sparse, handle: u16):
     common:
         span: int
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("layout soa(sparse, index: u16) must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("layout soa(sparse, handle: u16) must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 	et := enumTypeByName(t, result, "Expr")
 	if !et.LayoutSparse {

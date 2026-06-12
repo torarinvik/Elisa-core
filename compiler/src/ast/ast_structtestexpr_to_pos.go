@@ -312,14 +312,12 @@ type ContinueStmt struct {
 	Position lexer.Pos
 }
 type IfStmt struct {
-	Position              lexer.Pos
-	Hint                  BranchHint
-	Cond                  Expr
-	Then                  []Stmt
-	Elifs                 []ElifClause
-	Else                  []Stmt
-	DeprecatedSyntax      string
-	DeprecatedReplacement string
+	Position lexer.Pos
+	Hint     BranchHint
+	Cond     Expr
+	Then     []Stmt
+	Elifs    []ElifClause
+	Else     []Stmt
 }
 type WhileStmt struct {
 	Position lexer.Pos

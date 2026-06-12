@@ -881,7 +881,9 @@ func expectEnumProgramError(t *testing.T, fixture string, src string, want strin
 }
 
 // docs/82 polish: the legacy `(index: uN)` spelling is deprecation-warned (canonical: `handle:`).
-func TestLegacyIndexSpellingWarns(t *testing.T) {
+// The legacy `(index: uN)` enum-layout spelling is hard-removed: a parse error pointing at the
+// canonical `(handle: uN)` form (docs/82).
+func TestLegacyIndexSpellingRejected(t *testing.T) {
 	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
@@ -894,7 +896,6 @@ enum Tree layout(index: u16):
 def main() -> i64:
     return 0
 `
-	t.Setenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS", "0")
 	full := "include \"" + std + "\"\n" + src
 	dir := t.TempDir()
 	path := filepath.Join(dir, "index_legacy.elisa")
@@ -902,12 +903,12 @@ def main() -> i64:
 		t.Fatalf("write fixture: %v", err)
 	}
 	var stdout, stderr bytes.Buffer
-	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code != 0 {
-		t.Fatalf("legacy index: spelling must still compile (deprecation, not removal); exit %d\nstderr:\n%s", code, stderr.String())
+	if code := runCLI([]string{"-emit", "llvm", path}, &stdout, &stderr); code == 0 {
+		t.Fatalf("legacy `(index: uN)` spelling must be rejected, but compiled cleanly")
 	}
 	combined := stdout.String() + stderr.String()
-	if !strings.Contains(combined, "deprecated") || !strings.Contains(combined, "handle: u16") {
-		t.Fatalf("expected a deprecation warning naming the `handle:` spelling, got:\n%s", combined)
+	if !strings.Contains(combined, "has been removed") || !strings.Contains(combined, "handle:") {
+		t.Fatalf("expected a removal error pointing at the `handle:` spelling, got:\n%s", combined)
 	}
 }
 

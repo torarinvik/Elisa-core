@@ -115,14 +115,14 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 			parent += "." + p.expect(lexer.TOKEN_IDENT).Text
 		}
 	}
-	layout, layoutSet, sparse, indexWidth, legacyIndexSpelling := p.parseEnumLayoutSuffix()
+	layout, layoutSet, sparse, indexWidth := p.parseEnumLayoutSuffix()
 	p.expect(lexer.TOKEN_COLON)
 	// An abstract root that only gathers sub-categories may use the inline empty body `enum Node: pass`
 	// (docs/77) instead of an indented block.
 	if p.peek() == lexer.TOKEN_PASS {
 		p.advance()
 		p.expectNewline()
-		return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, IndexWidthLegacySpelling: legacyIndexSpelling, Parent: parent}
+		return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
 	}
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -156,7 +156,7 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, IndexWidthLegacySpelling: legacyIndexSpelling, Parent: parent}
+	return &ast.EnumDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Packed: packed, Common: commonFields, Variants: variants, Layout: layout, LayoutSet: layoutSet, LayoutSparse: sparse, IndexWidth: indexWidth, Parent: parent}
 }
 
 // parseEnumLayoutSuffix parses an optional `layout soa|aos|c|packed` suffix on an enum declaration
@@ -167,13 +167,13 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 //	enum Small layout aos(handle: u16):
 //	enum Small layout(handle: u16):       # mode omitted — keeps the default layout (docs/82)
 //
-// `handle:` is the canonical key for the opaque-handle width (docs/82); `index:` is the
-// deprecated docs/76 spelling, kept as an alias. `layout` reuses the struct layout grammar
-// (docs/01) — one vocabulary across structs and enums. It is layout-only: it carries no region
-// and no usage meaning (orthogonality, docs/10).
-func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, string, bool) {
+// `handle:` is the canonical key for the opaque-handle width (docs/82); the legacy docs/76 `index:`
+// spelling is removed (hard parser error). `layout` reuses the struct layout grammar (docs/01) — one
+// vocabulary across structs and enums. It is layout-only: it carries no region and no usage meaning
+// (orthogonality, docs/10).
+func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, string) {
 	if !p.matchIdentText("layout") {
-		return ast.StructLayoutDefault, false, false, "", false
+		return ast.StructLayoutDefault, false, false, ""
 	}
 	layout := ast.StructLayoutDefault
 	if p.peek() != lexer.TOKEN_LPAREN { // mode-less `layout(...)` keeps the default mode
@@ -198,17 +198,18 @@ func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, stri
 	}
 	sparse := false
 	indexWidth := ""
-	legacyIndexSpelling := false
 	if p.match(lexer.TOKEN_LPAREN) {
 		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
 			opt := p.cur()
 			if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "sparse" {
 				p.advance()
 				sparse = true
-			} else if opt.Kind == lexer.TOKEN_IDENT && (opt.Text == "handle" || opt.Text == "index") {
-				if opt.Text == "index" {
-					legacyIndexSpelling = true
-				}
+			} else if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "index" {
+				p.errorf("enum layout `(index: uN)` has been removed; use the canonical `(handle: uN)` spelling (docs/82)")
+				p.advance()
+				p.match(lexer.TOKEN_COLON)
+				p.advance()
+			} else if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "handle" {
 				p.advance()
 				p.expect(lexer.TOKEN_COLON)
 				width := p.expect(lexer.TOKEN_IDENT).Text
@@ -228,7 +229,7 @@ func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, stri
 		}
 		p.expect(lexer.TOKEN_RPAREN)
 	}
-	return layout, true, sparse, indexWidth, legacyIndexSpelling
+	return layout, true, sparse, indexWidth
 }
 func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expect(lexer.TOKEN_IDENT)
