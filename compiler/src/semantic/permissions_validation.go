@@ -385,7 +385,7 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 		a.validateCallPermissions(n.Position, n.Func, granted, n.SafeConcurrencySugar)
 		if a.enforceUnsafePermissions {
 			if fnType, ok := a.exprTypes[n.Func].(*FuncType); ok {
-				if fnType.Name == "spawn1" && len(n.Args) > 1 {
+				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
 					if threadTransferRequiresUnsafeThreadShare(a.exprTypes[n.Args[1]], map[string]bool{}) {
 						a.warnOnMissingLocalGrant(n.Args[1].Pos(), "thread share", unsafeThreadShareRefs(n.Args[1].Pos()), granted)
 					}

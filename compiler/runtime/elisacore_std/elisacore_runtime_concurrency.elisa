@@ -983,6 +983,20 @@ def detach[R](thread: Thread[R, Joinable]):
 		detach_raw(move raw)
 		ctx_concurrency_work1_release(state_bits)
 
+# spawn_daemon: a blessed detached, process-lifetime thread for a true daemon —
+# a fire-and-forget worker that outlives every lexical scope and is never joined.
+# Unlike `detach` (a raw escape hatch), spawn_daemon is a public, typed surface;
+# its SAFETY rests entirely on the captured argument: the analyzer requires `arg`
+# to be thread-shareable (static refs / atomics / Mutex / CondVar / frozen stores /
+# scalars), exactly as `spawn1` does — a thread-unsafe capture demands an explicit
+# `Unsafe.ThreadShare` vouch. That is the principled boundary for a thread no one
+# can reason about locally: it may only touch state that provably outlives it and
+# cannot be raced. Prefer `nursery:` / `pool` for anything that should shut down
+# cleanly; reach for spawn_daemon only for genuinely immortal background work.
+def spawn_daemon[A, permission P](fn: func(A) -> void can[P], arg: A):
+	can P, Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
+		detach(spawn1(fn, arg))
+
 # ------------------------------------------------------------
 # task / future_get: ergonomic aliases for fork-join parallel results.
 #

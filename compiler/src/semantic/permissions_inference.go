@@ -267,7 +267,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		if fnType, ok := c.analyzer.exprTypes[n.Func].(*FuncType); ok {
 			c.addRefs(functionPermissionRefs(fnType))
 			if c.analyzer.enforceUnsafePermissions {
-				if fnType.Name == "spawn1" && len(n.Args) > 1 {
+				if (fnType.Name == "spawn1" || fnType.Name == "spawn_daemon") && len(n.Args) > 1 {
 					if threadTransferRequiresUnsafeThreadShare(c.analyzer.exprTypes[n.Args[1]], map[string]bool{}) {
 						c.addRefs(unsafeThreadShareRefs(n.Args[1].Pos()))
 					}
