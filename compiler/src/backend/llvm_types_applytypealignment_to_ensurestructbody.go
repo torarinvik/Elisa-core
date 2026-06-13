@@ -36,6 +36,17 @@ import (
 	"unsafe"
 )
 
+// setInstrAlignment overrides the alignment (in bytes) of a load/store instruction. Used by the
+// AoS slot-narrowing path: records at a narrowed (e.g. 12-byte) stride are only slot-aligned, so
+// stores/loads of 8-byte payload fields must be told their pointer is slot-aligned (align 4) rather
+// than letting LLVM assume the value type's natural 8-byte alignment.
+func (g *llvmGenerator) setInstrAlignment(value C.LLVMValueRef, bytes uint64) {
+	if g == nil || value == nil || bytes == 0 {
+		return
+	}
+	C.elisacoreSetAlignment(value, C.uint(bytes))
+}
+
 func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type) {
 	if g == nil || value == nil {
 		return

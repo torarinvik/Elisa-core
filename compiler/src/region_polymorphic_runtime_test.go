@@ -145,6 +145,90 @@ def bt() -> void:
 	}
 }
 
+// AoS slot-narrowing (handle-width payload slots): exercises the two paths that the plain-tree tests
+// do NOT cover and that the narrowing newly stresses — (1) a variant whose payload spans MULTIPLE
+// narrowed slots with mixed field widths (i64 at a slot-aligned, sub-word-aligned offset + i32
+// tails), reassembled on read; and (2) a sub-word handle dial (u16 → 2-byte slots), where even the
+// u32/i64 payload fields straddle several slots. Both build under -fsanitize=address so an over-read
+// past the narrowed record (the hazard the slot-typed load fixes) or a misaligned 8-byte access (the
+// hazard the align-on-store fixes) faults instead of silently returning a wrong sum.
+func TestAoSNarrowedSlotPayloadsRunClean(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
+		t.Skip("std runtime not found")
+	}
+	src := "include \"" + std + "\"\n" + `
+enum Rec:
+    One(a: i64)
+    Quad(a: i64, b: i64, c: i32, d: i32)
+    Mix(h: i64, lo: i32)
+
+def classify(r: Rec) -> i64:
+    match r:
+        Rec.One(a: a):
+            return a
+        Rec.Quad(a: a, b: b, c: c, d: d):
+            return a + b + c.i64() + d.i64()
+        Rec.Mix(h: h, lo: lo):
+            return h + lo.i64()
+
+enum Tree layout(handle: u16):
+    Node(left: Tree, right: Tree)
+    Leaf(value: i64)
+
+def total(t: Tree) -> i64:
+    match t:
+        Tree.Node(left: l, right: r):
+            return total(l) + total(r)
+        Tree.Leaf(value: v):
+            return v
+
+def make(depth: i64) -> Tree:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        if depth <= 0:
+            return Tree.Leaf(value: 1)
+        return Tree.Node(left: make(depth - 1), right: make(depth - 1))
+
+@test
+def narrowed() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        acc: i64 = classify(Rec.Quad(a: 5, b: 7, c: 11, d: 13)) + classify(Rec.Mix(h: 100, lo: 9)) + classify(Rec.One(a: 42))
+        if acc != (5 + 7 + 11 + 13) + (100 + 9) + 42:
+            panic("multi-slot payload reassembly wrong")
+        if total(make(6)) != 64:
+            panic("u16-handle (2-byte slot) tree wrong sum")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "narrowed.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	t.Setenv("ELISA_KEEP_TEST_BINARY", "1")
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "test", "-link", "-fsanitize=address", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	exePath := ""
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if idx := strings.Index(line, "test binary: "); idx >= 0 {
+			exePath = strings.TrimSpace(line[idx+len("test binary: "):])
+			break
+		}
+	}
+	if exePath == "" {
+		t.Skipf("could not locate kept test binary:\n%s", stderr.String())
+	}
+	defer os.Remove(exePath)
+	defer os.RemoveAll(exePath + ".dSYM")
+	if out, err := exec.Command(exePath, "narrowed").CombinedOutput(); err != nil {
+		t.Fatalf("narrowed-slot run failed (ASan/abort or wrong sum): %v\noutput:\n%s", err, string(out))
+	}
+}
+
 // docs/76 §5 (Phase 5): first-class column scan. A `layout soa` (columnar) recursive enum is
 // region-backed with per-field column arrays; `for s in Expr of .span` streams the dense `span`
 // common-field column across every node in the implicit store. Builds 3 nodes (spans 10, 20, 30)

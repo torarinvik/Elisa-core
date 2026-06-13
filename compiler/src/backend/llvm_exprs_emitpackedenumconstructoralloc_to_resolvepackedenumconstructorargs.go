@@ -148,7 +148,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 			rowValue = C.LLVMBuildInsertValue(s.builder, rowValue, fieldValue, C.unsigned(layout.RowFieldIndex), cStringFree("packed.enum.common.ins"))
 		}
 	}
-	C.LLVMBuildStore(s.builder, rowValue, allocPtr)
+	rowStore := C.LLVMBuildStore(s.builder, rowValue, allocPtr)
+	s.g.setInstrAlignment(rowStore, s.g.payloadSlotBytes(enumType))
 	if len(variant.Payload) > 0 {
 		payloadPtr, err := s.enumPayloadPtr(allocPtr, enumType)
 		if err != nil {
@@ -167,7 +168,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 				return nil, nil, err
 			}
 			if !llvmValueIsZeroConstant(argValue) {
-				C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+				st := C.LLVMBuildStore(s.builder, argValue, payloadPtr)
+				s.g.setInstrAlignment(st, s.g.payloadSlotBytes(enumType))
 			}
 		} else {
 			payloadType, err := s.g.lowerEnumVariantPayloadType(variant)
@@ -188,7 +190,8 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 				aggregate = C.LLVMBuildInsertValue(s.builder, aggregate, argValue, C.unsigned(i), cStringFree("packed.enum.payload.ins"))
 			}
 			if !allZero {
-				C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+				st := C.LLVMBuildStore(s.builder, aggregate, payloadPtr)
+				s.g.setInstrAlignment(st, s.g.payloadSlotBytes(enumType))
 			}
 		}
 	}

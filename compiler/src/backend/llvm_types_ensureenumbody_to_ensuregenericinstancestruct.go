@@ -32,6 +32,7 @@ import "C"
 import (
 	"elisacore/src/semantic"
 	"fmt"
+	"os"
 )
 
 // enumLayoutLeaves returns the variants that determine an enum's physical layout: for a sealed
@@ -248,9 +249,48 @@ func enumIsTagOnly(enum *semantic.EnumType) bool {
 // SoA/dense/variant-sparse column helpers and the @storage(side_table) side columns are a separate
 // uintptr-word model and MUST keep the machine word — those sites do NOT call this accessor.
 //
-// NOTE: currently returns the word size unchanged for every enum — this is the no-op seam; lowering
-// it (for AoS-mode enums) is a separate, validated step.
+// AoS-mode enums narrow the inline payload slot to the HANDLE WIDTH (u32 by default): a recursive
+// child reference is a handle, so handle-width slots pack the dominant payload element densely with
+// no padding and no multi-slot reassembly, recovering the 8-byte payload-array alignment slack and
+// last-slot rounding (a default binary-tree record drops 16->12B). Larger leaf fields (an i64 in a
+// u32 tree) then straddle multiple slots and become slot-aligned within the record, so every
+// store/load of such a field must be emitted at the slot alignment — the read path reassembles
+// multi-slot fields in a naturally-aligned alloca, and the construct path sets the payload-store
+// alignment to the slot width. Keying off the handle width means u64-handle enums keep 8-byte slots
+// (no narrowing, no reassembly regression) while u16/u32 enums shrink. SoA/dense/variant-sparse and
+// side-table columns are a separate uintptr-word model and keep the machine word.
+//
+// Set ELISA_AOS_NO_NARROW=1 to force the legacy uintptr slot (for A/B IR diffing / bisecting).
+// CAVEAT: this env toggle changes codegen but is NOT part of the test-runner cache key, so it only
+// takes effect on a cache MISS. When A/B-benchmarking, use physically distinct sources (or a clean
+// cache) for the two builds, or both runs may resolve to the same cached binary.
+func (g *llvmGenerator) aosNarrowSlots(enum *semantic.EnumType) bool {
+	if enum == nil {
+		return false
+	}
+	if os.Getenv("ELISA_AOS_NO_NARROW") != "" {
+		return false
+	}
+	if g.packedModeForEnum(enum) != packedEnumABIAoS {
+		return false
+	}
+	// Only a sub-word handle actually narrows; a u64/ptr handle already fills the machine word.
+	return g.aosSlotBytes(enum) < uint64(g.wordBits/8)
+}
+
+// aosSlotBytes is the slot width an AoS enum WOULD use: its handle width in bytes (8/16/32/64 bits).
+func (g *llvmGenerator) aosSlotBytes(enum *semantic.EnumType) uint64 {
+	bits := enum.Root().ResolvedIndexWidthBits()
+	if bits <= 0 {
+		bits = 32
+	}
+	return uint64(bits) / 8
+}
+
 func (g *llvmGenerator) payloadSlotBytes(enum *semantic.EnumType) uint64 {
+	if g.aosNarrowSlots(enum) {
+		return g.aosSlotBytes(enum)
+	}
 	b := uint64(g.wordBits / 8)
 	if b == 0 {
 		b = 8
@@ -259,8 +299,18 @@ func (g *llvmGenerator) payloadSlotBytes(enum *semantic.EnumType) uint64 {
 }
 
 // payloadSlotType is the LLVM element type of the inline payload-slot array (see payloadSlotBytes).
-// Its ABI size MUST equal payloadSlotBytes(enum); the two move together. Currently uintptr (no-op).
+// Its ABI size MUST equal payloadSlotBytes(enum); the two move together.
 func (g *llvmGenerator) payloadSlotType(enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	if g.aosNarrowSlots(enum) {
+		switch g.aosSlotBytes(enum) {
+		case 1:
+			return g.lowerBuiltin("u8")
+		case 2:
+			return g.lowerBuiltin("u16")
+		case 4:
+			return g.lowerBuiltin("u32")
+		}
+	}
 	return g.lowerBuiltin("uintptr")
 }
 

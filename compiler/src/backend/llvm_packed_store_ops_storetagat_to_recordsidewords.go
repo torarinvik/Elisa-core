@@ -286,7 +286,19 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		return C.LLVMBuildLoad2(ops.s.builder, uintptrLLVM, wordPtr, cStringFree("packed.aos.word")), nil
+		// Load EXACTLY one slot (not a full uintptr): with narrowed slots a uintptr load of the last
+		// slot would over-read past the record into the next chunk record (or off the chunk at the
+		// page boundary). The slot type's natural alignment matches the slot stride, so the load is
+		// aligned. Callers expect a uintptr-typed word, so zero-extend a narrow slot back up.
+		slotLLVM, err := ops.s.g.payloadSlotType(enumType)
+		if err != nil {
+			return nil, err
+		}
+		wordValue := C.LLVMBuildLoad2(ops.s.builder, slotLLVM, wordPtr, cStringFree("packed.aos.word"))
+		if slotLLVM != uintptrLLVM {
+			wordValue = C.LLVMBuildZExt(ops.s.builder, wordValue, uintptrLLVM, cStringFree("packed.aos.word.zext"))
+		}
+		return wordValue, nil
 	default:
 		arenaValue, err := ops.arenaValue("packed.arena")
 		if err != nil {

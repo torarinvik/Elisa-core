@@ -795,9 +795,11 @@ def main() -> i64:
 	}
 }
 
-// docs/82 tight-payload pin: the handle dial changes the RECORD size, not just the value ABI —
-// Tree{Node(l,r),Leaf(i64)} rows are 16 bytes at handle u16/u32 (tag + widest payload = Leaf i64)
-// and 24 at u64 (two 8-byte edges widen the union past the i64 leaf).
+// docs/82 tight-payload pin: the handle dial changes the RECORD size, not just the value ABI.
+// With handle-width payload slots (the AoS slot-narrowing), Tree{Node(l,r),Leaf(i64)} rows are 12
+// bytes at handle u16/u32 — tag(4) + the i64 leaf packed into handle-width slots with no 8-byte
+// payload-array alignment pad — and 24 at u64, where 8-byte slots fill the machine word so the union
+// is two 8-byte edges and there is no padding to reclaim.
 func TestHandleDialShrinksRecordRows(t *testing.T) {
 	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
@@ -849,11 +851,11 @@ def main() -> i64:
 		t.Fatalf("could not find row_bytes for %s", width)
 		return ""
 	}
-	if got := rowBytes("u16"); got != "16" {
-		t.Fatalf("u16-handle rows must be 16 bytes (tight payload), got %s", got)
+	if got := rowBytes("u16"); got != "12" {
+		t.Fatalf("u16-handle rows must be 12 bytes (handle-width slots, no payload-array pad), got %s", got)
 	}
 	if got := rowBytes("u64"); got != "24" {
-		t.Fatalf("u64-handle rows must be 24 bytes, got %s", got)
+		t.Fatalf("u64-handle rows must be 24 bytes (8-byte slots fill the word, no pad to reclaim), got %s", got)
 	}
 }
 
