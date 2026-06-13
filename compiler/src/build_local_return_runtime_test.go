@@ -301,6 +301,115 @@ func TestReadOnlyRefParamNotRegionPoly(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "read_only_ref_param_lives")
 }
 
+// S3: dstr param parity. `dstr` is the u8 darray (a *ast.NamedType with no `@r` annotation
+// surface), so the inference stamps the region onto the enclosing reference, which resolveType
+// pushes down onto the resolved DArrayType — the same normalization the darray builtin path uses.
+// Zero region annotations: the callee grows a caller-owned dstr by reference and the grown bytes
+// are caller-visible and intact (no UAF / wrong region).
+const inferredRegionParamDStrGrowthBody = `
+def build_msg(out: mutable dstr&, n: usize) -> void:
+    i: mutable usize = 0
+    while i < n:
+        out.push((65u8 + (i % 26u).u8()))
+        i <- i + 1
+
+@test
+def inferred_region_param_dstr_growth_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        s: mutable dstr = []
+        build_msg(&s, 50000)
+        if s.count != 50000:
+            panic("caller lost dstr count (header update dropped)")
+        sum: mutable u64 = 0u64
+        for i in 0..<s.count.i64():
+            sum <- sum + s[i].u64()
+        if sum != 3874976u64:
+            panic("grown dstr bytes corrupted (UAF / wrong region?)")
+`
+
+func TestInferredRegionParamDStrGrowthCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "inferred_region_param_dstr_growth", inferredRegionParamDStrGrowthBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "inferred_region_param_dstr_growth_lives")
+}
+
+// S3: multi-param. Two grown region-less container ref params get two DISTINCT region params
+// (__rg_a, __rg_b), each threaded from its own caller arg's region. The per-param loop already
+// supported this; this proves it threads independently with no cross-talk and both grows are
+// caller-visible and intact after the call.
+const inferredRegionParamMultiGrowthBody = `
+def fill_two(a: mutable darray[u8]&, b: mutable darray[i64]&, n: usize) -> void:
+    i: mutable usize = 0
+    while i < n:
+        a.push((i.u8()))
+        b.push((i.i64() * 2))
+        i <- i + 1
+
+@test
+def inferred_region_param_multi_growth_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        xs: mutable darray[u8] = []
+        ys: mutable darray[i64] = []
+        fill_two(&xs, &ys, 40000)
+        if xs.count != 40000 or ys.count != 40000:
+            panic("caller lost count on one of two grown params")
+        suma: mutable u64 = 0u64
+        for i in 0..<xs.count.i64():
+            suma <- suma + xs[i].u64()
+        sumb: mutable i64 = 0
+        for i in 0..<ys.count.i64():
+            sumb <- sumb + ys[i]
+        if suma != 5093856u64:
+            panic("grown param a corrupted (UAF / wrong region?)")
+        if sumb != 1599960000:
+            panic("grown param b corrupted (UAF / wrong region?)")
+`
+
+func TestInferredRegionParamMultiGrowthCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "inferred_region_param_multi_growth", inferredRegionParamMultiGrowthBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "inferred_region_param_multi_growth_lives")
+}
+
+// dstr string-literal init: `s: dstr = "..."` desugars (in the parser) to the byte-list literal
+// `['s'.u8(), ...]`, so it allocates a growable region-backed dstr — assignable, escape-checked, and
+// pushable afterward — instead of being a non-assignable static cstr. Covers empty (`= ""`), escape
+// decoding, and post-init growth. ASan-linked to catch any region/lifetime mistake.
+const dstrStringLiteralInitBody = `
+@test
+def dstr_string_literal_init_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        empty: mutable dstr = ""
+        if empty.count != 0:
+            panic("empty dstr literal not empty")
+        empty.push(90u8)
+        if empty.count != 1 or empty[0] != 90u8:
+            panic("empty dstr literal not growable")
+        s: mutable dstr = "AB\nC"
+        if s.count != 4:
+            panic("dstr literal wrong length (escape decode?)")
+        if s[0] != 65u8 or s[1] != 66u8 or s[2] != 10u8 or s[3] != 67u8:
+            panic("dstr literal wrong bytes")
+        s.push(33u8)
+        if s.count != 5 or s[4] != 33u8:
+            panic("dstr literal not growable after init")
+`
+
+func TestDStrStringLiteralInit(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "dstr_string_literal_init", dstrStringLiteralInitBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "dstr_string_literal_init_lives")
+}
+
 // `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
 // combinator (it builds the result in its own region and the caller adopts it) instead of an inline
 // presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +

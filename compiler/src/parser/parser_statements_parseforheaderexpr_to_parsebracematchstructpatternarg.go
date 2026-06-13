@@ -3,6 +3,7 @@ package parser
 import (
 	"fmt"
 	"reflect"
+	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -777,6 +778,47 @@ func isRegionlessContainerType(typ ast.TypeExpr) bool {
 	}
 	return false
 }
+// desugarDStrStringLiteralInit rewrites `s: dstr = "abc"` into `s: dstr = [97, 98, 99]` — the
+// byte-list literal a user would otherwise hand-write (`['a'.u8(), ...]`). `dstr` is the u8
+// specialization of darray, so a bare string literal (otherwise a static `cstr`) does not assign to
+// it. Desugaring at parse time — before functionBodyNeedsAutoRegion runs — means the result is an
+// ordinary allocating list literal: it triggers the inferred auto-region wrap and flows through the
+// identical growable-darray path (region backing, escape checks, codegen), adding no new surface.
+//
+// StringLit.Value is the already-decoded raw byte sequence (escapes resolved by the lexer; the
+// backend emits these bytes verbatim), so each byte becomes a suffix-less IntLit whose type is
+// driven to u8 by the darray[u8] list-literal context (no discouraged-suffix warning). An empty
+// string yields an empty `[]`. The value is only rewritten when the declared type is a region-less
+// `dstr`; any other type (including a `cstr`/view) is left untouched.
+func desugarDStrStringLiteralInit(typ ast.TypeExpr, value ast.Expr) ast.Expr {
+	if value == nil || !typeExprIsRegionlessDStr(typ) {
+		return value
+	}
+	lit, ok := value.(*ast.StringLit)
+	if !ok {
+		return value
+	}
+	elems := make([]ast.Expr, 0, len(lit.Value))
+	for i := 0; i < len(lit.Value); i++ {
+		elems = append(elems, &ast.IntLit{Position: lit.Position, Value: strconv.Itoa(int(lit.Value[i]))})
+	}
+	return &ast.ListLitExpr{Position: lit.Position, Elems: elems}
+}
+
+// typeExprIsRegionlessDStr reports whether typ is the region-less owned `dstr` string (a NamedType,
+// optionally behind `mutable`). cstr/views and annotated `dstr @r` are excluded.
+func typeExprIsRegionlessDStr(typ ast.TypeExpr) bool {
+	for {
+		mt, ok := typ.(*ast.MutableType)
+		if !ok {
+			break
+		}
+		typ = mt.Elem
+	}
+	nt, ok := typ.(*ast.NamedType)
+	return ok && nt.Name == "dstr"
+}
+
 func (p *Parser) parseCanStmt() *ast.CanStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("can")

@@ -59,7 +59,7 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 	}
 	for i := range fn.Params {
 		p := &fn.Params[i]
-		container, ok := regionlessRefContainer(p.Type)
+		stamp, ok := regionlessRefContainer(p.Type)
 		if !ok {
 			continue
 		}
@@ -69,19 +69,27 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 		// Param names are unique within a function, so the per-param suffix yields a unique,
 		// deterministic region-param name (no Date/random — must stay resume-stable).
 		name := "__rg_" + p.Name
-		container.Region = name
+		stamp(name)
 		fn.RegionParams = append(fn.RegionParams, name)
 	}
 }
 
-// regionlessRefContainer returns the innermost container type node of a parameter type IFF it is a
-// by-reference (`&`) region-less growable container (`darray`/`dict`/`set`). Returns the
-// *ast.BuiltinTypeExpr so the caller can stamp its Region. The `&` is required: only a reference
-// makes the callee's growth (header realloc + count) visible in the caller — a by-value container
-// param copies the header, so growth would be lost (the S1 footgun). An existing `@r` anywhere
-// (on the ref or the container) means the user is already managing the region: leave it alone.
-func regionlessRefContainer(typ ast.TypeExpr) (*ast.BuiltinTypeExpr, bool) {
-	sawRef := false
+// regionlessRefContainer reports whether a parameter type is a by-reference (`&`) region-less
+// growable container, and if so returns a closure that stamps a region name onto the right AST node.
+// Two container spellings qualify:
+//   - `darray`/`dict`/`set` — a *ast.BuiltinTypeExpr; the region is stamped onto its `.Region`.
+//   - `dstr` — a *ast.NamedType (the u8-darray string; it has no `@r` annotation surface, so it
+//     can't carry a region itself). The region is stamped onto the enclosing *ast.RefType instead,
+//     which resolveType then pushes DOWN onto the resolved DArrayType via stampContainerRegion —
+//     the identical normalization the builtin path relies on, so both spellings produce the same
+//     resolved region-carrying container type.
+//
+// The `&` is required: only a reference makes the callee's growth (header realloc + count) visible
+// in the caller — a by-value container param copies the header, so growth would be lost (the S1
+// footgun). An existing `@r` anywhere (on the ref or the container) means the user is already
+// managing the region: leave it alone.
+func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
+	var ref *ast.RefType
 	for {
 		switch t := typ.(type) {
 		case *ast.MutableType:
@@ -92,17 +100,25 @@ func regionlessRefContainer(typ ast.TypeExpr) (*ast.BuiltinTypeExpr, bool) {
 			if t.Region != "" {
 				return nil, false
 			}
-			sawRef = true
+			ref = t
 			typ = t.Elem
 		case *ast.BuiltinTypeExpr:
-			if !sawRef || t.Region != "" {
+			if ref == nil || t.Region != "" {
 				return nil, false
 			}
 			switch t.Name {
 			case "darray", "dict", "set":
-				return t, true
+				return func(region string) { t.Region = region }, true
 			}
 			return nil, false
+		case *ast.NamedType:
+			if ref == nil || t.Name != "dstr" {
+				return nil, false
+			}
+			// dstr has no region surface of its own; stamp the ref, which resolveType
+			// pushes down onto the resolved DArrayType.
+			r := ref
+			return func(region string) { r.Region = region }, true
 		default:
 			return nil, false
 		}

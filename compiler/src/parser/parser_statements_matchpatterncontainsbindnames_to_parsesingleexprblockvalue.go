@@ -530,6 +530,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 				value = p.parseValueExprAllowTuple()
 			}
 			p.expectNewlineAfterValueExpr(value)
+			value = desugarDStrStringLiteralInit(typ, value)
 			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value, Owner: owner}
 		}
 	}
