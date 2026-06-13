@@ -194,6 +194,10 @@ func generateInterleaveScope(rng *rand.Rand) (string, bool) {
 // into it are still rejected. Six growables push the last two (e, g) into the merge stack, and they
 // cross — the hard error stands.
 func TestRegionLifetimeRejectsCrossingInMergeStack(t *testing.T) {
+	// The merge/interleave path only triggers once the per-region stack budget is exhausted;
+	// production caps at 64, so pin it low here to exercise it with a few growables.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 4
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rl_merge.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         a: mutable darray[i64] = []
@@ -234,6 +238,10 @@ func TestRegionGrowthTwoGrowablesAutoSplitNoWarning(t *testing.T) {
 // (cap 4) push the last two into the merge stack; growing the earlier of that pair after the later
 // one is allocated still warns.
 func TestRegionGrowthMergeStackStillWarns(t *testing.T) {
+	// The merge/interleave path only triggers once the per-region stack budget is exhausted;
+	// production caps at 64, so pin it low here to exercise it with a few growables.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 4
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_merge.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         a: mutable darray[i64] = []
@@ -286,6 +294,10 @@ func TestRegionGrowthTailOrderNoWarning(t *testing.T) {
 }
 
 func TestRegionGrowthResizeWarns(t *testing.T) {
+	// The merge/interleave path only triggers once the per-region stack budget is exhausted;
+	// production caps at 64, so pin it low here to exercise it with a few growables.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 4
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rg_resize.elisa", `def f() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         a: mutable darray[i64] = []
@@ -308,6 +320,10 @@ func TestRegionGrowthResizeWarns(t *testing.T) {
 // straight-line gap), a concrete disjoint-reorder is provably legal, so the message says exactly
 // which declaration to move — modeled on the struct-padding "consider ordering ..." lint.
 func TestInterleavedErrorNamesConcreteReorderWhenLegal(t *testing.T) {
+	// The merge/interleave path only triggers once the per-region stack budget is exhausted;
+	// production caps at 64, so pin it low here to exercise it with a few growables.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 4
 	// Six unreserved growables: a..d take stacks 1-4, e and g share the merge stack. g's first use
 	// is after e's last use, so their live ranges are disjoint once g's decl moves down.
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "xreorder.elisa", `def prog() -> void:
@@ -340,6 +356,10 @@ func TestInterleavedErrorNamesConcreteReorderWhenLegal(t *testing.T) {
 // earlier one dies), no declaration move can separate them, so the message must NOT claim a reorder
 // is available — it offers only the always-valid remedies (separate region / reserve).
 func TestInterleavedErrorOmitsReorderWhenRangesOverlap(t *testing.T) {
+	// The merge/interleave path only triggers once the per-region stack budget is exhausted;
+	// production caps at 64, so pin it low here to exercise it with a few growables.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 4
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "xoverlap.elisa", `def prog() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         a: mutable darray[i64] = []
@@ -366,5 +386,37 @@ func TestInterleavedErrorOmitsReorderWhenRangesOverlap(t *testing.T) {
 	}
 	if !strings.Contains(diag, "their live ranges overlap") || !strings.Contains(diag, "reserve()") {
 		t.Fatalf("expected the overlap message to offer the region/reserve remedies, got:\n%s", diag)
+	}
+}
+
+// The death-time region model gives EVERY growable its own bump-stack (regionStackCap lifted to
+// 64), so a region with more than the old 4-stack budget of crossing growables is no longer
+// rejected — each gets its own tail and the crossing lifetimes are separated, not merged. Six
+// interleaved growables that the old cap would have forced into a merge stack (and rejected for
+// "interleaved object lifetimes ... stack budget exhausted") must now compile clean.
+func TestRegionManyCrossingGrowablesNoLongerRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_many.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        c: mutable darray[i64] = []
+        d: mutable darray[i64] = []
+        e: mutable darray[i64] = []
+        g: mutable darray[i64] = []
+        a.push(1)
+        b.push(1)
+        c.push(1)
+        d.push(1)
+        e.push(1)
+        g.push(1)
+        a.push(2)
+        b.push(2)
+        c.push(2)
+        d.push(2)
+        e.push(2)
+        g.push(2)
+`, AnalyzeOptions{})
+	if all := allDiagnostics(result); strings.Contains(all, "interleaved object lifetimes") {
+		t.Fatalf("six crossing growables must each get their own stack now (no merge rejection), got:\n%s", all)
 	}
 }

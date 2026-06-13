@@ -11,9 +11,22 @@ import (
 )
 
 // regionStackCap bounds the number of own (growable-tail) stacks per region before the overflow
-// growables are merged into one shared CHAINED stack — so a function with many small growables
-// does not allocate many separate blocks (docs/71, over-split guard).
-const regionStackCap = 4
+// growables are merged into one shared CHAINED stack.
+//
+// Policy (the death-time region model): EVERY growable gets its own bump-stack so it can grow at
+// its tail without fragmenting any sibling, and a region's crossing lifetimes are resolved by
+// separation rather than rejected. The cap is therefore set high enough to mean "every growable"
+// for all realistic code — its only remaining job is a safety valve against a pathological region
+// with dozens of independently-growing containers. On POSIX an UNUSED growable stack costs nothing
+// (the reserve_commit reservation is lazy), and a used one costs one VMA + lazily-committed virtual
+// space; on non-overcommit targets growables stay chained (no pre-reservation). So the practical
+// cost of a high cap is a VMA per actually-used growable, which is cheap until the count is huge.
+//
+// Lifting this from its original value of 4 both removes merge-stack fragmentation for real code
+// and eliminates the "interleaved object lifetimes ... stack budget exhausted" rejection for any
+// region with <= this many crossing growables. Once the cross-region stack-reuse POOL lands (it
+// makes extra stacks free to recycle), the merge can be dropped entirely and this cap removed.
+var regionStackCap = 64
 
 // RegionStackAssignment partitions an inferred region's fresh container allocations into parallel
 // bump-stacks (lifetime inference, Phase B; docs/71). Stack 0 is the shared stack for
