@@ -410,6 +410,51 @@ func TestDStrStringLiteralInit(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "dstr_string_literal_init_lives")
 }
 
+// dstrStringLiteralReturnAssignBody exercises the two non-var-decl positions where a `dstr` may now
+// be initialized from a string literal: a `return "..."` from a `-> dstr` function (rewritten at
+// parse time so the region-poly-return classification sees a list literal) and a `s <- "..."`
+// assignment into a local whose region is already established by its `[]` declaration. Both desugar
+// to the byte-list literal the literal is equivalent to; escapes are decoded by the lexer.
+const dstrStringLiteralReturnAssignBody = `
+def make_msg() -> dstr:
+    return "Hi"
+
+def pick(b: bool) -> dstr:
+    if b:
+        return "yes"
+    return "no\n"
+
+@test
+def dstr_literal_return_assign_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        m: dstr = make_msg()
+        if m.count != 2 or m[0] != 72u8 or m[1] != 105u8:
+            panic("return string literal wrong")
+        y: dstr = pick(true)
+        if y.count != 3 or y[0] != 121u8:
+            panic("nested-return string literal wrong")
+        n: dstr = pick(false)
+        if n.count != 3 or n[2] != 10u8:
+            panic("nested-return escape literal wrong")
+        s: mutable dstr = []
+        s.push(64u8)
+        s <- "ab\nc"
+        if s.count != 4 or s[0] != 97u8 or s[2] != 10u8 or s[3] != 99u8:
+            panic("local-assign string literal wrong")
+        s.push(33u8)
+        if s.count != 5 or s[4] != 33u8:
+            panic("local-assign result not growable")
+`
+
+func TestDStrStringLiteralReturnAssign(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "dstr_string_literal_return_assign", dstrStringLiteralReturnAssignBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "dstr_literal_return_assign_lives")
+}
+
 // `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
 // combinator (it builds the result in its own region and the caller adopts it) instead of an inline
 // presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +

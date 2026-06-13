@@ -279,6 +279,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// ambient, bind the RHS to the permanent region so container literals and
 		// region-polymorphic calls just work (`g_state <- Build_State()`) instead of
 		// demanding an explicit region the value would immediately escape anyway.
+		// `s <- "..."` into a region-less dstr: rewrite the static string literal to the
+		// equivalent byte-list literal before analysis (dstr is darray[u8]; a bare literal is
+		// otherwise a static cstr). Parallels the parser's typed-var-decl desugar.
+		a.rewriteDStrStringLiteral(&n.Value, targetType)
 		savedAllocExpr := a.currentAllocExpr
 		restoreAllocExpr := false
 		// A synthesized (function-local) ambient auto region must not capture a value
