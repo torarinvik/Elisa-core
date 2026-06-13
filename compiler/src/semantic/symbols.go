@@ -38,6 +38,7 @@ type Result struct {
 	StaticImpls             map[string]*StaticImpl
 	ConstValues             map[string]ConstValue
 	ExprTypes               map[ast.Expr]Type
+	PermGrowthOps           map[ast.Expr]bool
 	RewriteDefaults         map[*ast.Ident]bool
 	OptionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	InterfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef

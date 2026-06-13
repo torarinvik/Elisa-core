@@ -5,7 +5,11 @@ package backend
 */
 import "C"
 
-import "fmt"
+import (
+	"fmt"
+
+	"elisacore/src/ast"
+)
 
 // permArenaGlobalName is the module-level Arena backing the `perm` program-lifetime
 // region. It is zero-initialized (a lazy arena: arena_alloc creates the first block
@@ -45,4 +49,22 @@ func (s *functionState) permTreeAllocOwner() (treeAllocOwnerBinding, error) {
 		return treeAllocOwnerBinding{}, err
 	}
 	return treeAllocOwnerBinding{arenaRef: global}, nil
+}
+
+// permGrowthOwner returns the perm arena owner when the semantic analyzer marked
+// this growth op (push/extend/reserve/resize/put/...) as program-lifetime — its
+// receiver roots at a global, so its backing belongs in the permanent region.
+// This is the in-place analogue of routing a global store's RHS to perm.
+func (s *functionState) permGrowthOwner(expr ast.Expr) (treeAllocOwnerBinding, bool, error) {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.PermGrowthOps == nil {
+		return treeAllocOwnerBinding{}, false, nil
+	}
+	if !s.g.result.PermGrowthOps[expr] {
+		return treeAllocOwnerBinding{}, false, nil
+	}
+	owner, err := s.permTreeAllocOwner()
+	if err != nil {
+		return treeAllocOwnerBinding{}, false, err
+	}
+	return owner, true, nil
 }

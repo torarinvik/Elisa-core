@@ -61,9 +61,32 @@ func (a *Analyzer) globalStorageRoot(expr ast.Expr) (*Symbol, bool) {
 		return a.globalStorageRoot(n.Object)
 	case *ast.SliceExpr:
 		return a.globalStorageRoot(n.Object)
+	case *ast.ParenExpr:
+		return a.globalStorageRoot(n.Inner)
 	default:
 		return nil, false
 	}
+}
+
+// growthReceiverIsProgramLifetime reports whether an in-place container growth
+// op (push/extend/reserve/resize on a darray/store/dict) targets storage rooted
+// at a GLOBAL. Such a container is program-lifetime, so its backing allocation
+// belongs in the permanent region — the in-place analogue of the global-store
+// inference (a global `g <- Build()` binds to perm). When true the growth needs
+// no ambient `in <arena>:` scope; the backend routes it to the perm arena.
+func (a *Analyzer) growthReceiverIsProgramLifetime(opExpr, receiver ast.Expr) bool {
+	if a == nil || receiver == nil {
+		return false
+	}
+	if _, ok := a.globalStorageRoot(receiver); ok {
+		// Record so the backend routes this growth's allocation to the perm arena
+		// (the semantic side already suppressed the missing-region error).
+		if opExpr != nil && a.permGrowthOps != nil {
+			a.permGrowthOps[opExpr] = true
+		}
+		return true
+	}
+	return false
 }
 
 func globalStorageRootExpr(expr ast.Expr) ast.Expr {

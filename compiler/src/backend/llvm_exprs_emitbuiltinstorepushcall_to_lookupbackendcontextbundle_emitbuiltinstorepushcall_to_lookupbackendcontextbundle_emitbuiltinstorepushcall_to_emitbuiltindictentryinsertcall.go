@@ -94,6 +94,9 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		return nil, nil, true, fmt.Errorf("store push expects %d arguments, got %d", len(storeType.StoreFieldOrder), len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
+	if !ok {
+		owner, ok, _ = s.permGrowthOwner(expr)
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("store push requires an active in <arena>: scope")
 	}
@@ -180,6 +183,9 @@ func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMV
 		return nil, nil, true, fmt.Errorf("store reserve expects 1 argument, got %d", len(expr.Args))
 	}
 	owner, ok := s.lookupTreeAllocOwner()
+	if !ok {
+		owner, ok, _ = s.permGrowthOwner(expr)
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("store reserve requires an active in <arena>: scope")
 	}
@@ -556,6 +562,9 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if !ok {
 		owner, ok = s.lookupTreeAllocOwner()
 	}
+	if !ok {
+		owner, ok, _ = s.permGrowthOwner(expr)
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict entry insert requires an active in <arena>: scope")
 	}
@@ -673,6 +682,9 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 	if !ok {
 		owner, ok = s.lookupTreeAllocOwner()
 	}
+	if !ok {
+		owner, ok, _ = s.permGrowthOwner(expr)
+	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("dict %s requires an active in <arena>: scope", method)
 	}
@@ -764,6 +776,9 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 	owner, ok := s.regionArenaOwner(setType.Region)
 	if !ok {
 		owner, ok = s.lookupTreeAllocOwner()
+	}
+	if !ok {
+		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("set %s requires an active in <arena>: scope", method)

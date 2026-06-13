@@ -252,7 +252,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
 	}
-	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
+	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
@@ -341,7 +341,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray extend requires a mutable darray receiver")
 	}
-	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
+	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "extend")
@@ -411,7 +411,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray reserve requires a mutable darray receiver")
 	}
-	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "darray reserve requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "reserve")
@@ -474,7 +474,7 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray resize requires a mutable darray receiver")
 	}
-	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "darray resize requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "resize")
@@ -624,7 +624,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store push requires a mutable store receiver")
 	}
-	if a.currentAllocExpr == nil {
+	if a.currentAllocExpr == nil && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "store push requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != len(storeType.StoreFieldOrder) {
@@ -667,7 +667,7 @@ func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, boo
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "store reserve requires a mutable store receiver")
 	}
-	if a.currentAllocExpr == nil {
+	if a.currentAllocExpr == nil && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "store reserve requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {

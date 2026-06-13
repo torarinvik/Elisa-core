@@ -236,7 +236,7 @@ func (s *functionState) regionArenaOwner(region string) (treeAllocOwnerBinding, 
 // arena allocates there (kept consistent across all its growth ops, so a realloc never straddles
 // arenas). Falls back to the existing region/ambient resolution for everything else. All parallel
 // arenas share one region lifetime, so routing is layout-only and cannot affect when memory frees.
-func (s *functionState) darrayGrowthOwner(receiver ast.Expr, darrayType *semantic.DArrayType) (treeAllocOwnerBinding, bool) {
+func (s *functionState) darrayGrowthOwner(opExpr, receiver ast.Expr, darrayType *semantic.DArrayType) (treeAllocOwnerBinding, bool) {
 	if id, ok := receiver.(*ast.Ident); ok && s.darrayStackTag != nil {
 		if tag, ok := s.darrayStackTag[id.Name]; ok {
 			if owner, ok := s.regionArenaOwner(tag); ok {
@@ -249,7 +249,15 @@ func (s *functionState) darrayGrowthOwner(receiver ast.Expr, darrayType *semanti
 			return owner, true
 		}
 	}
-	return s.lookupTreeAllocOwner()
+	if owner, ok := s.lookupTreeAllocOwner(); ok {
+		return owner, true
+	}
+	// Last resort: a growth op on a global-rooted container (the analyzer marked it
+	// program-lifetime) allocates from the perm arena, with no ambient region needed.
+	if owner, ok, err := s.permGrowthOwner(opExpr); err == nil && ok {
+		return owner, true
+	}
+	return treeAllocOwnerBinding{}, false
 }
 
 // containerRegionName peels ref wrappers and returns the allocation region of

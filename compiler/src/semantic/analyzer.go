@@ -99,6 +99,7 @@ type Analyzer struct {
 	externLinkNames         map[string]externLinkNameSignature
 	constValues             map[string]ConstValue
 	exprTypes               map[ast.Expr]Type
+	permGrowthOps           map[ast.Expr]bool
 	rewriteDefaults         map[*ast.Ident]bool
 	optionalBindSourceTypes map[*ast.OptionalBindExpr]Type
 	interfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
@@ -493,6 +494,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		externLinkNames:                   map[string]externLinkNameSignature{},
 		constValues:                       map[string]ConstValue{},
 		exprTypes:                         make(map[ast.Expr]Type, exprCapacity),
+		permGrowthOps:                     make(map[ast.Expr]bool),
 		rewriteDefaults:                   make(map[*ast.Ident]bool, exprCapacity/128+4),
 		optionalBindSourceTypes:           make(map[*ast.OptionalBindExpr]Type, exprCapacity/16+8),
 		interfaceMethodRefs:               make(map[*ast.FieldExpr]*InterfaceMethodRef, exprCapacity/16+8),
@@ -609,6 +611,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		StaticImpls:             a.staticImpls,
 		ConstValues:             a.constValues,
 		ExprTypes:               a.exprTypes,
+		PermGrowthOps:           a.permGrowthOps,
 		RewriteDefaults:         a.rewriteDefaults,
 		OptionalBindSourceTypes: a.optionalBindSourceTypes,
 		InterfaceMethodRefs:     a.interfaceMethodRefs,

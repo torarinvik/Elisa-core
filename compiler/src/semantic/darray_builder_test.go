@@ -1517,3 +1517,22 @@ func TestAnalyzeDArrayClearAndTruncate(t *testing.T) {
 		t.Fatalf("expected clear call to produce ref type, got %T", result.ExprTypes[clearCall])
 	}
 }
+
+// Global-container growth binds to the perm (program-lifetime) region: a push/reserve
+// on a darray rooted at a global needs no ambient `in <arena>:` scope, because a global
+// container is program-lifetime — the in-place analogue of routing a global store's RHS
+// to perm. The analyzer records the op in PermGrowthOps so the backend routes it.
+func TestAnalyzeGlobalDArrayGrowthBindsToPerm(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "global_darray_growth_perm.elisa", `global mutable g_list: mutable darray[i64] = zeroed
+
+def add(x: i64) -> void:
+    g_list.push(x)
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `requires an active in <arena>: scope`) {
+		t.Fatalf("expected global darray push to bind to perm without an ambient region, got:\n%s", all)
+	}
+	if len(result.PermGrowthOps) == 0 {
+		t.Fatal("expected the global push to be recorded in PermGrowthOps")
+	}
+}

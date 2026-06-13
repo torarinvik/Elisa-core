@@ -214,7 +214,7 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 		// to coerce, and no Memory.Allocate/Abort.Panic surfaced into the caller (the backend
 		// sources the arena from the active scope and calls the panic-on-OOM runtime wrapper).
 		// Only a complete absence of any region is an error.
-		if a.regionAvailableForContainer(dictType) || a.currentAllocExpr != nil {
+		if a.regionAvailableForContainer(dictType) || a.currentAllocExpr != nil || a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 			return builtinDictMethodRewriteNone
 		}
 		a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
@@ -287,7 +287,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "dict entry insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {
@@ -396,7 +396,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
 	}
-	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) {
+	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "dict entry get_or_insert requires an active in <arena>: scope")
 	}
 	if len(expr.Args) != 1 {
