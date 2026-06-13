@@ -57,6 +57,7 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 	if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
 		return
 	}
+	inferred := map[string]string{} // param name -> inferred region-param name
 	for i := range fn.Params {
 		p := &fn.Params[i]
 		stamp, ok := regionlessRefContainer(p.Type)
@@ -71,7 +72,81 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 		name := "__rg_" + p.Name
 		stamp(name)
 		fn.RegionParams = append(fn.RegionParams, name)
+		inferred[p.Name] = name
 	}
+	inferReturnViewRegion(fn, inferred)
+}
+
+// inferReturnViewRegion ties a function's region-less `view[T]` return type to an inferred region
+// param when the body provably returns a slice (`param[a:b]`) of that param's container — `def
+// head(out: mutable darray[u8]&, n) -> view[u8]: out.push(..); return out[0:n]`. Without this the
+// returned view is region-less, so a caller storing it past the source region's death is not caught
+// (a use-after-free — the same hole the explicit `-> view[u8] @r` form now closes). Stamping the
+// return type's region makes the call-site substitution resolve it to the caller's region, where the
+// existing escape checker proves the borrow cannot outlive its backing.
+//
+// Tightly scoped for soundness: only when EXACTLY ONE region param was inferred (so the source
+// region is unambiguous), the declared return type is a region-less view, and a `return param[...]`
+// over the matching grown param is present. A returned view into a dying LOCAL is already rejected
+// upstream, so a function reaching here with a compiling body returns a view backed by the param's
+// (caller-provided) region — exactly the region we stamp.
+func inferReturnViewRegion(fn *ast.FuncDecl, inferred map[string]string) {
+	if len(inferred) != 1 {
+		return
+	}
+	view, ok := fn.ReturnType.(*ast.BuiltinTypeExpr)
+	if !ok || view.Name != "view" || view.Region != "" {
+		return
+	}
+	for paramName, regionName := range inferred {
+		if functionReturnsSliceOfParam(fn.Body, paramName) {
+			view.Region = regionName
+		}
+	}
+}
+
+// functionReturnsSliceOfParam reports whether the body has a `return param[a:b]` returning a slice
+// whose object is the named parameter as a bare identifier. Conservative (bare Ident object only),
+// scanning structurally via reflection like paramContainerIsGrown; a false negative just leaves the
+// return region-less (the pre-existing, safe-but-unchecked state), never the reverse.
+func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
+				if slice, ok := ret.Value.(*ast.SliceExpr); ok && slice != nil {
+					if id, ok := slice.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+						found = true
+						return
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // regionlessRefContainer reports whether a parameter type is a by-reference (`&`) region-less

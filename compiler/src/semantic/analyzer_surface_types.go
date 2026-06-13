@@ -184,7 +184,10 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
 			return invalidType
 		}
-		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view"}
+		// `@r` on a view annotation (`view[u8] @r`) ties the borrowed window to region r — load-bearing
+		// for the escape checker, mirroring darray/dict/set/dstr above. Dropping it left a returned
+		// `view[u8] @r` region-less, so a view escaping its caller region was not caught (use-after-free).
+		viewType := &ViewType{Elem: a.resolveType(expr.TypeArgs[0]), SurfaceName: "view", Region: expr.Region}
 		if len(expr.ValueArgs) == 2 {
 			viewType.Begin = a.exprSummary(expr.ValueArgs[0])
 			viewType.End = a.exprSummary(expr.ValueArgs[1])

@@ -302,6 +302,7 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 		}
 	case *ViewType:
 		if act, ok := actual.(*ViewType); ok {
+			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
 	case *DStrType:

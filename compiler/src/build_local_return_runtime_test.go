@@ -525,3 +525,37 @@ func TestByParMapCollectAdoptedNoUAF(t *testing.T) {
 	}
 	assertAllPassed(t, exit, stdout, stderr, "by_par_map_collect_lives")
 }
+
+// #3 return-a-view-into-grown-param: a function grows a caller-owned darray by reference and
+// returns a `view[u8]` window into it, with ZERO region annotations. Inference ties the param to a
+// region param AND (inferReturnViewRegion) stamps the return view's region to that param, so the
+// returned view binds to the caller's region. The caller reads the window back under ASan — a
+// region-less return (the pre-fix state) or a wrong region pick would fault or read garbage.
+const returnViewIntoGrownParamBody = `
+def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
+    i: mutable usize = 0
+    while i < n:
+        out.push(65u8)
+        i <- i + 1
+    return out[0:n]
+
+@test
+def return_view_into_grown_param_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        v: mutable darray[u8] = []
+        w: view[u8] = head(&v, 64)
+        total: mutable usize = 0
+        for b in w:
+            total <- total + b.usize()
+        if total != 64 * 65:
+            panic("returned view corrupted (UAF / wrong region?)")
+`
+
+func TestReturnViewIntoGrownParamNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "return_view_into_grown_param", returnViewIntoGrownParamBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "return_view_into_grown_param_lives")
+}
