@@ -825,7 +825,7 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 			switch param.Kind {
 			case ast.GenericParamRegion:
 				seenRegion[param.Name] = true
-				parts = append(parts, "region "+param.Name)
+				parts = append(parts, "@"+param.Name)
 			case ast.GenericParamPermission:
 				seenPermission[param.Name] = true
 				parts = append(parts, "permission "+param.Name)
@@ -839,7 +839,7 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 		}
 		for _, name := range regionParams {
 			if !seenRegion[name] {
-				parts = append(parts, "region "+name)
+				parts = append(parts, "@"+name)
 			}
 		}
 		for _, name := range permissionParams {
@@ -850,7 +850,7 @@ func formatFuncGenericParams(genericParams []ast.GenericParam, typeParams []stri
 	} else {
 		parts = append(parts, typeParams...)
 		for _, name := range regionParams {
-			parts = append(parts, "region "+name)
+			parts = append(parts, "@"+name)
 		}
 		for _, name := range permissionParams {
 			parts = append(parts, "permission "+name)

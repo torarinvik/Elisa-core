@@ -347,7 +347,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	interfaceSource := string(data)
 	for _, check := range []string{
 		"struct Box[T]:",
-		"struct Expr[region owner]:",
+		"struct Expr[@owner]:",
 		"next: Expr&? @owner",
 		"extern counter: int",
 		"extern identity[T](value: T) -> T",

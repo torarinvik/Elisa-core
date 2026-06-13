@@ -265,7 +265,7 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 		t.Fatalf("expected region-owned AST fixture to print, stderr:\n%s", stderr.String())
 	}
 	output := stdout.String()
-	for _, check := range []string{"struct Expr[region owner]", "struct Explicit[region arena]", "layout soa struct Rows[region owner]"} {
+	for _, check := range []string{"struct Expr[@owner]", "struct Explicit[@arena]", "layout soa struct Rows[@owner]"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}

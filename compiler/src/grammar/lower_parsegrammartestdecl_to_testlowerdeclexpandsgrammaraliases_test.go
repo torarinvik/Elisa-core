@@ -79,7 +79,7 @@ func TestLowerDeclCarriesGenericHeaderAndBindsTokens(t *testing.T) {
 	}
 	formatted := unparse.FormatDecl(fn)
 	for _, want := range []string{
-		"def program[T, region parse_region](input: T) -> Pascal.Program:",
+		"def program[T, @parse_region](input: T) -> Pascal.Program:",
 		"keyword = expect(\"program\")",
 		"name = parse_ident()",
 		"expect(\";\")",

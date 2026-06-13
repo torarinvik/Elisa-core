@@ -175,6 +175,38 @@ layout soa struct SymbolRows[region owner]:
 	}
 }
 
+func TestParseFuncRegionParamAtSigilForm(t *testing.T) {
+	// `[@r]` is the canonical region-param spelling — the same `@r` token used at use sites —
+	// and must parse to the identical region param as the legacy `[region r]`, composing with
+	// type params in `[T, @r]`.
+	file, errs := parseSourceFile(t, `def repl[@r](s: mutable darray[u8]& @r) -> void:
+	s <- [1]
+
+def merge[T, @r](dst: mutable darray[T]& @r, src: darray[T]) -> void:
+	dst.push(src[0])
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	repl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected first decl to be a func, got %T", file.Decls[0])
+	}
+	if len(repl.RegionParams) != 1 || repl.RegionParams[0] != "r" {
+		t.Fatalf("expected [@r] to yield region param [r], got %v", repl.RegionParams)
+	}
+	merge, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected second decl to be a func, got %T", file.Decls[1])
+	}
+	if len(merge.TypeParams) != 1 || merge.TypeParams[0] != "T" {
+		t.Fatalf("expected [T, @r] to keep type param [T], got %v", merge.TypeParams)
+	}
+	if len(merge.RegionParams) != 1 || merge.RegionParams[0] != "r" {
+		t.Fatalf("expected [T, @r] to yield region param [r], got %v", merge.RegionParams)
+	}
+}
+
 func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Expr[region owner]:
 	left: Expr&? @owner
@@ -192,9 +224,9 @@ layout soa struct SymbolRows[region owner]:
 	}
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"struct Expr[region owner]:",
-		"struct Box[T, region owner]:",
-		"layout soa struct SymbolRows[region owner]:",
+		"struct Expr[@owner]:",
+		"struct Box[T, @owner]:",
+		"layout soa struct SymbolRows[@owner]:",
 		"next: Box[T, owner]&? @owner",
 	} {
 		if !strings.Contains(formatted, want) {

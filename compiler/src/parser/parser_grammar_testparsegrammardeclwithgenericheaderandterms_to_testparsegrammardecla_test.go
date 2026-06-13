@@ -60,7 +60,7 @@ func TestParseGrammarDeclWithGenericHeaderAndTerms(t *testing.T) {
 
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
-		"grammar Pascal[T, region parse_region]:",
+		"grammar Pascal[T, @parse_region]:",
 		"program(input: T) -> Pascal.Program:",
 		"keyword = \"program\"",
 		"name = parse_ident()",
