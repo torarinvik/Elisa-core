@@ -42,6 +42,14 @@ func tryEarlyCachedTestRun(program *loadedProgram, options cliOptions, stdout io
 		return 0, false
 	}
 	writeTestPhaseLine(stderr, "emit_test", "early_cache_hit")
+	// Honor ELISA_KEEP_TEST_BINARY on the early-cache fast path too. The cached binary is
+	// already persistent (it lives in the cache dir, not a temp), but without printing its
+	// path there is no way to map a (project) test run back to the exact executable it ran —
+	// which is what you need to profile/lldb it. The full-compile path prints this; this fast
+	// path silently skipped it, so a cached run gave no reliable handle on its binary.
+	if os.Getenv("ELISA_KEEP_TEST_BINARY") != "" {
+		fmt.Fprintf(stderr, "[ keep     ] test binary: %s\n", meta.Executable)
+	}
 	passed, skipped, failed, _ := runTestExecutableCases(meta.Executable, meta.Cases, options.targetTriple, stdout, stderr)
 	fmt.Fprintf(stdout, "[ SUMMARY  ] %d test(s) selected; passed=%d skipped=%d failed=%d\n", len(meta.Cases), passed, skipped, failed)
 	if failed > 0 {
