@@ -63,7 +63,7 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 		if !ok {
 			continue
 		}
-		if !paramContainerIsGrown(fn.Body, p.Name) {
+		if !paramContainerIsGrown(fn.Body, p.Name) && !paramContainerReassignedFromLiteral(fn.Body, p.Name) {
 			continue
 		}
 		// Param names are unique within a function, so the per-param suffix yields a unique,
@@ -168,4 +168,69 @@ func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// paramContainerReassignedFromLiteral reports whether the body REASSIGNS the named ref-container
+// parameter from a freshly-allocating literal — `param <- [a, b]`, `param <- [x for x in ...]`, or
+// `param <- "..."` (the dstr string-literal sugar, still a StringLit at this pre-pass; flow analysis
+// later rewrites it to a byte-list literal). Like push, whole-container reassignment from a literal
+// allocates a new backing buffer that must land in the param's region — so it equally forces the
+// param to be region-polymorphic, allocating into the caller's region (sound) rather than a local
+// auto-region (which would dangle through the ref — use-after-free). Only literal RHS forms qualify;
+// reassignment from a call/other container raises region-compatibility questions push never had, so
+// it is conservatively excluded (a false negative just reinstates the old "active scope" error).
+func paramContainerReassignedFromLiteral(stmts []ast.Stmt, name string) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if asn, ok := v.Interface().(*ast.AssignStmt); ok && asn != nil && !asn.Optional {
+				if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name && reassignmentAllocatesFreshBacking(asn.Value) {
+					found = true
+					return
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
+}
+
+// reassignmentAllocatesFreshBacking reports whether an assignment RHS allocates a new container
+// backing buffer in place: a list/dict/set literal, a comprehension, or a string literal (the dstr
+// sugar, rewritten to a byte-list literal in flow analysis). Parens are unwrapped.
+func reassignmentAllocatesFreshBacking(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	switch value.(type) {
+	case *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.StringLit:
+		return true
+	}
+	return false
 }

@@ -455,6 +455,46 @@ func TestDStrStringLiteralReturnAssign(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "dstr_literal_return_assign_lives")
 }
 
+// inferredRegionParamReassignBody exercises region-param inference triggered by whole-container
+// REASSIGNMENT from a literal (not just push): a bare `mutable T&` ref param reassigned via
+// `s <- [...]` / `s <- "..."` is inferred region-polymorphic, so the fresh backing allocates in the
+// caller's region (sound) instead of a dying local auto-region (which would dangle through the ref).
+// The caller's region is itself inferred (`= []`), so this also exercises the inferred→inferred
+// threading path. ASan would catch a use-after-free here.
+const inferredRegionParamReassignBody = `
+def repl_da(s: mutable darray[u8]&) -> void:
+    s <- [88u8, 89u8, 90u8]
+
+def repl_str(s: mutable dstr&) -> void:
+    s <- "Hello"
+
+@test
+def inferred_region_param_reassign_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        v: mutable darray[u8] = []
+        v.push(65u8)
+        repl_da(&v)
+        if v.count != 3 or v[0] != 88u8 or v[2] != 90u8:
+            panic("darray bare-reassign wrong")
+        s: mutable dstr = []
+        s.push(64u8)
+        repl_str(&s)
+        if s.count != 5 or s[0] != 72u8 or s[4] != 111u8:
+            panic("dstr bare-string-reassign wrong")
+        s.push(33u8)
+        if s.count != 6 or s[5] != 33u8:
+            panic("post-reassign growth wrong")
+`
+
+func TestInferredRegionParamReassignCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "inferred_region_param_reassign", inferredRegionParamReassignBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "inferred_region_param_reassign_lives")
+}
+
 // `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
 // combinator (it builds the result in its own region and the caller adopts it) instead of an inline
 // presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +
