@@ -217,8 +217,10 @@ func TestAnalyzeRejectsStringMatchOverNonStringValue(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "match requires an enum, const enum, error set, optional, string, tuple, sequence, or struct value, got int") {
-		t.Fatalf("expected non-string match diagnostic, got:\n%s", all)
+	// Matching an integer is now valid (open integer match), so a string-literal arm over an int
+	// is rejected as a malformed integer-match arm rather than an unmatchable scrutinee.
+	if !strings.Contains(all, "top-level integer match arm must use an integer literal or _") {
+		t.Fatalf("expected integer-match arm diagnostic, got:\n%s", all)
 	}
 }
 func TestAnalyzeRejectsNonLiteralTopLevelStringMatchArm(t *testing.T) {

@@ -192,3 +192,10 @@ func (a *Analyzer) reportNonExhaustiveStringMatchExpr(pos lexer.Pos, hasWildcard
 	}
 	a.errorf(pos, "non-exhaustive string match expression; add a final _ arm")
 }
+
+func (a *Analyzer) reportNonExhaustiveIntegerMatchExpr(pos lexer.Pos, hasWildcard bool) {
+	if hasWildcard {
+		return
+	}
+	a.errorf(pos, "non-exhaustive integer match expression; add a final _ arm")
+}

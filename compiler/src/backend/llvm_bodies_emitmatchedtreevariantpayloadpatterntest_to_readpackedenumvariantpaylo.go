@@ -63,8 +63,17 @@ func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, act
 		}
 		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
 		return nil
+	case *ast.MatchLiteralPattern:
+		// Integer match arm (`0xA9:`). emitComparableIsTargetTest unifies the scrutinee and literal
+		// operand types (so a bare literal lowers at the scrutinee's width) and emits an ICmp EQ.
+		cmp, _, err := s.emitComparableIsTargetTest(actualExpr, p.Value)
+		if err != nil {
+			return err
+		}
+		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+		return nil
 	default:
-		return fmt.Errorf("unsupported string match pattern %T", pattern)
+		return fmt.Errorf("unsupported scalar match pattern %T", pattern)
 	}
 }
 func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPattern, actualType semantic.Type) ([]structLiteralField, []*ast.MatchPatternArg, error) {

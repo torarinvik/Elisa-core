@@ -505,6 +505,13 @@ func resolveMatchableErrorSetTypeBackend(actual semantic.Type) (*semantic.ErrorS
 	errorSetType, ok := semantic.StripAggregateStateType(actual).(*semantic.ErrorSetType)
 	return errorSetType, ok && errorSetType != nil
 }
+
+// isIntegerMatchableTypeBackend mirrors the analyzer's isIntegerMatchableType. Integer matches lower
+// through the same generic scalar-literal drivers as string matches (emitStringMatch/Expr), differing
+// only in the per-arm comparison emitted by emitStringMatchPatternTest.
+func isIntegerMatchableTypeBackend(actual semantic.Type) bool {
+	return actual != nil && semantic.IsIntegralType(semantic.StripAggregateStateType(actual))
+}
 func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	enumType, ok := resolveMatchableEnumType(s.exprType(stmt.Value))
 	if ok {
@@ -520,6 +527,9 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	}
 	if optionalType, ok := s.exprType(stmt.Value).(*semantic.OptionalType); ok {
 		return s.emitOptionalMatch(stmt, optionalType)
+	}
+	if isIntegerMatchableTypeBackend(s.exprType(stmt.Value)) {
+		return s.emitStringMatch(stmt)
 	}
 	if isStringMatchableType(s.exprType(stmt.Value)) {
 		return s.emitStringMatch(stmt)

@@ -360,6 +360,9 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if optionalType, ok := s.exprType(expr.Value).(*semantic.OptionalType); ok {
 		return s.emitOptionalMatchExpr(expr, resultType, optionalType)
 	}
+	if isIntegerMatchableTypeBackend(s.exprType(expr.Value)) {
+		return s.emitStringMatchExpr(expr, resultType)
+	}
 	if isStringMatchableType(s.exprType(expr.Value)) {
 		return s.emitStringMatchExpr(expr, resultType)
 	}

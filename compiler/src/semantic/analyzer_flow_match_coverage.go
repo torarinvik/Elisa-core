@@ -43,6 +43,16 @@ func isStringMatchableType(actual Type) bool {
 	return runtimeStringComparable(actual, literalType)
 }
 
+// isIntegerMatchableType reports whether `match` may scrutinize this value as an open integer match
+// — integer-literal arms plus a required `_` catch-all. Like strings, the value space is too large
+// to enumerate, so a final wildcard is mandatory (enforced for expression match).
+func isIntegerMatchableType(actual Type) bool {
+	if actual == nil {
+		return false
+	}
+	return IsIntegralType(StripAggregateStateType(actual))
+}
+
 func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual Type, enumType *EnumType, storeExpr ast.Expr) {
 	if enumType == nil {
 		return

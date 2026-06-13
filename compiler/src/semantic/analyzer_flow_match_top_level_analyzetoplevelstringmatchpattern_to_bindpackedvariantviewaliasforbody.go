@@ -32,6 +32,43 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 		return false
 	}
 }
+// analyzeTopLevelIntegerMatchPattern validates one arm of an integer `match`. Each arm must be an
+// integer-literal pattern (`0xA9:`) or the wildcard `_`. The literal is analyzed against the
+// scrutinee type so it lowers at the scrutinee's width (a bare `0xA9` becomes a u8 when matching a
+// u8), and must be assignable to it. Returns true for the wildcard arm.
+func (a *Analyzer) analyzeTopLevelIntegerMatchPattern(pattern ast.MatchPattern, valueType Type, scope *Scope, index int, armCount int) bool {
+	savedScope := a.currentScope
+	a.currentScope = scope
+	defer func() { a.currentScope = savedScope }()
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		if index != armCount-1 {
+			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
+		}
+		return true
+	case *ast.MatchLiteralPattern:
+		armType := a.analyzeValueExpr(p.Value, valueType)
+		if !IsIntegralType(StripAggregateStateType(armType)) {
+			a.errorf(p.Pos(), "integer match arm expects an integer literal, got %s", armType)
+		} else if !AssignableTo(valueType, armType) {
+			a.errorf(p.Pos(), "integer match arm value of type %s is not assignable to the matched %s", armType, valueType)
+		}
+		return false
+	case *ast.MatchStringLiteralPattern:
+		a.errorf(p.Pos(), "top-level integer match arm must use an integer literal or _")
+		return false
+	case *ast.MatchBindPattern:
+		a.errorf(p.Pos(), "top-level integer match arm must use an integer literal or _")
+		return false
+	case *ast.MatchVariantPattern:
+		a.errorf(p.Pos(), "top-level integer match arm must use an integer literal or _")
+		return false
+	default:
+		a.errorf(pattern.Pos(), "unsupported match pattern %T", pattern)
+		return false
+	}
+}
+
 func (a *Analyzer) analyzeTopLevelStructMatchPattern(pattern ast.MatchPattern, valueType Type, valueExpr ast.Expr, scope *Scope, index int, armCount int) bool {
 	savedScope := a.currentScope
 	a.currentScope = scope
