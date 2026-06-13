@@ -371,6 +371,12 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 			a.errorf(expr.Args[1].Pos(), "dict %s expects value of type %s, got %s", method, dictType.Value, valueType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[1], dictType, dictType.Value, valueType)
+		// Region-poly result value: region-less type but lives in the ambient region, so
+		// putting it into a dict whose storage outlives the function dangles once that region
+		// frees (same hole as assignment/push). Gate on the receiver dict outliving the function.
+		if a.lvalueStorageOutlivesFunction(fieldExpr.Object) {
+			a.checkStoredRegionContainerEscape(expr.Args[1], valueType)
+		}
 		a.consumeAffineValueExpr(expr.Args[1], dictType.Value, "move into dict "+method)
 	}
 	valueRefType := builtinDictEntryValueRefType(dictType)

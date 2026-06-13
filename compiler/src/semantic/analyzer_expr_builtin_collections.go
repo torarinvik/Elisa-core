@@ -288,6 +288,13 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// region outlives it would leave the longer-lived buffer holding a dangling
 		// reference once the inner region is freed.
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], darrayType, darrayType.Elem, argType)
+		// Region-poly result element: its type is region-less but it lives in the ambient
+		// region, so pushing it into a container whose storage outlives the function dangles
+		// once that region is freed (same hole as the assignment path). Mirror the assignment
+		// gate: only when the receiver container outlives the function.
+		if a.lvalueStorageOutlivesFunction(fieldExpr.Object) {
+			a.checkStoredRegionContainerEscape(expr.Args[0], argType)
+		}
 		a.consumeAffineValueExpr(expr.Args[0], darrayType.Elem, "move into darray push")
 	}
 	resultType := receiverRefType

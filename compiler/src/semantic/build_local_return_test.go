@@ -134,3 +134,32 @@ def use_local() -> i64:
     return u.user[0]
 `)
 }
+
+// The same region-poly-result dangle through the in-place container mutations (push / dict.put),
+// not just assignment: pushing/putting a region-poly result into a container whose storage
+// outlives the function dangles once the ambient region frees. Both must be rejected.
+func TestRegionPolyResultPushedIntoRefParamContainerRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_push_escape.elisa", `def make_item() -> darray[i64]:
+    out: mutable darray[i64] = []
+    out.push(7)
+    return out
+def fill(dst: mutable darray[darray[i64]]&) -> void:
+    dst.push(make_item())
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
+		t.Fatalf("pushing a region-poly result into a ref-param container must be rejected, got:\n%s", all)
+	}
+}
+
+func TestRegionPolyResultPutIntoRefParamDictRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_put_escape.elisa", `def make_item() -> darray[i64]:
+    out: mutable darray[i64] = []
+    out.push(7)
+    return out
+def fill(dst: mutable dict[cstr, darray[i64]]&) -> void:
+    _ = dst.put("k", make_item())
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
+		t.Fatalf("putting a region-poly result into a ref-param dict must be rejected, got:\n%s", all)
+	}
+}
