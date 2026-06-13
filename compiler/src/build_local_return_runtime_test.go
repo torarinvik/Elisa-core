@@ -234,6 +234,73 @@ func TestRefParamGrowthInferredRegionCallerVisibleNoUAF(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "ref_param_growth_inferred_region_lives")
 }
 
+// S2 (docs/75) — CALLEE-SIDE region inference with ZERO region annotations. `def fill(out:
+// mutable darray[u8]&, n)` has NO `[region r]` and NO `@r`: the analyzer detects that it GROWS a
+// region-less by-reference container param (`out.push(...)`) and rewrites it into the proven S1
+// `[region __rg_out](out: ... @__rg_out)` form, so the caller's region arena is threaded as the
+// growth allocator and the mutation (count + reallocated items pointer across many growths) is
+// visible in the caller AFTER the call. Caller's container is itself inferred-region (`v = []`, no
+// scope). Reads all 50k bytes back under ASan: a wrong region pick (growth into a freed/foreign
+// arena) faults; a dropped header update loses the count. This is the zero-ceremony cross-fn
+// lifetime goal — `fill(&v)` with no region syntax anywhere.
+const inferredRegionParamGrowthBody = `
+def fill(out: mutable darray[u8]&, n: usize) -> void:
+    i: mutable usize = 0
+    while i < n:
+        out.push((i.u8()))
+        i <- i + 1
+
+@test
+def inferred_region_param_growth_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        v: mutable darray[u8] = []
+        fill(&v, 50000)
+        if v.count != 50000:
+            panic("caller lost count (header update dropped)")
+        sum: mutable u64 = 0u64
+        for i in 0..<v.count.i64():
+            sum <- sum + v[i].u64()
+        if sum != 6367960u64:
+            panic("grown elements corrupted (UAF / wrong region?)")
+`
+
+func TestInferredRegionParamGrowthCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "inferred_region_param_growth", inferredRegionParamGrowthBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "inferred_region_param_growth_lives")
+}
+
+// S2 negative guard: a darray& param used ONLY for reading (`.count`, indexing) must NOT be made
+// region-polymorphic — no growth call, so no region param is synthesized and no spurious hidden
+// Arena& is threaded. If it were, callers would need to supply a region they don't have. Proves
+// the growth-detection gate (paramContainerIsGrown) is the discriminator, not the `&` alone.
+const readOnlyRefParamBody = `
+def total(xs: darray[i64]&) -> i64:
+    sum: mutable i64 = 0
+    for i in 0..<xs.count.i64():
+        sum <- sum + xs[i]
+    return sum
+
+@test
+def read_only_ref_param_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        v: darray[i64] = [1, 2, 3, 4, 5]
+        if total(&v) != 15:
+            panic("read-only ref param miscomputed")
+`
+
+func TestReadOnlyRefParamNotRegionPoly(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "read_only_ref_param", readOnlyRefParamBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "read_only_ref_param_lives")
+}
+
 // `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
 // combinator (it builds the result in its own region and the caller adopts it) instead of an inline
 // presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +

@@ -1,0 +1,155 @@
+package semantic
+
+import (
+	"reflect"
+
+	"elisacore/src/ast"
+)
+
+// containerGrowthMethods are the by-reference container operations that ALLOCATE into the
+// container's backing region. A call to one of these on a parameter is what forces that
+// parameter to carry a region: the push site needs an ambient arena, and across a function
+// boundary the only one available is the caller's, threaded in. Read-only operations
+// (`.count`, indexing, iteration) never need it, so a darray& param used purely for reading
+// is deliberately NOT made region-polymorphic.
+var containerGrowthMethods = map[string]bool{
+	"push":    true,
+	"extend":  true,
+	"insert":  true,
+	"resize":  true,
+	"reserve": true,
+	"append":  true,
+	"put":     true, // dict
+	"add":     true, // set
+}
+
+// inferRegionParamsForGrownContainerParams is the docs/75 S2 callee-side inference for
+// cross-function lifetime. A function that GROWS a region-less by-reference container parameter
+// — `def fill(out: mutable darray[T]&): out.push(...)` — is rewritten in place into the explicit
+// region-parameter form `def fill[region __rg_out](out: mutable darray[T]& @__rg_out): ...`,
+// so the rest of the pipeline sees exactly the (proven sound, S1) annotated shape: the
+// caller's region arena is threaded as a hidden Arena& and resolves the growth allocator, and
+// resolveType's region push-down unifies `@__rg_out` through the ref onto the container so it
+// binds against the `&v` argument's region.
+//
+// This MUST run BEFORE collectValueSymbols so the synthesized region params and the stamped
+// param `@r` are baked into the FuncType at construction time (RegionParams + the param's
+// resolved container Region), keeping the AST and the type in lockstep without a second mutation.
+//
+// SAFETY: this adds no new lifetime power — it only spells, automatically, the `[region r]`/`@r`
+// a user could write by hand (and which S1 proved sound under ASan). The "what is stored INTO
+// the grown param" lifetime obligation stays guarded by the existing escape checker
+// (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
+// arena comes from.
+func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
+	for _, fn := range collectRegionPolyCandidateFuncs(decls) {
+		inferRegionParamsForGrownContainerParamsIn(fn)
+	}
+}
+
+func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
+	if fn == nil || len(fn.Body) == 0 {
+		return
+	}
+	// Don't touch functions that already manage regions explicitly: a hand-written `[region r]`
+	// owns the threading, and an `Arena&` param self-threads its allocator (same gate as
+	// functionBuildsAndReturnsLocalContainer / the parser's auto-region wrap).
+	if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
+		return
+	}
+	for i := range fn.Params {
+		p := &fn.Params[i]
+		container, ok := regionlessRefContainer(p.Type)
+		if !ok {
+			continue
+		}
+		if !paramContainerIsGrown(fn.Body, p.Name) {
+			continue
+		}
+		// Param names are unique within a function, so the per-param suffix yields a unique,
+		// deterministic region-param name (no Date/random — must stay resume-stable).
+		name := "__rg_" + p.Name
+		container.Region = name
+		fn.RegionParams = append(fn.RegionParams, name)
+	}
+}
+
+// regionlessRefContainer returns the innermost container type node of a parameter type IFF it is a
+// by-reference (`&`) region-less growable container (`darray`/`dict`/`set`). Returns the
+// *ast.BuiltinTypeExpr so the caller can stamp its Region. The `&` is required: only a reference
+// makes the callee's growth (header realloc + count) visible in the caller — a by-value container
+// param copies the header, so growth would be lost (the S1 footgun). An existing `@r` anywhere
+// (on the ref or the container) means the user is already managing the region: leave it alone.
+func regionlessRefContainer(typ ast.TypeExpr) (*ast.BuiltinTypeExpr, bool) {
+	sawRef := false
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.OwnedType:
+			typ = t.Elem
+		case *ast.RefType:
+			if t.Region != "" {
+				return nil, false
+			}
+			sawRef = true
+			typ = t.Elem
+		case *ast.BuiltinTypeExpr:
+			if !sawRef || t.Region != "" {
+				return nil, false
+			}
+			switch t.Name {
+			case "darray", "dict", "set":
+				return t, true
+			}
+			return nil, false
+		default:
+			return nil, false
+		}
+	}
+}
+
+// paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)
+// whose receiver is the named parameter — `param.push(...)`. A false negative only forgoes the
+// ergonomic rewrite (the old "requires an active in <arena>: scope" error still fires, which is
+// safe); a false positive only threads an unused region param. Scans structurally via reflection,
+// mirroring bodyCallsStoreNeedingOutsideRegion.
+func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+						found = true
+						return
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
+}
