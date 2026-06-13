@@ -82,3 +82,55 @@ def fill(self: mutable Cache&, n: usize) -> void:
 		t.Fatalf("expected escape error for storing an inferred-region collection into a caller field, got:\n%s", joined)
 	}
 }
+
+// SOUNDNESS: a region-polymorphic call's result is allocated in the caller's ambient region even
+// though its return type is region-less (the region rides the threaded arena, not the type). When
+// such a result — a darray, OR a struct that transitively holds region-allocated data — is stored
+// through a mutable ref parameter (or any storage that outlives the function's region), it dangles
+// once that region is freed. This was a silent use-after-free; it must now be rejected.
+func TestRegionPolyResultStoredThroughRefParamRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_store_escape.elisa", `struct Holder:
+    items: mutable darray[i64]
+def make_items() -> darray[i64]:
+    out: mutable darray[i64] = []
+    out.push(7)
+    return out
+def store_into(dst: mutable Holder&) -> void:
+    dst.items <- make_items()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
+		t.Fatalf("storing a region-poly result through a ref param must be rejected as an escape, got:\n%s", all)
+	}
+}
+
+// A region-poly result holding region data in a STRUCT (the UserSettings_Load shape) is the same
+// dangling store — the struct type carries no region but its darray field lives in the auto region.
+func TestRegionPolyStructResultStoredThroughRefParamRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "rp_struct_store_escape.elisa", `struct Users:
+    user: mutable darray[i64]
+struct Mgr:
+    users: mutable Users
+def make_users() -> Users:
+    return Users([1, 2, 3])
+def bad_store(dst: mutable Mgr&) -> void:
+    dst.users <- make_users()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "escapes its `in auto:` scope") {
+		t.Fatalf("storing a region-poly STRUCT result through a ref param must be rejected, got:\n%s", all)
+	}
+}
+
+// Must NOT over-fire: returning a region-poly result (the caller adopts its region) and binding it
+// to a local that does not outlive the region are both legitimate and must still compile.
+func TestRegionPolyResultReturnAndLocalBindStillAccepted(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "rp_store_ok.elisa", `struct Users:
+    user: mutable darray[i64]
+def make_users() -> Users:
+    return Users([1, 2, 3])
+def forward() -> Users:
+    return make_users()
+def use_local() -> i64:
+    u: Users = make_users()
+    return u.user[0]
+`)
+}

@@ -314,11 +314,42 @@ func (a *Analyzer) checkStoredRegionContainerEscape(valueExpr ast.Expr, valueTyp
 	a.checkRegionContainerEscape(valueExpr, valueType, "store into longer-lived storage")
 }
 
+// exprIsRegionPolyResultCarryingRegionData reports whether an expression is a call to a
+// region-polymorphic function whose result transitively holds region-allocated data. Such a
+// result lives in the ambient (threaded) region even though its type is region-less, so a store
+// of it into longer-lived storage dangles once that region is freed (the ref-param / global-store
+// soundness case). A pure-scalar result (no container/ref/nested region) can never dangle.
+func (a *Analyzer) exprIsRegionPolyResultCarryingRegionData(valueExpr ast.Expr, valueType Type) bool {
+	if a == nil || valueExpr == nil {
+		return false
+	}
+	call, ok := unwrapParenForRegionPoly(valueExpr).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	ft := a.regionPolyCalleeFuncType(call)
+	if ft == nil || !ft.RegionPolymorphic {
+		return false
+	}
+	return typeCarriesRegionStorage(valueType)
+}
+
 func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type, via string) {
 	if a == nil || valueExpr == nil {
 		return
 	}
 	region := containerRegion(valueType)
+	if region == "" {
+		// A region-polymorphic call's result is allocated in the AMBIENT region even though its
+		// type carries no region (region-poly returns are region-less by convention — the region
+		// rides the threaded arena, not the type). If the result transitively holds region-allocated
+		// data (a container/ref field, possibly inside a returned struct), it escapes exactly like a
+		// region-stamped container. Recover the region from the active alloc scope so the checks below
+		// fire. Gated callers already restrict this to targets that outlive the function.
+		if a.activeContainerRegionName() != "" && a.exprIsRegionPolyResultCarryingRegionData(valueExpr, valueType) {
+			region = a.activeContainerRegionName()
+		}
+	}
 	if region == "" {
 		return
 	}
