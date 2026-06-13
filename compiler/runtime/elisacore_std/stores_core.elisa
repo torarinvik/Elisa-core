@@ -20,6 +20,15 @@ def packed_store_side_column_table(state: mutable PackedStoreState&) -> mutable 
 def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
         handles: mutable darray[uintptr]& = packed_store_handle_table(state)
+        # Hot-path short-circuit: this runs on EVERY node append, but the four metadata
+        # columns grow in lockstep (all reserved to the same needed_rows), so a single
+        # capacity check on `handles` settles whether ANY growth is needed; the prefix/side
+        # columns track their own capacity. Once geometric growth has run a few times the
+        # common case is "everything already fits" — return before the per-column accessor
+        # and reserve/ensure calls, which (uninlined) otherwise dominate construction cost.
+        if needed_rows <= handles.capacity and (state.prefix_words == 0 or needed_rows <= state.prefix_column_capacity) and (state.side_words == 0 or needed_rows <= state.side_column_capacity):
+            return
+
         indices: mutable darray[u32]& = packed_store_index_table(state)
         tags: mutable darray[u32]& = packed_store_tag_table(state)
         variant_slots: mutable darray[u32]& = packed_store_variant_slot_table(state)
