@@ -56,13 +56,13 @@ extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 extern free(ptr: heap void&) can[Memory.Release]
 
 static if (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
-    const PROT_READ = 0x1
-    const PROT_WRITE = 0x2
-    const MAP_PRIVATE = 0x02
+    const ELISA_ARENA_PROT_READ = 0x1
+    const ELISA_ARENA_PROT_WRITE = 0x2
+    const ELISA_ARENA_MAP_PRIVATE = 0x02
     static if ELISA_TARGET_OS_LINUX:
-        const MAP_ANONYMOUS = 0x20
+        const ELISA_ARENA_MAP_ANONYMOUS = 0x20
     static else:
-        const MAP_ANONYMOUS = 0x1000
+        const ELISA_ARENA_MAP_ANONYMOUS = 0x1000
     extern mmap(addr: uintptr, length: usize, prot: int, flags: int, fd: int, offset: i64) -> uintptr
     extern munmap(addr: heap void&, length: usize) -> int
     extern MAP_FAILED() -> uintptr
