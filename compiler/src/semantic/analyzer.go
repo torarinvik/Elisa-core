@@ -592,6 +592,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// `[region r]`/`@r` form BEFORE FuncTypes are built, so callee-side region inference reuses
 	// the proven S1 region-param threading end-to-end.
 	a.inferRegionParamsForGrownContainerParams(activeDecls)
+	a.warnOnByValueGrownContainerParams(activeDecls)
 	a.collectValueSymbols(activeDecls)
 	a.collectStaticImpls(activeDecls)
 	a.classifyRegionPolymorphicFunctions(activeDecls)
