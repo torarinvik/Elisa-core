@@ -159,6 +159,81 @@ func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "generic_build_local_return_lives")
 }
 
+// CROSS-FN GROWTH of a CALLER-OWNED container through a by-reference region param.
+// `def fill[region r](out: mutable darray[u8]& @r, ...)` grows the caller's darray and
+// the mutation (count + reallocated items pointer across many growths) is visible in the
+// caller AFTER the call — the `&` makes it pass-by-reference, and `@r` (normalized down onto
+// the container, so it unifies with the `&v` argument's region) threads the caller's region
+// arena as the growth allocator. Reads all 50k bytes back in the caller under ASan: a wrong
+// region pick (growth into a freed/foreign arena) would fault; a dropped header update would
+// lose the count. Explicit `region a(...)` form.
+const refParamGrowthExplicitRegionBody = `
+def fill[region r](out: mutable darray[u8]& @r, n: usize) -> void:
+    i: mutable usize = 0
+    while i < n:
+        out.push((i.u8()))
+        i <- i + 1
+
+@test
+def ref_param_growth_explicit_region_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region a(262144):
+            v: mutable darray[u8] @a = []
+            fill(&v, 50000)
+            if v.count != 50000:
+                panic("caller lost count (header update dropped)")
+            sum: mutable u64 = 0u64
+            for i in 0..<v.count.i64():
+                sum <- sum + v[i].u64()
+            if sum != 6367960u64:
+                panic("grown elements corrupted (UAF / wrong region?)")
+`
+
+func TestRefParamGrowthExplicitRegionCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "ref_param_growth_explicit", refParamGrowthExplicitRegionBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "ref_param_growth_explicit_region_lives")
+}
+
+// Same cross-fn by-ref growth, but the caller's container has NO region annotation and NO
+// explicit `region NAME(...)` scope: `v: mutable darray[u8] = []`. The caller's synthesized
+// auto region is threaded into the `[region r]` callee through the `&v` argument. This was the
+// original P4 vector (inferred container into a region param → silent miscompile). Caller reads
+// all 50k bytes back under ASan: proves the auto-region threading composes with the by-ref
+// region param and stays sound.
+const refParamGrowthInferredRegionBody = `
+def fill[region r](out: mutable darray[u8]& @r, n: usize) -> void:
+    i: mutable usize = 0
+    while i < n:
+        out.push((i.u8()))
+        i <- i + 1
+
+@test
+def ref_param_growth_inferred_region_lives() -> void:
+    can Abort.Panic, Memory.Allocate:
+        v: mutable darray[u8] = []
+        fill(&v, 50000)
+        if v.count != 50000:
+            panic("caller lost count (header update dropped)")
+        sum: mutable u64 = 0u64
+        for i in 0..<v.count.i64():
+            sum <- sum + v[i].u64()
+        if sum != 6367960u64:
+            panic("grown elements corrupted (UAF / wrong region?)")
+`
+
+func TestRefParamGrowthInferredRegionCallerVisibleNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "ref_param_growth_inferred", refParamGrowthInferredRegionBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "ref_param_growth_inferred_region_lives")
+}
+
 // `[ f(x) for x in xs by par ]` now lowers to the generic `par_map_collect` build-local-return
 // combinator (it builds the result in its own region and the caller adopts it) instead of an inline
 // presize+par_map block. This exercises the full stack under ASan — generic region-poly + nursery +

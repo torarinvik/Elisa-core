@@ -174,6 +174,66 @@ func typeCanCarryRegion(typ Type) bool {
 	return false
 }
 
+// stampContainerRegion returns a shallow clone of a region-carrying container
+// type with its Region set to `region`, but ONLY when the container currently
+// has no region of its own. It reports whether a stamp was applied. This is the
+// "region belongs to the container, not the reference" normalization: a `@r`
+// written on a reference-to-container param (`darray[T]& @r`) is pushed down
+// onto the container Elem so it lands in the same place the argument side already
+// puts it (`&v` over `v: darray[T] @a` carries the region on the inner darray).
+// Without this the two regions sit on different type levels and the region
+// parameter never unifies (see darrayGrowthOwner / collectRegionBinding).
+func stampContainerRegion(t Type, region string) (Type, bool) {
+	if region == "" {
+		return t, false
+	}
+	switch c := t.(type) {
+	case *DArrayType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	case *DictType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	case *SetType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	case *DStrType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	case *ViewType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	case *SViewType:
+		if c.Region != "" {
+			return t, false
+		}
+		clone := *c
+		clone.Region = region
+		return &clone, true
+	}
+	return t, false
+}
+
 func (a *Analyzer) freezeMovedPackedStoreSource(expr ast.Expr) (*Symbol, *PackedEnumStoreType, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {

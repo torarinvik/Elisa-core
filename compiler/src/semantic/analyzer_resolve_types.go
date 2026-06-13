@@ -103,6 +103,15 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if a.containsAffineHandleValues(elemType, map[string]bool{}) && !isBorrowableAffineOwnerType(elemType) {
 			a.errorf(n.Pos(), "references to values containing linear handles are not supported; got %s&", elemType)
 		}
+		// "Region belongs to the container, not the reference": a `@r` on a
+		// reference-to-container (`darray[T]& @r`) is pushed down onto the Elem so
+		// it matches where the argument side carries it (`&v` over `darray[T] @a`
+		// puts the region on the inner darray). This lets the region parameter
+		// unify through the ref and lets the callee's growth resolve the threaded
+		// arena. Refs to non-container values (`Arena&`) keep the region on the ref.
+		if stamped, ok := stampContainerRegion(elemType, region); ok {
+			return &RefType{Elem: stamped, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: "", ExplicitStorage: n.Explicit}
+		}
 		return &RefType{Elem: elemType, State: RefState(n.State), Storage: RefStorage(n.Storage), Region: region, ExplicitStorage: n.Explicit}
 	case *ast.ArrayType:
 		return a.resolveArrayType(n)
