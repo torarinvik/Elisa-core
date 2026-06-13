@@ -436,7 +436,11 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 	if g.preferPrivateLinkage && !g.isDirectlyExportedFunction(name) {
 		linkage = C.LLVMLinkage(C.LLVMPrivateLinkage)
 	}
-	if g.isDirectlyExportedFunction(name) || g.isDefaultNativeRuntimeSupportExport(name) {
+	// `main` is the program entry point: the C runtime (crt0) calls it from outside the module,
+	// so it must stay externally visible. Without this it gets private linkage at -O>0 and the
+	// optimizer's GlobalDCE strips it (no in-module callers), breaking native exe links with
+	// "undefined symbol _main".
+	if name == "main" || g.isDirectlyExportedFunction(name) || g.isDefaultNativeRuntimeSupportExport(name) {
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
