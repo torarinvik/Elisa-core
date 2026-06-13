@@ -51,7 +51,10 @@ def ctx_aos_store_new_with_side_words(a: mutable Arena&, record_bytes: usize, si
 def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
-        chunk_index: usize = state.count / state.chunk_records
+        # chunk_records is the fixed power-of-2 PACKED_AOS_CHUNK_RECORDS, so dividing by the
+        # CONSTANT (not the runtime field) lets the backend strength-reduce / and % to shift/mask
+        # on this per-node hot path. The field stays in sync for the (rare) chunk-sizing math below.
+        chunk_index: usize = state.count / PACKED_AOS_CHUNK_RECORDS
         if chunk_index >= state.chunks.count:
             new_chunk: heap u8& = arena_alloc(a, state.chunk_records * state.record_bytes).cast[heap u8&]
             in a:
@@ -60,7 +63,7 @@ def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedS
                 new_side_chunk: heap u8& = arena_alloc(a, state.chunk_records * state.side_words * size_of(uintptr)).cast[heap u8&]
                 in a:
                     state.side_chunks.push(new_side_chunk.uintptr())
-        offset_in_chunk: usize = (state.count - chunk_index * state.chunk_records) * state.record_bytes
+        offset_in_chunk: usize = (state.count - chunk_index * PACKED_AOS_CHUNK_RECORDS) * state.record_bytes
         chunk_base: uintptr = state.chunks[chunk_index]
         row: mutable heap u8& = (chunk_base + offset_in_chunk).cast[mutable heap u8&]
         index: usize = state.count
@@ -70,8 +73,8 @@ def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedS
 # Resolve a node index handle to its (stable) record address.
 def ctx_aos_store_record(state_bits: mutable void&, index: usize) -> mutable heap void&:
     state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
-    chunk_index: usize = index / state.chunk_records
-    offset_in_chunk: usize = (index - chunk_index * state.chunk_records) * state.record_bytes
+    chunk_index: usize = index / PACKED_AOS_CHUNK_RECORDS
+    offset_in_chunk: usize = (index - chunk_index * PACKED_AOS_CHUNK_RECORDS) * state.record_bytes
     chunk_base: uintptr = state.chunks[chunk_index]
     return (chunk_base + offset_in_chunk).cast[mutable heap void&]
 
