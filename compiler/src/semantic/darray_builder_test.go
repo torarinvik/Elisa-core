@@ -362,6 +362,101 @@ func TestAnalyzeInfersUntypedDArrayFromIndexedPush(t *testing.T) {
 	}
 }
 
+// A builder local whose only `.push` lives inside a `while` body must still infer its
+// element type — the use-scan recurses into nested control-flow bodies, not just the
+// declaration's straight-line siblings. (Previously rejected with "empty list literal
+// requires an expected ... type" because the loop-nested push was invisible.)
+func TestAnalyzeInfersUntypedDArrayFromPushInLoop(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_loop_push.elisa", `def build() -> void:
+    item: i64 = 7
+    xs = []
+    n: mutable usize = 0
+    while n < 3:
+        xs.push(item)
+        n <- n + 1
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `empty list literal requires`) || strings.Contains(all, `cannot infer element type`) {
+		t.Fatalf("expected a loop-nested push to infer the darray element type, got:\n%s", all)
+	}
+	elem := inferredBuilderElemType(t, result, "build", "xs")
+	if builtin, ok := elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected inferred darray element i64, got %#v", elem)
+	}
+}
+
+// Return-type-driven fallback: when no push pins the element type (a computed push the
+// syntactic scan can't resolve) but the local is returned from a `-> darray[T]` function,
+// T is taken from the return annotation. This makes the canonical loop-builder shape infer
+// with no type annotation on the local.
+func TestAnalyzeInfersUntypedDArrayFromReturnType(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_return_type.elisa", `def build() -> darray[i64]:
+    xs = []
+    n: mutable usize = 0
+    while n < 3:
+        xs.push(n.i64() * 2)
+        n <- n + 1
+    return xs
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, `empty list literal requires`) || strings.Contains(all, `cannot infer element type`) {
+		t.Fatalf("expected the -> darray[i64] return type to pin the builder element type, got:\n%s", all)
+	}
+	elem := inferredBuilderElemType(t, result, "build", "xs")
+	if builtin, ok := elem.(*BuiltinType); !ok || builtin.Name != "i64" {
+		t.Fatalf("expected inferred darray element i64, got %#v", elem)
+	}
+}
+
+// A computed-push builder with NO return type to fall back on stays a clean, teaching
+// diagnostic (not a silent miscompile): the use-scan flags it ambiguous and asks for a type.
+func TestAnalyzeRejectsUntypedDArrayWithUnresolvableElement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "darray_untyped_empty_unresolvable.elisa", `def build() -> void:
+    xs = []
+    n: mutable usize = 0
+    while n < 3:
+        xs.push(n.i64() * 2)
+        n <- n + 1
+`)
+
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `cannot infer element type`) {
+		t.Fatalf("expected an ambiguous-builder diagnostic asking for a type, got:\n%s", all)
+	}
+}
+
+// inferredBuilderElemType locates the auto-region-wrapped VarDecl named declName inside
+// fnName and returns the element type its empty-literal initializer resolved to.
+func inferredBuilderElemType(t *testing.T, result *Result, fnName, declName string) Type {
+	t.Helper()
+	var regionStmt *ast.RegionStmt
+	for _, decl := range result.File.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name == fnName && len(fn.Body) != 0 {
+			regionStmt, _ = fn.Body[0].(*ast.RegionStmt)
+			break
+		}
+	}
+	if regionStmt == nil {
+		t.Fatalf("expected %s body wrapped in an inferred auto region", fnName)
+	}
+	for _, stmt := range regionStmt.Body {
+		vd, ok := stmt.(*ast.VarDeclStmt)
+		if !ok || vd.Name != declName {
+			continue
+		}
+		darrayType, ok := result.ExprTypes[vd.Value].(*DArrayType)
+		if !ok || darrayType == nil {
+			t.Fatalf("expected %s to resolve to an inferred darray, got %T", declName, result.ExprTypes[vd.Value])
+		}
+		return darrayType.Elem
+	}
+	t.Fatalf("did not find inferred builder local %q in %s", declName, fnName)
+	return nil
+}
+
 func TestAnalyzeInfersUntypedDArrayFromExtendSource(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "darray_untyped_empty_infers_from_extend_source.elisa", `def build() -> void:
     src: mutable darray[u8] = []

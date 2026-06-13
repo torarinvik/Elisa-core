@@ -685,31 +685,67 @@ func stmtUsesDArrayBuilderLocal(stmt ast.Stmt, name string) bool {
 			visitExpr(e.Inner)
 		}
 	}
-	switch s := stmt.(type) {
-	case *ast.ExprStmt:
-		visitExpr(s.Expr)
-	case *ast.ReturnStmt:
-		visitExpr(s.Value)
-	case *ast.VarDeclStmt:
-		visitExpr(s.Value)
-	case *ast.AssignStmt:
-		visitExpr(s.Target)
-		visitExpr(s.Value)
-	case *ast.AugAssignStmt:
-		visitExpr(s.Target)
-		visitExpr(s.Value)
-	case *ast.IfStmt:
-		visitExpr(s.Cond)
-	case *ast.ForStmt:
-		visitExpr(s.Start)
-		visitExpr(s.End)
-		visitExpr(s.Step)
-	case *ast.IterForStmt:
-		visitExpr(s.Source)
-		visitExpr(s.Filter)
-	case *ast.WhileStmt:
-		visitExpr(s.Cond)
+	var visitStmt func(ast.Stmt)
+	visitStmts := func(list []ast.Stmt) {
+		for _, st := range list {
+			if found {
+				return
+			}
+			visitStmt(st)
+		}
 	}
+	// Descend into nested control-flow BODIES, not just their headers: the canonical builder
+	// shape fills the local inside a loop (`out = []; while ...: out.push(x)`). Without this
+	// the auto-region wrap would miss a builder whose only use is loop-nested, leaving the
+	// empty literal with no ambient region. Mirrors the semantic-side use-scan recursion.
+	visitStmt = func(st ast.Stmt) {
+		if found || st == nil {
+			return
+		}
+		switch s := st.(type) {
+		case *ast.ExprStmt:
+			visitExpr(s.Expr)
+		case *ast.ReturnStmt:
+			visitExpr(s.Value)
+		case *ast.VarDeclStmt:
+			visitExpr(s.Value)
+		case *ast.AssignStmt:
+			visitExpr(s.Target)
+			visitExpr(s.Value)
+		case *ast.AugAssignStmt:
+			visitExpr(s.Target)
+			visitExpr(s.Value)
+		case *ast.IfStmt:
+			visitExpr(s.Cond)
+			visitStmts(s.Then)
+			for _, elif := range s.Elifs {
+				visitExpr(elif.Cond)
+				visitStmts(elif.Body)
+			}
+			visitStmts(s.Else)
+		case *ast.ForStmt:
+			visitExpr(s.Start)
+			visitExpr(s.End)
+			visitExpr(s.Step)
+			visitStmts(s.Body)
+		case *ast.IterForStmt:
+			visitExpr(s.Source)
+			visitExpr(s.Filter)
+			visitStmts(s.Body)
+		case *ast.WhileStmt:
+			visitExpr(s.Cond)
+			visitStmts(s.Body)
+		case *ast.ScopeStmt:
+			visitStmts(s.Body)
+		case *ast.CanStmt:
+			visitStmts(s.Body)
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				visitStmts(arm.Body)
+			}
+		}
+	}
+	visitStmt(stmt)
 	return found
 }
 

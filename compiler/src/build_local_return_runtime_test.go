@@ -45,6 +45,46 @@ func TestBuildLocalReturnAdoptedNoUAF(t *testing.T) {
 	assertAllPassed(t, exit, stdout, stderr, "build_local_return_lives")
 }
 
+// UNTYPED build-local-return: `out = []` (no type annotation) filled by a loop-nested push of
+// a COMPUTED value, returned from a `-> darray[i64]` function. The element type is pinned by
+// the return annotation (the syntactic push-arg scan can't resolve `i.i64() * 2`), the body is
+// wrapped in a synthesized auto region, and that region must be adopted into the caller — so a
+// 50k-element read-back after the call is ASan-clean. Guards the untyped-builder ergonomic
+// against both an inference miss (would not compile) and an adoption miss (would UAF).
+const untypedBuildLocalReturnBody = `
+def collect(n: usize) -> darray[i64]:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        out = []
+        i: mutable usize = 0
+        while i < n:
+            out.push(i.i64() * 2)
+            i <- i + 1
+        return out
+
+@test
+def untyped_build_local_return_lives() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        xs: darray[i64] = collect(50000)
+        if xs.count != 50000:
+            panic("returned darray lost its count")
+        sum: mutable i64 = 0
+        for v in xs:
+            sum <- sum + v
+        if sum != 2499950000:
+            panic("returned darray elements corrupted (UAF?)")
+        if xs[0] != 0 or xs[49999] != 99998:
+            panic("returned darray boundary corrupted")
+`
+
+func TestUntypedBuildLocalReturnAdoptedNoUAF(t *testing.T) {
+	t.Setenv("ASAN_OPTIONS", "detect_leaks=0:abort_on_error=1")
+	exit, stdout, stderr := runStressProgram(t, "untyped_build_local_return_uaf", untypedBuildLocalReturnBody, "-link", "-fsanitize=address")
+	if strings.Contains(stderr, "clang not available") {
+		t.Skip("clang not available")
+	}
+	assertAllPassed(t, exit, stdout, stderr, "untyped_build_local_return_lives")
+}
+
 // Multi-return / conditional build-local-return: two literal-locals built in the SAME
 // function-body auto region (maybeWrapFunctionBodyInAutoRegion wraps the whole body in one
 // region), each returned on a different path. Both must be adopted into the caller's region —

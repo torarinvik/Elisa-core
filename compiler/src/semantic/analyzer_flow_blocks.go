@@ -57,6 +57,26 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 			}
 			elem = inferDArrayElemTypeFromUse(stmts[j], decl.Name, known)
 		}
+		// Return-type-driven fallback: when no push/extend pins the element type (e.g. the
+		// builder pushes computed values like `out.push(i.i64() * 2)` whose type the syntactic
+		// scan can't resolve), but the local is the value handed back from a `-> darray[T]`
+		// function, take T straight from the return annotation. This makes the canonical
+		// loop-builder shape (`def mk() -> darray[i64]: out = []; while ...: out.push(...); return out`)
+		// infer with zero ceremony. A mismatched push is still caught later when the push is
+		// type-checked against the now-typed darray, so this can only widen acceptance soundly.
+		if elem == nil && a.currentFuncType != nil {
+			if ret, ok := a.currentFuncType.Return.(*DArrayType); ok && ret != nil && ret.Elem != nil && !IsInvalidType(ret.Elem) {
+				for j := i + 1; j < len(stmts); j++ {
+					if shadow, ok := stmts[j].(*ast.VarDeclStmt); ok && shadow.Name == decl.Name {
+						break
+					}
+					if stmtReturnsBuilderLocal(stmts[j], decl.Name) {
+						elem = astTypeExprForBuiltinMethodRewrite(decl.Position, ret.Elem)
+						break
+					}
+				}
+			}
+		}
 		if elem == nil {
 			if sawDArrayBuilderUse {
 				if a.ambiguousDArrayBuilders == nil {
@@ -156,16 +176,111 @@ func stmtUsesUntypedDArrayBuilderLocal(stmt ast.Stmt, name string) bool {
 			visitExpr(e.Inner)
 		}
 	}
-	switch s := stmt.(type) {
-	case *ast.ExprStmt:
-		visitExpr(s.Expr)
-	case *ast.VarDeclStmt:
-		visitExpr(s.Value)
-	case *ast.AssignStmt:
-		visitExpr(s.Value)
-	case *ast.ReturnStmt:
-		visitExpr(s.Value)
+	var visitStmt func(ast.Stmt)
+	visitStmts := func(list []ast.Stmt) {
+		for _, st := range list {
+			if found {
+				return
+			}
+			visitStmt(st)
+		}
 	}
+	// Mirror inferDArrayElemTypeFromUse's recursion: a builder-local use nested inside a
+	// loop/conditional must count too, so a loop-filled local is not misclassified as unused.
+	visitStmt = func(st ast.Stmt) {
+		if found || st == nil {
+			return
+		}
+		switch s := st.(type) {
+		case *ast.ExprStmt:
+			visitExpr(s.Expr)
+		case *ast.VarDeclStmt:
+			visitExpr(s.Value)
+		case *ast.AssignStmt:
+			visitExpr(s.Value)
+		case *ast.ReturnStmt:
+			visitExpr(s.Value)
+		case *ast.IfStmt:
+			visitStmts(s.Then)
+			for _, elif := range s.Elifs {
+				visitStmts(elif.Body)
+			}
+			visitStmts(s.Else)
+		case *ast.WhileStmt:
+			visitStmts(s.Body)
+		case *ast.ForStmt:
+			visitStmts(s.Body)
+		case *ast.IterForStmt:
+			visitStmts(s.Body)
+		case *ast.ScopeStmt:
+			visitStmts(s.Body)
+		case *ast.CanStmt:
+			visitStmts(s.Body)
+		case *ast.RegionStmt:
+			visitStmts(s.Body)
+		case *ast.InStoreStmt:
+			visitStmts(s.Body)
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				visitStmts(arm.Body)
+			}
+		}
+	}
+	visitStmt(stmt)
+	return found
+}
+
+// stmtReturnsBuilderLocal reports whether stmt (recursing into nested control-flow bodies)
+// contains a `return <name>` handing back the builder local directly. Used by the return-type
+// fallback in inferUntypedDArrayBuilderLocals to decide whether the function's `-> darray[T]`
+// annotation may pin an untyped empty-literal local's element type.
+func stmtReturnsBuilderLocal(stmt ast.Stmt, name string) bool {
+	found := false
+	var visitStmt func(ast.Stmt)
+	visitStmts := func(list []ast.Stmt) {
+		for _, st := range list {
+			if found {
+				return
+			}
+			visitStmt(st)
+		}
+	}
+	visitStmt = func(st ast.Stmt) {
+		if found || st == nil {
+			return
+		}
+		switch s := st.(type) {
+		case *ast.ReturnStmt:
+			if id, ok := stripParenExpr(s.Value).(*ast.Ident); ok && id != nil && id.Name == name {
+				found = true
+			}
+		case *ast.IfStmt:
+			visitStmts(s.Then)
+			for _, elif := range s.Elifs {
+				visitStmts(elif.Body)
+			}
+			visitStmts(s.Else)
+		case *ast.WhileStmt:
+			visitStmts(s.Body)
+		case *ast.ForStmt:
+			visitStmts(s.Body)
+		case *ast.IterForStmt:
+			visitStmts(s.Body)
+		case *ast.ScopeStmt:
+			visitStmts(s.Body)
+		case *ast.CanStmt:
+			visitStmts(s.Body)
+		case *ast.RegionStmt:
+			visitStmts(s.Body)
+		case *ast.InStoreStmt:
+			visitStmts(s.Body)
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				visitStmts(arm.Body)
+			}
+		}
+	}
+	visitStmt(stmt)
 	return found
 }
 
@@ -250,16 +365,59 @@ func inferDArrayElemTypeFromUse(stmt ast.Stmt, name string, known map[string]Typ
 			visitExpr(e.Inner)
 		}
 	}
-	switch s := stmt.(type) {
-	case *ast.ExprStmt:
-		visitExpr(s.Expr)
-	case *ast.VarDeclStmt:
-		visitExpr(s.Value)
-	case *ast.AssignStmt:
-		visitExpr(s.Value)
-	case *ast.ReturnStmt:
-		visitExpr(s.Value)
+	var visitStmt func(ast.Stmt)
+	visitStmts := func(list []ast.Stmt) {
+		for _, st := range list {
+			if found != nil {
+				return
+			}
+			visitStmt(st)
+		}
 	}
+	// Descend into nested control-flow bodies: a builder local is very often filled by a
+	// `.push(...)` inside a `while`/`for`/`if`/`match`/`can` body, not just straight-line at
+	// the declaration's level. Without this recursion the empty-literal element type could not
+	// be inferred for the canonical loop-builder shape (`out = []; while ...: out.push(x)`).
+	visitStmt = func(st ast.Stmt) {
+		if found != nil || st == nil {
+			return
+		}
+		switch s := st.(type) {
+		case *ast.ExprStmt:
+			visitExpr(s.Expr)
+		case *ast.VarDeclStmt:
+			visitExpr(s.Value)
+		case *ast.AssignStmt:
+			visitExpr(s.Value)
+		case *ast.ReturnStmt:
+			visitExpr(s.Value)
+		case *ast.IfStmt:
+			visitStmts(s.Then)
+			for _, elif := range s.Elifs {
+				visitStmts(elif.Body)
+			}
+			visitStmts(s.Else)
+		case *ast.WhileStmt:
+			visitStmts(s.Body)
+		case *ast.ForStmt:
+			visitStmts(s.Body)
+		case *ast.IterForStmt:
+			visitStmts(s.Body)
+		case *ast.ScopeStmt:
+			visitStmts(s.Body)
+		case *ast.CanStmt:
+			visitStmts(s.Body)
+		case *ast.RegionStmt:
+			visitStmts(s.Body)
+		case *ast.InStoreStmt:
+			visitStmts(s.Body)
+		case *ast.MatchStmt:
+			for _, arm := range s.Arms {
+				visitStmts(arm.Body)
+			}
+		}
+	}
+	visitStmt(stmt)
 	return found
 }
 
