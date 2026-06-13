@@ -19,7 +19,7 @@ func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
 `)
 }
 func TestAnalyzeSequenceRewriteUsesExpectedRegionParam(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "sequence_rewrite_region_param.elisa", `def keep_non_zero[region r](items: darray[u32] @r) -> darray[u32] @r:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sequence_rewrite_region_param.elisa", `def keep_non_zero[@r](items: darray[u32] @r) -> darray[u32] @r:
 	return rewrite items as sequence[u32]:
 		item when item != 0u32:
 			emit item

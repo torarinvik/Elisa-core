@@ -22,7 +22,7 @@ def f() -> void:
 func TestOwnedArenaDestroyedIsClean(t *testing.T) {
 	analyzeTreeTestSource(t, "owned_destroyed.elisa", `extern new_arena(cap: usize) -> Arena
 
-struct Node[region owner]:
+struct Node[@owner]:
     value: i32
 
 def f() -> void:
@@ -46,7 +46,7 @@ func TestOwnedArenaParamMustBeConsumed(t *testing.T) {
 
 // An owned Arena param that the callee destroys (and allocates into) is clean.
 func TestOwnedArenaParamDestroyedIsClean(t *testing.T) {
-	analyzeTreeTestSource(t, "owned_param_ok.elisa", `struct Node[region owner]:
+	analyzeTreeTestSource(t, "owned_param_ok.elisa", `struct Node[@owner]:
     value: i32
 
 def worker(r: owned Arena) -> void:
@@ -101,7 +101,7 @@ def f() -> void:
 func TestClosureCapturingOwnedRegionDepRejectedAfterDestroy(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "owned_closure.elisa", `extern new_arena(cap: usize) -> Arena
 
-struct Node[region owner]:
+struct Node[@owner]:
     value: i32
 
 def f() -> i32:

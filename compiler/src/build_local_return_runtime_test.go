@@ -160,7 +160,7 @@ func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
 }
 
 // CROSS-FN GROWTH of a CALLER-OWNED container through a by-reference region param.
-// `def fill[region r](out: mutable darray[u8]& @r, ...)` grows the caller's darray and
+// `def fill[@r](out: mutable darray[u8]& @r, ...)` grows the caller's darray and
 // the mutation (count + reallocated items pointer across many growths) is visible in the
 // caller AFTER the call — the `&` makes it pass-by-reference, and `@r` (normalized down onto
 // the container, so it unifies with the `&v` argument's region) threads the caller's region
@@ -168,7 +168,7 @@ func TestBuildLocalReturnGenericAdoptedNoUAF(t *testing.T) {
 // region pick (growth into a freed/foreign arena) would fault; a dropped header update would
 // lose the count. Explicit `region a(...)` form.
 const refParamGrowthExplicitRegionBody = `
-def fill[region r](out: mutable darray[u8]& @r, n: usize) -> void:
+def fill[@r](out: mutable darray[u8]& @r, n: usize) -> void:
     i: mutable usize = 0
     while i < n:
         out.push((i.u8()))
@@ -200,12 +200,12 @@ func TestRefParamGrowthExplicitRegionCallerVisibleNoUAF(t *testing.T) {
 
 // Same cross-fn by-ref growth, but the caller's container has NO region annotation and NO
 // explicit `region NAME(...)` scope: `v: mutable darray[u8] = []`. The caller's synthesized
-// auto region is threaded into the `[region r]` callee through the `&v` argument. This was the
+// auto region is threaded into the `[@r]` callee through the `&v` argument. This was the
 // original P4 vector (inferred container into a region param → silent miscompile). Caller reads
 // all 50k bytes back under ASan: proves the auto-region threading composes with the by-ref
 // region param and stays sound.
 const refParamGrowthInferredRegionBody = `
-def fill[region r](out: mutable darray[u8]& @r, n: usize) -> void:
+def fill[@r](out: mutable darray[u8]& @r, n: usize) -> void:
     i: mutable usize = 0
     while i < n:
         out.push((i.u8()))
@@ -235,9 +235,9 @@ func TestRefParamGrowthInferredRegionCallerVisibleNoUAF(t *testing.T) {
 }
 
 // S2 (docs/75) — CALLEE-SIDE region inference with ZERO region annotations. `def fill(out:
-// mutable darray[u8]&, n)` has NO `[region r]` and NO `@r`: the analyzer detects that it GROWS a
+// mutable darray[u8]&, n)` has NO `[@r]` and NO `@r`: the analyzer detects that it GROWS a
 // region-less by-reference container param (`out.push(...)`) and rewrites it into the proven S1
-// `[region __rg_out](out: ... @__rg_out)` form, so the caller's region arena is threaded as the
+// `[@__rg_out](out: ... @__rg_out)` form, so the caller's region arena is threaded as the
 // growth allocator and the mutation (count + reallocated items pointer across many growths) is
 // visible in the caller AFTER the call. Caller's container is itself inferred-region (`v = []`, no
 // scope). Reads all 50k bytes back under ASan: a wrong region pick (growth into a freed/foreign

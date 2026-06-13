@@ -20,7 +20,7 @@ func TestRunCLIRegionParamContainerPushThreadsArenaViaHiddenParam(t *testing.T) 
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_push_fixture.elisa")
-	src := `def fill[region r](out: mutable darray[u8] @r) -> u64:
+	src := `def fill[@r](out: mutable darray[u8] @r) -> u64:
     for i in 0..<10:
         out.push((65 + i).u8())
     sum: mutable u64 = 0u64
@@ -66,7 +66,7 @@ func TestRunCLIDArrayPushArrayLiteralBulkAppend(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "darray_push_array_literal_fixture.elisa")
-	src := `def fill[region r](out: mutable darray[u8] @r) -> u64:
+	src := `def fill[@r](out: mutable darray[u8] @r) -> u64:
     out.push([10, 20, 30])
     out.extend([40, 50])
     sum: mutable u64 = 0u64
@@ -112,7 +112,7 @@ func TestRunCLIRegionParamListComprehensionThreadsArenaViaHiddenParam(t *testing
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_list_comp_fixture.elisa")
-	src := `def bumped[region r](items: darray[u8] @r) -> u64:
+	src := `def bumped[@r](items: darray[u8] @r) -> u64:
     out: darray[u8] @r = [item + 1 for item in items]
     sum: mutable u64 = 0u64
     for i in 0..<out.count.i64():
@@ -160,7 +160,7 @@ func TestRunCLIRegionParamEachQueryThreadsArenaViaHiddenParam(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_each_query_fixture.elisa")
-	src := `def bumped[region r](items: darray[u8] @r) -> u64:
+	src := `def bumped[@r](items: darray[u8] @r) -> u64:
     out: darray[u8] @r = item + 1 for each item in items
     sum: mutable u64 = 0u64
     for i in 0..<out.count.i64():
@@ -220,7 +220,7 @@ func TestRunCLIRegionParamDictInsertThreadsArenaViaHiddenParam(t *testing.T) {
 	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
 include "` + filepath.Join(stdDir, "heap.elisa") + `"
 
-def fill[region r](d: mutable dict[cstr, i64] @r) -> i64:
+def fill[@r](d: mutable dict[cstr, i64] @r) -> i64:
     d.entry("alpha").insert(10)
     d.entry("beta").insert(20)
     d.entry("gamma").insert(30)
@@ -279,7 +279,7 @@ func TestRunCLIRegionParamDictPutThreadsArenaViaHiddenParam(t *testing.T) {
 	src := `include "` + filepath.Join(stdDir, "elisacore_runtime.elisa") + `"
 include "` + filepath.Join(stdDir, "heap.elisa") + `"
 
-def fill[region r](d: mutable dict[cstr, i64] @r) -> i64:
+def fill[@r](d: mutable dict[cstr, i64] @r) -> i64:
     d.reserve(8)
     _ = d.put("alpha", 10)
     _ = d.put("beta", 20)
@@ -380,7 +380,7 @@ func TestRunCLIRegionParamCloneDArrayUsesHiddenArena(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_clone_darray.elisa")
-	src := `def copy[region r](items: darray[u8] @r) -> darray[u8] @r:
+	src := `def copy[@r](items: darray[u8] @r) -> darray[u8] @r:
     return clone[darray[u8] @r](items)
 
 @test
@@ -424,7 +424,7 @@ func TestRunCLIRegionParamSequenceRewriteUsesHiddenArena(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_sequence_rewrite.elisa")
-	src := `def keep_non_zero[region r](items: darray[u32] @r) -> darray[u32] @r:
+	src := `def keep_non_zero[@r](items: darray[u32] @r) -> darray[u32] @r:
     return rewrite items as sequence[u32]:
         item when item != 0u32:
             emit item
@@ -697,7 +697,7 @@ func TestRunCLIRegionParamDarrayCstrThreadsArenaViaHiddenParam(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_darray_cstr.elisa")
-	src := `def cstrlen[region r](d: mutable darray[u8] @r) -> i64:
+	src := `def cstrlen[@r](d: mutable darray[u8] @r) -> i64:
     cs: cstr = d.as_cstr()
     n: mutable i64 = 0
     for ch in cs:
@@ -744,7 +744,7 @@ func TestRunCLIRegionParamDarrayLiteralThreadsArenaViaHiddenParam(t *testing.T) 
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_darray_literal.elisa")
-	src := `def build[region r](anchor: mutable darray[u8] @r) -> u64:
+	src := `def build[@r](anchor: mutable darray[u8] @r) -> u64:
     xs: darray[u8] @r = [10, 20, 30]
     sum: mutable u64 = 0u64
     for i in 0..<xs.count.i64():

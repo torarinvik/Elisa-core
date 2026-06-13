@@ -42,7 +42,7 @@ func parseGrammarTestFile(t *testing.T, src string) *ast.File {
 	return file
 }
 func TestLowerDeclCarriesGenericHeaderAndBindsTokens(t *testing.T) {
-	decl := parseGrammarTestDecl(t, `grammar Pascal[T, region parse_region]:
+	decl := parseGrammarTestDecl(t, `grammar Pascal[T, @parse_region]:
     program(input: T) -> Pascal.Program:
         keyword = "program"
         name = parse_ident()

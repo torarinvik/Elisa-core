@@ -49,10 +49,10 @@ def main() -> i64:
 	}
 }
 
-// A region-tracked self-ref (`@owner` in a `[region owner]` struct) is a sound single-region
+// A region-tracked self-ref (`@owner` in a `[@owner]` struct) is a sound single-region
 // graph whose whole lifetime is one decision — NOT flagged. Friction only on the raw kind.
 func TestRunCLIPointerGraphLintAllowsRegionProvenance(t *testing.T) {
-	out := compileAndCaptureStderr(t, "region_graph.elisa", `struct SafeNode[region owner]:
+	out := compileAndCaptureStderr(t, "region_graph.elisa", `struct SafeNode[@owner]:
     value: i64
     next: SafeNode&? @owner
 

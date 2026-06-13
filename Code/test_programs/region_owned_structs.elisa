@@ -1,8 +1,8 @@
-struct Expr[region owner]:
+struct Expr[@owner]:
     value: i64
     next: Expr&? @owner
 
-struct Box[T, region owner]:
+struct Box[T, @owner]:
     value: T
     next: Box[T, owner]&? @owner
 

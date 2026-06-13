@@ -8,7 +8,7 @@ import (
 )
 
 func TestParseGrammarDeclWithGenericHeaderAndTerms(t *testing.T) {
-	file, errs := parseSourceFile(t, `grammar Pascal[T, region parse_region]:
+	file, errs := parseSourceFile(t, `grammar Pascal[T, @parse_region]:
     program(input: T) -> Pascal.Program:
         keyword = "program"
         name = parse_ident()

@@ -1,4 +1,4 @@
-struct RegionNode[region owner]:
+struct RegionNode[@owner]:
     next: RegionNode&? @owner
     value: i32
 

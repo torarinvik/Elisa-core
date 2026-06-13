@@ -21,7 +21,7 @@ func TestRegionContainerReturnEscapeChecking(t *testing.T) {
 		t.Fatalf("expected scope-owned region container return to be rejected; got: %s", all)
 	}
 
-	ok := analyzeTreeTestSourceWithSemanticErrors(t, "region_escape_ok.elisa", `def keep[region r](v: mutable darray[u8] @r) -> darray[u8] @r:
+	ok := analyzeTreeTestSourceWithSemanticErrors(t, "region_escape_ok.elisa", `def keep[@r](v: mutable darray[u8] @r) -> darray[u8] @r:
     return v
 `)
 	if all := strings.Join(ok.Errors(), "\n"); strings.Contains(all, "escapes via return") {
@@ -79,7 +79,7 @@ func TestRegionScopeDirectPushAllowed(t *testing.T) {
 }
 
 func TestRegionParamDictDirectPutAllowed(t *testing.T) {
-	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_param_dict_direct_put.elisa", `def fill[region r](d: mutable dict[cstr, i64] @r) -> void:
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_param_dict_direct_put.elisa", `def fill[@r](d: mutable dict[cstr, i64] @r) -> void:
     d.reserve(8)
     _ = d.put("alpha", 10)
     _ = d.get_or_insert("beta", 20)

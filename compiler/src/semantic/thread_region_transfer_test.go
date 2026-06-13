@@ -12,7 +12,7 @@ import (
 const threadRegionPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
     return zeroed
 extern new_arena(cap: usize) -> Arena
-struct Node[region owner]:
+struct Node[@owner]:
     value: i32
 def worker(r: owned Arena) -> i64:
     n: Node[r]& @r = new[r] Node(7)

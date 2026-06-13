@@ -39,7 +39,7 @@ func TestAnalyzeAcceptsExplicitRegionQualifiedRefs(t *testing.T) {
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnFunctions(t *testing.T) {
-	src := `def id[T, region r](value: T& @r) -> T& @r:
+	src := `def id[T, @r](value: T& @r) -> T& @r:
 	alias: T& @r = value
 	return alias
 
@@ -53,7 +53,7 @@ def use(seed: i32) -> i32:
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsExplicitRegionParamsOnExternFunctions(t *testing.T) {
-	src := `extern borrow[region r](value: i32& @r) -> i32& @r
+	src := `extern borrow[@r](value: i32& @r) -> i32& @r
 
 def use(seed: i32) -> i32:
 	region scratch(1024)
@@ -367,7 +367,7 @@ func TestAnalyzeInfersBuiltinAbortPermissionFromPanic(t *testing.T) {
 // region prefix `r T&`: both bind the reference to region parameter r, so the same
 // program analyzes cleanly written either way.
 func TestAnalyzeAcceptsRegionSuffixOnReference(t *testing.T) {
-	src := `def id[region r](value: i32& @r) -> i32& @r:
+	src := `def id[@r](value: i32& @r) -> i32& @r:
 	return value
 `
 	_, errs := parseAndAnalyze(t, "function_region_suffix_ref_ok.elisa", src)
@@ -377,7 +377,7 @@ func TestAnalyzeAcceptsRegionSuffixOnReference(t *testing.T) {
 }
 
 func TestAnalyzeRejectsCallsWhenRegionParamCannotBeInferred(t *testing.T) {
-	src := `def id[region r](value: i32& @r) -> i32& @r:
+	src := `def id[@r](value: i32& @r) -> i32& @r:
 	return value
 
 def use(value: i32&) -> i32&:

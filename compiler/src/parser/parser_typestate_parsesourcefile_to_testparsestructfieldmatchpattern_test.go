@@ -207,6 +207,46 @@ def merge[T, @r](dst: mutable darray[T]& @r, src: darray[T]) -> void:
 	}
 }
 
+func TestLegacyRegionParamSpellingEmitsDeprecation(t *testing.T) {
+	// `[region r]` is the legacy alias for the canonical `[@r]`; it still parses to the same
+	// region param (no hard error) but now emits a non-fatal deprecation notice steering to `@r`.
+	l := lexer.New("test.elisa", []byte(`def repl[region r](s: mutable darray[u8]& @r) -> void:
+	s <- [1]
+
+struct Box[T, region owner]:
+	value: T
+`))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lexer errors: %v", errs)
+	}
+	p := New(tokens)
+	file := p.ParseFile("test.elisa")
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("legacy region spelling should still parse without errors, got: %v", errs)
+	}
+	fn, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok || len(fn.RegionParams) != 1 || fn.RegionParams[0] != "r" {
+		t.Fatalf("expected [region r] to parse to region param [r], got %#v", file.Decls[0])
+	}
+	notices := strings.Join(p.Notices(), "\n")
+	for _, want := range []string{"`region r` is deprecated", "use `@r`", "`region owner` is deprecated", "use `@owner`"} {
+		if !strings.Contains(notices, want) {
+			t.Fatalf("expected deprecation notice containing %q, got:\n%s", want, notices)
+		}
+	}
+}
+
+func TestCanonicalRegionParamSpellingEmitsNoDeprecation(t *testing.T) {
+	l := lexer.New("test.elisa", []byte("def repl[@r](s: mutable darray[u8]& @r) -> void:\n\ts <- [1]\n"))
+	tokens := l.Tokenize()
+	p := New(tokens)
+	p.ParseFile("test.elisa")
+	if notices := p.Notices(); len(notices) != 0 {
+		t.Fatalf("canonical `[@r]` spelling should emit no deprecation notice, got: %v", notices)
+	}
+}
+
 func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Expr[region owner]:
 	left: Expr&? @owner

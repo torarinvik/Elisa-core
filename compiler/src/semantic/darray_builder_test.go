@@ -132,7 +132,7 @@ func TestAnalyzeDArrayLiteralWithExplicitOwner(t *testing.T) {
 }
 
 func TestAnalyzeDArrayLiteralUsesExpectedRegionParam(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_region_param.elisa", `def build[region r](anchor: darray[i64] @r) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "darray_literal_region_param.elisa", `def build[@r](anchor: darray[i64] @r) -> usize:
     _ = anchor
     xs: darray[i64] @r = [1, 2, 3]
     return xs.count
@@ -1220,7 +1220,7 @@ def names(owner: Arena, entries: darray[Entry]) -> darray[i64]:
 }
 
 func TestAnalyzeEachQueryUsesExpectedRegionParam(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "each_query_region_param.elisa", `def build[region r](items: darray[i64] @r) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "each_query_region_param.elisa", `def build[@r](items: darray[i64] @r) -> usize:
     out: darray[i64] @r = item + 1 for each item in items
     return out.count
 `)
@@ -1268,7 +1268,7 @@ func TestAnalyzeListComprehensionReturnIsRegionPolymorphic(t *testing.T) {
 }
 
 func TestAnalyzeListComprehensionUsesExpectedRegionParam(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "list_comprehension_region_param.elisa", `def build[region r](items: darray[i64] @r) -> usize:
+	result := analyzeFunctionAnalysisTestSource(t, "list_comprehension_region_param.elisa", `def build[@r](items: darray[i64] @r) -> usize:
     out: darray[i64] @r = [item + 1 for item in items]
     return out.count
 `)

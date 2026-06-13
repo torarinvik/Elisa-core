@@ -24,13 +24,13 @@ def main() -> i64:
 	}
 }
 
-// The same A <-> B cycle made sound with `@owner`/`[region owner]` provenance is a single-region
+// The same A <-> B cycle made sound with `@owner`/`[@owner]` provenance is a single-region
 // graph whose lifetime is one decision — NOT flagged.
 func TestRunCLIPointerGraphLintAllowsRegionUnifiedCycle(t *testing.T) {
-	out := compileAndCaptureStderr(t, "region_cycle.elisa", `struct A[region owner]:
+	out := compileAndCaptureStderr(t, "region_cycle.elisa", `struct A[@owner]:
     next: B&? @owner
 
-struct B[region owner]:
+struct B[@owner]:
     back: A&? @owner
 
 def main() -> i64:

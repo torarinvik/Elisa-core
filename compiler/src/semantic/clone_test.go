@@ -17,7 +17,7 @@ def clone_pair(owner: mutable Arena&, source_items: view[u32]) -> Pair:
 }
 
 func TestAnalyzeCloneBuiltinUsesRegionParamTarget(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_region_param.elisa", `def copy[region r](items: darray[u8] @r) -> darray[u8] @r:
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clone_builtin_region_param.elisa", `def copy[@r](items: darray[u8] @r) -> darray[u8] @r:
     return clone[darray[u8] @r](items)
 `)
 	all := strings.Join(result.Errors(), "\n")

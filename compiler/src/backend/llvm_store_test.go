@@ -160,7 +160,7 @@ def build(owner: Arena) -> usize:
 }
 
 func TestGenerateLLVMIRLowersRegionOwnedStructInstance(t *testing.T) {
-	src := `struct Expr[region owner]:
+	src := `struct Expr[@owner]:
     next: Expr&? @owner
 
 def build() -> i64:
@@ -188,7 +188,7 @@ def build() -> i64:
 }
 
 func TestGenerateLLVMIRLowersRegionOwnedStructWithArenaValueArgument(t *testing.T) {
-	src := `struct Expr[region owner]:
+	src := `struct Expr[@owner]:
     next: Expr&? @owner
 
 def build(owner: Arena) -> i64:

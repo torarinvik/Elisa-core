@@ -205,11 +205,11 @@ struct Header:
 }
 
 func TestAnalyzeStructRegionOwnerScope(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr[region owner]:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_scope.elisa", `struct Expr[@owner]:
 	left: Expr&? @owner
 	right: Expr&? @owner
 
-struct Explicit[region arena]:
+struct Explicit[@arena]:
 	next: Explicit&? @arena
 `)
 	expr := result.NamedTypes["Expr"].(*StructType)
@@ -237,7 +237,7 @@ struct Explicit[region arena]:
 }
 
 func TestAnalyzeStructRegionOwnerUseSiteInstantiation(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_use_site.elisa", `struct Expr[region owner]:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_use_site.elisa", `struct Expr[@owner]:
 	next: Expr&? @owner
 
 def build() -> void:
@@ -254,7 +254,7 @@ def build() -> void:
 }
 
 func TestAnalyzeStructRegionOwnerAcceptsArenaValueArgument(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_arena_value_arg.elisa", `struct Expr[region owner]:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_arena_value_arg.elisa", `struct Expr[@owner]:
 	next: Expr&? @owner
 
 def build(owner: Arena) -> void:
@@ -269,7 +269,7 @@ def build(owner: Arena) -> void:
 }
 
 func TestAnalyzeStructRegionOwnerWithTypeParams(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, region owner]:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, @owner]:
 	value: T
 	next: Box[T, owner]&? @owner
 
