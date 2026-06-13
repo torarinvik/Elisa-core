@@ -234,7 +234,7 @@ func (s *functionState) enumPayloadWordCount(enumType *semantic.EnumType) (uint6
 	}
 	maxSlots := uint64(0)
 	for _, variant := range enumType.Variants {
-		slots, err := s.g.enumVariantPayloadSlots(variant)
+		slots, err := s.g.enumVariantPayloadSlots(enumType, variant)
 		if err != nil {
 			return 0, err
 		}

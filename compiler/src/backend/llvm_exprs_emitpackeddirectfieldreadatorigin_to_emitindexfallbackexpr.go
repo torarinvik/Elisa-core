@@ -113,10 +113,7 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		}
 		cacheDirectField = true
 	}
-	wordBytes := uint64(s.g.wordBits / 8)
-	if wordBytes == 0 {
-		wordBytes = 8
-	}
+	wordBytes := s.g.payloadSlotBytes(enumType)
 	wordOffset := fieldOffsetBytes / wordBytes
 	byteOffsetInWord := fieldOffsetBytes % wordBytes
 	if byteOffsetInWord+fieldSizeBytes <= wordBytes {

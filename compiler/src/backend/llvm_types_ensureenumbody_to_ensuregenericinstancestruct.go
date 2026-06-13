@@ -81,13 +81,13 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 	if err != nil {
 		return nil, err
 	}
-	wordType, err := g.lowerBuiltin("uintptr")
+	wordType, err := g.payloadSlotType(enum)
 	if err != nil {
 		return nil, err
 	}
 	maxSlots := uint64(0)
 	for _, variant := range leaves {
-		slots, err := g.enumVariantPayloadSlots(variant)
+		slots, err := g.enumVariantPayloadSlots(enum, variant)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +135,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 	}
 	maxSlots := uint64(0)
 	for _, variant := range enumLayoutLeaves(enum) { // docs/77: union over the whole hierarchy's leaves
-		slots, err := g.enumVariantPayloadSlots(variant)
+		slots, err := g.enumVariantPayloadSlots(enum, variant)
 		if err != nil {
 			return nil, err
 		}
@@ -144,7 +144,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 		}
 	}
 	if maxSlots > 0 {
-		wordType, err := g.lowerBuiltin("uintptr")
+		wordType, err := g.payloadSlotType(enum)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +165,7 @@ func (g *llvmGenerator) packedEnumCommonPrefixWordCount(enum *semantic.EnumType)
 	}
 	hasPayload := false
 	for _, variant := range enumLayoutLeaves(enum) {
-		slots, err := g.enumVariantPayloadSlots(variant)
+		slots, err := g.enumVariantPayloadSlots(enum, variant)
 		if err != nil {
 			return 0, err
 		}
@@ -236,7 +236,35 @@ func enumIsTagOnly(enum *semantic.EnumType) bool {
 	// agree on representation (bare u32 vs {tag, union}).
 	return enumLeavesAreTagOnly(enumLayoutLeaves(enum))
 }
-func (g *llvmGenerator) enumVariantPayloadSlots(variant *semantic.EnumVariant) (uint64, error) {
+// payloadSlotBytes is the granularity (in bytes) of one inline packed-enum payload slot for the
+// given enum. The payload union is tiled into a `[maxSlots x slotType]` array; field byte-offsets
+// are computed against that tiling and every inline payload read/write strides by this many bytes.
+// Historically this was the machine word (uintptr, 8 on 64-bit), which padded the payload array to
+// 8-byte alignment and rounded each variant up to a whole word. The slot-narrowing work routes
+// every such site through this single accessor so the granularity can be lowered (recovering the
+// alignment slack and the last-slot rounding) without hunting hardcoded `wordBits/8` constants.
+//
+// It is keyed by enumType because narrowing applies ONLY to the AoS inline-payload ABI. The
+// SoA/dense/variant-sparse column helpers and the @storage(side_table) side columns are a separate
+// uintptr-word model and MUST keep the machine word — those sites do NOT call this accessor.
+//
+// NOTE: currently returns the word size unchanged for every enum — this is the no-op seam; lowering
+// it (for AoS-mode enums) is a separate, validated step.
+func (g *llvmGenerator) payloadSlotBytes(enum *semantic.EnumType) uint64 {
+	b := uint64(g.wordBits / 8)
+	if b == 0 {
+		b = 8
+	}
+	return b
+}
+
+// payloadSlotType is the LLVM element type of the inline payload-slot array (see payloadSlotBytes).
+// Its ABI size MUST equal payloadSlotBytes(enum); the two move together. Currently uintptr (no-op).
+func (g *llvmGenerator) payloadSlotType(enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	return g.lowerBuiltin("uintptr")
+}
+
+func (g *llvmGenerator) enumVariantPayloadSlots(enum *semantic.EnumType, variant *semantic.EnumVariant) (uint64, error) {
 	if variant == nil || len(variant.Payload) == 0 {
 		return 0, nil
 	}
@@ -251,11 +279,8 @@ func (g *llvmGenerator) enumVariantPayloadSlots(variant *semantic.EnumVariant) (
 	if err != nil {
 		return 0, err
 	}
-	wordBytes := uint64(g.wordBits / 8)
-	if wordBytes == 0 {
-		wordBytes = 8
-	}
-	return (sizeBytes + wordBytes - 1) / wordBytes, nil
+	slotBytes := g.payloadSlotBytes(enum)
+	return (sizeBytes + slotBytes - 1) / slotBytes, nil
 }
 func (g *llvmGenerator) lowerEnumVariantPayloadType(variant *semantic.EnumVariant) (C.LLVMTypeRef, error) {
 	if variant == nil || len(variant.Payload) == 0 {

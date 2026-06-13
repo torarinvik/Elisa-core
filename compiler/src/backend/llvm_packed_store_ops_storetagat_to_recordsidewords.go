@@ -274,10 +274,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 		if err != nil {
 			return nil, err
 		}
-		wordBytes := uint64(ops.s.g.wordBits / 8)
-		if wordBytes == 0 {
-			wordBytes = 8
-		}
+		wordBytes := ops.s.g.payloadSlotBytes(enumType)
 		byteOffset := C.LLVMBuildMul(ops.s.builder, wordOffset, C.LLVMConstInt(usizeLLVM, C.ulonglong(wordBytes), 0), cStringFree("packed.aos.byteoff"))
 		i8LLVM, err := ops.s.g.lowerBuiltin("u8")
 		if err != nil {
@@ -367,6 +364,8 @@ func (ops *packedStoreOps) loadTailView(handleValue C.LLVMValueRef, enumType *se
 	if !ok || viewType == nil {
 		return nil, false, nil
 	}
+	// SoA (index-SOA) tail-view: columns are strided by the machine word, NOT the AoS inline
+	// payload slot. Keep the uintptr word here; slot-narrowing applies only to the AoS ABI.
 	wordBytes := uint64(ops.s.g.wordBits / 8)
 	if wordBytes == 0 {
 		wordBytes = 8
