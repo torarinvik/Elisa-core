@@ -265,6 +265,11 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	} else {
 		body = p.parseFuncBodyAfterColon()
 	}
+	// Value-contract preconditions are written as the FIRST statements of the body
+	// (`requires <bool-expr>`), then lifted out into the decl here. They are NOT a post-signature
+	// clause: `-> T requires ...` is ambiguous with the region-prefix type grammar (`<region> T&`),
+	// where `T requires` reads as region label `T` + type `requires`.
+	requires, body := liftLeadingRequires(body)
 	if !isStatic {
 		// Static functions are evaluated at compile time and have no runtime region; never
 		// wrap them in an auto region (it would break static darray construction).
@@ -272,7 +277,30 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: requires, Params: params, ReturnType: retType, Body: body}
+}
+
+// liftLeadingRequires pulls leading `requires <bool-expr>` contract statements (parsed as
+// ContractStmt) off the front of a function body into a precondition list, returning the remaining
+// body. Only honoured at the very start of the body; a later stray ContractStmt is left in place so
+// the analyzer reports the misplacement rather than silently dropping it.
+func liftLeadingRequires(body []ast.Stmt) ([]ast.Expr, []ast.Stmt) {
+	var requires []ast.Expr
+	i := 0
+	for i < len(body) {
+		cs, ok := body[i].(*ast.ContractStmt)
+		if !ok || cs.Kind != ast.ContractRequire {
+			break
+		}
+		if cs.Cond != nil {
+			requires = append(requires, cs.Cond)
+		}
+		i++
+	}
+	if i == 0 {
+		return nil, body
+	}
+	return requires, body[i:]
 }
 
 func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {

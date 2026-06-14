@@ -92,6 +92,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeGuardStmt() {
 				return p.parseGuardStmt()
 			}
+		case "requires":
+			// `requires <bool-expr>` value-contract precondition (lifted into the decl when leading).
+			// Skip if it's actually a variable named `requires` (followed by =/:/<- or end of line).
+			if p.looksLikeContractStmt() {
+				pos := p.cur().Pos
+				p.advance()
+				cond := p.parseExpr()
+				p.expectNewline()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond}
+			}
 		case "expect":
 			if p.looksLikeExpectPatternStmt() {
 				return p.parseExpectPatternStmt()
@@ -776,4 +786,18 @@ func forWhereIdentLooksLikePatternType(name string) bool {
 	}
 	ch := name[0]
 	return ch >= 'A' && ch <= 'Z'
+}
+
+// looksLikeContractStmt reports whether a leading `requires` is a value-contract precondition
+// rather than an identifier named "requires" being assigned/typed. It is a contract unless the next
+// token ends the line or begins an assignment/binding (=, :, <-).
+func (p *Parser) looksLikeContractStmt() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	switch p.tokens[p.pos+1].Kind {
+	case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_ASSIGN, lexer.TOKEN_COLON, lexer.TOKEN_LARROW:
+		return false
+	}
+	return true
 }

@@ -516,6 +516,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 	}
 
+	if err := state.emitPreconditionChecks(decl); err != nil {
+		return err
+	}
+
 	if err := state.emitBlock(decl.Body, false); err != nil {
 		return err
 	}
@@ -827,4 +831,43 @@ func clonePackedViewBindingMap(src map[string]packedVariantViewBinding) map[stri
 		cloned[name] = binding
 	}
 	return cloned
+}
+
+// emitPreconditionChecks emits a function's `requires` value-contracts at entry, in debug builds
+// only (-O0, or forced via ELISACORE_FORCE_CONTRACTS). Zero cost in release: "debug verifies what
+// release assumes." Params are already bound, so the conditions resolve normally.
+func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
+	if decl == nil || len(decl.Requires) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	for _, cond := range decl.Requires {
+		if cond == nil {
+			continue
+		}
+		if err := s.emitContractCheck(cond, "precondition failed"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emitContractCheck lowers a single boolean contract: if the condition is false, panic with a
+// backtrace at the contract's source location; otherwise fall through.
+func (s *functionState) emitContractCheck(cond ast.Expr, label string) error {
+	condVal, _, err := s.emitExpr(cond, nil)
+	if err != nil {
+		return err
+	}
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("contract.fail"))
+	C.LLVMBuildCondBr(s.builder, condVal, okBB, failBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if err := s.emitPanicWithBacktrace(cond.Pos(), &ast.StringLit{Position: cond.Pos(), Value: label}); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	return nil
 }

@@ -454,6 +454,22 @@ type StaticAssertStmt struct {
 	Cond     Expr
 	Message  Expr
 }
+
+// ContractKind distinguishes value-contract clauses.
+type ContractKind int
+
+const (
+	ContractRequire ContractKind = iota // precondition: `requires <bool-expr>` at function start
+)
+
+// ContractStmt is a value-contract clause written as a leading body statement. The parser produces
+// it for `requires <bool-expr>`; the function-decl parser lifts leading ones into FuncDecl.Requires
+// (so it normally never reaches the statement analyzer/backend — see liftLeadingRequires).
+type ContractStmt struct {
+	Position lexer.Pos
+	Kind     ContractKind
+	Cond     Expr
+}
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos
 	Assertions []StaticAssertItem

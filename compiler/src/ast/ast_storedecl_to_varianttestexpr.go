@@ -115,9 +115,13 @@ type FuncDecl struct {
 	GenericParams    []GenericParam
 	Permissions      []PermissionRef
 	Ensures          []EnsuresClause
-	Params           []ParamDecl
-	ReturnType       TypeExpr
-	Body             []Stmt
+	// Requires holds value-contract preconditions (`requires <bool-expr>` clauses), checked at
+	// function entry in debug builds only (elided in release), like the bounds-check watchdog.
+	// Distinct from Ensures, which is the typestate/resource-state contract.
+	Requires   []Expr
+	Params     []ParamDecl
+	ReturnType TypeExpr
+	Body       []Stmt
 }
 type ParamDecl struct {
 	Position     lexer.Pos

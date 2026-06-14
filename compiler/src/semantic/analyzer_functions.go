@@ -122,6 +122,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
+					a.analyzeRequiresClauses(fn)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -304,6 +305,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
+					a.analyzeRequiresClauses(fn)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -452,6 +454,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
+					a.analyzeRequiresClauses(fn)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -493,4 +496,19 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.suppressOptimizationFacts = savedSuppressOptimizationFacts
 	a.currentNamespace = savedNamespace
 	a.currentUsings = savedUsings
+}
+
+// analyzeRequiresClauses type-checks a function's value-contract preconditions in the parameter
+// scope (no `result` binding). Each must be bool. Analysis attaches types so the backend can emit
+// the entry checks (debug builds only). Called from each body-analysis branch before the body.
+func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
+	for _, req := range fn.Requires {
+		if req == nil {
+			continue
+		}
+		reqType := a.analyzeExpr(req)
+		if reqType != nil && !IsBoolType(reqType) {
+			a.errorf(req.Pos(), "requires clause must be bool, got %s", reqType)
+		}
+	}
 }
