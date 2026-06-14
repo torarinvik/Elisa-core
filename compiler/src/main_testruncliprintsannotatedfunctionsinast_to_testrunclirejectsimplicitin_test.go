@@ -139,6 +139,32 @@ func TestRunCLICompilesConstEnumFlagsToLLVM(t *testing.T) {
 		}
 	}
 }
+
+func TestRunCLICompilesConstEnumBitwiseOpsToLLVM(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_enum_bitwise.elisa")
+	src := "const enum CpuFlag of u8:\n    C = 1\n    Z = 2\n    I = 4\n    N = 128\n\n\ndef mask() -> u8:\n    return CpuFlag.C | CpuFlag.I\n\n\ndef has_zero(p: u8) -> bool:\n    return (p & CpuFlag.Z) != 0\n\n\ndef clear_negative(p: u8) -> u8:\n    return p & (CpuFlag.N ^ 0xFF)\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const enum bitwise fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	if stderr.Len() != 0 {
+		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, check := range []string{"define i8 @mask()", "ret i8 5", "define i1 @has_zero(i8", "andtmp", "define i8 @clear_negative(i8"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected LLVM output to contain %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestRunCLIRejectsLegacyCastSyntax(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_cast_error.elisa")

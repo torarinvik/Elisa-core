@@ -115,12 +115,21 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		left = valueContextOperandType(left)
 		right = valueContextOperandType(right)
 		requiresIntegral := expr.Op == lexer.TOKEN_PERCENT || expr.Op == lexer.TOKEN_CARET || expr.Op == lexer.TOKEN_PIPE || expr.Op == lexer.TOKEN_AMPERSAND || expr.Op == lexer.TOKEN_LSHIFT || expr.Op == lexer.TOKEN_RSHIFT
+		if requiresIntegral {
+			leftStorage := integralOperatorOperandType(left)
+			rightStorage := integralOperatorOperandType(right)
+			if !IsNumericType(leftStorage) || !IsNumericType(rightStorage) {
+				a.errorf(expr.Pos(), "operator requires numeric operands")
+				return invalidType
+			}
+			if !IsIntegralStorageType(leftStorage) || !IsIntegralStorageType(rightStorage) {
+				a.errorf(expr.Pos(), "operator requires integral operands")
+				return invalidType
+			}
+			return CommonNumericType(leftStorage, rightStorage)
+		}
 		if !IsNumericType(left) || !IsNumericType(right) {
 			a.errorf(expr.Pos(), "operator requires numeric operands")
-			return invalidType
-		}
-		if requiresIntegral && (!IsIntegralStorageType(left) || !IsIntegralStorageType(right)) {
-			a.errorf(expr.Pos(), "operator requires integral operands")
 			return invalidType
 		}
 		return CommonNumericType(left, right)
@@ -134,6 +143,13 @@ func valueContextOperandType(t Type) Type {
 		if IsNumericType(ref.Elem) || IsBoolType(ref.Elem) {
 			return ref.Elem
 		}
+	}
+	return t
+}
+
+func integralOperatorOperandType(t Type) Type {
+	if storage, ok := ConstEnumStorageType(t); ok {
+		return storage
 	}
 	return t
 }

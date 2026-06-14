@@ -943,6 +943,12 @@ func (s *functionState) binaryOperandType(op lexer.TokenKind, left semantic.Type
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
 		left = backendValueContextOperandType(left)
 		right = backendValueContextOperandType(right)
+		switch op {
+		case lexer.TOKEN_PERCENT, lexer.TOKEN_PIPE, lexer.TOKEN_CARET, lexer.TOKEN_AMPERSAND,
+			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			left = numericCastType(left)
+			right = numericCastType(right)
+		}
 		if isNumericType(left) && isNumericType(right) {
 			return semantic.CommonNumericType(left, right)
 		}
