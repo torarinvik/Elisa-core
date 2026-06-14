@@ -60,6 +60,11 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		if err != nil {
 			return nil, nil, err
 		}
+		if userFacing {
+			if err := s.emitDebugIndexBoundsGuard(arrayPtr, t, indexValue); err != nil {
+				return nil, nil, err
+			}
+		}
 		arrayLLVMType, err := s.g.lowerType(t)
 		if err != nil {
 			return nil, nil, err
@@ -100,6 +105,11 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			return nil, nil, err
 		}
 		if arrayElem, ok := t.Elem.(*semantic.ArrayType); ok {
+			if userFacing {
+				if err := s.emitDebugIndexBoundsGuard(basePtr, arrayElem, indexValue); err != nil {
+					return nil, nil, err
+				}
+			}
 			arrayLLVMType, err := s.g.lowerType(arrayElem)
 			if err != nil {
 				return nil, nil, err
@@ -151,14 +161,29 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
 		return nil
 	}
-	switch containerType.(type) {
+	var countValue C.LLVMValueRef
+	switch t := containerType.(type) {
 	case *semantic.DArrayType, *semantic.ViewType:
+		cv, err := s.emitContainerCountValue(containerPtr, containerType, "wd.count")
+		if err != nil {
+			return err
+		}
+		countValue = cv
+	case *semantic.ArrayType:
+		// Fixed-size array: the bound is the compile-time element count. This catches
+		// out-of-range indexing of `array[T, N]` (framebuffers, lookup tables, byte
+		// buffers) which otherwise GEPs past the array silently. Non-const-size arrays
+		// carry no static length here, so they're left unguarded.
+		if !t.HasConstSize {
+			return nil
+		}
+		usizeLLVM, err := s.g.lowerType(s.g.result.NamedTypes["usize"])
+		if err != nil {
+			return err
+		}
+		countValue = C.LLVMConstInt(usizeLLVM, C.ulonglong(t.ConstSize), 0)
 	default:
 		return nil
-	}
-	countValue, err := s.emitContainerCountValue(containerPtr, containerType, "wd.count")
-	if err != nil {
-		return err
 	}
 	inBounds := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("wd.in_bounds"))
 	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.ok"))

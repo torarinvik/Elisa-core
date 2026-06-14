@@ -67,7 +67,9 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 	case *ast.FieldExpr:
 		return s.emitFieldAddress(n)
 	case *ast.IndexExpr:
-		return s.emitIndexAddress(n, false)
+		// userFacing=true so assignment targets (a[i] <- v) and &a[i] get the debug
+		// bounds guard too — out-of-range writes are the most corrupting case.
+		return s.emitIndexAddress(n, true)
 	case *ast.ParenExpr:
 		return s.emitAddress(n.Inner)
 	default:
