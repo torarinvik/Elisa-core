@@ -260,6 +260,11 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 		return "", nil
 	}
 	var src strings.Builder
+	// Prologue: libc snprintf/write aliased via @link_name so a counterexample can
+	// report the failing input values without touching the runtime arenas (which are
+	// not initialized in the standalone test binary). Distinct Elisa names avoid
+	// colliding with any snprintf the program itself declares.
+	src.WriteString(propertyReportExterns)
 	cases := make([]selectedTestCase, 0, len(props))
 	for _, fn := range props {
 		if fn == nil || fn.Signature == nil {
@@ -290,12 +295,23 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string 
 	b.WriteString("() -> void:\n")
 	b.WriteString("\tcan Abort.Panic:\n")
 	fmt.Fprintf(&b, "\t\t__prop_s: mutable u64 = %d\n", seed)
+	// Scratch buffer + length for the counterexample report (snprintf/write).
+	b.WriteString("\t\t__prop_buf: mutable u8[128] = zeroed\n")
+	b.WriteString("\t\t__prop_n: mutable int = 0\n")
 	fmt.Fprintf(&b, "\t\tfor __prop_i in 0..<%d:\n", cases)
 	argNames := make([]string, 0, len(fn.Signature.Params))
+	argTypes := make([]string, 0, len(fn.Signature.Params))
+	argLabels := make([]string, 0, len(fn.Signature.Params))
 	for j, p := range fn.Signature.Params {
 		typeName, _ := semantic.PropertyParamTypeName(p)
 		arg := fmt.Sprintf("__prop_a%d", j)
 		argNames = append(argNames, arg)
+		argTypes = append(argTypes, typeName)
+		label := fmt.Sprintf("arg%d", j)
+		if j < len(fn.Signature.ExplicitParamNames) && fn.Signature.ExplicitParamNames[j] != "" {
+			label = fn.Signature.ExplicitParamNames[j]
+		}
+		argLabels = append(argLabels, label)
 		// Advance the generator before each draw.
 		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 13)\n")
 		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s >> 7)\n")
@@ -303,9 +319,52 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string 
 		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawExpr(typeName, "__prop_s"))
 	}
 	fmt.Fprintf(&b, "\t\t\tif not %s(%s):\n", fn.Name, strings.Join(argNames, ", "))
+	// Report the failing case and each input value to stderr (fd 2) before aborting.
+	header := fmt.Sprintf(">>> property %s counterexample (case %%lld):\\n", fn.Name)
+	b.WriteString(propertyReportStmt(header, "__prop_i.i64()"))
+	for j := range argNames {
+		verb, conv := propertyReportArg(argTypes[j], argNames[j])
+		line := fmt.Sprintf("      %s (%s) = %s\\n", argLabels[j], argTypes[j], verb)
+		b.WriteString(propertyReportStmt(line, conv))
+	}
 	msg := elisacoreStringLiteral(fmt.Sprintf("property %q failed (deterministic seed; %d cases)", fn.Name, cases))
 	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
 	return b.String()
+}
+
+// propertyReportExterns declares libc snprintf/write under distinct Elisa names so
+// the property drivers can print failing inputs without the runtime arenas.
+const propertyReportExterns = `
+@link_name("snprintf")
+extern __prop_snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int
+@link_name("write")
+extern __prop_write(fd: int, buf: void&, count: usize) -> isize
+`
+
+// propertyReportStmt emits an indented snprintf-into-__prop_buf + write(2) pair for
+// one report line. fmtLiteral is the printf-style format (with escaped \n), arg is
+// the single Elisa value expression substituted for its verb.
+func propertyReportStmt(fmtLiteral, arg string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "\t\t\t\t__prop_n <- __prop_snprintf(&__prop_buf[0], 128, \"%s\", %s)\n", fmtLiteral, arg)
+	b.WriteString("\t\t\t\tif __prop_n > 0:\n")
+	b.WriteString("\t\t\t\t\t_ = __prop_write(2, (&__prop_buf[0]).cast[void&], __prop_n.usize())\n")
+	return b.String()
+}
+
+// propertyReportArg returns the printf verb and the Elisa conversion expression for
+// reporting a value of the given supported property type.
+func propertyReportArg(typeName, arg string) (verb, conv string) {
+	switch typeName {
+	case "bool":
+		return "%lld", "(1 if " + arg + " else 0).i64()"
+	case "u8", "u16", "u32", "u64":
+		return "%llu", arg + ".u64()"
+	case "f32", "f64":
+		return "%g", arg + ".f64()"
+	default: // signed integers and int
+		return "%lld", arg + ".i64()"
+	}
 }
 
 // propertyDrawExpr returns an Elisa expression that converts the current

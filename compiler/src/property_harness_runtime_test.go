@@ -83,6 +83,26 @@ def add_commutes(a: i32, b: i32) -> bool:
 	}
 }
 
+func TestPropertyHarnessReportsFailingInputs(t *testing.T) {
+	const body = `
+@property
+def bogus(a: i32, flag: bool) -> bool:
+    return a < 100
+`
+	_, stdout, stderr := runPropertyProgram(t, "prop_report", body)
+	combined := stdout + stderr
+	if !strings.Contains(combined, "counterexample") {
+		t.Fatalf("expected a counterexample report, got:\n%s", combined)
+	}
+	// The report names each parameter with its type and a concrete value.
+	if !strings.Contains(combined, "a (i32) = ") {
+		t.Fatalf("expected the failing i32 value to be reported by name, got:\n%s", combined)
+	}
+	if !strings.Contains(combined, "flag (bool) = ") {
+		t.Fatalf("expected the failing bool value to be reported by name, got:\n%s", combined)
+	}
+}
+
 func TestPropertyHarnessGeneratesFloats(t *testing.T) {
 	const body = `
 @property
