@@ -789,6 +789,20 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err := s.storeValue(ptr, value, targetType, "assign"); err != nil {
 			return err
 		}
+		// Struct field invariants (debug builds): after `obj.field <- v`, re-check obj's invariants.
+		if s.g.optLevel == OptimizationLevel0 || s.g.forceContracts {
+			if fieldTarget, ok := n.Target.(*ast.FieldExpr); ok && fieldTarget.Object != nil {
+				if st := backendStructTypeOf(s.exprType(fieldTarget.Object)); st != nil && st.Decl != nil && len(st.Decl.Invariants) > 0 {
+					objPtr, _, addrErr := s.emitAddress(fieldTarget.Object)
+					if addrErr != nil {
+						return addrErr
+					}
+					if err := s.emitStructInvariantChecksAt(objPtr, st); err != nil {
+						return err
+					}
+				}
+			}
+		}
 		if s.g.trace != nil {
 			assignName := ""
 			if id, ok := n.Target.(*ast.Ident); ok {

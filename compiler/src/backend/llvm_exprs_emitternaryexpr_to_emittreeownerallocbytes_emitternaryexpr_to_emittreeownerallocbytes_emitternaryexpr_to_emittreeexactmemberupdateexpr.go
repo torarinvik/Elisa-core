@@ -230,7 +230,67 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		}
 		value = C.LLVMBuildInsertValue(s.builder, value, fieldValue, C.unsigned(i), cStringFree("ins"))
 	}
+	if err := s.emitStructInvariantChecks(value, structType); err != nil {
+		return nil, nil, err
+	}
 	return value, structType, nil
+}
+
+// backendStructTypeOf unwraps a struct type, or a reference to one, to its *StructType (else nil).
+func backendStructTypeOf(t semantic.Type) *semantic.StructType {
+	switch v := t.(type) {
+	case *semantic.StructType:
+		return v
+	case *semantic.RefType:
+		if st, ok := v.Elem.(*semantic.StructType); ok {
+			return st
+		}
+	}
+	return nil
+}
+
+// emitStructInvariantChecks verifies a struct value's field invariants (debug builds only) by
+// materializing it to an addressable temp, binding `self` to it, and checking each invariant. Used
+// right after construction and after a field store. `zeroed` construction bypasses this (it never
+// reaches emitStructLitExpr), which is the intended low-level escape.
+func (s *functionState) emitStructInvariantChecks(value C.LLVMValueRef, structType semantic.Type) error {
+	st, ok := structType.(*semantic.StructType)
+	if !ok || st.Decl == nil || len(st.Decl.Invariants) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	alloca, err := s.createEntryAlloca("self.inv", structType)
+	if err != nil {
+		return err
+	}
+	C.LLVMBuildStore(s.builder, value, alloca)
+	return s.emitStructInvariantChecksAt(alloca, st)
+}
+
+// emitStructInvariantChecksAt checks each invariant with `self` bound to an existing struct address
+// (used after a field store, where the struct is already addressable). Assumes debug-gating already
+// decided by the caller for the value form; re-checks it here so the address form is safe too.
+func (s *functionState) emitStructInvariantChecksAt(structPtr C.LLVMValueRef, st *semantic.StructType) error {
+	if st == nil || st.Decl == nil || len(st.Decl.Invariants) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	s.pushScope()
+	defer s.popScope()
+	s.defineBinding("self", valueBinding{ptr: structPtr, typ: st, mutable: false})
+	for _, inv := range st.Decl.Invariants {
+		if inv == nil {
+			continue
+		}
+		if err := s.emitContractCheck(inv, "struct invariant failed"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 func (s *functionState) emitRecordUpdateExpr(expr *ast.RecordUpdateExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Base == nil {

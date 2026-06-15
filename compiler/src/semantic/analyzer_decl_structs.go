@@ -88,6 +88,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 						}
 					}
 					a.validateStructDerivedStates(stDecl, st)
+					a.analyzeStructInvariants(stDecl, st)
 					a.checkPointerGraphStruct(stDecl, st)
 				})
 			})
@@ -156,6 +157,29 @@ func (a *Analyzer) resolveBitGroupType(name string, groupDecl *ast.BitGroupDecl)
 	}
 	group.BackingWidth = BitGroupBackingWidth(offset)
 	return group
+}
+
+// analyzeStructInvariants type-checks a struct's field invariants (`invariant <bool-expr>` in the
+// struct body) in a scope binding `self` to the struct, so they reference `self.field`. Each must be
+// bool. The backend emits the checks after construction and after each `s.field <- ...` store.
+func (a *Analyzer) analyzeStructInvariants(stDecl *ast.StructDecl, st *StructType) {
+	if stDecl == nil || len(stDecl.Invariants) == 0 {
+		return
+	}
+	saved := a.currentScope
+	scope := NewScope(nil)
+	scope.Define(&Symbol{Name: "self", Kind: SymbolLocal, Type: DefaultNamedStateType(st)})
+	a.currentScope = scope
+	defer func() { a.currentScope = saved }()
+	for _, inv := range stDecl.Invariants {
+		if inv == nil {
+			continue
+		}
+		t := a.analyzeExpr(inv)
+		if t != nil && !IsBoolType(t) {
+			a.errorf(inv.Pos(), "struct invariant must be bool, got %s", t)
+		}
+	}
 }
 
 func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *StructType) {

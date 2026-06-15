@@ -611,4 +611,8 @@ type StructDecl struct {
 	ReprC     bool
 	Layout    StructLayoutMode
 	Fields    []FieldDecl
+	// Invariants are value-contract conditions over the struct's fields (`invariant <bool-expr>`
+	// in the struct body, referencing `self.field`). Checked in debug builds after construction and
+	// after each `s.field <- ...` store (`zeroed` construction is exempt).
+	Invariants []Expr
 }
