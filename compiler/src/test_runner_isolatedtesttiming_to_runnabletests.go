@@ -220,7 +220,122 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	if err != nil {
 		return "", err
 	}
-	return buildTestRunnerSource(source, selectTestCases(result, filter), filter), nil
+	driverSource, propertyCases := buildPropertyDrivers(result, filter)
+	if driverSource != "" {
+		if len(source) != 0 && source[len(source)-1] != '\n' {
+			source = append(source, '\n')
+		}
+		source = append(source, []byte(driverSource)...)
+	}
+	cases := append(selectTestCases(result, filter), propertyCases...)
+	return buildTestRunnerSource(source, cases, filter), nil
+}
+
+// propertyIterations is how many random inputs each @property is checked against.
+const propertyIterations = 256
+
+// buildPropertyDrivers synthesizes, for every selected @property function, a
+// parameterless void driver `__property_<name>` that feeds it `propertyIterations`
+// deterministic pseudo-random inputs (xorshift64, name-seeded so runs are
+// reproducible) and panics on the first counterexample. Each driver is returned
+// as appended Elisa source plus a synthetic test case so it runs like a @test.
+func buildPropertyDrivers(result *semantic.Result, filter string) (string, []selectedTestCase) {
+	props := selectAnnotatedFunctions(result, "property", filter)
+	if len(props) == 0 {
+		return "", nil
+	}
+	var src strings.Builder
+	cases := make([]selectedTestCase, 0, len(props))
+	for _, fn := range props {
+		if fn == nil || fn.Signature == nil {
+			continue
+		}
+		driverName := "__property_" + fn.Name
+		src.WriteString(propertyDriverSource(driverName, fn))
+		cases = append(cases, selectedTestCase{Func: &semantic.AnnotatedFunc{
+			Name: driverName,
+			// The driver calls panic() on a counterexample; surface Abort.Panic so
+			// the dispatch wrapper grants it at the call site (no warning).
+			Signature: &semantic.FuncType{
+				Return:         result.NamedTypes["void"],
+				PermissionRefs: []ast.PermissionRef{{Name: "Abort", Member: "Panic"}},
+			},
+		}})
+	}
+	return src.String(), cases
+}
+
+// propertyDriverSource emits the Elisa text for one property driver.
+func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string {
+	seed := propertySeed(fn.Name)
+	var b strings.Builder
+	b.WriteString("\ndef ")
+	b.WriteString(driverName)
+	b.WriteString("() -> void:\n")
+	b.WriteString("\tcan Abort.Panic:\n")
+	fmt.Fprintf(&b, "\t\t__prop_s: mutable u64 = %d\n", seed)
+	fmt.Fprintf(&b, "\t\tfor __prop_i in 0..<%d:\n", propertyIterations)
+	argNames := make([]string, 0, len(fn.Signature.Params))
+	for j, p := range fn.Signature.Params {
+		typeName, _ := semantic.PropertyParamTypeName(p)
+		arg := fmt.Sprintf("__prop_a%d", j)
+		argNames = append(argNames, arg)
+		// Advance the generator before each draw.
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 13)\n")
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s >> 7)\n")
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 17)\n")
+		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawExpr(typeName, "__prop_s"))
+	}
+	fmt.Fprintf(&b, "\t\t\tif not %s(%s):\n", fn.Name, strings.Join(argNames, ", "))
+	msg := elisacoreStringLiteral(fmt.Sprintf("property %q failed (deterministic seed; %d cases)", fn.Name, propertyIterations))
+	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
+	return b.String()
+}
+
+// propertyDrawExpr returns an Elisa expression that converts the current
+// generator state `s` into a value of the given supported type.
+func propertyDrawExpr(typeName, s string) string {
+	switch typeName {
+	case "bool":
+		return "(" + s + " & 1) == 1"
+	case "i8":
+		return "((" + s + " % 256).i32() - 128).i8()"
+	case "i16":
+		return "((" + s + " % 65536).i32() - 32768).i16()"
+	case "i32":
+		return "((" + s + " % 2000001).i64() - 1000000).i32()"
+	case "i64":
+		return "(" + s + " % 2000000001).i64() - 1000000000"
+	case "int":
+		return "((" + s + " % 2000000001).i64() - 1000000000).int()"
+	case "u8":
+		return "(" + s + " % 256).u8()"
+	case "u16":
+		return "(" + s + " % 65536).u16()"
+	case "u32":
+		return "(" + s + " % 4000000000).u32()"
+	case "u64":
+		return s
+	default:
+		return s
+	}
+}
+
+// propertySeed derives a fixed nonzero xorshift64 seed from the property name so
+// each property gets a distinct but reproducible input sequence (FNV-1a).
+func propertySeed(name string) uint64 {
+	var h uint64 = 14695981039346656037
+	for i := 0; i < len(name); i++ {
+		h ^= uint64(name[i])
+		h *= 1099511628211
+	}
+	// Mask to 63 bits so the value always fits a positive integer literal in
+	// generated source, regardless of how the lexer first types the constant.
+	h &= 0x7FFFFFFFFFFFFFFF
+	if h == 0 {
+		h = 88172645463325252
+	}
+	return h
 }
 func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter string) string {
 	runnable := runnableTests(cases)
@@ -486,6 +601,14 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 	}
 	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
 	testCases := selectTestCases(result, filter)
+	driverSource, propertyCases := buildPropertyDrivers(result, filter)
+	if driverSource != "" {
+		if len(source) != 0 && source[len(source)-1] != '\n' {
+			source = append(source, '\n')
+		}
+		source = append(source, []byte(driverSource)...)
+		testCases = append(testCases, propertyCases...)
+	}
 	if len(testCases) == 0 {
 		fmt.Fprintf(stdout, "[ NO TESTS ] no @test functions matched filter %q\n", strings.TrimSpace(filter))
 		return 1

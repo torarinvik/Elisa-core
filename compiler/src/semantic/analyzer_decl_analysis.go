@@ -464,6 +464,9 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "property" {
+		return a.validateFunctionPropertyAnnotation(annotation, fn, signature)
+	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature)
 		return false
@@ -484,6 +487,60 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	case "test", "bench":
 		if !isVoidType(signature.Return) {
 			a.errorf(annotation.Position, "@%s function %q must return void, got %s", annotation.Name, fn.Name, signature.Return)
+			return false
+		}
+	}
+	return true
+}
+
+// PropertyParamTypeName reports the canonical builtin name of a property-test
+// parameter type for which the harness can synthesize random inputs, and whether
+// the type is supported. Supported set: bool and the fixed-width integers.
+func PropertyParamTypeName(t Type) (string, bool) {
+	b, ok := t.(*BuiltinType)
+	if !ok {
+		return "", false
+	}
+	switch b.Name {
+	case "bool", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64":
+		return b.Name, true
+	default:
+		return "", false
+	}
+}
+
+func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	if len(annotation.Args) != 0 {
+		a.errorf(annotation.Position, "@property on function %q does not take arguments", fn.Name)
+		return false
+	}
+	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 || len(signature.GenericParams) > 0 {
+		a.errorf(annotation.Position, "@property function %q must not be generic; got %s", fn.Name, signature)
+		return false
+	}
+	if !annotationAllowsDeclaredPermissions("property", signature) {
+		a.errorf(annotation.Position, "@property function %q must not require permissions; got %s", fn.Name, signature)
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@property function %q must not be variadic", fn.Name)
+		return false
+	}
+	if !IsBoolType(signature.Return) {
+		a.errorf(annotation.Position, "@property function %q must return bool, got %s", fn.Name, signature.Return)
+		return false
+	}
+	if len(signature.Params) == 0 {
+		a.errorf(annotation.Position, "@property function %q must take at least one generated parameter", fn.Name)
+		return false
+	}
+	for i, p := range signature.Params {
+		if _, ok := PropertyParamTypeName(p); !ok {
+			name := ""
+			if i < len(signature.ExplicitParamNames) {
+				name = signature.ExplicitParamNames[i]
+			}
+			a.errorf(annotation.Position, "@property function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64)", fn.Name, name, p)
 			return false
 		}
 	}
@@ -716,7 +773,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
+	case "test", "bench", "property", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	case "boundary_pointer_args":
 		return true

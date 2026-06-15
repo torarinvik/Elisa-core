@@ -285,6 +285,10 @@ def shared_seed() -> int:
 @test
 def beta_case() -> void:
     pass
+
+@property
+def add_commutes(a: i32, b: i32) -> bool:
+    return a + b == b + a
 ```
 
 Current rules:
@@ -292,6 +296,24 @@ Current rules:
 - `@test`, `@bench`, and `@fixture` mark functions for list and runner surfaces (`-emit tests`, `-emit benches`, `-emit fixtures`, `-emit test`, `-emit test-runner`)
 - `@test` and `@bench` functions are validated as runner entry functions and must return `void`
 - skip markers such as `@skip(...)` or `@ignore` are accepted and used by runner surfaces to exclude selected cases
+
+### `@property` — randomized property tests
+
+`@property` marks a predicate that must hold for *all* inputs. Unlike `@test`, a
+property **takes parameters** and **returns `bool`**. The runner synthesizes a
+parameterless driver `__property_<name>` that feeds the property a batch of
+pseudo-random inputs and fails (via `panic`) on the first counterexample; the
+driver runs alongside `@test` cases under `-emit test` / `-emit test-runner`.
+
+- Must return `bool` (`true` = holds for that input) and take at least one parameter.
+- Generated parameter types: `bool`, `int`, and the fixed-width integers
+  `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`. Other types are a compile error.
+- Inputs are deterministic: the generator (xorshift64) is seeded from the property
+  name, so a failing run reproduces exactly. Each property is checked against a
+  fixed number of cases.
+- Properties must be pure predicates: no effect permissions, generics, or variadics.
+- Pairs naturally with debug-gated `requires`/`ensure` contracts on the function
+  under test — at `-O0` a contract violation surfaces as a property counterexample.
 
 ## Boundary pointer annotations
 
