@@ -314,9 +314,13 @@ driver runs alongside `@test` cases under `-emit test` / `-emit test-runner`.
   name, so a failing run reproduces exactly. Each property is checked against 256
   cases by default; override with `@property(N)` (a positive integer), e.g.
   `@property(1000)`.
-- On a counterexample the driver prints the failing case index and each input value
-  (by parameter name and type) to stderr before aborting, e.g.
-  `>>> property bogus counterexample (case 1):` / `      a (i32) = 994649`.
+- On a counterexample the driver first *shrinks* the failing input — a greedy
+  coordinate descent that drives each argument toward zero/false while the property
+  still fails — then prints the failing case index and each (shrunk) input value by
+  parameter name and type to stderr before aborting, e.g.
+  `>>> property bogus counterexample (case 1, shrunk):` / `      a (i32) = 0`.
+  Shrinking is greedy (halving toward the failing boundary), so it minimises
+  irrelevant arguments to zero but may not reach the single smallest failing value.
 - Properties must be pure predicates: no effect permissions, generics, or variadics.
 - Pairs naturally with debug-gated `requires`/`ensure` contracts on the function
   under test — at `-O0` a contract violation surfaces as a property counterexample.

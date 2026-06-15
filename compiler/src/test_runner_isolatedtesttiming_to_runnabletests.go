@@ -319,11 +319,36 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string 
 		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawExpr(typeName, "__prop_s"))
 	}
 	fmt.Fprintf(&b, "\t\t\tif not %s(%s):\n", fn.Name, strings.Join(argNames, ", "))
-	// Report the failing case and each input value to stderr (fd 2) before aborting.
-	header := fmt.Sprintf(">>> property %s counterexample (case %%lld):\\n", fn.Name)
-	b.WriteString(propertyReportStmt(header, "__prop_i.i64()"))
+	// Copy the failing tuple into mutable shrink locals.
+	mutNames := make([]string, len(argNames))
 	for j := range argNames {
-		verb, conv := propertyReportArg(argTypes[j], argNames[j])
+		mutNames[j] = fmt.Sprintf("__prop_m%d", j)
+		fmt.Fprintf(&b, "\t\t\t\t%s: mutable %s = %s\n", mutNames[j], argTypes[j], argNames[j])
+	}
+	// Greedy coordinate-descent shrink: drive each argument toward zero/false while
+	// the property still fails, so the reported counterexample is minimal-ish.
+	fmt.Fprintf(&b, "\t\t\t\tfor __prop_r in 0..<%d:\n", propertyShrinkRounds)
+	b.WriteString("\t\t\t\t\t_ = __prop_r\n")
+	for j := range mutNames {
+		t := argTypes[j]
+		zero := propertyZeroExpr(t)
+		if t == "bool" {
+			fmt.Fprintf(&b, "\t\t\t\t\tif %s and not %s:\n", mutNames[j], propertyCallWith(fn.Name, mutNames, j, zero))
+			fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], zero)
+			continue
+		}
+		// Prefer an outright zero; otherwise halve the magnitude toward zero.
+		fmt.Fprintf(&b, "\t\t\t\t\tif not %s:\n", propertyCallWith(fn.Name, mutNames, j, zero))
+		fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], zero)
+		half := propertyHalfExpr(t, mutNames[j])
+		fmt.Fprintf(&b, "\t\t\t\t\tif %s != %s and not %s:\n", mutNames[j], half, propertyCallWith(fn.Name, mutNames, j, half))
+		fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], half)
+	}
+	// Report the (shrunk) failing case and each input value to stderr (fd 2).
+	header := fmt.Sprintf(">>> property %s counterexample (case %%lld, shrunk):\\n", fn.Name)
+	b.WriteString(propertyReportStmt(header, "__prop_i.i64()"))
+	for j := range mutNames {
+		verb, conv := propertyReportArg(argTypes[j], mutNames[j])
 		line := fmt.Sprintf("      %s (%s) = %s\\n", argLabels[j], argTypes[j], verb)
 		b.WriteString(propertyReportStmt(line, conv))
 	}
@@ -350,6 +375,48 @@ func propertyReportStmt(fmtLiteral, arg string) string {
 	b.WriteString("\t\t\t\tif __prop_n > 0:\n")
 	b.WriteString("\t\t\t\t\t_ = __prop_write(2, (&__prop_buf[0]).cast[void&], __prop_n.usize())\n")
 	return b.String()
+}
+
+// propertyShrinkRounds bounds the greedy coordinate-descent shrink applied to a
+// failing input before it is reported. 40 rounds is comfortably more than the
+// log2 of the draw ranges, so halving converges well before the cap.
+const propertyShrinkRounds = 40
+
+// propertyCallWith renders a predicate call over the mutable shrink locals with the
+// j-th argument replaced by a candidate expression.
+func propertyCallWith(fnName string, mutNames []string, j int, candidate string) string {
+	parts := make([]string, len(mutNames))
+	copy(parts, mutNames)
+	parts[j] = candidate
+	return fmt.Sprintf("%s(%s)", fnName, strings.Join(parts, ", "))
+}
+
+// propertyZeroExpr is the simplest ("most shrunk") value of a supported type.
+func propertyZeroExpr(typeName string) string {
+	switch typeName {
+	case "bool":
+		return "false"
+	case "f32":
+		return "0.0.f32()"
+	case "f64":
+		return "0.0"
+	case "int", "i64":
+		return "0"
+	default: // i8/i16/i32, u8/u16/u32/u64
+		return "0." + typeName + "()"
+	}
+}
+
+// propertyHalfExpr halves the magnitude of a shrink local toward zero.
+func propertyHalfExpr(typeName, mut string) string {
+	switch typeName {
+	case "f32":
+		return mut + " / 2.0.f32()"
+	case "f64":
+		return mut + " / 2.0"
+	default:
+		return mut + " / 2"
+	}
 }
 
 // propertyReportArg returns the printf verb and the Elisa conversion expression for

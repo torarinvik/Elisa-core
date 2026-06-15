@@ -103,6 +103,23 @@ def bogus(a: i32, flag: bool) -> bool:
 	}
 }
 
+func TestPropertyHarnessShrinksCounterexample(t *testing.T) {
+	// `ignored` plays no role in the predicate, so the shrinker should drive it to 0.
+	const body = `
+@property
+def shrinks(a: i32, ignored: i32) -> bool:
+    return a < 10
+`
+	_, stdout, stderr := runPropertyProgram(t, "prop_shrink", body)
+	combined := stdout + stderr
+	if !strings.Contains(combined, "shrunk") {
+		t.Fatalf("expected the report to be marked shrunk, got:\n%s", combined)
+	}
+	if !strings.Contains(combined, "ignored (i32) = 0") {
+		t.Fatalf("expected the irrelevant argument to shrink to 0, got:\n%s", combined)
+	}
+}
+
 func TestPropertyHarnessGeneratesFloats(t *testing.T) {
 	const body = `
 @property
