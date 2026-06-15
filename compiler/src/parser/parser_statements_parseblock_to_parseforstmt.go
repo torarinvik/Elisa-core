@@ -111,6 +111,15 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond}
 			}
+		case "invariant":
+			// `invariant <bool-expr>` in-body assertion, checked in place (debug builds only).
+			if p.looksLikeContractStmt() {
+				pos := p.cur().Pos
+				p.advance()
+				cond := p.parseExpr()
+				p.expectNewline()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractInvariant, Cond: cond}
+			}
 		case "expect":
 			if p.looksLikeExpectPatternStmt() {
 				return p.parseExpectPatternStmt()

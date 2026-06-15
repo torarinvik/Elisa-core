@@ -952,6 +952,16 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		return s.emitStaticIf(n)
 	case *ast.StaticErrorStmt:
 		return fmt.Errorf("static error should not reach LLVM lowering")
+	case *ast.ContractStmt:
+		// In-body `invariant` -> a debug-gated runtime check at this point. (Lifted requires/ensure
+		// never reach here; a stray non-invariant was already reported by the analyzer.)
+		if n.Kind != ast.ContractInvariant || n.Cond == nil {
+			return nil
+		}
+		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+			return nil
+		}
+		return s.emitContractCheck(n.Cond, "invariant failed")
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
 	case *ast.StaticAssertBlockStmt:
