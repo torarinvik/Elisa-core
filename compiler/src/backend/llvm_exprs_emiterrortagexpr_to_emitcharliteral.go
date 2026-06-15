@@ -974,6 +974,12 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 	defer C.free(unsafe.Pointer(text))
 	value := C.LLVMBuildGlobalStringPtr(s.builder, text, name)
 	resultType := s.exprType(expr)
+	if resultType == nil {
+		// Synthetic literal with no analyzed type (e.g. a backend-built contract-failure
+		// message): a global string pointer is exactly a `u8&`, which is what the panic
+		// message coercer accepts. Without this it falls back to the default "panic" text.
+		resultType = &semantic.RefType{Elem: s.g.result.NamedTypes["u8"]}
+	}
 	if expected != nil && isStringViewCarrierType(expected) {
 		resultType = expected
 	}

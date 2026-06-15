@@ -554,6 +554,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	return nil
 }
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
+	if err := s.emitPostconditionChecks(value, actual); err != nil {
+		return err
+	}
 	if err := s.emitActiveScopedCleanup(); err != nil {
 		return err
 	}
@@ -848,6 +851,39 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 			continue
 		}
 		if err := s.emitContractCheck(cond, "precondition failed"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emitPostconditionChecks emits a function's `ensure` value-contracts just before a return, in
+// debug builds only. `result` is bound to the returned value so the conditions can reference it.
+// (`old(...)` is not yet supported.)
+func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual semantic.Type) error {
+	if s.decl == nil || len(s.decl.EnsureValues) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	// Bind `result` to the returned value (skip for void / error-union returns) so the ensure
+	// conditions resolve it. The binding lives only for these checks; the block terminates on return.
+	if s.fnType != nil && !isVoidType(s.fnType.Return) {
+		if _, isUnion := s.fnType.Return.(*semantic.ErrorUnionType); !isUnion {
+			alloca, err := s.createEntryAlloca("result", s.fnType.Return)
+			if err != nil {
+				return err
+			}
+			C.LLVMBuildStore(s.builder, value, alloca)
+			s.defineBinding("result", valueBinding{ptr: alloca, typ: s.fnType.Return, mutable: false})
+		}
+	}
+	for _, cond := range s.decl.EnsureValues {
+		if cond == nil {
+			continue
+		}
+		if err := s.emitContractCheck(cond, "postcondition failed"); err != nil {
 			return err
 		}
 	}

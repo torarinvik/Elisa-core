@@ -123,6 +123,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
 					a.analyzeRequiresClauses(fn)
+					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -306,6 +307,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.analyzeRequiresClauses(fn)
+					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -455,6 +457,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.analyzeRequiresClauses(fn)
+					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
@@ -511,4 +514,29 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 			a.errorf(req.Pos(), "requires clause must be bool, got %s", reqType)
 		}
 	}
+}
+
+// analyzeEnsureClauses type-checks a function's value-contract postconditions in a child scope that
+// binds `result` to the return type (so `ensure result >= 0` works). Each must be bool. The backend
+// emits the checks at every return (debug builds only). `old(...)` is not yet supported.
+func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
+	if len(fn.EnsureValues) == 0 {
+		return
+	}
+	saved := a.currentScope
+	scope := NewScope(saved)
+	if fnType != nil && fnType.Return != nil && !isVoidType(fnType.Return) {
+		scope.Define(&Symbol{Name: "result", Kind: SymbolLocal, Type: fnType.Return})
+	}
+	a.currentScope = scope
+	for _, e := range fn.EnsureValues {
+		if e == nil {
+			continue
+		}
+		t := a.analyzeExpr(e)
+		if t != nil && !IsBoolType(t) {
+			a.errorf(e.Pos(), "ensure clause must be bool, got %s", t)
+		}
+	}
+	a.currentScope = saved
 }

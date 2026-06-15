@@ -460,6 +460,7 @@ type ContractKind int
 
 const (
 	ContractRequire ContractKind = iota // precondition: `requires <bool-expr>` at function start
+	ContractEnsure                       // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
 )
 
 // ContractStmt is a value-contract clause written as a leading body statement. The parser produces

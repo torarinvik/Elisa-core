@@ -102,6 +102,15 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond}
 			}
+		case "ensure":
+			// `ensure <bool-expr>` value-contract postcondition (may use `result`/`old(...)`).
+			if p.looksLikeContractStmt() {
+				pos := p.cur().Pos
+				p.advance()
+				cond := p.parseExpr()
+				p.expectNewline()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond}
+			}
 		case "expect":
 			if p.looksLikeExpectPatternStmt() {
 				return p.parseExpectPatternStmt()

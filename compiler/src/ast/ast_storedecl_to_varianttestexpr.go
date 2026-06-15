@@ -118,10 +118,14 @@ type FuncDecl struct {
 	// Requires holds value-contract preconditions (`requires <bool-expr>` clauses), checked at
 	// function entry in debug builds only (elided in release), like the bounds-check watchdog.
 	// Distinct from Ensures, which is the typestate/resource-state contract.
-	Requires   []Expr
-	Params     []ParamDecl
-	ReturnType TypeExpr
-	Body       []Stmt
+	Requires []Expr
+	// EnsureValues holds value-contract postconditions (`ensure <bool-expr>`), checked at every
+	// return in debug builds. They may reference `result` (the returned value) and `old(expr)`
+	// (the value of expr at function entry). Distinct from Ensures (typestate).
+	EnsureValues []Expr
+	Params       []ParamDecl
+	ReturnType   TypeExpr
+	Body         []Stmt
 }
 type ParamDecl struct {
 	Position     lexer.Pos
