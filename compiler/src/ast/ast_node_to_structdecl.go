@@ -616,3 +616,13 @@ type StructDecl struct {
 	// after each `s.field <- ...` store (`zeroed` construction is exempt).
 	Invariants []Expr
 }
+
+// IsOldCall reports whether a call expression is the contract `old(expr)` pseudo-call (the value of
+// expr at function entry, valid only inside an `ensure` clause).
+func IsOldCall(c *CallExpr) bool {
+	if c == nil {
+		return false
+	}
+	id, ok := c.Func.(*Ident)
+	return ok && id != nil && id.Name == "old"
+}

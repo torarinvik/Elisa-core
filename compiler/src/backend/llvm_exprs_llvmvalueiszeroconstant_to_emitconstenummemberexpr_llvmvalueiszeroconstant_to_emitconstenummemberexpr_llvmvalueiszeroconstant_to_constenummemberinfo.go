@@ -368,6 +368,13 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.UnaryExpr:
 		value, actualType, err = s.emitUnaryExpr(n)
 	case *ast.CallExpr:
+		if s.oldCaptures != nil && ast.IsOldCall(n) {
+			// `old(expr)` in an ensure clause -> the value captured at function entry.
+			if cap, ok := s.oldCaptures[n]; ok {
+				return cap.val, cap.typ, nil
+			}
+			return nil, nil, fmt.Errorf("old(...) outside a captured ensure context")
+		}
 		if n.Safe {
 			value, actualType, err = s.emitSafeCallExpr(n)
 		} else {

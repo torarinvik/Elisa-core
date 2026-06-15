@@ -108,6 +108,15 @@ type functionState struct {
 	// update). While > 0, fnFastMath() reports true so FP ops emitted in the scope get full
 	// fast-math (reassociation), scoped to that one reduction rather than program-wide.
 	fastMathScope int
+	// oldCaptures holds, for each `old(expr)` pseudo-call in this function's `ensure` clauses, the
+	// value of expr captured at function entry (the SSA value dominates all returns). emitExpr reads
+	// it when lowering the `old(...)` node during postcondition checks. nil when there are no olds.
+	oldCaptures map[*ast.CallExpr]oldCapture
+}
+
+type oldCapture struct {
+	val C.LLVMValueRef
+	typ semantic.Type
 }
 
 func (s *functionState) currentNamespace() string {
@@ -516,6 +525,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 	}
 
+	if err := state.emitOldCaptures(decl); err != nil {
+		return err
+	}
 	if err := state.emitPreconditionChecks(decl); err != nil {
 		return err
 	}
@@ -834,6 +846,67 @@ func clonePackedViewBindingMap(src map[string]packedVariantViewBinding) map[stri
 		cloned[name] = binding
 	}
 	return cloned
+}
+
+// emitOldCaptures evaluates every `old(expr)` appearing in the function's `ensure` clauses at entry
+// and records the value, so postcondition checks at each return read the entry-time value. Debug
+// builds only. The captured SSA values are computed in the entry region and dominate all returns.
+func (s *functionState) emitOldCaptures(decl *ast.FuncDecl) error {
+	if decl == nil || len(decl.EnsureValues) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	var olds []*ast.CallExpr
+	for _, e := range decl.EnsureValues {
+		collectOldCalls(e, &olds)
+	}
+	if len(olds) == 0 {
+		return nil
+	}
+	s.oldCaptures = make(map[*ast.CallExpr]oldCapture, len(olds))
+	for _, oc := range olds {
+		if len(oc.Args) != 1 {
+			continue
+		}
+		val, typ, err := s.emitExpr(oc.Args[0], nil)
+		if err != nil {
+			return err
+		}
+		s.oldCaptures[oc] = oldCapture{val: val, typ: typ}
+	}
+	return nil
+}
+
+// collectOldCalls appends every `old(...)` pseudo-call reachable in expr to out (depth-first over the
+// common expression shapes used in contracts).
+func collectOldCalls(expr ast.Expr, out *[]*ast.CallExpr) {
+	switch n := expr.(type) {
+	case nil:
+		return
+	case *ast.CallExpr:
+		if ast.IsOldCall(n) {
+			*out = append(*out, n)
+			return // don't descend into the captured expression
+		}
+		collectOldCalls(n.Func, out)
+		for _, a := range n.Args {
+			collectOldCalls(a, out)
+		}
+	case *ast.BinaryExpr:
+		collectOldCalls(n.Left, out)
+		collectOldCalls(n.Right, out)
+	case *ast.UnaryExpr:
+		collectOldCalls(n.Operand, out)
+	case *ast.ParenExpr:
+		collectOldCalls(n.Inner, out)
+	case *ast.FieldExpr:
+		collectOldCalls(n.Object, out)
+	case *ast.IndexExpr:
+		collectOldCalls(n.Object, out)
+		collectOldCalls(n.Index, out)
+	}
 }
 
 // emitPreconditionChecks emits a function's `requires` value-contracts at entry, in debug builds

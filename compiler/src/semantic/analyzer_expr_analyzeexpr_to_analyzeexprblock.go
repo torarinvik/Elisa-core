@@ -224,6 +224,19 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeMoveExpr(n)
 		return
 	case *ast.CallExpr:
+		// `old(expr)` inside an `ensure` clause: the value of expr at function entry. Types as the
+		// inner expr (analyzed in the entry/param state); the backend captures it at entry.
+		if a.inEnsureContext && ast.IsOldCall(n) {
+			if len(n.Args) != 1 {
+				a.errorf(n.Pos(), "old(...) takes exactly one argument")
+				result = invalidType
+				a.exprTypes[n] = result
+				return
+			}
+			result = a.analyzeExpr(n.Args[0])
+			a.exprTypes[n] = result
+			return
+		}
 		result = a.analyzeCallExpr(n)
 		return
 	case *ast.EnumColumnExpr:

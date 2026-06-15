@@ -529,6 +529,8 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 		scope.Define(&Symbol{Name: "result", Kind: SymbolLocal, Type: fnType.Return})
 	}
 	a.currentScope = scope
+	a.inEnsureContext = true
+	defer func() { a.inEnsureContext = false }()
 	for _, e := range fn.EnsureValues {
 		if e == nil {
 			continue

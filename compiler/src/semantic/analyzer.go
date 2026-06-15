@@ -172,7 +172,10 @@ type Analyzer struct {
 	exportedGlobals              []*ExportedGlobal
 	currentScope                 *Scope
 	currentReturn                Type
-	currentFuncDecl              *ast.FuncDecl
+	// inEnsureContext is true while analyzing `ensure` postcondition expressions, enabling the
+	// `old(expr)` pseudo-call (the value of expr at function entry).
+	inEnsureContext bool
+	currentFuncDecl *ast.FuncDecl
 	currentFuncType              *FuncType
 	// currentFuncSawPlainValueReturn records whether the current function has a
 	// value-returning path that is NOT a `return move <region>`. Combined with
