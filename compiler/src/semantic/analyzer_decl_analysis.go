@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
@@ -495,24 +496,41 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 
 // PropertyParamTypeName reports the canonical builtin name of a property-test
 // parameter type for which the harness can synthesize random inputs, and whether
-// the type is supported. Supported set: bool and the fixed-width integers.
+// the type is supported. Supported set: bool, the fixed-width integers, and the
+// floating-point types.
 func PropertyParamTypeName(t Type) (string, bool) {
 	b, ok := t.(*BuiltinType)
 	if !ok {
 		return "", false
 	}
 	switch b.Name {
-	case "bool", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64":
+	case "bool", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64":
 		return b.Name, true
 	default:
 		return "", false
 	}
 }
 
+// PropertyCaseCount parses a @property case-count argument (a bare positive
+// integer literal such as "1000") and reports the value and whether it parsed.
+func PropertyCaseCount(arg string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(arg))
+	if err != nil {
+		return 0, false
+	}
+	return n, true
+}
+
 func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
-	if len(annotation.Args) != 0 {
-		a.errorf(annotation.Position, "@property on function %q does not take arguments", fn.Name)
+	if len(annotation.Args) > 1 {
+		a.errorf(annotation.Position, "@property on function %q takes at most one argument (the case count, e.g. @property(1000))", fn.Name)
 		return false
+	}
+	if len(annotation.Args) == 1 {
+		if n, ok := PropertyCaseCount(annotation.Args[0]); !ok || n <= 0 {
+			a.errorf(annotation.Position, "@property on function %q expects a positive integer case count, got %q", fn.Name, annotation.Args[0])
+			return false
+		}
 	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 || len(signature.GenericParams) > 0 {
 		a.errorf(annotation.Position, "@property function %q must not be generic; got %s", fn.Name, signature)
@@ -540,7 +558,7 @@ func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation,
 			if i < len(signature.ExplicitParamNames) {
 				name = signature.ExplicitParamNames[i]
 			}
-			a.errorf(annotation.Position, "@property function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64)", fn.Name, name, p)
+			a.errorf(annotation.Position, "@property function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64, f32/f64)", fn.Name, name, p)
 			return false
 		}
 	}

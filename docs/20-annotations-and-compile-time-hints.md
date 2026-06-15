@@ -306,11 +306,14 @@ pseudo-random inputs and fails (via `panic`) on the first counterexample; the
 driver runs alongside `@test` cases under `-emit test` / `-emit test-runner`.
 
 - Must return `bool` (`true` = holds for that input) and take at least one parameter.
-- Generated parameter types: `bool`, `int`, and the fixed-width integers
-  `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`. Other types are a compile error.
+- Generated parameter types: `bool`, `int`, the fixed-width integers
+  `i8`/`i16`/`i32`/`i64`/`u8`/`u16`/`u32`/`u64`, and the floats `f32`/`f64`. Other
+  types are a compile error. Floats are drawn over `[-1000.0, 1000.0]` in `0.001`
+  steps (covers sign, zero, and fractional values).
 - Inputs are deterministic: the generator (xorshift64) is seeded from the property
-  name, so a failing run reproduces exactly. Each property is checked against a
-  fixed number of cases.
+  name, so a failing run reproduces exactly. Each property is checked against 256
+  cases by default; override with `@property(N)` (a positive integer), e.g.
+  `@property(1000)`.
 - Properties must be pure predicates: no effect permissions, generics, or variadics.
 - Pairs naturally with debug-gated `requires`/`ensure` contracts on the function
   under test — at `-O0` a contract violation surfaces as a property counterexample.

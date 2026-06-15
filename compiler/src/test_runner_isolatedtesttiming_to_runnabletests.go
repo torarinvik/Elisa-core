@@ -231,8 +231,23 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	return buildTestRunnerSource(source, cases, filter), nil
 }
 
-// propertyIterations is how many random inputs each @property is checked against.
+// propertyIterations is the default number of random inputs each @property is
+// checked against; override per-property with @property(N).
 const propertyIterations = 256
+
+// propertyCaseCount returns the case count for a property: the optional
+// positive-integer @property(N) argument, or propertyIterations by default.
+func propertyCaseCount(fn *semantic.AnnotatedFunc) int {
+	for _, ann := range fn.Annotations {
+		if ann.Name != "property" || len(ann.Args) != 1 {
+			continue
+		}
+		if n, ok := semantic.PropertyCaseCount(ann.Args[0]); ok && n > 0 {
+			return n
+		}
+	}
+	return propertyIterations
+}
 
 // buildPropertyDrivers synthesizes, for every selected @property function, a
 // parameterless void driver `__property_<name>` that feeds it `propertyIterations`
@@ -268,13 +283,14 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 // propertyDriverSource emits the Elisa text for one property driver.
 func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string {
 	seed := propertySeed(fn.Name)
+	cases := propertyCaseCount(fn)
 	var b strings.Builder
 	b.WriteString("\ndef ")
 	b.WriteString(driverName)
 	b.WriteString("() -> void:\n")
 	b.WriteString("\tcan Abort.Panic:\n")
 	fmt.Fprintf(&b, "\t\t__prop_s: mutable u64 = %d\n", seed)
-	fmt.Fprintf(&b, "\t\tfor __prop_i in 0..<%d:\n", propertyIterations)
+	fmt.Fprintf(&b, "\t\tfor __prop_i in 0..<%d:\n", cases)
 	argNames := make([]string, 0, len(fn.Signature.Params))
 	for j, p := range fn.Signature.Params {
 		typeName, _ := semantic.PropertyParamTypeName(p)
@@ -287,7 +303,7 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string 
 		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawExpr(typeName, "__prop_s"))
 	}
 	fmt.Fprintf(&b, "\t\t\tif not %s(%s):\n", fn.Name, strings.Join(argNames, ", "))
-	msg := elisacoreStringLiteral(fmt.Sprintf("property %q failed (deterministic seed; %d cases)", fn.Name, propertyIterations))
+	msg := elisacoreStringLiteral(fmt.Sprintf("property %q failed (deterministic seed; %d cases)", fn.Name, cases))
 	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
 	return b.String()
 }
@@ -316,6 +332,12 @@ func propertyDrawExpr(typeName, s string) string {
 		return "(" + s + " % 4000000000).u32()"
 	case "u64":
 		return s
+	case "f64":
+		// Fixed-point draw over [-1000.000, 1000.000] in 0.001 steps; covers
+		// sign, zero, and fractional values without relying on bit reinterpretation.
+		return "((" + s + " % 2000001).i64() - 1000000).f64() / 1000.0"
+	case "f32":
+		return "(((" + s + " % 2000001).i64() - 1000000).f64() / 1000.0).f32()"
 	default:
 		return s
 	}

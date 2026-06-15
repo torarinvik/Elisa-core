@@ -83,6 +83,71 @@ def add_commutes(a: i32, b: i32) -> bool:
 	}
 }
 
+func TestPropertyHarnessGeneratesFloats(t *testing.T) {
+	const body = `
+@property
+def f64_add_commutes(a: f64, b: f64) -> bool:
+    return a + b == b + a
+
+@property
+def f32_sq_nonneg(x: f32) -> bool:
+    return x * x >= 0.0.f32()
+
+@property
+def f64_bogus(x: f64) -> bool:
+    return x < 100.0
+`
+	_, stdout, stderr := runPropertyProgram(t, "prop_float", body)
+	if !strings.Contains(stdout, "[       OK ] __property_f64_add_commutes") {
+		t.Fatalf("expected float commutativity to hold, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "[       OK ] __property_f32_sq_nonneg") {
+		t.Fatalf("expected f32 square property to hold, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout, "failed=1") {
+		t.Fatalf("expected the bogus float property to fail, got:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if !strings.Contains(stdout+stderr, "f64_bogus") {
+		t.Fatalf("expected counterexample to name f64_bogus, got:\n%s", stdout+stderr)
+	}
+}
+
+func TestPropertyHarnessConfigurableCaseCount(t *testing.T) {
+	const body = `
+@property(1000)
+def big_run(a: i32) -> bool:
+    return a == a
+
+@property(7)
+def small_bogus(x: i32) -> bool:
+    return x < 100
+`
+	_, stdout, stderr := runPropertyProgram(t, "prop_cases", body)
+	if !strings.Contains(stdout, "[       OK ] __property_big_run") {
+		t.Fatalf("expected reflexive property to hold over 1000 cases, got:\n%s", stdout)
+	}
+	if !strings.Contains(stdout+stderr, "7 cases") {
+		t.Fatalf("expected the panic to report the overridden case count (7 cases), got:\n%s", stdout+stderr)
+	}
+}
+
+func TestPropertyHarnessRejectsBadCaseCount(t *testing.T) {
+	for _, tc := range []struct{ name, body, want string }{
+		{"zero", "@property(0)\ndef z(a: i32) -> bool:\n    return true\n", "positive integer case count"},
+		{"nonint", "@property(foo)\ndef z(a: i32) -> bool:\n    return true\n", "positive integer case count"},
+	} {
+		path := filepath.Join(t.TempDir(), "prop_"+tc.name+".elisa")
+		if err := os.WriteFile(path, []byte(tc.body), 0o644); err != nil {
+			t.Fatalf("write fixture: %v", err)
+		}
+		var stdout, stderr bytes.Buffer
+		runCLI([]string{"-emit", "semantic", path}, &stdout, &stderr)
+		if out := stdout.String() + stderr.String(); !strings.Contains(out, tc.want) {
+			t.Fatalf("%s: expected %q, got:\n%s", tc.name, tc.want, out)
+		}
+	}
+}
+
 func TestPropertyHarnessRejectsUnsupportedSignatures(t *testing.T) {
 	const body = `
 @property
