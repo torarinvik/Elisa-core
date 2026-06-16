@@ -68,6 +68,12 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 	if err != nil {
 		return nil, nil, err
 	}
+	// docs/84 Increment 3b: if the indexed object is a proven-distinct container-ref
+	// parameter, stage its per-param alias scope so the element load/store gets the
+	// distinct alias.scope/noalias instead of the shared "elt" scope. Single-use: it is
+	// consumed (and cleared) inside emitRuntimePointerIndexedAddressWithType. Cleared
+	// unconditionally first so a non-runtime path (array/plain ref) leaves no stale scope.
+	s.pendingDisjointScope = s.disjointScopeForObject(expr.Object)
 	zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
 	switch t := objType.(type) {
 	case *semantic.ArrayType:
@@ -240,6 +246,11 @@ func (s *functionState) emitRuntimePointerIndexedAddress(containerPtr C.LLVMValu
 	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
 }
 func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.LLVMValueRef, containerLLVMType C.LLVMTypeRef, elemType semantic.Type, indexValue C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	// docs/84 Increment 3b: consume the staged per-param disjoint scope exactly once and
+	// clear it, so a later non-index caller of this function (iter loops, node tables) can
+	// never pick up a stale scope from a previous indexing site.
+	disjointScope := s.pendingDisjointScope
+	s.pendingDisjointScope = nil
 	dataFieldPtr := C.LLVMBuildStructGEP2(s.builder, containerLLVMType, containerPtr, 0, cStringFree("idx.data.ptr"))
 	dataPtr, err := s.loadValue(dataFieldPtr, &semantic.RefType{Elem: elemType, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny}, "idx.data")
 	if err != nil {
@@ -257,6 +268,18 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
 		s.tagDarrayHeaderLoad(dataPtr)
 		s.markAliasSafeElementPtr(ptr)
+		// docs/84 Increment 3b: additionally register this element address under its
+		// proven-distinct parameter's scope (a SEPARATE alias-scope domain from the
+		// hdr/elt one above — an access carries metadata from both, LLVM intersects them).
+		// The darray-domain elt scope preserves base-ptr hoisting; the disjoint-domain
+		// per-param scope lets LoopAccessAnalysis prove cross-param NoAlias and elide the
+		// runtime memcheck so the loop vectorizes.
+		if disjointScope != nil {
+			if s.disjointElementPtrs == nil {
+				s.disjointElementPtrs = map[C.LLVMValueRef]*disjointParamScope{}
+			}
+			s.disjointElementPtrs[ptr] = disjointScope
+		}
 	}
 	return ptr, elemType, nil
 }
@@ -292,13 +315,19 @@ func (s *functionState) markAliasSafeElementPtr(ptr C.LLVMValueRef) {
 
 // tagDarrayElementAccess marks a scalar-darray element load/store as not aliasing header memory.
 func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMValueRef) {
-	if s == nil || inst == nil || ptr == nil || s.aliasSafeElementPtrs == nil {
+	if s == nil || inst == nil || ptr == nil {
 		return
 	}
-	if !s.aliasSafeElementPtrs[ptr] {
-		return
+	if s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[ptr] {
+		s.attachAliasScopeMetadataWithNames(inst, darrayAliasDomain, darrayAliasScopeElt, []string{darrayAliasScopeHdr})
 	}
-	s.attachAliasScopeMetadataWithNames(inst, darrayAliasDomain, darrayAliasScopeElt, []string{darrayAliasScopeHdr})
+	// docs/84 Increment 3b: if this element address belongs to a proven-distinct parameter,
+	// additionally stamp its per-param alias.scope + sibling noalias (in the disjoint domain).
+	if s.disjointElementPtrs != nil {
+		if scope := s.disjointElementPtrs[ptr]; scope != nil {
+			s.tagDisjointParamElementAccess(inst, scope)
+		}
+	}
 }
 func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
 	if enumType == nil {

@@ -64,6 +64,17 @@ type functionState struct {
 	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
 	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
 	aliasSafeElementPtrs map[C.LLVMValueRef]bool
+	// disjointScopes carries the per-parameter alias.scope identities for proven-distinct
+	// container-ref params (docs/84 Increment 3b). Nil unless -fnoalias is on AND the
+	// analyzer's whole-program FuncDisjointParams proved a self-noalias group for this fn.
+	disjointScopes *disjointParamScopeState
+	// disjointElementPtrs maps a GEP'd element address of a proven-distinct param to its
+	// scope, so the subsequent load/store in loadValue/storeValue is tagged with the
+	// per-param scope (replacing the shared elt scope) for that element.
+	disjointElementPtrs map[C.LLVMValueRef]*disjointParamScope
+	// pendingDisjointScope is the scope of the index-site object currently being lowered;
+	// set by emitIndexAddress and consumed once by emitRuntimePointerIndexedAddressWithType.
+	pendingDisjointScope *disjointParamScope
 	regions              []regionBinding
 	// darrayStackTag routes a fresh inferred-region darray (by name) to its assigned parallel
 	// arena (multi-stack regions, Phase B1b): name -> region arena tag "__auto_N#k". Populated at
@@ -466,6 +477,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	if g.trace != nil {
 		state.traceNameGlobal = g.trace.nameGlobalFor(decl.Name)
 	}
+	// docs/84 Increment 3b: compute the per-parameter disjoint alias scopes (no-op unless
+	// -fnoalias and a proven self-noalias group). Done before param binding so the explicit
+	// loop below can record each scope's shadowing-proof alloca identity.
+	state.initDisjointParamScopes()
 
 	abiLayout, layoutErr := g.computeFuncAbiLayout(fnType)
 	if layoutErr != nil {
@@ -509,6 +524,13 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	for i, param := range decl.Params {
 		if err := bindParam(param.Name, param.Mutable, i, i); err != nil {
 			return err
+		}
+		// docs/84 Increment 3b: record this param's binding pointer as its scope identity.
+		// The pointer (not the name) is the shadowing-proof key checked at each index site.
+		if state.disjointScopes != nil {
+			if binding, ok := state.lookupBinding(param.Name); ok {
+				state.recordDisjointParamAlloca(i, binding.ptr)
+			}
 		}
 		if g.di != nil {
 			if binding, ok := state.lookupBinding(param.Name); ok {
