@@ -14,7 +14,7 @@ It builds directly on the existing region model in
 [08-region-checkpoints.md](08-region-checkpoints.md) and the dependency-set model
 in [10-orthogonality-packed-enums-regions-and-affine-concurrency.md](10-orthogonality-packed-enums-regions-and-affine-concurrency.md)
 (`deps(v) = { (region, generation), ... }`), and on region parameters — both the inferred generic form
-(`def fill[region r](out: mutable darray[u8] @r)`, already runtime-tested, where
+(`def fill[@r](out: mutable darray[u8] @r)`, already runtime-tested, where
 `r` is inferred from a region-backed argument) and the explicit
 `Arena`-value-parameter form (`def make(owner: Arena) -> Expr @owner`,
 [docs/01](01-memory-layout-syntax.md)) used when the caller supplies the

@@ -265,7 +265,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 	case *semantic.StructType:
 		// Region parameters carry provenance, not layout: an `@owner` container/ref field
 		// has the same representation regardless of which region backs it. So a struct
-		// parameterized ONLY over regions (`struct State[region owner]:`) lowers to a
+		// parameterized ONLY over regions (`struct State[@owner]:`) lowers to a
 		// concrete body directly — it is the no-Arena-field replacement for arena-carrying
 		// state structs. Only TYPE/state parameters genuinely require concrete arguments.
 		needsConcrete := false

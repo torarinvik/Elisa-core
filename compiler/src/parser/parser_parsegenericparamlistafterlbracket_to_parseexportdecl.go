@@ -20,16 +20,16 @@ func (p *Parser) parseGenericParamListAfterLBracket(allowRegion bool, allowPermi
 		kind := ast.GenericParamType
 		isRegionParam := allowRegion && p.match(lexer.TOKEN_REGION)
 		if isRegionParam {
-			p.deprecatedAt(paramPos, "region-param spelling `region %s` is deprecated; use `@%s`", p.cur().Text, p.cur().Text)
+			p.errorAt(paramPos, "region-param spelling `region %s` has been removed; use `@%s`", p.cur().Text, p.cur().Text)
 		}
 		if !isRegionParam && allowRegion && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "region" {
 			p.advance()
-			p.deprecatedAt(paramPos, "region-param spelling `region %s` is deprecated; use `@%s`", p.cur().Text, p.cur().Text)
+			p.errorAt(paramPos, "region-param spelling `region %s` has been removed; use `@%s`", p.cur().Text, p.cur().Text)
 			isRegionParam = true
 		}
 		// Canonical region-param spelling: `@r` — the same token used at every use site
 		// (`darray[T] @r`, `&@r`), so declaration and use read identically (cf. Rust lifetimes).
-		// `region r` is the legacy alias. `[T, @r]` composes: the `@` marks the entry as a region.
+		// `[T, @r]` composes: the `@` marks the entry as a region.
 		if !isRegionParam && allowRegion && p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 			p.advance() // consume '@'
 			isRegionParam = true

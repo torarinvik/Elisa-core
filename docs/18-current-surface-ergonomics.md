@@ -1140,7 +1140,7 @@ Current rules:
 - `size_of[T]()`, `align_of[T]`, and `offset_of[T](.field)` are the generic-style spellings and are preferred in new code
 - results are computed from the backend target data layout
 - `offset_of` currently accepts a direct field name on a lowered struct-like type
-- legacy spellings `sizeof`, `alignof`, and `offsetof` are still accepted with deprecation diagnostics, but new code should use the underscore forms
+- legacy spellings `sizeof`, `alignof`, and `offsetof` have been removed; use the underscore forms
 - prefer these builtins in runtime, FFI, packed-layout, and backend test code instead of duplicating ABI constants by hand
 
 ## Static Assertions
@@ -3277,7 +3277,7 @@ values: int[3] = [1, 2, 3]
 ```
 
 Region-owned structs declare their region in the bracket list —
-`struct Expr[region owner]:` (several with `[region a, region b]`). Use sites carry
+`struct Expr[@owner]:` (several with `[@a, @b]`). Use sites carry
 the region with the `@r` suffix — `Expr @scratch` / `Expr @owner` — naming a region,
 region parameter, or visible `Arena` value (see
 [68-region-memory-model.md §5](68-region-memory-model.md)).
@@ -3286,7 +3286,7 @@ When the struct also has type parameters, the brackets hold the type arguments a
 the `@r` suffix carries the region.
 
 ```elisa
-struct Box[T, region owner]:
+struct Box[T, @owner]:
     value: T
     next: Box[T]&? @owner
 

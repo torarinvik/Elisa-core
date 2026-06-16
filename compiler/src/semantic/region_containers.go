@@ -135,7 +135,7 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 	if region == "" {
 		return
 	}
-	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[region r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
+	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
 }
 
 // typeCarriesRegionStorage reports whether a value of type t can transitively hold
@@ -370,9 +370,9 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 				funcTypeHasImplicitParam(a.currentFuncType, regionPolymorphicImplicitParamName) {
 				return
 			}
-			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region", via)
+			a.errorf(valueExpr.Pos(), "value escapes its `in auto:` scope via %s; the inferred region is freed at scope exit. Give it an explicit lifetime — copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region", via)
 		} else {
-			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[region r] ... -> ... @r) or a longer-lived region first", region, via)
+			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region first", region, via)
 		}
 	}
 }
@@ -749,8 +749,8 @@ func (a *Analyzer) regionAvailableForContainer(t Type) bool {
 }
 
 // containerRegionParamInScope reports whether t is a container whose region is
-// an in-scope region parameter (e.g. `def f[region r](out: darray[T] @r&)` or
-// `def f[region r](d: dict[K,V] @r&)`). Such a container may be grown/inserted
+// an in-scope region parameter (e.g. `def f[@r](out: darray[T] @r&)` or
+// `def f[@r](d: dict[K,V] @r&)`). Such a container may be grown/inserted
 // without an ambient `in <arena>:` scope: the arena for r is supplied by the
 // caller (region-aware codegen sources it from the region environment / hidden
 // arena param). Handles darray, dict, dict-entry receivers, peeling refs.

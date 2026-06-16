@@ -44,10 +44,6 @@ func (p *Parser) Errors() []string { return p.errors }
 // Notices returns non-fatal parse-time diagnostics (deprecation warnings).
 func (p *Parser) Notices() []string { return p.notices }
 
-func (p *Parser) deprecatedAt(pos lexer.Pos, format string, args ...interface{}) {
-	msg := fmt.Sprintf("%s: deprecated: %s", pos, fmt.Sprintf(format, args...))
-	p.notices = append(p.notices, msg)
-}
 func (p *Parser) activePoolName() string {
 	if len(p.poolScopes) == 0 {
 		return ""

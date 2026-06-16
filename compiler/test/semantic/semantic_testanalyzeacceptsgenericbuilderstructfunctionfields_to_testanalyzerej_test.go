@@ -30,12 +30,11 @@ def run() -> i64:
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
 func TestAnalyzeRejectsSpecializationOfNonGenericFunction(t *testing.T) {
-	src := `def id(value: i64) -> i64:
+	src := `def id(value: int) -> int:
     return value
 
-def run() -> i64:
-    fn: func(i64) -> i64 = id.specialize[i64]()
-    return fn(7)
+def run() -> int:
+    return id[int](7)
 `
 	_, errs := parseAndAnalyze(t, "specialize_non_generic_reject.elisa", src)
 	if len(errs) == 0 {

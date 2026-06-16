@@ -397,9 +397,6 @@ extern count_if[T](da: darray[T], pred: func(T) -> bool) -> usize
 
 extern find_if[T](da: darray[T], pred: func(T) -> bool) -> T?
 
-@deprecated("use a fold comprehension `(acc <op> x for x in da with acc = init)` (no lambda, same fused loop), or a plain `for` loop for complex steps")
-extern fold[T, A](da: darray[T], init: A, f: func(A, T) -> A) -> A
-
 extern darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start: usize, end: usize)
 
 extern sort[T](da: mutable darray[T]&, less: func(T, T) -> bool)

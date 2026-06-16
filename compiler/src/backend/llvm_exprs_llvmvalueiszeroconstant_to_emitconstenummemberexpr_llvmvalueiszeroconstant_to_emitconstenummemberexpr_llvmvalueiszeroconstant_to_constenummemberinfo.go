@@ -612,7 +612,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		return value, binding.typ, err
 	}
 	if owner, ok := s.regionArenaOwner(expr.Name); ok && owner.arenaRef != nil {
-		// A reference to an explicit `[region owner]` parameter by name yields the threaded
+		// A reference to an explicit `[@owner]` parameter by name yields the threaded
 		// hidden Arena& parameter as a value — so `owner` can be passed where an arena value is
 		// expected (a runtime container constructor like `indexmap.new(owner)`), the no-Arena-field
 		// replacement for an `owner: mutable Arena&` state field. The arena param is already a

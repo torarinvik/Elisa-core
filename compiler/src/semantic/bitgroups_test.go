@@ -303,7 +303,7 @@ def read() -> usize:
 // The modern `size_of` / `align_of` / `offset_of` layout-introspection names analyze cleanly.
 // (The removed `sizeof` / `alignof` / `offsetof` spellings are rejected at parse time; see the
 // parser package's TestParseRejectsLegacyLayoutIntrospectionNames.)
-func TestAnalyzeDeprecatedLegacyLayoutIntrospectionNames(t *testing.T) {
+func TestAnalyzeModernLayoutIntrospectionNames(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_names.elisa", `struct Header layout c:
 	tag: u8
 	count: u32

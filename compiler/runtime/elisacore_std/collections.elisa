@@ -616,19 +616,6 @@ def find_if[T](da: darray[T], pred: func(T) -> bool) -> T?:
             return x
     return null
 
-# Left fold / reduce over the range (std::accumulate): `da.fold(init, f)` returns
-# f(... f(f(init, e0), e1) ..., en). The accumulator type is inferred from `init`,
-# so it composes with any element type. Read-only, allocation-free.
-#
-# DEPRECATED (docs/79): superseded by the fold/reduce comprehension, which needs no
-# lambda and fuses to the same loop -- `(acc + x for x in da with acc = init)`.
-@deprecated("use a fold comprehension `(acc <op> x for x in da with acc = init)` (no lambda, same fused loop), or a plain `for` loop for complex steps")
-def fold[T, A](da: darray[T], init: A, f: func(A, T) -> A) -> A:
-    acc: mutable A = init
-    for x in da:
-        acc <- f(acc, x)
-    return acc
-
 # Comparator-based ordering algorithms (the C++ idiom: a strict-weak-ordering
 # `less(a, b)`, not a `T`-level `<`, so they stay generic without operator
 # overloading). All in-place / allocation-free.

@@ -773,7 +773,7 @@ func (a *Analyzer) defineRegionPolymorphicParamSymbol(fn *ast.FuncDecl, fnType *
 	a.defineLocal(sym, fn.Pos())
 }
 
-// defineRegionParamValueSymbols makes each explicit `[region owner]` parameter referenceable as an
+// defineRegionParamValueSymbols makes each explicit `[@owner]` parameter referenceable as an
 // Arena VALUE inside the function body (not just as an `@owner` annotation). A region param is bound
 // as a SymbolRegion exactly like a `region owner(...):` declaration, so `owner` resolves where an
 // arena value is expected — e.g. a runtime container constructor that threads an explicit arena

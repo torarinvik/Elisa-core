@@ -20,7 +20,7 @@ import (
 // is local — put one object in an explicit region so the lifetimes nest, or reorder so one
 // contains the other.
 //
-// Explicit regions (`region r(...)`, `def f[region r]`, an `@r` type annotation) are NOT
+// Explicit regions (`region r(...)`, `def f[@r]`, an `@r` type annotation) are NOT
 // inferred and are exempt: the user keeps full manual control. With interleaving banned, every
 // inferred region's surviving objects nest or are disjoint — a clean forest the auto-tightening
 // transform (Phase 2) relies on.

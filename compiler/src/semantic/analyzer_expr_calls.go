@@ -383,7 +383,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// `region owner(...):` scope (or `with arena ... as owner`) makes `owner` a visible
 		// region the callee can allocate into. This is the no-argument binding path (the
 		// region appears in neither an argument nor the return type), letting a builder like
-		// `def make[region owner]() -> State` allocate into the caller's named region with no
+		// `def make[@owner]() -> State` allocate into the caller's named region with no
 		// threaded `Arena&` — the region-system replacement for arena-passing. Inference from
 		// `@r`-annotated arguments/returns (resolveImplicitCallArgs) takes precedence.
 		if _, ok := regionBindings[name]; !ok {

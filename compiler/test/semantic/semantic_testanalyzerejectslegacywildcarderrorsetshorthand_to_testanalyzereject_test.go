@@ -122,8 +122,8 @@ func TestAnalyzeRejectsElseOnNonNullableReference(t *testing.T) {
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "else recovery requires an optional or nullable reference (refstate fact nullable)") {
-		t.Fatalf("expected else recovery diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "implicit `else` unwrap has been removed") {
+		t.Fatalf("expected removed implicit else diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 func TestAnalyzeAcceptsRuntimeBackedArrayAndViewIndexing(t *testing.T) {
@@ -412,7 +412,6 @@ func TestAnalyzeStrictUnsafeCollectionsCastsStayInternal(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "arena_da_view_slice")
 	requireFunctionPermissionRefs(t, result, "arena_da_from_view", "Memory.Allocate", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "darray_view")
-	requireFunctionPermissionRefs(t, result, "darray_builder_view")
 	requireFunctionPermissionRefs(t, result, "inline_vec_view")
 	requireFunctionPermissionRefs(t, result, "arena_dict_new", "Memory.Allocate", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "arena_dict_reserve", "Memory.Allocate", "Abort.Panic")
@@ -447,9 +446,6 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "intern_small_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "int_to_string_into", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string_into", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "string_builder_new", "heap mutable StringBuilder&")
-	requireFunctionReturnTypeString(t, result, "string_builder_append", "heap mutable StringBuilder&")
-	requireFunctionReturnTypeString(t, result, "string_builder_finish", "heap u8&")
 }
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
@@ -462,9 +458,6 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "char_to_string", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "char_to_string_scratch", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_concat2", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_new", "Memory.Allocate", "Abort.Panic", "Global.Read")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_append", "Memory.Allocate", "Abort.Panic", "Global.Read")
-	requireFunctionPermissionRefs(t, result, "rt_string_builder_finish", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_puts", "Console.Write")
@@ -472,8 +465,6 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string", "heap u8&")
 	requireFunctionReturnTypeString(t, result, "char_to_string_scratch", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "rt_string_builder_new", "heap mutable StringBuilder&")
-	requireFunctionReturnTypeString(t, result, "rt_string_builder_append", "heap mutable StringBuilder&")
 	requireFunctionReturnTypeString(t, result, "string_view_copy", "heap u8&")
 }
 func TestAnalyzeAcceptsValueOptionalsAndTryElse(t *testing.T) {

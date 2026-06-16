@@ -132,11 +132,11 @@ layout soa struct ParticleRows:
 }
 
 func TestParseStructRegionOwnerForms(t *testing.T) {
-	file, errs := parseSourceFile(t, `struct Expr[region owner]:
+	file, errs := parseSourceFile(t, `struct Expr[@owner]:
 	left: Expr&? @owner
 	right: Expr&? @owner
 
-layout soa struct SymbolRows[region owner]:
+layout soa struct SymbolRows[@owner]:
 	name_id: NameId
 	span: Span
 `)
@@ -177,8 +177,7 @@ layout soa struct SymbolRows[region owner]:
 
 func TestParseFuncRegionParamAtSigilForm(t *testing.T) {
 	// `[@r]` is the canonical region-param spelling — the same `@r` token used at use sites —
-	// and must parse to the identical region param as the legacy `[region r]`, composing with
-	// type params in `[T, @r]`.
+	// and composes with type params in `[T, @r]`.
 	file, errs := parseSourceFile(t, `def repl[@r](s: mutable darray[u8]& @r) -> void:
 	s <- [1]
 
@@ -207,9 +206,7 @@ def merge[T, @r](dst: mutable darray[T]& @r, src: darray[T]) -> void:
 	}
 }
 
-func TestLegacyRegionParamSpellingEmitsDeprecation(t *testing.T) {
-	// `[region r]` is the legacy alias for the canonical `[@r]`; it still parses to the same
-	// region param (no hard error) but now emits a non-fatal deprecation notice steering to `@r`.
+func TestLegacyRegionParamSpellingIsRejected(t *testing.T) {
 	l := lexer.New("test.elisa", []byte(`def repl[region r](s: mutable darray[u8]& @r) -> void:
 	s <- [1]
 
@@ -221,18 +218,11 @@ struct Box[T, region owner]:
 		t.Fatalf("unexpected lexer errors: %v", errs)
 	}
 	p := New(tokens)
-	file := p.ParseFile("test.elisa")
-	if errs := p.Errors(); len(errs) != 0 {
-		t.Fatalf("legacy region spelling should still parse without errors, got: %v", errs)
-	}
-	fn, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok || len(fn.RegionParams) != 1 || fn.RegionParams[0] != "r" {
-		t.Fatalf("expected [region r] to parse to region param [r], got %#v", file.Decls[0])
-	}
-	notices := strings.Join(p.Notices(), "\n")
-	for _, want := range []string{"`region r` is deprecated", "use `@r`", "`region owner` is deprecated", "use `@owner`"} {
-		if !strings.Contains(notices, want) {
-			t.Fatalf("expected deprecation notice containing %q, got:\n%s", want, notices)
+	_ = p.ParseFile("test.elisa")
+	errs := strings.Join(p.Errors(), "\n")
+	for _, want := range []string{"`region r` has been removed", "use `@r`", "`region owner` has been removed", "use `@owner`"} {
+		if !strings.Contains(errs, want) {
+			t.Fatalf("expected removed region-param diagnostic containing %q, got:\n%s", want, errs)
 		}
 	}
 }
@@ -248,14 +238,14 @@ func TestCanonicalRegionParamSpellingEmitsNoDeprecation(t *testing.T) {
 }
 
 func TestFormatStructRegionOwnerFormsRoundTrips(t *testing.T) {
-	file, errs := parseSourceFile(t, `struct Expr[region owner]:
+	file, errs := parseSourceFile(t, `struct Expr[@owner]:
 	left: Expr&? @owner
 
-struct Box[T, region owner]:
+struct Box[T, @owner]:
 	value: T
 	next: Box[T, owner]&? @owner
 
-layout soa struct SymbolRows[region owner]:
+layout soa struct SymbolRows[@owner]:
 	name_id: NameId
 	span: Span
 `)
@@ -283,7 +273,7 @@ layout soa struct SymbolRows[region owner]:
 }
 
 func TestParseStructRegionOwnerRejectsDuplicateExplicitRegion(t *testing.T) {
-	_, errs := parseSourceFile(t, `struct Expr[region owner, region owner]:
+	_, errs := parseSourceFile(t, `struct Expr[@owner, @owner]:
 	next: Expr&? @owner
 `)
 	if len(errs) == 0 {

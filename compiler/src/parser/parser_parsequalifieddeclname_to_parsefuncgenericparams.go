@@ -610,7 +610,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 	}
 
 	// The `struct X in owner:` declaration sugar is removed (docs/68 §7): declare the
-	// region as a type parameter instead, `struct X[region owner]:`. RegionOwner is
+	// region as a type parameter instead, `struct X[@owner]:`. RegionOwner is
 	// kept vestigially ("" always) to avoid churn in the downstream readers.
 	regionOwner := ""
 	if p.peek() == lexer.TOKEN_IN {
@@ -619,7 +619,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 		if p.peek() == lexer.TOKEN_IDENT {
 			ownerName = p.advance().Text // consume the region name to recover
 		}
-		p.errorf("`struct %s in %s:` is no longer supported; declare the region as a parameter: `struct %s[region %s]:`", name, ownerName, name, ownerName)
+		p.errorf("`struct %s in %s:` is no longer supported; declare the region as a parameter: `struct %s[@%s]:`", name, ownerName, name, ownerName)
 	}
 
 	p.expect(lexer.TOKEN_COLON)

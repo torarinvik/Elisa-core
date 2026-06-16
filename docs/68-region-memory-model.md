@@ -16,7 +16,7 @@ used across [01](01-memory-layout-syntax.md), [22](22-value-fact-core.md), and
 > [docs/75](75-region-polymorphic-functions.md)), or uses the innermost active
 > region otherwise. Write `new[r] T(...)` only when you want to target a *named*
 > region explicitly. `new[auto]` is the (still-accepted) spelling of the inferred
-> default — bare `new` is now preferred. The `in auto:` block is **deprecated**:
+> default — bare `new` is now preferred. The `in auto:` block has been removed:
 > inference no longer needs it; use an explicit `region NAME(size):` when you
 > want a scope you control. Container literals (`darray[T] = []`, `dict = {}`)
 > infer their region the same way. Examples below that show `new[auto]` /
@@ -194,13 +194,13 @@ invalidation) and better than a blanket "growth always invalidates" rule.
 "Which region does this value live in?" is written **one way**, by position:
 
 - **Declare** a region parameter in the bracket list, beside type parameters:
-  `[region r]`.
+  `[@r]`.
 - **Use** provenance with the `@r` suffix, on *any* type:
   `i32& @r`, `Entity& @r`, `darray[T] @r`, `Level @r`, `Box[i64] @r`.
 - **Struct fields** reference the struct's own region parameter by name: `@owner`.
 
 ```elisa
-struct Level[region owner]:            # declare the region parameter
+struct Level[@owner]:            # declare the region parameter
     name:     str
     geometry: darray[Triangle] @owner   # fields tie provenance to it
     entities: Pooled[Entity]   @owner
@@ -212,12 +212,12 @@ lvl: Level @loading                    # @ at a use site
 e0:  Entity& @big                      # @ on a reference
 ```
 
-The only struct form is `struct Level[region owner]:`. Region parameters live in
+The only struct form is `struct Level[@owner]:`. Region parameters live in
 the bracket list beside type parameters, each prefixed with `region`, and
 **generalize** to several regions:
 
 ```elisa
-struct Edge[region a, region b]:        # endpoints in different regions
+struct Edge[@a, @b]:        # endpoints in different regions
     from: Node& @a
     to:   Node& @b
 ```
@@ -271,7 +271,7 @@ Breaking changes, applied as one coordinated sweep:
 | `scratch i32&` (region prefix on ref) | `i32& @scratch` |
 | `Expr[owner]`, `Box[i64, scratch]` (region in brackets at use site) | `Expr @owner`, `Box[i64] @scratch` |
 | `owner Expr&?` (field, region prefix) | `Expr&? @owner` |
-| `struct X in owner:` | `struct X[region owner]:` — `in owner` declaration sugar **removed** |
+| `struct X in owner:` | `struct X[@owner]:` — `in owner` declaration sugar **removed** |
 | `xs = [1, 2, 3] in owner` (expression owner) | `xs: darray[int] @owner = [1, 2, 3]` |
 
 Unchanged: `new[r] x`; `mark`/`restore`/`reset`/`destroy`/`leak`; storage-class
@@ -355,7 +355,7 @@ def entity_demo() -> void:
 ### 9.4 Last boss — a frame loop: permanent + per-frame + scratch + bulk `adopt`
 
 ```elisa
-struct Level[region owner]:
+struct Level[@owner]:
     name:     str
     geometry: darray[Triangle] @owner
     entities: Pooled[Entity]   @owner

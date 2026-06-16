@@ -512,8 +512,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				a.warnf(n.Pos(), "constant %d does not fit in %s and is truncated by this cast", value.Int, dst)
 			}
 		}
-		// The `x.ref[T]` reference shorthand is deprecated in favor of the explicit
-		// `&x` (borrow) / `(&x).cast[T]` (reinterpret) forms. Warn on every use.
+		// The `x.ref[T]` reference shorthand has been removed in favor of the explicit
+		// `&x` (borrow) / `(&x).cast[T]` (reinterpret) forms. Reject every use.
 		// Classify so the message points at the right replacement: BORROW (-> `&x`)
 		// iff matching pointee (ignoring mutability), the target is not the universal
 		// `void&` type-erasure pointer, and `&x`'s mutability suffices — `&x`'s real

@@ -38,7 +38,7 @@ from one) is **region-polymorphic**: it is implicitly parameterized over the reg
 in, exactly as it is already implicitly parameterized over nothing-you-write for ordinary type
 inference. The region parameter is:
 
-- **Inferred, not declared.** No `def make[region r]`. The signature stays `def make(depth) -> Expr`.
+- **Inferred, not declared.** No `def make[@r]`. The signature stays `def make(depth) -> Expr`.
 - **Threaded as a hidden parameter.** The caller passes its ambient region; `new[auto]` inside the
   callee resolves to that region; the returned handle's provenance is the caller's region.
 - **Bound at the call site to the region the result flows into.** `root: Expr = make(21)` inside
@@ -68,7 +68,7 @@ def build():
 This is `new[auto]`'s natural completion: `new[auto]` is "allocate into the region I'm in";
 region-polymorphism is "the region I'm in can be my caller's."
 
-## Why inferred, not explicit `[region r]`
+## Why inferred, not explicit `[@r]`
 
 The two-tier inference story already governs every other allocation axis; region-polymorphic
 functions are the same table, one row down:
@@ -79,9 +79,9 @@ functions are the same table, one row down:
 | struct alloc | `new[auto] Box(...)` | `new[r] Box(...)` |
 | **region-poly fn** | `def make(...) -> Expr` | `def make(...) -> Expr @r` |
 
-Going explicit-only here (the `def make[region r]` form) would be the one inconsistent axis in an
+Going explicit-only here (the `def make[@r]` form) would be the one inconsistent axis in an
 otherwise inference-first language — you don't write `make<T>` for a type-generic call, so you
-shouldn't write `make[region r]` for a region-generic one. The region, like the type, is recovered
+shouldn't write `make[@r]` for a region-generic one. The region, like the type, is recovered
 from the call site.
 
 The honest cost (the reason Rust went explicit): cross-function region inference can be ambiguous,
@@ -150,7 +150,7 @@ binary-trees benchmark can run.
 
 ## Non-goals
 
-- No `[region r]` parameter syntax on functions. The region is inferred; `@r` pins only when
+- No `[@r]` parameter syntax on functions. The region is inferred; `@r` pins only when
   inference is ambiguous, and ambiguity is an error-with-a-fix, never a silent guess.
 - No change to the enum/handle types (docs/74): the region rides on the value, never the type.
 - No reuse vocabulary beyond what exists: `@r`, `new[auto]`/`new[r]`, and the `tree` store-threading

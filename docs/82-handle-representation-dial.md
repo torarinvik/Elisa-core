@@ -28,9 +28,9 @@ enum Node layout soa(handle: u32):    # columnar, same dial
   suffix slot, no ordering questions.
 - The mode (`aos`/`soa`) may be omitted when options alone are given:
   `layout(handle: u16)` keeps the default mode.
-- The Phase-1 `index:` spelling (docs/76) becomes a **deprecated alias** of `handle:`.
-  Two keys for one dimension is soup; `handle` is the honest name once `ptr` joins the
-  value space (a pointer is not an index).
+- The Phase-1 `index:` spelling (docs/76) has been removed; use `handle:`.
+  Two keys for one dimension was soup; `handle` is the honest name once `ptr`
+  joins the value space (a pointer is not an index).
 
 ### The invariant: payloads never change across the dial
 
@@ -84,12 +84,12 @@ What it costs — enforced as compile errors, not footnotes:
    outlives/escape machinery applies verbatim because the handle is opaque — it cannot
    be laundered past the checker.
 
-## Rejected: `enum Node[region r]:` with `Node& @r` payloads
+## Rejected: `enum Node[@r]:` with `Node& @r` payloads
 
 Re-affirms docs/76 §"Why not a region parameter on the type"; both reasons bind harder
 for hierarchies:
 
-1. **The threading wall.** `Node[r]` as a type forces `[region r]` onto every function
+1. **The threading wall.** `Node[r]` as a type forces `[@r]` onto every function
    that touches one, transitively — the exact wall docs/75 region-polymorphism removes.
 2. **Provenance splits type identity.** `Node[a]` and `Node[b]` would be byte-identical
    types that can't flow into the same darray/function/match. docs/10 forbids it.
@@ -180,7 +180,7 @@ Plug points in docs/81 Phase 3:
    payload field is stored as the BARE handle with the width's null sentinel meaning
    absent (no presence flag in the record — `{handle, handle}` payloads); the generic
    `{bool, handle}` carrier remains the ABI outside the record, converted exactly at
-   the constructor-write / payload-read boundary. `index:` is deprecation-warned.
+   the constructor-write / payload-read boundary. `index:` has been removed.
    Known gap: an optional-only self-reference (`next: Tree?` with no bare edge) does
    not yet promote the enum to region-backed (computeRecursiveEnumSet counts only bare
    payload types).

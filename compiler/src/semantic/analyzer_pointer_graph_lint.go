@@ -25,7 +25,7 @@ func (a *Analyzer) perfLint(pos lexer.Pos, format string, args ...interface{}) {
 // to replace.
 //
 // Crucially this does NOT flag a `@owner`-tracked self-ref (`next: Node& @owner` in a
-// `struct Node[region owner]`): that is a sound single-region graph whose whole lifetime is
+// `struct Node[@owner]`): that is a sound single-region graph whose whole lifetime is
 // one decision. Only the un-provenance'd raw kind (`heap Node&?` or a bare `Node&?`) is
 // flagged — friction lands on the slow/unsafe pattern, not the safe one.
 func (a *Analyzer) checkPointerGraphStruct(stDecl *ast.StructDecl, st *StructType) {
@@ -47,7 +47,7 @@ func (a *Analyzer) checkPointerGraphStruct(stDecl *ast.StructDecl, st *StructTyp
 		if !rawSelfReferentialRef(resolved.Type, st) {
 			continue
 		}
-		a.perfLint(field.Position, "field %q makes %q a raw self-referential pointer graph (a linked node / tree of bare pointers — unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the field provenance — `struct %s[region owner]` with `%s: ... @owner`", field.Name, st.Name, st.Name, field.Name)
+		a.perfLint(field.Position, "field %q makes %q a raw self-referential pointer graph (a linked node / tree of bare pointers — unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the field provenance — `struct %s[@owner]` with `%s: ... @owner`", field.Name, st.Name, st.Name, field.Name)
 	}
 }
 
@@ -153,7 +153,7 @@ func (a *Analyzer) checkPointerGraphCycles(decls []scopedDecl) {
 				// Back-edge: st → e.target closes a cycle. Flag st on this edge.
 				if !flagged[st] {
 					flagged[st] = true
-					a.perfLint(e.field.Position, "field %q makes %q part of a raw pointer-graph cycle (%s → %s → ... → %s — a graph of bare pointers spread across types, unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the refs provenance (`[region owner]` + `@owner`), or acknowledge the raw structure with `@intrusive`", e.field.Name, st.Name, st.Name, e.target.Name, st.Name)
+					a.perfLint(e.field.Position, "field %q makes %q part of a raw pointer-graph cycle (%s → %s → ... → %s — a graph of bare pointers spread across types, unsafe to outlive and cache-hostile to traverse). Prefer a handle into a store: a packed enum, or an index into a `darray`/`Store`. For a region-unified graph instead, give the refs provenance (`[@owner]` + `@owner`), or acknowledge the raw structure with `@intrusive`", e.field.Name, st.Name, st.Name, e.target.Name, st.Name)
 				}
 			}
 		}

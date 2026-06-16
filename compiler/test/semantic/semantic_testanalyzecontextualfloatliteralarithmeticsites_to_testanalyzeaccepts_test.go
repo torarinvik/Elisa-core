@@ -7,6 +7,16 @@ import (
 	"testing"
 )
 
+func contextualFuncStmt(fn *ast.FuncDecl, index int) ast.Stmt {
+	body := fn.Body
+	if len(body) == 1 {
+		if region, ok := body[0].(*ast.RegionStmt); ok {
+			body = region.Body
+		}
+	}
+	return body[index]
+}
+
 func TestAnalyzeContextualFloatLiteralArithmeticSites(t *testing.T) {
 	src := `extern passthrough(value: f32) -> f32
 
@@ -35,9 +45,9 @@ def contextual_array() -> f32[2]:
 	requireNoWarnings(t, result)
 
 	localDecl := requireFuncDecl(t, result, "contextual_local")
-	localInit, ok := localDecl.Body[0].(*ast.VarDeclStmt)
+	localInit, ok := contextualFuncStmt(localDecl, 0).(*ast.VarDeclStmt)
 	if !ok {
-		t.Fatalf("expected contextual_local to start with a local declaration, got %T", localDecl.Body[0])
+		t.Fatalf("expected contextual_local to start with a local declaration, got %T", contextualFuncStmt(localDecl, 0))
 	}
 	localBinary, ok := localInit.Value.(*ast.BinaryExpr)
 	if !ok {
@@ -48,9 +58,9 @@ def contextual_array() -> f32[2]:
 	requireExprTypeString(t, result, localBinary.Right, "f32")
 
 	returnDecl := requireFuncDecl(t, result, "contextual_return")
-	returnStmt, ok := returnDecl.Body[0].(*ast.ReturnStmt)
+	returnStmt, ok := contextualFuncStmt(returnDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_return to contain a return statement, got %T", returnDecl.Body[0])
+		t.Fatalf("expected contextual_return to contain a return statement, got %T", contextualFuncStmt(returnDecl, 0))
 	}
 	parenExpr, ok := returnStmt.Value.(*ast.ParenExpr)
 	if !ok {
@@ -82,9 +92,9 @@ def contextual_array() -> f32[2]:
 	}
 
 	callDecl := requireFuncDecl(t, result, "contextual_call")
-	callReturn, ok := callDecl.Body[0].(*ast.ReturnStmt)
+	callReturn, ok := contextualFuncStmt(callDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_call to contain a return statement, got %T", callDecl.Body[0])
+		t.Fatalf("expected contextual_call to contain a return statement, got %T", contextualFuncStmt(callDecl, 0))
 	}
 	callExpr, ok := callReturn.Value.(*ast.CallExpr)
 	if !ok {
@@ -99,9 +109,9 @@ def contextual_array() -> f32[2]:
 	requireExprTypeString(t, result, callBinary.Right, "f32")
 
 	structDecl := requireFuncDecl(t, result, "contextual_struct")
-	structReturn, ok := structDecl.Body[0].(*ast.ReturnStmt)
+	structReturn, ok := contextualFuncStmt(structDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_struct to contain a return statement, got %T", structDecl.Body[0])
+		t.Fatalf("expected contextual_struct to contain a return statement, got %T", contextualFuncStmt(structDecl, 0))
 	}
 	structLit, ok := structReturn.Value.(*ast.StructLitExpr)
 	if !ok {
@@ -118,9 +128,9 @@ def contextual_array() -> f32[2]:
 	}
 
 	arrayDecl := requireFuncDecl(t, result, "contextual_array")
-	arrayReturn, ok := arrayDecl.Body[0].(*ast.ReturnStmt)
+	arrayReturn, ok := contextualFuncStmt(arrayDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_array to contain a return statement, got %T", arrayDecl.Body[0])
+		t.Fatalf("expected contextual_array to contain a return statement, got %T", contextualFuncStmt(arrayDecl, 0))
 	}
 	arrayLit, ok := arrayReturn.Value.(*ast.ListLitExpr)
 	if !ok {
@@ -257,9 +267,9 @@ def plain_range() -> int:
 	requireNoWarnings(t, result)
 
 	localDecl := requireFuncDecl(t, result, "contextual_local")
-	localInit, ok := localDecl.Body[0].(*ast.VarDeclStmt)
+	localInit, ok := contextualFuncStmt(localDecl, 0).(*ast.VarDeclStmt)
 	if !ok {
-		t.Fatalf("expected contextual_local to start with a local declaration, got %T", localDecl.Body[0])
+		t.Fatalf("expected contextual_local to start with a local declaration, got %T", contextualFuncStmt(localDecl, 0))
 	}
 	requireExprTypeString(t, result, localInit.Value, "usize")
 
@@ -334,9 +344,9 @@ def contextual_unary() -> i32:
 	requireExprTypeString(t, result, localInit.Value, "i32")
 
 	callDecl := requireFuncDecl(t, result, "contextual_call")
-	callReturn, ok := callDecl.Body[0].(*ast.ReturnStmt)
+	callReturn, ok := contextualFuncStmt(callDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_call to contain a return statement, got %T", callDecl.Body[0])
+		t.Fatalf("expected contextual_call to contain a return statement, got %T", contextualFuncStmt(callDecl, 0))
 	}
 	callExpr, ok := callReturn.Value.(*ast.CallExpr)
 	if !ok {
@@ -345,9 +355,9 @@ def contextual_unary() -> i32:
 	requireExprTypeString(t, result, callExpr.Args[0], "i32")
 
 	structDecl := requireFuncDecl(t, result, "contextual_struct")
-	structReturn, ok := structDecl.Body[0].(*ast.ReturnStmt)
+	structReturn, ok := contextualFuncStmt(structDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_struct to contain a return statement, got %T", structDecl.Body[0])
+		t.Fatalf("expected contextual_struct to contain a return statement, got %T", contextualFuncStmt(structDecl, 0))
 	}
 	structLit, ok := structReturn.Value.(*ast.StructLitExpr)
 	if !ok {
@@ -358,9 +368,9 @@ def contextual_unary() -> i32:
 	}
 
 	arrayDecl := requireFuncDecl(t, result, "contextual_array")
-	arrayReturn, ok := arrayDecl.Body[0].(*ast.ReturnStmt)
+	arrayReturn, ok := contextualFuncStmt(arrayDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_array to contain a return statement, got %T", arrayDecl.Body[0])
+		t.Fatalf("expected contextual_array to contain a return statement, got %T", contextualFuncStmt(arrayDecl, 0))
 	}
 	arrayLit, ok := arrayReturn.Value.(*ast.ListLitExpr)
 	if !ok {
@@ -371,9 +381,9 @@ def contextual_unary() -> i32:
 	}
 
 	unaryDecl := requireFuncDecl(t, result, "contextual_unary")
-	unaryReturn, ok := unaryDecl.Body[0].(*ast.ReturnStmt)
+	unaryReturn, ok := contextualFuncStmt(unaryDecl, 0).(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected contextual_unary to contain a return statement, got %T", unaryDecl.Body[0])
+		t.Fatalf("expected contextual_unary to contain a return statement, got %T", contextualFuncStmt(unaryDecl, 0))
 	}
 	unaryExpr, ok := unaryReturn.Value.(*ast.UnaryExpr)
 	if !ok {

@@ -175,7 +175,7 @@ default to the node's region.
 ### The binding rule (why a declared `@region` can't work)
 
 A region name written in a **field declaration** has nowhere to be bound — *unless* it is a parameter
-of the type (`enum FooEnum[region shared]`) or the variant (`Baz[region shared](...)`). There is no
+of the type (`enum FooEnum[@shared]`) or the variant (`Baz[@shared](...)`). There is no
 third option: a bare `mao: darray[u16] @shared` on the declaration references an unbound name and is
 **rejected**. So "annotate the field" collapses into "add a region parameter," and the real decision
 is parameter-vs-inference.
@@ -193,7 +193,7 @@ region shared(reserve_commit):
         # compiler records: node.mao points into `shared`; checks `shared` outlives `nodes`
 ```
 
-`node`'s type is just `FooEnum` — no `@shared`, no `[region shared]`. The compiler records a
+`node`'s type is just `FooEnum` — no `@shared`, no `[@shared]`. The compiler records a
 provenance fact ("`mao` is in `shared`") on the value and the existing outlives/escape checker enforces
 `shared` outlives `nodes`. Same machinery as same-region; it just remembers a second region for that one
 field. Where the edge must cross a **function** boundary, the second region is threaded on the
@@ -209,21 +209,21 @@ threaded; `FooEnum` stays clean.
 
 ### Why not a region parameter on the type
 
-`enum FooEnum[region shared]` is **rejected** for two reasons — distinct from why docs/74 rejected
-`packed enum Expr[region r]`. (That earlier rejection was about an *erased, redundant* region — the
+`enum FooEnum[@shared]` is **rejected** for two reasons — distinct from why docs/74 rejected
+`packed enum Expr[@r]`. (That earlier rejection was about an *erased, redundant* region — the
 handle already carried it, so `Expr[r]` and `Expr[other]` were the identical ABI word. A cross-region
 *field* names a **genuine second provenance**, so the redundancy argument does not apply here.) The
 reasons it is still rejected:
 
 1. **It re-creates the threading wall.** The moment `FooEnum[shared]` exists, every function building or
-   consuming one needs `[region shared]` threaded through it — the exact `undefined identifier shared`
+   consuming one needs `[@shared]` threaded through it — the exact `undefined identifier shared`
    wall region-polymorphic functions (docs/75) exist to remove.
 2. **It splits the type by provenance.** `FooEnum[a]` and `FooEnum[b]` would be different types with
    byte-identical layout, differing only in where one field points — provenance leaking into type
    identity, which docs/10 forbids.
 
 **Fallback (only if value-level inference proves too costly):** a region parameter on the **variant**
-(`Baz[region shared](...)`), scoped to the one variant that actually crosses — never smeared across the
+(`Baz[@shared](...)`), scoped to the one variant that actually crosses — never smeared across the
 whole type. This is the explicit escape hatch, not the model.
 
 > Correction to docs/74: that doc's `ty: TypeExpr @types` field annotation only works because `types`
@@ -255,8 +255,8 @@ enum Small layout aos(index: u16):     # narrow the handle for max density on a 
 
 Three hard rules:
 
-- **`layout` is layout only — axis 1 (docs/10).** It carries no region (`enum Expr layout soa[region
-  r]` is rejected, exactly as docs/74 rejects `packed enum Expr[region r]`) and says nothing about
+- **`layout` is layout only — axis 1 (docs/10).** It carries no region (`enum Expr layout soa[@r]`
+  is rejected, exactly as docs/74 rejects `packed enum Expr[@r]`) and says nothing about
   freeze/affine usage (axis 3). Orthogonality is physical, not nominal.
 - **Pointers-vs-indices is *not* a dial.** Both AoS and SoA are index-backed; the representation never
   depends on usage. (A `aos(handle: pointer)` escape hatch is reserved only for a future cross-region

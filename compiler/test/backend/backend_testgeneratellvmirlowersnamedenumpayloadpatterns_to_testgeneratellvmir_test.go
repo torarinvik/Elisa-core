@@ -161,7 +161,7 @@ def inspect(owner: Arena) -> i32:
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+	table: NodeTable[Expr, i32] = node_table_fill[Expr, i32](owner, frozen, -1)
 	table[key] <- 0
 	values: view[i32] = table.values
 	if values.len == frozen.count:
@@ -222,7 +222,7 @@ def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
 	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
-	table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, box.store, -1)
+	table: NodeTable[Expr, i32] = node_table_fill[Expr, i32](owner, box.store, -1)
 	table[key] <- 7
 	return table[key]
 `

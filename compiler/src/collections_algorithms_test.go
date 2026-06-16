@@ -205,12 +205,6 @@ func TestRunCLICollectionsFold(t *testing.T) {
 	preamble := fmt.Sprintf("# include %q\n# include %q\n",
 		rel("test.elisa"), rel("elisacore_runtime.elisa"))
 	src := preamble + `
-def i64_sum(a: i64, b: i64) -> i64:
-    return a + b
-
-def i64_max(acc: i64, x: i64) -> i64:
-    return x if x > acc else acc
-
 @test
 def fold_reduce() -> void:
     can Memory.Allocate, Abort.Panic:
@@ -221,8 +215,10 @@ def fold_reduce() -> void:
                 _ = xs.push(7)
                 _ = xs.push(2)
             z: i64 = 0
-            assert_eq(xs.fold(z, i64_sum), 12)
-            assert_eq(xs.fold(z, i64_max), 7)
+            sum: i64 = (acc + x for x in xs with acc = z)
+            max_value: i64 = (x if x > acc else acc for x in xs with acc = z)
+            assert_eq(sum, 12)
+            assert_eq(max_value, 7)
 `
 	fixturePath := filepath.Join(fixtureDir, "fold_reduce.elisa")
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

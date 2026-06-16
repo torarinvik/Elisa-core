@@ -214,12 +214,12 @@ Declares a named allocation region.
 ## 13. `struct T in Region`
 
 ```elisa
-struct Expr[region owner]:
+struct Expr[@owner]:
     kind: ExprKind
     left: Expr&? @owner
     right: Expr&? @owner
 
-struct Box[T, region owner]:
+struct Box[T, @owner]:
     value: T
     next: Box[T]&? @owner
 ```
@@ -227,7 +227,7 @@ struct Box[T, region owner]:
 **Syntax meaning:**
 Declares a struct with an owner-region parameter. Region parameters go in the
 bracket list beside type parameters, each prefixed with `region`, and scale to
-several: `struct Edge[region a, region b]:`. Use sites carry the region with the
+several: `struct Edge[@a, @b]:`. Use sites carry the region with the
 `@r` suffix (`Expr @owner`, `left: Expr&? @owner`), never as a bracket argument.
 See [68-region-memory-model.md §5](68-region-memory-model.md) for the full rule.
 
@@ -248,7 +248,7 @@ def make(owner: Arena) -> Expr @owner:
 ## 14. `layout ... in Region`
 
 ```elisa
-layout soa struct Particle[region owner]:
+layout soa struct Particle[@owner]:
     x: f32
     y: f32
     z: f32
@@ -260,7 +260,7 @@ layout soa struct Particle[region owner]:
 **Syntax meaning:**
 Combines physical layout selection with an owner-region parameter. As with plain
 structs, the region parameter goes in the bracket list:
-`layout soa struct Particle[region owner]:`.
+`layout soa struct Particle[@owner]:`.
 
 ---
 

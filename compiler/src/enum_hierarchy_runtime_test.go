@@ -882,7 +882,6 @@ func expectEnumProgramError(t *testing.T, fixture string, src string, want strin
 	}
 }
 
-// docs/82 polish: the legacy `(index: uN)` spelling is deprecation-warned (canonical: `handle:`).
 // The legacy `(index: uN)` enum-layout spelling is hard-removed: a parse error pointing at the
 // canonical `(handle: uN)` form (docs/82).
 func TestLegacyIndexSpellingRejected(t *testing.T) {

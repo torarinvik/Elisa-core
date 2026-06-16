@@ -26,7 +26,7 @@ var containerGrowthMethods = map[string]bool{
 // inferRegionParamsForGrownContainerParams is the docs/75 S2 callee-side inference for
 // cross-function lifetime. A function that GROWS a region-less by-reference container parameter
 // — `def fill(out: mutable darray[T]&): out.push(...)` — is rewritten in place into the explicit
-// region-parameter form `def fill[region __rg_out](out: mutable darray[T]& @__rg_out): ...`,
+// region-parameter form `def fill[@__rg_out](out: mutable darray[T]& @__rg_out): ...`,
 // so the rest of the pipeline sees exactly the (proven sound, S1) annotated shape: the
 // caller's region arena is threaded as a hidden Arena& and resolves the growth allocator, and
 // resolveType's region push-down unifies `@__rg_out` through the ref onto the container so it
@@ -36,7 +36,7 @@ var containerGrowthMethods = map[string]bool{
 // param `@r` are baked into the FuncType at construction time (RegionParams + the param's
 // resolved container Region), keeping the AST and the type in lockstep without a second mutation.
 //
-// SAFETY: this adds no new lifetime power — it only spells, automatically, the `[region r]`/`@r`
+// SAFETY: this adds no new lifetime power — it only spells, automatically, the `[@r]`/`@r`
 // a user could write by hand (and which S1 proved sound under ASan). The "what is stored INTO
 // the grown param" lifetime obligation stays guarded by the existing escape checker
 // (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
@@ -51,7 +51,7 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 	if fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	// Don't touch functions that already manage regions explicitly: a hand-written `[region r]`
+	// Don't touch functions that already manage regions explicitly: a hand-written `[@r]`
 	// owns the threading, and an `Arena&` param self-threads its allocator (same gate as
 	// functionBuildsAndReturnsLocalContainer / the parser's auto-region wrap).
 	if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {

@@ -22,7 +22,7 @@ of the handle type — it is supplied at the allocation site (`new[auto]` / `new
 handle's value, exactly like `darray` backings and `new[auto] Box`.
 
 ```elisa
-packed enum Expr:                       # PURE LAYOUT — no [region r], no @r anywhere
+packed enum Expr:                       # PURE LAYOUT — no [@r], no @r anywhere
     common:
         span: int                       # dense column on every node — no annotation
     Int(value: int)
@@ -45,7 +45,7 @@ boundary or live in a long-lived struct; never on the type, never on a variant.
 secretly carrying another's meaning. `docs/69`: *"packedness is layout, regions/stores are
 provenance… none should silently imply the others."* Therefore:
 
-- **`packed enum Expr[region r]` is rejected** — it makes layout (the enum) carry provenance (the
+- **`packed enum Expr[@r]` is rejected** — it makes layout (the enum) carry provenance (the
   region). It is also *erased* (`Expr[r]` and `Expr[other]` are the same ABI word; the handle's
   pointer lane already carries the store, docs/24), so it changes nothing at runtime. Shipped code
   (`Code/benchmarks/packed_runtime_ml_expr_repro.elisa`) already declares packed enums with **zero**
@@ -53,7 +53,7 @@ provenance… none should silently imply the others."* Therefore:
 - **`Int@r` / `Add@r` on variants is rejected** — a variant is a column-set *selector*; it owns no
   storage and no region. Per-stack placement of short-lived cohorts is the inference engine's job
   (docs/71 interval coloring), never a source annotation.
-- **The struct precedent (`struct Node[region owner]` + `next: Node&? @owner`) does NOT transfer.**
+- **The struct precedent (`struct Node[@owner]` + `next: Node&? @owner`) does NOT transfer.**
   A `struct` field `next: Node&?` is a raw **pointer** whose region must be named. A packed child
   `left: Expr` is a **row index** that co-locates in the same store's columns by construction — there
   is no dangling pointer to type, so no `@owner` is needed. Index ≠ pointer. (docs/68 also retired the

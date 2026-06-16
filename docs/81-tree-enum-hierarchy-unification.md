@@ -289,10 +289,9 @@ Estimated deletion: **~7 500–9 000 lines** (semantic ~1 800 + backend ~5 200 +
 
 ### Migration order for Phase 6
 
-1. Add a `@deprecated` annotation on `tree`/`node` keywords (one-sprint warning period).
-2. Desugar `tree`/`node` at parse time into `enum … is` AST nodes (keeping semantic
-   behaviour identical via Phase 3 store path).
-3. Verify full test suite green on the desugared path.
+1. The `tree`/`node` keywords completed their warning period and have been removed.
+2. Model tree-shaped data directly with `enum … is` hierarchies.
+3. Keep the packed-enum backend path as the implementation target for hierarchy lowering.
 4. Delete the old AST nodes, semantic types, and backend files.
 5. Migrate Go test fixtures that build `TreeBlockType`/`TreeStructType` directly into
    equivalent `EnumType` constructions.
