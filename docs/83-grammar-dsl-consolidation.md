@@ -267,15 +267,12 @@ union/difference lowering, grammarenv-defaults lowering.
 
 ## Phase 2 results (2026-06-12) — canonicalization
 
-1. **Legacy repetition spellings deprecation-warned.** `repeat …`/`repeat(…)`,
+1. **Legacy repetition spellings removed.** `repeat …`/`repeat(…)`,
    `list(…)`, and the bracketed `[term] while tok in tokens != […]` form now
-   emit parse-time deprecation notices pointing at the canonical family
-   (`term*`, `term+`, `separated … by … until`, `flatrepeat` for flattening).
-   This added the parser's first non-fatal diagnostics channel
-   (`Parser.Notices()`, printed by the driver alongside semantic notices).
-   The frontends had **zero** uses of any legacy spelling — only compiler
-   tests exercise them (kept, as deprecation-period coverage). Hard removal
-   can follow the standard pattern in a later pass.
+   emit parse-time errors pointing at the canonical family (`term*`, `term+`,
+   `separated … by … until`, `flatrepeat` for flattening). The earlier
+   deprecation-notice period found zero frontend uses; the remaining coverage is
+   hard-removal parser tests.
 2. **`flatrepeat` kept as canonical.** Per the Phase 0 finding it is the
    flatten form, not a duplicate spelling; it does not warn.
 3. **when()-gate bulk migration: 45 of 80 SML sites → ordered `choice:`**
