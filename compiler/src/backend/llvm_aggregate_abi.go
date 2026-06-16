@@ -28,6 +28,17 @@ static void elisacoreAddCallTypeAttr(LLVMValueRef call, unsigned index, LLVMCont
 		LLVMAddCallSiteAttribute(call, index, attr);
 	}
 }
+
+// Add a value-less enum attribute (e.g. "noalias") to a function at the given
+// attribute index.
+static void elisacoreAddFuncEnumAttr(LLVMValueRef fn, unsigned index, LLVMContextRef ctx, const char *name, size_t nameLen) {
+	unsigned kind = LLVMGetEnumAttributeKindForName(name, nameLen);
+	if (kind == 0) {
+		return;
+	}
+	LLVMAttributeRef attr = LLVMCreateEnumAttribute(ctx, kind, 0);
+	LLVMAddAttributeAtIndex(fn, index, attr);
+}
 */
 import "C"
 
@@ -182,6 +193,9 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 		// sret attribute index = sretParamPos + 1.
 		g.addFuncTypeAttr(fn, C.uint(layout.sretParamPos()+1), "sret", layout.sretType)
 	}
+	// noalias on the eligible mutable-ref subset is independent of the byval ABI
+	// lowering below, so apply it first (it must hold on arm64, where byval is skipped).
+	g.applyMutableRefNoaliasAttrs(fn, fnType, layout.paramBase())
 	cabi := funcTypeIsCABI(fnType)
 	// At the C-ABI boundary on arm64, memory-class args are plain indirect
 	// pointers (no byval attribute); only x86-64 SysV (and all internal calls)
@@ -251,6 +265,66 @@ func llvmParamAttrIndex(llvmParamPos int) C.uint {
 
 func (g *llvmGenerator) addFuncByvalAttr(fn C.LLVMValueRef, llvmParamPos int, ty C.LLVMTypeRef) {
 	g.addFuncTypeAttr(fn, llvmParamAttrIndex(llvmParamPos), "byval", ty)
+}
+
+func (g *llvmGenerator) addFuncEnumAttr(fn C.LLVMValueRef, llvmParamPos int, name string) {
+	if fn == nil {
+		return
+	}
+	nameC := C.CString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	C.elisacoreAddFuncEnumAttr(fn, llvmParamAttrIndex(llvmParamPos), g.context, nameC, C.size_t(len(name)))
+}
+
+// pointeeEligibleForNoalias reports whether a `mutable T&` parameter whose pointee
+// is `elem` belongs to the subset for which `noalias` is sound to stamp.
+//
+// Limited to scalar (numeric) and darray pointees — the subset the aliasing model
+// proves free of laundered aliases (see memory: noalias-blocked-by-region-escape,
+// alias-laundering-hole). Struct/enum/view/void pointees are EXCLUDED: struct refs
+// still have open laundering residuals (field-rebind, nested carriers) and `void&`
+// is the type-erased aliasing escape hatch the trusted runtime relies on.
+func pointeeEligibleForNoalias(elem semantic.Type) bool {
+	if elem == nil {
+		return false
+	}
+	if semantic.IsNumericType(elem) {
+		return true
+	}
+	if _, ok := elem.(*semantic.DArrayType); ok {
+		return true
+	}
+	return false
+}
+
+// applyMutableRefNoaliasAttrs stamps LLVM `noalias` on the eligible subset of
+// `mutable T&` parameters when opted in (ELISACORE_NOALIAS_MUTABLE_REFS).
+//
+// Soundness rests on the aliasing checker rejecting two live mutable references to
+// the same storage (call-arg alias check + escape analysis + closed laundering
+// vectors), so a `mutable T&` is the unique mutator of its pointee for the call —
+// exactly the restrict semantics `noalias` encodes. This is OFF by default: a
+// noalias miscompile is silent, so it stays an explicit opt-in pending empirical
+// validation before it can become a default.
+func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn C.LLVMValueRef, fnType *semantic.FuncType, base int) {
+	if fn == nil || fnType == nil || !g.noaliasMutableRefs {
+		return
+	}
+	// At the C-ABI boundary the callee is foreign code that may legitimately alias
+	// its pointer args; never promise restrict across it.
+	if funcTypeIsCABI(fnType) {
+		return
+	}
+	for i, param := range fnType.Params {
+		rt, ok := param.(*semantic.RefType)
+		if !ok || rt == nil || !rt.Mutable {
+			continue
+		}
+		if !pointeeEligibleForNoalias(rt.Elem) {
+			continue
+		}
+		g.addFuncEnumAttr(fn, base+i, "noalias")
+	}
 }
 
 func (g *llvmGenerator) addFuncSretAttr(fn C.LLVMValueRef, ty C.LLVMTypeRef) {
