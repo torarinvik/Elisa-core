@@ -268,12 +268,14 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
 		s.tagDarrayHeaderLoad(dataPtr)
 		s.markAliasSafeElementPtr(ptr)
-		// docs/84 Increment 3b: additionally register this element address under its
-		// proven-distinct parameter's scope (a SEPARATE alias-scope domain from the
-		// hdr/elt one above — an access carries metadata from both, LLVM intersects them).
-		// The darray-domain elt scope preserves base-ptr hoisting; the disjoint-domain
-		// per-param scope lets LoopAccessAnalysis prove cross-param NoAlias and elide the
-		// runtime memcheck so the loop vectorizes.
+		// docs/84 Increment 3b: register this element address under its proven-distinct
+		// parameter's scope. tagDarrayElementAccess stamps the per-param alias.scope/noalias
+		// (in a SEPARATE per-function domain) on the load/store; because an instruction holds
+		// one alias.scope slot, that stamp REPLACES the shared hdr/elt tag for these elements —
+		// we trade the header/element base-ptr hoist for the cross-param NoAlias that lets
+		// LoopAccessAnalysis elide the runtime memcheck and vectorize (the larger win in a hot
+		// loop). Both are sound noalias claims, so dropping one forgoes an optimization, never
+		// correctness.
 		if disjointScope != nil {
 			if s.disjointElementPtrs == nil {
 				s.disjointElementPtrs = map[C.LLVMValueRef]*disjointParamScope{}
