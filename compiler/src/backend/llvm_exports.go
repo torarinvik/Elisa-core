@@ -127,6 +127,11 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if !isVoidType(targetType.Return) {
 		callName = "export.call"
 	}
+	// The call's result name must be a non-nil C string even when empty: LLVM's
+	// LLVMBuildCall2 forwards it into a Twine(const char*), which dereferences Name[0].
+	// cStringFree("") returns nil (crash), so use cString (always non-nil) and free it.
+	callNameC := cString(callName)
+	defer C.free(unsafe.Pointer(callNameC))
 	var call C.LLVMValueRef
 	var targetResult C.LLVMValueRef
 	if retUnion, ok := nonVoidErrorUnion(targetType.Return); ok {
@@ -139,7 +144,7 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		callArgs := make([]C.LLVMValueRef, 0, len(args)+1)
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
-		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), C.unsigned(len(callArgs)), cStringFree(callName))
+		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), C.unsigned(len(callArgs)), callNameC)
 		payload := C.LLVMBuildLoad2(builder, resultLLVMType, resultSlot, cStringFree("export.ret.payload"))
 		unionLLVMType, err := g.lowerType(targetType.Return)
 		if err != nil {
@@ -149,7 +154,7 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		targetResult = C.LLVMBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
 		targetResult = C.LLVMBuildInsertValue(builder, targetResult, payload, 1, cStringFree("export.ret.val"))
 	} else {
-		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), cStringFree(callName))
+		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), callNameC)
 		targetResult = call
 	}
 	if isVoidType(targetType.Return) {
