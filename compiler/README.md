@@ -8,7 +8,7 @@ Repository-level release notes now live in `../CHANGELOG.md`.
 
 The current unreleased highlights include:
 
-- canonical cast formatting now prefers `value as Type` for ordinary casts, postfix `value.Type()` / `value.Type?()` for hook-backed value conversions, and explicit `.cast[Type]` / `.ref[Type&]` for loud low-level reinterpretation; legacy expression-arrow casts are deprecated
+- canonical cast formatting now prefers postfix `value.Type()` / `value.Type?()` for hook-backed value conversions and explicit `.cast[Type]` / `.ref[Type&]` for loud low-level reinterpretation; legacy expression-arrow casts and `expr as Type` casts have been removed
 - side-table storage for packed-enum `common:` fields via `@storage(side_table)`
 - first-class `effect` declarations plus explicit `signal` statements for effect tracking
 - the earlier `refstorage` / `refstate` generic work across parsing, semantics, specialization, lowering, and generated C headers
@@ -17,19 +17,19 @@ For a compile-checked end-to-end example, see `../Code/test_programs/ref_qualifi
 
 ## Current syntax reference
 
-For the newer source-language surface that is easy to miss in older design notes, see `../docs/useful_language_features/18-current-surface-ergonomics.md`.
+For the newer source-language surface that is easy to miss in older design notes, see `../docs/18-current-surface-ergonomics.md`.
 
-For compile-time interfaces and receiver-style dispatch, see `../docs/useful_language_features/19-static-interfaces-extension-methods-and-ufcs.md`.
+For compile-time protocols and receiver-style dispatch, see `../docs/19-static-interfaces-extension-methods-and-ufcs.md`.
 
-For the canonical bundle/tree-capability cleanup direction, including implicit bundle fallback and parser/tree helper style, see `../docs/useful_language_features/20-tree-capabilities-and-interface-cleanup.md`.
+For the canonical bundle cleanup direction, see `../docs/20-tree-capabilities-and-interface-cleanup.md`.
 
-For the parser implementation house style, see `../docs/useful_language_features/21-canonical-grammar-style.md`.
+For the parser implementation house style, see `../docs/21-canonical-grammar-style.md`.
 
-For the concrete pain points that surfaced while implementing the SML frontend and the Elisa core ergonomics improvements they suggest, see `../docs/useful_language_features/23-sml-frontend-pain-points-and-elisacore-ergonomics.md`.
+For the concrete pain points that surfaced while implementing the SML frontend and the Elisa core ergonomics improvements they suggest, see `../docs/23-sml-frontend-pain-points-and-elisacore-ergonomics.md`.
 
-For scope/checkpoint rollback blocks, see `../docs/useful_language_features/08-region-checkpoints.md`.
+For scope/checkpoint rollback blocks, see `../docs/08-region-checkpoints.md`.
 
-For current annotations and compile-time hints, see `../docs/useful_language_features/20-annotations-and-compile-time-hints.md`.
+For current annotations and compile-time hints, see `../docs/20-annotations-and-compile-time-hints.md`.
 
 That reference covers the currently implemented syntax for:
 
@@ -38,9 +38,9 @@ That reference covers the currently implemented syntax for:
 - named bundles via `bundle Name implicit:` and `bundle Name explicit:`
 - local explicit bundles for block-scoped call-shaping packs
 - brace destructuring, field punning, record updates, and filtered iterable loops
-- grammar DSL parser features: `token:` blocks, `token family` reusable token unions, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, readable list/repeat forms, recovery, lookahead/cut, precedence/suffix/postfix helpers, and channel-driven struct result synthesis
+- grammar DSL parser features: `token:` blocks, `token family` reusable token unions, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, postfix `*`/`+` repetition, `flatrepeat`, `separated ... by ... until(...)`, recovery, lookahead/cut, precedence/suffix/postfix helpers, and channel-driven struct result synthesis
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
-- cascade blocks and expressions, lambda literals, `node[span = ...]` tree construction, tree `rewrite`, and canonical `as` casts
+- lambda literals and explicit cast/conversion surfaces
 - protocols, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
 
 ## Syntax cheat sheet
@@ -56,8 +56,7 @@ can ConsoleEffect.Write:
 effectalias FrontendEffects = error[ParseErr] can[Abort.Panic]
 bundle ParseCtx implicit:
 with ParseCtx(.., alloc = scratch_alloc):
-bundle Pair explicit:
-with args(use Pair(left:), width:):
+  return parse_root()
 ```
 
 ```text
@@ -74,15 +73,8 @@ bounds/strides, fixed-count work, or temporary places where no iterable source
 exists yet.
 
 ```text
-cascade report:
-  .inner.value <- value
 return lambda (value: i64) -> i64:
   return value + 1
-return rewrite node as Expr:
-  Expr.Int(expr):
-    new[perm] Expr.Int(span: expr.span, value: expr.value)
-  Expr.Add(expr, left, right):
-    new[perm] Expr.Add(span: expr.span, left: left, right: right)
 ```
 
 ```text
@@ -127,7 +119,7 @@ impl Tok:
   def score(self: Tok) -> i64:
     return 7
 
-interface Builder:
+protocol Builder:
   type Node
   def make(value: int) -> Node
 ```

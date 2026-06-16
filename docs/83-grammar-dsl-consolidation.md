@@ -48,16 +48,20 @@ These stay and get polished, not extended:
 
 ## Bucket 2 — Remove the bad parts
 
-1. **Redundant repetition spellings.** Today: `repeat`, `flatrepeat`, `list`,
-   `while` (immediately rewritten to flatrepeat, token_sets.go:184), `separated`,
-   and `*`. Six spellings, overlapping semantics. Target family:
+1. **Redundant repetition spellings.** Current status after the Phase 0/1
+   audit: `repeat`, `list`, and the old bracketed `while` spelling have been
+   hard-removed with parser diagnostics. `flatrepeat` remains live because it
+   flattens darray-valued terms into one accumulator, which is not equivalent
+   to postfix `*`. The canonical family is:
    - `term*` — zero or more (exists).
-   - `term+` — one or more (new, trivial lowering: `term` then `term*`).
+   - `term+` — one or more (exists).
    - `separated term by sep until(stop)` — delimited lists (exists, keep).
-   - `term* while(pred)` — predicate-bounded repetition (new, Bucket 3 §2).
-   `repeat`/`flatrepeat`/`list`/bare-`while` become deprecation-warned aliases,
-   then hard-removed after frontend migration (standard removal pattern from the
-   deprecation roadmap).
+   - `flatrepeat term until(stop)` — flatten repeated darray-valued terms into
+     one accumulator (exists, keep until a clearer canonical flattening spelling
+     replaces it).
+   A predicate-bounded repetition form remains a possible future addition, but
+   the removed `[term] while tok in tokens != [...]` spelling should not be
+   documented as current surface.
 2. **`guard()` as a recovery smuggling device.** The Pascal idiom
    `guard(state.current_token().kind in BlockEnd) recover(…)` is ad-hoc parser
    code wearing grammar syntax. Once `term* while(pred)` and checked sync points
@@ -87,7 +91,7 @@ In priority order:
    boilerplate source: Pascal's hand-rolled recursion pairs
    (`X_groups` / `X_group_and_rest` + `when(state.is_start(), …)` + prepend
    helper) exist because `until(…)` is token-based and `*` has no predicate
-   form. Add `term* while(pred)` lowering to a plain loop that pushes into a
+   form. A future `term* while(pred)` could lower to a plain loop that pushes into a
    darray (the lowered code is exactly what `lowerFlatRepeatLoopBody` emits,
    with the loop condition swapped for the host predicate). Kills ~10 recursion
    pairs across Pascal alone.
@@ -135,11 +139,12 @@ In priority order:
   unions → tokensets; audit frontends for `*`-able recursion; fix any position
   that rejects a tokenset ref. Output: smaller frontends + a verified feature
   matrix.
-- **Phase 1 — ergonomics**: `+`, `term* while(pred)`, tokenset `+`/`-`
-  operators, grammarenv defaults. Each is parser + lowering only.
-- **Phase 2 — canonicalize**: deprecation-warn `repeat`/`flatrepeat`/`list`/
-  bare-`while`; migrate frontends to the canonical repetition family;
-  hard-remove per the standard pattern. Lint the guard-recovery idiom.
+- **Phase 1 — ergonomics**: `+`, tokenset `+`/`-` operators, grammarenv
+  defaults. Each is parser + lowering only. Predicate-bounded repetition remains
+  future work.
+- **Phase 2 — canonicalize**: `repeat`/`list`/bare-`while` are now
+  hard-removed; keep `flatrepeat` unless/until an equivalent canonical
+  flattening form exists. Lint the guard-recovery idiom.
 - **Phase 3 — the seam**: external rules; migrate `dynamic_infix_*` helpers and
   `expr()`-wrapping tricks onto them.
 - **Phase 4 — dynamic fixity tables**: design doc addendum first, then

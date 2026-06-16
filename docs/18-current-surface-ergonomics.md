@@ -197,12 +197,12 @@ Current rules for error-union signature rows:
 - legacy `T | ErrorSet` return syntax is no longer supported; use `T error[SomeSet]` instead
 - legacy `error[Set.*]` and `error[Set.*, ...]` shorthands are no longer supported; use `error[Set]`, `error[Set, ...]`, or explicit tag rows instead
 
-Compatibility note: the compiler still accepts older implicit absence-recovery spellings such as `value else fallback`, `xs[i] else fallback`, and `try optional_value else fallback`, but these docs prefer the explicit `get ... else ...` surface for nullable/optional and checked-access recovery.
+Removed compatibility note: the compiler no longer accepts older implicit absence-recovery spellings such as `value else fallback`, `xs[i] else fallback`, or `try optional_value else fallback`. Use explicit `get ... else ...` for nullable/optional and checked-access recovery, and use `try ... else ...` only for handled error unions.
 
 ```elisa
-a: i64 = maybe else 11
-return xs[i] else 0
-return try value else 11
+a: i64 = get maybe else 11
+return get xs[i] else 0
+return try read_value() else 11
 ```
 
 When the handled branches want to name success and error payloads directly, use `catch expr:`. Each arm names the handled outcome and supplies the replacement expression or block.
@@ -1695,7 +1695,7 @@ Current rules for local grants:
 - `-emit fmt` always prints local grants in surface syntax rather than declaration syntax
 - the formatter conservatively inlines simple one-statement grant blocks into `... can ...` form for returns, assignments, declarations, tuple binds, discards, `as` rebinds, and expression statements
 - the formatter keeps block form for multi-statement regions and for statements it cannot safely rewrite, including statement-position `panic(...)`
-- when a granted expression contains `try ... else ...`, `get value else fallback`, or legacy `value else fallback`, the formatter parenthesizes the expression so the grant applies to the whole expression
+- when a granted expression contains `try ... else ...` or `get value else fallback`, the formatter parenthesizes the expression so the grant applies to the whole expression
 
 Style guidance:
 
@@ -2587,7 +2587,7 @@ The list-family helpers use readable DSL-style forms as the canonical style.
 ```elisa
 statements = separated statement() by .SEMICOLON until(.END, token(TokenKind.EOF))
 names = separated required(.IDENT, ParseMessageKey.ExpectedDeclName) by .COMMA until(.COLON, token(TokenKind.EOF))
-decls = [variable_decl_group()] while token in tokens != [.BEGIN, token(TokenKind.EOF)]
+decls = flatrepeat variable_decl_group() until(.BEGIN, token(TokenKind.EOF))
 args = delimited(.LPAREN, separated expression() by .COMMA until(.RPAREN, token(TokenKind.EOF)), .RPAREN, ParseMessageKey.ExpectedRightParen)?
 maybe_name = .IDENT?
 ```
@@ -2596,11 +2596,12 @@ Current list-family terms:
 
 - `term?` succeeds with an optional result
 - `term?` is the canonical optional grammar spelling; `optional term` and `optional(term)` remain accepted for compatibility, but the formatter emits postfix `?`
-- `repeat term until(...)` parses zero or more items and returns the collected list
-- `[term] while token in tokens != [stop1, stop2]` is the canonical flattening form for zero or more list-producing items
-- bracket `while` forms are the canonical flattening repeat spelling; `flatrepeat term until(...)` remains accepted for compatibility
+- `term* until(...)` parses zero or more items and returns the collected list
+- `term+ until(...)` parses one or more items and returns the collected list
+- `flatrepeat term until(...)` parses zero or more list-producing items and flattens them into one accumulator
+- the old `repeat ...`, `list ...`, and `[term] while token in tokens != [...]` spellings have been removed
 - `separated term by sep until(...)` is the canonical separated-list form
-- `list term separated by sep until(...)` and function-style `separated(term, sep, until(...))` remain accepted, but the formatter emits `separated term by sep until(...)`
+- function-style `separated(term, sep, until(...))` remains accepted, but the formatter emits `separated term by sep until(...)`
 - `delimited(open, body, close, MessageKey)` parses `open`, returns `body`, and requires `close`
 - `until(...)` accepts token aliases, literal tokens, explicit `token(...)` terms, or other recoverable terms
 
@@ -2751,20 +2752,21 @@ Current rules:
 - the same surface works in direct assignments, call arguments, named arguments, and list elements
 - `do` remains contextual, so `consume(do: 3)` still parses as a named argument rather than a block expression
 
-## Index fallback
+## Checked index recovery
 
-Index fallback adds an explicit recovery expression to an index operation.
+Checked index recovery uses `get ... else ...` to make the bounds-check path explicit.
 
 ```elisa
 def read(xs: darray[int], i: usize) -> int:
-    return xs[i] else 0
+    return get xs[i] else 0
 ```
 
 Current rules:
 
-- `source[index] else fallback` keeps the ordinary indexing semantics on success and yields `fallback` on the miss path
+- `get source[index] else fallback` keeps the ordinary indexing semantics on success and yields `fallback` on the miss path
 - the fallback expression must match the indexed element type
 - the fallback surface is for value reads only; it is not an assignment target or a ref-binding surface
+- the older `source[index] else fallback` spelling has been removed
 
 ## `defer` statements
 
@@ -2985,26 +2987,21 @@ Current rules:
 - `a, b <- value` reassigns existing locals from a tuple-shaped source
 - tuple binders participate in the same name-based filtering surface used by `for ... where ...` and `each ... where ...`
 
-## Cascade blocks and cascade expressions
+## Removed cascade blocks and expressions
 
-Receiver-oriented shorthand is available in both statement and expression form.
+The old receiver-oriented `cascade` shorthand has been removed. Write the target explicitly or introduce a local alias when several statements share the same receiver.
 
 ```elisa
-cascade report:
-    .inner.value <- value
-    .flag <- true
+report.inner.value <- value
+report.flag <- true
 
-return cascade row => .ref_count != 0
+return row.ref_count != 0
 ```
-
-Inside the cascade surface, a leading-dot member path is resolved relative to the cascade target.
 
 Current rules:
 
-- `cascade target:` is the statement form for grouped mutations or multiple related statements
-- `cascade target => expr` is the expression form for a single computed value
-- leading-dot shorthand is only meaningful inside cascade rewriting positions
-- `cascade` is contextual, so a normal identifier named `cascade` still works where the grammar expects an ordinary name
+- `cascade target:` and `cascade target => expr` are rejected by the parser
+- leading-dot member shorthand is no longer available through cascade rewriting
 
 ## Lambda literals
 
