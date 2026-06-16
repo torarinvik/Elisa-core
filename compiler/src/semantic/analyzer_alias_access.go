@@ -166,7 +166,7 @@ func (a *Analyzer) recordLocalRefAliasBinding(stmt ast.Stmt, sym *Symbol, value 
 	if !ok {
 		return
 	}
-	if !aliasExprIsExplicitBorrow(value) {
+	if !a.valueIsAliasBorrow(value) {
 		a.releaseLocalAliasBinding(sym)
 		return
 	}
@@ -222,7 +222,7 @@ func (a *Analyzer) recordLocalRefAliasAssignment(stmt *ast.AssignStmt, targetTyp
 	if _, ok := bindingType.(*RefType); !ok {
 		bindingType = sym.Type
 	}
-	if sym.Mutable && aliasExprIsExplicitBorrow(stmt.Value) {
+	if sym.Mutable && a.valueIsAliasBorrow(stmt.Value) {
 		if ref, ok := bindingType.(*RefType); ok && !ref.Mutable {
 			cloned := cloneRefType(ref)
 			cloned.Mutable = true
@@ -250,6 +250,53 @@ func (a *Analyzer) releaseLocalAliasBinding(sym *Symbol) {
 		return
 	}
 	a.currentAliasAccesses[binding.Root] = state
+}
+
+// valueIsAliasBorrow reports whether binding a reference to `value` borrows tracked storage —
+// either a literal `&…` borrow, or a call whose return provably aliases one of its arguments
+// (so `r = get_ref(&x)` is a borrow of x, not an opaque value). Without this, a borrow laundered
+// through a reference-returning call would lose its root and defeat the call-site alias checker.
+func (a *Analyzer) valueIsAliasBorrow(value ast.Expr) bool {
+	if aliasExprIsExplicitBorrow(value) {
+		return true
+	}
+	if call, ok := stripOptimizationParens(value).(*ast.CallExpr); ok {
+		return a.callReturnAliasedArg(call) != nil
+	}
+	return false
+}
+
+// callReturnAliasedArg returns the single argument expression whose storage a call's returned
+// reference borrows, using the callee's already-computed return-isolation provenance. It is
+// deliberately conservative: it fires only for a simple positional free-function call (Ident
+// callee, no named args) whose return provably aliases EXACTLY ONE parameter, so the parameter
+// index maps 1:1 to call.Args. Method calls (receiver shifts the index) and multi-param alias
+// returns return nil and fall back to the prior behavior — a documented soundness follow-up.
+func (a *Analyzer) callReturnAliasedArg(call *ast.CallExpr) ast.Expr {
+	if call == nil || call.HasArgForward {
+		return nil
+	}
+	for _, name := range call.ArgNames {
+		if name != "" {
+			return nil
+		}
+	}
+	if _, ok := call.Func.(*ast.Ident); !ok {
+		return nil
+	}
+	ft, ok := a.exprTypes[call.Func].(*FuncType)
+	if !ok || ft == nil || !ft.ReturnIsolationKnown {
+		return nil
+	}
+	indices := ft.ReturnIsolation.AliasParamIndices
+	if len(indices) != 1 {
+		return nil
+	}
+	idx := indices[0]
+	if idx < 0 || idx >= len(call.Args) {
+		return nil
+	}
+	return call.Args[idx]
 }
 
 func aliasExprIsExplicitBorrow(expr ast.Expr) bool {
@@ -382,6 +429,13 @@ func (a *Analyzer) aliasRootForExprSeen(expr ast.Expr, seen map[*Symbol]bool) st
 		return a.aliasRootForExprSeen(n.Object, seen)
 	case *ast.SliceExpr:
 		return a.aliasRootForExprSeen(n.Object, seen)
+	case *ast.CallExpr:
+		// A call whose return borrows exactly one argument (proven provenance) roots to that
+		// argument's storage, so an inline `f(get_ref(&x), &x)` is caught like the two-step form.
+		if arg := a.callReturnAliasedArg(n); arg != nil {
+			return a.aliasRootForExprSeen(arg, seen)
+		}
+		return ""
 	default:
 		return ""
 	}
