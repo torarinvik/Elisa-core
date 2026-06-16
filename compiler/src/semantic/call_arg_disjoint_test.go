@@ -98,3 +98,81 @@ def forward(p: mutable darray[f64]&, q: mutable darray[f64]&) -> void:
 		t.Fatalf("param-backed args must NOT be proven distinct, got %v", info.DistinctPairs)
 	}
 }
+
+func TestCallArgDisjointDriftFrontier(t *testing.T) {
+	cases := []struct {
+		name     string
+		body     string
+		distinct bool
+	}{
+		{
+			name: "empty literals are distinct fresh buffers",
+			body: `
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = []
+	axpy(&a, &b)
+`,
+			distinct: true,
+		},
+		{
+			name: "clone is a distinct fresh buffer",
+			body: `
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = clone[darray[f64]](a)
+	axpy(&a, &b)
+`,
+			distinct: true,
+		},
+		{
+			name: "same local aliases",
+			body: `
+	a: mutable darray[f64] = []
+	axpy(&a, &a)
+`,
+		},
+		{
+			name: "header copy aliases",
+			body: `
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = a
+	axpy(&a, &b)
+`,
+		},
+		{
+			name: "whole value escape is not private fresh",
+			body: `
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = []
+	sink(a)
+	axpy(&a, &b)
+`,
+		},
+		{
+			name: "index-derived root is rejected",
+			body: `
+	outer: mutable darray[darray[f64]] = []
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = []
+	outer.push(a)
+	outer.push(b)
+	axpy(&outer[0], &outer[1])
+`,
+		},
+	}
+	preamble := disjointKernelSrc + `
+def sink(v: darray[f64]) -> void:
+	return
+`
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := preamble + `
+def run() -> void:` + tc.body
+			result := analyzeTreeTestSource(t, "disjoint_drift_frontier.elisa", src)
+			info := firstDisjointInfo(result)
+			got := info != nil && info.PairDistinct(0, 1)
+			if got != tc.distinct {
+				t.Fatalf("PairDistinct(0,1)=%v, want %v; info=%+v", got, tc.distinct, info)
+			}
+		})
+	}
+}

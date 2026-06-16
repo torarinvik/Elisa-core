@@ -213,6 +213,16 @@ func (s *privateFreshScan) scanValue(v reflect.Value) {
 			s.recordDecl(n)
 			// Fall through to generic recursion so the initializer (and any nested
 			// statements) are scanned for escapes of OTHER names.
+		case *ast.CallExpr:
+			if isCloneCallExpr(n) {
+				// clone[darray[T]](x) deep-copies elements into a fresh destination. Reading
+				// the source container to copy its elements does not header-copy or share its
+				// backing buffer, so a bare source local remains private-fresh.
+				for _, arg := range n.Args {
+					s.scanPlace(arg)
+				}
+				return
+			}
 		case *ast.TupleBindStmt, *ast.LetDestructureStmt, *ast.MoveBindStmt, *ast.AsRefAssignStmt:
 			// Binding forms whose target names are plain strings (not *ast.Ident), so the
 			// default value-position walk would miss them. Mark every name they touch escaped.
@@ -309,9 +319,21 @@ func isFreshDArrayAllocExpr(e ast.Expr) bool {
 		// Darray comprehension only (dict/set comprehensions are not darray buffers).
 		return n.Key == nil && !n.Set
 	case *ast.CallExpr:
-		if ident, ok := n.Func.(*ast.Ident); ok && ident.Name == "clone" {
+		if isCloneCallExpr(n) {
 			return true
 		}
 	}
 	return false
+}
+
+func isCloneCallExpr(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	fn := stripOptimizationParens(call.Func)
+	if spec, ok := fn.(*ast.SpecializeExpr); ok && spec != nil {
+		fn = stripOptimizationParens(spec.Operand)
+	}
+	ident, ok := fn.(*ast.Ident)
+	return ok && ident.Name == "clone"
 }

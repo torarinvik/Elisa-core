@@ -124,6 +124,29 @@ func TestDisjointParamScopesHeaderCopyNotStamped(t *testing.T) {
 	}
 }
 
+const disjointAxpyCloneSrc = `@inline(never)
+def axpy(y: mutable darray[f64]&, x: mutable darray[f64]&) -> void:
+    for i in 0..<y.count:
+        y[i] <- y[i] + x[i]
+
+def driver() -> void:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = clone[darray[f64]](a)
+    axpy(&a, &b)
+`
+
+func TestDisjointParamScopesCloneStamped(t *testing.T) {
+	t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
+	result := parseAndAnalyzeBackendTest(t, "disjoint_axpy_clone.elisa", disjointAxpyCloneSrc)
+	ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt error: %v", err)
+	}
+	if !irHasDisjointParamScopes(ir) {
+		t.Fatalf("clone produces a fresh buffer, so expected per-param disjoint scopes, got:\n%s", ir)
+	}
+}
+
 const disjointAxpyMainSrc = `@inline(never)
 def axpy(y: mutable darray[f64]&, x: mutable darray[f64]&) -> void:
     for i in 0..<y.count:
