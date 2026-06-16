@@ -300,6 +300,8 @@ type Analyzer struct {
 	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
 	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
 	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
+	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
+	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
 	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace                 string
@@ -548,6 +550,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		lambdaInfo:                        map[*ast.LambdaExpr]*LambdaInfo{},
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
 		callArgDisjoint:                   map[*ast.CallExpr]*CallArgDisjointInfo{},
+		disjointCallSites:                 map[*ast.FuncDecl][]callDisjointObservation{},
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		declVisibility:                    activeFile.DeclVisibility,
@@ -626,6 +629,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	}
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
+	a.finalizeFuncDisjointParams(activeDecls)
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
 	}
@@ -654,6 +658,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,
 		CallArgDisjoint:         a.callArgDisjoint,
+		FuncDisjointParams:      a.funcDisjointParams,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,

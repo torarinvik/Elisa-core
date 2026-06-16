@@ -78,16 +78,22 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 			distinctCount[j]++
 		}
 	}
-	if len(distinct) == 0 {
-		return
-	}
-
 	selfNoalias := map[int]bool{}
 	others := len(containerParams) - 1
 	for _, i := range containerParams {
-		if distinctCount[i] == others {
+		if others > 0 && distinctCount[i] == others {
 			selfNoalias[i] = true
 		}
+	}
+
+	// Register this call site for whole-program per-callee aggregation (Increment 3a),
+	// EVEN WHEN no pair is distinct here: a non-distinct site must kill pairs that other
+	// sites prove, so the cross-call-site intersection stays sound. Done before the
+	// len(distinct)==0 early return below for exactly that reason.
+	a.registerCallDisjointObservation(call, containerParams, distinct, selfNoalias)
+
+	if len(distinct) == 0 {
+		return
 	}
 
 	a.callArgDisjoint[call] = &CallArgDisjointInfo{

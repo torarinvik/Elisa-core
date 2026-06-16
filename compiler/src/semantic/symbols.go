@@ -55,6 +55,7 @@ type Result struct {
 	PackedLowering          PackedLoweringMetadata
 	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
 	CallArgDisjoint         map[*ast.CallExpr]*CallArgDisjointInfo
+	FuncDisjointParams      map[*ast.FuncDecl]*FuncDisjointParamInfo
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
@@ -132,6 +133,42 @@ type CallArgDisjointInfo struct {
 }
 
 func (info *CallArgDisjointInfo) PairDistinct(i, j int) bool {
+	if info == nil || info.DistinctPairs == nil {
+		return false
+	}
+	if i > j {
+		i, j = j, i
+	}
+	return info.DistinctPairs[[2]int{i, j}]
+}
+
+// FuncDisjointParamInfo lifts the per-call `proven_distinct` predicate to a whole-program,
+// per-callee fact: which container-reference parameter pairs of a function are distinct at
+// EVERY call site (docs/84 §3.2, Increment 3a). The backend stamps buffer-level
+// alias.scope/noalias on element accesses inside the callee body — a stamp that is sound only
+// if no caller ever passes aliasing buffers for the pair. The intersection across all call
+// sites is what makes that whole-program guarantee.
+//
+// SOUNDNESS — completeness of call-site capture. Stamping the callee body requires observing
+// ALL of its calls. This is guaranteed only for a function that (a) has a program-unique name
+// (so each call's by-name resolution is unambiguous) and (b) is never address-taken (so every
+// call is a direct by-name call the analyzer sees — a function value could be invoked from an
+// unobserved site). A function failing either gate is excluded outright (no entry), forgoing
+// the optimization. Methods, overloaded names, and generic/specialized kernels currently fall
+// under these exclusions; whole-array monomorphic free-function kernels (AXPY, Jacobi sweeps,
+// serial Stable-Fluids fields — the docs/84 §3.5 census majority) are the served case.
+type FuncDisjointParamInfo struct {
+	// DistinctPairs holds the unordered param index pairs {i,j} (i<j) that are proven distinct
+	// at every observed call site — the intersection of the per-call DistinctPairs.
+	DistinctPairs map[[2]int]bool
+	// SelfNoalias[i] is true when param i is proven distinct from every other container param at
+	// every observed call site (the per-call SelfNoalias intersection). It is the precondition
+	// for the loop-access-analysis memcheck elision, still subject to the backend's
+	// no-other-aliasing-memory body check before a noalias stamp.
+	SelfNoalias map[int]bool
+}
+
+func (info *FuncDisjointParamInfo) PairDistinct(i, j int) bool {
 	if info == nil || info.DistinctPairs == nil {
 		return false
 	}
