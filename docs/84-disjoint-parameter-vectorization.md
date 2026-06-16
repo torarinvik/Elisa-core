@@ -182,6 +182,13 @@ kernels are **not** force-migrated to `Slice`.
    across the full suite. Mirrors the `ELISACORE_NOALIAS_MUTABLE_REFS` opt-in
    precedent.
 
+Run the current focused gate with:
+
+```text
+cd compiler
+./scripts/run_disjoint_param_vectorization_gate.sh
+```
+
 ## 5. Staged increments
 
 - **Increment 1 — DONE (`612ddfbb`).** `ParallelForInfo.BandSourceDisjoint` +
@@ -198,9 +205,10 @@ kernels are **not** force-migrated to `Slice`.
   `noalias.scope.decl`, and keep the feature guarded by
   `ELISACORE_NOALIAS_MUTABLE_REFS=1`.
 - **Increment 4 — IN PROGRESS.** Differential O0-vs-O3 checksum harness + drift
-  guard over the §4 kernel set. CI-wire. The bit-identical gate now covers AXPY,
-  Jacobi/stencil, an explicitly aliased stencil, and a small multi-field
-  fluid-frame-style update in `TestDisjointParamVectorizationBitIdentical`.
+  guard over the §4 kernel set. CI-wire. The focused gate is available as
+  `compiler/scripts/run_disjoint_param_vectorization_gate.sh`; the bit-identical
+  test covers AXPY, Jacobi/stencil, an explicitly aliased stencil, and a small
+  multi-field fluid-frame-style update.
 - **Increment 5 — flip default / optional keyword.** Default-on once green;
   optionally add the `disjoint` checked-assertion keyword + `-Wperf` hint.
 

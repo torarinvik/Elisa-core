@@ -570,6 +570,12 @@ Run all tests:
 go test ./...
 ```
 
+Run the focused disjoint-parameter vectorization gate (docs/84):
+
+```text
+./scripts/run_disjoint_param_vectorization_gate.sh
+```
+
 ## Runtime source of truth
 
 The active runtime implementation lives in Elisa core source files under `runtime/elisacore_std/`.
