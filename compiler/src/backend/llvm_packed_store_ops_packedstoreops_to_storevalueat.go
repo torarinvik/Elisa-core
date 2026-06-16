@@ -153,6 +153,62 @@ func (ops *packedStoreOps) directReadCacheIdentity(enumType *semantic.EnumType, 
 	}
 	return packedReadOriginKey{}, ops.canonicalizeDenseHandleKey(handleValue)
 }
+
+// cacheKeyStoreSSA returns the per-read store/state SSA value to embed in a dense read cache key, or
+// nil when the read carries a stable AST origin. A resolved origin (originKey.root != nil) already
+// uniquely identifies the store and location through its (root pointer + field path), and reads are
+// only ever cached for FROZEN stores (canCacheDenseHandleReads / canCacheDirectReadValues), so the
+// value is immutable. The store/state SSA itself is re-derived on every read — when the read base is
+// reached through a helper-returned aggregate (`wrapped.items[0].node.span`) it reloads to a fresh
+// SSA each time — so leaving it in the key makes two syntactically identical frozen reads miss the
+// cache and emit duplicate read-helper calls. Dropping it once the origin is known restores the
+// single cached read. Without an origin the volatile SSA is kept (the only available identity).
+func (ops *packedStoreOps) cacheKeyStoreSSA(originKey packedReadOriginKey, storeSSA C.LLVMValueRef) C.LLVMValueRef {
+	if originKey.root != nil {
+		return nil
+	}
+	return storeSSA
+}
+
+// cacheKeyBlock returns the basic block to key a dense read cache entry on. It canonicalizes the
+// current block through straightLineBlockParent so reads separated only by straight-line trap-guard
+// splits (the wd.ok arms of index bounds checks) share one cache entry, while reads across genuine
+// divergent control flow keep distinct blocks. See functionState.straightLineBlockParent.
+func (ops *packedStoreOps) cacheKeyBlock() C.LLVMBasicBlockRef {
+	if ops == nil || ops.s == nil {
+		return nil
+	}
+	return ops.s.canonicalCacheBlock(ops.currentBlock())
+}
+
+// recordStraightLineBlock notes that child is reachable only as a straight-line continuation of
+// parent (parent dominates child), so read-cache keys on child canonicalize back to parent.
+func (s *functionState) recordStraightLineBlock(child, parent C.LLVMBasicBlockRef) {
+	if s == nil || child == nil || parent == nil || child == parent {
+		return
+	}
+	if s.straightLineBlockParent == nil {
+		s.straightLineBlockParent = map[C.LLVMBasicBlockRef]C.LLVMBasicBlockRef{}
+	}
+	s.straightLineBlockParent[child] = parent
+}
+
+// canonicalCacheBlock walks straightLineBlockParent to the straight-line root of block. Two blocks
+// share a root only when one is reachable from the other purely through trap-guard continuations, so
+// a value live in the root dominates both — sound to share a cached read across them.
+func (s *functionState) canonicalCacheBlock(block C.LLVMBasicBlockRef) C.LLVMBasicBlockRef {
+	if s == nil {
+		return block
+	}
+	for i := 0; i < 64; i++ { // bounded walk; the chain is acyclic (each child was just created)
+		parent, ok := s.straightLineBlockParent[block]
+		if !ok || parent == nil {
+			break
+		}
+		block = parent
+	}
+	return block
+}
 func (ops *packedStoreOps) constantUint64(value C.LLVMValueRef) (uint64, bool) {
 	if value == nil {
 		return 0, false

@@ -51,7 +51,7 @@ func (ops *packedStoreOps) loadSideWordAtOrigin(indexValue C.LLVMValueRef, wordO
 			ops.s.packedDenseSideWordReads = map[packedDenseSideWordReadCacheKey]C.LLVMValueRef{}
 		}
 		originKey, cacheIndex := ops.denseReadCacheIdentity(origin, coercedIndex)
-		key := packedDenseSideWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, index: cacheIndex, offset: wordOffset}
+		key := packedDenseSideWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, index: cacheIndex, offset: wordOffset}
 		if cached, ok := ops.s.packedDenseSideWordReads[key]; ok && cached != nil {
 			return cached, nil
 		}

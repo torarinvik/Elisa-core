@@ -201,7 +201,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 						ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
 					}
 					originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
-					key := packedDenseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, handle: cacheHandle, offset: wordOffset}
+					key := packedDenseWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, handle: cacheHandle, offset: wordOffset}
 					if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
 						return cached, nil
 					}
@@ -220,7 +220,7 @@ func (ops *packedStoreOps) loadPayloadWordAtOrigin(handleValue C.LLVMValueRef, e
 				ops.s.packedDenseWordReads = map[packedDenseWordReadCacheKey]C.LLVMValueRef{}
 			}
 			originKey, cacheHandle := ops.denseReadCacheIdentity(origin, coercedHandle)
-			key := packedDenseWordReadCacheKey{block: ops.currentBlock(), storeType: ops.storeType, state: stateValue, origin: originKey, handle: cacheHandle, offset: wordOffset}
+			key := packedDenseWordReadCacheKey{block: ops.cacheKeyBlock(), storeType: ops.storeType, state: ops.cacheKeyStoreSSA(originKey, stateValue), origin: originKey, handle: cacheHandle, offset: wordOffset}
 			if cached, ok := ops.s.packedDenseWordReads[key]; ok && cached != nil {
 				return cached, nil
 			}

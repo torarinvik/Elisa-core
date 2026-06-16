@@ -99,8 +99,8 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 		}
 		originKey, cacheHandle := ops.directReadCacheIdentity(enumType, origin, handleValue)
 		cacheKey = packedDirectFieldReadCacheKey{
-			block:    ops.currentBlock(),
-			store:    ops.storeValue,
+			block:    ops.cacheKeyBlock(),
+			store:    ops.cacheKeyStoreSSA(originKey, ops.storeValue),
 			enumType: enumType,
 			origin:   originKey,
 			handle:   cacheHandle,

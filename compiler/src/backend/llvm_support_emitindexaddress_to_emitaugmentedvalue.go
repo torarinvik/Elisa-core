@@ -27,6 +27,21 @@ static int elisacoreValueIsTriviallyValidPtr(LLVMValueRef v) {
 	}
 	return 0;
 }
+
+// elisacoreConstIndexInBounds reports whether both the index and the count are
+// compile-time constant integers and index < count. When true the index bounds
+// guard is statically satisfied (the comparison would fold to `i1 true`), so emitting
+// a runtime branch is pure overhead and — by splitting the basic block — defeats
+// per-block read CSE at the indexed site. Returns 0 if either operand is non-constant.
+static int elisacoreConstIndexInBounds(LLVMValueRef index, LLVMValueRef count) {
+	if (index == NULL || count == NULL) {
+		return 0;
+	}
+	if (LLVMIsAConstantInt(index) == NULL || LLVMIsAConstantInt(count) == NULL) {
+		return 0;
+	}
+	return LLVMConstIntGetZExtValue(index) < LLVMConstIntGetZExtValue(count) ? 1 : 0;
+}
 */
 import "C"
 
@@ -185,10 +200,22 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 	default:
 		return nil
 	}
+	// A compile-time-constant index into a known bound can never be out of range at runtime when it
+	// is in range here, so the guard would be a `br i1 true` with a dead trap arm. Emitting it adds
+	// no verification value (a constant index has no runtime variability to catch) and splits the
+	// basic block, which defeats per-block read CSE at repeated indexed accesses (e.g.
+	// `a[0].f + a[0].f`). Elide it for the provably-in-bounds constant case.
+	if C.elisacoreConstIndexInBounds(indexValue, countValue) != 0 {
+		return nil
+	}
+	guardedFrom := C.LLVMGetInsertBlock(s.builder)
 	inBounds := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), indexValue, countValue, cStringFree("wd.in_bounds"))
 	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.ok"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("wd.fail"))
 	C.LLVMBuildCondBr(s.builder, inBounds, okBB, failBB)
+	// wd.ok is a straight-line continuation of the guarded block (wd.fail always traps), so record it
+	// for read-cache block canonicalization (see straightLineBlockParent).
+	s.recordStraightLineBlock(okBB, guardedFrom)
 	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
 	// When -ftrace is also on, record the offending index and the container count into
 	// the trace ring just before trapping, so the fault dump shows the exact values

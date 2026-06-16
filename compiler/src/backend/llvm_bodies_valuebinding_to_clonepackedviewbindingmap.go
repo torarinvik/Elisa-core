@@ -96,6 +96,14 @@ type functionState struct {
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
+	// straightLineBlockParent maps a basic block created purely as a straight-line continuation of
+	// another (e.g. the `wd.ok` arm of an index bounds-check, whose `wd.fail` arm always traps) to its
+	// predecessor. Such a block is only reachable from that predecessor, so a value live in the
+	// predecessor dominates it. The dense read caches canonicalize their per-block key through this
+	// chain so repeated reads across trap-guard splits still share one cached read; real divergent
+	// blocks (if/match/loop arms) never register here and keep distinct keys (plus the explicit
+	// invalidatePackedReadCaches at mutations/binds), so cross-branch reuse stays blocked.
+	straightLineBlockParent map[C.LLVMBasicBlockRef]C.LLVMBasicBlockRef
 	scopedCleanups               []scopedCleanupBinding
 	checkpoints                  map[string]checkpointBinding
 	poolScopes                   []activePoolBinding
