@@ -48,6 +48,38 @@ func (a *Analyzer) cloneAliasBindings() map[*Symbol]aliasAccessBinding {
 	return clone
 }
 
+func (a *Analyzer) cloneAliasCarriers() map[string][]string {
+	if len(a.currentAliasCarriers) == 0 {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(a.currentAliasCarriers))
+	for name, roots := range a.currentAliasCarriers {
+		clone[name] = append([]string(nil), roots...)
+	}
+	return clone
+}
+
+// recordStructAliasCarrier records (or clears) a non-reference local's laundered-reference content.
+// When `value` is a reference-returning call that aliases parameters, the local carries those
+// param roots; otherwise any stale carrier is dropped (a whole-local rebind replaces the content).
+func (a *Analyzer) recordStructAliasCarrier(name string, value ast.Expr) {
+	if name == "" {
+		return
+	}
+	var roots []string
+	if call, ok := stripOptimizationParens(value).(*ast.CallExpr); ok {
+		roots = a.callReturnAliasedRoots(call)
+	}
+	if len(roots) == 0 {
+		delete(a.currentAliasCarriers, name)
+		return
+	}
+	if a.currentAliasCarriers == nil {
+		a.currentAliasCarriers = map[string][]string{}
+	}
+	a.currentAliasCarriers[name] = roots
+}
+
 func (a *Analyzer) recordUnsafeAliasExpr(expr ast.Expr) {
 	if expr == nil || !a.enforceUnsafePermissions {
 		return
@@ -167,6 +199,11 @@ func (a *Analyzer) recordLocalRefAliasAccess(stmt ast.Stmt, value ast.Expr, bind
 func (a *Analyzer) recordLocalRefAliasBinding(stmt ast.Stmt, sym *Symbol, value ast.Expr, bindingType Type) {
 	mode, ok := refAliasAccessMode(bindingType)
 	if !ok {
+		// Not a reference binding — but a struct/value local can still carry a laundered reference
+		// into a parameter (`r = wrap(v)`). Track that so a later `r.refField` access is caught.
+		if sym != nil {
+			a.recordStructAliasCarrier(sym.Name, value)
+		}
 		return
 	}
 	roots := a.aliasBorrowRootsForValue(value)
@@ -449,6 +486,21 @@ func (a *Analyzer) aliasRootsForExpr(expr ast.Expr) []string {
 	case *ast.CallExpr:
 		if roots := a.callReturnAliasedRoots(n); len(roots) != 0 {
 			return roots
+		}
+	case *ast.FieldExpr:
+		// A reference-typed field of a struct local that carries a laundered borrow aliases the
+		// borrowed parameter(s), e.g. `r.p` where `r = wrap(v)`. Union the carried roots with the
+		// structural root so same-field and param-direct uses both conflict.
+		if _, isRef := a.exprTypes[n].(*RefType); isRef {
+			if ident, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok {
+				if carried, ok := a.currentAliasCarriers[ident.Name]; ok && len(carried) != 0 {
+					roots := append([]string(nil), carried...)
+					if root := a.aliasRootForExpr(expr); root != "" {
+						roots = append(roots, root)
+					}
+					return roots
+				}
+			}
 		}
 	}
 	if root := a.aliasRootForExpr(expr); root != "" {

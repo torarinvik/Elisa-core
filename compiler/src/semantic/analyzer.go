@@ -228,6 +228,16 @@ type Analyzer struct {
 	// the callee's return-isolation AliasParamIndices back to the borrowed argument, for method
 	// and free-function calls alike.
 	callAlignedAliasArgs map[*ast.CallExpr][]ast.Expr
+	// currentAliasCarriers tracks struct/value locals that carry a reference into a parameter,
+	// bound from a reference-returning call (`r = wrap(v)` where wrap's result aliases v). A later
+	// reference-typed field access `r.p` is then known to alias v, closing the laundering gap for
+	// mutable wrappers (which, unlike immutable ones, get no value binding to resolve through). It
+	// follows the same scope save/restore lifecycle as currentAliasBindings. Re-bound on every
+	// whole-local assignment; field-level rebinds (`r.p = &w`) are a deeper, pre-existing gap.
+	// Keyed by local NAME (not *Symbol): a declaration and a later assignment to the same local
+	// can resolve to distinct Symbol instances, but the name is stable, and block-scope cloning of
+	// this map already isolates shadowed names.
+	currentAliasCarriers map[string][]string
 	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
 	currentPackedStores           map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions map[*Symbol]packedStoreResolution

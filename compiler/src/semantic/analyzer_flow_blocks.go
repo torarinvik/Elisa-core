@@ -17,15 +17,18 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	saved := a.currentScope
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
+	savedAliasCarriers := a.currentAliasCarriers
 	a.inferUntypedDArrayBuilderLocals(stmts, scope)
 	a.currentScope = scope
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
+	a.currentAliasCarriers = a.cloneAliasCarriers()
 	for _, stmt := range stmts {
 		a.analyzeStmt(stmt)
 	}
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
+	a.currentAliasCarriers = savedAliasCarriers
 	a.currentScope = saved
 }
 
@@ -1201,6 +1204,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	savedStorageViewDeps := a.currentStorageViewDeps
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
+	savedAliasCarriers := a.currentAliasCarriers
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedIndexBounds := a.currentIndexBounds
 	savedViewStaticLen := a.currentViewStaticLen
@@ -1213,6 +1217,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentStorageViewDeps = a.cloneStorageViewDeps()
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
+	a.currentAliasCarriers = a.cloneAliasCarriers()
 	a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
 	a.currentViewStaticLen = cloneViewStaticLen(a.currentViewStaticLen)
 	a.currentViewMutable = cloneViewMutable(a.currentViewMutable)
@@ -1229,6 +1234,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentStorageViewDeps = savedStorageViewDeps
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
+	a.currentAliasCarriers = savedAliasCarriers
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentIndexBounds = savedIndexBounds
 	a.currentViewStaticLen = savedViewStaticLen
