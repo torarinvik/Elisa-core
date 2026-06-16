@@ -295,6 +295,12 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Opt the whole program into full fast-math FP (reassociation etc.), unlocking the
 			// reassociated tree reduction for FP folds. Read at codegen time (in-process build).
 			_ = os.Setenv("ELISACORE_FAST_MATH", "1")
+		case arg == "-fnoalias":
+			// Stamp LLVM `noalias` on the eligible `mutable T&` param subset (scalar/darray
+			// pointee). Sound (the alias checker makes a `mutable T&` the unique mutator of its
+			// pointee) but OFF by default: a noalias miscompile is silent. Read at codegen time
+			// (in-process build), same env the backend generator already consults.
+			_ = os.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
 		case arg == "-Wperf":
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.

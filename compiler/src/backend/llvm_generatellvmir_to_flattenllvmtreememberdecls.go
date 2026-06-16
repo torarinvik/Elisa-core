@@ -112,9 +112,12 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	// explicit opt-in. Comprehension folds already reassociate into a vectorizable tree by default
 	// (reassoc+contract only); -ffast-math and `@fast_math` are the broader, value-changing opt-ins.
 	g.globalFastMath = os.Getenv("ELISACORE_FAST_MATH") != ""
-	// ELISACORE_NOALIAS_MUTABLE_REFS stamps LLVM `noalias` on the eligible subset of
-	// `mutable T&` params (scalar/darray pointee). OFF by default: a noalias miscompile
-	// is silent, so it stays an explicit opt-in pending empirical validation.
+	// ELISACORE_NOALIAS_MUTABLE_REFS (set by the `-fnoalias` CLI flag) stamps LLVM `noalias`
+	// on the eligible subset of `mutable T&` params (scalar/darray pointee). OFF by default:
+	// a noalias miscompile is silent, so it stays an explicit opt-in. NOTE (empirically
+	// measured): sound but currently low-value at O3 — darray header-pointer noalias does not
+	// cover the SROA'd inner data buffer, and scalar refs are arg-promoted by value before it
+	// matters. Real kernel-vectorization wins need buffer-level alias.scope metadata.
 	g.noaliasMutableRefs = os.Getenv("ELISACORE_NOALIAS_MUTABLE_REFS") != ""
 	g.optLevel = optLevel
 	g.packedProfile = profile

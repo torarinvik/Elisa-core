@@ -404,6 +404,11 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			// Opt the whole program into full fast-math FP (reassociation etc.), unlocking the
 			// reassociated tree reduction for FP folds. Read at codegen time (in-process build).
 			_ = os.Setenv("ELISACORE_FAST_MATH", "1")
+		case arg == "-fnoalias":
+			// Stamp LLVM `noalias` on the eligible `mutable T&` param subset (scalar/darray
+			// pointee). Sound but OFF by default (a noalias miscompile is silent). Read at
+			// codegen time, same env the backend generator consults.
+			_ = os.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
 		case arg == "-Wperf":
 			options.perfStrict = true
 		case arg == "-Wconcurrency":

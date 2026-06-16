@@ -1,0 +1,2 @@
+def bump(x: mutable i32&) -> void:
+	x <- x + 1
