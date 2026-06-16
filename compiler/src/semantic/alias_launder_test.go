@@ -51,3 +51,70 @@ def run(x: mutable i32&) -> void:
 		t.Fatalf("expected inline laundered-ref alias to require unsafe grant, got:\n%s", all)
 	}
 }
+
+// A reference returned from a call that aliases MULTIPLE parameters carries every possible root,
+// so passing it alongside one of those parameters is caught.
+func TestMultiParamAliasReturnLaunderRequiresUnsafeAliasGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "multi_param_alias_return_launder.elisa", `
+def pick(cond: bool, a: mutable i32&, b: mutable i32&) -> mutable i32&:
+    if cond:
+        return a
+    return b
+
+def mutate_pair(x: mutable i32&, y: mutable i32&) -> void:
+    pass
+
+def run(p: mutable i32&, q: mutable i32&) -> void:
+    r: mutable i32& = pick(true, p, q)
+    mutate_pair(r, p)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `mutable alias requires can[Unsafe]`) {
+		t.Fatalf("expected multi-param alias-return launder to require unsafe grant, got:\n%s", all)
+	}
+}
+
+// Passing the laundered multi-alias ref alongside a DISJOINT location stays accepted: the ref can
+// only be p or q, neither of which overlaps an unrelated third reference.
+func TestMultiParamAliasReturnDisjointStaysSafe(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "multi_param_alias_return_disjoint.elisa", `
+def pick(cond: bool, a: mutable i32&, b: mutable i32&) -> mutable i32&:
+    if cond:
+        return a
+    return b
+
+def mutate_pair(x: mutable i32&, y: mutable i32&) -> void:
+    pass
+
+def run(p: mutable i32&, q: mutable i32&, s: mutable i32&) -> void:
+    r: mutable i32& = pick(true, p, q)
+    mutate_pair(r, s)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `mutable alias requires`) {
+		t.Fatalf("expected disjoint third reference to stay safe, got:\n%s", all)
+	}
+}
+
+// A method (UFCS) call whose return aliases the whole receiver is mapped through the param-aligned
+// argument list, so the receiver shift no longer hides the borrow.
+func TestMethodReceiverAliasReturnLaunderRequiresUnsafeAliasGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "method_receiver_alias_return_launder.elisa", `
+struct Box:
+    value: mutable i32
+
+def identity(self: mutable Box&) -> mutable Box&:
+    return self
+
+def mutate_pair(x: mutable Box&, y: mutable Box&) -> void:
+    pass
+
+def run(box: mutable Box&) -> void:
+    h: mutable Box& = box.identity()
+    mutate_pair(h, box)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `mutable alias requires can[Unsafe]`) {
+		t.Fatalf("expected method receiver-alias launder to require unsafe grant, got:\n%s", all)
+	}
+}

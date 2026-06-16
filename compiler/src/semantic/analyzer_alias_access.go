@@ -12,8 +12,11 @@ type aliasAccessState struct {
 }
 
 type aliasAccessBinding struct {
-	Root string
-	Mode aliasAccessMode
+	// Roots names every storage root the bound reference may alias. Usually one (a `&x` borrow),
+	// but a reference returned from a call that aliases several parameters carries one root per
+	// aliased argument — the reference may be any of them, so all are tracked.
+	Roots []string
+	Mode  aliasAccessMode
 }
 
 type aliasAccessMode int
@@ -166,12 +169,8 @@ func (a *Analyzer) recordLocalRefAliasBinding(stmt ast.Stmt, sym *Symbol, value 
 	if !ok {
 		return
 	}
-	if !a.valueIsAliasBorrow(value) {
-		a.releaseLocalAliasBinding(sym)
-		return
-	}
-	root := a.aliasRootForExpr(value)
-	if root == "" {
+	roots := a.aliasBorrowRootsForValue(value)
+	if len(roots) == 0 {
 		a.releaseLocalAliasBinding(sym)
 		return
 	}
@@ -179,31 +178,48 @@ func (a *Analyzer) recordLocalRefAliasBinding(stmt ast.Stmt, sym *Symbol, value 
 		a.currentAliasAccesses = map[string]aliasAccessState{}
 	}
 	a.releaseLocalAliasBinding(sym)
-	existing := a.currentAliasAccesses[root]
-	conflict := aliasAccessConflicts(existing, mode)
-	if !conflict {
-		// A live borrow on an OVERLAPPING root (whole-object vs one of its fields)
-		// aliases the same storage even though the root strings differ.
-		for otherRoot, state := range a.currentAliasAccesses {
-			if otherRoot == root || !aliasRootsOverlap(root, otherRoot) {
-				continue
-			}
-			if aliasAccessConflicts(state, mode) {
-				conflict = true
-				break
+	conflict := false
+	for _, root := range roots {
+		existing := a.currentAliasAccesses[root]
+		if aliasAccessConflicts(existing, mode) {
+			conflict = true
+		} else {
+			// A live borrow on an OVERLAPPING root (whole-object vs one of its fields)
+			// aliases the same storage even though the root strings differ.
+			for otherRoot, state := range a.currentAliasAccesses {
+				if otherRoot == root || !aliasRootsOverlap(root, otherRoot) {
+					continue
+				}
+				if aliasAccessConflicts(state, mode) {
+					conflict = true
+					break
+				}
 			}
 		}
+		a.currentAliasAccesses[root] = aliasAccessStateWith(existing, mode)
 	}
 	if conflict {
 		a.recordUnsafeAliasStmt(stmt)
 	}
-	a.currentAliasAccesses[root] = aliasAccessStateWith(existing, mode)
 	if sym != nil {
 		if a.currentAliasBindings == nil {
 			a.currentAliasBindings = map[*Symbol]aliasAccessBinding{}
 		}
-		a.currentAliasBindings[sym] = aliasAccessBinding{Root: root, Mode: mode}
+		a.currentAliasBindings[sym] = aliasAccessBinding{Roots: roots, Mode: mode}
 	}
+}
+
+// aliasBorrowRootsForValue returns every storage root a reference bound to `value` may alias: the
+// single root of a literal `&…` borrow, or the per-aliased-argument roots of a reference-returning
+// call (see callReturnAliasedRoots). Empty when `value` is not a tracked borrow.
+func (a *Analyzer) aliasBorrowRootsForValue(value ast.Expr) []string {
+	if call, ok := stripOptimizationParens(value).(*ast.CallExpr); ok && !aliasExprIsExplicitBorrow(value) {
+		return a.callReturnAliasedRoots(call)
+	}
+	if root := a.aliasRootForExpr(value); root != "" {
+		return []string{root}
+	}
+	return nil
 }
 
 func (a *Analyzer) recordLocalRefAliasAssignment(stmt *ast.AssignStmt, targetType Type) {
@@ -244,44 +260,49 @@ func (a *Analyzer) releaseLocalAliasBinding(sym *Symbol) {
 	if a.currentAliasAccesses == nil {
 		return
 	}
-	state := aliasAccessStateWithout(a.currentAliasAccesses[binding.Root], binding.Mode)
-	if aliasAccessStateEmpty(state) {
-		delete(a.currentAliasAccesses, binding.Root)
+	for _, root := range binding.Roots {
+		state := aliasAccessStateWithout(a.currentAliasAccesses[root], binding.Mode)
+		if aliasAccessStateEmpty(state) {
+			delete(a.currentAliasAccesses, root)
+			continue
+		}
+		a.currentAliasAccesses[root] = state
+	}
+}
+
+func (a *Analyzer) recordCallAlignedAliasArgs(call *ast.CallExpr, args []ast.Expr) {
+	if call == nil {
 		return
 	}
-	a.currentAliasAccesses[binding.Root] = state
+	if a.callAlignedAliasArgs == nil {
+		a.callAlignedAliasArgs = map[*ast.CallExpr][]ast.Expr{}
+	}
+	a.callAlignedAliasArgs[call] = args
 }
 
 // valueIsAliasBorrow reports whether binding a reference to `value` borrows tracked storage —
-// either a literal `&…` borrow, or a call whose return provably aliases one of its arguments
-// (so `r = get_ref(&x)` is a borrow of x, not an opaque value). Without this, a borrow laundered
-// through a reference-returning call would lose its root and defeat the call-site alias checker.
+// either a literal `&…` borrow, or a call whose return provably aliases one or more of its
+// arguments (so `r = get_ref(&x)` is a borrow of x, not an opaque value). Without this, a borrow
+// laundered through a reference-returning call would lose its root and defeat the alias checker.
 func (a *Analyzer) valueIsAliasBorrow(value ast.Expr) bool {
 	if aliasExprIsExplicitBorrow(value) {
 		return true
 	}
 	if call, ok := stripOptimizationParens(value).(*ast.CallExpr); ok {
-		return a.callReturnAliasedArg(call) != nil
+		return len(a.callReturnAliasedRoots(call)) != 0
 	}
 	return false
 }
 
-// callReturnAliasedArg returns the single argument expression whose storage a call's returned
-// reference borrows, using the callee's already-computed return-isolation provenance. It is
-// deliberately conservative: it fires only for a simple positional free-function call (Ident
-// callee, no named args) whose return provably aliases EXACTLY ONE parameter, so the parameter
-// index maps 1:1 to call.Args. Method calls (receiver shifts the index) and multi-param alias
-// returns return nil and fall back to the prior behavior — a documented soundness follow-up.
-func (a *Analyzer) callReturnAliasedArg(call *ast.CallExpr) ast.Expr {
-	if call == nil || call.HasArgForward {
-		return nil
-	}
-	for _, name := range call.ArgNames {
-		if name != "" {
-			return nil
-		}
-	}
-	if _, ok := call.Func.(*ast.Ident); !ok {
+// callReturnAliasedRoots returns the alias roots of every argument whose storage a call's
+// returned reference may borrow, using the callee's already-computed return-isolation provenance
+// (ReturnIsolation.AliasParamIndices). Argument expressions are taken from the call's
+// param-aligned alias-arg list (receiver + reordered named args + implicits), so method and
+// free-function calls are handled uniformly and the parameter index maps correctly. A return
+// aliasing several parameters yields several roots; the caller treats the result as aliasing any
+// of them. Empty when provenance is unknown or no aligned args were recorded (non-enforcing pass).
+func (a *Analyzer) callReturnAliasedRoots(call *ast.CallExpr) []string {
+	if call == nil {
 		return nil
 	}
 	ft, ok := a.exprTypes[call.Func].(*FuncType)
@@ -289,14 +310,31 @@ func (a *Analyzer) callReturnAliasedArg(call *ast.CallExpr) ast.Expr {
 		return nil
 	}
 	indices := ft.ReturnIsolation.AliasParamIndices
-	if len(indices) != 1 {
+	if len(indices) == 0 {
 		return nil
 	}
-	idx := indices[0]
-	if idx < 0 || idx >= len(call.Args) {
+	aligned, ok := a.callAlignedAliasArgs[call]
+	if !ok {
 		return nil
 	}
-	return call.Args[idx]
+	roots := make([]string, 0, len(indices))
+	seenRoot := map[string]bool{}
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(aligned) {
+			// Without a resolvable argument for every aliased parameter we cannot prove the
+			// full borrow set, so report none rather than an incomplete (unsound) subset.
+			return nil
+		}
+		root := a.aliasRootForExpr(aligned[idx])
+		if root == "" {
+			return nil
+		}
+		if !seenRoot[root] {
+			seenRoot[root] = true
+			roots = append(roots, root)
+		}
+	}
+	return roots
 }
 
 func aliasExprIsExplicitBorrow(expr ast.Expr) bool {
@@ -319,6 +357,7 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 	if call == nil || !a.enforceUnsafePermissions {
 		return
 	}
+	a.recordCallAlignedAliasArgs(call, args)
 	seen := map[string]aliasAccessState{}
 	limit := len(args)
 	if len(paramTypes) < limit {
@@ -329,33 +368,53 @@ func (a *Analyzer) validateCallArgAliasAccess(call *ast.CallExpr, paramTypes []T
 		if !ok {
 			continue
 		}
-		root := a.aliasRootForExpr(args[i])
-		if root == "" {
+		// An arg may resolve to several alias roots (a reference returned from a call that
+		// aliases multiple params). Each is a storage the arg might touch, so any conflicting
+		// with this mutable use is a real alias.
+		roots := a.aliasRootsForExpr(args[i])
+		conflict := false
+		for _, root := range roots {
+			// Exact-root live state, discounting the arg's own outstanding binding so
+			// `&x` doesn't self-conflict with x's own borrow.
+			if existingLive := a.liveAliasAccessStateForArg(root, args[i]); aliasAccessConflicts(existingLive, mode) {
+				conflict = true
+				break
+			}
+			// Overlapping (whole-object vs field) live borrows on a DIFFERENT root.
+			if a.overlappingAliasConflict(root, mode, args[i]) {
+				conflict = true
+				break
+			}
+			// Earlier args of THIS call, exact or overlapping (e.g. update(node, node.value)).
+			if aliasMapHasOverlapConflict(seen, root, mode) {
+				conflict = true
+				break
+			}
+		}
+		if conflict {
+			a.recordUnsafeAliasExpr(call)
+			return
+		}
+		// Roots of one arg are alternatives (the ref is one of them), not mutual conflicts,
+		// so add them to `seen` only after checking this arg against earlier args.
+		for _, root := range roots {
+			seen[root] = aliasAccessStateWith(seen[root], mode)
+		}
+	}
+}
+
+// overlappingAliasConflict reports a live borrow on a DIFFERENT root that overlaps `root`
+// (whole-object vs one of its fields), discounting `arg`'s own outstanding binding on that root.
+func (a *Analyzer) overlappingAliasConflict(root string, mode aliasAccessMode, arg ast.Expr) bool {
+	for other := range a.currentAliasAccesses {
+		if other == root || !aliasRootsOverlap(root, other) {
 			continue
 		}
-		// Exact-root live state, discounting the arg's own outstanding binding so
-		// `&x` doesn't self-conflict with x's own borrow.
-		if existingLive := a.liveAliasAccessStateForArg(root, args[i]); aliasAccessConflicts(existingLive, mode) {
-			a.recordUnsafeAliasExpr(call)
-			return
+		if aliasAccessConflicts(a.liveAliasAccessStateForArg(other, arg), mode) {
+			return true
 		}
-		// Overlapping (whole-object vs field) live borrows on a DIFFERENT root.
-		for other, state := range a.currentAliasAccesses {
-			if other == root || !aliasRootsOverlap(root, other) {
-				continue
-			}
-			if aliasAccessConflicts(state, mode) {
-				a.recordUnsafeAliasExpr(call)
-				return
-			}
-		}
-		// Earlier args of THIS call, exact or overlapping (e.g. update(node, node.value)).
-		if aliasMapHasOverlapConflict(seen, root, mode) {
-			a.recordUnsafeAliasExpr(call)
-			return
-		}
-		seen[root] = aliasAccessStateWith(seen[root], mode)
 	}
+	return false
 }
 
 func (a *Analyzer) liveAliasAccessStateForArg(root string, arg ast.Expr) aliasAccessState {
@@ -364,11 +423,38 @@ func (a *Analyzer) liveAliasAccessStateForArg(root string, arg ast.Expr) aliasAc
 	}
 	state := a.currentAliasAccesses[root]
 	if sym := a.aliasBindingSymbolForExpr(arg); sym != nil {
-		if binding, ok := a.currentAliasBindings[sym]; ok && binding.Root == root {
-			state = aliasAccessStateWithout(state, binding.Mode)
+		if binding, ok := a.currentAliasBindings[sym]; ok {
+			for _, bound := range binding.Roots {
+				if bound == root {
+					state = aliasAccessStateWithout(state, binding.Mode)
+					break
+				}
+			}
 		}
 	}
 	return state
+}
+
+// aliasRootsForExpr returns every alias root an expression may name when passed as a call argument:
+// the roots a ref-typed ident is bound to (one, or several for a multi-param-alias return), the
+// roots of an inline reference-returning call, or otherwise the single structural root.
+func (a *Analyzer) aliasRootsForExpr(expr ast.Expr) []string {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.Ident:
+		if sym := a.aliasBindingSymbolForExpr(n); sym != nil {
+			if binding, ok := a.currentAliasBindings[sym]; ok && len(binding.Roots) != 0 {
+				return append([]string(nil), binding.Roots...)
+			}
+		}
+	case *ast.CallExpr:
+		if roots := a.callReturnAliasedRoots(n); len(roots) != 0 {
+			return roots
+		}
+	}
+	if root := a.aliasRootForExpr(expr); root != "" {
+		return []string{root}
+	}
+	return nil
 }
 
 func (a *Analyzer) aliasBindingSymbolForExpr(expr ast.Expr) *Symbol {
@@ -407,8 +493,9 @@ func (a *Analyzer) aliasRootForExprSeen(expr ast.Expr, seen map[*Symbol]bool) st
 				if seen[sym] {
 					return n.Name
 				}
-				if binding, ok := a.currentAliasBindings[sym]; ok && binding.Root != "" {
-					return binding.Root
+				if binding, ok := a.currentAliasBindings[sym]; ok && len(binding.Roots) != 0 {
+					// Representative single root (callers needing all roots use aliasRootsForExpr).
+					return binding.Roots[0]
 				}
 				if value, ok := a.currentValueBindings[sym]; ok && value != nil {
 					seen[sym] = true
@@ -430,10 +517,11 @@ func (a *Analyzer) aliasRootForExprSeen(expr ast.Expr, seen map[*Symbol]bool) st
 	case *ast.SliceExpr:
 		return a.aliasRootForExprSeen(n.Object, seen)
 	case *ast.CallExpr:
-		// A call whose return borrows exactly one argument (proven provenance) roots to that
-		// argument's storage, so an inline `f(get_ref(&x), &x)` is caught like the two-step form.
-		if arg := a.callReturnAliasedArg(n); arg != nil {
-			return a.aliasRootForExprSeen(arg, seen)
+		// A call whose return borrows its arguments (proven provenance) roots to that storage, so
+		// an inline `f(get_ref(&x), &x)` is caught like the two-step form. Representative first root
+		// for the single-string API; aliasRootsForExpr returns the full set for conflict checks.
+		if roots := a.callReturnAliasedRoots(n); len(roots) != 0 {
+			return roots[0]
 		}
 		return ""
 	default:

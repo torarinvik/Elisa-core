@@ -222,6 +222,12 @@ type Analyzer struct {
 	currentIteratedSources        map[string]lexer.Pos
 	currentAliasAccesses          map[string]aliasAccessState
 	currentAliasBindings          map[*Symbol]aliasAccessBinding
+	// callAlignedAliasArgs records, per call, the argument expressions aligned 1:1 to the
+	// callee's parameters (receiver + reordered named args + implicits) — the same alignment
+	// validateCallArgAliasAccess uses. It lets a ref bound from a reference-returning call map
+	// the callee's return-isolation AliasParamIndices back to the borrowed argument, for method
+	// and free-function calls alike.
+	callAlignedAliasArgs map[*ast.CallExpr][]ast.Expr
 	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
 	currentPackedStores           map[string]*PackedEnumStoreType
 	currentPackedStoreResolutions map[*Symbol]packedStoreResolution
