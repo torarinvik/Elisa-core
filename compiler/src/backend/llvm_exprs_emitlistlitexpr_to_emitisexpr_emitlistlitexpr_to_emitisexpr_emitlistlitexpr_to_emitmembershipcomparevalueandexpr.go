@@ -30,6 +30,17 @@ static void elisacoreSetFPContractReciprocal(LLVMValueRef v) {
 	}
 }
 
+// Allow reassociation + contraction on an FP instruction, WITHOUT nnan/ninf/nsz. This is the
+// "defined tree-order reduction" tier: it lets the vectorizer re-bracket a reduction into parallel
+// partial sums (SIMD tree reduction) while leaving NaN/Inf/signed-zero behaviour at IEEE. Used on a
+// comprehension fold's accumulator update — a fold's reduction order is defined as a tree, not strict
+// left-to-right, so this reassociation is the defined semantics, not an unsafe opt-in (docs/79).
+static void elisacoreSetFPReassoc(LLVMValueRef v) {
+	if (v != NULL && LLVMCanValueUseFastMathFlags(v)) {
+		LLVMSetFastMathFlags(v, LLVMFastMathAllowReassoc | LLVMFastMathAllowContract);
+	}
+}
+
 // Set ALL fast-math flags (reassoc, nnan, ninf, nsz, arcp, contract) on an FP instruction, matching
 // clang -ffast-math. Enables FP reassociation -> auto-vectorization of reduction/elementwise loops.
 // Used only inside functions annotated @fast_math (opt-in; reorders FP, results may differ).
@@ -313,12 +324,6 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		// the element type). Emit that block in place of the sequential comprehension.
 		return s.emitExpr(expr.LoweredParallel, s.exprType(expr))
 	}
-	if expr.FastMath {
-		// `by simd` on a list-map: emit the whole comprehension body under full fast-math FP,
-		// covering the value expression on both the indexed-store fast path and the push fallback.
-		s.fastMathScope++
-		defer func() { s.fastMathScope-- }()
-	}
 	if expr.Key != nil {
 		return s.emitDictComprehensionExpr(expr)
 	}
@@ -441,6 +446,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		Op:              lexer.TOKEN_RANGE_LT,
 		Body:            body,
 		AutovecExpected: comprehensionBodyCallFree(expr),
+		AutovecReason:   "comprehension map",
 	}
 
 	return &ast.ExprBlock{
@@ -460,30 +466,7 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 // node types are treated conservatively as "contains a call" so the marker (and thus the warning)
 // is only set for clearly-simple, call-free bodies — false negatives, never false positives.
 func exprContainsCall(e ast.Expr) bool {
-	switch n := e.(type) {
-	case nil:
-		return false
-	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.StringLit, *ast.Ident:
-		return false
-	case *ast.ParenExpr:
-		return exprContainsCall(n.Inner)
-	case *ast.BinaryExpr:
-		return exprContainsCall(n.Left) || exprContainsCall(n.Right)
-	case *ast.UnaryExpr:
-		return exprContainsCall(n.Operand)
-	case *ast.TernaryExpr:
-		return exprContainsCall(n.Value) || exprContainsCall(n.Cond) || exprContainsCall(n.Alt)
-	case *ast.IndexExpr:
-		return exprContainsCall(n.Object) || exprContainsCall(n.Index)
-	case *ast.FieldExpr:
-		return exprContainsCall(n.Object)
-	case *ast.CastExpr:
-		return exprContainsCall(n.Operand)
-	case *ast.CallExpr:
-		return true
-	default:
-		return true
-	}
+	return ast.ExprContainsCall(e)
 }
 
 // comprehensionBodyCallFree reports whether a comprehension's value expression and all of its
@@ -602,6 +585,7 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 		Op:              lexer.TOKEN_RANGE_LT,
 		Body:            body,
 		AutovecExpected: comprehensionBodyCallFree(expr),
+		AutovecReason:   "comprehension map",
 	}
 
 	return &ast.ExprBlock{
@@ -1286,10 +1270,10 @@ func fpAllowContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
 	return v
 }
 
-// fnFastMath reports whether full fast-math FP applies to the value currently being emitted: the
-// enclosing function opted in (@fast_math), the whole program did (the `-ffast-math` CLI flag /
-// ELISACORE_FAST_MATH), or we are inside a `by simd` fast-math scope (a `by simd` fold's
-// accumulator update — see fastMathScope).
+// fnFastMath reports whether FULL fast-math FP applies to the value currently being emitted: the
+// enclosing function opted in (@fast_math) or the whole program did (the `-ffast-math` CLI flag /
+// ELISACORE_FAST_MATH). A comprehension fold's accumulator reassociation is a narrower tier
+// (reassoc+contract only) and is handled separately via reduceReassocScope, not here.
 func (s *functionState) fnFastMath() bool {
 	if s == nil {
 		return false
@@ -1300,23 +1284,33 @@ func (s *functionState) fnFastMath() bool {
 	if s.g != nil && s.g.globalFastMath {
 		return true
 	}
-	return s.fastMathScope > 0
+	return false
 }
 
-// fpContract applies contraction (FMA) by default, or full fast-math when the function is @fast_math.
+// fpContract applies contraction (FMA) by default, full fast-math when the function is @fast_math /
+// the program is -ffast-math, or reassociation+contraction inside a comprehension fold's accumulator
+// update (reduceReassocScope) so its reduction reassociates into a vectorizable tree (docs/79).
 func (s *functionState) fpContract(v C.LLVMValueRef) C.LLVMValueRef {
 	if s.fnFastMath() {
 		C.elisacoreSetFPFast(v)
 		return v
 	}
+	if s.reduceReassocScope > 0 {
+		C.elisacoreSetFPReassoc(v)
+		return v
+	}
 	return fpAllowContract(v)
 }
 
-// fpContractReciprocal applies contraction+reciprocal by default (for fdiv), or full fast-math when
-// the function is @fast_math.
+// fpContractReciprocal applies contraction+reciprocal by default (for fdiv), full fast-math under
+// @fast_math / -ffast-math, or reassociation+contraction inside a fold accumulator update.
 func (s *functionState) fpContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
 	if s.fnFastMath() {
 		C.elisacoreSetFPFast(v)
+		return v
+	}
+	if s.reduceReassocScope > 0 {
+		C.elisacoreSetFPReassoc(v)
 		return v
 	}
 	return fpAllowContractReciprocal(v)

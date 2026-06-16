@@ -1,0 +1,23 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A comprehension fold's reduction order is defined as a vectorizable tree reduction, not strict
+# left-to-right (docs/79 Part IV): its accumulator update reassociates by default, with no marker.
+# This fixture pins that folds parse and compute correct results across every shape — plain iterable,
+# filtered, head-binding, and range (the data is integer-valued, so the tree order does not change
+# the sums).
+@test
+def fold_default_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[f64] = [k.f64() for k in 0..<10]   # [0.0 .. 9.0]
+
+		total: f64 = (acc + x for x in a with acc: f64 = 0.0)
+		assert total == 45.0
+
+		evens: f64 = (acc + x for x in a if x.i64() % 2 == 0 with acc: f64 = 0.0)
+		assert evens == 20.0                          # 0+2+4+6+8
+
+		sq: f64 = (y = x * x, acc + y for x in a with acc: f64 = 0.0)
+		assert sq == 285.0                            # sum of squares 0..9
+
+		rsum: i64 = (acc + i for i in 0..<5 with acc: i64 = 0)
+		assert rsum == 10

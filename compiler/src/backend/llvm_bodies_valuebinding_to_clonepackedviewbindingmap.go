@@ -104,10 +104,11 @@ type functionState struct {
 	loopCleanupFloors            []int
 	cleanupDepth                 int
 	scopePool                    []*codegenScope
-	// fastMathScope counts active `by simd` fast-math scopes (a `by simd` fold's accumulator
-	// update). While > 0, fnFastMath() reports true so FP ops emitted in the scope get full
-	// fast-math (reassociation), scoped to that one reduction rather than program-wide.
-	fastMathScope int
+	// reduceReassocScope counts active comprehension-fold accumulator-update scopes. While > 0, FP
+	// ops emitted in the scope get reassociation+contraction (not full fast-math), so the reduction
+	// re-brackets into a vectorizable tree — a fold's reduction order is defined as a tree, not strict
+	// left-to-right (docs/79). Scoped to the one accumulator update, not program-wide.
+	reduceReassocScope int
 	// oldCaptures holds, for each `old(expr)` pseudo-call in this function's `ensure` clauses, the
 	// value of expr captured at function entry (the SSA value dominates all returns). emitExpr reads
 	// it when lowering the `old(...)` node during postcondition checks. nil when there are no olds.

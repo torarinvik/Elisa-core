@@ -244,8 +244,9 @@ type AssignStmt struct {
 	Optional bool
 	// FastMath marks an assignment whose value expression should be emitted under full fast-math
 	// FP (reassociation etc.), regardless of the enclosing function's setting. Set on the
-	// accumulator update of a `by simd` fold so that one reduction gets the reassociated tree
-	// reduction without opting the whole program into `-ffast-math` (docs/79 Part IV).
+	// accumulator update of every comprehension fold: a fold's reduction order is defined as a
+	// vectorizable tree reduction, not strict left-to-right, so its FP accumulator reassociates by
+	// default (no `by simd` marker needed; integer accumulators are unaffected) (docs/79 Part IV).
 	FastMath bool
 }
 type AugAssignStmt struct {
@@ -345,6 +346,10 @@ type ForStmt struct {
 	// backend tags the loop's latch with `!llvm.loop` metadata carrying the marker + source
 	// position, then a post-optimization pass warns for any marked loop left un-vectorized.
 	AutovecExpected bool
+	// AutovecReason is a short human label for the construct that produced this loop ("comprehension
+	// map", "fold reduction"), embedded in the marker so a -Wperf warning can name what failed to
+	// vectorize rather than describing it generically. Only meaningful when AutovecExpected is set.
+	AutovecReason string
 }
 type IterBindMode int
 

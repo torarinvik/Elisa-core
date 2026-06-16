@@ -203,10 +203,9 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()
 	}
-	// Optional `by simd` / `by par` marker on a list-map comprehension (docs/79 Part IV). `by simd`
-	// emits the body under full fast-math FP; `by par` lowers to a parallel map over the source's
-	// disjoint bands (the analyzer does the desugar, once the element type is known).
-	fastMath := false
+	// Optional `by par` marker on a list-map comprehension (docs/79 Part IV): lowers to a parallel
+	// map over the source's disjoint bands (the analyzer does the desugar, once the element type is
+	// known). `by simd` was removed — comprehensions vectorize by default (docs/79 Part IV).
 	parallel := false
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
 		byPos := p.cur().Pos
@@ -214,11 +213,11 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 		mode := p.expect(lexer.TOKEN_IDENT).Text
 		switch mode {
 		case "simd":
-			fastMath = true
+			p.errorAt(byPos, "`by simd` was removed; comprehensions vectorize by default (a non-vectorizable shape warns under -Wperf)")
 		case "par":
 			parallel = true
 		default:
-			p.errorAt(byPos, "expected `simd` or `par` after `by`, got %q", mode)
+			p.errorAt(byPos, "expected `par` after `by`, got %q", mode)
 		}
 	}
 	p.expect(lexer.TOKEN_RBRACKET)
@@ -229,7 +228,7 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 		owner = p.withInMembershipDisabled(p.parseExpr)
 		p.errorf("comprehension allocation owner `[...] in <owner>` is no longer supported; annotate the binding type instead (e.g. `xs: darray[T] @<owner> = [...]`)")
 	}
-	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner, FastMath: fastMath, Parallel: parallel}
+	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner, Parallel: parallel}
 }
 
 // parseDictComprehensionFromFirst parses a dict comprehension
@@ -374,16 +373,22 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	accInit := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
-	// Optional `by simd` / `by par` marker (docs/79 Part IV). `by simd` opts this one fold into the
-	// reassociated (vectorizable) tree reduction (full fast-math FP on its accumulator update);
-	// `by par` lowers it to a contention-free parallel reduction over the source's disjoint bands.
+	// Optional `by par` marker (docs/79 Part IV): lowers to a contention-free parallel reduction over
+	// the source's disjoint bands. `by simd` was removed — a fold's reduction order is defined as a
+	// vectorizable tree reduction by default (its accumulator update always carries reassociation).
 	byMode := ""
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
 		byPos := p.cur().Pos
 		p.advance()
 		byMode = p.expect(lexer.TOKEN_IDENT).Text
-		if byMode != "simd" && byMode != "par" {
-			p.errorAt(byPos, "expected `simd` or `par` after `by`, got %q", byMode)
+		switch byMode {
+		case "simd":
+			p.errorAt(byPos, "`by simd` was removed; a fold reduces in a vectorizable tree order by default (use `-ffast-math` only for further FP relaxation)")
+			byMode = ""
+		case "par":
+			// handled below
+		default:
+			p.errorAt(byPos, "expected `par` after `by`, got %q", byMode)
 		}
 	}
 	p.expect(lexer.TOKEN_RPAREN)
@@ -392,7 +397,18 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 		return p.buildParallelFoldReduce(pos, bindings, body, name, accName, source, rangeEnd, filter, accInit)
 	}
 
-	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: byMode == "simd"})
+	// Phase 2 (docs/79 Part IV): when the fold's shape lets us pin the reduction tree, emit a
+	// fixed-width pinned reduction whose bracketing is fixed in the source — bit-reproducible across
+	// every target and optimization level. Ineligible shapes fall through to the reassociating scalar
+	// loop below (still vectorizes per-target, but its exact bits depend on the vectorizer's choices).
+	if pinned, ok := p.buildPinnedFoldReduce(pos, bindings, body, name, accName, accType, source, rangeEnd, filter, accInit); ok {
+		return pinned
+	}
+
+	// The accumulator update reassociates by default: comprehension folds are defined to reduce in a
+	// vectorizable tree order, not strict left-to-right (docs/79 Part IV). For integer accumulators
+	// this is a no-op (integer add/mul are associative); for FP it permits SIMD tree reduction.
+	assign := ast.Stmt(&ast.AssignStmt{Position: pos, Target: &ast.Ident{Position: pos, Name: accName}, Value: body, FastMath: true})
 	loopBody := append([]ast.Stmt{}, bindings...)
 	if filter != nil {
 		loopBody = append(loopBody, &ast.IfStmt{Position: pos, Cond: filter, Then: []ast.Stmt{assign}})
@@ -401,7 +417,13 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	}
 	var loopStmt ast.Stmt
 	if rangeEnd != nil {
-		loopStmt = &ast.ForStmt{Position: pos, Name: name, Start: source, End: rangeEnd, Step: rangeStep, Op: rangeOp, Body: loopBody}
+		// A range fold falls back to the reassociating scalar loop (it cannot use the pinned path,
+		// which needs an indexable darray). With no filter and a call-free body it is still shaped to
+		// vectorize via reassociation, so mark it for the -Wperf auto-vectorization verifier — a range
+		// reduction that fails to vectorize is a real perf defect worth surfacing. A filter or a body
+		// call legitimately blocks vectorization, so those stay unmarked (no noise).
+		autovec := filter == nil && foldBodyCallFree(body, bindings)
+		loopStmt = &ast.ForStmt{Position: pos, Name: name, Start: source, End: rangeEnd, Step: rangeStep, Op: rangeOp, Body: loopBody, AutovecExpected: autovec, AutovecReason: "fold reduction"}
 	} else {
 		loopStmt = &ast.IterForStmt{Position: pos, Pattern: &ast.MoveBindNamePattern{Position: pos, Name: name}, Mode: ast.IterBindValue, Source: source, Body: loopBody}
 	}
@@ -480,6 +502,191 @@ func (p *Parser) buildParallelFoldReduce(pos lexer.Pos, bindings []ast.Stmt, bod
 		Func:     &ast.Ident{Position: pos, Name: "map_reduce"},
 		Args:     []ast.Expr{sliceCall, accInit, transformLambda, opLambda},
 	}
+}
+
+// pinnedFoldWidth is the fixed reduction lane count. The fold's tree bracketing is pinned to this
+// width in the desugared source (W independent strict accumulators + a fixed strict pairwise combine),
+// so the rounded result is bit-identical across every target and optimization level — the loop
+// vectorizer may pack the W independent lanes into a SIMD register, but it can never reorder them
+// (no reassociation flag rides on these ops), so the bits do not depend on its choices.
+const pinnedFoldWidth = 8
+
+// buildPinnedFoldReduce lowers an eligible fold to a fixed-width pinned reduction (docs/79 Part IV,
+// Phase 2). Eligibility mirrors `by par` (no head bindings / filter / range; a plain darray source; an
+// associative top-level op with the accumulator as one whole operand) plus a numeric-literal seed (so
+// the per-lane identity is synthesizable) and a clonable per-element transform. The second return is
+// false when any condition fails; the caller then falls back to the reassociating scalar loop. Unlike
+// `by par` an ineligible shape is NOT an error — pinning is a best-effort reproducibility upgrade over
+// the always-correct scalar default.
+func (p *Parser) buildPinnedFoldReduce(pos lexer.Pos, bindings []ast.Stmt, body ast.Expr, name string, accName string, accType ast.TypeExpr, source ast.Expr, rangeEnd ast.Expr, filter ast.Expr, accInit ast.Expr) (ast.Expr, bool) {
+	if len(bindings) != 0 || filter != nil || rangeEnd != nil {
+		return nil, false
+	}
+	srcIdent, ok := source.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	bin, ok := body.(*ast.BinaryExpr)
+	if !ok || (bin.Op != lexer.TOKEN_PLUS && bin.Op != lexer.TOKEN_STAR) {
+		return nil, false
+	}
+	var transformExpr ast.Expr
+	switch {
+	case identName(bin.Left) == accName:
+		transformExpr = bin.Right
+	case identName(bin.Right) == accName:
+		transformExpr = bin.Left
+	default:
+		return nil, false
+	}
+	// The per-lane identity must be a typed literal we can synthesize; only a bare numeric-literal seed
+	// tells us the kind (int vs float) without type information at parse time.
+	isMul := bin.Op == lexer.TOKEN_STAR
+	isFloat := false
+	switch accInit.(type) {
+	case *ast.FloatLit:
+		isFloat = true
+	case *ast.IntLit:
+		isFloat = false
+	default:
+		return nil, false
+	}
+	// The transform is spliced once per lane; it must be deep-clonable so the lanes never share a node.
+	if ast.CloneExpr(transformExpr) == nil {
+		return nil, false
+	}
+
+	id := func(s string) ast.Expr { return &ast.Ident{Position: pos, Name: s} }
+	ilit := func(v string) ast.Expr { return &ast.IntLit{Position: pos, Value: v} }
+	op := func(l, r ast.Expr) ast.Expr { return &ast.BinaryExpr{Position: pos, Op: bin.Op, Left: l, Right: r} }
+	srcAt := func(ix ast.Expr) ast.Expr { return &ast.IndexExpr{Position: pos, Object: id(srcIdent.Name), Index: ix} }
+	transform := func() ast.Expr { return ast.CloneExpr(transformExpr) }
+	assign := func(target, val ast.Expr) ast.Stmt {
+		return &ast.AssignStmt{Position: pos, Target: target, Value: val}
+	}
+	identityLit := func() ast.Expr {
+		v := "0"
+		if isMul {
+			v = "1"
+		}
+		if isFloat {
+			return &ast.FloatLit{Position: pos, Value: v + ".0"}
+		}
+		return ilit(v)
+	}
+
+	const (
+		nName = "__fold_n"
+		iName = "__fold_i"
+	)
+	laneNames := []string{"__fold_a0", "__fold_a1", "__fold_a2", "__fold_a3", "__fold_a4", "__fold_a5", "__fold_a6", "__fold_a7"}
+	wLit := func() ast.Expr { return ilit("8") }
+
+	// --- n >= W branch: W independent strict lanes, unrolled by W, then a strict pairwise combine. ---
+	then := []ast.Stmt{
+		// Reusable element binding (mutable). Valid to seed from src[0] because this branch needs n >= W.
+		&ast.VarDeclStmt{Position: pos, Name: name, Mutable: true, Value: srcAt(ilit("0"))},
+	}
+	for j := 0; j < pinnedFoldWidth; j++ {
+		seed := identityLit()
+		if j == 0 {
+			seed = ast.CloneExpr(accInit) // lane 0 carries the seed; the combine folds it in exactly once
+		}
+		then = append(then, &ast.VarDeclStmt{Position: pos, Name: laneNames[j], Mutable: true, Value: seed})
+	}
+	then = append(then, &ast.VarDeclStmt{Position: pos, Name: iName, Mutable: true, Type: &ast.NamedType{Position: pos, Name: "usize"}, Value: ilit("0")})
+
+	mainBody := []ast.Stmt{}
+	for j := 0; j < pinnedFoldWidth; j++ {
+		// element <- src[i + j]; laneJ <- laneJ <op> transform(element)
+		offset := ast.Expr(id(iName))
+		if j != 0 {
+			offset = &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: id(iName), Right: ilit(itoa(j))}
+		}
+		mainBody = append(mainBody,
+			assign(id(name), srcAt(offset)),
+			assign(id(laneNames[j]), op(id(laneNames[j]), transform())),
+		)
+	}
+	mainBody = append(mainBody, assign(id(iName), &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: id(iName), Right: wLit()}))
+	// while i + W <= n
+	then = append(then, &ast.WhileStmt{
+		Position: pos,
+		Cond:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LTEQ, Left: &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: id(iName), Right: wLit()}, Right: id(nName)},
+		Body:     mainBody,
+	})
+	// remainder: while i < n  { element <- src[i]; lane0 <- lane0 <op> transform; i <- i + 1 }
+	then = append(then, &ast.WhileStmt{
+		Position: pos,
+		Cond:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: id(iName), Right: id(nName)},
+		Body: []ast.Stmt{
+			assign(id(name), srcAt(id(iName))),
+			assign(id(laneNames[0]), op(id(laneNames[0]), transform())),
+			assign(id(iName), &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: id(iName), Right: ilit("1")}),
+		},
+	})
+	// Strict pairwise combine: ((a0 a1)(a2 a3)) op ((a4 a5)(a6 a7)) — fixed bracketing, no reassociation.
+	tree := op(
+		op(op(id(laneNames[0]), id(laneNames[1])), op(id(laneNames[2]), id(laneNames[3]))),
+		op(op(id(laneNames[4]), id(laneNames[5])), op(id(laneNames[6]), id(laneNames[7]))),
+	)
+	then = append(then, assign(id(accName), tree))
+
+	// --- n < W branch: strict scalar fold into the (already seeded) result; reproducible at small n. ---
+	els := []ast.Stmt{
+		&ast.IterForStmt{
+			Position: pos,
+			Pattern:  &ast.MoveBindNamePattern{Position: pos, Name: name},
+			Mode:     ast.IterBindValue,
+			Source:   id(srcIdent.Name),
+			Body:     []ast.Stmt{assign(id(accName), op(id(accName), transform()))},
+		},
+	}
+
+	block := &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			&ast.VarDeclStmt{Position: pos, Name: nName, Value: &ast.FieldExpr{Position: pos, Object: id(srcIdent.Name), Field: "count"}},
+			&ast.VarDeclStmt{Position: pos, Name: accName, Mutable: true, Type: accType, Value: ast.CloneExpr(accInit)},
+			&ast.IfStmt{
+				Position: pos,
+				Cond:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_GTEQ, Left: id(nName), Right: wLit()},
+				Then:     then,
+				Else:     els,
+			},
+		},
+		Value: id(accName),
+	}
+	return block, true
+}
+
+// itoa renders a small non-negative int as a decimal string (lane offsets 0..7), avoiding an fmt
+// import in this parser file.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var digits []byte
+	for n > 0 {
+		digits = append([]byte{byte('0' + n%10)}, digits...)
+		n /= 10
+	}
+	return string(digits)
+}
+
+// foldBodyCallFree reports whether a fold's body expression and its head-binding values are all
+// call-free — the precondition for marking the fold loop AutovecExpected (a call legitimately blocks
+// auto-vectorization, so flagging it would be -Wperf noise rather than a real defect).
+func foldBodyCallFree(body ast.Expr, bindings []ast.Stmt) bool {
+	if ast.ExprContainsCall(body) {
+		return false
+	}
+	for _, b := range bindings {
+		if vd, ok := b.(*ast.VarDeclStmt); ok && ast.ExprContainsCall(vd.Value) {
+			return false
+		}
+	}
+	return true
 }
 
 // identName returns the name of an Ident expression, or "" if expr is not a plain identifier.

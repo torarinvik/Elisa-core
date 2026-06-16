@@ -720,11 +720,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		return s.emitPromoteStmt(n)
 	case *ast.AssignStmt:
 		if n.FastMath {
-			// A `by simd` fold's accumulator update: emit its value under full fast-math FP so the
-			// reduction reassociates (the vectorizable tree form), scoped to this statement. The
-			// defer pops when emitStmt returns, i.e. right after this assignment is emitted.
-			s.fastMathScope++
-			defer func() { s.fastMathScope-- }()
+			// A comprehension fold's accumulator update: emit its value with reassociation+contraction
+			// so the reduction re-brackets into the vectorizable tree form (the defined reduction order
+			// for a fold, docs/79), scoped to this statement. The defer pops when emitStmt returns, i.e.
+			// right after this assignment is emitted. Integer accumulators are unaffected by FP flags.
+			s.reduceReassocScope++
+			defer func() { s.reduceReassocScope-- }()
 		}
 		if n.Optional {
 			if s.g.trace != nil {

@@ -43,4 +43,21 @@ func TestAutovecVerifierWarnsOnNonVectorizedComprehension(t *testing.T) {
 			t.Fatalf("the verifier must be silent at -O0, got stderr:\n%s", errOut)
 		}
 	})
+
+	// A reassociating range fold (the fallback when the pinned path does not apply) is also marked for
+	// the verifier, tagged as a "fold reduction". This one vectorizes, so it must NOT warn — proving
+	// the verifier covers folds and that a healthy fold is not a false positive.
+	t.Run("range fold is tagged as a fold reduction and does not falsely warn", func(t *testing.T) {
+		path := filepath.Join(repoRoot, "compiler", "range_fold_probe.elisa")
+		var stdout, stderr bytes.Buffer
+		if code := runCLI([]string{"-emit", "llvm", "-O3", path}, &stdout, &stderr); code != 0 {
+			t.Fatalf("emit llvm failed (%d):\n%s", code, stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "elisa.autovec.expected") || !strings.Contains(stdout.String(), "fold reduction") {
+			t.Fatalf("expected the range fold loop to carry the autovec marker tagged \"fold reduction\":\n%s", stdout.String())
+		}
+		if strings.Contains(stderr.String(), "-Wperf") {
+			t.Fatalf("a fold that vectorizes must not warn, got stderr:\n%s", stderr.String())
+		}
+	})
 }

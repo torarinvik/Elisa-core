@@ -12,14 +12,18 @@ package backend
 // `elisa.autovec.expected` marker plus the source position. The marker rides in the IR, so it
 // survives inlining (unlike a held function reference) and lets a post-optimization pass identify
 // a comprehension build loop that was lowered to be vectorizable but failed to auto-vectorize.
-static void elisacoreTagAutovecLoop(LLVMContextRef ctx, LLVMValueRef branchInst, const char *posText) {
+static void elisacoreTagAutovecLoop(LLVMContextRef ctx, LLVMValueRef branchInst, const char *posText, const char *reasonText) {
 	if (ctx == NULL || branchInst == NULL || posText == NULL) {
 		return;
 	}
+	if (reasonText == NULL) {
+		reasonText = "";
+	}
 	LLVMMetadataRef markerName = LLVMMDStringInContext2(ctx, "elisa.autovec.expected", 22);
 	LLVMMetadataRef posMD = LLVMMDStringInContext2(ctx, posText, strlen(posText));
-	LLVMMetadataRef markerOps[2] = {markerName, posMD};
-	LLVMMetadataRef markerNode = LLVMMDNodeInContext2(ctx, markerOps, 2);
+	LLVMMetadataRef reasonMD = LLVMMDStringInContext2(ctx, reasonText, strlen(reasonText));
+	LLVMMetadataRef markerOps[3] = {markerName, posMD, reasonMD};
+	LLVMMetadataRef markerNode = LLVMMDNodeInContext2(ctx, markerOps, 3);
 
 	// Loop metadata must be a distinct, self-referential node: !{ self, <props...> }. Build it with
 	// a temporary first operand, then RAUW the temporary to the node itself (which also deletes it).
@@ -47,13 +51,18 @@ import (
 
 // tagAutovecExpectedLoop marks a compiler-synthesized comprehension build loop's latch branch as
 // expected-to-vectorize (see ForStmt.AutovecExpected). No-op at -O0, where no vectorization runs.
-func (s *functionState) tagAutovecExpectedLoop(branchInst C.LLVMValueRef, pos lexer.Pos) {
+func (s *functionState) tagAutovecExpectedLoop(branchInst C.LLVMValueRef, pos lexer.Pos, reason string) {
 	if s == nil || s.g == nil || s.g.optLevel == OptimizationLevel0 || branchInst == nil {
 		return
 	}
+	if reason == "" {
+		reason = "comprehension"
+	}
 	posC := cString(pos.String())
 	defer C.free(unsafe.Pointer(posC))
-	C.elisacoreTagAutovecLoop(s.g.context, branchInst, posC)
+	reasonC := cString(reason)
+	defer C.free(unsafe.Pointer(reasonC))
+	C.elisacoreTagAutovecLoop(s.g.context, branchInst, posC, reasonC)
 }
 
 // verifyAutovecExpectations runs after the optimization pipeline. It scans every loop's `!llvm.loop`
@@ -79,15 +88,12 @@ func (g *llvmGenerator) verifyAutovecExpectations() {
 			if loopMD == nil {
 				continue
 			}
-			pos, marked, vectorized := inspectAutovecLoopMetadata(loopMD)
+			pos, reason, marked, vectorized := inspectAutovecLoopMetadata(loopMD)
 			if !marked || vectorized || seen[pos] {
 				continue
 			}
 			seen[pos] = true
-			g.perfWarnings = append(g.perfWarnings, fmt.Sprintf(
-				"%s: warning [-Wperf]: comprehension was lowered for auto-vectorization but did not "+
-					"vectorize at -O%d; check for an aliasing or loop-carried dependency, or a body the "+
-					"vectorizer cost model rejected", pos, int(g.optLevel)))
+			g.perfWarnings = append(g.perfWarnings, autovecPerfWarning(pos, reason, int(g.optLevel)))
 		}
 	}
 }
@@ -95,7 +101,7 @@ func (g *llvmGenerator) verifyAutovecExpectations() {
 // inspectAutovecLoopMetadata walks a loop-id MDNode's property operands, returning the marker's
 // embedded source position (if present), whether the marker is present, and whether the loop also
 // carries `llvm.loop.isvectorized`.
-func inspectAutovecLoopMetadata(loopMD C.LLVMValueRef) (pos string, marked bool, vectorized bool) {
+func inspectAutovecLoopMetadata(loopMD C.LLVMValueRef) (pos string, reason string, marked bool, vectorized bool) {
 	ops := mdNodeOperands(loopMD)
 	// Operand 0 is the self-reference; properties follow.
 	for i := 1; i < len(ops); i++ {
@@ -119,11 +125,38 @@ func inspectAutovecLoopMetadata(loopMD C.LLVMValueRef) (pos string, marked bool,
 					pos = p
 				}
 			}
+			if len(propOps) >= 3 {
+				if r, ok := mdStringValue(propOps[2]); ok {
+					reason = r
+				}
+			}
 		case "llvm.loop.isvectorized":
 			vectorized = true
 		}
 	}
-	return pos, marked, vectorized
+	return pos, reason, marked, vectorized
+}
+
+// autovecPerfWarning renders the -Wperf message for a marked-but-unvectorized loop, naming the
+// construct (from the embedded reason) and the most likely blocker for that construct. The loop was
+// only marked because its body is call-free and its shape was lowered to be vectorizer-legal, so a
+// real failure is almost always a memory dependency the vectorizer could not disprove.
+func autovecPerfWarning(pos, reason string, optLevel int) string {
+	construct := reason
+	if construct == "" {
+		construct = "comprehension"
+	}
+	hint := "check for an aliasing or loop-carried dependency, or a body the vectorizer cost model rejected"
+	switch reason {
+	case "fold reduction":
+		hint = "the reduction did not re-bracket into vector lanes — check for an aliasing source or a " +
+			"loop-carried dependency other than the accumulator"
+	case "comprehension map":
+		hint = "the element store did not vectorize — check whether the source and destination may alias, " +
+			"or for a loop-carried dependency in the element transform"
+	}
+	return fmt.Sprintf("%s: warning [-Wperf]: %s was lowered for auto-vectorization but did not vectorize "+
+		"at -O%d; %s", pos, construct, optLevel, hint)
 }
 
 // mdNodeOperands returns the operands of an MDNode-as-value, or nil if it is not a node.

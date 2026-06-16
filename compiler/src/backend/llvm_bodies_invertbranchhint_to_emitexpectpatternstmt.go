@@ -354,7 +354,7 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 		C.LLVMBuildStore(s.builder, nextValue, currentAlloca)
 		backedge := C.LLVMBuildBr(s.builder, condBB)
 		if stmt.AutovecExpected {
-			s.tagAutovecExpectedLoop(backedge, stmt.Position)
+			s.tagAutovecExpectedLoop(backedge, stmt.Position, stmt.AutovecReason)
 		}
 	}
 

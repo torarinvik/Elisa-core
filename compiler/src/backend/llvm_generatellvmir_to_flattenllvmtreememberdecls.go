@@ -108,9 +108,9 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	g.forceContracts = os.Getenv("ELISACORE_FORCE_CONTRACTS") != ""
 	// ELISACORE_FAST_MATH opts the whole program into full fast-math FP (reassociation,
 	// reciprocals, no-nan/no-inf) — clang's -ffast-math. Set by the `-ffast-math` CLI flag.
-	// This is what unlocks the *tree* (reassociated) horizontal reduction for FP folds, which
-	// changes numerical results, so it stays an explicit program-wide opt-in (the per-function
-	// `@fast_math` annotation and the per-fold `by simd` marker are the narrower opt-ins).
+	// This applies full fast-math (incl. no-nan/no-inf/no-signed-zero) program-wide, so it stays an
+	// explicit opt-in. Comprehension folds already reassociate into a vectorizable tree by default
+	// (reassoc+contract only); -ffast-math and `@fast_math` are the broader, value-changing opt-ins.
 	g.globalFastMath = os.Getenv("ELISACORE_FAST_MATH") != ""
 	g.optLevel = optLevel
 	g.packedProfile = profile

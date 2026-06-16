@@ -4,47 +4,9 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 )
-
-// `by simd` on a list-map emits the body under full fast-math FP (the map analogue of the per-fold
-// marker): the plain map's body carries only `contract` flags, the `by simd` map's body carries
-// `fast`.
-func TestBySimdMapAppliesFastMath(t *testing.T) {
-	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "compiler", "by_simd_map_probe.elisa")
-
-	var stdout, stderr bytes.Buffer
-	if code := runCLI([]string{"-emit", "llvm", "-O3", fixturePath}, &stdout, &stderr); code != 0 {
-		t.Fatalf("emit llvm failed (%d):\n%s", code, stderr.String())
-	}
-	out := stdout.String()
-	body := func(fn string) string {
-		return regexp.MustCompile(`(?s)define[^\n]*@` + fn + `\(.*?\n\}`).FindString(out)
-	}
-	if strings.Contains(body("probe_plain"), "fmul fast") {
-		t.Fatalf("plain map body must not carry `fast` FP flags:\n%s", body("probe_plain"))
-	}
-	if !strings.Contains(body("probe_simd"), "fmul fast") {
-		t.Fatalf("`by simd` map body must carry `fast` FP flags:\n%s", body("probe_simd"))
-	}
-}
-
-// by_simd_map_smoke pins that `by simd` maps compute correct values (indexed-store + range source).
-func TestRunCLIBySimdMapSmoke(t *testing.T) {
-	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "compiler", "by_simd_map_smoke.elisa")
-
-	var stdout, stderr bytes.Buffer
-	if code := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); code != 0 {
-		t.Fatalf("by simd map smoke failed (%d):\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[       OK ] by_simd_map_smoke") {
-		t.Fatalf("expected by_simd_map_smoke to pass, got:\n%s", stdout.String())
-	}
-}
 
 // `by par` on a map is gated to a no-filter map over a plain darray identifier with a
 // reconstructible element type, so the parallel decomposition is well-defined. Ineligible maps are a

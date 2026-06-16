@@ -554,10 +554,6 @@ type ListComprehensionExpr struct {
 	// Bindings are comma-head `name [:T] = e` per-element lets, in scope for Key,
 	// Value, and Filter. Each is a *VarDeclStmt; recomputed every iteration.
 	Bindings []Stmt
-	// FastMath marks a `by simd` list-map comprehension: its body is emitted under full fast-math
-	// FP (so the vectorizer may apply the more aggressive FP transforms), the map analogue of the
-	// per-fold `by simd` marker (docs/79 Part IV).
-	FastMath bool
 	// Parallel marks a `by par` list-map comprehension: a parallel map over the source's disjoint
 	// bands. The analyzer lowers it (LoweredParallel) once the element type is known.
 	Parallel bool

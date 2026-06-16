@@ -1,0 +1,18 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A list-map comprehension vectorizes by default (docs/79 Part IV): no marker, no fast-math needed —
+# each output element is independent, so SIMD gives bit-identical results. This fixture pins
+# correctness across an indexed-store map (darray source) and a range source.
+@test
+def map_default_smoke():
+	can Memory.Allocate, Abort.Panic:
+		a: mutable darray[f64] = [k.f64() for k in 0..<8]
+
+		out: darray[f64] = [x * 2.0 + 1.0 for x in a]
+		assert out.count == 8.usize()
+		assert out[0.usize()] == 1.0
+		assert out[7.usize()] == 15.0
+
+		sq: darray[i64] = [i * i for i in 0..<5]
+		assert sq.count == 5.usize()
+		assert sq[4.usize()] == 16

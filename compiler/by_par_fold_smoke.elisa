@@ -23,7 +23,7 @@ def by_par_fold_smoke():
 		prod: i64 = (acc * x for x in b with acc: i64 = 1 by par)
 		assert prod == 40320                          # 8!
 
-		# float parallel sum (by par reorders the combine — accepted, like by simd)
+		# float parallel sum (by par reorders the combine — accepted, like the default tree reduction)
 		f: mutable darray[f64] = [1.0 for _ in 0..<1000]
 		fsum: f64 = (acc + x for x in f with acc: f64 = 0.0 by par)
 		assert fsum == 1000.0

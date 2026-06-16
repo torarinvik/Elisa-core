@@ -1,0 +1,44 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Phase 2 (docs/79 Part IV): an associative fold over an indexable darray with a numeric-literal seed
+# lowers to a fixed-width (W=8) pinned reduction — W independent strict lanes plus a fixed strict
+# pairwise combine. This fixture pins correctness across the W boundary (n<W small path, n==W exact,
+# and n=8k+remainder), for both `+` and `*`, and for FP and integer accumulators. The data is chosen
+# so the exact mathematical result is representable, so any divergence in the reduction would surface
+# as a failed assert. Running it at both -O0 and -O3 (see the Go harness) also pins that the pinned
+# result is bit-identical across optimization levels — the whole point of pinning the tree.
+@test
+def pinned_fold_smoke():
+	can Memory.Allocate, Abort.Panic:
+		# n < W: exercises the scalar small-n fallback inside the pinned lowering.
+		small: mutable darray[f64] = [1.0, 2.0, 3.0]
+		s_small: f64 = (acc + x for x in small with acc: f64 = 0.0)
+		assert s_small == 6.0
+
+		# n == W exactly: one full lane pass, no remainder.
+		eight: mutable darray[f64] = [1.0 for _ in 0..<8]
+		s_eight: f64 = (acc + x for x in eight with acc: f64 = 0.0)
+		assert s_eight == 8.0
+
+		# n = 8k + remainder: full lane passes plus the strict remainder loop.
+		big: mutable darray[f64] = [k.f64() for k in 0..<1000]   # 0.0 .. 999.0
+		s_big: f64 = (acc + x for x in big with acc: f64 = 0.0)
+		assert s_big == 499500.0
+
+		# Non-zero seed must be folded in exactly once (it rides lane 0).
+		s_seed: f64 = (acc + x for x in big with acc: f64 = 100.0)
+		assert s_seed == 499600.0
+
+		# Product, FP: 1 * 2 * ... — small enough to stay exact.
+		facsrc: mutable darray[f64] = [k.f64() for k in 1..<9]   # 1.0 .. 8.0
+		p_fac: f64 = (acc * x for x in facsrc with acc: f64 = 1.0)
+		assert p_fac == 40320.0                                  # 8!
+
+		# Integer accumulator (already associative; pins the same lowering path).
+		ints: mutable darray[i64] = [k for k in 0..<1000]
+		s_int: i64 = (acc + x for x in ints with acc: i64 = 0)
+		assert s_int == 499500
+
+		# Transformed element (sum of squares) over an eligible darray fold.
+		s_sq: f64 = (acc + x*x for x in facsrc with acc: f64 = 0.0)
+		assert s_sq == 204.0                                     # 1+4+9+...+64
