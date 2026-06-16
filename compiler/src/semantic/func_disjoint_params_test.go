@@ -61,6 +61,26 @@ def run_alias() -> void:
 	}
 }
 
+// Drift guard for the header-copy frontier: even if another site is cleanly distinct,
+// a single `b = a` caller shares the buffer and must kill the whole-program callee fact.
+func TestFuncDisjointHeaderCopySiteKillsPair(t *testing.T) {
+	src := disjointKernelSrc + `
+def run_ok() -> void:
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = []
+	axpy(&a, &b)
+
+def run_header_copy() -> void:
+	c: mutable darray[f64] = []
+	d: mutable darray[f64] = c
+	axpy(&c, &d)
+`
+	result := analyzeTreeTestSource(t, "fdisjoint_headercopy.elisa", src)
+	if info := disjointInfoForFunc(result, "axpy"); info != nil && info.PairDistinct(0, 1) {
+		t.Fatalf("a single header-copy call site must drop the pair, got %v", info.DistinctPairs)
+	}
+}
+
 // A function whose name is referenced as a value (address-taken) could be invoked from an
 // unobserved indirect site, so it is excluded even when every observed call is distinct.
 func TestFuncDisjointAddressTakenExcluded(t *testing.T) {

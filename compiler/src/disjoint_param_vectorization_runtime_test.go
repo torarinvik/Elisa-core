@@ -13,19 +13,20 @@ import (
 )
 
 // TestDisjointParamVectorizationBitIdentical is the docs/84 §4 soundness gate for
-// Increment 3b: the per-parameter alias.scope/noalias stamp on proven-distinct
-// container-ref params must NEVER change results. The same program is built at -O3
-// once with the noalias stamp OFF (env unset) and once ON (env set), run, and the
-// emitted f64-checksum BIT PATTERNS must be identical.
+// Increment 3b/4: the per-parameter alias.scope/noalias stamp on proven-distinct
+// container-ref params must NEVER change results. The same program is built with
+// the noalias stamp OFF and ON, run, and the emitted f64-checksum BIT PATTERNS must
+// be identical. It also compares O0/no-stamp against O3/stamped, matching the
+// default-on safety bar in docs/84 §4.
 //
 // The program exercises BOTH polarities (the part that makes this a real soundness
 // test, not a tautology):
-//   - axpy_distinct: only ever called with two distinct private-fresh darray locals,
-//     so the whole-program FuncDisjointParams predicate proves the pair distinct and
-//     the backend stamps the disjoint alias scopes. This is the path under test.
-//   - axpy_aliased:  called with the SAME darray twice (y == x). The predicate proves
-//     NOTHING (self-alias fails closed), so no stamp is emitted; the aliased aliasing
-//     semantics (y[i] += y[i] doubling) must be preserved with and without the flag.
+//   - AXPY: the minimal whole-array two-param kernel.
+//   - Jacobi/stencil: separate read/write grids with awkward non-power-of-two sizes.
+//   - Aliased stencil: called with the SAME darray twice; the predicate proves nothing,
+//     so no stamp is emitted and aliasing semantics must be preserved.
+//   - Fluid-frame-style multi-field update: several distinct mutable fields in one
+//     kernel, covering noalias groups larger than two params.
 //
 // Bit-identical checksums across both kernels and both flag states is the proof.
 func TestDisjointParamVectorizationBitIdentical(t *testing.T) {
@@ -57,31 +58,81 @@ def axpy_aliased(y: mutable darray[f64]&, x: mutable darray[f64]&) -> void:
     for i in 0..<y.count:
         y[i] <- y[i] + x[i]
 
+def jacobi_sweep(dst: mutable darray[f64]&, src: mutable darray[f64]&) -> void:
+    for i in 1..<src.count - 1:
+        dst[i] <- (src[i - 1] + src[i] + src[i + 1]) * 0.3333333333333333
+
+def aliased_stencil(dst: mutable darray[f64]&, src: mutable darray[f64]&) -> void:
+    for i in 1..<src.count - 1:
+        dst[i] <- dst[i] + src[i - 1] * 0.125 + src[i + 1] * 0.25
+
+def fluid_frame(u: mutable darray[f64]&, v: mutable darray[f64]&, u0: mutable darray[f64]&, v0: mutable darray[f64]&) -> void:
+    for i in 0..<u.count:
+        u[i] <- u[i] + u0[i] * 0.1 + v0[i] * 0.025
+        v[i] <- v[i] + v0[i] * 0.1 - u0[i] * 0.015
+
+def checksum(xs: darray[f64]) -> f64:
+    s: mutable f64 = 0.0
+    weight: mutable f64 = 1.0
+    for v in xs:
+        s <- s + v * weight
+        weight <- weight + 0.0001
+    return s
+
 def build_distinct() -> f64:
     a: mutable darray[f64] = []
     b: mutable darray[f64] = []
-    for i in 0..<2048:
+    for i in 0..<2051:
         a.push(i.f64())
         b.push(i.f64() * 1.5)
     axpy_distinct(&a, &b)
-    s: mutable f64 = 0.0
-    for v in a:
-        s <- s + v
-    return s
+    return checksum(a)
 
 def build_aliased() -> f64:
     c: mutable darray[f64] = []
-    for i in 0..<2048:
+    for i in 0..<2051:
         c.push(i.f64() + 0.25)
     axpy_aliased(&c, &c)
-    s: mutable f64 = 0.0
-    for v in c:
-        s <- s + v
-    return s
+    return checksum(c)
+
+def build_jacobi() -> f64:
+    src: mutable darray[f64] = []
+    dst: mutable darray[f64] = []
+    for i in 0..<4099:
+        src.push((i.f64() * 0.5) + 1.0)
+        dst.push(0.0)
+    jacobi_sweep(&dst, &src)
+    jacobi_sweep(&src, &dst)
+    return checksum(src) + checksum(dst)
+
+def build_aliased_stencil() -> f64:
+    c: mutable darray[f64] = []
+    for i in 0..<1027:
+        c.push((i.f64() + 3.0) * 0.75)
+    aliased_stencil(&c, &c)
+    return checksum(c)
+
+def build_fluid_frame() -> f64:
+    u: mutable darray[f64] = []
+    v: mutable darray[f64] = []
+    u0: mutable darray[f64] = []
+    v0: mutable darray[f64] = []
+    for i in 0..<1539:
+        f: f64 = i.f64()
+        u.push(f * 0.01)
+        v.push(f * -0.02)
+        u0.push((f + 1.0) * 0.03)
+        v0.push((f + 2.0) * -0.04)
+    fluid_frame(&u, &v, &u0, &v0)
+    fluid_frame(&u0, &v0, &u, &v)
+    return checksum(u) + checksum(v) + checksum(u0) + checksum(v0)
 
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     d: f64 = build_distinct()
     al: f64 = build_aliased()
+    j: f64 = build_jacobi()
+    st: f64 = build_aliased_stencil()
+    fl: f64 = build_fluid_frame()
     print(d) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((d * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -89,6 +140,18 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     print(al) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((al * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print(j) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print((j * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print(st) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print((st * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print(fl) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print((fl * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print("\n") can Console.Write
     return 0
 `, filepath.ToSlash(rel))
@@ -98,7 +161,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("write fixture: %v", err)
 	}
 
-	buildAndRun := func(t *testing.T, noalias bool) string {
+	buildAndRun := func(t *testing.T, opt backend.OptimizationLevel, noalias bool) string {
 		t.Helper()
 		const envKey = "ELISACORE_NOALIAS_MUTABLE_REFS"
 		prev, had := os.LookupEnv(envKey)
@@ -124,25 +187,29 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		if !ok {
 			t.Fatalf("analyze fixture failed:\n%s", stderr.String())
 		}
-		exePath, cleanup, err := buildNativeExecutable(result, nil, nil, "", backend.OptimizationLevel3, backend.DefaultPackedLoweringProfile(), "", false, false, &stderr)
+		exePath, cleanup, err := buildNativeExecutable(result, nil, nil, "", opt, backend.DefaultPackedLoweringProfile(), "", false, false, &stderr)
 		if err != nil {
-			t.Fatalf("build native (noalias=%v) failed: %v\n%s", noalias, err, stderr.String())
+			t.Fatalf("build native (opt=%v noalias=%v) failed: %v\n%s", opt, noalias, err, stderr.String())
 		}
 		defer cleanup()
 		output, err := exec.Command(exePath).CombinedOutput()
 		if err != nil {
-			t.Fatalf("run native (noalias=%v) failed: %v\n%s", noalias, err, string(output))
+			t.Fatalf("run native (opt=%v noalias=%v) failed: %v\n%s", opt, noalias, err, string(output))
 		}
 		return strings.TrimSpace(string(output))
 	}
 
-	off := buildAndRun(t, false)
-	on := buildAndRun(t, true)
-	if off == "" {
-		t.Fatalf("empty checksum output (flag off)")
+	o0Off := buildAndRun(t, backend.OptimizationLevel0, false)
+	o3Off := buildAndRun(t, backend.OptimizationLevel3, false)
+	o3On := buildAndRun(t, backend.OptimizationLevel3, true)
+	if o0Off == "" {
+		t.Fatalf("empty checksum output (O0 flag off)")
 	}
-	if off != on {
-		t.Fatalf("CHECKSUM DIVERGENCE: noalias stamp changed results.\n off=%q\n  on=%q", off, on)
+	if o3Off != o3On {
+		t.Fatalf("CHECKSUM DIVERGENCE: noalias stamp changed O3 results.\n off=%q\n  on=%q", o3Off, o3On)
 	}
-	t.Logf("bit-identical checksum (off==on): %s", on)
+	if o0Off != o3On {
+		t.Fatalf("CHECKSUM DIVERGENCE: O0/no-stamp and O3/stamped differ.\n  O0 off=%q\n  O3  on=%q", o0Off, o3On)
+	}
+	t.Logf("bit-identical checksum (O0 off == O3 off == O3 on): %s", o3On)
 }

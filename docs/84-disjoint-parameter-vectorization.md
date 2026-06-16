@@ -1,7 +1,11 @@
 # 84 — Disjoint-Parameter Vectorization
 
-Status: **design converged, not yet implemented.** Increment 1 (the band-disjointness
-analyzer fact, commit `612ddfbb`) is the first brick and is landed/unconsumed.
+Status: **Increments 1, 2, 3a, and 3b landed; Increment 4 in progress.**
+The current implementation derives per-call buffer disjointness, aggregates it into
+sound per-callee facts, and emits gated per-parameter LLVM `alias.scope`/`noalias`
+metadata for proven-distinct numeric `darray&` element streams under
+`ELISACORE_NOALIAS_MUTABLE_REFS=1`. The remaining work before default-on is the
+full soundness/perf gate in §4.
 
 This document is the agreed plan from a 4-perspective design debate (minimalist,
 provenance-rigorist, LLVM-pragmatist, skeptic). It supersedes the earlier
@@ -183,15 +187,20 @@ kernels are **not** force-migrated to `Slice`.
 - **Increment 1 — DONE (`612ddfbb`).** `ParallelForInfo.BandSourceDisjoint` +
   `DisjointViewCaptures`: proves band-source ⊥ view-captures when each resolves to a
   distinct fresh local. First brick of the `bufRoot` union-find.
-- **Increment 2 — `bufRoot` general predicate.** Lift the band-only fact to a
+- **Increment 2 — DONE (`c8f03b4a`).** Lift the band-only fact to a
   general per-ordered-param-pair `proven_distinct` over the union-find rules in 3.1,
   computed at call sites. Pure analyzer; no codegen yet. Add the self-vs-rest bit.
-- **Increment 3 — backend inline-then-tag.** Consume the booleans at `emitFunction`;
-  force-inline accessor, paired scope/noalias on inner-ptr load/store,
-  `noalias.scope.decl` in preheader, the both-lists-same-domain assertion. Guarded
-  by `-fnoalias` from the first commit. Unifies `darray&` + `Slice.split`.
-- **Increment 4 — soundness gate.** Differential O0-vs-O3 checksum harness + drift
-  guard over the §4 kernel set. CI-wire.
+- **Increment 3a — DONE (`6722804b`).** Aggregate per-call `proven_distinct`
+  observations into whole-program per-callee facts by intersecting every direct
+  call site and conservatively excluding address-taken/ambiguous callees.
+- **Increment 3b — DONE (`6519d98c`).** Consume the booleans at `emitFunction`;
+  stamp paired scope/noalias on inner-ptr load/store, anchor scopes with
+  `noalias.scope.decl`, and keep the feature guarded by
+  `ELISACORE_NOALIAS_MUTABLE_REFS=1`.
+- **Increment 4 — IN PROGRESS.** Differential O0-vs-O3 checksum harness + drift
+  guard over the §4 kernel set. CI-wire. The bit-identical gate now covers AXPY,
+  Jacobi/stencil, an explicitly aliased stencil, and a small multi-field
+  fluid-frame-style update in `TestDisjointParamVectorizationBitIdentical`.
 - **Increment 5 — flip default / optional keyword.** Default-on once green;
   optionally add the `disjoint` checked-assertion keyword + `-Wperf` hint.
 

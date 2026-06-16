@@ -97,3 +97,76 @@ func TestDisjointParamScopesAliasedCallSiteNotStamped(t *testing.T) {
 		t.Fatalf("an aliased call site must suppress the disjoint stamp, got:\n%s", ir)
 	}
 }
+
+// Header-copy drift guard: `b = a` creates two mutable darray values sharing one
+// backing buffer. The semantic aggregate must therefore withhold FuncDisjointParams,
+// and the backend must not stamp per-param scopes even under -fnoalias.
+const disjointAxpyHeaderCopySrc = `@inline(never)
+def axpy(y: mutable darray[f64]&, x: mutable darray[f64]&) -> void:
+    for i in 0..<y.count:
+        y[i] <- y[i] + x[i]
+
+def driver() -> void:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = a
+    axpy(&a, &b)
+`
+
+func TestDisjointParamScopesHeaderCopyNotStamped(t *testing.T) {
+	t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
+	result := parseAndAnalyzeBackendTest(t, "disjoint_axpy_headercopy.elisa", disjointAxpyHeaderCopySrc)
+	ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt error: %v", err)
+	}
+	if strings.Contains(ir, "elisa.disjoint.") {
+		t.Fatalf("a header-copy call site must suppress the disjoint stamp, got:\n%s", ir)
+	}
+}
+
+const disjointAxpyMainSrc = `@inline(never)
+def axpy(y: mutable darray[f64]&, x: mutable darray[f64]&) -> void:
+    for i in 0..<y.count:
+        y[i] <- y[i] + x[i]
+
+def main() -> int can[Memory.Allocate]:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = []
+    for i in 0..<1024:
+        a.push(i.f64())
+        b.push(i.f64())
+    axpy(&a, &b)
+    return 0
+`
+
+func TestDisjointParamScopesElideO3RuntimeMemcheck(t *testing.T) {
+	t.Run("flag off keeps runtime memcheck", func(t *testing.T) {
+		t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "")
+		result := parseAndAnalyzeBackendTest(t, "disjoint_axpy_o3_off.elisa", disjointAxpyMainSrc)
+		ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
+		if err != nil {
+			t.Fatalf("GenerateLLVMIRWithOpt error: %v", err)
+		}
+		if !strings.Contains(ir, "vector.body") || !strings.Contains(ir, "llvm.loop.isvectorized") {
+			t.Fatalf("expected the baseline loop to vectorize so the memcheck comparison is meaningful, got:\n%s", ir)
+		}
+		if !strings.Contains(ir, "vector.memcheck") {
+			t.Fatalf("expected baseline O3 IR to keep LLVM's runtime alias memcheck, got:\n%s", ir)
+		}
+	})
+
+	t.Run("flag on elides runtime memcheck", func(t *testing.T) {
+		t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
+		result := parseAndAnalyzeBackendTest(t, "disjoint_axpy_o3_on.elisa", disjointAxpyMainSrc)
+		ir, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
+		if err != nil {
+			t.Fatalf("GenerateLLVMIRWithOpt error: %v", err)
+		}
+		if !strings.Contains(ir, "vector.body") || !strings.Contains(ir, "llvm.loop.isvectorized") {
+			t.Fatalf("expected the stamped loop to vectorize, got:\n%s", ir)
+		}
+		if strings.Contains(ir, "vector.memcheck") {
+			t.Fatalf("per-param disjoint scopes should let LLVM elide the runtime alias memcheck, got:\n%s", ir)
+		}
+	})
+}
