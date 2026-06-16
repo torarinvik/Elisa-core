@@ -444,6 +444,15 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		linkage = C.LLVMLinkage(C.LLVMExternalLinkage)
 	}
 	C.LLVMSetLinkage(value, linkage)
+	// Every Elisa-defined function is `nounwind`: the language has no exceptions and the backend
+	// emits no `invoke`/landingpad/personality — panics lower to `trap`/`unreachable` (noreturn) and
+	// all cleanup (defer/drop) runs on straight-line normal-exit paths, so no body can unwind. The
+	// attribute lets callers assume a `call` here cannot unwind, which removes EH bookkeeping and
+	// unblocks optimizations (e.g. eliminating a call whose result is unused) — most valuable at the
+	// call barriers LLVM can't see through (exported, indirect, separately compiled). (A foreign C++
+	// callee that threw across the boundary would be UB, but Elisa has no landing pads to catch one
+	// regardless — exceptions through Elisa frames already terminate — so this matches the model.)
+	g.addNoUnwindAttribute(value)
 	explicitInlineMode := false
 	if fnType != nil {
 		if fnType.HasInlineMode {
@@ -579,6 +588,12 @@ func (g *llvmGenerator) addNoRecurseAttribute(fn C.LLVMValueRef) {
 		return
 	}
 	g.addFunctionEnumAttribute(fn, "norecurse")
+}
+func (g *llvmGenerator) addNoUnwindAttribute(fn C.LLVMValueRef) {
+	if g == nil || g.context == nil || fn == nil {
+		return
+	}
+	g.addFunctionEnumAttribute(fn, "nounwind")
 }
 func (g *llvmGenerator) addHotAttribute(fn C.LLVMValueRef) {
 	if g == nil || g.context == nil || fn == nil {
