@@ -1,0 +1,42 @@
+name: Disjoint Param Vectorization
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/disjoint-param-vectorization.yml"
+      - "compiler/**"
+      - "docs/84-disjoint-parameter-vectorization.md"
+  push:
+    branches:
+      - main
+      - work
+    paths:
+      - ".github/workflows/disjoint-param-vectorization.yml"
+      - "compiler/**"
+      - "docs/84-disjoint-parameter-vectorization.md"
+  workflow_dispatch:
+
+jobs:
+  gate:
+    name: Soundness and Metadata Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: compiler/go.mod
+          cache-dependency-path: compiler/go.sum
+
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm-dev libllvm-dev
+
+      - name: Run disjoint-param vectorization gate
+        working-directory: compiler
+        run: ./scripts/run_disjoint_param_vectorization_gate.sh
