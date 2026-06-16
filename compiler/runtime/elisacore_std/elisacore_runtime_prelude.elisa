@@ -54,11 +54,6 @@ struct StringLenCacheEntry:
 	ptr: mutable u8&
 	len: mutable usize
 
-struct StringBuilder:
-	len: mutable i64
-	cap: mutable i64
-	data: mutable heap u8&?
-
 struct StringView:
 	data: mutable u8&
 	len: mutable i64
@@ -216,9 +211,9 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# This path stays until the regression family proves a safe
 		# small-string cache design under mixed string-builder flows.
 		# TODO(runtime): reintroduce cache path only after these pass:
-		# - short_string_builder_finish_regression
-		# - short_string_builder_mixed_inputs_regression
-		# - short_string_builder_cross_path_stress_regression
+		# - short_concat_finish_regression
+		# - short_concat_mixed_inputs_regression
+		# - short_concat_cross_path_stress_regression
 		# Experimental note:
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
@@ -261,81 +256,3 @@ def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
 		text[0] <- value.u8()
 		text[1] <- 0
 		return intern_small_string(&text[0], 1)
-
-# ------------------------------------------------------------
-# String builder
-# ------------------------------------------------------------
-
-def string_builder_next_cap(min_cap: i64) -> i64:
-	cap: mutable i64 = 16
-	trusted Unsafe.AssumeProgress:
-		while cap < min_cap:
-			cap *= 2
-	return cap
-
-@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
-def string_builder_new(initial: u8&?) -> mutable heap StringBuilder&:
-	can Memory.Allocate, Abort.Panic:
-		src: u8& = initial if initial != null else ""
-		len: usize = runtime_strlen(src)
-
-		builder: heap StringBuilder& = alloc_perm(size_of(StringBuilder).i64()).cast[heap StringBuilder&]
-		builder.len <- len.i64()
-		builder.cap <- string_builder_next_cap(len.i64() + 1)
-		builder.data <- alloc_perm(builder.cap).cast[heap u8&]
-
-		if len > 0:
-			memcpy(builder.data.cast[mutable void&], src.cast[void&], len)
-
-		builder.data[len] <- 0
-		return builder
-
-@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
-def string_builder_append(builder: mutable heap StringBuilder&?, suffix: u8&?) -> mutable heap StringBuilder&:
-	can Memory.Allocate, Abort.Panic:
-		src: u8& = suffix if suffix != null else ""
-		suffix_len: usize = runtime_strlen(src)
-
-		if builder == null:
-			return string_builder_new(src)
-
-		if suffix_len == 0:
-			return builder
-
-		b: heap StringBuilder& = builder
-		needed: i64 = b.len + suffix_len.i64() + 1
-
-		if needed > b.cap:
-			new_cap: i64 = string_builder_next_cap(needed)
-			new_data: heap u8& = alloc_perm(new_cap).cast[heap u8&]
-			if b.len > 0:
-				assert b.data != null
-				memcpy(new_data.cast[mutable void&], b.data.cast[void&], b.len.usize())
-			b.data <- new_data
-			b.cap <- new_cap
-
-		assert b.data != null
-		# Append may legally receive a suffix that aliases builder storage.
-		# Use memmove to preserve defined behavior in overlap cases.
-		memmove((b.data + b.len.usize()).cast[mutable void&], src.cast[void&], suffix_len)
-		b.len += suffix_len.i64()
-		b.data[b.len.usize()] <- 0
-		return b
-
-@deprecated("StringBuilder is legacy runtime glue; prefer `concat2_scratch(...)`, `ctx_string_from_view(...)`, and existing `Str -> cstr` conversions")
-def string_builder_finish(builder: heap StringBuilder&?) -> heap u8&:
-	can Memory.Allocate, Abort.Panic:
-		if builder == null:
-			return intern_small_string("", 0)
-
-		b: heap StringBuilder& = builder
-		if b.len <= 0:
-			return intern_small_string("", 0)
-
-		assert b.data != null
-
-		if b.len <= 8:
-			return intern_small_string(b.data.cast[u8&], b.len.usize())
-
-		register_perm_string_len(b.data.cast[u8&], b.len.usize())
-		return b.data

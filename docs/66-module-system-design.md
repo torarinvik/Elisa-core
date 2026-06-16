@@ -219,10 +219,9 @@ PLANNED (in priority order):
      the primary overload. FIXED: rewriteFreeCallReceiverOverload now unwraps the
      SpecializeExpr, disambiguates by receiver type, and re-applies the type args to
      the rewritten FieldExpr (TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType).
-   - Local-vs-global conflicts: a parameter/local named `builder` (prelude's
-     `string_builder_append(builder: heap StringBuilder&?)`) must shadow a same-named
+   - Local-vs-global conflicts: a parameter/local named `builder` must shadow a same-named
      global generic function `def builder[T](Arena&)`. ROOT CAUSE: binding the param
-     into a typed local (`b: StringBuilder& = builder`) recorded the init expr;
+     into a typed local recorded the init expr;
      reading the local re-resolved `builder` via functionValueTypeForExpr, which —
      after finding the (non-function) local symbol — fell through to lookupVisibleGlobal
      and mis-bound the local to the global function's type. FIXED: functionValueTypeForExpr

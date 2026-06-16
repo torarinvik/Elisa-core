@@ -82,16 +82,10 @@ The preferred current generic-call surface is direct bracket specialization on t
 value: int = identity[int](7)
 ```
 
-The older helper-like spelling still exists in some tests and older code:
-
-```elisa
-value: int = identity.specialize[int]()(7)
-```
-
 Current rule:
 
-- direct `fn[T](...)` is the preferred surface when the callee is named directly
-- formatter normalization rewrites the older `.specialize[T]()` spelling into the direct bracket form when it can do so safely
+- direct `fn[T](...)` is the only supported source spelling when the callee is named directly
+- the older `.specialize[T]()` spelling has been removed; rewrite it to `fn[T]` or `fn[T](...)`
 
 ## Receiver-scoped extension impls
 

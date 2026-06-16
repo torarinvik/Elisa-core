@@ -613,9 +613,8 @@ func TestRunCLILocalParamShadowsSameNamedGlobalFunction(t *testing.T) {
 	// local re-resolved `widget` through functionValueTypeForExpr, which — after
 	// finding the (non-function) local symbol — fell through to the global lookup
 	// and mis-bound the local to the global function's type ("field access requires
-	// struct type, got func[T](...)"). This is the local-vs-global clash that blocks
-	// dropping  (prelude's `string_builder_append(builder: StringBuilder&)`
-	// vs the global `def builder[T](Arena&)`).
+	// struct type, got func[T](...)"). This is the local-vs-global clash that used
+	// to block removing receiver-only method annotations.
 	src := fmt.Sprintf(`# include %q
 
 struct Wid[T]:
@@ -1074,14 +1073,14 @@ def debug_trace_value_divergence_changes_fingerprint() -> void:
 	}
 }
 
-func TestRunCLINativeRuntimeStringBuilderShortStringRegression(t *testing.T) {
+func TestRunCLINativeRuntimeConcatShortStringRegression(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
 
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "native_runtime_string_builder_short_string_regression.elisa")
+	fixturePath := filepath.Join(fixtureDir, "native_runtime_concat_short_string_regression.elisa")
 	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
 	if err != nil {
@@ -1102,7 +1101,7 @@ def make_queue_label_with_suffix(vqid: int, suffix: cstr) -> cstr:
 		return rt_concat2_scratch(make_queue_label(vqid), suffix)
 
 @test
-def short_string_builder_finish_regression() -> void:
+def short_concat_finish_regression() -> void:
 	can Abort.Panic, Memory.Allocate, Console.Format:
 		for i in 0..<20000:
 			label: cstr = make_queue_label((i %% 260).int())
@@ -1110,7 +1109,7 @@ def short_string_builder_finish_regression() -> void:
 			assert ctx_strlen(label) <= 8
 
 @test
-def short_string_builder_mixed_inputs_regression() -> void:
+def short_concat_mixed_inputs_regression() -> void:
 	can Abort.Panic, Memory.Allocate, Console.Format:
 		for i in 0..<24000:
 			slot: int = (i %% 5).int()
@@ -1138,7 +1137,7 @@ def short_string_builder_mixed_inputs_regression() -> void:
 			assert ctx_strlen(plain) <= 8
 
 @test
-def short_string_builder_cross_path_stress_regression() -> void:
+def short_concat_cross_path_stress_regression() -> void:
 	can Abort.Panic, Memory.Allocate, Console.Format:
 		total: mutable i64 = 0
 		for i in 0..<16000:
@@ -1151,30 +1150,30 @@ def short_string_builder_cross_path_stress_regression() -> void:
 		assert total > 0
 	`, runtimeInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write string builder regression fixture: %v", err)
+		t.Fatalf("failed to write concat regression fixture: %v", err)
 	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
 	if exitCode != 0 {
-		t.Fatalf("expected string builder regression test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+		t.Fatalf("expected concat regression test execution to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
 	}
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
 	}
 	output := stdout.String()
 	for _, check := range []string{
-		"[ RUN      ] short_string_builder_finish_regression",
-		"[       OK ] short_string_builder_finish_regression",
-		"[ RUN      ] short_string_builder_mixed_inputs_regression",
-		"[       OK ] short_string_builder_mixed_inputs_regression",
-		"[ RUN      ] short_string_builder_cross_path_stress_regression",
-		"[       OK ] short_string_builder_cross_path_stress_regression",
+		"[ RUN      ] short_concat_finish_regression",
+		"[       OK ] short_concat_finish_regression",
+		"[ RUN      ] short_concat_mixed_inputs_regression",
+		"[       OK ] short_concat_mixed_inputs_regression",
+		"[ RUN      ] short_concat_cross_path_stress_regression",
+		"[       OK ] short_concat_cross_path_stress_regression",
 		"[ SUMMARY  ] 3 test(s) selected; passed=3 skipped=0 failed=0",
 	} {
 		if !strings.Contains(output, check) {
-			t.Fatalf("expected string builder regression output to contain %q, got:\n%s", check, output)
+			t.Fatalf("expected concat regression output to contain %q, got:\n%s", check, output)
 		}
 	}
 }

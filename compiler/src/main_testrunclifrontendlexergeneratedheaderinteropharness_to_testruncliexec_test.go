@@ -336,7 +336,6 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	checks := []string{
 		"define ptr @int_to_string(i64",
 		"define ptr @rt_concat2(ptr",
-		"define ptr @rt_string_builder_new(ptr",
 		"%StringView = type { ptr, i64 }",
 		"%FixedBufferAllocator = type { ptr, i64, i64 }",
 		"define i64 @ctx_string_view_len(%StringView",

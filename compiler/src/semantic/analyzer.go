@@ -60,7 +60,6 @@ var shapeTransformTable = map[string]ShapeTransformSpec{
 	"arena_da_append_many":      {FreshReturnShapeParams: []string{"shape_out"}},
 	"rt_concat2":                {FreshReturnShapeParams: []string{"shape_result"}},
 	"rt_concat2_scratch":        {FreshReturnShapeParams: []string{"shape_result"}},
-	"rt_string_builder_finish":  {FreshReturnShapeParams: []string{"shape_out"}},
 	"rt_int_to_string":          {FreshReturnShapeParams: []string{"shape_out"}},
 	"rt_int_to_string_scratch":  {FreshReturnShapeParams: []string{"shape_out"}},
 	"rt_bool_to_string":         {FreshReturnShapeParams: []string{"shape_out"}},
@@ -81,16 +80,16 @@ const (
 )
 
 type Analyzer struct {
-	file                    *ast.File
-	diagnostics             []Diagnostic
-	namedTypes              map[string]Type
-	staticInterfaces        map[string]*StaticInterface
-	staticImpls             map[string]*StaticImpl
+	file             *ast.File
+	diagnostics      []Diagnostic
+	namedTypes       map[string]Type
+	staticInterfaces map[string]*StaticInterface
+	staticImpls      map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
-	regionPolyFn           *ast.FuncDecl
-	extensionMethodsByName map[string][]*ExtensionMethod
+	regionPolyFn            *ast.FuncDecl
+	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
 	grantAliases            map[string][]ast.PermissionRef
@@ -176,7 +175,7 @@ type Analyzer struct {
 	// `old(expr)` pseudo-call (the value of expr at function entry).
 	inEnsureContext bool
 	currentFuncDecl *ast.FuncDecl
-	currentFuncType              *FuncType
+	currentFuncType *FuncType
 	// currentFuncSawPlainValueReturn records whether the current function has a
 	// value-returning path that is NOT a `return move <region>`. Combined with
 	// FuncType.ReturnsOwnedRegion it rejects functions that transfer an owned
@@ -192,11 +191,11 @@ type Analyzer struct {
 	// caller-owned and outlive every local (ordinal 0), and 'heap/borrowed arenas
 	// are treated as outermost. Used to reject storing an inner-@r value into an
 	// outer-region slot (a dangling pointer once the inner region is freed).
-	regionLifetimeOrdinals       map[string]int
-	regionLifetimeCounter        int
-	currentRegionMarks           map[*Symbol]regionMarkState
-	currentCheckpoints           map[*Symbol]checkpointState
-	currentRegionRefs            map[*Symbol]regionRefState
+	regionLifetimeOrdinals map[string]int
+	regionLifetimeCounter  int
+	currentRegionMarks     map[*Symbol]regionMarkState
+	currentCheckpoints     map[*Symbol]checkpointState
+	currentRegionRefs      map[*Symbol]regionRefState
 	// currentStructInteriorRegionTaint records, per region-less aggregate local,
 	// the innermost (shortest-lived) region name that one of its interior
 	// container/view fields was stored a value from. A struct's TYPE never carries
@@ -205,12 +204,12 @@ type Analyzer struct {
 	// undetected. Consumed only by checkStructCopyInteriorRegionEscape; kept off the
 	// shared region-ref provenance map to avoid perturbing promote/packed/invalidation.
 	currentStructInteriorRegionTaint map[*Symbol]string
-	currentAffineValues          map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues        map[*Symbol]*FuncType
-	currentSpecializedValueTypes map[*Symbol]Type
-	currentValueBindings         map[*Symbol]ast.Expr
-	currentStorageViewDeps       map[*Symbol]storageViewDependencyState
+	currentAffineValues              map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs         map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues            map[*Symbol]*FuncType
+	currentSpecializedValueTypes     map[*Symbol]Type
+	currentValueBindings             map[*Symbol]ast.Expr
+	currentStorageViewDeps           map[*Symbol]storageViewDependencyState
 	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
 	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
 	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.

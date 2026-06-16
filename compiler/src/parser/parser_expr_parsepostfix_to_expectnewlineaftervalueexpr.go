@@ -91,10 +91,9 @@ func (p *Parser) parsePostfix() ast.Expr {
 
 			if field == "specialize" && p.peek() == lexer.TOKEN_LBRACKET {
 				p.advance()
-				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 				if p.peek() != lexer.TOKEN_RBRACKET {
 					for {
-						typeArgs = append(typeArgs, p.parseTypeExpr())
+						_ = p.parseTypeExpr()
 						if !p.match(lexer.TOKEN_COMMA) {
 							break
 						}
@@ -103,7 +102,8 @@ func (p *Parser) parsePostfix() ast.Expr {
 				p.expect(lexer.TOKEN_RBRACKET)
 				p.expect(lexer.TOKEN_LPAREN)
 				p.expect(lexer.TOKEN_RPAREN)
-				expr = &ast.SpecializeExpr{Position: pos, Operand: expr, TypeArgs: typeArgs, Legacy: true}
+				p.errorAt(pos, "legacy generic specialization `.specialize[T]()` has been removed; use bracket specialization `fn[T]` instead")
+				expr = &ast.Ident{Position: pos, Name: "__invalid_removed_specialize"}
 				continue
 			}
 
@@ -167,7 +167,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 			pos := p.cur().Pos
 			// Generic-function VALUE specialization with 2+ type args and no trailing call:
 			// `fn[A, B]` materializes the generic function as a value (the modern replacement
-			// for `fn.specialize[A, B]()`). A multi-element bracket cannot be an index, so this
+			// A multi-element bracket cannot be an index, so this
 			// is unambiguous. The single-arg value form `fn[T]` stays an IndexExpr here and is
 			// reinterpreted as a specialization in the analyzer when the operand is a function.
 			if p.peekPostfixGenericValueApplication() {

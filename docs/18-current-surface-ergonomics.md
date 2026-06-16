@@ -349,7 +349,7 @@ def inspect(owner: Arena) -> i32:
     frozen: Expr.Store[Frozen] = freeze(move store)
     node: Expr = frozen[2]
     key: NodeKey[Expr] = dense_key(node, frozen)
-    table: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+    table: NodeTable[Expr, i32] = node_table_fill[Expr, i32](owner, frozen, -1)
     table[key] <- 7
     return frozen[key].span + table[key]
 ```
@@ -358,7 +358,7 @@ Current rules:
 
 - `dense_key(node, frozen)` requires a packed enum value or `packedview[...]` proven to come from the same exact frozen store root
 - `NodeKey[Expr]` may index that exact `Expr.Store[Frozen]` root or a `NodeTable[Expr, T]` built from the same root
-- `node_table_fill.specialize[Expr, T]()(owner, frozen, init)` returns `NodeTable[Expr, T]` with one slot per frozen packed node
+- `node_table_fill[Expr, T](owner, frozen, init)` returns `NodeTable[Expr, T]` with one slot per frozen packed node
 - `NodeTable.values` exposes the backing storage as `view[T]`
 - `node_table_fill` currently requires explicit specialization in v1
 - these helpers are for packed enum frozen stores rather than ordinary enums or tree stores

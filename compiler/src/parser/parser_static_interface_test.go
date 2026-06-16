@@ -21,6 +21,22 @@ static interface Builder:
 	}
 }
 
+func TestParseLegacySpecializeSpellingIsRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `
+def identity[T](value: T) -> T:
+    return value
+
+def use_it() -> int:
+    return identity.specialize[int]()(7)
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected parser error for removed .specialize spelling")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "legacy generic specialization `.specialize[T]()` has been removed") {
+		t.Fatalf("expected removed .specialize parser error, got: %v", errs)
+	}
+}
+
 // The `interface` keyword was a silent alias for `protocol`; it is now rejected outright.
 func TestParseInterfaceSpellingIsRejected(t *testing.T) {
 	_, errs := parseSourceFile(t, "interface Box:\n    def get() -> int\n")
@@ -386,7 +402,7 @@ def build_pair[B: Builder](value: int) -> (node: B.Node, checksum: int):
     return B.make(value), value
 
 def use_pair[B: Builder](value: int) -> B.Node:
-    built = build_pair.specialize[B]()(value)
+    built = build_pair[B](value)
     node, checksum = built
     _ = checksum
     return node

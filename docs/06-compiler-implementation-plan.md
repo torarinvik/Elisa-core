@@ -444,7 +444,7 @@ Recommended rollout is now:
 
 The codebase is already following this staged approach:
 
-- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringView`, and raw `u8&` string values; `StringBuilder` remains only as deprecated legacy runtime glue
+- low-level stage 0 runtime code still uses representation-first types such as `DynArray[T]`, `StringView`, and raw `u8&` string values; the deprecated `StringBuilder` runtime glue has been removed
 - `arena.elisa` now exposes shape-typed append helpers such as `arena_da_append` and `arena_da_append_many`
 - `elisacore_runtime.elisa` stage 1 wrappers now expose typed logical APIs such as `rt_concat2`, `ctx_string_slice`, and the `ctx_string_view*` helpers for string subviews
 - `arena.elisa` now also exposes typed non-owning `view[T]` helpers such as `arena_da_view`, `arena_da_view_slice`, and `arena_da_view_get`

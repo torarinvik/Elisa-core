@@ -19,7 +19,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	// `fn[T]` over a generic function is not an index (functions are not indexable) -- it is a
 	// single-type-arg value specialization, the counterpart of the multi-arg `fn[A, B]` the parser
 	// produces directly. Reinterpret it as a SpecializeExpr so it materializes the generic function
-	// as a value (the modern replacement for `fn.specialize[T]()`).
+	// as a value.
 	if expr.Fallback == nil {
 		if fnType, isFunc := objType.(*FuncType); isFunc && len(genericParamsForFuncType(fnType)) > 0 {
 			if typeArg, ok := exprAsSpecializeTypeArg(expr.Index); ok {
@@ -505,7 +505,7 @@ func (a *Analyzer) rewriteIndexedElementCall(expr *ast.CallExpr) {
 		return
 	}
 	spec, ok := expr.Func.(*ast.SpecializeExpr)
-	if !ok || spec == nil || spec.Legacy || len(spec.TypeArgs) != 1 {
+	if !ok || spec == nil || len(spec.TypeArgs) != 1 {
 		return
 	}
 	index, ok := specializeTypeArgAsIndexValue(spec.TypeArgs[0])

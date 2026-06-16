@@ -659,9 +659,6 @@ type SpecializeExpr struct {
 	Position lexer.Pos
 	Operand  Expr
 	TypeArgs []TypeExpr
-	// Legacy marks the deprecated `fn.specialize[T]()` spelling (vs the preferred bracket form
-	// `fn[T]` / `fn[T, U]`). The analyzer emits a deprecation warning for it.
-	Legacy bool
 }
 type StructLitExpr struct {
 	Position lexer.Pos
