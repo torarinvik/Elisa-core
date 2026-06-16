@@ -299,6 +299,8 @@ type Analyzer struct {
 	returnBorrowedOwnerLocalProgress map[*Symbol]bool
 	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
 	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
+	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
+	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
 	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace                 string
 	currentUsings                    []string
@@ -545,6 +547,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		foldInfo:                          map[*ast.FoldExpr]*FoldInfo{},
 		lambdaInfo:                        map[*ast.LambdaExpr]*LambdaInfo{},
 		parallelForInfo:                   make(map[*ast.ParallelForStmt]*ParallelForInfo, parallelForCapacity),
+		callArgDisjoint:                   map[*ast.CallExpr]*CallArgDisjointInfo{},
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		declVisibility:                    activeFile.DeclVisibility,
@@ -650,6 +653,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,
 		ParallelFor:             a.parallelForInfo,
+		CallArgDisjoint:         a.callArgDisjoint,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,

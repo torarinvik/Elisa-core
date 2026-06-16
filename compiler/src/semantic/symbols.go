@@ -54,6 +54,7 @@ type Result struct {
 	NodeTables              map[ast.Expr]NodeTableInfo
 	PackedLowering          PackedLoweringMetadata
 	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
+	CallArgDisjoint         map[*ast.CallExpr]*CallArgDisjointInfo
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
@@ -106,6 +107,38 @@ type ParallelForInfo struct {
 	// miscompiling. DisjointViewCaptures lists the capture names proven disjoint from the band.
 	BandSourceDisjoint   bool
 	DisjointViewCaptures []string
+}
+
+// CallArgDisjointInfo records, for one call site, which container-reference arguments
+// (`mutable darray[T]&` / `darray[T]&`) are provably backed by DISJOINT buffers. It is the
+// general per-call lift of the band-disjointness fact (ParallelForInfo.BandSourceDisjoint):
+// the `proven_distinct` predicate of docs/84 §3.1. Soundness is positive-evidence only — a
+// pair is recorded distinct solely when both arguments resolve to distinct FRESH-LOCAL
+// allocations (two distinct in-function buffers never share storage). Distinct parameters,
+// self-aliasing (`f(&a,&a)`), and header-copy aliasing (`b=a; f(&a,&b)`) are NOT distinct and
+// are omitted — conservatively giving up the optimization, never miscompiling. Increment 3
+// (the backend) consumes this to stamp buffer-level alias.scope/noalias.
+type CallArgDisjointInfo struct {
+	// ContainerParams lists the param-aligned argument indices that are container references.
+	ContainerParams []int
+	// DistinctPairs holds the unordered index pairs {i,j} (i<j, both in ContainerParams) whose
+	// argument buffers are provably disjoint at this call site.
+	DistinctPairs map[[2]int]bool
+	// SelfNoalias[i] is true when container arg i is proven distinct from EVERY other container
+	// arg at this call. NOTE for Increment 3: a sound `noalias` stamp on the callee body also
+	// requires that body to touch no other aliasing memory (globals / captured buffers); the
+	// backend must AND this call-site bit with that body fact before emitting noalias.
+	SelfNoalias map[int]bool
+}
+
+func (info *CallArgDisjointInfo) PairDistinct(i, j int) bool {
+	if info == nil || info.DistinctPairs == nil {
+		return false
+	}
+	if i > j {
+		i, j = j, i
+	}
+	return info.DistinctPairs[[2]int{i, j}]
 }
 
 type DeferInfo struct {
