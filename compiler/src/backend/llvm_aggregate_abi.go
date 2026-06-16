@@ -32,28 +32,76 @@ static void elisacoreAddCallTypeAttr(LLVMValueRef call, unsigned index, LLVMCont
 import "C"
 
 import (
+	"runtime"
+	"strings"
 	"unsafe"
 
 	"elisacore/src/semantic"
 )
 
-// aggregateMemoryClassThresholdBytes is the size at/above which an aggregate
-// (struct/array) function parameter or return value is passed/returned by
-// pointer (byval/sret) rather than as a first-class LLVM aggregate value.
+// targetUsesByvalAggregateArgs reports whether memory-class aggregate arguments
+// should carry the LLVM "byval" attribute under the active target's C ABI.
 //
-// It is set high enough that only genuinely large aggregates are affected
-// (e.g. the shader IR's inst/block/program types, which embed large fixed
-// arrays). Small structs keep the existing by-value lowering, so the change
-// has no effect on the vast majority of code -- and large structs are passed
-// by memory under every supported C ABI anyway, so this also matches the
-// platform calling convention for FFI.
+// On x86-64 SysV, a memory-class argument is passed on the stack and "byval" is
+// the correct lowering. On arm64 (AAPCS / Apple), a composite larger than 16
+// bytes is instead passed *indirectly* — the caller copies it and passes a plain
+// pointer (in a GP register), with no "byval" attribute (this is what clang
+// emits). Since convertByvalArgs already materializes the caller-side copy and
+// the parameter's LLVM type is a plain pointer either way, the only difference
+// is whether the attribute is attached. Returns (sret) are unaffected: sret is
+// correct on both targets.
+func (g *llvmGenerator) targetUsesByvalAggregateArgs() bool {
+	t := strings.ToLower(strings.TrimSpace(g.requestedTargetTriple))
+	if t == "" {
+		// Native build: tuned for the host (see llvm_target.go).
+		return runtime.GOARCH != "arm64"
+	}
+	return !strings.Contains(t, "arm64") && !strings.Contains(t, "aarch64")
+}
+
+// aggregateMemoryClassThresholdBytes is the size at/above which an aggregate is
+// passed/returned by pointer (byval/sret) under Elisa's INTERNAL calling
+// convention. It is set high enough that only genuinely large aggregates are
+// affected; small/medium structs keep the first-class lowering that internal
+// call emitters (e.g. the concurrency runtime's parallel-chunk structs) assume.
 const aggregateMemoryClassThresholdBytes = 1024
 
-// aggregateIsMemoryClass reports whether a type is a large aggregate that
-// should be passed/returned by pointer. This is the single source of truth
-// shared by function-type lowering, attribute application, the callee prologue,
-// and call sites, so all four stay consistent for a given function type.
+// cAbiAggregateMemoryClassThresholdBytes is the threshold under the platform C
+// ABI: both arm64 AAPCS and x86-64 SysV pass aggregates LARGER than 16 bytes via
+// memory (sret returns / indirect args). This is required for FFI — calling C /
+// Objective-C functions that take or return such structs by value (e.g. CMTime,
+// 24 bytes). It applies only at the C-ABI boundary (extern/@c_abi functions and
+// call_as indirect calls, identified by CallConv == "c"), so Elisa-internal
+// calls are completely unaffected.
+const cAbiAggregateMemoryClassThresholdBytes = 17
+
+// funcTypeIsCABI reports whether a function type uses the C calling convention,
+// i.e. its parameter/return aggregate lowering must follow the platform C ABI.
+func funcTypeIsCABI(fn *semantic.FuncType) bool {
+	return fn != nil && fn.CallConv == "c"
+}
+
+// aggregateArgUsesByval reports whether memory-class aggregate ARGUMENTS carry
+// the LLVM "byval" attribute. Internal calls always use byval (caller and callee
+// agree, so it is self-consistent). At the C-ABI boundary, x86-64 SysV uses byval
+// but arm64 passes a plain indirect pointer (matching clang) — see
+// targetUsesByvalAggregateArgs.
+func (g *llvmGenerator) aggregateArgUsesByval(cabi bool) bool {
+	return !cabi || g.targetUsesByvalAggregateArgs()
+}
+
+// aggregateIsMemoryClass reports memory-class under the internal ABI (the common
+// case). C-ABI call/def sites use aggregateIsMemoryClassABI with cabi=true.
 func (g *llvmGenerator) aggregateIsMemoryClass(t semantic.Type) bool {
+	return g.aggregateIsMemoryClassABI(t, false)
+}
+
+// aggregateIsMemoryClassABI reports whether a type is an aggregate passed/returned
+// by pointer (byval/sret). The threshold depends on whether the surrounding
+// function uses the C ABI: this is the single source of truth shared by
+// function-type lowering, attribute application, the callee prologue, and call
+// sites, so all four stay consistent for a given function type.
+func (g *llvmGenerator) aggregateIsMemoryClassABI(t semantic.Type, cabi bool) bool {
 	if g == nil || t == nil {
 		return false
 	}
@@ -64,7 +112,11 @@ func (g *llvmGenerator) aggregateIsMemoryClass(t semantic.Type) bool {
 	if err != nil {
 		return false
 	}
-	return size >= aggregateMemoryClassThresholdBytes
+	var threshold uint64 = aggregateMemoryClassThresholdBytes
+	if cabi {
+		threshold = cAbiAggregateMemoryClassThresholdBytes
+	}
+	return size >= threshold
 }
 
 // funcAbiLayout describes the leading hidden parameters of a lowered function:
@@ -105,7 +157,7 @@ func (g *llvmGenerator) computeFuncAbiLayout(fn *semantic.FuncType) (funcAbiLayo
 	}
 	_, eu := nonVoidErrorUnion(fn.Return)
 	layout := funcAbiLayout{errorUnionOut: eu}
-	if !eu && g.aggregateIsMemoryClass(fn.Return) {
+	if !eu && g.aggregateIsMemoryClassABI(fn.Return, funcTypeIsCABI(fn)) {
 		t, err := g.lowerType(fn.Return)
 		if err != nil {
 			return layout, err
@@ -130,9 +182,16 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 		// sret attribute index = sretParamPos + 1.
 		g.addFuncTypeAttr(fn, C.uint(layout.sretParamPos()+1), "sret", layout.sretType)
 	}
+	cabi := funcTypeIsCABI(fnType)
+	// At the C-ABI boundary on arm64, memory-class args are plain indirect
+	// pointers (no byval attribute); only x86-64 SysV (and all internal calls)
+	// use byval. The pointer parameter type and caller-side copy happen regardless.
+	if !g.aggregateArgUsesByval(cabi) {
+		return
+	}
 	base := layout.paramBase()
 	for i, param := range fnType.Params {
-		if !g.aggregateIsMemoryClass(param) {
+		if !g.aggregateIsMemoryClassABI(param, cabi) {
 			continue
 		}
 		ty, err := g.lowerType(param)
@@ -150,9 +209,10 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []C.LLVMValueRef) ([]C.LLVMValueRef, map[int]C.LLVMTypeRef, error) {
 	out := make([]C.LLVMValueRef, len(args))
 	copy(out, args)
+	cabi := funcTypeIsCABI(funcType)
 	var byval map[int]C.LLVMTypeRef
 	for i := 0; i < len(funcType.Params) && i < len(args); i++ {
-		if !s.g.aggregateIsMemoryClass(funcType.Params[i]) {
+		if !s.g.aggregateIsMemoryClassABI(funcType.Params[i], cabi) {
 			continue
 		}
 		ty, err := s.g.lowerType(funcType.Params[i])

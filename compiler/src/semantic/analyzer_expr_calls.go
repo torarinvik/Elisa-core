@@ -241,8 +241,16 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		return invalidType
 	}
 	a.maybeEmitDirectCallDeprecation(expr)
-	if a.enforceUnsafePermissions && isIndirectCallTarget(expr.Func) {
-		a.recordFunctionPermissionRefs(unsafeIndirectCallRefs(expr.Pos()))
+	if isIndirectCallTarget(expr.Func) {
+		// call_as targets a raw (C) function pointer, so its aggregate ABI must
+		// follow the platform C calling convention (sret returns / indirect args
+		// for structs > 16 bytes), not Elisa's internal first-class lowering.
+		if ft.CallConv == "" {
+			ft.CallConv = "c"
+		}
+		if a.enforceUnsafePermissions {
+			a.recordFunctionPermissionRefs(unsafeIndirectCallRefs(expr.Pos()))
+		}
 	}
 	orderedArgs, orderedOK := a.resolveFunctionCallArgs(expr, ft)
 	if !orderedOK {

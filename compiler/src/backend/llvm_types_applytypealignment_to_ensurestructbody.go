@@ -72,7 +72,8 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 	// Large aggregate returns are returned via an sret out-pointer (return void),
 	// mirroring the error-union out-param mechanism. (Error-union returns already
 	// carry their value via an out-pointer, so they are mutually exclusive.)
-	sretReturn := !isErrorUnionReturn && g.aggregateIsMemoryClass(fn.Return)
+	cabi := funcTypeIsCABI(fn)
+	sretReturn := !isErrorUnionReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
 	if sretReturn {
 		returnType = C.LLVMVoidTypeInContext(g.context)
 	}
@@ -88,8 +89,8 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 	}
 	for _, param := range fn.Params {
-		if g.aggregateIsMemoryClass(param) {
-			// Large aggregate params are passed by pointer (byval).
+		if g.aggregateIsMemoryClassABI(param, cabi) {
+			// Memory-class params are passed by pointer (byval / indirect).
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 			continue
 		}

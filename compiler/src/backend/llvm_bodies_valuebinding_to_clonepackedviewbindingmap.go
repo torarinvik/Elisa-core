@@ -471,6 +471,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	if layoutErr != nil {
 		return layoutErr
 	}
+	abiCABI := funcTypeIsCABI(fnType)
 	paramOffset := abiLayout.paramBase()
 	if abiLayout.errorUnionOut {
 		state.resultSlot = C.LLVMGetParam(fnValue, 0)
@@ -487,10 +488,10 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 		paramType := fnType.Params[typeIndex]
 		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
-		if g.aggregateIsMemoryClass(paramType) {
-			// byval: the parameter is already a pointer to the callee's private
-			// copy of the aggregate, so use it directly as the binding's address
-			// (no entry alloca + giant element-wise store).
+		if g.aggregateIsMemoryClassABI(paramType, abiCABI) {
+			// memory-class: the parameter is already a pointer to the aggregate
+			// (a byval private copy, or on arm64 C-ABI a plain indirect pointer to
+			// the caller's copy), so use it directly as the binding's address.
 			state.defineBinding(name, valueBinding{ptr: paramValue, typ: paramType, mutable: mutable})
 			return nil
 		}

@@ -592,8 +592,13 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	// in lowerFunctionType. Empty for non-region-param functions.
 	args = append(args, regionArenaArgs...)
 	base := layout.paramBase()
-	// applyByvalCallAttrs tags the byval pointer arguments on a built call.
+	// applyByvalCallAttrs tags the byval pointer arguments on a built call. On
+	// arm64 the memory-class arg convention is a plain indirect pointer, so the
+	// attribute is suppressed there (the pointer-to-copy is still passed).
 	applyByvalCallAttrs := func(call C.LLVMValueRef) {
+		if !s.g.aggregateArgUsesByval(funcTypeIsCABI(funcType)) {
+			return
+		}
 		for i, ty := range byvalTypes {
 			s.addCallByvalAttr(call, base+i, ty)
 		}
