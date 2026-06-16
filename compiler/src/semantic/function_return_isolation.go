@@ -48,6 +48,57 @@ func summarizeReturnIsolation(fn *ast.FuncDecl, fnType *FuncType, partitions *Gr
 	return summary
 }
 
+// mergeReturnAliasParamLocations folds additional param-rooted alias locations (e.g. a returned
+// `&self.value` field borrow, which the region/owner provenance does not record) into an existing
+// isolation summary, recomputing the derived param-index sets. Locations already present are
+// ignored. Used only by the call-argument alias checker, so it never perturbs escape analysis.
+func mergeReturnAliasParamLocations(summary ReturnIsolationSummary, fnType *FuncType, partitions *GraphPartitions, locations []string) ReturnIsolationSummary {
+	if len(locations) == 0 {
+		return summary
+	}
+	merged := map[string]bool{}
+	for _, location := range summary.AliasLocations {
+		merged[location] = true
+	}
+	added := false
+	for _, location := range locations {
+		if location == "" || merged[location] {
+			continue
+		}
+		merged[location] = true
+		added = true
+	}
+	if !added {
+		return summary
+	}
+	summary.Isolated = false
+	summary.AliasLocations = summary.AliasLocations[:0]
+	paramAliases := map[int]bool{}
+	mutableAliases := map[int]bool{}
+	for location := range merged {
+		summary.AliasLocations = append(summary.AliasLocations, location)
+		index := functionParamIndex(fnType, flowLocationRoot(location))
+		if index >= 0 {
+			paramAliases[index] = true
+			if partitions != nil && partitions.ClassMutated(location) {
+				mutableAliases[index] = true
+			}
+		}
+	}
+	sort.Strings(summary.AliasLocations)
+	summary.AliasParamIndices = summary.AliasParamIndices[:0]
+	summary.AliasMutableParamIndices = summary.AliasMutableParamIndices[:0]
+	for index := range paramAliases {
+		summary.AliasParamIndices = append(summary.AliasParamIndices, index)
+	}
+	for index := range mutableAliases {
+		summary.AliasMutableParamIndices = append(summary.AliasMutableParamIndices, index)
+	}
+	sort.Ints(summary.AliasParamIndices)
+	sort.Ints(summary.AliasMutableParamIndices)
+	return summary
+}
+
 func collectBorrowedOwnerAliasLocations(fnType *FuncType, summary borrowedOwnerRefSummary, out map[string]bool) {
 	if fnType == nil || out == nil {
 		return

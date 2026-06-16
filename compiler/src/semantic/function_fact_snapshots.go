@@ -26,6 +26,9 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 	partitions := computeGraphPartitionsFromCFG(cfg)
 	cleanupPlan := SynthesizeParamCleanupPlan(fn, fnType)
 	returnIsolation := summarizeReturnIsolation(fn, fnType, partitions)
+	// Field borrows of a parameter (`return &self.value`) are not captured by the region/owner
+	// return provenance, so fold them in here for the call-argument alias checker.
+	returnIsolation = mergeReturnAliasParamLocations(returnIsolation, fnType, partitions, a.collectReturnParamAliasLocations(fn, fnType))
 	fnType.ReturnIsolation = returnIsolation
 	fnType.ReturnIsolationKnown = true
 	cfgTransforms := populateCFGBlockFactTransforms(cfg)

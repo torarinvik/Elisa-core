@@ -118,3 +118,48 @@ def run(box: mutable Box&) -> void:
 		t.Fatalf("expected method receiver-alias launder to require unsafe grant, got:\n%s", all)
 	}
 }
+
+// A method returning a FIELD borrow of the receiver (`get_mut(self) -> &self.value`) — the field
+// borrow is recorded as a param-rooted alias location, so laundering it past the checker is caught.
+func TestFieldBorrowReturnMethodLaunderRequiresUnsafeAliasGrant(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "field_borrow_return_method_launder.elisa", `
+struct Box:
+    value: mutable i32
+
+def get_mut(self: mutable Box&) -> mutable i32&:
+    return &self.value
+
+def mutate_pair(a: mutable i32&, b: mutable i32&) -> void:
+    pass
+
+def run(box: mutable Box&) -> void:
+    h: mutable i32& = box.get_mut()
+    mutate_pair(h, &box.value)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `mutable alias requires can[Unsafe]`) {
+		t.Fatalf("expected field-borrow-return method launder to require unsafe grant, got:\n%s", all)
+	}
+}
+
+// A method returning a by-VALUE copy of a field (no `&`) creates no alias and must stay accepted.
+func TestFieldValueReturnMethodStaysSafe(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "field_value_return_method_safe.elisa", `
+struct Box:
+    value: mutable i32
+
+def get(self: Box&) -> i32:
+    return self.value
+
+def use_twice(a: i32, b: i32) -> void:
+    pass
+
+def run(box: mutable Box&) -> void:
+    v: i32 = box.get()
+    use_twice(v, box.value)
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	all := allDiagnostics(result)
+	if strings.Contains(all, `mutable alias requires`) {
+		t.Fatalf("expected by-value field return to stay safe, got:\n%s", all)
+	}
+}
