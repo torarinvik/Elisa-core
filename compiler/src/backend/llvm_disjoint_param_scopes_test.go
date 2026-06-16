@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -56,6 +57,81 @@ func TestDisjointParamScopesStampedUnderFlag(t *testing.T) {
 			t.Fatalf("element access carries alias.scope without a paired noalias (unsound half-tag):\n%s", line)
 		}
 	}
+	requireCombinedDarrayAndDisjointMetadata(t, ir)
+}
+
+func requireCombinedDarrayAndDisjointMetadata(t *testing.T, ir string) {
+	t.Helper()
+	md := parseMetadataDefinitions(ir)
+	checked := 0
+	for _, line := range strings.Split(ir, "\n") {
+		if !strings.Contains(line, " double") || !strings.Contains(line, "!alias.scope") || !strings.Contains(line, "!noalias") {
+			continue
+		}
+		if !metadataAttachmentContains(t, md, line, "alias.scope", darrayAliasDomain, "elisa.disjoint.axpy.aa") {
+			t.Fatalf("element access alias.scope must include both darray and disjoint domains:\n%s", line)
+		}
+		if !metadataAttachmentContains(t, md, line, "noalias", darrayAliasDomain, "elisa.disjoint.axpy.aa") {
+			t.Fatalf("element access noalias must include both darray and disjoint domains:\n%s", line)
+		}
+		checked++
+	}
+	if checked == 0 {
+		t.Fatalf("expected at least one double element access with alias/noalias metadata, got:\n%s", ir)
+	}
+}
+
+func parseMetadataDefinitions(ir string) map[string]string {
+	re := regexp.MustCompile(`^!(\d+) = (.*)$`)
+	md := map[string]string{}
+	for _, line := range strings.Split(ir, "\n") {
+		m := re.FindStringSubmatch(strings.TrimSpace(line))
+		if len(m) == 3 {
+			md[m[1]] = m[2]
+		}
+	}
+	return md
+}
+
+func metadataAttachmentContains(t *testing.T, md map[string]string, line string, kind string, names ...string) bool {
+	t.Helper()
+	id := metadataAttachmentID(line, kind)
+	if id == "" {
+		return false
+	}
+	for _, name := range names {
+		if !metadataTreeContains(md, id, `!"`+name+`"`, map[string]bool{}) {
+			return false
+		}
+	}
+	return true
+}
+
+func metadataAttachmentID(line string, kind string) string {
+	re := regexp.MustCompile(`!` + regexp.QuoteMeta(kind) + ` !([0-9]+)`)
+	m := re.FindStringSubmatch(line)
+	if len(m) != 2 {
+		return ""
+	}
+	return m[1]
+}
+
+func metadataTreeContains(md map[string]string, id string, needle string, seen map[string]bool) bool {
+	if id == "" || seen[id] {
+		return false
+	}
+	seen[id] = true
+	body := md[id]
+	if strings.Contains(body, needle) {
+		return true
+	}
+	refRe := regexp.MustCompile(`!([0-9]+)`)
+	for _, m := range refRe.FindAllStringSubmatch(body, -1) {
+		if len(m) == 2 && metadataTreeContains(md, m[1], needle, seen) {
+			return true
+		}
+	}
+	return false
 }
 
 // Default (flag off): no disjoint scopes — a noalias miscompile is silent, so the whole

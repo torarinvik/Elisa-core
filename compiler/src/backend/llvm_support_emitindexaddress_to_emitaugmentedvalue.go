@@ -268,14 +268,10 @@ func (s *functionState) emitRuntimePointerIndexedAddressWithType(containerPtr C.
 		// the base-pointer load out of hot loops. See aliasSafeElementPtrs.
 		s.tagDarrayHeaderLoad(dataPtr)
 		s.markAliasSafeElementPtr(ptr)
-		// docs/84 Increment 3b: register this element address under its proven-distinct
-		// parameter's scope. tagDarrayElementAccess stamps the per-param alias.scope/noalias
-		// (in a SEPARATE per-function domain) on the load/store; because an instruction holds
-		// one alias.scope slot, that stamp REPLACES the shared hdr/elt tag for these elements —
-		// we trade the header/element base-ptr hoist for the cross-param NoAlias that lets
-		// LoopAccessAnalysis elide the runtime memcheck and vectorize (the larger win in a hot
-		// loop). Both are sound noalias claims, so dropping one forgoes an optimization, never
-		// correctness.
+		// docs/84 Increment 4: register this element address under its proven-distinct
+		// parameter's scope. tagDarrayElementAccess combines the shared darray hdr/elt
+		// scope with the per-function disjoint-param scope in one metadata list, preserving
+		// both the base-pointer-hoist and cross-param NoAlias claims.
 		if disjointScope != nil {
 			if s.disjointElementPtrs == nil {
 				s.disjointElementPtrs = map[C.LLVMValueRef]*disjointParamScope{}
@@ -320,15 +316,20 @@ func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMVa
 	if s == nil || inst == nil || ptr == nil {
 		return
 	}
-	if s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[ptr] {
+	aliasSafe := s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[ptr]
+	var disjointScope *disjointParamScope
+	if s.disjointElementPtrs != nil {
+		disjointScope = s.disjointElementPtrs[ptr]
+	}
+	if aliasSafe && disjointScope != nil {
+		s.tagDarrayAndDisjointParamElementAccess(inst, disjointScope)
+		return
+	}
+	if aliasSafe {
 		s.attachAliasScopeMetadataWithNames(inst, darrayAliasDomain, darrayAliasScopeElt, []string{darrayAliasScopeHdr})
 	}
-	// docs/84 Increment 3b: if this element address belongs to a proven-distinct parameter,
-	// additionally stamp its per-param alias.scope + sibling noalias (in the disjoint domain).
-	if s.disjointElementPtrs != nil {
-		if scope := s.disjointElementPtrs[ptr]; scope != nil {
-			s.tagDisjointParamElementAccess(inst, scope)
-		}
+	if disjointScope != nil {
+		s.tagDisjointParamElementAccess(inst, disjointScope)
 	}
 }
 func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {

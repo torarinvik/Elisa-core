@@ -80,6 +80,57 @@ static void elisa_coreAttachDisjointParamScope(LLVMValueRef inst, LLVMContextRef
 	}
 	free(siblings);
 }
+
+// elisa_coreAttachDarrayAndDisjointParamScope stamps one element load/store with
+// BOTH alias-scope domains used for darray element accesses:
+//   - the shared darray hdr-vs-elt domain (keeps header/data-ptr hoisting), and
+//   - the per-function disjoint-param domain (lets LAA prove cross-param NoAlias).
+//
+// LLVM has one `!alias.scope` and one `!noalias` attachment slot per instruction, so
+// preserving both domains means building combined lists in one call rather than
+// setting metadata twice. Fail-closed for the disjoint half: if the param scope or
+// sibling list is missing, emit nothing here and let the Go caller use the shared
+// darray-only path instead.
+static void elisa_coreAttachDarrayAndDisjointParamScope(LLVMValueRef inst, LLVMContextRef ctx,
+	const char* darrayDomainName, const char* darrayAliasScopeName, const char* darrayNoAliasScopeName,
+	const char* disjointDomainName, const char* disjointAliasScopeName,
+	const char** disjointNoAliasScopeNames, size_t disjointNoAliasCount) {
+	if (inst == NULL || ctx == NULL ||
+		darrayDomainName == NULL || darrayAliasScopeName == NULL || darrayNoAliasScopeName == NULL ||
+		disjointDomainName == NULL || disjointAliasScopeName == NULL ||
+		disjointNoAliasScopeNames == NULL || disjointNoAliasCount == 0) {
+		return;
+	}
+	if (darrayAliasScopeName[0] == '\0' || darrayNoAliasScopeName[0] == '\0' ||
+		disjointAliasScopeName[0] == '\0') {
+		return;
+	}
+
+	LLVMMetadataRef darrayDomain = elisa_coreDisjointDomain(ctx, darrayDomainName);
+	LLVMMetadataRef disjointDomain = elisa_coreDisjointDomain(ctx, disjointDomainName);
+
+	LLVMMetadataRef* noAliasScopes = (LLVMMetadataRef*)malloc(sizeof(LLVMMetadataRef) * (disjointNoAliasCount + 1));
+	if (noAliasScopes == NULL) {
+		return;
+	}
+
+	LLVMMetadataRef aliasScopes[2];
+	aliasScopes[0] = elisa_coreDisjointScope(ctx, darrayDomain, darrayAliasScopeName);
+	aliasScopes[1] = elisa_coreDisjointScope(ctx, disjointDomain, disjointAliasScopeName);
+	size_t n = 0;
+	noAliasScopes[n++] = elisa_coreDisjointScope(ctx, darrayDomain, darrayNoAliasScopeName);
+	for (size_t i = 0; i < disjointNoAliasCount; i++) {
+		if (disjointNoAliasScopeNames[i] == NULL || disjointNoAliasScopeNames[i][0] == '\0') {
+			continue;
+		}
+		noAliasScopes[n++] = elisa_coreDisjointScope(ctx, disjointDomain, disjointNoAliasScopeNames[i]);
+	}
+	if (n > 1) {
+		elisa_coreDisjointSetMD(inst, ctx, "alias.scope", aliasScopes, 2);
+		elisa_coreDisjointSetMD(inst, ctx, "noalias", noAliasScopes, n);
+	}
+	free(noAliasScopes);
+}
 */
 import "C"
 
@@ -261,11 +312,9 @@ func stripBackendParens(e ast.Expr) ast.Expr {
 }
 
 // tagDisjointParamElementAccess stamps an element load/store with the per-parameter
-// alias.scope + sibling noalias metadata (docs/84 §3.3). It REPLACES the shared elt
-// scope for proven-distinct params: the access is in a distinct per-function domain, so
-// LLVM's LoopAccessAnalysis can mark the cross-param dependence NoAlias and elide the
-// runtime memcheck. The both-lists-same-domain invariant is enforced in the C helper
-// (it refuses to emit alias.scope without a non-empty sibling noalias list).
+// alias.scope + sibling noalias metadata (docs/84 §3.3). The both-lists-same-domain
+// invariant is enforced in the C helper (it refuses to emit alias.scope without a
+// non-empty sibling noalias list).
 func (s *functionState) tagDisjointParamElementAccess(inst C.LLVMValueRef, scope *disjointParamScope) {
 	if s == nil || s.g == nil || inst == nil || scope == nil || s.disjointScopes == nil {
 		return
@@ -292,4 +341,46 @@ func (s *functionState) tagDisjointParamElementAccess(inst C.LLVMValueRef, scope
 	}()
 	siblingPtr := (**C.char)(unsafe.Pointer(&cStrs[0]))
 	C.elisa_coreAttachDisjointParamScope(inst, s.g.context, domainC, ownC, siblingPtr, C.size_t(len(cStrs)))
+}
+
+// tagDarrayAndDisjointParamElementAccess stamps an element load/store with both the
+// shared darray hdr/elt metadata and the per-param disjoint metadata in one combined
+// metadata list. Calling the two stampers separately would overwrite the single
+// `alias.scope` / `noalias` slots on the instruction.
+func (s *functionState) tagDarrayAndDisjointParamElementAccess(inst C.LLVMValueRef, scope *disjointParamScope) {
+	if s == nil || s.g == nil || inst == nil || scope == nil || s.disjointScopes == nil {
+		return
+	}
+	if scope.ownScope == "" || len(scope.siblingScopes) == 0 {
+		return
+	}
+	if C.LLVMIsALoadInst(inst) == nil && C.LLVMIsAStoreInst(inst) == nil {
+		return
+	}
+	darrayDomainC := cString(darrayAliasDomain)
+	defer C.free(unsafe.Pointer(darrayDomainC))
+	darrayAliasC := cString(darrayAliasScopeElt)
+	defer C.free(unsafe.Pointer(darrayAliasC))
+	darrayNoAliasC := cString(darrayAliasScopeHdr)
+	defer C.free(unsafe.Pointer(darrayNoAliasC))
+	disjointDomainC := cString(s.disjointScopes.domain)
+	defer C.free(unsafe.Pointer(disjointDomainC))
+	disjointAliasC := cString(scope.ownScope)
+	defer C.free(unsafe.Pointer(disjointAliasC))
+
+	cStrs := make([]*C.char, len(scope.siblingScopes))
+	for i, name := range scope.siblingScopes {
+		cStrs[i] = cString(name)
+	}
+	defer func() {
+		for _, p := range cStrs {
+			C.free(unsafe.Pointer(p))
+		}
+	}()
+	siblingPtr := (**C.char)(unsafe.Pointer(&cStrs[0]))
+	C.elisa_coreAttachDarrayAndDisjointParamScope(
+		inst, s.g.context,
+		darrayDomainC, darrayAliasC, darrayNoAliasC,
+		disjointDomainC, disjointAliasC, siblingPtr, C.size_t(len(cStrs)),
+	)
 }
