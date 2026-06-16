@@ -682,15 +682,20 @@ def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
 		state.qtail <- null
 		state.shutdown <- 0
 		state.workers <- null
+		# The mutex/condvar handles are heap-allocated (malloc'd in *_init) and live
+		# for the pool's lifetime, but they flow through nullable `void&?` fields
+		# whose `heap` storage the type system does not currently carry, so the
+		# forwarded-reference check cannot prove it. The trusted runtime owns it.
 		mu: mutable Mutex = zeroed
 		mutex_init(&mu)
-		state.mutex <- mu.handle
 		wc: mutable CondVar = zeroed
 		condvar_init(&wc)
-		state.work_cond <- wc.handle
 		dc: mutable CondVar = zeroed
 		condvar_init(&dc)
-		state.done_cond <- dc.handle
+		trusted Unsafe.StaleRef:
+			state.mutex <- mu.handle
+			state.work_cond <- wc.handle
+			state.done_cond <- dc.handle
 		i: mutable usize = 0.usize()
 		trusted Unsafe.AssumeProgress:
 			while i < nworkers:
@@ -774,8 +779,12 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		rec: heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
 		rec.next <- null
 		rec.pool <- state.cast[void&]
-		rec.entry <- entry
-		rec.arg <- arg.cast[void&]
+		# entry/arg are caller-provided pointers stored into a heap task record the
+		# pool runs asynchronously; their pointee lifetime is the caller's contract,
+		# which the type system cannot verify here. The trusted runtime owns it.
+		trusted Unsafe.StaleRef:
+			rec.entry <- entry
+			rec.arg <- arg.cast[void&]
 		rec.done <- 0
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -940,7 +949,10 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 			node.next <- null
 		else:
 			node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
-		node.state_bits <- state_bits.cast[void&]
+		# state_bits is a caller-provided pointer recorded in a heap cleanup node;
+		# its lifetime is the caller's contract, unverifiable by the type system.
+		trusted Unsafe.StaleRef:
+			node.state_bits <- state_bits.cast[void&]
 		group.cleanup <- node.cast[void&]
 
 def ctx_task_group_release_all(group: mutable TaskGroup&):

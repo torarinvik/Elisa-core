@@ -158,7 +158,11 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 
 		new_entry: heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
 		new_entry.next <- string_len_cache[bucket]
-		new_entry.ptr <- ptr.cast[u8&]
+		# ptr is the caller's string pointer cached in a program-long table; callers
+		# pass stable (static/interned) string data, a contract the type system can't
+		# see on a bare `u8&`. The trusted runtime takes responsibility for it.
+		trusted Unsafe.StaleRef:
+			new_entry.ptr <- ptr.cast[u8&]
 		new_entry.len <- len
 		string_len_cache[bucket] <- new_entry
 

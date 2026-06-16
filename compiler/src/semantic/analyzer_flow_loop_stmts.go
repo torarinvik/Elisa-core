@@ -23,11 +23,15 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	savedUsedRefs := a.currentFunctionUsedPermissionRefs
 	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
 	savedTrustedAssumeProgressDepth := a.currentTrustedAssumeProgressDepth
+	savedTrustedStaleRefDepth := a.currentTrustedStaleRefDepth
 	if permissionRefsContain(refs, "Unsafe", "NonProgress") {
 		a.currentTrustedNonProgressDepth++
 	}
 	if permissionRefsContain(refs, "Unsafe", "AssumeProgress") {
 		a.currentTrustedAssumeProgressDepth++
+	}
+	if permissionRefsContain(refs, "Unsafe", "StaleRef") {
+		a.currentTrustedStaleRefDepth++
 	}
 	if permissionRefsContain(refs, "Unsafe", "BlockMain") && a.currentProgressSummary != nil {
 		a.currentProgressSummary.HasUnsafeBlockMain = true
@@ -41,6 +45,7 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	a.currentFunctionUsedPermissionRefs = savedUsedRefs
 	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.currentTrustedAssumeProgressDepth = savedTrustedAssumeProgressDepth
+	a.currentTrustedStaleRefDepth = savedTrustedStaleRefDepth
 	a.recordFunctionPermissionRefs(remainingRefs)
 }
 

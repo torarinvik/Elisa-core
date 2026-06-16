@@ -116,6 +116,18 @@ func (a *Analyzer) checkStoredBorrowEscapesLocal(target, value ast.Expr, valueTy
 	if a.assignTargetIsLocalRebind(target) {
 		return
 	}
+	// A FORWARDED reference (a plain load of a ref-typed value, e.g. a `mutable T&`
+	// parameter `x`, not a freshly-taken `&place`) stored into storage that
+	// outlives the function dangles iff its pointee does not outlive the function.
+	// The pointee's lifetime is the value ref-type's storage class: Heap/Static
+	// outlive the frame and are safe to store; Stack does not; Any is unannotated
+	// and could be a caller stack local, so it is rejected conservatively (the
+	// caller must promise `heap`/`static`, exactly Rust's `'static` store bound).
+	// Region-rooted forwards are deferred to the region escape machinery.
+	if isBorrowLikeType(valueType) && !isAddrOfRootedBorrow(value) {
+		a.checkForwardedRefStoreEscapes(value, valueType)
+		return
+	}
 	a.checkBorrowEscapesLocal(value, valueType, "storing a reference to function-local storage into longer-lived storage; it dangles once the function returns")
 }
 
@@ -132,6 +144,64 @@ func (a *Analyzer) assignTargetIsLocalRebind(target ast.Expr) bool {
 		return false
 	}
 	return symbolAliasRoot(sym).Kind == SymbolLocal
+}
+
+// outlivesFrameStorage reports whether a ref storage class guarantees the
+// pointee outlives the current function frame (Heap allocation or Static/global
+// storage). Stack pointees die with their frame; Any is unannotated and treated
+// conservatively as not-proven.
+func outlivesFrameStorage(s RefStorage) bool {
+	return s == RefStorageHeap || s == RefStorageStatic
+}
+
+// checkForwardedRefStoreEscapes guards the store of a forwarded reference (a
+// loaded ref value, not a fresh &-borrow) into storage that outlives the
+// function. Safety is decided by the pointee's storage class carried in the
+// value's resolved ref type: Heap/Static outlive the frame; Stack/Any do not
+// (Any is an unannotated `T&` whose pointee could be a caller stack local).
+// Region-rooted forwards are handled by the region escape machinery, so they
+// are exempted here to avoid double-reporting and to respect region lifetimes.
+func (a *Analyzer) checkForwardedRefStoreEscapes(value ast.Expr, valueType Type) {
+	if a == nil || value == nil {
+		return
+	}
+	// `trusted Unsafe.StaleRef:` is the explicit escape hatch: the author takes
+	// responsibility for a stored reference whose pointee lifetime the type system
+	// cannot prove (e.g. the trusted runtime caching a caller pointer in an async
+	// task record). Inside such a block, do not flag the store.
+	if a.currentTrustedStaleRefDepth > 0 {
+		return
+	}
+	rt, ok := valueType.(*RefType)
+	if !ok || rt == nil {
+		return
+	}
+	// The pointee's lifetime is sound if EITHER the value's resolved ref type or
+	// its walked provenance proves a frame-outliving (Heap/Static) storage class.
+	// Both signals are individually sound when they report Heap/Static but each is
+	// imprecise in a complementary way: the resolved type tracks a field/element's
+	// own declared storage (e.g. a `heap T&` struct field) but is erased by a
+	// `.cast[T&]` to a plain ref; the walked provenance follows the operand through
+	// casts but reports a field's object storage rather than the field's own. The
+	// union closes both gaps without admitting an unsound Heap/Static claim.
+	if outlivesFrameStorage(rt.Storage) {
+		return
+	}
+	// borrowProvenanceStorage only ever reports Heap (heap-typed ref) or Static
+	// (global / explicit `static` cast) when it walked to genuinely frame-outliving
+	// storage, so the class is trustworthy even when its `known`/explicit flag is
+	// false (a bare `heap T&` carries no explicit-annotation bit).
+	if prov, _ := a.borrowProvenanceStorage(value); outlivesFrameStorage(prov) {
+		return
+	}
+	// Region-managed forwards: the region machinery already validates these
+	// against the region lifetime lattice.
+	if rs, ok := a.regionRefStateForExpr(value); ok {
+		if region, _, ok := firstLiveRegionDependency(rs); ok && region != nil {
+			return
+		}
+	}
+	a.errorf(value.Pos(), "storing a forwarded reference into longer-lived storage; its pointee may not outlive the function. Annotate the reference as `heap`/`static` if its target outlives the frame, store the value/owner by value, or take responsibility with `trusted Unsafe.StaleRef:`")
 }
 
 func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, message string) {

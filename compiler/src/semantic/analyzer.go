@@ -266,6 +266,7 @@ type Analyzer struct {
 	loopDepth                         int
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
+	currentTrustedStaleRefDepth       int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
