@@ -97,6 +97,15 @@ type ParallelForInfo struct {
 	// once per band. BandElement is the band's element type T (for slice_band[T] lowering).
 	BandMode    bool
 	BandElement Type
+	// BandSourceDisjoint is set (band mode only) when the writable band source and every
+	// Slice/ReadView capture provably refer to DISJOINT buffers: each resolves to a distinct
+	// fresh LOCAL allocation (not a parameter, whose buffer is opaque and could alias at the
+	// caller). It is the soundness precondition for tagging band writes `noalias` the captured
+	// view reads (the buffer-level restrict the backend emits under -fnoalias). False whenever
+	// disjointness cannot be proven locally — conservatively giving up the optimization, never
+	// miscompiling. DisjointViewCaptures lists the capture names proven disjoint from the band.
+	BandSourceDisjoint   bool
+	DisjointViewCaptures []string
 }
 
 type DeferInfo struct {

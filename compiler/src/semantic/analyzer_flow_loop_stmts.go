@@ -589,16 +589,108 @@ func (a *Analyzer) analyzeParallelForStmt(stmt *ast.ParallelForStmt) {
 	for _, msg := range captureCollector.errors {
 		a.errorf(stmt.Pos(), "%s", msg)
 	}
+	bandDisjoint := false
+	var disjointViews []string
+	if bandMode {
+		bandDisjoint, disjointViews = a.computeBandSourceDisjoint(stmt, captureCollector.captureOrder)
+	}
 	if a.parallelForInfo == nil {
 		a.parallelForInfo = map[*ast.ParallelForStmt]*ParallelForInfo{}
 	}
 	a.parallelForInfo[stmt] = &ParallelForInfo{
-		SourceType:  sourceType,
-		ItemType:    itemType,
-		Captures:    append([]string(nil), captureCollector.captureOrder...),
-		BandMode:    bandMode,
-		BandElement: bandElement,
+		SourceType:           sourceType,
+		ItemType:             itemType,
+		Captures:             append([]string(nil), captureCollector.captureOrder...),
+		BandMode:             bandMode,
+		BandElement:          bandElement,
+		BandSourceDisjoint:   bandDisjoint,
+		DisjointViewCaptures: disjointViews,
 	}
+}
+
+// computeBandSourceDisjoint proves (conservatively) that the writable band source buffer is
+// disjoint from the buffers behind the loop's Slice/ReadView captures, so the backend may tag
+// band writes `noalias` those captured reads. SOUND ONLY when every root resolves to a fresh
+// LOCAL allocation: two distinct *parameters* resolve to distinct names yet can still alias at
+// the caller, so a param (or param-derived) root is treated as un-provable and gives up the
+// optimization. Returns the proof bit and the subset of capture names proven disjoint from the
+// band (read-only views never conflict with each other, so only band⊥view is required).
+func (a *Analyzer) computeBandSourceDisjoint(stmt *ast.ParallelForStmt, captures []string) (bool, []string) {
+	bandRoots := a.aliasRootsForExpr(stmt.Source)
+	if len(bandRoots) == 0 || !a.aliasRootsAllFreshLocal(bandRoots) {
+		return false, nil
+	}
+	var disjoint []string
+	for _, name := range captures {
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || sym == nil || !isSliceOrReadViewType(sym.Type) {
+			continue
+		}
+		viewRoots := a.aliasRootsForExpr(&ast.Ident{Position: stmt.Position, Name: name})
+		if len(viewRoots) == 0 || !a.aliasRootsAllFreshLocal(viewRoots) {
+			continue
+		}
+		if aliasRootSetsOverlap(bandRoots, viewRoots) {
+			continue
+		}
+		disjoint = append(disjoint, name)
+	}
+	if len(disjoint) == 0 {
+		return false, nil
+	}
+	return true, disjoint
+}
+
+// aliasRootsAllFreshLocal reports whether every root resolves to a SymbolLocal (a fresh in-function
+// allocation, never a parameter). Value-binding resolution in aliasRootsForExpr already collapses
+// `b = a` / borrow laundering to the underlying root, so a root naming a param-backed local resolves
+// to the param name (rejected here). Distinct fresh locals never share a buffer, so distinct
+// fresh-local roots are provably disjoint.
+func (a *Analyzer) aliasRootsAllFreshLocal(roots []string) bool {
+	if a.currentScope == nil {
+		return false
+	}
+	for _, root := range roots {
+		base := root
+		if dot := indexOfByte(base, '.'); dot >= 0 {
+			base = base[:dot]
+		}
+		sym, ok := a.currentScope.Lookup(base)
+		if !ok || sym == nil || sym.Kind != SymbolLocal {
+			return false
+		}
+	}
+	return true
+}
+
+func aliasRootSetsOverlap(a []string, b []string) bool {
+	for _, x := range a {
+		for _, y := range b {
+			if aliasRootsOverlap(x, y) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func indexOfByte(s string, c byte) int {
+	for i := 0; i < len(s); i++ {
+		if s[i] == c {
+			return i
+		}
+	}
+	return -1
+}
+
+// isSliceOrReadViewType reports whether t is a Slice[T] or ReadView[T] (the data-parallel views
+// whose backing buffer the band-disjointness proof reasons about).
+func isSliceOrReadViewType(t Type) bool {
+	gi, ok := StripAggregateStateType(t).(*GenericInstanceType)
+	if !ok || gi == nil || len(gi.Args) != 1 {
+		return false
+	}
+	return gi.Name == "Slice" || gi.Name == "ReadView"
 }
 
 // sliceSourceElementType reports whether t is a Slice[T] (the runtime data-parallel band view)
