@@ -37,6 +37,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang llvm-dev libllvm-dev
 
+      - name: Show toolchain versions
+        run: |
+          go version
+          clang --version
+          llvm-config --version
+
       - name: Run disjoint-param vectorization gate
         working-directory: compiler
         run: ./scripts/run_disjoint_param_vectorization_gate.sh

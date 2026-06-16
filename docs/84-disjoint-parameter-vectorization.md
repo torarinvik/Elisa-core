@@ -1,11 +1,12 @@
 # 84 — Disjoint-Parameter Vectorization
 
-Status: **Increments 1, 2, 3a, and 3b landed; Increment 4 in progress.**
+Status: **Increments 1, 2, 3a, and 3b landed; Increment 4 focused gate landed
+and CI-wired.**
 The current implementation derives per-call buffer disjointness, aggregates it into
 sound per-callee facts, and emits gated per-parameter LLVM `alias.scope`/`noalias`
 metadata for proven-distinct numeric `darray&` element streams under
-`ELISACORE_NOALIAS_MUTABLE_REFS=1`. The remaining work before default-on is the
-full soundness/perf gate in §4.
+`ELISACORE_NOALIAS_MUTABLE_REFS=1`. The remaining work before default-on is broader
+platform/corpus confidence and the Increment 5 default flip.
 
 This document is the agreed plan from a 4-perspective design debate (minimalist,
 provenance-rigorist, LLVM-pragmatist, skeptic). It supersedes the earlier
@@ -173,7 +174,9 @@ kernels are **not** force-migrated to `Slice`.
    method that validated the parallel fluid solver (bit-identical across
    w = 1/2/4/8). Required kernel set: **AXPY including a deliberately aliased
    `axpy(y, y, k)`** (must be proven-aliased → no stamp), Jacobi sweep, a full
-   Stable-Fluids frame, and an aliased stencil call site.
+   Stable-Fluids frame, and an aliased stencil call site. The focused gate now covers
+   those shapes, including a scaled-down 2D Stable-Fluids-style Jacobi pressure pass
+   adapted from `Code/test_programs/fluid_parallel_for_bench.elisa`.
 2. **Drift guard.** A CI check that the derived predicate never returns
    `proven_distinct` where a runtime `assert_disjoint(ai, aj)` would trip — closes
    the alias-frontier drift gap that the recent run of alias-launder fix commits
@@ -204,11 +207,12 @@ cd compiler
   stamp paired scope/noalias on inner-ptr load/store, anchor scopes with
   `noalias.scope.decl`, and keep the feature guarded by
   `ELISACORE_NOALIAS_MUTABLE_REFS=1`.
-- **Increment 4 — IN PROGRESS.** Differential O0-vs-O3 checksum harness + drift
-  guard over the §4 kernel set. CI-wire. The focused gate is available as
-  `compiler/scripts/run_disjoint_param_vectorization_gate.sh`; the bit-identical
-  test covers AXPY, Jacobi/stencil, an explicitly aliased stencil, and a small
-  multi-field fluid-frame-style update.
+- **Increment 4 — FOCUSED GATE LANDED / CI-WIRED.** Differential O0-vs-O3
+  checksum harness + drift/perf guards over the §4 kernel set. The focused gate is
+  available as `compiler/scripts/run_disjoint_param_vectorization_gate.sh` and runs
+  in `.github/workflows/disjoint-param-vectorization.yml`. The bit-identical test
+  covers AXPY, Jacobi/stencil, an explicitly aliased stencil, a multi-field
+  fluid-frame-style update, and a scaled-down 2D Stable-Fluids-style Jacobi pass.
 - **Increment 5 — flip default / optional keyword.** Default-on once green;
   optionally add the `disjoint` checked-assertion keyword + `-Wperf` hint.
 

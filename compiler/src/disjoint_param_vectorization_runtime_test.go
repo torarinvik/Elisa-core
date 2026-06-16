@@ -27,6 +27,8 @@ import (
 //     so no stamp is emitted and aliasing semantics must be preserved.
 //   - Fluid-frame-style multi-field update: several distinct mutable fields in one
 //     kernel, covering noalias groups larger than two params.
+//   - Stable-Fluids-style 2D Jacobi pressure/diffusion sweeps, adapted from the
+//     real fluid_parallel_for_bench serial oracle but scaled down for a focused gate.
 //
 // Bit-identical checksums across both kernels and both flag states is the proof.
 func TestDisjointParamVectorizationBitIdentical(t *testing.T) {
@@ -70,6 +72,23 @@ def fluid_frame(u: mutable darray[f64]&, v: mutable darray[f64]&, u0: mutable da
     for i in 0..<u.count:
         u[i] <- u[i] + u0[i] * 0.1 + v0[i] * 0.025
         v[i] <- v[i] + v0[i] * 0.1 - u0[i] * 0.015
+
+def ix2(i: i64, j: i64, n: i64) -> usize:
+    return (i + (n + 2) * j).usize()
+
+def stable_fluid_jacobi_sweep(n: i64, xn: mutable darray[f64]&, x: mutable darray[f64]&, x0: mutable darray[f64]&, a: f64, c: f64) -> void:
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            gi: usize = ix2(i, j, n)
+            s: f64 = x[ix2(i - 1, j, n)] + x[ix2(i + 1, j, n)] + x[ix2(i, j - 1, n)] + x[ix2(i, j + 1, n)]
+            xn[gi] <- (x0[gi] + a * s) / c
+
+def stable_fluid_init_source(x0: mutable darray[f64]&, n: i64, size: i64) -> void:
+    for k in 0..<size:
+        x0[k.usize()] <- 0.0
+    for j in 1..<(n + 1):
+        for i in 1..<(n + 1):
+            x0[ix2(i, j, n)] <- ((i * 7 + j * 13) %% 17).f64() * 0.01
 
 def checksum(xs: darray[f64]) -> f64:
     s: mutable f64 = 0.0
@@ -127,12 +146,40 @@ def build_fluid_frame() -> f64:
     fluid_frame(&u0, &v0, &u, &v)
     return checksum(u) + checksum(v) + checksum(u0) + checksum(v0)
 
+def build_stable_fluid_pressure() -> f64:
+    n: i64 = 31
+    size: i64 = (n + 2) * (n + 2)
+    iters: i64 = 17
+    a: f64 = 0.25
+    c: f64 = 1.0 + 4.0 * a
+    x0: mutable darray[f64] = []
+    buf_a: mutable darray[f64] = []
+    buf_b: mutable darray[f64] = []
+    _ = x0.resize(size.usize())
+    _ = buf_a.resize(size.usize())
+    _ = buf_b.resize(size.usize())
+    stable_fluid_init_source(&x0, n, size)
+    for k in 0..<size:
+        buf_a[k.usize()] <- 0.0
+        buf_b[k.usize()] <- 0.0
+    toggle: mutable bool = true
+    for it in 0..<iters:
+        if toggle:
+            stable_fluid_jacobi_sweep(n, &buf_b, &buf_a, &x0, a, c)
+        else:
+            stable_fluid_jacobi_sweep(n, &buf_a, &buf_b, &x0, a, c)
+        toggle <- not toggle
+    if toggle:
+        return checksum(buf_a)
+    return checksum(buf_b)
+
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     d: f64 = build_distinct()
     al: f64 = build_aliased()
     j: f64 = build_jacobi()
     st: f64 = build_aliased_stencil()
     fl: f64 = build_fluid_frame()
+    sf: f64 = build_stable_fluid_pressure()
     print(d) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((d * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -152,6 +199,10 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     print(fl) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((fl * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print(sf) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print((sf * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print("\n") can Console.Write
     return 0
 `, filepath.ToSlash(rel))
