@@ -309,6 +309,32 @@ def g(bag: Bag&) -> i64:
 	}
 }
 
+func TestAutoReserveForInViewSourceSetsPreReserve(t *testing.T) {
+	// A borrowed view source exposes an O(1) `.len`, so a for-in fill over it presizes just like a
+	// darray source (which uses `.count`) — closing the gap where view-sourced fills reallocated.
+	file := analyzeAndGetFile(t, `def g(src: view[i64]) -> i64:
+    ys: mutable darray[i64] = []
+    for x in src:
+        ys.push(x)
+    return ys[0]
+`)
+	loop := firstIterForStmt(file)
+	if loop == nil {
+		t.Fatal("no IterForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected an auto-reserve PreReserve on the view-source for-in fill loop")
+	}
+	bound := reserveBoundArg(t, loop.PreReserve)
+	field, ok := bound.(*ast.FieldExpr)
+	if !ok || field.Field != "len" {
+		t.Fatalf("expected reserve bound to use source.len for a view, got %T %#v", bound, bound)
+	}
+	if source, ok := field.Object.(*ast.Ident); !ok || source.Name != "src" {
+		t.Fatalf("expected reserve source to clone the view identifier src, got %T %#v", field.Object, field.Object)
+	}
+}
+
 func TestAutoReserveForInSkipsNestedGrowth(t *testing.T) {
 	file := analyzeAndGetFile(t, `def g(src: darray[darray[i64]]&) -> i64:
     ys: mutable darray[i64] = []

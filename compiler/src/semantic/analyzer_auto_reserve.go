@@ -12,14 +12,14 @@ import (
 var autoReserveDisabledSem = os.Getenv("ELISA_NO_AUTO_RESERVE") != ""
 
 // maybeAutoReserveIterFill infers a presize for a `for x in src:` loop that fills a darray, by
-// synthesizing `ys.reserve(src.count)` and emitting it before the loop (region inference, Phase A).
-// Fixed-size list pushes scale
-// the bound (`ys.push([a, b])` reserves `src.count * 2`). The darray then never reallocates during
-// the fill, and becomes a fixed-footprint citizen that packs densely.
+// synthesizing `ys.reserve(src.<count>)` and emitting it before the loop (region inference, Phase A).
+// The count field is `count` for a darray source and `len` for a borrowed view source. Fixed-size
+// list pushes scale the bound (`ys.push([a, b])` reserves `src.<count> * 2`). The darray then never
+// reallocates during the fill, and becomes a fixed-footprint citizen that packs densely.
 //
 // Pure optimization, so the eligibility bar is conservative for safety:
-//   - source is a bare identifier of darray type — `.count` is O(1) and re-reading it cannot
-//     double-evaluate a side effect (the loop reads the same identifier).
+//   - source is a bare identifier of darray or view type — its element count (`.count`/`.len`) is
+//     O(1) and re-reading it cannot double-evaluate a side effect (the loop reads the same identifier).
 //   - the body grows exactly ONE distinct darray ys via push/extend (in scope, not the source);
 //     ambiguous or zero targets are skipped. Over-reserving (e.g. under a `where` filter) is safe.
 func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Type) {
@@ -29,7 +29,11 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 	if semanticCloneReserveBoundExpr(stmt.Source) == nil {
 		return
 	}
-	if !isDArrayTypeMaybeRef(sourceType) {
+	// The source must expose an O(1) element count readable as a plain field: `darray.count` or
+	// `view.len`. Both are stable to re-read (the loop reads the same source identifier), so the
+	// synthesized `reserve(src.<field>)` cannot double-evaluate a side effect.
+	countField := iterSourceCountFieldName(sourceType)
+	if countField == "" {
 		return
 	}
 	sourceName := ""
@@ -49,7 +53,7 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !isDArrayTypeMaybeRef(sym.Type) {
 			continue
 		}
-		bound := semanticIterSourceCountBound(stmt)
+		bound := semanticIterSourceCountBound(stmt, countField)
 		if bound == nil {
 			continue
 		}
@@ -72,15 +76,32 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 	stmt.PreReserves = preReserves
 }
 
-func semanticIterSourceCountBound(stmt *ast.IterForStmt) ast.Expr {
-	if stmt == nil {
+func semanticIterSourceCountBound(stmt *ast.IterForStmt, countField string) ast.Expr {
+	if stmt == nil || countField == "" {
 		return nil
 	}
 	sourceClone := semanticCloneReserveBoundExpr(stmt.Source)
 	if sourceClone == nil {
 		return nil
 	}
-	return &ast.FieldExpr{Position: stmt.Position, Object: sourceClone, Field: "count"}
+	return &ast.FieldExpr{Position: stmt.Position, Object: sourceClone, Field: countField}
+}
+
+// iterSourceCountFieldName returns the O(1) element-count field for a `for x in src:` source whose
+// length is a plain, re-readable field — `count` for a darray, `len` for a borrowed view — or "" for
+// any other source (dict/set/range/lazy), which keeps the conservative no-auto-reserve behavior.
+func iterSourceCountFieldName(t Type) string {
+	if r, ok := t.(*RefType); ok {
+		t = r.Elem
+	}
+	switch StripAggregateStateType(t).(type) {
+	case *DArrayType:
+		return "count"
+	case *ViewType:
+		return "len"
+	default:
+		return ""
+	}
 }
 
 func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
