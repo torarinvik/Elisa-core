@@ -217,3 +217,66 @@ def f(a: i64) -> i64:
 		t.Fatalf("`a > -5` does NOT entail Nat; must stay unproven, got:\n%s", allDiagnostics(result))
 	}
 }
+
+const boundedLaw = `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+`
+
+// Parametric refinement, constant: 42 ∈ [0,500] proven; bracket args bound into the law body.
+func TestRefinementParametricConstantProven(t *testing.T) {
+	src := boundedLaw + `
+def f() -> i64:
+    x: i64 is Bounded[0, 500] = 42
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("42 ∈ [0,500] should prove (clean under -strict), got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("proven parametric refinement should emit no runtime check")
+	}
+}
+
+// Range sugar `[0..500]` is the two endpoints; a violating constant is refuted.
+func TestRefinementParametricRangeRefuted(t *testing.T) {
+	src := boundedLaw + `
+def f() -> i64:
+    x: i64 is Bounded[0..500] = 600
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_refute.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("600 ∉ [0,500] should be refuted, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Flow + parametric: a ∈ [10,20] ⊆ [0,500] proven from the branch condition.
+func TestRefinementParametricFlowProven(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64) -> i64:
+    if a >= 10 and a <= 20:
+        x: i64 is Bounded[0..500] = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("a ∈ [10,20] ⊆ [0,500] should prove, got: %v", result.Errors())
+	}
+}
+
+// Flow + parametric, insufficient: a ∈ [10,∞) does NOT prove the upper bound — stays unproven.
+func TestRefinementParametricFlowInsufficient(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64) -> i64:
+    if a >= 10:
+        x: i64 is Bounded[0..500] = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_flow_weak.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("a >= 10 alone does not bound the top of [0,500]; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}

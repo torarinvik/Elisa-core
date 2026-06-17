@@ -45,42 +45,38 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 	}
 	var checks []*ast.CallExpr
 	for _, pred := range rt.Preds {
-		if len(pred.Args) != 0 {
-			continue // parametric refinement discharge is a later brick
-		}
 		lawDecl, _, ok := a.lookupLaw(pred.Name)
 		if !ok {
 			continue // not a law — already reported by validateRefinementPreds
 		}
-		// Tier-2 discharge — FLOW entailment: when the initializer is an immutable integer with a
-		// known range fact (from an enclosing `if a > 5`), prove the law's constraints from it. This
-		// is the Dafny-like flow-sensitive proof (docs/85 1d-2). Proven → no runtime check.
-		if a.tryProveRefinementByFlow(n.Value, lawDecl) {
+		// `subject is P[args]` is the law call `P(subject, args...)` (the bracket args follow the
+		// subject — UFCS first-arg binding, docs/85).
+		callArgsAfterSubject := append([]ast.Expr(nil), pred.Args...)
+		// Tier-2 — FLOW entailment: an immutable integer with a known range fact (from an enclosing
+		// `if a > 5`) proven against the law's `self OP const` constraints (with bracket args bound).
+		if a.tryProveRefinementByFlow(n.Value, lawDecl, pred.Args) {
 			continue
 		}
-		// Tier-1 discharge (docs/85 §3) — constant entailment: when the initializer is a constant,
-		// evaluate the (pure) law on it at compile time. Proven → emit no runtime check; refuted →
-		// a compile error (a wrong proof would be a runtime trap otherwise); unknown → fall through
-		// to the runtime boundary check. This is the "prove tier"; flow-fact entailment (`if a > 5`)
-		// is the next slice.
+		// Tier-1 — CONSTANT entailment: when the initializer is constant, const-evaluate the (pure)
+		// law on it. Proven → no check; refuted → compile error; unknown → runtime fallback.
 		if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
-			Args:     []ast.Expr{n.Value},
+			Args:     append([]ast.Expr{n.Value}, callArgsAfterSubject...),
 		}); known {
 			if !ok {
 				a.errorf(n.Pos(), "refinement %q is violated: %q does not satisfy it", pred.Name, n.Name)
 			}
 			continue // proven (or refuted) at compile time — no runtime check
 		}
-		// Not statically proven: fall back to a runtime check AND tell the user — a static
-		// guarantee was not achieved here (docs/85: the fallback must be KNOWN). Warning by default
-		// so it is visible; a hard error under -strict (prove-it-or-fail, the Dafny-like mode).
+		// Not statically proven: fall back to a runtime check AND tell the user — a static guarantee
+		// was not achieved here (docs/85: the fallback must be KNOWN). Warning by default; hard error
+		// under -strict (prove-it-or-fail, the Dafny-like mode).
 		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check", pred.Name, n.Name)
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
-			Args:     []ast.Expr{&ast.Ident{Position: n.Pos(), Name: n.Name}},
+			Args:     append([]ast.Expr{&ast.Ident{Position: n.Pos(), Name: n.Name}}, callArgsAfterSubject...),
 		}
 		a.analyzeExpr(call)
 		checks = append(checks, call)

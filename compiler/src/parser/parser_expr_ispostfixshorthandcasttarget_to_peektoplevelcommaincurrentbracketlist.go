@@ -153,7 +153,13 @@ func (p *Parser) parseRefinementPred() ast.RefinementPredExpr {
 	var args []ast.Expr
 	if p.match(lexer.TOKEN_LBRACKET) {
 		for p.peek() != lexer.TOKEN_RBRACKET {
-			args = append(args, p.parseExpr())
+			first := p.parseExpr()
+			// `Bounded[0..500]` — an inclusive range is sugar for its two endpoints `0, 500`.
+			if p.match(lexer.TOKEN_RANGE) {
+				args = append(args, first, p.parseExpr())
+			} else {
+				args = append(args, first)
+			}
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}

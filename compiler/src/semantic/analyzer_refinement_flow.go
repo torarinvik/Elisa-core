@@ -135,8 +135,10 @@ type lawConstraint struct {
 
 // lawConstraints interprets a law body as a conjunction of `self OP const` constraints, or returns
 // false if the body is outside the decidable fragment (then the flow prover declines and discharge
-// falls back to a runtime check). `self` is the law's first parameter name.
-func (a *Analyzer) lawConstraints(decl *ast.FuncDecl) ([]lawConstraint, bool) {
+// falls back to a runtime check). `self` is the law's first parameter name; `paramConsts` binds the
+// law's remaining (static `[..]`) params to the refinement's bracket-arg constants, so a body like
+// `self >= lo and self <= hi` is interpreted against the actual bounds.
+func (a *Analyzer) lawConstraints(decl *ast.FuncDecl, paramConsts map[string]int64) ([]lawConstraint, bool) {
 	if decl == nil || len(decl.Params) == 0 || len(decl.Body) != 1 {
 		return nil, false
 	}
@@ -146,33 +148,33 @@ func (a *Analyzer) lawConstraints(decl *ast.FuncDecl) ([]lawConstraint, bool) {
 	}
 	self := decl.Params[0].Name
 	var out []lawConstraint
-	if !a.collectLawConstraints(ret.Value, self, &out) {
+	if !a.collectLawConstraints(ret.Value, self, paramConsts, &out) {
 		return nil, false
 	}
 	return out, true
 }
 
-// collectLawConstraints walks a conjunction of `self OP const` comparisons. Any other shape makes
-// the whole body undecidable (returns false) so the prover stays sound by declining.
-func (a *Analyzer) collectLawConstraints(expr ast.Expr, self string, out *[]lawConstraint) bool {
+// collectLawConstraints walks a conjunction of `self OP <const>` comparisons, where the operand is
+// a literal constant or a static param bound in paramConsts. Any other shape makes the whole body
+// undecidable (returns false) so the prover stays sound by declining.
+func (a *Analyzer) collectLawConstraints(expr ast.Expr, self string, paramConsts map[string]int64, out *[]lawConstraint) bool {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return a.collectLawConstraints(n.Inner, self, out)
+		return a.collectLawConstraints(n.Inner, self, paramConsts, out)
 	case *ast.BinaryExpr:
 		if n.Op == lexer.TOKEN_AND {
-			return a.collectLawConstraints(n.Left, self, out) && a.collectLawConstraints(n.Right, self, out)
+			return a.collectLawConstraints(n.Left, self, paramConsts, out) && a.collectLawConstraints(n.Right, self, paramConsts, out)
 		}
-		// `self OP const` (or const on the left).
-		op := n.Op
+		// `self OP <const>` (or the constant on the left).
 		if isSelfIdent(n.Left, self) {
-			if c, ok := a.constIntValue(n.Right); ok {
-				*out = append(*out, lawConstraint{op: op, c: c})
+			if c, ok := a.operandConst(n.Right, paramConsts); ok {
+				*out = append(*out, lawConstraint{op: n.Op, c: c})
 				return true
 			}
 		}
 		if isSelfIdent(n.Right, self) {
-			if c, ok := a.constIntValue(n.Left); ok {
-				*out = append(*out, lawConstraint{op: flipComparison(op), c: c})
+			if c, ok := a.operandConst(n.Left, paramConsts); ok {
+				*out = append(*out, lawConstraint{op: flipComparison(n.Op), c: c})
 				return true
 			}
 		}
@@ -180,6 +182,17 @@ func (a *Analyzer) collectLawConstraints(expr ast.Expr, self string, out *[]lawC
 	default:
 		return false
 	}
+}
+
+// operandConst resolves a law-body comparison operand to a constant: a literal, or a static law
+// param bound to a bracket-arg constant.
+func (a *Analyzer) operandConst(expr ast.Expr, paramConsts map[string]int64) (int64, bool) {
+	if ident, ok := expr.(*ast.Ident); ok && ident != nil {
+		if c, bound := paramConsts[ident.Name]; bound {
+			return c, true
+		}
+	}
+	return a.constIntValue(expr)
 }
 
 func isSelfIdent(expr ast.Expr, self string) bool {
@@ -209,7 +222,7 @@ func rangeEntailsConstraint(r numRange, k lawConstraint) bool {
 // is a bare immutable integer identifier with a known range fact, and the law body is a decidable
 // conjunction of `self OP const` constraints, it checks the range entails every constraint. Returns
 // true only on a sound proof (docs/85 1d-2).
-func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl) bool {
+func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
 		return false
@@ -218,7 +231,19 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl) 
 	if !ok {
 		return false
 	}
-	constraints, ok := a.lawConstraints(decl)
+	// Bind the law's static params (decl.Params[1:]) to the refinement's bracket-arg constants.
+	if decl == nil || len(predArgs) != len(decl.Params)-1 {
+		return false
+	}
+	paramConsts := map[string]int64{}
+	for i, arg := range predArgs {
+		c, ok := a.constIntValue(arg)
+		if !ok {
+			return false // a non-constant bracket arg is not statically interpretable
+		}
+		paramConsts[decl.Params[i+1].Name] = c
+	}
+	constraints, ok := a.lawConstraints(decl, paramConsts)
 	if !ok || len(constraints) == 0 {
 		return false
 	}
