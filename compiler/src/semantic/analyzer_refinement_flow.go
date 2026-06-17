@@ -340,35 +340,7 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 		if !ok || sym == nil || sym.Mutable || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
 			continue
 		}
-		fact := numRange{}
-		any := false
-		for _, pred := range rt.Preds {
-			decl, _, ok := a.lookupLaw(pred.Name)
-			if !ok || decl == nil || len(pred.Args) != len(decl.Params)-1 {
-				continue
-			}
-			paramConsts := map[string]int64{}
-			bad := false
-			for i, arg := range pred.Args {
-				c, ok := a.constIntValue(arg)
-				if !ok {
-					bad = true
-					break
-				}
-				paramConsts[decl.Params[i+1].Name] = c
-			}
-			if bad {
-				continue
-			}
-			constraints, ok := a.lawConstraints(decl, paramConsts)
-			if !ok {
-				continue
-			}
-			for _, k := range constraints {
-				fact = fact.intersect(constraintToRange(k))
-				any = true
-			}
-		}
+		fact, any := a.rangeFromRefinementTypeExpr(rt)
 		if !any {
 			continue
 		}
@@ -377,6 +349,89 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 		}
 		a.currentScope.rangeFacts[param.Name] = a.currentScope.rangeFacts[param.Name].intersect(fact)
 	}
+}
+
+// rangeFromRefinementTypeExpr computes the integer interval implied by a refinement type expression
+// whose law predicates all take compile-time-constant arguments (e.g. `i64 is Bounded[0, 100]`). It
+// is the shared kernel behind both the param-entry seed (seedParamRefinementFacts) and the
+// caller-side return-refinement seed (seedReturnRefinementFacts): a refinement on a function's return
+// type IS its postcondition, so binding its result lets the caller assume the bound. Returns ok=false
+// when no predicate yields a usable constraint (non-constant law arg, unknown law) — fails closed.
+func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr) (numRange, bool) {
+	fact := numRange{}
+	any := false
+	for _, pred := range rt.Preds {
+		decl, _, ok := a.lookupLaw(pred.Name)
+		if !ok || decl == nil || len(pred.Args) != len(decl.Params)-1 {
+			continue
+		}
+		paramConsts := map[string]int64{}
+		bad := false
+		for i, arg := range pred.Args {
+			c, ok := a.constIntValue(arg)
+			if !ok {
+				bad = true
+				break
+			}
+			paramConsts[decl.Params[i+1].Name] = c
+		}
+		if bad {
+			continue
+		}
+		constraints, ok := a.lawConstraints(decl, paramConsts)
+		if !ok {
+			continue
+		}
+		for _, k := range constraints {
+			fact = fact.intersect(constraintToRange(k))
+			any = true
+		}
+	}
+	return fact, any
+}
+
+// seedReturnRefinementFacts records the integer range implied by a callee's REFINED return type onto
+// an immutable integer binding `name = f(args)` (docs/90 brick 90-7). The return refinement is the
+// function's postcondition; a caller that binds the result may assume it. This closes the modular
+// loop: a function PROVES its return refinement (dischargeReturnRefinements), and every caller then
+// USES it as a fact — without re-deriving it from the body.
+//
+// Sound and conservative:
+//   - Immutable bindings only (the caller passes n.Mutable==false); a mutable binding could be
+//     reassigned, invalidating the fact.
+//   - Only direct calls to a resolvable FuncDecl with a constant-argument return refinement; anything
+//     else simply seeds nothing.
+//   - The seed only NARROWS (intersect), so it can never widen an existing fact unsoundly.
+//   - Like all SMT/refinement VALUE facts, this never drives bounds-check elision (that is the
+//     separate syntactic indexBoundsProven system), so even a buggy callee contract cannot create
+//     memory unsafety — it is garbage-in-garbage-out at worst.
+func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindingType Type) {
+	if a.currentScope == nil || value == nil {
+		return
+	}
+	if !IsNumericType(bindingType) || IsFloatType(bindingType) {
+		return
+	}
+	call, ok := value.(*ast.CallExpr)
+	if !ok {
+		return
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil || decl.ReturnType == nil {
+		return
+	}
+	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return
+	}
+	fact, any := a.rangeFromRefinementTypeExpr(rt)
+	if !any {
+		return
+	}
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = a.currentScope.rangeFacts[name].intersect(fact)
 }
 
 // --- tier-2: bounded linear arithmetic (docs/86) ---------------------------------------------

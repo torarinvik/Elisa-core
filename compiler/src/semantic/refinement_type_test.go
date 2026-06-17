@@ -116,6 +116,55 @@ def f(n: i64) -> i64:
 	}
 }
 
+// docs/90 brick 90-7: a callee's REFINED return type is its postcondition; binding the result of a
+// direct call lets the caller assume that bound as a flow fact. Here `clamp() -> i64 is Bounded[0,
+// 100]` makes `x` provably in [0, 100], so the downstream `y: i64 is Nat = x` discharges statically
+// with NO runtime check — the caller never re-derives the bound from clamp's body.
+func TestReturnRefinementSeedsCallerFact(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law Nat(self: i64) = self >= 0
+
+def clamp() -> i64 is Bounded[0, 100]:
+    return 50
+
+def use() -> i64:
+    x = clamp()
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "return_refine_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("return-refinement seed should analyze cleanly, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("Nat on a value bound from Bounded[0,100] should be proven via the seeded fact, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Soundness floor for brick 90-7: with NO refinement on the callee's return type, binding its result
+// seeds nothing, so a downstream refinement obligation correctly falls back to a runtime check.
+func TestReturnRefinementNoSeedWhenUnrefined(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def anyInt() -> i64:
+    return 50
+
+def use() -> i64:
+    x = anyInt()
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "return_refine_noseed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unrefined return should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("with no return refinement there is no caller fact: expected a runtime check")
+	}
+}
+
 // `if x is Law:` narrows x inside the branch: a refinement obligation on x discharges statically
 // there with no runtime check (docs/85 — predicate-test narrowing).
 func TestLawIsNarrowsBranch(t *testing.T) {

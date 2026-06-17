@@ -77,6 +77,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if IsNumericType(bindingType) && !IsFloatType(bindingType) {
 				a.recordBoundEqual(n.Name, optimizationExprString(n.Value))
 			}
+			// docs/90 brick 90-7: when the initializer is a direct call to a function with a refined
+			// return type (`-> i64 is Bounded[..]`), assume that postcondition as a flow fact on the
+			// binding. The callee proves its return refinement; the caller now uses it without
+			// re-deriving it from the body (modular verification).
+			a.seedReturnRefinementFacts(n.Name, n.Value, bindingType)
 		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)

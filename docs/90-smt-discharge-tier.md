@@ -171,7 +171,31 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    garbage-in-garbage-out, never memory unsafety. A clause outside the fragment is skipped (fewer
    assumptions = conservative). Without the precondition, `xs[0] is NonNeg` correctly does NOT prove.
    - **Deferred**: caller-side proof of quantified *array* preconditions (the caller rarely has the
-     quantified facts; declines to a warning today); using `ensure` postconditions as caller-side
-     facts; multi-line law/contract bodies; trigger/pattern tuning.
+     quantified facts; declines to a warning today); multi-line law/contract bodies; trigger/pattern
+     tuning.
+7. **90-7 — return refinements as caller-side facts (the other direction). [LANDED]** The dual of
+   90-6: where 90-6 lets a callee *assume* its preconditions, 90-7 lets a caller *use* the callee's
+   postcondition. A refined return type IS a postcondition — `def clamp() -> i64 is Bounded[0, 100]`
+   promises its result is in `[0, 100]`. When an immutable integer binding takes the result of such a
+   direct call, `seedReturnRefinementFacts` records that interval as a flow fact on the binding:
+   ```elisa
+   def clamp() -> i64 is Bounded[0, 100]: ...
+   def use() -> i64:
+       x = clamp()          # x assumes Bounded[0,100] — the callee already PROVED it
+       y: i64 is Nat = x    # discharges statically, no runtime check, no re-derivation
+   ```
+   This closes the modular loop: the callee proves its return refinement once
+   (`dischargeReturnRefinements`), and every caller reuses it as a fact instead of re-deriving it from
+   the body. Shared kernel `rangeFromRefinementTypeExpr` (factored out of `seedParamRefinementFacts`)
+   computes the interval from a constant-argument refinement. **Sound and conservative**: immutable
+   bindings only; direct resolvable calls only; constant-argument return refinements only; the seed
+   only *narrows* (intersect), never widens; and like every refinement VALUE fact it never drives
+   bounds-check elision, so even a wrong callee contract is garbage-in-garbage-out, never memory
+   unsafety. With no return refinement, nothing is seeded and the obligation falls back to a runtime
+   check. Tests: `refinement_type_test.go` `TestReturnRefinementSeedsCallerFact` /
+   `TestReturnRefinementNoSeedWhenUnrefined`.
+   - **Deferred**: non-constant return refinements (`-> i64 is Bounded[0, n]`, needs arg
+     substitution); seeding from `ensures <result> is Law` clauses beyond the return-type form;
+     re-asserting facts after a mutating call.
 
 Each brick: build → targeted test → full `./src/...` green → commit.
