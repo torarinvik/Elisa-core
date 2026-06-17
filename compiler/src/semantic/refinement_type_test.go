@@ -62,3 +62,56 @@ def f(xs: darray[f64] is NonEmpty) -> usize:
 		t.Fatalf("generic-law refinement should analyze, got: %v", errs)
 	}
 }
+
+// Tier-1 constant discharge: a constant that satisfies the refinement is PROVEN at compile time —
+// no runtime check is recorded (docs/85 Stage 1d).
+func TestRefinementConstantProvenElided(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f() -> i64:
+    x: i64 is Nat = 5
+    return x
+`
+	result := analyzeTreeTestSource(t, "refine_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("constant 5 satisfies Nat, should be clean, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("proven refinement should emit NO runtime check, got %d", len(result.RefinementChecks))
+	}
+}
+
+// A constant that violates the refinement is REFUTED at compile time — a hard error, not a
+// runtime trap.
+func TestRefinementConstantRefutedErrors(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f() -> i64:
+    x: i64 is Nat = 0 - 3
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("constant -3 violates Nat: expected a compile-time refutation, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A non-constant value falls back to a runtime boundary check.
+func TestRefinementNonConstantRuntimeCheck(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(n: i64) -> i64:
+    x: i64 is Nat = n
+    return x
+`
+	result := analyzeTreeTestSource(t, "refine_runtime.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("non-const refinement should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("non-const refinement should record a runtime check")
+	}
+}

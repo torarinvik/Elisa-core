@@ -754,11 +754,17 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 		return ConstValue{}, false
 	}
 	fnType, ok := sym.Type.(*FuncType)
-	if !ok || fnType == nil || !fnType.Static {
+	if !ok || fnType == nil {
 		return ConstValue{}, false
 	}
 	decl, ok := sym.Node.(*ast.FuncDecl)
 	if !ok || decl == nil {
+		return ConstValue{}, false
+	}
+	// Static functions and laws are both const-evaluable: a law is enforced pure (docs/85), so
+	// evaluating its body on constant arguments is sound — this is how a refinement obligation on a
+	// constant value is discharged (or refuted) at compile time.
+	if !fnType.Static && !decl.IsLaw {
 		return ConstValue{}, false
 	}
 	args := expr.Args

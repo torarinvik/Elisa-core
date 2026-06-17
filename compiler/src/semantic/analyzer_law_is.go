@@ -51,6 +51,21 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		if _, _, ok := a.lookupLaw(pred.Name); !ok {
 			continue // not a law — already reported by validateRefinementPreds
 		}
+		// Tier-1 discharge (docs/85 §3) — constant entailment: when the initializer is a constant,
+		// evaluate the (pure) law on it at compile time. Proven → emit no runtime check; refuted →
+		// a compile error (a wrong proof would be a runtime trap otherwise); unknown → fall through
+		// to the runtime boundary check. This is the "prove tier"; flow-fact entailment (`if a > 5`)
+		// is the next slice.
+		if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
+			Position: pred.Position,
+			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
+			Args:     []ast.Expr{n.Value},
+		}); known {
+			if !ok {
+				a.errorf(n.Pos(), "refinement %q is violated: %q does not satisfy it", pred.Name, n.Name)
+			}
+			continue // proven (or refuted) at compile time — no runtime check
+		}
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
