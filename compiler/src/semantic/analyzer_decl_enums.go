@@ -322,6 +322,13 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 					enumType.TagType.Members = append(enumType.TagType.Members, member)
 					enumType.TagType.MemberMap[member.Name] = member
 					a.constValues[enumType.TagType.Name+"."+member.Name] = ConstValue{Kind: ConstInt, Int: member.Value}
+				} else if !enumType.Packed && len(payload) == 0 {
+					// Plain (non-packed) enum variants with no payload are compile-time constants: their
+					// tag value is fixed, so `EnumName.Variant` can be const-folded. This lets the
+					// written-const channel and refinement-law discharge reason about plain-enum writes
+					// (docs/85), matching the packed path above. Payload-bearing variants are not
+					// constants and are skipped.
+					a.constValues[enumType.Name+"."+variant.Name] = ConstValue{Kind: ConstInt, Int: int64(variant.Tag)}
 				}
 			}
 			enumType.Variants = variants

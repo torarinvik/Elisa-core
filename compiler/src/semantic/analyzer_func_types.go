@@ -388,12 +388,32 @@ func (a *Analyzer) resolveRefinementEnsures(name string, params []ast.ParamDecl,
 			a.errorf(clause.Position, "ensures %q is not a law", clause.RefinementLaw)
 			continue
 		}
-		// Bare laws only for now (a parametric `is Bounded[lo,hi]` postcondition is a later brick).
-		if len(decl.Params) != 1 {
-			a.errorf(clause.Position, "ensures %q must be a single-subject (bare) law for a refinement postcondition", clause.RefinementLaw)
+		// A law's first parameter is the subject; any remaining parameters are filled by the
+		// postcondition's bracket args. A bare law has exactly one parameter (no args). A parametric
+		// postcondition (`ensures x is Bounded[0, 500]`) must supply one arg per extra parameter.
+		if len(decl.Params) == 0 {
+			a.errorf(clause.Position, "ensures %q is not a valid refinement law (no subject parameter)", clause.RefinementLaw)
 			continue
 		}
-		if paramIndex < len(paramTypes) && ft != nil && len(ft.Params) == 1 && len(decl.TypeParams) == 0 {
+		wantArgs := len(decl.Params) - 1
+		if len(clause.RefinementArgs) != wantArgs {
+			a.errorf(clause.Position, "ensures %q expects %d argument(s), got %d", clause.RefinementLaw, wantArgs, len(clause.RefinementArgs))
+			continue
+		}
+		// Args must be compile-time constants so the obligation has a stable (law, args) identity
+		// shared by the caller-gain fact key and the callee discharge.
+		argsOK := true
+		for _, arg := range clause.RefinementArgs {
+			a.analyzeExpr(arg)
+			if _, ok := a.evalConstExpr(arg); !ok {
+				a.errorf(arg.Pos(), "ensures %q argument must be a compile-time constant", clause.RefinementLaw)
+				argsOK = false
+			}
+		}
+		if !argsOK {
+			continue
+		}
+		if paramIndex < len(paramTypes) && ft != nil && len(ft.Params) >= 1 && len(decl.TypeParams) == 0 {
 			subject := ft.Params[0]
 			base := refinementSubjectBaseType(paramTypes[paramIndex])
 			if base != nil && !AssignableTo(base, subject) && !AssignableTo(subject, base) {
@@ -401,7 +421,7 @@ func (a *Analyzer) resolveRefinementEnsures(name string, params []ast.ParamDecl,
 				continue
 			}
 		}
-		out = append(out, RefinementEnsure{Position: clause.Position, ParamIndex: paramIndex, LawName: clause.RefinementLaw})
+		out = append(out, RefinementEnsure{Position: clause.Position, ParamIndex: paramIndex, LawName: clause.RefinementLaw, Args: clause.RefinementArgs})
 	}
 	return out
 }

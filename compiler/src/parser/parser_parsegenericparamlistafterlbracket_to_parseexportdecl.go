@@ -201,10 +201,17 @@ func (p *Parser) parseEnsuresClause() ast.EnsuresClause {
 	pos := p.cur().Pos
 	condition := p.parseEnsuresCondition()
 	target := p.parseEnsuresPath()
-	// `ensures <param> is <BareLaw>` (docs/85): a law-predicate postcondition, no `=>` arm.
+	// `ensures <param> is <Law>` / `ensures <param> is <Law>[args]` (docs/85): a law-predicate
+	// postcondition, no `=>` arm. Bracket args make it a parametric refinement (`Bounded[0, 500]`,
+	// `Bounded[0..500]` desugaring to its two endpoints), mirroring parseRefinementPred.
 	if p.match(lexer.TOKEN_IS) {
 		law := p.expect(lexer.TOKEN_IDENT).Text
-		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindRefinement, RefinementLaw: law}
+		var args []ast.Expr
+		if p.match(lexer.TOKEN_LBRACKET) {
+			args = p.parseRefinementPredArgs()
+			p.expect(lexer.TOKEN_RBRACKET)
+		}
+		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindRefinement, RefinementLaw: law, RefinementArgs: args}
 	}
 	p.expect(lexer.TOKEN_FATARROW)
 	if p.matchIdentText("preserve") {

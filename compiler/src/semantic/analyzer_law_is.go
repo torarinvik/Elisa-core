@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -57,15 +58,58 @@ func (a *Analyzer) resolveLawIsTarget(target ast.Expr) (string, []ast.Expr, bool
 	if _, _, isLaw := a.lookupLaw(gen.Name); !isLaw {
 		return "", nil, false
 	}
+	// The target IS a law: reinterpret each bracket arg as a VALUE expression. A literal arg already
+	// carries its value; an identifier or dotted path the parser shaped as a type node (`n`,
+	// `xs.count`) is converted back to a value expr so a DEPENDENT bound (docs/85 §5.3) like
+	// `Bounded[0, xs.count]` is usable as a `is`-narrowing target. Done only after the law check, so
+	// genuine type tests over non-law generics are untouched.
 	args := make([]ast.Expr, 0, len(gen.Args))
 	for _, ta := range gen.Args {
-		va, ok := ta.(*ast.GenericValueArgTypeExpr)
-		if !ok || va == nil || va.Value == nil {
-			return "", nil, false // a type argument ⇒ not a value-parametric law application
+		value, ok := typeArgAsValueExpr(ta)
+		if !ok {
+			return "", nil, false // an irreducible type argument ⇒ not a value-parametric law application
 		}
-		args = append(args, va.Value)
+		args = append(args, value)
 	}
 	return gen.Name, args, true
+}
+
+// typeArgAsValueExpr reinterprets a generic bracket argument as a value expression for a law
+// application (docs/85). A `GenericValueArgTypeExpr` already wraps a value. A bare or dotted type
+// name the parser produced for an identifier/path argument (`n`, `xs.count`) is rebuilt as an
+// identifier or field-access chain so dependent bounds can name runtime values. Anything else (a real
+// type, a generic instantiation with args) is not a value and returns false.
+func typeArgAsValueExpr(ta ast.TypeExpr) (ast.Expr, bool) {
+	switch t := ta.(type) {
+	case *ast.GenericValueArgTypeExpr:
+		if t == nil || t.Value == nil {
+			return nil, false
+		}
+		return t.Value, true
+	case *ast.NamedType:
+		if t == nil || t.Name == "" {
+			return nil, false
+		}
+		return dottedNameAsValueExpr(t.Name, t.Position), true
+	case *ast.GenericType:
+		if t == nil || len(t.Args) != 0 || t.Name == "" {
+			return nil, false
+		}
+		return dottedNameAsValueExpr(t.Name, t.Position), true
+	default:
+		return nil, false
+	}
+}
+
+// dottedNameAsValueExpr turns a (possibly dotted) name into a value expression: `n` → Ident{n},
+// `xs.count` → FieldExpr{Ident{xs}, count}.
+func dottedNameAsValueExpr(name string, pos lexer.Pos) ast.Expr {
+	parts := strings.Split(name, ".")
+	var expr ast.Expr = &ast.Ident{Position: pos, Name: parts[0]}
+	for _, field := range parts[1:] {
+		expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field}
+	}
+	return expr
 }
 
 // recordRefinementChecks records the discharge obligations for a refinement-typed var declaration
@@ -115,13 +159,21 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 // when the obligation is unknown — the caller decides the runtime/observability fallback. Shared by
 // the var-decl boundary and call-argument boundaries.
 func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos) bool {
+	return a.tryDischargeRefinementStaticallyOpt(value, valueName, pred, lawDecl, pos, true)
+}
+
+// tryDischargeRefinementStaticallyOpt is tryDischargeRefinementStatically with control over whether
+// DEPENDENT predicate facts (docs/85 §5.3) may discharge the obligation. Same-function obligations
+// (var decl, return, ensures) allow them; a cross-function call-argument boundary does not, since a
+// dependent key names variables in the callee's scope (see tryProveRefinementByFactSet).
+func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos, allowDependentFacts bool) bool {
 	if a.tryProveRefinementByFlow(value, lawDecl, pred.Args) {
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
 	// Mutable refinement flow (docs/85): a live predicate fact gained from a narrowing and not
 	// since invalidated by a mutation discharges the obligation with no runtime check.
-	if a.tryProveRefinementByFactSet(value, pred.Name, pred.Args) {
+	if a.tryProveRefinementByFactSet(value, pred.Name, pred.Args, allowDependentFacts) {
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
@@ -178,7 +230,9 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 				continue
 			}
 			name := "argument " + itoaParam(i+1)
-			if a.tryDischargeRefinementStatically(args[i], name, pred, lawDecl, call.Pos()) {
+			// Cross-function boundary: a dependent fact's names belong to the callee's scope, so they
+			// must not discharge a caller-site argument obligation (allowDependentFacts=false).
+			if a.tryDischargeRefinementStaticallyOpt(args[i], name, pred, lawDecl, call.Pos(), false) {
 				continue
 			}
 			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
@@ -264,7 +318,7 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 			continue
 		}
 		subject := &ast.Ident{Position: n.Pos(), Name: paramName}
-		pred := ast.RefinementPredExpr{Position: re.Position, Name: re.LawName}
+		pred := ast.RefinementPredExpr{Position: re.Position, Name: re.LawName, Args: re.Args}
 		valueName := "parameter \"" + paramName + "\""
 		if a.tryDischargeRefinementStatically(subject, valueName, pred, lawDecl, n.Pos()) {
 			continue

@@ -1021,10 +1021,13 @@ func (s *functionState) emitRefinementPostconditionChecks() error {
 		if clause.Kind != ast.EnsuresKindRefinement || clause.RefinementLaw == "" || clause.Target.Root == "" {
 			continue
 		}
+		// Subject first, then the parametric postcondition's constant args (`is Bounded[0, 500]`).
+		args := []ast.Expr{&ast.Ident{Position: clause.Position, Name: clause.Target.Root}}
+		args = append(args, clause.RefinementArgs...)
 		call := &ast.CallExpr{
 			Position: clause.Position,
 			Func:     &ast.Ident{Position: clause.Position, Name: clause.RefinementLaw},
-			Args:     []ast.Expr{&ast.Ident{Position: clause.Position, Name: clause.Target.Root}},
+			Args:     args,
 		}
 		if err := s.emitContractCheck(call, "postcondition failed"); err != nil {
 			return err

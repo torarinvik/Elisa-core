@@ -386,6 +386,12 @@ type Scope struct {
 	// cover mutable variables, because they are invalidated at every mutation site (docs/85: mutable
 	// refinement flow — see analyzer_refinement_predfacts.go).
 	predFacts map[string]map[string]bool
+	// predFactDeps records, for a DEPENDENT predicate fact (docs/85 §5.3 dependence-freeze), the root
+	// variables its bounds read — keyed holder name → fact key → dependency roots. A fact such as
+	// `i is Bounded[0, xs.count]` is sound only while `xs` is frozen, so mutating ANY dependency root
+	// invalidates the fact through the same chokepoint that drops the holder's own facts
+	// (invalidatePredFacts). Constant-only facts have no entry here.
+	predFactDeps map[string]map[string][]string
 	// writtenConst records the last value written to a variable when that value is a compile-time
 	// constant of ANY const-evaluable kind — int (`x <- 0`, `n = 5`), bool (`ready <- true`), enum
 	// (`state <- Door.Open`), float/char/string — including writes through a non-aliased `mutable T&`

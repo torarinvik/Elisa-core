@@ -506,7 +506,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				continue
 			}
 			if root, ok := rootIdentName(loweredArgs[i]); ok {
-				recordPredFact(a.currentScope, root, re.LawName)
+				// A parametric postcondition (`ensures p is Bounded[0,500]`) is keyed by its exact
+				// constant args, the same identity tryProveRefinementByFactSet matches against.
+				if key, keyOK := a.factKey(re.LawName, re.Args); keyOK {
+					recordPredFact(a.currentScope, root, key)
+				}
 			}
 		}
 	}

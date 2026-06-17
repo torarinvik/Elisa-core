@@ -106,8 +106,11 @@ type EnsuresClause struct {
 	Kind       EnsuresKind
 	StateCases []string
 	RefState   RefState
-	// RefinementLaw is the bare law name for EnsuresKindRefinement (`ensures arr is NonEmpty`).
+	// RefinementLaw is the law name for EnsuresKindRefinement (`ensures arr is NonEmpty`).
 	RefinementLaw string
+	// RefinementArgs are the bracket arguments of a parametric refinement postcondition
+	// (`ensures x is Bounded[0, 500]` / `ensures x is Bounded[0..500]`); empty for a bare law.
+	RefinementArgs []Expr
 }
 type FuncDecl struct {
 	Position         lexer.Pos

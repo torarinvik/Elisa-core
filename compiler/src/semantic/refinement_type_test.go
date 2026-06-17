@@ -852,6 +852,69 @@ def f(seed: i64) -> i64:
 	}
 }
 
+// Preserve-credit now reads the immutable-borrow signal from the resolved FuncType, so it applies to
+// METHOD calls too (not just direct by-name calls): a method with an immutable-borrow param `p: i64&`
+// cannot mutate the argument, so the caller's narrowed fact survives `recv.observe(&n)`.
+func TestPreserveCreditImmutableBorrowMethodCall(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+struct Logger:
+    count: i64
+
+impl Logger:
+    def observe(self: Logger, p: i64&) -> void:
+        pass
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    lg: mutable Logger = zeroed
+    n: mutable i64 = seed
+    if n is Positive:
+        lg.observe(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "preserve_immutable_borrow_method.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("immutable-borrow METHOD call should preserve the Positive fact, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("fact should survive an immutable-borrow method call (no runtime check), got %d", len(result.CallArgRefinementChecks))
+	}
+}
+
+// SOUNDNESS GUARD: a method with a MUTABLE-borrow param still DROPS the fact through a method call.
+func TestPreserveCreditMutableBorrowMethodStillDrops(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+struct Logger:
+    count: i64
+
+impl Logger:
+    def touch(self: Logger, p: mutable i64&) -> void:
+        pass
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    lg: mutable Logger = zeroed
+    n: mutable i64 = seed
+    if n is Positive:
+        lg.touch(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "preserve_mutable_borrow_method_drops.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("a mutable-borrow method call must still DROP the fact (preserve-credit must not over-apply)")
+	}
+}
+
 // --- Mutable refinement flow brick 4: parametric facts. `if x is Bounded[0,500]:` carries a fact
 // keyed by the constant bounds, usable across mutations, with exact-match (no over-proving). ---
 
@@ -921,6 +984,104 @@ def f(seed: i64, other: i64) -> i64:
 	}
 }
 
+// --- Mutable refinement flow: dependent length facts (docs/85 §5.3 dependence-freeze). A fact whose
+// bounds read a frozen variable (`i is Bounded[0, xs.count]`) discharges a same-scope obligation and
+// is dropped when either the holder OR a dependency mutates. ---
+
+// A dependent fact `i is Bounded[0, xs.count]` proves a same-scope obligation with the identical
+// dependent bound — no runtime check — while xs is frozen.
+func TestDependentLengthFactProves(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def f(xs: darray[i64], seed: i64) -> void:
+    i: mutable i64 = seed
+    if i is Bounded[0, xs.count]:
+        j: i64 is Bounded[0, xs.count] = i
+    return
+`
+	result := analyzeTreeTestSource(t, "dep_len_proves.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("dependent fact should prove the same-bound obligation, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("dependent fact should prove statically (no runtime check), got %d", len(result.RefinementChecks))
+	}
+}
+
+// The exclusive sugar `Bounded[0..<xs.count]` parses as a dependent param refinement (docs/85 §5.3),
+// desugaring to `Bounded[0, xs.count - 1]` — the doc's canonical dependent-bound form.
+func TestDependentLengthExclusiveSugarParses(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def f(xs: darray[i64], i: i64 is Bounded[0..<xs.count]) -> void:
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dep_len_exclusive.elisa", src, AnalyzeOptions{})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`Bounded[0..<xs.count]` dependent param refinement should parse cleanly, got: %v", errs)
+	}
+}
+
+// SOUNDNESS (freeze): mutating the DEPENDENCY drops the dependent fact even though the holder `i` was
+// untouched — a stale bound must not discharge. (Scalar dependency `n` keeps the test arena-free.)
+func TestDependentLengthFactDroppedByDependencyMutation(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def f(n: mutable i64, seed: i64, other: i64) -> void:
+    i: mutable i64 = seed
+    if i is Bounded[0, n]:
+        n <- other
+        j: i64 is Bounded[0, n] = i
+    return
+`
+	result := analyzeTreeTestSource(t, "dep_len_dep_mutated.elisa", src)
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("mutating the dependency `n` must drop the dependent fact, forcing a runtime check")
+	}
+}
+
+// SOUNDNESS (holder): mutating the holder `i` also drops the dependent fact, like any pred fact.
+func TestDependentLengthFactDroppedByHolderMutation(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def f(xs: darray[i64], seed: i64, other: i64) -> void:
+    i: mutable i64 = seed
+    if i is Bounded[0, xs.count]:
+        i <- other
+        j: i64 is Bounded[0, xs.count] = i
+    return
+`
+	result := analyzeTreeTestSource(t, "dep_len_holder_mutated.elisa", src)
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("mutating the holder `i` must drop the dependent fact, forcing a runtime check")
+	}
+}
+
+// SOUNDNESS (cross-function): a caller's dependent fact must NOT discharge a callee argument
+// obligation by mere name coincidence — the callee's `xs` is a different variable.
+func TestDependentLengthFactNotMatchedAcrossCall(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_idx(xs: darray[i64], x: i64 is Bounded[0, xs.count]) -> void:
+    return
+
+def f(xs: darray[i64], seed: i64) -> void:
+    i: mutable i64 = seed
+    if i is Bounded[0, xs.count]:
+        needs_idx(xs, i)
+    return
+`
+	result := analyzeTreeTestSource(t, "dep_len_cross_call.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("a dependent fact must NOT discharge across a call boundary by name coincidence; a runtime check is required")
+	}
+}
+
 // --- Mutable refinement flow: non-int written-const. The written-constant channel tracks any
 // const-evaluable kind (bool, enum), not just integers, through ref pointees and plain writes. ---
 
@@ -987,5 +1148,119 @@ def shut_it(p: mutable Door&) -> void ensures p is Opened:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_enum_refuted.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "is violated") {
 		t.Fatalf("`p <- Door.Shut` should REFUTE `ensures p is Opened`, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A PARAMETRIC postcondition `ensures p is Bounded[0, 500]` is proven by a written constant in range.
+func TestEnsuresParametricRefinementProvenByWrittenConst(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 500]:
+    p <- 42
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- 42` should statically prove `ensures p is Bounded[0, 500]`, got: %v", result.Errors())
+	}
+}
+
+// The range-sugar form `Bounded[0..500]` desugars to the same two endpoints.
+func TestEnsuresParametricRefinementRangeSugarProven(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0..500]:
+    p <- 500
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_range_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- 500` should statically prove `ensures p is Bounded[0..500]`, got: %v", result.Errors())
+	}
+}
+
+// A written constant OUT of the parametric bounds is refuted.
+func TestEnsuresParametricRefinementRefutedByWrittenConst(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 500]:
+    p <- 600
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("`p <- 600` should REFUTE `ensures p is Bounded[0, 500]`, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// The arg count must match the law's non-subject parameters.
+func TestEnsuresParametricRefinementArgCountMismatch(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0]:
+    p <- 1
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_argcount.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "expects 2 argument") {
+		t.Fatalf("`Bounded[0]` should error on arg count, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A caller GAINS the parametric fact across a call whose callee declares the matching postcondition.
+func TestEnsuresParametricRefinementCallerGain(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 500]:
+    p <- 1
+    return
+def needs(q: i64 is Bounded[0, 500]) -> void:
+    return
+def caller() -> void:
+    x: mutable i64 = 9999
+    clamp(&x)
+    needs(x)
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_caller_gain.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("caller should GAIN `Bounded[0, 500]` on x after clamp(&x) to satisfy needs(x), got: %v", result.Errors())
+	}
+}
+
+// A PLAIN (non-packed) enum written constant proves the law: plain enum variants without payloads
+// are now const-folded (their tag value), so the written-const channel reasons about them too.
+func TestEnsuresRefinementProvenByWrittenPlainEnum(t *testing.T) {
+	src := `
+enum Door:
+    Open
+    Shut
+
+law Opened(self: Door) = self == Door.Open
+def open_it(p: mutable Door&) -> void ensures p is Opened:
+    p <- Door.Open
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_plain_enum_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- Door.Open` (plain enum) should statically prove `ensures p is Opened`, got: %v", result.Errors())
+	}
+}
+
+// A PLAIN enum written constant that violates the law is refuted.
+func TestEnsuresRefinementRefutedByWrittenPlainEnum(t *testing.T) {
+	src := `
+enum Door:
+    Open
+    Shut
+
+law Opened(self: Door) = self == Door.Open
+def shut_it(p: mutable Door&) -> void ensures p is Opened:
+    p <- Door.Shut
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_plain_enum_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("`p <- Door.Shut` (plain enum) should REFUTE `ensures p is Opened`, got:\n%s", allDiagnostics(result))
 	}
 }

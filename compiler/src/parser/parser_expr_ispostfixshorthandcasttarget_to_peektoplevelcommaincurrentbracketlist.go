@@ -152,22 +152,34 @@ func (p *Parser) parseRefinementPred() ast.RefinementPredExpr {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	var args []ast.Expr
 	if p.match(lexer.TOKEN_LBRACKET) {
-		for p.peek() != lexer.TOKEN_RBRACKET {
-			first := p.parseExpr()
-			// `Bounded[0..500]` — an inclusive range is sugar for its two endpoints `0, 500`.
-			if p.match(lexer.TOKEN_RANGE) {
-				args = append(args, first, p.parseExpr())
-			} else {
-				args = append(args, first)
-			}
-			if !p.match(lexer.TOKEN_COMMA) {
-				break
-			}
-		}
+		args = p.parseRefinementPredArgs()
 		p.expect(lexer.TOKEN_RBRACKET)
 	}
 	return ast.RefinementPredExpr{Position: pos, Name: name, Args: args}
 }
+// parseRefinementPredArgs parses the comma-separated bracket arguments of a refinement predicate,
+// shared by `T is Law[...]` types and `ensures x is Law[...]` postconditions. A `..` range is sugar
+// for its two inclusive endpoints (`Bounded[0..500]` → `0, 500`); a `..<` range is exclusive
+// (`Bounded[0..<n]` → `0, n - 1`), which makes `Bounded[0..<xs.count]` a dependent length bound.
+func (p *Parser) parseRefinementPredArgs() []ast.Expr {
+	var args []ast.Expr
+	for p.peek() != lexer.TOKEN_RBRACKET {
+		first := p.parseExpr()
+		if p.match(lexer.TOKEN_RANGE) {
+			args = append(args, first, p.parseExpr())
+		} else if rangePos := p.cur().Pos; p.match(lexer.TOKEN_RANGE_LT) {
+			end := p.parseExpr()
+			args = append(args, first, &ast.BinaryExpr{Position: rangePos, Op: lexer.TOKEN_MINUS, Left: end, Right: &ast.IntLit{Position: rangePos, Value: "1"}})
+		} else {
+			args = append(args, first)
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return args
+}
+
 func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
 	if p.peekOwnedQualifier() {
 		p.advance()

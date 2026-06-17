@@ -508,6 +508,10 @@ type RefinementEnsure struct {
 	Position   lexer.Pos
 	ParamIndex int
 	LawName    string
+	// Args are the constant bracket arguments of a parametric postcondition (`ensures x is
+	// Bounded[0, 500]`); nil for a bare law. Validated const-evaluable at resolution time so both the
+	// caller-gain fact key and the callee discharge use the exact same (law, args) identity.
+	Args []ast.Expr
 }
 
 type FuncSegmentTransition int
