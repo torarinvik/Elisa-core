@@ -105,20 +105,71 @@ def half(n: Hundred) -> usize is Bounded[0, 50]:
 	}
 }
 
-// Soundness gate: a SIGNED dividend that could be negative is NOT translated (Euclidean div would
-// mismatch truncating div), so the obligation declines rather than risk an unsound proof.
-func TestSMTDeclinesSignedDivision(t *testing.T) {
+// Signed division (docs/90 follow-up): Elisa truncates toward zero, while SMT-LIB `div` is Euclidean.
+// The SMT tier models truncation explicitly, so a signed dividend range can now prove a signed bound.
+func TestSMTProvesSignedTruncatingDivision(t *testing.T) {
 	src := `
-law NonNeg(self: i64) = self >= 0
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+type SignedHundred = i64 is Bounded[-100, 100]
 
-def half(n: i64) -> i64 is NonNeg:
+def half(n: SignedHundred) -> i64 is Bounded[-50, 50]:
     return n / 2
 `
 	result := analyzeWithSMT(t, "smt_signed_div.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var smtProven int
 	for _, f := range result.ProofReport {
 		if f.Outcome == ProofProvenSMT {
-			t.Fatalf("signed division must not be SMT-proven (could be negative): %+v", result.ProofReport)
+			smtProven++
 		}
+	}
+	if smtProven != 1 {
+		t.Fatalf("expected signed truncating division bound proven by SMT, got %d: %+v", smtProven, result.ProofReport)
+	}
+}
+
+// Soundness gate: even with truncating semantics modeled, a divisor that may be zero is NOT
+// translated because SMT-LIB division is total at zero and source division is not.
+func TestSMTDeclinesDivisionByMaybeZero(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+type MaybeZero = i64 is Bounded[-1, 1]
+
+def divide(n: i64, d: MaybeZero) -> i64 is Bounded[-100, 100]:
+    return n / d
+`
+	result := analyzeWithSMT(t, "smt_div_maybe_zero.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("division by a maybe-zero divisor must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+// Signed modulo rides the same truncating quotient model: r = x - y * trunc_div(x, y). For divisor 3,
+// Elisa/C-style remainder stays in [-2, 2] even for negative dividends.
+func TestSMTProvesSignedTruncatingModulo(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+type SignedHundred = i64 is Bounded[-100, 100]
+
+def rem3(n: SignedHundred) -> i64 is Bounded[-2, 2]:
+    return n % 3
+`
+	result := analyzeWithSMT(t, "smt_signed_mod.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var smtProven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			smtProven++
+		}
+	}
+	if smtProven != 1 {
+		t.Fatalf("expected signed truncating modulo bound proven by SMT, got %d: %+v", smtProven, result.ProofReport)
 	}
 }
 

@@ -391,18 +391,26 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		case lexer.TOKEN_STAR:
 			op = "*"
 		case lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
-			// SMT-LIB `div`/`mod` are Euclidean; they equal Elisa's truncating `/`/`%` ONLY for a
-			// non-negative dividend and a strictly-positive divisor (which also rules out div-by-zero,
-			// where SMT-LIB div is an unconstrained total function that could unsoundly "prove"). Gate
-			// on both; otherwise decline (the obligation falls back to the runtime check). Sound by
-			// construction — full signed-division modeling is a docs/90 follow-up.
-			if !tr.a.provablyNonNeg(n.Left) || !tr.a.provablyPositive(n.Right) {
+			// SMT-LIB `div`/`mod` are Euclidean, while Elisa integer division truncates toward zero.
+			// Model truncating division explicitly from abs/sign, and model remainder as x-y*q. Still
+			// require a provably non-zero divisor: SMT-LIB division is total at zero, which could
+			// otherwise fabricate proofs for source programs that may divide by zero at runtime.
+			if !tr.a.provablyNonZero(n.Right) {
 				return "", false
 			}
-			op = "div"
-			if n.Op == lexer.TOKEN_PERCENT {
-				op = "mod"
+			l, ok := tr.termEnv(n.Left, env)
+			if !ok {
+				return "", false
 			}
+			r, ok := tr.termEnv(n.Right, env)
+			if !ok {
+				return "", false
+			}
+			if n.Op == lexer.TOKEN_PERCENT {
+				q := smtTruncDiv(l, r)
+				return "(- " + l + " (* " + r + " " + q + "))", true
+			}
+			return smtTruncDiv(l, r), true
 		default:
 			return "", false
 		}
@@ -448,6 +456,26 @@ func (a *Analyzer) provablyPositive(expr ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// provablyNegative reports whether an expression is provably <= -1.
+func (a *Analyzer) provablyNegative(expr ast.Expr) bool {
+	if c, ok := a.constIntValue(expr); ok {
+		return c <= -1
+	}
+	if f, ok := a.affineOf(expr, a.currentScope); ok {
+		r := a.boundAffine(f, a.currentScope)
+		if r.hiKnown && r.hi <= -1 {
+			return true
+		}
+	}
+	return false
+}
+
+// provablyNonZero reports whether an expression is provably outside zero. This is the soundness gate
+// for SMT division/modulo because SMT-LIB's arithmetic is total at zero but Elisa division is not.
+func (a *Analyzer) provablyNonZero(expr ast.Expr) bool {
+	return a.provablyPositive(expr) || a.provablyNegative(expr)
 }
 
 // boolTerm lowers a boolean-valued expression: comparisons, and/or/not, parens, and bool literals.
@@ -698,8 +726,23 @@ func smtInt(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
+// smtAbs renders integer absolute value. The caller is responsible for keeping terms in the integer
+// fragment; SMT-LIB Int arithmetic is total.
+func smtAbs(term string) string {
+	return "(ite (< " + term + " 0) (- " + term + ") " + term + ")"
+}
+
+// smtTruncDiv renders Elisa/C-style integer division, which truncates toward zero. SMT-LIB `div` is
+// Euclidean, so for negative operands we divide absolute values and restore the quotient sign.
+func smtTruncDiv(left, right string) string {
+	absLeft := smtAbs(left)
+	absRight := smtAbs(right)
+	quot := "(div " + absLeft + " " + absRight + ")"
+	sameSign := "(= (< " + left + " 0) (< " + right + " 0))"
+	return "(ite " + sameSign + " " + quot + " (- " + quot + "))"
+}
+
 // smtVar maps an Elisa identifier to a collision-free SMT symbol.
 func smtVar(name string) string {
 	return "v_" + name
 }
-

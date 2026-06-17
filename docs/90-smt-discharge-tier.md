@@ -1,8 +1,8 @@
 # 90 — The optional SMT discharge tier
 
-Status: **bricks 1–2 landed + profiled.** Adds an SMT solver as the highest tier of the docs/85
+Status: **bricks 1–16 landed + profiled.** Adds an SMT solver as the highest tier of the docs/85
 discharge ladder, reached only for obligations the bounded-linear prover (docs/86) declines —
-non-linear products, division/mod (deferred), richer boolean law bodies, and (future) quantifiers.
+non-linear products, division/mod, richer boolean law bodies, and quantifiers.
 
 ## 1. Why a tier, not a replacement
 
@@ -72,9 +72,11 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 100]:
 
 A false bound (`Bounded[4, 50]`, since `a*b` reaches 100) is **not** proven — `sat` → runtime check.
 
-**Division/mod are deliberately excluded:** SMT-LIB `div`/`mod` are Euclidean and would not match
-Elisa's truncating integer division for negative operands, so translating them could be unsound. They
-return to the linear-declined → runtime path until brick 3 models the semantics carefully.
+**Division/mod are modeled carefully:** SMT-LIB `div`/`mod` are Euclidean and would not match Elisa's
+truncating integer division for negative operands if used directly. The translator therefore lowers `/`
+through an explicit trunc-toward-zero quotient (`sign(x)==sign(y) ? div(abs x, abs y) : -div(abs x,
+abs y)`) and lowers `%` as `x - y * q`. A divisor must still be provably non-zero; if it may be zero,
+the SMT tier declines and the runtime path remains.
 
 ## 5. Profile — is it cheap or demanding?
 
@@ -103,14 +105,12 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    `facts ∧ ¬O` query; `ProofProvenSMT`; `-smt` flag; `--explain` profile line; `SMTStats` on Result.
    Profiled at ~0.08ms/obligation.
 3. **90-3 — division/mod, `requires` SMT fallback, counterexamples. [LANDED]**
-   - **division/mod**: `+ - * /` and `%` now translate. SMT-LIB `div`/`mod` are *Euclidean*, which
-     equals Elisa's *truncating* `/`/`%` only for a non-negative dividend and a strictly-positive
-     divisor — so translation is gated on `provablyNonNeg(dividend) ∧ provablyPositive(divisor)`
-     (unsigned type or interval lower bound; the positivity gate also excludes div-by-zero, where
-     SMT-LIB `div` is an unconstrained total function that could unsoundly "prove"). A signed dividend
-     that could be negative declines. Now provable: `def half(n: usize is Bounded[0,100]) -> usize is
-     Bounded[0,50]: return n / 2u`. Full signed-division modeling (introduce q,r with truncation
-     axioms) is a follow-up.
+   - **division/mod**: `+ - * /` and `%` now translate. `/` and `%` use Elisa's trunc-toward-zero
+     semantics, not raw SMT-LIB Euclidean `div`/`mod`: the quotient is built from absolute values and
+     operand signs, and `%` is `x - y * q`. Translation is gated on `provablyNonZero(divisor)`
+     (constant or interval proof) because SMT-LIB division is total at zero while source division is
+     not. Now provable: `def half(n: i64 is Bounded[-100,100]) -> i64 is Bounded[-50,50]: return n /
+     2` and `def rem3(n: i64 is Bounded[-100,100]) -> i64 is Bounded[-2,2]: return n % 3`.
    - **`requires` SMT fallback**: when the linear clause prover (brick 86-5) declines a precondition,
      `trySMTProveRequires` translates the clause with params substituted by caller-arg terms and proves
      it against the caller's facts. Now provable: `requires a * b <= 100` at a call with a,b ∈ [2,5].
