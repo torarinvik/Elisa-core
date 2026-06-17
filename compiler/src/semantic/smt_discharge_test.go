@@ -377,6 +377,109 @@ def forward(data: darray[i64], m: i64) -> i64:
 	}
 }
 
+// BLOCK-FORM LAW BODIES (docs/90 brick 90-15): a law may name its sub-predicates in an indented
+// block ending in `return`, instead of packing everything onto one `= <expr>` line. The bindings are
+// inlined at parse time, so the SMT tier sees exactly the same single predicate. This is the
+// sorted-implies-first-is-min theorem written readably.
+func TestBlockFormLawProvesArrayQuantifierTheorem(t *testing.T) {
+	src := `
+law SortedFirstMin(self: darray[i64], n: i64):
+    sorted = forall i: (0 <= i and i < n - 1) implies self[i] <= self[i + 1]
+    firstMin = forall j: (0 <= j and j < n) implies self[0] <= self[j]
+    return sorted implies firstMin
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is SortedFirstMin[10] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_block_law.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis of the block-form law, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the block-form array-quantifier theorem proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: a block-form law that is FALSE is still not proven — the inlining is semantics-preserving,
+// not a way to sneak a proof past the solver. "all elements equal the first" does not follow.
+func TestBlockFormLawDeclinesFalseClaim(t *testing.T) {
+	src := `
+law AllEqualFirst(self: darray[i64], n: i64):
+    claim = forall i: (0 <= i and i < n) implies self[i] == self[0]
+    return claim
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is AllEqualFirst[10] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_block_law_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("a false block-form law must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+// Block-form bindings chain: a later binding may reference an earlier one, and the inline resolves in
+// order. `both` references `lo` and `hi`. A scalar law proven by the cheap tiers (no SMT needed).
+func TestBlockFormLawChainedBindings(t *testing.T) {
+	src := `
+law InUnit(self: i64):
+    lo = self >= 0
+    hi = self <= 1
+    both = lo and hi
+    return both
+
+def pick() -> i64:
+    x: i64 is InUnit = 1
+    return x
+`
+	result := analyzeTreeTestSource(t, "block_law_chain.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("chained block-form law should analyze cleanly, got: %v", errs)
+	}
+}
+
+// SMT TRIGGER TUNING (docs/90 brick 90-16): array-element quantifiers now carry an explicit
+// `:pattern ((select arr i))` E-matching trigger. This test locks in that the trigger does not
+// regress completeness — the sorted-implies-first-is-min theorem (which needs the sorted hypothesis
+// instantiated at several indices) still proves — and that a purely arithmetic quantifier (no select
+// term, so no pattern, left to MBQI) also still proves.
+func TestSMTTriggerPreservesArrayAndArithmeticProofs(t *testing.T) {
+	src := `
+law SortedFirstMin(self: darray[i64], n: i64) = (forall i: (0 <= i and i < n - 1) implies self[i] <= self[i + 1]) implies (forall j: (0 <= j and j < n) implies self[0] <= self[j])
+law NotDouble(self: i64, n: i64) = forall k: (0 <= k and k < n) implies self != k * 2
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is SortedFirstMin[10] = xs
+    return 0
+
+def pick() -> i64:
+    x: i64 is NotDouble[5] = 11
+    return x
+`
+	result := analyzeWithSMT(t, "smt_triggers.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 2 {
+		t.Fatalf("triggers must preserve both the array theorem and the arithmetic quantifier proof, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
 // With SMT off (default), the same nonlinear obligation is NOT proven and no solver runs.
 func TestSMTOffLeavesNonlinearUnproven(t *testing.T) {
 	src := `

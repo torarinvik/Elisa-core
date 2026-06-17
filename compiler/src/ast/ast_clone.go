@@ -150,6 +150,12 @@ func CloneExpr(expr Expr) Expr {
 		return &TupleExpr{Position: n.Position, Elems: elems}
 	case *TypeExprExpr:
 		return &TypeExprExpr{Position: n.Position, Type: n.Type}
+	case *QuantifierExpr:
+		body := CloneExpr(n.Body)
+		if n.Body != nil && body == nil {
+			return nil
+		}
+		return &QuantifierExpr{Position: n.Position, Exists: n.Exists, Vars: append([]string(nil), n.Vars...), Body: body}
 	default:
 		return nil
 	}

@@ -553,6 +553,36 @@ func (p *Parser) parseLawDecl() ast.Decl {
 			IsLaw:            true,
 		}
 	}
+	// A BLOCK law (docs/90 brick 90-15): `law Name(...):` with an indented body of zero or more
+	// `name = <expr>` sub-predicate bindings followed by a single `return <bool-expr>`. The bindings
+	// are inlined into the return expression at parse time, so the law is represented exactly like the
+	// `= <expr>` form (a single predicate) and every downstream tier (SMT, linear, flow) is unchanged.
+	// Lets an author name the parts of a complex law (e.g. `sorted`, `firstMin`) instead of packing it
+	// onto one line.
+	if p.match(lexer.TOKEN_COLON) {
+		p.expectNewline()
+		savedQuant := p.allowQuantifiers
+		p.allowQuantifiers = true
+		body := p.parseBlock()
+		p.allowQuantifiers = savedQuant
+		predicate, ok := desugarLawBlock(body)
+		if !ok {
+			p.errorf("a law block body must be zero or more `name = <expr>` bindings followed by a single `return <bool-expr>`")
+			predicate = &ast.BoolLit{Position: pos, Value: false}
+		}
+		return &ast.FuncDecl{
+			Position:         pos,
+			Name:             name,
+			TypeParams:       typeParams,
+			RegionParams:     regionParams,
+			PermissionParams: permissionParams,
+			GenericParams:    genericParams,
+			Params:           params,
+			ReturnType:       &ast.NamedType{Position: pos, Name: "bool"},
+			Body:             []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: predicate}},
+			IsLaw:            true,
+		}
+	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	savedQuant := p.allowQuantifiers
 	p.allowQuantifiers = true
@@ -570,6 +600,89 @@ func (p *Parser) parseLawDecl() ast.Decl {
 		ReturnType:       &ast.NamedType{Position: pos, Name: "bool"},
 		Body:             []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: predicate}},
 		IsLaw:            true,
+	}
+}
+
+// desugarLawBlock inlines a law block's `name = <expr>` bindings into its final `return <expr>`,
+// yielding the single predicate expression the rest of the pipeline expects. Bindings are resolved in
+// order (a later binding may reference an earlier one). Returns false if the block is not the
+// expected shape (some non-binding/non-return statement, no trailing return, or a binding without a
+// value). A binding name that shadows a quantifier binder inside an expression is left untouched there
+// (the binder wins), so the inline is capture-safe.
+func desugarLawBlock(stmts []ast.Stmt) (ast.Expr, bool) {
+	subst := map[string]ast.Expr{}
+	for i, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.VarDeclStmt:
+			// Only immutable, untyped/typed value bindings — a law is pure, no mutation.
+			if n.Mutable || n.Value == nil || n.Name == "" || i == len(stmts)-1 {
+				return nil, false
+			}
+			subst[n.Name] = substituteLawIdents(n.Value, subst, nil)
+		case *ast.ReturnStmt:
+			if n.Value == nil || i != len(stmts)-1 {
+				return nil, false
+			}
+			return substituteLawIdents(n.Value, subst, nil), true
+		default:
+			return nil, false
+		}
+	}
+	return nil, false
+}
+
+// substituteLawIdents replaces each free identifier named in `subst` with a parenthesized clone of
+// its bound expression, over the expression fragment laws use. `bound` is the set of quantifier
+// binders currently in scope; a name in `bound` is NOT substituted (the binder shadows the binding).
+// An unrecognized node is returned unchanged — any surviving binding-name reference then surfaces as
+// a normal undefined-identifier error downstream, never a silent miscompile.
+func substituteLawIdents(expr ast.Expr, subst map[string]ast.Expr, bound map[string]bool) ast.Expr {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if bound != nil && bound[n.Name] {
+			return n
+		}
+		if repl, ok := subst[n.Name]; ok {
+			return &ast.ParenExpr{Position: n.Position, Inner: ast.CloneExpr(repl)}
+		}
+		return n
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{Position: n.Position, Inner: substituteLawIdents(n.Inner, subst, bound)}
+	case *ast.UnaryExpr:
+		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: substituteLawIdents(n.Operand, subst, bound)}
+	case *ast.BinaryExpr:
+		return &ast.BinaryExpr{Position: n.Position, Op: n.Op,
+			Left:  substituteLawIdents(n.Left, subst, bound),
+			Right: substituteLawIdents(n.Right, subst, bound)}
+	case *ast.FieldExpr:
+		return &ast.FieldExpr{Position: n.Position, Object: substituteLawIdents(n.Object, subst, bound), Field: n.Field}
+	case *ast.IndexExpr:
+		return &ast.IndexExpr{Position: n.Position,
+			Object: substituteLawIdents(n.Object, subst, bound),
+			Index:  substituteLawIdents(n.Index, subst, bound)}
+	case *ast.CallExpr:
+		out := *n
+		out.Func = substituteLawIdents(n.Func, subst, bound)
+		out.Args = make([]ast.Expr, len(n.Args))
+		for i, arg := range n.Args {
+			out.Args[i] = substituteLawIdents(arg, subst, bound)
+		}
+		return &out
+	case *ast.QuantifierExpr:
+		inner := bound
+		if len(n.Vars) > 0 {
+			inner = map[string]bool{}
+			for k := range bound {
+				inner[k] = true
+			}
+			for _, v := range n.Vars {
+				inner[v] = true
+			}
+		}
+		return &ast.QuantifierExpr{Position: n.Position, Exists: n.Exists, Vars: n.Vars,
+			Body: substituteLawIdents(n.Body, subst, inner)}
+	default:
+		return n
 	}
 }
 func (p *Parser) parseTypeAliasDecl() ast.Decl {
