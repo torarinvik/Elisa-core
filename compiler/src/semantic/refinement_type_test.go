@@ -165,6 +165,57 @@ def use() -> i64:
 	}
 }
 
+// docs/90 brick 90-8: a PARAMETRIC return refinement (`-> i64 is Bounded[0, n]`) names a callee
+// param in its bound; at a call site the param is substituted by the caller's argument, so
+// `cap_to(100)` yields the caller fact `[0, 100]` and the downstream `Nat` obligation discharges
+// statically. The bound is resolved in the caller's terms, not re-derived from the callee body.
+func TestParametricReturnRefinementSeedsCallerFact(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law Nat(self: i64) = self >= 0
+
+def cap_to(n: i64) -> i64 is Bounded[0, n]:
+    return 0
+
+def use() -> i64:
+    x = cap_to(100)
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "param_return_refine_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("parametric return-refinement seed should analyze cleanly, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("Nat on a value bound from Bounded[0, n] with n=100 should be proven via the substituted fact, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Soundness floor for brick 90-8: when the callee-param bound is substituted by a NON-constant caller
+// argument, the bracket value is not statically known, so no fact is seeded and the downstream
+// obligation falls back to a runtime check (never a fabricated bound).
+func TestParametricReturnRefinementNonConstArgNoSeed(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law Nat(self: i64) = self >= 0
+
+def cap_to(n: i64) -> i64 is Bounded[0, n]:
+    return 0
+
+def use(m: i64) -> i64:
+    x = cap_to(m)
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "param_return_refine_nonconst.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("non-const parametric return refinement should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("a non-constant bracket argument is not statically known: expected a runtime check")
+	}
+}
+
 // `if x is Law:` narrows x inside the branch: a refinement obligation on x discharges statically
 // there with no runtime check (docs/85 — predicate-test narrowing).
 func TestLawIsNarrowsBranch(t *testing.T) {

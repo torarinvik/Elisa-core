@@ -194,8 +194,28 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    unsafety. With no return refinement, nothing is seeded and the obligation falls back to a runtime
    check. Tests: `refinement_type_test.go` `TestReturnRefinementSeedsCallerFact` /
    `TestReturnRefinementNoSeedWhenUnrefined`.
-   - **Deferred**: non-constant return refinements (`-> i64 is Bounded[0, n]`, needs arg
-     substitution); seeding from `ensures <result> is Law` clauses beyond the return-type form;
+   - **Deferred**: parametric return refinements (`-> i64 is Bounded[0, n]`, needs arg substitution
+     — done in 90-8); seeding from `ensures <result> is Law` clauses beyond the return-type form;
      re-asserting facts after a mutating call.
+8. **90-8 — parametric return refinements (argument substitution). [LANDED]** A return refinement may
+   name the callee's own parameters in its bound — `def cap_to(n: i64) -> i64 is Bounded[0, n]`. At a
+   call site, `seedReturnRefinementFacts` now builds a callee-param → caller-argument substitution map
+   and resolves the bracket arguments in the caller's terms, so `x = cap_to(100)` seeds `x ∈ [0, 100]`
+   and a downstream `y: i64 is Nat = x` discharges with no runtime check:
+   ```elisa
+   def cap_to(n: i64) -> i64 is Bounded[0, n]: ...
+   def use() -> i64:
+       x = cap_to(100)      # n ↦ 100  ⟹  x ∈ [0, 100]
+       y: i64 is Nat = x    # proven from the substituted fact
+   ```
+   `substConstInt` const-evaluates a bracket argument after substituting callee params, over the small
+   arithmetic fragment (`n`, `n - 1`, `n * 2`, …). **Sound and conservative**: a substituted argument
+   that does not itself const-fold in the caller (e.g. `cap_to(m)` for a runtime `m`) drops the
+   predicate — no fact seeded, runtime fallback — never a fabricated bound. With `subst == nil`
+   (the param-entry seed) the kernel is exactly the old constant path. Tests:
+   `TestParametricReturnRefinementSeedsCallerFact` / `TestParametricReturnRefinementNonConstArgNoSeed`.
+   - **Deferred**: range-valued (non-constant) bracket arguments via direction-aware bounding (use the
+     arg's lower bound for a `>=` law constraint, upper bound for `<=`); `ensures <result> is Law`
+     clauses beyond the return-type form; re-asserting facts after a mutating call.
 
 Each brick: build → targeted test → full `./src/...` green → commit.

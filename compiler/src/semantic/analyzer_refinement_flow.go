@@ -340,7 +340,7 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 		if !ok || sym == nil || sym.Mutable || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
 			continue
 		}
-		fact, any := a.rangeFromRefinementTypeExpr(rt)
+		fact, any := a.rangeFromRefinementTypeExpr(rt, nil)
 		if !any {
 			continue
 		}
@@ -352,12 +352,16 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 }
 
 // rangeFromRefinementTypeExpr computes the integer interval implied by a refinement type expression
-// whose law predicates all take compile-time-constant arguments (e.g. `i64 is Bounded[0, 100]`). It
+// whose law predicates reduce to compile-time-constant arguments (e.g. `i64 is Bounded[0, 100]`). It
 // is the shared kernel behind both the param-entry seed (seedParamRefinementFacts) and the
 // caller-side return-refinement seed (seedReturnRefinementFacts): a refinement on a function's return
-// type IS its postcondition, so binding its result lets the caller assume the bound. Returns ok=false
-// when no predicate yields a usable constraint (non-constant law arg, unknown law) — fails closed.
-func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr) (numRange, bool) {
+// type IS its postcondition, so binding its result lets the caller assume the bound.
+//
+// `subst` (nil for the param-entry case) maps callee parameter names to the CALLER's argument
+// expressions, so a parametric return refinement like `-> i64 is Bounded[0, n]` called as `f(100)`
+// substitutes `n` → `100` and yields `[0, 100]` in the caller. A law arg that does not reduce to a
+// constant after substitution drops that predicate — fails closed, never widens.
+func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr, subst map[string]ast.Expr) (numRange, bool) {
 	fact := numRange{}
 	any := false
 	for _, pred := range rt.Preds {
@@ -368,7 +372,7 @@ func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr) (numR
 		paramConsts := map[string]int64{}
 		bad := false
 		for i, arg := range pred.Args {
-			c, ok := a.constIntValue(arg)
+			c, ok := a.substConstInt(arg, subst)
 			if !ok {
 				bad = true
 				break
@@ -388,6 +392,63 @@ func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr) (numR
 		}
 	}
 	return fact, any
+}
+
+// substConstInt const-evaluates an integer expression, first replacing any identifier named in
+// `subst` (a callee parameter) with the caller's argument expression (evaluated in the caller scope).
+// With subst==nil it is exactly constIntValue. Covers the small arithmetic fragment a refinement's
+// bracket arguments can use (`Bounded[0, n]`, `Bounded[0, n - 1]`, `Bounded[0, n * 2]`). Anything
+// outside the fragment, or a substituted argument that is not itself constant, returns ok=false.
+func (a *Analyzer) substConstInt(expr ast.Expr, subst map[string]ast.Expr) (int64, bool) {
+	if subst == nil {
+		return a.constIntValue(expr)
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.substConstInt(n.Inner, subst)
+	case *ast.Ident:
+		if arg, ok := subst[n.Name]; ok {
+			// The callee parameter is bound to the caller's argument; that argument must const-fold in
+			// the caller scope for the bracket value to be statically known.
+			return a.constIntValue(arg)
+		}
+		return a.constIntValue(n)
+	case *ast.UnaryExpr:
+		if n.Op != lexer.TOKEN_MINUS {
+			return 0, false
+		}
+		v, ok := a.substConstInt(n.Operand, subst)
+		if !ok {
+			return 0, false
+		}
+		return -v, true
+	case *ast.BinaryExpr:
+		l, ok := a.substConstInt(n.Left, subst)
+		if !ok {
+			return 0, false
+		}
+		r, ok := a.substConstInt(n.Right, subst)
+		if !ok {
+			return 0, false
+		}
+		switch n.Op {
+		case lexer.TOKEN_PLUS:
+			return l + r, true
+		case lexer.TOKEN_MINUS:
+			return l - r, true
+		case lexer.TOKEN_STAR:
+			return l * r, true
+		case lexer.TOKEN_SLASH:
+			if r == 0 {
+				return 0, false
+			}
+			return l / r, true
+		default:
+			return 0, false
+		}
+	default:
+		return a.constIntValue(expr)
+	}
 }
 
 // seedReturnRefinementFacts records the integer range implied by a callee's REFINED return type onto
@@ -424,7 +485,18 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 	if !ok || rt == nil {
 		return
 	}
-	fact, any := a.rangeFromRefinementTypeExpr(rt)
+	// A parametric return refinement (`-> i64 is Bounded[0, n]`) names callee params in its bracket
+	// args; bind each to the caller's argument so the bound is resolved in the caller's terms. A
+	// constant refinement (`Bounded[0, 100]`) ignores the map. Absent args (variadic/defaulted) drop
+	// the predicate, never widen.
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(call.Args) || call.Args[i] == nil {
+			continue
+		}
+		subst[param.Name] = call.Args[i]
+	}
+	fact, any := a.rangeFromRefinementTypeExpr(rt, subst)
 	if !any {
 		return
 	}
