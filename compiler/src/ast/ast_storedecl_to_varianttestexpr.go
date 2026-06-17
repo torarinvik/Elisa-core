@@ -126,6 +126,11 @@ type FuncDecl struct {
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Body         []Stmt
+	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
+	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
+	// function machinery (generics, modules, type checking, calls); the flag drives purity
+	// enforcement and lets `is` resolve it as a predicate.
+	IsLaw bool
 }
 type ParamDecl struct {
 	Position     lexer.Pos

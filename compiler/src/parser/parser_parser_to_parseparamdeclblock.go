@@ -300,6 +300,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("type") {
 		return p.parseTypeAliasDecl()
 	}
+	if p.peekIdentText("law") && p.looksLikeLawDecl() {
+		return p.parseLawDecl()
+	}
 	if p.peekIdentText("tokenset") {
 		return p.parseTokenSetDecl()
 	}
@@ -434,6 +437,53 @@ func (p *Parser) parseDecl() ast.Decl {
 }
 func (p *Parser) parseLayoutStructDecl() *ast.StructDecl {
 	return p.parseLayoutStructDeclWithAnnotations(nil)
+}
+
+// looksLikeLawDecl distinguishes a `law` declaration from an identifier named `law`. At decl
+// position a law is `law <name> [generics] ( … )`, so require an identifier name followed by
+// `(` or `[`.
+func (p *Parser) looksLikeLawDecl() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	switch p.tokens[p.pos+2].Kind {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseLawDecl parses a predicate law (docs/85 Stage 1): `law Name[generics](self: T, …) = <bool-expr>`.
+// It is represented as a bool-returning FuncDecl with IsLaw set, so it reuses every bit of the
+// function machinery (generics, modules, calls, type checking); the analyzer separately enforces
+// purity, totality, and the bool return that make it a sound predicate.
+func (p *Parser) parseLawDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("law")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	p.expect(lexer.TOKEN_LPAREN)
+	params, _ := p.parseExplicitSignatureParamList(true, false)
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_ASSIGN)
+	predicate := p.parseExpr()
+	p.expectNewline()
+	return &ast.FuncDecl{
+		Position:         pos,
+		Name:             name,
+		TypeParams:       typeParams,
+		RegionParams:     regionParams,
+		PermissionParams: permissionParams,
+		GenericParams:    genericParams,
+		Params:           params,
+		ReturnType:       &ast.NamedType{Position: pos, Name: "bool"},
+		Body:             []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: predicate}},
+		IsLaw:            true,
+	}
 }
 func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	pos := p.cur().Pos

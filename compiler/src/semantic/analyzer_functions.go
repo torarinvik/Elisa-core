@@ -173,6 +173,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 			fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
 		}
 		a.checkHotContract(fn, fnType)
+		a.checkLawContract(fn, fnType)
 		a.finalizeFunctionAnalysis(fn, fnType)
 	}
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)

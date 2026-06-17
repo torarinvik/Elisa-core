@@ -8,20 +8,27 @@ from the review to its resolution here.
 
 ## 1. The model in one sentence
 
-A **law** is a pure total `bool` function with an implicit `self`; the **`is`** operator
-applies it in type, flow, or contract position; obligations are **discharged** against one
-sound flow-fact lattice (prove), else a debug check/measure, else a `-strict` error — and
-each law declares a **discharge class** so a uniform surface never implies a uniform
-guarantee.
+A **law** is a pure total `bool` function whose first value parameter is its subject
+(conventionally named `self`); the **`is`** operator applies it by binding its left side to
+that first parameter — the *same* first-argument desugaring as UFCS/method calls
+(`x is P[a]` ≡ `P(x, a)`, docs/19) — in type, flow, or contract position; obligations are
+**discharged** against one sound flow-fact lattice (prove), else a debug check/measure, else
+a `-strict` error — and each law declares a **discharge class** so a uniform surface never
+implies a uniform guarantee.
 
 ## 2. Primitives
 
-- **`law`** — a pure, total, deterministic `bool` function with implicit `self`. Not a new
-  AST kind: it reuses functions, generics, modules, the type checker, and the effect system
-  (purity is *enforced* by requiring an empty effect set; totality by the existing
-  progress/recursion checks). `law Bounded[lo, hi] = self >= lo and self <= hi`.
-- **`is`** — the one application operator. `x is P[a]` ≡ apply `P` to `x`. Type position →
-  refinement type; flow position → narrowing (today's `is`); contract position → obligation.
+- **`law`** — a pure, total, deterministic `bool` function whose first value parameter is
+  the subject (by convention `self`, but it is an ordinary explicitly-typed parameter, not a
+  magic binding). Not a new AST kind: it reuses functions, generics, modules, the type
+  checker, and the effect system (purity is *enforced* by requiring an empty effect set;
+  totality by the existing progress/recursion checks).
+  `law Bounded[lo, hi](self: i64) = self >= lo and self <= hi`.
+- **`is`** — the one application operator, defined as **first-argument binding**: `x is P[a]`
+  ≡ `P(x, a)`, exactly the UFCS/method-call desugaring (docs/19) — no new binding rule. The
+  `is` left side fills the first value parameter; `[..]` are the static params; any remaining
+  `(..)` are extra value args. Type position → refinement type; flow position → narrowing
+  (today's `is`); contract position → obligation.
 - **Composition = conjunction.** `includes` is clause-set union; a composite holds iff its
   parts do. Frame composition is *union of `changes` sets* (§7). Nothing more exotic.
 - **One discharge routine** with the ladder of §6.
