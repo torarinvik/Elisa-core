@@ -19,18 +19,52 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 	if len(targets) != 1 {
 		return false
 	}
-	lawName, ok := a.resolveBareLawIsTarget(targets[0])
+	lawName, lawArgs, ok := a.resolveLawIsTarget(targets[0])
 	if !ok {
 		return false
 	}
 	call := &ast.CallExpr{
 		Position: expr.Pos(),
 		Func:     &ast.Ident{Position: expr.Right.Pos(), Name: lawName},
-		Args:     []ast.Expr{expr.Left},
+		Args:     append([]ast.Expr{expr.Left}, lawArgs...),
 	}
 	a.analyzeExpr(call)
 	a.lawIsCalls[expr] = call
 	return true
+}
+
+// resolveLawIsTarget recognizes an `is` target that names a law, returning the law name and its
+// value arguments (nil for a bare law). Handles bare references (`Positive`) and the parametric form
+// `Bounded[0, 500]` (a GenericType carrying value args). A non-law target, or a parametric target
+// with a non-value (type) argument, returns false.
+func (a *Analyzer) resolveLawIsTarget(target ast.Expr) (string, []ast.Expr, bool) {
+	if name, ok := a.resolveBareLawIsTarget(target); ok {
+		return name, nil, true
+	}
+	inner := target
+	if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+		inner = p.Inner
+	}
+	te, ok := inner.(*ast.TypeExprExpr)
+	if !ok || te == nil {
+		return "", nil, false
+	}
+	gen, ok := te.Type.(*ast.GenericType)
+	if !ok || gen == nil || indexOfByte(gen.Name, '.') >= 0 {
+		return "", nil, false
+	}
+	if _, _, isLaw := a.lookupLaw(gen.Name); !isLaw {
+		return "", nil, false
+	}
+	args := make([]ast.Expr, 0, len(gen.Args))
+	for _, ta := range gen.Args {
+		va, ok := ta.(*ast.GenericValueArgTypeExpr)
+		if !ok || va == nil || va.Value == nil {
+			return "", nil, false // a type argument ⇒ not a value-parametric law application
+		}
+		args = append(args, va.Value)
+	}
+	return gen.Name, args, true
 }
 
 // recordRefinementChecks records the discharge obligations for a refinement-typed var declaration

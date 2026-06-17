@@ -129,6 +129,13 @@ func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, 
 			}
 		}
 	}
+	// docs/85: a parametric law application `x is Bounded[0, 500]` is a predicate, not a named-state
+	// target. Bail before resolveType so the narrowing passes don't report "unknown type".
+	if gen, ok := typedExpr.Type.(*ast.GenericType); ok && gen != nil && indexOfByte(gen.Name, '.') < 0 {
+		if _, _, isLaw := a.lookupLaw(gen.Name); isLaw {
+			return nil, nil, false
+		}
+	}
 	resolved := a.resolveType(typedExpr.Type)
 	base, ok := namedStateStructBase(resolved)
 	if !ok || base == nil {

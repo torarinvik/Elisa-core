@@ -140,6 +140,49 @@ def f(n: i64) -> i64:
 	}
 }
 
+// `if x is Bounded[0,500]:` (parametric law) narrows x so a `Bounded[0,500]` obligation discharges.
+func TestParametricLawIsNarrowsBranch(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_b(x: i64 is Bounded[0, 500]) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    if n is Bounded[0, 500]:
+        return needs_b(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "param_law_narrow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`if n is Bounded[0,500]` should narrow n so `needs_b(n)` proves, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("narrowed parametric call arg should be statically proven, got %d", len(result.CallArgRefinementChecks))
+	}
+}
+
+// A narrowing by a TIGHTER parametric range does not prove a WIDER obligation: `is Bounded[10,20]`
+// must NOT discharge `Bounded[0,500]`'s... wait — tighter entails wider. The unsound direction is
+// the reverse: narrowing by a wider range must not prove a tighter obligation.
+func TestParametricLawIsNarrowingDoesNotOverprove(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_tight(x: i64 is Bounded[10, 20]) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    if n is Bounded[0, 500]:
+        return needs_tight(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "param_law_overprove.elisa", src)
+	if len(result.ReturnRefinementChecks)+len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("`is Bounded[0,500]` must NOT prove the tighter `Bounded[10,20]` — a runtime check is required")
+	}
+}
+
 // Without the narrowing branch, the same call is unproven — confirms the narrowing is what proves it.
 func TestLawIsNarrowingIsLoadBearing(t *testing.T) {
 	src := `

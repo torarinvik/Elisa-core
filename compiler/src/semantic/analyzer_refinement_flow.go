@@ -70,11 +70,12 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
 }
 
-// gatherLawIsRangeRefinement narrows an immutable integer variable by a bare law inside the truthy
-// branch of `if x is Law:` (docs/85). When the law body is a decidable conjunction of `self OP
-// const`, its constraints become an integer range fact on x, so a later refinement obligation on x
-// (another `x is OtherLaw`, an `x`-initialized refinement binding, or passing x to a refinement
-// param) discharges statically. Bare (parameterless) laws only; parametric narrowing is a follow-up.
+// gatherLawIsRangeRefinement narrows an immutable integer variable by a law inside the truthy branch
+// of `if x is Law:` (docs/85). When the law body is a decidable conjunction of `self OP const`, its
+// constraints become an integer range fact on x, so a later refinement obligation on x (another `x
+// is OtherLaw`, an `x`-initialized refinement binding, or passing x to a refinement param)
+// discharges statically. Handles both bare laws (`is Positive`) and parametric laws with
+// compile-time-constant args (`is Bounded[0, 500]`).
 func (a *Analyzer) gatherLawIsRangeRefinement(scope *Scope, n *ast.BinaryExpr, truthy bool) {
 	if !truthy || scope == nil || n == nil {
 		return
@@ -87,15 +88,25 @@ func (a *Analyzer) gatherLawIsRangeRefinement(scope *Scope, n *ast.BinaryExpr, t
 	if len(targets) != 1 {
 		return
 	}
-	lawName, ok := a.resolveBareLawIsTarget(targets[0])
+	lawName, lawArgs, ok := a.resolveLawIsTarget(targets[0])
 	if !ok {
 		return
 	}
 	decl, _, ok := a.lookupLaw(lawName)
-	if !ok || decl == nil || len(decl.Params) != 1 {
+	if !ok || decl == nil || len(lawArgs) != len(decl.Params)-1 {
 		return
 	}
-	constraints, ok := a.lawConstraints(decl, map[string]int64{})
+	// Bind the law's static params (decl.Params[1:]) to the constant bracket args, so a body like
+	// `self >= lo and self <= hi` is interpreted against the actual bounds.
+	paramConsts := map[string]int64{}
+	for i, arg := range lawArgs {
+		c, ok := a.constIntValue(arg)
+		if !ok {
+			return // a non-constant arg is not statically interpretable
+		}
+		paramConsts[decl.Params[i+1].Name] = c
+	}
+	constraints, ok := a.lawConstraints(decl, paramConsts)
 	if !ok || len(constraints) == 0 {
 		return
 	}
