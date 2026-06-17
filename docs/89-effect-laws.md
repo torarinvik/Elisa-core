@@ -167,6 +167,13 @@ return type as a legacy region prefix (the disambiguation list only knew `can`/`
 The discharge-class ladder (docs/85 §4) is now complete: **value · frame · effect · shape ·
 measure**, plus **composite** composition over the function-level classes.
 
+**Observability (brick 5):** every function-level `fulfills` discharge is recorded in the
+`--explain` proof report (docs/85 §10) — a clean effect/shape/composite law as `proven (contract)`,
+a measure law as `measured (-Wperf)`, a violation as `refuted`. The report summary now counts a
+`measured` bucket alongside proven/runtime/refuted, and (a latent fix) folds `proven (linear)` into
+the proven count. So the "always known to the user" principle now covers all six classes, not just
+value refinements.
+
 **Deferred:**
 - **more built-in shape laws** (`BranchFree`, `NoRealloc`, `NoAlloc`-as-codegen) — same
   `isBuiltinShapeLaw` registry + a per-law body analysis in `dischargeShapeRequirement`.

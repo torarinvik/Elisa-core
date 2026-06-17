@@ -550,19 +550,21 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
 		fmt.Fprintln(stderr, "  (no refinement obligations)")
 		return
 	}
-	var proven, refuted, runtime int
+	var proven, refuted, runtime, measured int
 	for _, f := range report {
 		fmt.Fprintf(stderr, "  %s: %s is %s — %s\n", f.Pos, f.Subject, f.Predicate, f.Outcome)
 		switch f.Outcome {
-		case semantic.ProofProvenFlow, semantic.ProofProvenConst:
+		case semantic.ProofProvenFlow, semantic.ProofProvenLinear, semantic.ProofProvenConst, semantic.ProofProvenContract:
 			proven++
 		case semantic.ProofRefuted:
 			refuted++
 		case semantic.ProofRuntime:
 			runtime++
+		case semantic.ProofMeasured:
+			measured++
 		}
 	}
-	fmt.Fprintf(stderr, "  %d proven statically, %d runtime-checked, %d refuted\n", proven, runtime, refuted)
+	fmt.Fprintf(stderr, "  %d proven statically, %d runtime-checked, %d measured, %d refuted\n", proven, runtime, measured, refuted)
 }
 
 // printPerfWarnings surfaces the backend's post-optimization performance-friction warnings (the

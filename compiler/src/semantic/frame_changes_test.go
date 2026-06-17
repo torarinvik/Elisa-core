@@ -613,6 +613,46 @@ def f() -> i64 fulfills Bad:
 	}
 }
 
+// docs/85 observability: function-level law discharges are recorded in the --explain proof report —
+// effect/shape/composite as proven (contract), measure as measured.
+func TestFunctionLevelLawProofReport(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+law HotKernel includes NoAlloc, NoBoundsChecks
+
+def kernel(xs: darray[i64]) -> i64 fulfills HotKernel:
+    total: mutable i64 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i]
+    return total
+
+def scale(xs: darray[i64]) -> i64 fulfills Vectorizes:
+    total: mutable i64 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i] * 2
+    return total
+`
+	result := analyzeTreeTestSource(t, "fnlaw_proof_report.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var contract, measured int
+	for _, f := range result.ProofReport {
+		switch f.Outcome {
+		case ProofProvenContract:
+			contract++
+		case ProofMeasured:
+			measured++
+		}
+	}
+	if contract != 1 {
+		t.Fatalf("expected 1 proven-contract fact (kernel fulfills HotKernel), got %d: %+v", contract, result.ProofReport)
+	}
+	if measured != 1 {
+		t.Fatalf("expected 1 measured fact (scale fulfills Vectorizes), got %d: %+v", measured, result.ProofReport)
+	}
+}
+
 // A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
 func TestFrameLawInValueIsErrors(t *testing.T) {
 	src := `

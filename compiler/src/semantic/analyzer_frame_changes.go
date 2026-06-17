@@ -316,33 +316,49 @@ func (a *Analyzer) checkFunctionLevelFulfills(fn *ast.FuncDecl, fnType *FuncType
 		}
 		// A measure law (docs/85 §8) is verify-only: there is no static obligation to discharge here.
 		// `fulfills Vectorizes` opts the function's loops into the post-codegen autovec verifier (set
-		// in analyzeForStmt); a failure is a -Wperf warning, never a compile error. Nothing else to do.
+		// in analyzeForStmt); a failure is a -Wperf warning, never a compile error. Record it as
+		// measured (the honest, weaker outcome) for the --explain report.
 		if measure {
+			a.recordProof(fc.Position, fn.Name, fc.Law, ProofMeasured)
 			continue
 		}
+		violated := false
 		for _, forbidden := range forbids {
 			for _, used := range fnType.PermissionRefs {
 				if permissionRefForbidden(used, forbidden) {
 					a.errorf(fn.Pos(), "function %q `fulfills %s` but uses the `%s` effect, which %s forbids", fn.Name, fc.Law, lawEffectName(used), fc.Law)
+					violated = true
 					break
 				}
 			}
 		}
 		for _, shape := range shapes {
-			a.dischargeShapeRequirement(fn, fc.Law, shape)
+			if a.dischargeShapeRequirement(fn, fc.Law, shape) {
+				violated = true
+			}
+		}
+		// docs/85 observability: record the discharge for --explain. A clean function-level law is
+		// proven by analysis (effect/shape/composite); a violation (already an error) is refuted.
+		if violated {
+			a.recordProof(fc.Position, fn.Name, fc.Law, ProofRefuted)
+		} else {
+			a.recordProof(fc.Position, fn.Name, fc.Law, ProofProvenContract)
 		}
 	}
 }
 
 // dischargeShapeRequirement runs the audit for one built-in shape requirement on the current
-// function. via names the law the requirement came from (the fulfilled law, possibly a composite).
-func (a *Analyzer) dischargeShapeRequirement(fn *ast.FuncDecl, via, shape string) {
+// function and reports whether it was VIOLATED. via names the law the requirement came from (the
+// fulfilled law, possibly a composite).
+func (a *Analyzer) dischargeShapeRequirement(fn *ast.FuncDecl, via, shape string) bool {
 	switch shape {
 	case "NoBoundsChecks":
 		if len(a.currentFunctionGuardedIndexes) > 0 {
 			a.errorf(a.currentFunctionGuardedIndexes[0], "function %q `fulfills %s` (requires NoBoundsChecks) but has an index access that is not statically proven in-bounds, so a runtime bounds check would be emitted; prove the index (e.g. iterate, or guard with a bound the prover understands)", fn.Name, via)
+			return true
 		}
 	}
+	return false
 }
 
 // isBuiltinShapeLaw reports whether a name is a built-in SHAPE law (docs/89, docs/85 §8): a local,

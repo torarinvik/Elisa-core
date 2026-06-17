@@ -93,11 +93,13 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 type ProofOutcome string
 
 const (
-	ProofProvenFlow   ProofOutcome = "proven (flow)"   // entailed by a branch-condition range fact
-	ProofProvenLinear ProofOutcome = "proven (linear)" // entailed by tier-2 bounded linear arithmetic (docs/86)
-	ProofProvenConst  ProofOutcome = "proven (const)"  // entailed by constant evaluation
-	ProofRefuted     ProofOutcome = "refuted"        // provably violated — a compile error
-	ProofRuntime     ProofOutcome = "runtime"        // unprovable — debug runtime check / -strict error
+	ProofProvenFlow     ProofOutcome = "proven (flow)"     // entailed by a branch-condition range fact
+	ProofProvenLinear   ProofOutcome = "proven (linear)"   // entailed by tier-2 bounded linear arithmetic (docs/86)
+	ProofProvenConst    ProofOutcome = "proven (const)"    // entailed by constant evaluation
+	ProofProvenContract ProofOutcome = "proven (contract)" // a function-level law (effect/shape/composite) discharged by analysis (docs/89)
+	ProofMeasured       ProofOutcome = "measured (-Wperf)" // a measure law verified post-codegen, surfaced as a warning (docs/89 Stage 5)
+	ProofRefuted        ProofOutcome = "refuted"           // provably violated — a compile error
+	ProofRuntime        ProofOutcome = "runtime"           // unprovable — debug runtime check / -strict error
 )
 
 // ProofFact is one entry in the --explain proof report: where a refinement was discharged, on what
