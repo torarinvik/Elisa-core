@@ -533,6 +533,11 @@ func (a *Analyzer) analyzeIsComparableTarget(left Type, target ast.Expr) bool {
 	return true
 }
 func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
+	// docs/85 §2: `subject is Law` is law application — UFCS first-arg binding. Desugar to the
+	// call `Law(subject)` and reuse all call analysis/codegen. Bare-law single-target form.
+	if a.tryAnalyzeLawIsExpr(expr) {
+		return a.namedTypes["bool"]
+	}
 	left := a.analyzeExpr(expr.Left)
 	targets := flattenIsTargetExprs(expr.Right)
 	for _, target := range targets {

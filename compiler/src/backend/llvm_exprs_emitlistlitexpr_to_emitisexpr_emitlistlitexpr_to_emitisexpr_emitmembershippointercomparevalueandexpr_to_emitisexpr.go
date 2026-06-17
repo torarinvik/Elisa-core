@@ -172,6 +172,12 @@ func (s *functionState) emitRuntimeStringCompareValues(op lexer.TokenKind, leftV
 	return C.LLVMBuildICmp(s.builder, pred, call, zero, cStringFree("membership.strcmp.eq")), nil
 }
 func (s *functionState) emitIsExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, semantic.Type, error) {
+	// docs/85 §2: `subject is Law` was desugared by analysis into the call `Law(subject)`; emit it.
+	if s.g != nil && s.g.result != nil && s.g.result.LawIsCalls != nil {
+		if call := s.g.result.LawIsCalls[expr]; call != nil {
+			return s.emitExpr(call, nil)
+		}
+	}
 	targets := flattenIsTargetExprsBackend(expr.Right)
 	if len(targets) == 0 {
 		return nil, nil, fmt.Errorf("is expression is missing a target")

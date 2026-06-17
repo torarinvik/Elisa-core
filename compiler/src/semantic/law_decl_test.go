@@ -72,3 +72,38 @@ func indexOfSubstring(s, sub string) int {
 	}
 	return -1
 }
+
+// `subject is Law` desugars to the call Law(subject) and type-checks (docs/85 Stage 1b).
+func TestLawIsExprDesugars(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def check(n: i64) -> bool:
+    return n is Positive
+
+def use(n: i64) -> bool:
+    requires n is Positive
+    return true
+`
+	result := analyzeTreeTestSource(t, "law_is.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`n is Positive` should analyze (desugar to Positive(n)), got: %v", errs)
+	}
+	if len(result.LawIsCalls) == 0 {
+		t.Fatalf("expected at least one recorded law-is desugar call")
+	}
+}
+
+// `is Law` flow-narrowing reads as a bool condition; a type mismatch on the subject is an error.
+func TestLawIsExprSubjectTypeMismatch(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def check(s: cstr) -> bool:
+    return s is Positive
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "law_is_mismatch.elisa", src, AnalyzeOptions{})
+	if len(result.Errors()) == 0 {
+		t.Fatal("`cstr is Positive` should be a type error (subject is i64-typed)")
+	}
+}

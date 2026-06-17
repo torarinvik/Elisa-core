@@ -56,6 +56,11 @@ type Result struct {
 	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
 	CallArgDisjoint         map[*ast.CallExpr]*CallArgDisjointInfo
 	FuncDisjointParams      map[*ast.FuncDecl]*FuncDisjointParamInfo
+	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
+	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and
+	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)
+	// single-target form for now.
+	LawIsCalls map[*ast.BinaryExpr]*ast.CallExpr
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
