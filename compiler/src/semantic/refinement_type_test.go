@@ -116,6 +116,73 @@ def f(n: i64) -> i64:
 	}
 }
 
+// A refinement-typed RETURN proves statically for a satisfying constant — no runtime check.
+func TestRefinementReturnConstantProven(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f() -> i64 is Positive:
+    return 5
+`
+	result := analyzeTreeTestSource(t, "refine_ret_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("returning 5 satisfies Positive, should be clean, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("proven return refinement should emit NO runtime check, got %d", len(result.ReturnRefinementChecks))
+	}
+}
+
+// A refinement-typed RETURN of a violating constant is REFUTED at compile time.
+func TestRefinementReturnConstantRefuted(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f() -> i64 is Positive:
+    return 0 - 3
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_ret_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("returning -3 violates Positive: expected a compile-time refutation, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A refinement-typed RETURN of a flow-proven value proves statically — no runtime check, clean.
+func TestRefinementReturnFlowProven(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f(n: i64) -> i64 is Positive:
+    if n > 0:
+        return n
+    return 1
+`
+	result := analyzeTreeTestSource(t, "refine_ret_flow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("flow-proven return should be clean, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("flow-proven return refinement should emit NO runtime check, got %d", len(result.ReturnRefinementChecks))
+	}
+}
+
+// A refinement-typed RETURN of an unproven side-effect-free value records a runtime check.
+func TestRefinementReturnUnprovenRuntimeCheck(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def f(n: i64) -> i64 is Positive:
+    return n
+`
+	result := analyzeTreeTestSource(t, "refine_ret_runtime.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unproven return should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) == 0 {
+		t.Fatalf("unproven return refinement should record a runtime check")
+	}
+}
+
 // The user must KNOW when a refinement isn't statically guaranteed: a non-provable refinement
 // WARNS by default (not an error) — visible, but prototyping stays fluid (docs/85).
 func TestRefinementUnprovenWarnsByDefault(t *testing.T) {

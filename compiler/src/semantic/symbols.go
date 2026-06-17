@@ -72,6 +72,11 @@ type Result struct {
 	// check (trap on violation) before the real call, elided in release. Only side-effect-free args
 	// (idents/literals) get a check, so re-evaluating the arg in the predicate is safe.
 	CallArgRefinementChecks map[*ast.CallExpr][]*ast.CallExpr
+	// ReturnRefinementChecks holds the discharge obligations for a return statement whose function has
+	// a refinement-typed return (docs/85: the return half of the function-contract boundary). Codegen
+	// emits each predicate call as a debug boundary check (trap on violation) before the return,
+	// elided in release. Only side-effect-free return values get a check.
+	ReturnRefinementChecks map[*ast.ReturnStmt][]*ast.CallExpr
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo

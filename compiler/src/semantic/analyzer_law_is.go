@@ -145,6 +145,45 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 	}
 }
 
+// dischargeReturnRefinements discharges the refinement obligations on a returned value against the
+// enclosing function's refinement-typed return (docs/85: the return half of the function-contract
+// boundary). Symmetric to dischargeCallArgRefinements: prove/refute statically, else warn (and, for
+// a side-effect-free value, record a debug runtime check); under -strict an unproven return is a
+// hard error.
+func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
+	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
+		return
+	}
+	rt, ok := a.currentFuncDecl.ReturnType.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return
+	}
+	var checks []*ast.CallExpr
+	for _, pred := range rt.Preds {
+		lawDecl, _, ok := a.lookupLaw(pred.Name)
+		if !ok {
+			continue
+		}
+		if a.tryDischargeRefinementStatically(n.Value, "the returned value", pred, lawDecl, n.Pos()) {
+			continue
+		}
+		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check", pred.Name, a.currentFuncDecl.Name)
+		if !a.isSideEffectFreeRefinementArg(n.Value) {
+			continue
+		}
+		check := &ast.CallExpr{
+			Position: pred.Position,
+			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
+			Args:     append([]ast.Expr{n.Value}, pred.Args...),
+		}
+		a.analyzeExpr(check)
+		checks = append(checks, check)
+	}
+	if len(checks) != 0 && a.returnRefinementChecks != nil {
+		a.returnRefinementChecks[n] = checks
+	}
+}
+
 // isSideEffectFreeRefinementArg reports whether a call argument can be safely re-evaluated by a
 // runtime refinement predicate check (no observable side effect, no double cost worth worrying
 // about). Conservatively: bare identifiers, literals, and parenthesizations of those.

@@ -59,17 +59,41 @@ func (s *functionState) emitCallArgRefinementChecks(expr *ast.CallExpr) error {
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
 		return nil
 	}
+	return s.emitRefinementCheckCalls(checks, "argrefine")
+}
+
+// emitReturnRefinementChecks discharges the runtime tier for an unproven, side-effect-free returned
+// value against the function's refinement-typed return (docs/85: the return half of the
+// function-contract boundary). Debug-only, emitted before the return.
+func (s *functionState) emitReturnRefinementChecks(n *ast.ReturnStmt) error {
+	if s == nil || s.g == nil || s.g.result == nil || s.g.result.ReturnRefinementChecks == nil {
+		return nil
+	}
+	checks := s.g.result.ReturnRefinementChecks[n]
+	if len(checks) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
+		return nil
+	}
+	return s.emitRefinementCheckCalls(checks, "retrefine")
+}
+
+// emitRefinementCheckCalls emits a sequence of boolean predicate calls, trapping when any is false.
+// Shared by the var-decl, call-arg, and return refinement runtime tiers. `tag` names the basic
+// blocks for readable IR.
+func (s *functionState) emitRefinementCheckCalls(checks []*ast.CallExpr, tag string) error {
 	boolType := s.g.result.NamedTypes["bool"]
 	for _, call := range checks {
 		cond, _, err := s.emitExpr(call, boolType)
 		if err != nil {
 			return err
 		}
-		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("argrefine.ok"))
-		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("argrefine.fail"))
+		okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".ok"))
+		failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(tag+".fail"))
 		C.LLVMBuildCondBr(s.builder, cond, okBB, failBB)
 		C.LLVMPositionBuilderAtEnd(s.builder, failBB)
-		if err := s.emitTrapUnreachable("argrefine.trap"); err != nil {
+		if err := s.emitTrapUnreachable(tag + ".trap"); err != nil {
 			return err
 		}
 		C.LLVMPositionBuilderAtEnd(s.builder, okBB)

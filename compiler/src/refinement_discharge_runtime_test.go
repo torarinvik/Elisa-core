@@ -99,6 +99,41 @@ func TestCallArgRefinementViolatedTrapsInDebug(t *testing.T) {
 	}
 }
 
+const returnRefinementProgram = `
+law Positive(self: i64) = self > 0
+
+def passthru(n: i64) -> i64 is Positive:
+    return n
+
+def neg() -> i64:
+    return 0 - 3
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    r: i64 = passthru(%s)
+    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// An unproven-but-satisfying return passes the debug return-check and runs normally.
+func TestReturnRefinementSatisfiedPasses(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(returnRefinementProgram, "%s", "5", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("satisfying return refinement should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "5" {
+		t.Fatalf("want output 5, got %q", out)
+	}
+}
+
+// A violating return TRAPS at debug — the return half of the function-contract boundary is enforced.
+func TestReturnRefinementViolatedTrapsInDebug(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(returnRefinementProgram, "%s", "neg()", 1), backend.OptimizationLevel0)
+	if err == nil {
+		t.Fatalf("violating return refinement must trap at debug, but program exited 0 (out=%q)", out)
+	}
+}
+
 // A satisfying init passes the debug discharge check and runs normally.
 func TestRefinementDischargeSatisfiedPasses(t *testing.T) {
 	out, err := buildRunRefinement(t, strings.Replace(refinementProgram, "%s", "5", 1), backend.OptimizationLevel0)

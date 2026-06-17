@@ -905,6 +905,9 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if _, ok := s.fnType.Return.(*semantic.RefType); ok {
 			returnExpected = s.fnType.Return
 		}
+		if err := s.emitReturnRefinementChecks(n); err != nil {
+			return err
+		}
 		value, valueType, err := s.emitExpr(n.Value, returnExpected)
 		if err != nil {
 			return err

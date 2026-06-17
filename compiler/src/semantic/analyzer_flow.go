@@ -414,6 +414,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "unexpected return value")
 			return
 		}
+		a.dischargeReturnRefinements(n)
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		a.checkReturnRegionContainerEscape(n.Value, valueType)
