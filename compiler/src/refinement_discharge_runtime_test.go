@@ -302,3 +302,59 @@ func TestOldResultViolatedTrapsInDebug(t *testing.T) {
 		t.Fatalf("`ensure result == n - old(n)` returning 3 must trap at debug, but program exited 0 (out=%q)", out)
 	}
 }
+
+// An in-body `invariant` is a STANDING contract (docs/90 brick 90-14): once declared it is re-checked
+// after every later mutation of a variable it reads. The in-place check at the declaration passes
+// (x == start >= 0); only the re-check after a decrement can catch a violation. Here the loop drives
+// x down by `count` steps — the canonical loop-invariant idiom.
+const invariantRecheckProgram = `
+def countdown(start: i64, count: i64) -> i64 can[Abort.Panic]:
+    x: mutable i64 = start
+    invariant x >= 0
+    i: mutable i64 = 0
+    while i < count:
+        x <- x - 1
+        i <- i + 1
+    return x
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    r: i64 = countdown(%s) can Abort.Panic
+    print(r.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// start=5, count=3: x goes 5→2, the invariant `x >= 0` holds on every re-check, runs cleanly.
+func TestInvariantRecheckHoldsRuns(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "5, 3", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("a standing invariant that holds on every mutation should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "2" {
+		t.Fatalf("want output 2, got %q", out)
+	}
+}
+
+// start=1, count=3: x goes 1→0→-1; the re-check after the mutation that drops x to -1 TRAPS. Without
+// brick 90-14 the invariant is only checked once at x==1 and the violation slips through.
+func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "1, 3", 1), backend.OptimizationLevel0)
+	if err == nil {
+		t.Fatalf("a standing invariant violated by a later mutation must trap at debug, but program exited 0 (out=%q)", out)
+	}
+}
+
+// The standing invariant is debug-only: at -O3 the re-checks are elided, so the same violating run
+// does NOT trap (debug verifies what release assumes).
+func TestInvariantRecheckElidedInRelease(t *testing.T) {
+	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
+		if prev, had := os.LookupEnv(key); had {
+			_ = os.Unsetenv(key)
+			t.Cleanup(func() { _ = os.Setenv(key, prev) })
+		}
+	}
+	_, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "1, 3", 1), backend.OptimizationLevel3)
+	if err != nil {
+		t.Fatalf("release build should elide the standing-invariant re-checks (no trap), got: %v", err)
+	}
+}

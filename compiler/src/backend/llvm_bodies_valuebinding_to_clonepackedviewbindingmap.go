@@ -132,6 +132,10 @@ type functionState struct {
 	// value of expr captured at function entry (the SSA value dominates all returns). emitExpr reads
 	// it when lowering the `old(...)` node during postcondition checks. nil when there are no olds.
 	oldCaptures map[*ast.CallExpr]oldCapture
+	// activeInvariants holds the in-body `invariant` conditions currently in scope, each with the set
+	// of identifier names it reads, so a later assignment to one of those names re-asserts the
+	// invariant (docs/90 brick 90-14). Truncated at block exit; debug-gated like all contracts.
+	activeInvariants []activeInvariant
 }
 
 type oldCapture struct {

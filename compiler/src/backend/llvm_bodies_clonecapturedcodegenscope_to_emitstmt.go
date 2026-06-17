@@ -529,6 +529,10 @@ func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	return s.emitBlockInCurrentScope(binding.stmt.Body)
 }
 func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
+	// Invariants declared inside this block stop being re-checked once it exits (their variables may
+	// leave scope). Truncate back to the count we entered with (docs/90 brick 90-14).
+	savedInvariants := len(s.activeInvariants)
+	defer func() { s.activeInvariants = s.activeInvariants[:savedInvariants] }()
 	if scoped {
 		savedPackedStores := s.packedStores
 		s.packedStores = s.clonePackedStores()
@@ -564,6 +568,9 @@ func (s *functionState) emitBlock(stmts []ast.Stmt, scoped bool) error {
 }
 func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	if err := s.emitStmtInner(stmt); err != nil {
+		return err
+	}
+	if err := s.recheckInvariantsAfter(stmt); err != nil {
 		return err
 	}
 	return s.maybeEarlyFreeAfter(stmt)
@@ -993,7 +1000,13 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
 			return nil
 		}
-		return s.emitContractCheck(n.Cond, "invariant failed")
+		if err := s.emitContractCheck(n.Cond, "invariant failed"); err != nil {
+			return err
+		}
+		// Standing invariant: re-asserted after each later mutation of a variable it reads, until its
+		// block exits (docs/90 brick 90-14).
+		s.registerActiveInvariant(n.Cond)
+		return nil
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
 	case *ast.StaticAssertBlockStmt:
