@@ -111,13 +111,14 @@ func inferReturnViewRegion(fn *ast.FuncDecl, inferred map[string]string) {
 // region-less (the pre-existing, safe-but-unchecked state), never the reverse.
 func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 	aliases := map[string]bool{}
+	invalidAliases := map[string]bool{}
 	valueIsParamSlice := func(expr ast.Expr) bool {
 		if slice, ok := unwrapParenForRegionPoly(expr).(*ast.SliceExpr); ok && slice != nil {
 			if id, ok := unwrapParenForRegionPoly(slice.Object).(*ast.Ident); ok && id != nil && id.Name == name {
 				return true
 			}
 		}
-		if id, ok := unwrapParenForRegionPoly(expr).(*ast.Ident); ok && id != nil && aliases[id.Name] {
+		if id, ok := unwrapParenForRegionPoly(expr).(*ast.Ident); ok && id != nil && aliases[id.Name] && !invalidAliases[id.Name] {
 			return true
 		}
 		return false
@@ -127,12 +128,19 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 		for _, stmt := range body {
 			switch s := stmt.(type) {
 			case *ast.VarDeclStmt:
-				if s.Value != nil && valueIsParamSlice(s.Value) {
+				if !invalidAliases[s.Name] && s.Value != nil && valueIsParamSlice(s.Value) {
 					aliases[s.Name] = true
 				}
 			case *ast.AssignStmt:
-				if id, ok := s.Target.(*ast.Ident); ok && id != nil && s.Value != nil && valueIsParamSlice(s.Value) {
-					aliases[id.Name] = true
+				if id, ok := s.Target.(*ast.Ident); ok && id != nil {
+					if s.Value != nil && valueIsParamSlice(s.Value) {
+						if !invalidAliases[id.Name] {
+							aliases[id.Name] = true
+						}
+					} else if aliases[id.Name] {
+						delete(aliases, id.Name)
+						invalidAliases[id.Name] = true
+					}
 				}
 			case *ast.IfStmt:
 				collect(s.Then)
@@ -162,9 +170,10 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 		}
 	}
 	for {
-		before := len(aliases)
+		beforeAliases := len(aliases)
+		beforeInvalid := len(invalidAliases)
 		collect(stmts)
-		if len(aliases) == before {
+		if len(aliases) == beforeAliases && len(invalidAliases) == beforeInvalid {
 			break
 		}
 	}

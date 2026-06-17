@@ -80,6 +80,30 @@ def caller() -> void:
 	}
 }
 
+// Do not over-infer: if a local initially aliases the grown parameter but is later reassigned to
+// a different source, returning that local must not be stamped with the grown parameter's region.
+func TestReturnedViewInferredRegionInvalidatesReassignedLocalAlias(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_reassigned_alias_ok.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize) -> view[u8]:
+    out.push(65u8)
+    w: mutable view[u8] = out[0:n]
+    w <- src[0:n]
+    return w
+
+def caller() -> usize:
+    can Abort.Panic:
+        outer: mutable darray[u8] = []
+        outer.push(9u8)
+        escaped: mutable view[u8] = outer[0:1]
+        region inner(64):
+            v: mutable darray[u8] @inner = []
+            escaped <- head(&v, &outer, 1)
+        return escaped[0].usize()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("returning a reassigned view alias backed by outer storage should remain accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // The valid case must NOT be rejected: when the source container outlives the view's use, returning
 // and reading the view is sound and must type-check cleanly.
 func TestReturnedViewWithinLifetimeAccepted(t *testing.T) {
