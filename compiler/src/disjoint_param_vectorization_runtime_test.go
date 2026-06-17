@@ -114,6 +114,21 @@ def build_aliased() -> f64:
     axpy_aliased(&c, &c)
     return checksum(c)
 
+# Forwarder: passes its own params straight to the kernel. The interprocedural fixpoint must
+# prove axpy_distinct disjoint THROUGH this forwarder (build_forwarded passes fresh-distinct
+# buffers), so this exercises the depend-edge stamping path end-to-end.
+def forward_axpy(p: mutable darray[f64]&, q: mutable darray[f64]&) -> void:
+    axpy_distinct(p, q)
+
+def build_forwarded() -> f64:
+    a: mutable darray[f64] = []
+    b: mutable darray[f64] = []
+    for i in 0..<2051:
+        a.push(i.f64() * 0.5)
+        b.push((i.f64() + 0.25) * 1.25)
+    forward_axpy(&a, &b)
+    return checksum(a)
+
 def build_jacobi() -> f64:
     src: mutable darray[f64] = []
     dst: mutable darray[f64] = []
@@ -180,6 +195,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     st: f64 = build_aliased_stencil()
     fl: f64 = build_fluid_frame()
     sf: f64 = build_stable_fluid_pressure()
+    fw: f64 = build_forwarded()
     print(d) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((d * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -203,6 +219,10 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     print(sf) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print(" ") can Console.Write
     print((sf * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print(fw) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print(" ") can Console.Write
+    print((fw * 1000000.0).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     print("\n") can Console.Write
     return 0
 `, filepath.ToSlash(rel))

@@ -6,23 +6,36 @@ import (
 	"elisacore/src/ast"
 )
 
-// callDisjointObservation is one observed call site of a candidate kernel: the proven-distinct
-// container-param pairs and the per-param self-noalias bits computed for THAT call. The
-// whole-program fact (FuncDisjointParamInfo) is the intersection of these across every call.
+// pairDisjointEvidence is why a callee parameter pair could be distinct AT ONE call site:
+// either proven outright by the per-call fresh-anchor predicate (`base`), or CONDITIONAL on the
+// enclosing function's own parameters being disjoint (`depend` — both args were the enclosing
+// function's params depP/depQ, so the pair is distinct here iff the enclosing function's
+// (depP,depQ) is itself proven). Absence of evidence for a pair means "not distinct here", which
+// removes the pair from the callee's whole-program fact.
+type pairDisjointEvidence struct {
+	base   bool
+	depend bool
+	depP   int
+	depQ   int
+}
+
+// callDisjointObservation is one observed call site of a candidate kernel: the call's enclosing
+// function, the callee's container-param indices, and the per-pair evidence. The whole-program
+// fact (FuncDisjointParamInfo) is derived by the least-fixpoint in finalizeFuncDisjointParams.
 type callDisjointObservation struct {
+	enclosing       *ast.FuncDecl
 	containerParams []int
-	distinctPairs   map[[2]int]bool
-	selfNoalias     map[int]bool
+	evidence        map[[2]int]pairDisjointEvidence
 }
 
 // registerCallDisjointObservation records one call site against its resolved callee declaration,
-// for the per-callee aggregation in finalizeFuncDisjointParams. It runs for every analyzed call
-// whose callee resolves to a direct, by-name free function with >=2 container-ref params —
-// including calls where no pair is distinct, since those must still pull pairs OUT of the
-// cross-site intersection. Calls whose callee cannot be resolved by name are simply not recorded;
-// finalize separately disqualifies any callee reachable through an unobserved path (address-taken
-// / overloaded), so an unrecorded call can never leave a stale over-broad fact.
-func (a *Analyzer) registerCallDisjointObservation(call *ast.CallExpr, containerParams []int, distinctPairs map[[2]int]bool, selfNoalias map[int]bool) {
+// for the per-callee fixpoint in finalizeFuncDisjointParams. It runs for every analyzed call whose
+// callee resolves to a direct, by-name free function with >=2 container-ref params — including
+// calls where no pair is distinct, since those must still keep a pair OUT of the callee's fact.
+// Calls whose callee cannot be resolved by name are simply not recorded; finalize separately
+// disqualifies any callee reachable through an unobserved path (address-taken / overloaded), so an
+// unrecorded call can never leave a stale over-broad fact.
+func (a *Analyzer) registerCallDisjointObservation(call *ast.CallExpr, containerParams []int, evidence map[[2]int]pairDisjointEvidence) {
 	if a == nil || a.disjointCallSites == nil || len(containerParams) < 2 {
 		return
 	}
@@ -31,10 +44,18 @@ func (a *Analyzer) registerCallDisjointObservation(call *ast.CallExpr, container
 		return
 	}
 	a.disjointCallSites[decl] = append(a.disjointCallSites[decl], callDisjointObservation{
+		enclosing:       a.currentFuncDecl,
 		containerParams: append([]int(nil), containerParams...),
-		distinctPairs:   distinctPairs,
-		selfNoalias:     selfNoalias,
+		evidence:        evidence,
 	})
+}
+
+// orderedPair returns {i,j} with i<j, the canonical key used throughout the disjointness maps.
+func orderedPair(i, j int) [2]int {
+	if i > j {
+		i, j = j, i
+	}
+	return [2]int{i, j}
 }
 
 // resolveDirectCallFuncDecl returns the function declaration a call targets, but ONLY for the
@@ -61,68 +82,121 @@ func (a *Analyzer) resolveDirectCallFuncDecl(call *ast.CallExpr) (*ast.FuncDecl,
 	return decl, true
 }
 
-// finalizeFuncDisjointParams aggregates the per-call proven_distinct observations into the
-// whole-program, per-callee FuncDisjointParams fact (docs/84 §3.2, Increment 3a). A param pair is
-// kept only when proven distinct at EVERY observed call site (set intersection); a self-noalias
-// bit only when set at every site. Eligibility is gated to free functions that are (a) uniquely
-// named and (b) never address-taken, so every call is an observed direct by-name call and the
-// intersection is complete — see the FuncDisjointParamInfo soundness note.
+// finalizeFuncDisjointParams derives the whole-program, per-callee FuncDisjointParams fact from
+// the observed call sites by a LEAST-fixpoint over the call graph (docs/84 §3.2 + the forwarding
+// extension). A callee parameter pair is proven distinct only when EVERY observed call site of the
+// callee contributes distinctness — where a site contributes either by direct fresh-anchor
+// evidence (`base`) or because it forwards the enclosing function's own params and that enclosing
+// pair is ITSELF already proven (`depend`).
+//
+// Least-fixpoint (start with nothing proven, add only when grounded) is the soundness crux: a
+// purely forwarding cycle with no fresh-anchored base never becomes proven, because its only
+// evidence is a `depend` that is never discharged. A greatest-fixpoint (start all true, remove on
+// contradiction) would leave such ungrounded cycles unsoundly true. Conservative by construction:
+// it can only fail to prove a true fact (lost optimization), never prove a false one.
+//
+// Eligibility (unique name, never address-taken) is required for a function to (a) be stampable
+// and (b) have its facts TRUSTED as a `depend` target — both need every call site observed, which
+// only holds for a direct-by-name, non-address-taken free function. See the soundness note on
+// FuncDisjointParamInfo.
 func (a *Analyzer) finalizeFuncDisjointParams(decls []scopedDecl) {
 	if a == nil || len(a.disjointCallSites) == 0 {
 		return
 	}
 	nameCounts, valueUsedNames := scanFuncNameUsage(decls)
+	eligible := func(fn *ast.FuncDecl) bool {
+		return fn != nil && nameCounts[fn.Name] == 1 && !valueUsedNames[fn.Name]
+	}
+
+	// proven[f] = the param pairs proven distinct so far. Only ever populated for eligible f, so a
+	// `depend` on f's fact (queried below) implicitly requires f eligible.
+	proven := map[*ast.FuncDecl]map[[2]int]bool{}
+	contributes := func(obs callDisjointObservation, pair [2]int) bool {
+		ev, ok := obs.evidence[pair]
+		if !ok {
+			return false
+		}
+		if ev.base {
+			return true
+		}
+		if ev.depend {
+			if pr, ok := proven[obs.enclosing]; ok && pr[[2]int{ev.depP, ev.depQ}] {
+				return true
+			}
+		}
+		return false
+	}
+
+	for changed := true; changed; {
+		changed = false
+		for decl, observations := range a.disjointCallSites {
+			if !eligible(decl) || len(observations) == 0 {
+				continue
+			}
+			// Candidate pairs = those with evidence at the first site; a pair must contribute at
+			// EVERY site to be proven, so it must appear here. (Pairs absent from site 0 can never
+			// be proven.)
+			for pair := range observations[0].evidence {
+				if proven[decl][pair] {
+					continue
+				}
+				allContribute := true
+				for _, obs := range observations {
+					if !contributes(obs, pair) {
+						allContribute = false
+						break
+					}
+				}
+				if allContribute {
+					if proven[decl] == nil {
+						proven[decl] = map[[2]int]bool{}
+					}
+					proven[decl][pair] = true
+					changed = true
+				}
+			}
+		}
+	}
 
 	result := map[*ast.FuncDecl]*FuncDisjointParamInfo{}
-	for decl, observations := range a.disjointCallSites {
-		if decl == nil || len(observations) == 0 {
+	for decl, pairs := range proven {
+		if len(pairs) == 0 {
 			continue
 		}
-		// Unique name: a duplicated name means by-name resolution at a call site may bind a
-		// different overload than this decl, so observed sites cannot be trusted as complete.
-		if nameCounts[decl.Name] != 1 {
-			continue
+		containerParams := a.disjointCallSites[decl][0].containerParams
+		result[decl] = &FuncDisjointParamInfo{
+			DistinctPairs: pairs,
+			SelfNoalias:   selfNoaliasFromPairs(containerParams, pairs),
 		}
-		// Address-taken: any use of the name as a value (not a direct call target) means the
-		// function could be invoked from an unobserved indirect site.
-		if valueUsedNames[decl.Name] {
-			continue
-		}
-		distinct, selfNoalias := intersectDisjointObservations(observations)
-		if len(distinct) == 0 {
-			continue
-		}
-		result[decl] = &FuncDisjointParamInfo{DistinctPairs: distinct, SelfNoalias: selfNoalias}
 	}
 	if len(result) != 0 {
 		a.funcDisjointParams = result
 	}
 }
 
-// intersectDisjointObservations keeps only the pairs / self-bits proven at every observation.
-func intersectDisjointObservations(observations []callDisjointObservation) (map[[2]int]bool, map[int]bool) {
-	distinct := map[[2]int]bool{}
-	selfNoalias := map[int]bool{}
-	// Seed from the first observation, then intersect with the rest.
-	for pair := range observations[0].distinctPairs {
-		distinct[pair] = true
+// selfNoaliasFromPairs marks param i self-noalias when it is proven distinct from EVERY other
+// container param — the precondition for the backend's full memcheck-eliding stamp.
+func selfNoaliasFromPairs(containerParams []int, pairs map[[2]int]bool) map[int]bool {
+	self := map[int]bool{}
+	if len(containerParams) < 2 {
+		return self
 	}
-	for idx := range observations[0].selfNoalias {
-		selfNoalias[idx] = true
-	}
-	for _, obs := range observations[1:] {
-		for pair := range distinct {
-			if !obs.distinctPairs[pair] {
-				delete(distinct, pair)
+	for _, i := range containerParams {
+		all := true
+		for _, j := range containerParams {
+			if i == j {
+				continue
+			}
+			if !pairs[orderedPair(i, j)] {
+				all = false
+				break
 			}
 		}
-		for idx := range selfNoalias {
-			if !obs.selfNoalias[idx] {
-				delete(selfNoalias, idx)
-			}
+		if all {
+			self[i] = true
 		}
 	}
-	return distinct, selfNoalias
+	return self
 }
 
 // scanFuncNameUsage walks every declaration and returns (1) how many top-level FuncDecls carry

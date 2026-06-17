@@ -213,8 +213,25 @@ cd compiler
   in `.github/workflows/disjoint-param-vectorization.yml`. The bit-identical test
   covers AXPY, Jacobi/stencil, an explicitly aliased stencil, a multi-field
   fluid-frame-style update, and a scaled-down 2D Stable-Fluids-style Jacobi pass.
-- **Increment 5 — flip default / optional keyword.** Default-on once green;
-  optionally add the `disjoint` checked-assertion keyword + `-Wperf` hint.
+- **Increment 5 (perf hint) — DONE (`d5412afc`).** `-Wperf` graduated diagnostic on a
+  `@hot` kernel with >=2 numeric `darray[T]&` params not provably disjoint (warning by
+  default, hard error under `-Wperf`), naming the unproven pair + remedies. Default-flip
+  and the optional `disjoint` checked-assertion keyword remain deferred (a silent default
+  is not flipped without explicit sign-off; the keyword is the `-strict`/safety analog,
+  docs/85).
+- **Tracking improvement A — fresh-anchor widening DONE (`f879a967`).** `proven_distinct`
+  now proves a pair when AT LEAST ONE side is a private-fresh local (was: both). A
+  brand-new, never-escaping buffer is the disjointness anchor, ⊥ any distinct-rooted other
+  buffer. Adversarially verified sound (reassignment / laundered-return stay not-distinct).
+- **Tracking improvement B — interprocedural forwarding FIXPOINT DONE.** A kernel reached
+  through a forwarder that passes its OWN params is proven when all the forwarder's callers
+  pass disjoint args. A LEAST-fixpoint over the call graph: base = fresh-anchor evidence;
+  `depend` edge = a call forwarding the enclosing function's params `(p,q)`, distinct iff
+  that function's `(p,q)` is itself proven. Least (not greatest) fixpoint so ungrounded
+  forwarding cycles are never proven. The depend edge is guarded against forwarded-param
+  rebinding (Elisa's borrow checker already rejects `p <- q` on a `darray&`; the
+  reassigned-param guard is defense-in-depth). Differential gate extended with a forwarded
+  kernel — bit-identical O0/O3 off/on.
 
 ## 6. Rejected alternatives (recorded so they aren't re-litigated)
 

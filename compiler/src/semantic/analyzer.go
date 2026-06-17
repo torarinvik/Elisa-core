@@ -304,6 +304,7 @@ type Analyzer struct {
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	hotDisjointKernelCandidates      []hotDisjointKernelCandidate
 	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
+	reassignedParamCache             map[*ast.FuncDecl]map[string]bool
 	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace                 string
 	currentUsings                    []string

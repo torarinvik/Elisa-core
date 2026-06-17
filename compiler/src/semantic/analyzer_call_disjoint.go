@@ -99,11 +99,11 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 		}
 	}
 
-	// Register this call site for whole-program per-callee aggregation (Increment 3a),
-	// EVEN WHEN no pair is distinct here: a non-distinct site must kill pairs that other
-	// sites prove, so the cross-call-site intersection stays sound. Done before the
-	// len(distinct)==0 early return below for exactly that reason.
-	a.registerCallDisjointObservation(call, containerParams, distinct, selfNoalias)
+	// Register this call site for the whole-program per-callee fixpoint, with per-pair evidence
+	// (direct fresh-anchor `base`, or a `depend` on the enclosing function's own params). Done for
+	// every candidate-kernel call — even one with no distinct pair, since a site that contributes
+	// nothing must keep the pair out of the callee's fact.
+	a.registerCallDisjointObservation(call, containerParams, a.buildPairEvidence(containerParams, distinct, args))
 
 	if len(distinct) == 0 {
 		return
@@ -356,4 +356,134 @@ func isCloneCallExpr(call *ast.CallExpr) bool {
 	}
 	ident, ok := fn.(*ast.Ident)
 	return ok && ident.Name == "clone"
+}
+
+// buildPairEvidence records, per container-param pair of the callee, WHY it could be distinct at
+// this call site (consumed by the whole-program fixpoint in finalizeFuncDisjointParams):
+//   - base:   the per-call fresh-anchor predicate proved it here (unconditional).
+//   - depend: both args are the ENCLOSING function's own parameters p≠q, so the pair is distinct
+//             here exactly when the enclosing function's (p,q) is itself proven disjoint — the
+//             interprocedural forwarding edge.
+// A pair with neither gets no entry, which keeps it out of the callee's fact (fail closed).
+func (a *Analyzer) buildPairEvidence(containerParams []int, distinct map[[2]int]bool, args []ast.Expr) map[[2]int]pairDisjointEvidence {
+	evidence := map[[2]int]pairDisjointEvidence{}
+	for x := 0; x < len(containerParams); x++ {
+		for y := x + 1; y < len(containerParams); y++ {
+			i, j := containerParams[x], containerParams[y]
+			pair := [2]int{i, j} // containerParams is ascending, so i<j
+			if distinct[pair] {
+				evidence[pair] = pairDisjointEvidence{base: true}
+				continue
+			}
+			pi, oki := a.enclosingParamIndexForArg(args[i])
+			pj, okj := a.enclosingParamIndexForArg(args[j])
+			if oki && okj && pi != pj {
+				p, q := pi, pj
+				if p > q {
+					p, q = q, p
+				}
+				evidence[pair] = pairDisjointEvidence{depend: true, depP: p, depQ: q}
+			}
+		}
+	}
+	return evidence
+}
+
+// enclosingParamIndexForArg resolves a call argument to the index of the enclosing function's
+// parameter it forwards (`p` or `&p` where p is a parameter), or false. A parameter that the
+// enclosing function whole-value-REASSIGNS (`p <- other`) is rejected: such a param no longer
+// holds its incoming buffer, so the caller's disjointness guarantee about it would be stale —
+// trusting it would be unsound. Element stores (`p[i] <- x`) keep p's buffer and do not disqualify.
+func (a *Analyzer) enclosingParamIndexForArg(arg ast.Expr) (int, bool) {
+	if a.currentFuncDecl == nil || a.currentScope == nil {
+		return 0, false
+	}
+	ident, ok := stripAddrAndParens(arg).(*ast.Ident)
+	if !ok || ident == nil {
+		return 0, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil || sym.Kind != SymbolParam {
+		return 0, false
+	}
+	if a.reassignedParamNames()[ident.Name] {
+		return 0, false
+	}
+	return sym.ParamIndex, true
+}
+
+// stripAddrAndParens peels `&` and parens so `&p`, `(p)`, and `p` all resolve to the inner place.
+func stripAddrAndParens(e ast.Expr) ast.Expr {
+	for {
+		e = stripOptimizationParens(e)
+		if addr, ok := e.(*ast.AddrOfExpr); ok && addr != nil {
+			e = addr.Operand
+			continue
+		}
+		return e
+	}
+}
+
+// reassignedParamNames returns (memoized per function) the set of names that appear as the target
+// of a whole-value reassignment (`name <- …`, `name += …`, `name as … = …`) anywhere in the
+// current function body. A bare-identifier target rebinds the variable's whole value; an indexed
+// or field target (`name[i] <- …`) does not and is ignored. Conservative and flow-insensitive: a
+// param reassigned anywhere is excluded from forwarding evidence everywhere (lost optimization,
+// never a miscompile).
+func (a *Analyzer) reassignedParamNames() map[string]bool {
+	fn := a.currentFuncDecl
+	if fn == nil {
+		return nil
+	}
+	if a.reassignedParamCache == nil {
+		a.reassignedParamCache = map[*ast.FuncDecl]map[string]bool{}
+	}
+	if set, ok := a.reassignedParamCache[fn]; ok {
+		return set
+	}
+	set := map[string]bool{}
+	for _, stmt := range fn.Body {
+		collectReassignedTargets(reflect.ValueOf(stmt), set)
+	}
+	a.reassignedParamCache[fn] = set
+	return set
+}
+
+// collectReassignedTargets reflect-walks statements, adding the bare-identifier target name of
+// every whole-value assignment form to `set`.
+func collectReassignedTargets(v reflect.Value, set map[string]bool) {
+	if !v.IsValid() {
+		return
+	}
+	switch v.Kind() {
+	case reflect.Interface, reflect.Pointer:
+		if v.IsNil() {
+			return
+		}
+		switch n := v.Interface().(type) {
+		case *ast.AssignStmt:
+			recordReassignTarget(n.Target, set)
+		case *ast.AugAssignStmt:
+			recordReassignTarget(n.Target, set)
+		case *ast.AsRefAssignStmt:
+			recordReassignTarget(n.Target, set)
+		}
+		collectReassignedTargets(v.Elem(), set)
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			collectReassignedTargets(v.Field(i), set)
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			collectReassignedTargets(v.Index(i), set)
+		}
+	}
+}
+
+// recordReassignTarget adds the target name when it is a bare identifier (a whole-value rebind);
+// indexed/field targets are element/field stores that do not rebind the variable, so are ignored.
+func recordReassignTarget(target ast.Expr, set map[string]bool) {
+	if ident, ok := stripOptimizationParens(target).(*ast.Ident); ok && ident != nil {
+		set[ident.Name] = true
+	}
 }
