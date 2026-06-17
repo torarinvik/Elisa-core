@@ -67,9 +67,11 @@ def run() -> void:
 	}
 }
 
-// A whole-value read of `a` elsewhere (passed by value to a sink) means a's buffer may be copied
-// into another local out of view, so a must not count as private-fresh.
-func TestCallArgDisjointWholeValueEscapeNotDistinct(t *testing.T) {
+// `a` escapes (passed by value to a sink), so `a` is not private-fresh and cannot anchor
+// disjointness. But `b` is still a pristine fresh buffer that nothing else can reference, so it
+// anchors the pair: a brand-new buffer cannot alias `a` regardless of what `a` escaped into.
+// Proven distinct via the single fresh anchor (`b`) — sound; a runtime check would not trip.
+func TestCallArgDisjointFreshAnchorSurvivesOtherSideEscape(t *testing.T) {
 	src := disjointKernelSrc + `
 def sink(v: darray[f64]) -> void:
 	return
@@ -81,8 +83,29 @@ def run() -> void:
 	axpy(&a, &b)
 `
 	result := analyzeTreeTestSource(t, "disjoint_escape.elisa", src)
+	info := firstDisjointInfo(result)
+	if info == nil || !info.PairDistinct(0, 1) {
+		t.Fatalf("fresh anchor `b` should prove the pair distinct even though `a` escaped, got %+v", info)
+	}
+}
+
+// ADVERSARIAL: when the OTHER side is a laundered header-copy of the fresh local (`c` shares b's
+// buffer via a returning call), the fresh local has ESCAPED (passed to the launderer), so it is no
+// longer private-fresh and cannot anchor — the pair is correctly NOT distinct. This is what keeps
+// the single-anchor widening sound against return-value aliasing.
+func TestCallArgDisjointLaunderedReturnNotDistinct(t *testing.T) {
+	src := disjointKernelSrc + `
+def alias_of(v: darray[f64]) -> darray[f64]:
+	return v
+
+def run() -> void:
+	b: mutable darray[f64] = []
+	c: mutable darray[f64] = alias_of(b)
+	axpy(&b, &c)
+`
+	result := analyzeTreeTestSource(t, "disjoint_launder.elisa", src)
 	if info := firstDisjointInfo(result); info != nil && info.PairDistinct(0, 1) {
-		t.Fatalf("whole-value-escaped `a` must NOT be proven distinct, got %v", info.DistinctPairs)
+		t.Fatalf("laundered header-copy `c` must NOT be proven distinct from `b`, got %v", info.DistinctPairs)
 	}
 }
 
@@ -139,12 +162,36 @@ func TestCallArgDisjointDriftFrontier(t *testing.T) {
 `,
 		},
 		{
-			name: "whole value escape is not private fresh",
+			// `a` escaped (not an anchor), but the fresh, never-escaped `b` anchors the pair: a
+			// brand-new buffer cannot alias `a`. Genuinely disjoint — a runtime check would not trip.
+			name: "fresh anchor survives other-side escape",
 			body: `
 	a: mutable darray[f64] = []
 	b: mutable darray[f64] = []
 	sink(a)
 	axpy(&a, &b)
+`,
+			distinct: true,
+		},
+		{
+			// The fresh local `b` is whole-value reassigned to alias `a`, so it is no longer a
+			// pristine buffer and cannot anchor. Aliased — must NOT be distinct.
+			name: "reassignment to alias kills the anchor",
+			body: `
+	a: mutable darray[f64] = []
+	b: mutable darray[f64] = []
+	b <- a
+	axpy(&a, &b)
+`,
+		},
+		{
+			// `c` is a laundered header-copy of `b` (returned by a call); passing `&b` to the
+			// launderer escapes `b`, so neither side anchors. Aliased — must NOT be distinct.
+			name: "laundered return value aliases",
+			body: `
+	b: mutable darray[f64] = []
+	c: mutable darray[f64] = alias_of(b)
+	axpy(&b, &c)
 `,
 		},
 		{
@@ -162,6 +209,9 @@ func TestCallArgDisjointDriftFrontier(t *testing.T) {
 	preamble := disjointKernelSrc + `
 def sink(v: darray[f64]) -> void:
 	return
+
+def alias_of(v: darray[f64]) -> darray[f64]:
+	return v
 `
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

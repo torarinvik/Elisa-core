@@ -39,20 +39,22 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 	private := a.privateFreshDArrayLocals()
 
 	var containerParams []int
-	rootsByIdx := map[int][]string{}
+	argInfoByIdx := map[int]disjointArgRoots{}
 	for i := 0; i < limit; i++ {
 		if !isContainerRefType(paramTypes[i]) {
 			continue
 		}
 		containerParams = append(containerParams, i)
 		roots := a.aliasRootsForExpr(args[i])
-		if len(roots) == 0 || !rootsAllPrivateFresh(roots, private) {
-			// Un-provable provenance (param-backed, header-copied, view-derived, field path):
-			// no roots recorded, so this arg can never be proven distinct. Absence of positive
-			// evidence, never an assertion of aliasing.
+		if len(roots) == 0 {
+			// Unidentifiable buffer (opaque expression / unresolved provenance): no roots, so we
+			// can neither confirm freshness nor non-overlap. Absence of evidence, never aliasing.
 			continue
 		}
-		rootsByIdx[i] = roots
+		argInfoByIdx[i] = disjointArgRoots{
+			roots: roots,
+			fresh: rootsAllPrivateFresh(roots, private),
+		}
 	}
 	if len(containerParams) < 2 {
 		return
@@ -63,16 +65,27 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 	for x := 0; x < len(containerParams); x++ {
 		for y := x + 1; y < len(containerParams); y++ {
 			i, j := containerParams[x], containerParams[y]
-			ri, oki := rootsByIdx[i]
-			rj, okj := rootsByIdx[j]
+			ai, oki := argInfoByIdx[i]
+			aj, okj := argInfoByIdx[j]
 			if !oki || !okj {
 				continue
 			}
-			if aliasRootSetsOverlap(ri, rj) {
-				// Two private-fresh locals never share roots; this guards the
-				// degenerate `f(&a, &a)` (same local twice) and any field-path overlap.
+			if aliasRootSetsOverlap(ai.roots, aj.roots) {
+				// Shared root ⇒ the same buffer is reachable from both args (the degenerate
+				// `f(&a, &a)`, or a field-path overlap). Not distinct.
 				continue
 			}
+			if !ai.fresh && !aj.fresh {
+				// Both buffers pre-existed this call. Distinct NAMES do not imply distinct
+				// buffers — a caller may have header-copied one into the other (`b = a`), so two
+				// pre-existing roots can alias. Un-provable here; fail closed.
+				continue
+			}
+			// At least one side is a PRIVATE-FRESH local: a buffer freshly allocated in this
+			// function (`[]`/comprehension/`clone`) whose whole value provably never escapes, so
+			// nothing else — no parameter, local, or field — can reference it. A brand-new buffer
+			// therefore cannot alias any distinct-rooted other buffer. With non-overlapping roots
+			// confirming the other side is not that same fresh local, the pair is provably disjoint.
 			distinct[[2]int{i, j}] = true
 			distinctCount[i]++
 			distinctCount[j]++
@@ -101,6 +114,13 @@ func (a *Analyzer) recordCallArgDisjoint(call *ast.CallExpr, paramTypes []Type, 
 		DistinctPairs:   distinct,
 		SelfNoalias:     selfNoalias,
 	}
+}
+
+// disjointArgRoots is the per-argument buffer evidence used by the pairwise disjointness check:
+// the argument's alias roots and whether they all name private-fresh locals (brand-new buffers).
+type disjointArgRoots struct {
+	roots []string
+	fresh bool
 }
 
 // isContainerRefType reports whether t is a reference to a growable container whose backing buffer
