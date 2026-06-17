@@ -149,7 +149,6 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
   the natural Stage-2.5 follow-up. Documented so the index example in §13.5 of docs/85 isn't
   silently assumed covered.
 - **No multiplication of two variables, no division/mod in subjects.** Declines, sound.
-- **`..<` in flow position** still parses only in type position (pre-existing follow-up).
 
 ## 9. Staged bricks
 

@@ -321,19 +321,18 @@ Instead:
 
 ## The gating prerequisite (the real wall)
 
-The AoS default is frictionless **only if region-poly threading is total** for any function that
-returns or builds a node. Today a bare `darray.push` / storeless-`match` store recovery / `new[auto]`
-**inside a helper** can still error `requires an active in <arena>: scope`, and docs/75 step 4's
-machinery is the foundation. Recursive builders are exactly where beginners live; that error on a
-beginner's first recursive function is the precise outcome this design exists to prevent. **Total
-region-poly threading + retargeting the storeless surface onto AoS index handles is the gating
-deliverable** — everything else is downstream.
+The AoS default is frictionless only if region-poly threading is total for functions that return or
+build nodes. That gating work has since landed for the beginner-facing paths: `new[auto]` builders,
+plain recursive enum constructors/matches, build-local-return containers (`darray`/`dict`/`set`/`dstr`),
+and by-ref container growth/reassignment all thread or adopt the caller's region instead of producing a
+bare `requires an active in <arena>: scope` helper error. Recursive builders are exactly where
+beginners live; keeping that path ceremony-free is the reason the AoS default is viable.
 
 ## Implementation roadmap (phases)
 
 | Phase | Delivers | Depends on |
 |------|----------|-----------|
-| 0 | **Close region-poly threading gaps** so storeless builders never hit "requires an active in <arena>" — container ops (`darray.push`) and constructors in helper functions thread the caller's region like `new[auto]` already does (docs/75). Note: enum *construction* + *match* threading is already done (docs/74/75); this phase is the remaining explicit-container gap. | docs/75 |
+| 0 | **DONE** — region-poly threading/adoption for the no-ceremony builder paths: container build-local-return (`darray`/`dict`/`set`/`dstr`), by-ref container growth/reassignment, `new[auto]`, and plain recursive enum constructor/match helpers. Helpers now thread or adopt the caller's region instead of requiring a manual `in <arena>:` scope. | docs/75 |
 | 1 | **DONE** — `layout` on enum declarations: parses `enum … layout soa\|aos(sparse, index: uN)`, carries Layout/LayoutSet/LayoutSparse/IndexWidth onto EnumDecl + EnumType; bad index widths rejected at parse. `common(...)` canonical shared-field form also DONE. | struct `layout` grammar |
 | 2 | **Opaque index handle ABI**: index width `u8…u64` (default `u32`, node-index), free null sentinel at each width, loud overflow panic; opaque-handle check (no raw `&` leak). **Semantic foundation DONE** (`ResolvedIndexWidthBits`/`NullSentinelValue`/`MaxNodeCount` + layout-option validation). **Codegen DEFERRED into Phase 3**: the current handle is hard-coded `u32` across ~dozens of backend sites + the runtime `PackedStoreState`, so the width is built fresh in the AoS handle, not retrofitted onto the demoted SoA store. | 1 |
 | 3 | **DONE** — Plain recursive `enum` ⇒ region-backed AoS default. Slice 0+0b: promotion (syntactic self-reference at declare-time → `Packed`+`RecursivePlain`) + the full zero-ceremony surface (plain enum + `common(...)` + bare constructors + storeless match). **Slice 2: AoS storage** (`packedEnumABIAoS` — one contiguous `{tag, common, payload}` record per node, dense index handle, stable-address chunk store) is the default for recursive plain enums (`enum X layout soa` opts back to columnar). **Verified at scale: binary-trees N=18 = 0.38s/22MB — ~5.5× faster + 4× lighter than SoA, beating the struct form and hand-written C++/Rust arenas.** | 0, 1 |

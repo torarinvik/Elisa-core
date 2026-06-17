@@ -467,7 +467,8 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 // functionBuildsAndReturnsLocalContainer detects the build-local-return shape (Stage 1 of the
 // region-return-inference plan): a function whose SIGNATURE return type is an owned container
 // (`darray`/`dict`/`set`/`dstr`) and which RETURNS a local that was declared as a container literal
-// (`out: darray[T] = []` / `= {}`) built up in the body. Such a function is region-polymorphic: its
+// (`out: darray[T] = []`, `out: dict[K,V] = {}`, `out: set[T] = {}`) built up in the body.
+// Such a function is region-polymorphic: its
 // `out = []` opens a synthesized `__auto_*` region (maybeWrapFunctionBodyInAutoRegion wraps the
 // whole body, the `return out` included), and once classified region-polymorphic the backend's
 // regionPolyAutoAdopts threads+adopts that region into the caller's `__region_auto`, so the result
