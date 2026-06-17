@@ -102,9 +102,23 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
 2. **90-2 — translator + discharge tier + profile. [LANDED]** integer/bool fragment incl. var×var;
    `facts ∧ ¬O` query; `ProofProvenSMT`; `-smt` flag; `--explain` profile line; `SMTStats` on Result.
    Profiled at ~0.08ms/obligation.
-3. **90-3 (next) — division/mod with sound semantics; the `requires` precondition path (brick 86-5)
-   as an SMT fallback; counterexample extraction (z3 `(get-model)`) to turn `sat` into a concrete
-   "fails when a=10, b=10" diagnostic where the facts are complete.**
+3. **90-3 — division/mod, `requires` SMT fallback, counterexamples. [LANDED]**
+   - **division/mod**: `+ - * /` and `%` now translate. SMT-LIB `div`/`mod` are *Euclidean*, which
+     equals Elisa's *truncating* `/`/`%` only for a non-negative dividend and a strictly-positive
+     divisor — so translation is gated on `provablyNonNeg(dividend) ∧ provablyPositive(divisor)`
+     (unsigned type or interval lower bound; the positivity gate also excludes div-by-zero, where
+     SMT-LIB `div` is an unconstrained total function that could unsoundly "prove"). A signed dividend
+     that could be negative declines. Now provable: `def half(n: usize is Bounded[0,100]) -> usize is
+     Bounded[0,50]: return n / 2u`. Full signed-division modeling (introduce q,r with truncation
+     axioms) is a follow-up.
+   - **`requires` SMT fallback**: when the linear clause prover (brick 86-5) declines a precondition,
+     `trySMTProveRequires` translates the clause with params substituted by caller-arg terms and proves
+     it against the caller's facts. Now provable: `requires a * b <= 100` at a call with a,b ∈ [2,5].
+   - **counterexamples**: the harness gained `CheckValues` (on `sat`, fetch `(get-value …)` for the
+     declared vars; balanced-s-expr reader + tolerant parser, negatives normalized). A precondition the
+     caller's facts don't guarantee now warns with a concrete witness — *"it can fail when a=5, b=5"* —
+     instead of a generic message. Honest framing (a hint, not a refutation: our facts are a subset),
+     but a real input the caller's facts permit.
 4. **90-4 (future) — quantifiers** (`forall`/`exists` in specs): the capability the linear tier can
    never reach, and the line between "refinement checker" and "verifier." Gated behind `-smt`, same
    soundness contract (only `unsat` concludes), with trigger management as the main risk.

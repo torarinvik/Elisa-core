@@ -57,10 +57,23 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 			a.recordProof(call.Pos(), subject, clauseName, ProofRefuted)
 			a.errorf(call.Pos(), "precondition of %q is violated: the argument provably does not satisfy `requires`", decl.Name)
 		default:
+			// SMT fallback (docs/90 brick 3): the linear clause prover declined, but the solver may
+			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
+			// caller's facts. Only `unsat` of the negation concludes — sound, off unless -smt.
+			proven, counterexample := a.trySMTProveRequires(req, subst)
+			if proven {
+				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
+				continue
+			}
 			// Unknown: the callee still checks this at runtime (debug builds). Surface it so the user
-			// knows a static guarantee fell back, and let -strict escalate.
+			// knows a static guarantee fell back, and let -strict escalate. A solver counterexample (an
+			// input the caller's facts permit that violates the precondition) sharpens the message.
 			a.recordProof(call.Pos(), subject, clauseName, ProofRuntime)
-			a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; pass a provable value or accept the runtime check", decl.Name)
+			if counterexample != "" {
+				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; it can fail when %s (or accept the runtime check)", decl.Name, counterexample)
+			} else {
+				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; pass a provable value or accept the runtime check", decl.Name)
+			}
 		}
 	}
 }

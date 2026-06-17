@@ -57,6 +57,28 @@ func TestSolverNonlinearProof(t *testing.T) {
 	}
 }
 
+// CheckValues returns a concrete counterexample on Sat. `x in [0,10] and x > 7` is satisfiable; the
+// model must pin x to a value in (7,10].
+func TestSolverCheckValuesModel(t *testing.T) {
+	z3Available(t)
+	s, err := Open(Options{})
+	if err != nil {
+		t.Fatalf("open solver: %v", err)
+	}
+	defer s.Close()
+	res, vals, _ := s.CheckValues("(declare-const v_x Int)\n(assert (>= v_x 0))\n(assert (<= v_x 10))\n(assert (> v_x 7))", []string{"v_x"})
+	if res != Sat {
+		t.Fatalf("expected sat, got %s", res)
+	}
+	got, ok := vals["v_x"]
+	if !ok {
+		t.Fatalf("expected a model value for v_x, got %v", vals)
+	}
+	if got != "8" && got != "9" && got != "10" {
+		t.Fatalf("expected v_x in (7,10], got %q", got)
+	}
+}
+
 // The incremental scopes are isolated: a fact asserted inside one Check must not leak into the next.
 func TestSolverScopesAreIsolated(t *testing.T) {
 	z3Available(t)

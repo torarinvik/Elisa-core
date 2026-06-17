@@ -147,6 +147,44 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	return false
 }
 
+// trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
+// declined. The clause references the callee's parameters; each is translated to its caller argument
+// term (populating the caller's free variables), and the clause obligation is checked against the
+// caller's facts. Returns true only on `unsat` of the negation (a sound proof).
+func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Expr) (bool, string) {
+	solver := a.openSMT()
+	if solver == nil || clause == nil {
+		return false, ""
+	}
+	tr := &smtTranslator{a: a, decls: map[string]bool{}, paramConsts: map[string]int64{}}
+	// Translate each substituted argument to a term FIRST, so the caller's free variables are
+	// collected before the fact preamble is emitted.
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		term, ok := tr.term(argExpr)
+		if !ok {
+			return false, "" // an argument outside the fragment → decline
+		}
+		env[name] = term
+	}
+	obligation, ok := tr.boolTerm(clause, env)
+	if !ok {
+		return false, ""
+	}
+	query := tr.factPreamble() + "(assert (not " + obligation + "))\n"
+	a.smtStats.Attempts++
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		return true, ""
+	}
+	a.smtStats.Declined++
+	// On sat, the model is an input permitted by the caller's known facts that violates the
+	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
+	return false, tr.counterexample(model)
+}
+
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).
 func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 	if decl == nil || len(decl.Body) != 1 {
@@ -221,6 +259,19 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			op = "-"
 		case lexer.TOKEN_STAR:
 			op = "*"
+		case lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
+			// SMT-LIB `div`/`mod` are Euclidean; they equal Elisa's truncating `/`/`%` ONLY for a
+			// non-negative dividend and a strictly-positive divisor (which also rules out div-by-zero,
+			// where SMT-LIB div is an unconstrained total function that could unsoundly "prove"). Gate
+			// on both; otherwise decline (the obligation falls back to the runtime check). Sound by
+			// construction — full signed-division modeling is a docs/90 follow-up.
+			if !tr.a.provablyNonNeg(n.Left) || !tr.a.provablyPositive(n.Right) {
+				return "", false
+			}
+			op = "div"
+			if n.Op == lexer.TOKEN_PERCENT {
+				op = "mod"
+			}
 		default:
 			return "", false
 		}
@@ -236,6 +287,36 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	default:
 		return "", false
 	}
+}
+
+// provablyNonNeg reports whether an expression is provably ≥ 0 — by an unsigned type, or by the
+// interval prover's lower bound. Used to gate sound division/modulo translation.
+func (a *Analyzer) provablyNonNeg(expr ast.Expr) bool {
+	if t := a.exprTypes[expr]; t != nil && indexTypeGuaranteedNonNegative(t) {
+		return true
+	}
+	if f, ok := a.affineOf(expr, a.currentScope); ok {
+		r := a.boundAffine(f, a.currentScope)
+		if r.loKnown && r.lo >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// provablyPositive reports whether an expression is provably ≥ 1 — a constant ≥ 1, or an interval
+// lower bound ≥ 1. (An unsigned type alone only gives ≥ 0, so it does not qualify.)
+func (a *Analyzer) provablyPositive(expr ast.Expr) bool {
+	if c, ok := a.constIntValue(expr); ok {
+		return c >= 1
+	}
+	if f, ok := a.affineOf(expr, a.currentScope); ok {
+		r := a.boundAffine(f, a.currentScope)
+		if r.loKnown && r.lo >= 1 {
+			return true
+		}
+	}
+	return false
 }
 
 // boolTerm lowers a boolean-valued expression: comparisons, and/or/not, parens, and bool literals.
@@ -320,6 +401,40 @@ func (tr *smtTranslator) factPreamble() string {
 		}
 	}
 	return b.String()
+}
+
+// declaredSMTVars returns the SMT symbols for every free variable the translation declared, so the
+// solver can be asked for their values on a Sat (counterexample) result.
+func (tr *smtTranslator) declaredSMTVars() []string {
+	out := make([]string, 0, len(tr.decls))
+	for name := range tr.decls {
+		out = append(out, smtVar(name))
+	}
+	sort.Strings(out)
+	return out
+}
+
+// counterexample renders a model (SMT-var → value) as a readable "a=5, b=20" hint using the original
+// Elisa identifier names. Empty when no model is available.
+func (tr *smtTranslator) counterexample(model map[string]string) string {
+	if len(model) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(tr.decls))
+	for name := range tr.decls {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	parts := make([]string, 0, len(names))
+	for _, name := range names {
+		if v, ok := model[smtVar(name)]; ok {
+			parts = append(parts, name+"="+v)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, ", ")
 }
 
 func smtCompare(op lexer.TokenKind, l, r string) string {
