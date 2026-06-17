@@ -515,6 +515,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		EnforceProgressSafety:    options.strictPolicy,
 		EnforcePerfLints:         options.perfStrict,
 		EnforceStrictConcurrency: options.concurrencyStrict,
+		EnforceStrictProofs:      options.proofStrict,
 	}
 }
 

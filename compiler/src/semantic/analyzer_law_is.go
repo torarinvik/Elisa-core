@@ -66,6 +66,10 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 			}
 			continue // proven (or refuted) at compile time — no runtime check
 		}
+		// Not statically proven: fall back to a runtime check AND tell the user — a static
+		// guarantee was not achieved here (docs/85: the fallback must be KNOWN). Warning by default
+		// so it is visible; a hard error under -strict (prove-it-or-fail, the Dafny-like mode).
+		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check", pred.Name, n.Name)
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},

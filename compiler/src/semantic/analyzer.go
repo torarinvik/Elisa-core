@@ -287,6 +287,7 @@ type Analyzer struct {
 	enforceProgressSafety            bool
 	enforceStrictConcurrency         bool
 	enforcePerfLints                 bool
+	enforceStrictProofs              bool
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -467,8 +468,14 @@ type AnalyzeOptions struct {
 	// churn) from warnings to hard errors — the `-Wperf` graduated-strictness level for
 	// shipped code (docs/70). Off by default so prototyping stays fluid.
 	EnforcePerfLints bool
-	TargetTriple     string
-	TargetDebug      bool
+	// EnforceStrictProofs promotes the refinement-proof diagnostic from a warning to a hard error
+	// (docs/85: the `-strict` safety channel). When a refinement obligation cannot be discharged
+	// statically it falls back to a runtime check; by default that emits a WARNING so the user
+	// always KNOWS a static guarantee was not achieved, and under -strict it is an error
+	// (prove-it-or-fail, the Dafny-like mode). Off by default.
+	EnforceStrictProofs bool
+	TargetTriple        string
+	TargetDebug         bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -566,6 +573,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceProgressSafety:             options.EnforceProgressSafety,
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
+		enforceStrictProofs:               options.EnforceStrictProofs,
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},

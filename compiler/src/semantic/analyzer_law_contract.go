@@ -1,6 +1,9 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+)
 
 // checkLawContract enforces what makes a `law` a sound predicate rather than an arbitrary
 // function (docs/85 §2, §9.5): it must return `bool`, take at least one value parameter (its
@@ -26,6 +29,17 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 		a.errorf(fn.Pos(), "law %q must be pure but uses the `%s` effect; a predicate may not perform effects (no IO, allocation, mutation, time, or randomness)", fn.Name, lawEffectName(ref))
 		break
 	}
+}
+
+// proofLint reports that a refinement obligation was not statically discharged. It is a WARNING by
+// default — so the user always KNOWS where a static guarantee fell back to a runtime check — and a
+// hard ERROR under `-strict` (EnforceStrictProofs), the Dafny-like prove-it-or-fail mode (docs/85).
+func (a *Analyzer) proofLint(pos lexer.Pos, format string, args ...interface{}) {
+	if a.enforceStrictProofs {
+		a.errorf(pos, format, args...)
+		return
+	}
+	a.warnf(pos, format, args...)
 }
 
 // lawEffectName renders an effect reference for the law-purity diagnostic.

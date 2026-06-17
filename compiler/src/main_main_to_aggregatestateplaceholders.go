@@ -226,6 +226,7 @@ type cliOptions struct {
 	hasOptLevel       bool
 	strictPolicy      bool
 	perfStrict        bool
+	proofStrict       bool
 	concurrencyStrict bool
 }
 
@@ -309,11 +310,16 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
 			// diagnostics to hard errors for strict-mode code.
 			options.concurrencyStrict = true
+		case arg == "-strict":
+			// docs/85: promote refinement-proof fallbacks from warnings to hard errors — a
+			// refinement that cannot be discharged statically fails the build (Dafny-like).
+			options.proofStrict = true
 		case arg == "-Wstrict":
 			// Unified strictness: turn on the shipped safety/performance proof levers together.
 			options.strictPolicy = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
+			options.proofStrict = true
 		case arg == "-debug":
 			options.debug = true
 		case arg == "-debug-break-raise":
