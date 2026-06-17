@@ -871,6 +871,13 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
+			// docs/90: enforce value-contract `ensure <bool>` postconditions (over params / `old(...)`)
+			// on a void return too — the non-void path runs these via emitFunctionReturn, but a bare
+			// `return` lowers to RetVoid directly and would otherwise skip them. `result` is void here,
+			// so emitPostconditionChecks binds nothing and just emits the boolean checks.
+			if err := s.emitPostconditionChecks(nil, nil); err != nil {
+				return err
+			}
 			// docs/85 brick 2 B: enforce `ensures <param> is Law` postconditions on a void return too.
 			if err := s.emitRefinementPostconditionChecks(); err != nil {
 				return err

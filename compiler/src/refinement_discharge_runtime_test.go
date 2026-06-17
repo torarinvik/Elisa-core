@@ -233,3 +233,72 @@ func TestEnsuresRefinementViolatedTrapsInDebug(t *testing.T) {
 		t.Fatalf("violated ensures postcondition must trap at debug, but program exited 0 (out=%q)", out)
 	}
 }
+
+// `old(expr)` in an `ensure` clause captures the value at function ENTRY, so the postcondition can
+// relate the final state to the initial one. The body mutates the pointee, so `old(p)` and `p` differ
+// at return — a genuine test that the entry snapshot (not the current value) is read.
+const oldEnsureProgram = `
+def bump(p: mutable i64&) -> void:
+    ensure p == old(p) + 1
+    p <- p + %s
+    return
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    n: mutable i64 = 5
+    bump(&n)
+    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// `ensures p == old(p) + 1` holds when the body increments by exactly 1: old(p)==5 (entry), p==6.
+func TestOldEnsureSatisfiedRuns(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(oldEnsureProgram, "%s", "1", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("satisfying `ensures p == old(p) + 1` should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "6" {
+		t.Fatalf("want output 6, got %q", out)
+	}
+}
+
+// Incrementing by 2 violates `ensures p == old(p) + 1` — proves the check reads the ENTRY value of p
+// (a stale-current-value capture would compare p to itself and never trap).
+func TestOldEnsureViolatedTrapsInDebug(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(oldEnsureProgram, "%s", "2", 1), backend.OptimizationLevel0)
+	if err == nil {
+		t.Fatalf("`ensures p == old(p) + 1` with +2 must trap at debug, but program exited 0 (out=%q)", out)
+	}
+}
+
+// `old(...)` alongside `result` in a non-void function, relating the return value to an entry-time
+// argument. `delta` mutates its param, then returns the change relative to the captured entry value.
+const oldResultProgram = `
+def delta(n: i64) -> i64:
+    ensure result == n - old(n)
+    return %s
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    print(delta(7).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// `n` is not mutated, so `result == n - old(n)` holds exactly when the body returns 0.
+func TestOldResultSatisfiedRuns(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(oldResultProgram, "%s", "0", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("`ensure result == n - old(n)` returning 0 should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "0" {
+		t.Fatalf("want output 0, got %q", out)
+	}
+}
+
+// Returning a nonzero value violates `result == n - old(n)` (== 0 here) and traps in debug.
+func TestOldResultViolatedTrapsInDebug(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(oldResultProgram, "%s", "3", 1), backend.OptimizationLevel0)
+	if err == nil {
+		t.Fatalf("`ensure result == n - old(n)` returning 3 must trap at debug, but program exited 0 (out=%q)", out)
+	}
+}

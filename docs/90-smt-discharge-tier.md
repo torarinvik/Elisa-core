@@ -265,7 +265,7 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
     drive bounds-check elision, so a wrong one is garbage-in-garbage-out, never memory unsafety. Tests:
     `TestEnsureResultPostconditionSeedsCallerFact` /
     `TestEnsureResultParametricPostconditionSeedsCallerFact` / `TestEnsureResultNoPostconditionNoSeed`.
-    - **Deferred**: `old(...)` in postconditions. (The range-seed-across-a-call item is now done — brick 90-11.)
+    - **Deferred**: ~~`old(...)` in postconditions~~ — now done (see below). (The range-seed-across-a-call item is also done — brick 90-11.)
 
 11. **90-11 — `ensures <param> is Law` seeds the caller's INTERVAL store. [LANDED]** The complement
     to 90-10. A mutating callee's `ensures p is Bounded[0, 9]` already gains a *pred* fact at the call
@@ -298,5 +298,27 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
     soundness argument. Same model as the rest — interval facts only NARROW, never drive bounds-check
     elision, so a wrong contract is GIGO not memory unsafety. Tests:
     `TestEnsuresParamSeedsCallerInterval` / `TestEnsuresParamIntervalDroppedOnMutation`.
+
+12. **90-12 — `old(...)` in postconditions + void-return contract gap. [LANDED]** Completes the
+    design-by-contract postcondition surface: `ensure result == n - old(n)`, `ensure p == old(p) + 1`.
+    `old(expr)` is the value of `expr` at function ENTRY, letting a postcondition relate the final
+    state to the initial one. The front-end already recognized `old(...)` (parsed as a pseudo-call,
+    typed via `inEnsureContext`) and the backend already captured/substituted it — but it was untested
+    and **two real bugs hid behind that**:
+    - *Capture stored the reference, not the value.* `emitOldCaptures` emitted `old(p)` for a `T&`
+      param as the pointer, so the return-time check re-read the same address (always the *current*
+      value, never the entry snapshot) — and the raw pointer type-mismatched the auto-deref'd operand.
+      Fixed by coercing the capture to the pointee type (`expected = RefType.Elem`) so the entry rvalue
+      is snapshotted.
+    - *Void returns skipped value-contract checks entirely.* A bare `return` (and the fall-through
+      exit) lowered straight to `RetVoid`, calling only `emitRefinementPostconditionChecks` (the `is
+      Law` channel), never `emitPostconditionChecks` (the `ensure <bool>` channel). So ANY `ensure` on
+      a `void` function was silently unenforced. Added the call at both void exits.
+    - A third, smaller fix: the optimization-fact provenance walk (`regionRefStateForExpr`) descended
+      into the `old` callee identifier and reported "undefined identifier old"; an `old`-call now
+      resolves to its inner argument's provenance.
+    Debug-only like all contracts (`-O0` / `ELISACORE_FORCE_CONTRACTS`), zero cost in release. Tests:
+    `TestOldEnsureSatisfiedRuns` / `TestOldEnsureViolatedTrapsInDebug` / `TestOldResultSatisfiedRuns` /
+    `TestOldResultViolatedTrapsInDebug` (end-to-end compile+run, satisfied passes / violated traps).
 
 Each brick: build → targeted test → full `./src/...` green → commit.

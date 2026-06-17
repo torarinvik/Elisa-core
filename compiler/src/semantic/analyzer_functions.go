@@ -588,7 +588,8 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 
 // analyzeEnsureClauses type-checks a function's value-contract postconditions in a child scope that
 // binds `result` to the return type (so `ensure result >= 0` works). Each must be bool. The backend
-// emits the checks at every return (debug builds only). `old(...)` is not yet supported.
+// emits the checks at every return (debug builds only). `old(...)` (the entry-time value of an
+// expression) is recognized here via inEnsureContext and captured at function entry by the backend.
 func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 	if len(fn.EnsureValues) == 0 {
 		return

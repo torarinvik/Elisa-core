@@ -258,6 +258,12 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 		}
 		return cloneRegionRefState(right), true
 	case *ast.CallExpr:
+		// `old(expr)` in an `ensure` clause is a pseudo-call (the entry-time value of expr), not a real
+		// callee — its provenance is that of the captured expression. Resolve it directly so we never
+		// analyze the `old` identifier as a function (which has no binding → "undefined identifier old").
+		if a.inEnsureContext && ast.IsOldCall(n) && len(n.Args) == 1 {
+			return a.regionRefStateForExpr(n.Args[0])
+		}
 		if state, ok := a.regionRefStateForProofCarryingViewCall(n); ok {
 			return state, true
 		}

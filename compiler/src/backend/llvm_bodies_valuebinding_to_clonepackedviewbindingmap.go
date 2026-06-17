@@ -569,8 +569,12 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	}
 
 	if !state.currentBlockTerminated() {
-		// Fall-through exit (no explicit `return`): check `ensures … is Law` postconditions here too,
-		// so a void function that omits a return still backs the caller's gained fact (docs/85 brick 2).
+		// Fall-through exit (no explicit `return`): check value-contract `ensure <bool>` postconditions
+		// (docs/90) and `ensures … is Law` postconditions (docs/85 brick 2) here too, so a void function
+		// that omits a return still enforces its contract / backs the caller's gained fact.
+		if err := state.emitPostconditionChecks(nil, nil); err != nil {
+			return err
+		}
 		if err := state.emitRefinementPostconditionChecks(); err != nil {
 			return err
 		}
@@ -910,7 +914,15 @@ func (s *functionState) emitOldCaptures(decl *ast.FuncDecl) error {
 		if len(oc.Args) != 1 {
 			continue
 		}
-		val, typ, err := s.emitExpr(oc.Args[0], nil)
+		// Capture the entry-time *value*, not a reference. `old(p)` where p is a `T&` param must
+		// snapshot the pointee NOW (at entry); storing the pointer would re-read the same address at
+		// the return check and always equal the current value — and it would also type-mismatch the
+		// auto-deref'd operand. Coerce to the pointee type so emitExpr loads through the ref here.
+		expected := s.exprType(oc.Args[0])
+		if rt, ok := expected.(*semantic.RefType); ok && rt != nil {
+			expected = rt.Elem
+		}
+		val, typ, err := s.emitExpr(oc.Args[0], expected)
 		if err != nil {
 			return err
 		}
@@ -971,8 +983,8 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 }
 
 // emitPostconditionChecks emits a function's `ensure` value-contracts just before a return, in
-// debug builds only. `result` is bound to the returned value so the conditions can reference it.
-// (`old(...)` is not yet supported.)
+// debug builds only. `result` is bound to the returned value so the conditions can reference it,
+// and `old(...)` reads the entry-time snapshot captured by emitOldCaptures.
 func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual semantic.Type) error {
 	if s.decl == nil || len(s.decl.EnsureValues) == 0 {
 		return nil
