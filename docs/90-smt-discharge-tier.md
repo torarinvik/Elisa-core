@@ -136,10 +136,24 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
      quantified law has **no runtime fallback**. `lawBodyContainsQuantifier` routes it to SMT-only; if
      neither SMT nor const-eval proves it, the obligation is a warning (error under `-strict`) and
      emits **no** runtime check — never broken codegen. Proven by SMT → `proven (smt)`.
-   - **Scope**: arithmetic-only first (binders + scalars; no array indexing). Array-element quantifiers
-     (`forall i in 0..<n: xs[i] > 0`, modeling `xs[i]` via SMT array theory) are the next brick.
-   - **Deferred**: array-theory element quantifiers; quantifiers in `requires`/`ensure` clauses (only
-     law bodies activate the syntax today); trigger/pattern tuning (z3 auto-triggers; the 2 s timeout +
-     decline keeps a matching loop safe).
+   - **Scope**: arithmetic-only first (binders + scalars; no array indexing).
+5. **90-5 — array-element quantifiers (SMT array theory). [LANDED]** Quantify over container contents:
+   `forall i: (0 <= i and i < n) implies self[i] > 0`. The container is modeled as an SMT `(Array Int
+   Int)` and `self[i]` becomes `(select <arr> i)`; `self.count`/`.len` become a per-array non-negative
+   length symbol (derived from the array's SMT symbol so it resolves through `self`). Only
+   integer-element arrays/darrays are modeled (`isArrayLike`); other element types decline.
+   `trySMTProveRefinement` binds an array-typed subject via `arrayTermEnv` (instead of `term`), so the
+   law's `self` is the SMT array. The showcase is a real theorem over an **abstract** array — *sorted ⟹
+   the first element is the minimum* — proved by z3 with NO concrete contents:
+   ```elisa
+   law SortedFirstMin(self: darray[i64], n: i64) =
+       (forall i: (0 <= i and i < n - 1) implies self[i] <= self[i + 1])
+       implies (forall j: (0 <= j and j < n) implies self[0] <= self[j])
+   ```
+   A false array claim (`forall i: self[i] == self[0]`) is soundly declined. (Note: law bodies are
+   single-line today — the multi-line form above is illustrative.)
+   - **Deferred**: quantifiers in `requires`/`ensure` clauses (only law bodies activate the syntax
+     today); multi-line law bodies; nested/multi-array models; trigger/pattern tuning (z3
+     auto-triggers; the 2 s timeout + decline keeps a matching loop safe).
 
 Each brick: build → targeted test → full `./src/...` green → commit.

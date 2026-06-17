@@ -118,13 +118,20 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 		}
 		paramConsts[decl.Params[i+1].Name] = c
 	}
-	tr := &smtTranslator{a: a, decls: map[string]bool{}, paramConsts: paramConsts}
-	// The subject term (`value`), bound to the law's `self`.
-	subjectTerm, ok := tr.term(value)
+	tr := a.newSMTTranslator(paramConsts)
+	// Bind the law's `self` to the subject. An array/darray subject is modeled as an SMT array (so the
+	// law body's `self[i]` becomes a select); any other subject is an integer term.
+	self := decl.Params[0].Name
+	var subjectTerm string
+	var ok bool
+	if tr.isArrayLike(a.exprTypes[value]) {
+		subjectTerm, ok = tr.arrayTermEnv(value, nil)
+	} else {
+		subjectTerm, ok = tr.term(value)
+	}
 	if !ok {
 		return false
 	}
-	self := decl.Params[0].Name
 	env := map[string]string{self: subjectTerm}
 	// The law body as an SMT boolean, with `self` replaced by the subject term.
 	body, ok := a.lawBodyExpr(decl)
@@ -156,7 +163,7 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if solver == nil || clause == nil {
 		return false, ""
 	}
-	tr := &smtTranslator{a: a, decls: map[string]bool{}, paramConsts: map[string]int64{}}
+	tr := a.newSMTTranslator(nil)
 	// Translate each substituted argument to a term FIRST, so the caller's free variables are
 	// collected before the fact preamble is emitted.
 	env := map[string]string{}
@@ -202,7 +209,58 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 type smtTranslator struct {
 	a           *Analyzer
 	decls       map[string]bool  // Elisa ident -> declared as an SMT Int const
+	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	paramConsts map[string]int64 // law static params bound to constants
+}
+
+// newSMTTranslator builds a translator with all collection maps initialized.
+func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator {
+	if paramConsts == nil {
+		paramConsts = map[string]int64{}
+	}
+	return &smtTranslator{
+		a:           a,
+		decls:       map[string]bool{},
+		arrayDecls:  map[string]bool{},
+		lenDecls:    map[string]bool{},
+		paramConsts: paramConsts,
+	}
+}
+
+// arrayTermEnv lowers an ARRAY-valued expression to an SMT array symbol: an array/darray identifier
+// becomes a `(Array Int Int)` const (declared once), or resolves through `env` (the law's `self`).
+// Element-typed quantifiers (docs/90 brick 90-5) model `arr[i]` as `(select <arr> i)`.
+func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return tr.arrayTermEnv(n.Inner, env)
+	case *ast.Ident:
+		if env != nil {
+			if bound, ok := env[n.Name]; ok {
+				return bound, true
+			}
+		}
+		if tr.isArrayLike(tr.a.exprTypes[n]) {
+			tr.arrayDecls[n.Name] = true
+			return smtVar(n.Name), true
+		}
+		return "", false
+	default:
+		return "", false
+	}
+}
+
+// isArrayLike reports whether a type is an integer-element array/darray we can model as (Array Int
+// Int). Non-integer elements decline (sound: we only model integer element theory).
+func (tr *smtTranslator) isArrayLike(t Type) bool {
+	switch at := stripRefForBounds(t).(type) {
+	case *ArrayType:
+		return at != nil && IsNumericType(at.Elem) && !IsFloatType(at.Elem)
+	case *DArrayType:
+		return at != nil && IsNumericType(at.Elem) && !IsFloatType(at.Elem)
+	}
+	return false
 }
 
 // term lowers an integer-valued expression. Supports literals, immutable integer identifiers
@@ -239,6 +297,32 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			name := smtVar(n.Name)
 			tr.decls[n.Name] = true
 			return name, true
+		}
+		return "", false
+	case *ast.IndexExpr:
+		// Array element access `arr[idx]` → `(select <arr> <idx>)` over SMT array theory (docs/90
+		// brick 90-5). The element value is an Int; out-of-range indices are an arbitrary-but-total
+		// value, which a quantifier's range guard constrains away.
+		arr, ok := tr.arrayTermEnv(n.Object, env)
+		if !ok {
+			return "", false
+		}
+		idx, ok := tr.termEnv(n.Index, env)
+		if !ok {
+			return "", false
+		}
+		return "(select " + arr + " " + idx + ")", true
+	case *ast.FieldExpr:
+		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
+		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
+		if n.Field == "count" || n.Field == "len" {
+			arr, ok := tr.arrayTermEnv(n.Object, env)
+			if !ok {
+				return "", false
+			}
+			lenSym := arr + "_len"
+			tr.lenDecls[lenSym] = true
+			return lenSym, true
 		}
 		return "", false
 	case *ast.UnaryExpr:
@@ -421,6 +505,26 @@ func (tr *smtTranslator) factPreamble() string {
 		if c, ok := tr.a.writtenConstInt(name); ok {
 			b.WriteString("(assert (= " + v + " " + smtInt(c) + "))\n")
 		}
+	}
+	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT
+	// (Array Int Int). Deterministic order.
+	arrays := make([]string, 0, len(tr.arrayDecls))
+	for name := range tr.arrayDecls {
+		arrays = append(arrays, name)
+	}
+	sort.Strings(arrays)
+	for _, name := range arrays {
+		b.WriteString("(declare-const " + smtVar(name) + " (Array Int Int))\n")
+	}
+	// Length symbols (`arr.count`/`.len`), each a non-negative Int.
+	lens := make([]string, 0, len(tr.lenDecls))
+	for sym := range tr.lenDecls {
+		lens = append(lens, sym)
+	}
+	sort.Strings(lens)
+	for _, sym := range lens {
+		b.WriteString("(declare-const " + sym + " Int)\n")
+		b.WriteString("(assert (>= " + sym + " 0))\n")
 	}
 	return b.String()
 }

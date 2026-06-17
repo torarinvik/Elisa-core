@@ -238,6 +238,50 @@ def pick(v: i64) -> i64:
 	}
 }
 
+// ARRAY-ELEMENT QUANTIFIERS (docs/90 brick 90-5): a real theorem over an ABSTRACT array — sorted
+// implies the first element is the minimum. No concrete contents; z3 proves it via array theory +
+// quantifiers. self[i] is modeled as (select v_self i).
+func TestSMTProvesArrayQuantifierTheorem(t *testing.T) {
+	src := `
+law SortedFirstMin(self: darray[i64], n: i64) = (forall i: (0 <= i and i < n - 1) implies self[i] <= self[i + 1]) implies (forall j: (0 <= j and j < n) implies self[0] <= self[j])
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is SortedFirstMin[10] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_array_quant.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the array-quantifier theorem proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: a FALSE array-quantifier claim is not proven. "all elements equal element 0" does not
+// follow for an arbitrary array.
+func TestSMTDeclinesFalseArrayQuantifier(t *testing.T) {
+	src := `
+law AllEqualFirst(self: darray[i64], n: i64) = forall i: (0 <= i and i < n) implies self[i] == self[0]
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is AllEqualFirst[10] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_array_quant_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("a false array-quantifier claim must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
 // With SMT off (default), the same nonlinear obligation is NOT proven and no solver runs.
 func TestSMTOffLeavesNonlinearUnproven(t *testing.T) {
 	src := `
