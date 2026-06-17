@@ -305,6 +305,7 @@ type Analyzer struct {
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
 	refinementChecks                 map[*ast.VarDeclStmt][]*ast.CallExpr
+	callArgRefinementChecks          map[*ast.CallExpr][]*ast.CallExpr
 	hotDisjointKernelCandidates      []hotDisjointKernelCandidate
 	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
 	reassignedParamCache             map[*ast.FuncDecl]map[string]bool
@@ -564,6 +565,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		disjointCallSites:                 map[*ast.FuncDecl][]callDisjointObservation{},
 		lawIsCalls:                        map[*ast.BinaryExpr]*ast.CallExpr{},
 		refinementChecks:                  map[*ast.VarDeclStmt][]*ast.CallExpr{},
+		callArgRefinementChecks:            map[*ast.CallExpr][]*ast.CallExpr{},
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		declVisibility:                    activeFile.DeclVisibility,
@@ -676,6 +678,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
 		RefinementChecks:        a.refinementChecks,
+		CallArgRefinementChecks: a.callArgRefinementChecks,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,

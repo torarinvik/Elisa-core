@@ -106,6 +106,7 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 	if !ok {
 		return
 	}
+	var checks []*ast.CallExpr
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
 			break
@@ -124,7 +125,39 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 				continue
 			}
 			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check", pred.Name, name, decl.Name)
+			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
+			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
+			// double evaluation would change behavior), so the runtime tier stays sound.
+			if !a.isSideEffectFreeRefinementArg(args[i]) {
+				continue
+			}
+			check := &ast.CallExpr{
+				Position: pred.Position,
+				Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
+				Args:     append([]ast.Expr{args[i]}, pred.Args...),
+			}
+			a.analyzeExpr(check)
+			checks = append(checks, check)
 		}
+	}
+	if len(checks) != 0 && a.callArgRefinementChecks != nil {
+		a.callArgRefinementChecks[call] = checks
+	}
+}
+
+// isSideEffectFreeRefinementArg reports whether a call argument can be safely re-evaluated by a
+// runtime refinement predicate check (no observable side effect, no double cost worth worrying
+// about). Conservatively: bare identifiers, literals, and parenthesizations of those.
+func (a *Analyzer) isSideEffectFreeRefinementArg(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return n != nil && a.isSideEffectFreeRefinementArg(n.Inner)
+	case *ast.Ident:
+		return true
+	case *ast.IntLit, *ast.FloatLit, *ast.BoolLit:
+		return true
+	default:
+		return false
 	}
 }
 

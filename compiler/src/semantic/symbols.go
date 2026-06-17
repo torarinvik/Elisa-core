@@ -66,6 +66,12 @@ type Result struct {
 	// them as a debug boundary check (trap on violation), elided in release — "debug verifies what
 	// release assumes" — until the static prover (1d) elides the ones it can prove.
 	RefinementChecks map[*ast.VarDeclStmt][]*ast.CallExpr
+	// CallArgRefinementChecks holds the discharge obligations for an unproven, side-effect-free
+	// argument passed to a refinement-typed parameter (docs/85: the function-contract boundary). Like
+	// RefinementChecks but at the call site: codegen emits each predicate call as a debug boundary
+	// check (trap on violation) before the real call, elided in release. Only side-effect-free args
+	// (idents/literals) get a check, so re-evaluating the arg in the predicate is safe.
+	CallArgRefinementChecks map[*ast.CallExpr][]*ast.CallExpr
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo

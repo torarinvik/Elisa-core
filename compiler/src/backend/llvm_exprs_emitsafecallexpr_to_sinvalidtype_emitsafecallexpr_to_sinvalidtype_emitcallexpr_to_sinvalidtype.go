@@ -81,6 +81,9 @@ import (
 )
 
 func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if err := s.emitCallArgRefinementChecks(expr); err != nil {
+		return nil, nil, err
+	}
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
