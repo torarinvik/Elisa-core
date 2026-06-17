@@ -891,6 +891,61 @@ def f(seed: i64) -> i64:
 	}
 }
 
+// --- docs/90 brick 90-11: `ensures <param> is Law` seeds the caller's INTERVAL store, not only the
+// factset. This lets the flow prover use the mutated variable's numeric bound — discharging an
+// obligation the factset (exact-key) path cannot. ---
+
+// After `clamp(&n)` with `ensures n is Bounded[0, 9]`, the caller knows n ∈ [0, 9]. A subsequent
+// obligation for the WIDER `Bounded[0, 20]` proves only via interval entailment ([0,9] ⊆ [0,20]) —
+// the factset holds the exact key Bounded[0,9], never Bounded[0,20], so this is the interval seed at
+// work, not the predicate-fact gain.
+func TestEnsuresParamSeedsCallerInterval(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 9]:
+    p <- 0
+
+def use(seed: i64) -> i64:
+    n: mutable i64 = seed
+    clamp(&n)
+    m: i64 is Bounded[0, 20] = n
+    return m
+`
+	result := analyzeTreeTestSource(t, "ensures_param_interval_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensures n is Bounded[0,9]` should let the WIDER `Bounded[0,20]` prove via interval, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("interval [0,9] entails Bounded[0,20]: expected static proof, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Soundness floor for brick 90-11: mutating the variable AFTER the call drops the seeded interval
+// (invalidateRangeFactsForTarget), so the same obligation falls back to a runtime check.
+func TestEnsuresParamIntervalDroppedOnMutation(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 9]:
+    p <- 0
+
+def use(seed: i64) -> i64:
+    n: mutable i64 = seed
+    clamp(&n)
+    n <- seed
+    m: i64 is Bounded[0, 20] = n
+    return m
+`
+	result := analyzeTreeTestSource(t, "ensures_param_interval_drop.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected analysis to succeed with a runtime fallback, got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("re-mutating n must drop the seeded interval, forcing a runtime check")
+	}
+}
+
 // Without the `ensures`, the same ref call DROPS the fact (brick 1) — confirms the postcondition is
 // what carries the guarantee across the call.
 func TestEnsuresRefinementGainIsLoadBearing(t *testing.T) {

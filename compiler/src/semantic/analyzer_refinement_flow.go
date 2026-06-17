@@ -196,6 +196,30 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 	return acc, found
 }
 
+// invalidateRangeFacts drops the known integer range fact about `name` across the active scope chain.
+// Called at every mutation site for `name`, mirroring invalidatePredFacts. Unlike predFacts there is
+// NO dependent-fact cascade: a range fact is a concrete interval snapshot (even one seeded from another
+// variable's range captured that variable's bound at seed time), so it has no live symbolic dependence
+// on other variables — only a write to the SUBJECT itself can stale its interval (docs/90 brick 90-11).
+func (a *Analyzer) invalidateRangeFacts(name string) {
+	if name == "" {
+		return
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.rangeFacts != nil {
+			delete(scope.rangeFacts, name)
+		}
+	}
+}
+
+// invalidateRangeFactsForTarget drops the range fact about the root variable of a mutation target
+// expression (an identifier, or a field/index path rooted at one), mirroring invalidatePredFactsForTarget.
+func (a *Analyzer) invalidateRangeFactsForTarget(target ast.Expr) {
+	if name, ok := rootIdentName(target); ok {
+		a.invalidateRangeFacts(name)
+	}
+}
+
 // writtenConstInt returns the exact integer value of a variable when a live written-constant fact
 // pins it to a compile-time integer (an immutable local or a `<- const` write). The bridge between
 // the written-const tracker and the interval prover.
@@ -427,7 +451,7 @@ func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr, subst
 // rangeFromLawApplication computes the integer interval implied by ONE law application `Law[args...]`
 // (the subject being the value the law constrains). It is the per-predicate kernel shared by the
 // return-type seed (rangeFromRefinementTypeExpr) and the `ensures <param> is Law` post-call seed
-// (seedEnsuresParamRangeFacts). `subst` maps callee params to caller arguments for parametric bounds
+// (seedEnsuresParamRangeFacts, brick 90-11). `subst` maps callee params to caller arguments for parametric bounds
 // (nil = exact-constant args). Returns ok=false when the args/law leave the decidable fragment.
 func (a *Analyzer) rangeFromLawApplication(lawName string, lawArgs []ast.Expr, subst map[string]ast.Expr) (numRange, bool) {
 	decl, _, ok := a.lookupLaw(lawName)
@@ -600,6 +624,47 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 		any = true
 	}
 	if !any {
+		return
+	}
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = a.currentScope.rangeFacts[name].intersect(fact)
+}
+
+// seedEnsuresParamRangeFacts records, at a call site, the integer interval implied by a callee
+// postcondition `ensures <param> is Law` onto the (mutable) caller variable bound to that argument
+// (docs/90 brick 90-11). It complements the predicate-fact gain in the same call loop: where the
+// predFact lets a later `x is Law` discharge by factset identity, this lets the flow/interval prover
+// use `x`'s numeric bound directly (as a bracket argument, an array index, a comparison operand).
+//
+// Caller is responsible for restricting this to MUTABLE-REF params, where the postcondition genuinely
+// constrains the caller's variable (for a by-value or immutable-ref param the postcondition is about
+// the callee's local copy and says nothing about the caller's binding). Sound and conservative:
+//   - Applied AFTER the call-site mutable-ref invalidation, and `x`'s range fact is dropped again at the
+//     next mutation of `x` (invalidateRangeFactsForTarget at every assignment + every ref-arg call), so
+//     the snapshot interval can never outlive a write — the same envelope that makes the predFact gain
+//     sound, extended to the interval store.
+//   - The interval is a concrete snapshot (the callee guaranteed `x ∈ [..]` at return) with no live
+//     dependence on other variables, so no dependent-fact cascade is needed.
+//   - `ensures` law args are validated compile-time constants (resolveRefinementEnsures), so no
+//     caller-substitution is required; a non-decidable law simply seeds nothing.
+//   - Like all refinement value facts it only NARROWS (intersect) and never drives bounds-check elision,
+//     so even a buggy callee contract is garbage-in-garbage-out, never memory unsafety.
+func (a *Analyzer) seedEnsuresParamRangeFacts(arg ast.Expr, lawName string, lawArgs []ast.Expr) {
+	if a.currentScope == nil {
+		return
+	}
+	name, ok := rootIdentName(arg)
+	if !ok {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
+		return
+	}
+	fact, found := a.rangeFromLawApplication(lawName, lawArgs, nil)
+	if !found {
 		return
 	}
 	if a.currentScope.rangeFacts == nil {

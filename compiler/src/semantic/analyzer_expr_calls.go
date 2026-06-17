@@ -497,6 +497,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if rt, ok := paramType.(*RefType); ok && rt != nil && !a.callPreservesArgRefinements(expr, appliedType, i) {
 			a.invalidatePredFactsForTarget(loweredArgs[i])
 			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
+			// docs/90 brick 90-11: a ref call may write the arg, so any range fact about it is stale too —
+			// dropped here so a postcondition seed (below) is the only interval that survives the call.
+			a.invalidateRangeFactsForTarget(loweredArgs[i])
 		}
 		// Frame enforcement (docs/87 channel 2): passing a place by MUTABLE ref means the callee may
 		// write it, so it counts as a write to that place. An immutable borrow cannot write — skip it.
@@ -519,6 +522,17 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				// constant args, the same identity tryProveRefinementByFactSet matches against.
 				if key, keyOK := a.factKey(re.LawName, re.Args); keyOK {
 					recordPredFact(a.currentScope, root, key)
+				}
+			}
+			// docs/90 brick 90-11: ALSO seed the integer interval the law implies, so the flow/interval
+			// prover can use the mutated argument's numeric bound (not only the factset identity) — e.g.
+			// `clamp(&x)` with `ensures x is Bounded[0, 9]` lets `arr[x]` prove in-bounds. Gated to a
+			// MUTABLE-REF param: only there does the postcondition constrain the caller's variable (for a
+			// by-value/immutable-ref param it describes the callee's copy). Applied after the invalidation
+			// above so it survives, and dropped again at the arg's next mutation.
+			if i < len(appliedType.Params) {
+				if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
+					a.seedEnsuresParamRangeFacts(loweredArgs[i], re.LawName, re.Args)
 				}
 			}
 		}

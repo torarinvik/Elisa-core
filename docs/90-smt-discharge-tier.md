@@ -265,8 +265,38 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
     drive bounds-check elision, so a wrong one is garbage-in-garbage-out, never memory unsafety. Tests:
     `TestEnsureResultPostconditionSeedsCallerFact` /
     `TestEnsureResultParametricPostconditionSeedsCallerFact` / `TestEnsureResultNoPostconditionNoSeed`.
-    - **Deferred**: re-asserting facts about a mutable variable across a call from `ensures <param> is
-      Law` as a *range* (needs relaxing the immutable-ident gate for the post-call window — a larger,
-      riskier change to the dependence-freeze); `old(...)` in postconditions.
+    - **Deferred**: `old(...)` in postconditions. (The range-seed-across-a-call item is now done — brick 90-11.)
+
+11. **90-11 — `ensures <param> is Law` seeds the caller's INTERVAL store. [LANDED]** The complement
+    to 90-10. A mutating callee's `ensures p is Bounded[0, 9]` already gains a *pred* fact at the call
+    site (docs/85 brick 2A); now it also seeds an integer interval on the caller's variable, so the
+    flow/interval prover can use the mutated argument's numeric bound directly — discharging an
+    obligation the exact-key factset path cannot:
+    ```elisa
+    law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+    def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 9]:
+        p <- 0
+    def use(seed: i64) -> i64:
+        n: mutable i64 = seed
+        clamp(&n)                       # n ∈ [0, 9]
+        m: i64 is Bounded[0, 20] = n    # proven via interval ([0,9] ⊆ [0,20]); factset has only Bounded[0,9]
+        return m
+    ```
+    **The prior "would be inert" reasoning (90-10) was wrong about the mechanism.** The *read* path
+    (`tryProveRefinementByFlow` → `lookupRangeFact`) never gated on immutability; the immutable-ident
+    gate only governs *recording branch-condition* facts. The real blocker was that `rangeFacts` had
+    **no write-invalidation** — its whole soundness rested on only ever holding facts about immutable
+    variables. 90-11 adds that invalidation: `invalidateRangeFacts` / `invalidateRangeFactsForTarget`
+    fire at exactly the four sites `invalidatePredFacts` does (the three assignment forms + the
+    call-site mutable-ref drop), so a seeded interval on a mutable variable can never outlive a write.
+    The seed (`seedEnsuresParamRangeFacts`) is applied AFTER the call-site invalidation (so it
+    survives), gated to **mutable-ref params** (only there does the postcondition constrain the
+    caller's variable — a by-value/immutable-ref param's `ensures` describes the callee's copy), and
+    reuses `rangeFromLawApplication`. Range facts need NO dependent-fact cascade (unlike predFacts):
+    they are concrete interval snapshots with no live symbolic dependence on other variables, so only a
+    write to the *subject* stales them. Riding the predFact invalidation envelope exactly is the
+    soundness argument. Same model as the rest — interval facts only NARROW, never drive bounds-check
+    elision, so a wrong contract is GIGO not memory unsafety. Tests:
+    `TestEnsuresParamSeedsCallerInterval` / `TestEnsuresParamIntervalDroppedOnMutation`.
 
 Each brick: build → targeted test → full `./src/...` green → commit.
