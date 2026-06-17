@@ -426,7 +426,11 @@ func (a *Analyzer) analyzeCatchExpr(expr *ast.CatchExpr) Type {
 		}
 		matchedTag, ok := MatchErrorTag(unionType.Errors, arm.Name)
 		if !ok {
-			a.errorf(arm.Position, "catch arm %q does not match %s", arm.Name, ErrorSetDiagnosticName(unionType.Errors))
+			if unionType.Errors.HasParams() {
+				a.errorf(arm.Position, "catch arm %q does not match %s; use `error %s:` to catch the opaque error-set parameter component", arm.Name, ErrorSetDiagnosticName(unionType.Errors), arm.Name)
+			} else {
+				a.errorf(arm.Position, "catch arm %q does not match %s", arm.Name, ErrorSetDiagnosticName(unionType.Errors))
+			}
 			mergeArm(arm.Position, arm.Body, NewScope(a.currentScope))
 			continue
 		}

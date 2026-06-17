@@ -160,11 +160,11 @@ def both[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i6
 	}
 }
 
-// A BARE binder arm is a variant-name arm, not a catch-all — it cannot match
-// a param set (nor a concrete set). The catch-all spelling is `error e:`,
-// which matches and re-raises an opaque param-set error (next test). Remaining
-// polish: this diagnostic could hint at `error e:`.
-func TestGapCatchBinderArmCannotMatchParamSet(t *testing.T) {
+// A BARE binder arm is a variant-name arm, not a catch-all; it cannot match
+// a param set (nor a concrete set). The diagnostic points at the catch-all
+// spelling, `error e:`, which matches and re-raises an opaque param-set error
+// (next test).
+func TestCatchBinderArmCannotMatchParamSetHintsCatchAll(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_catch_param.elisa", `
 def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
     catch f():
@@ -176,6 +176,9 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	all := allDiagnostics(result)
 	if !strings.Contains(all, "does not match R") {
 		t.Fatalf("gap moved: catch binder arm over a param set no longer rejected. got:\n%s", all)
+	}
+	if !strings.Contains(all, "use `error e:`") {
+		t.Fatalf("expected catch binder diagnostic to hint at `error e:`, got:\n%s", all)
 	}
 }
 
