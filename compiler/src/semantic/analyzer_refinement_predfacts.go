@@ -170,6 +170,50 @@ func (a *Analyzer) lookupWrittenConst(name string) (int64, bool) {
 	return 0, false
 }
 
+// callPreservesArgRefinements reports whether passing an argument as ref-param `paramIndex` of
+// `call` (callee type `appliedType`) provably leaves the argument's refinements intact, so the
+// caller can KEEP its predicate/written-const facts across the call (docs/85 brick 3, preserve
+// credit). Two sound signals: (1) the callee declares `ensures <param> preserve` (a
+// FuncPoststateKindPreserve over the whole target — its ParamIndex aligns with the call loop index,
+// same as funcPoststatesForParam); (2) the parameter is an IMMUTABLE borrow (the callee decl's
+// ParamDecl.Mutable is false), so the callee cannot write through it and Elisa's borrow rules
+// forbid a concurrent mutable alias. Anything unprovable returns false → the brick-1 drop stands.
+func (a *Analyzer) callPreservesArgRefinements(call *ast.CallExpr, appliedType *FuncType, paramIndex int) bool {
+	if appliedType != nil {
+		for _, ps := range appliedType.Poststates {
+			if ps.ParamIndex == paramIndex && ps.Kind == FuncPoststateKindPreserve && len(ps.Path) == 0 {
+				return true
+			}
+		}
+	}
+	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil {
+		if paramIndex >= 0 && paramIndex < len(decl.Params) && paramIsImmutableBorrow(decl.Params[paramIndex]) {
+			return true
+		}
+	}
+	return false
+}
+
+// paramIsImmutableBorrow reports whether a parameter is an immutable borrow `T&` — a ref through
+// which the callee cannot write, so an argument's refinements survive the call. The canonical
+// mutable borrow is `p: mutable i64&` (a MutableType wrapping the ref); the legacy form is a leading
+// `mutable` keyword (ParamDecl.Mutable). Both are rejected here; only a plain `*ast.RefType` whose
+// pointee is not itself mutable counts as immutable. Conservative: any non-ref or mutable shape is
+// not a preserving borrow.
+func paramIsImmutableBorrow(p ast.ParamDecl) bool {
+	if p.Mutable {
+		return false
+	}
+	rt, ok := p.Type.(*ast.RefType)
+	if !ok || rt == nil {
+		return false
+	}
+	if _, mut := rt.Elem.(*ast.MutableType); mut {
+		return false
+	}
+	return true
+}
+
 // gatherLawIsPredFact records a predicate fact for `if x is Law:` where Law is a BARE law (no
 // bracket args) and x is a bare identifier — regardless of whether x is mutable. Mutable is safe
 // here because any later mutation of x invalidates the fact via invalidatePredFacts. The integer

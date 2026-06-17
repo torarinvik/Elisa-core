@@ -767,3 +767,87 @@ def mk(p: mutable i64&, v: i64) -> void ensures p is Positive:
 		t.Fatalf("under -strict an unprovable postcondition should be a hard error")
 	}
 }
+
+// --- Mutable refinement flow brick 3: preserve-credit. A ref call the callee provably doesn't use
+// to mutate the argument KEEPS the caller's refinement facts. ---
+
+// An immutable-borrow call (`p: i64&`) cannot mutate the argument, so a narrowed fact survives it —
+// the obligation after the call still proves statically (no runtime check).
+func TestPreserveCreditImmutableBorrow(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def observe(p: i64&) -> void:
+    pass
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        observe(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "preserve_immutable_borrow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("immutable-borrow call should preserve the Positive fact, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("fact should survive an immutable-borrow call (no runtime check), got %d", len(result.CallArgRefinementChecks))
+	}
+}
+
+// SOUNDNESS GUARD: the canonical mutable borrow `p: mutable i64&` CAN mutate, so the fact is still
+// dropped (a runtime check is forced) — preserve-credit must not over-apply.
+func TestPreserveCreditMutableBorrowStillDrops(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def touch(p: mutable i64&) -> void:
+    pass
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        touch(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "preserve_mutable_borrow_drops.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("a mutable-borrow call must still DROP the fact (preserve-credit must not over-apply)")
+	}
+}
+
+// An explicit `ensures p => preserve` postcondition grants preserve-credit even for a mutable
+// borrow: the callee guarantees the argument is unchanged, so the fact survives.
+func TestPreserveCreditExplicitEnsuresPreserve(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def keep(p: mutable i64&) -> void ensures p => preserve:
+    pass
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        keep(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "preserve_explicit_ensures.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensures p => preserve` should preserve the fact, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("explicit preserve should keep the fact (no runtime check), got %d", len(result.CallArgRefinementChecks))
+	}
+}

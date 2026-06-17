@@ -493,7 +493,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// for ref args. Conservative on two axes (any ref, not just mutable; no `ensures`-preserve
 		// credit yet); both only add runtime checks, never remove them, so the drop stays sound. A
 		// callee that re-establishes the predicate via `ensures` is a later refinement.
-		if rt, ok := paramType.(*RefType); ok && rt != nil {
+		if rt, ok := paramType.(*RefType); ok && rt != nil && !a.callPreservesArgRefinements(expr, appliedType, i) {
 			a.invalidatePredFactsForTarget(loweredArgs[i])
 			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
 		}
