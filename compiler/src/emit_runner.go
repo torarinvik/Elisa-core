@@ -231,6 +231,9 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	}
 	if options.explainProofs {
 		printProofReport(stderr, result.ProofReport)
+		if line := result.SMTProfile.String(); line != "" {
+			fmt.Fprintf(stderr, "  %s\n", line)
+		}
 	}
 
 	switch options.emit {
@@ -519,6 +522,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		EnforcePerfLints:         options.perfStrict,
 		EnforceStrictConcurrency: options.concurrencyStrict,
 		EnforceStrictProofs:      options.proofStrict,
+		EnableSMT:                options.enableSMT,
 	}
 }
 
@@ -554,7 +558,7 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
 	for _, f := range report {
 		fmt.Fprintf(stderr, "  %s: %s is %s — %s\n", f.Pos, f.Subject, f.Predicate, f.Outcome)
 		switch f.Outcome {
-		case semantic.ProofProvenFlow, semantic.ProofProvenLinear, semantic.ProofProvenConst, semantic.ProofProvenContract:
+		case semantic.ProofProvenFlow, semantic.ProofProvenLinear, semantic.ProofProvenConst, semantic.ProofProvenContract, semantic.ProofProvenSMT:
 			proven++
 		case semantic.ProofRefuted:
 			refuted++

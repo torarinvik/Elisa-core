@@ -228,6 +228,7 @@ type cliOptions struct {
 	perfStrict        bool
 	proofStrict       bool
 	explainProofs     bool
+	enableSMT         bool
 	concurrencyStrict bool
 }
 
@@ -319,6 +320,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// docs/85 observability: after analysis, print every refinement-discharge decision
 			// (proven / refuted / runtime) so the user can audit what is statically guaranteed.
 			options.explainProofs = true
+		case arg == "-smt":
+			// docs/90: enable the optional SMT discharge tier for obligations the bounded-linear
+			// prover declines (non-linear products, richer boolean bodies). Spawns a solver (z3).
+			options.enableSMT = true
 		case arg == "-Wstrict":
 			// Unified strictness: turn on the shipped safety/performance proof levers together.
 			options.strictPolicy = true

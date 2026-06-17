@@ -212,6 +212,13 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 		a.recordProof(pos, valueName, pred.Name, ProofProvenLinear)
 		return true
 	}
+	// SMT tier (docs/90): the last prove-step before the runtime fallback. Only reached when the
+	// linear tier declined, so the subject is genuinely outside the affine fragment (e.g. a var*var
+	// product). Off unless -smt; sound regardless (only `unsat` of the negation concludes).
+	if a.trySMTProveRefinement(value, lawDecl, pred.Args) {
+		a.recordProof(pos, valueName, pred.Name, ProofProvenSMT)
+		return true
+	}
 	// Written-constant substitution: when the subject is a bare variable whose last write was a
 	// compile-time constant of any kind (`p <- 0`, `ready <- true`, `d <- Door.Open` — even through a
 	// non-aliased `mutable T&` pointee), use that constant expr as the const-eval subject. This proves

@@ -322,7 +322,15 @@ type Analyzer struct {
 	enforceStrictConcurrency         bool
 	enforcePerfLints                 bool
 	enforceStrictProofs              bool
-	proofReport                      []ProofFact
+	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
+	// (so a compile with no hard obligations never spawns a process) and closed at the end of
+	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
+	smtEnabled     bool
+	smtBinary      string
+	smtSolver      smtSolverHandle
+	smtUnavailable bool
+	smtStats       SMTStats
+	proofReport    []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -511,8 +519,15 @@ type AnalyzeOptions struct {
 	// always KNOWS a static guarantee was not achieved, and under -strict it is an error
 	// (prove-it-or-fail, the Dafny-like mode). Off by default.
 	EnforceStrictProofs bool
-	TargetTriple        string
-	TargetDebug         bool
+	// EnableSMT turns on the optional SMT discharge tier (docs/90): an obligation the bounded-linear
+	// prover declines (a non-linear product, a richer boolean body) is handed to an SMT solver. Off
+	// by default — it spawns a solver subprocess and is only worth it for code the linear tier can't
+	// reach. SMTSolverBinary overrides the solver (default "z3"). The tier is sound regardless: an
+	// `unsat` of the negated obligation proves it; sat/unknown/missing-solver decline to runtime.
+	EnableSMT        bool
+	SMTSolverBinary  string
+	TargetTriple     string
+	TargetDebug      bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -614,6 +629,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
+		smtEnabled:                        options.EnableSMT,
+		smtBinary:                         options.SMTSolverBinary,
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
@@ -686,10 +703,12 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.analyzeExports(activeDecls)
 	a.finalizeFuncDisjointParams(activeDecls)
 	a.lintHotKernelsForDisjointness()
+	a.closeSMT()
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
 	}
 	return &Result{
+		SMTProfile:              a.smtStats,
 		File:                    file,
 		LoweredFile:             loweredFile,
 		GlobalScope:             a.globalScope,

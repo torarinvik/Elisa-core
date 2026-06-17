@@ -30,6 +30,10 @@ func (d Diagnostic) String() string {
 }
 
 type Result struct {
+	// SMTProfile reports the optional SMT discharge tier's cost (docs/90): query count, verdict
+	// breakdown, and wall time. Zero-valued when the tier is off. Surfaced by `--explain` so "is SMT
+	// cheap or demanding?" is answered with data.
+	SMTProfile              SMTStats
 	File                    *ast.File
 	LoweredFile             *ast.File
 	GlobalScope             *Scope

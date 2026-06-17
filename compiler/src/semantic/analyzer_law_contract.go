@@ -96,6 +96,7 @@ const (
 	ProofProvenFlow     ProofOutcome = "proven (flow)"     // entailed by a branch-condition range fact
 	ProofProvenLinear   ProofOutcome = "proven (linear)"   // entailed by tier-2 bounded linear arithmetic (docs/86)
 	ProofProvenConst    ProofOutcome = "proven (const)"    // entailed by constant evaluation
+	ProofProvenSMT      ProofOutcome = "proven (smt)"      // entailed by an SMT solver — nonlinear / rich-boolean (docs/90)
 	ProofProvenContract ProofOutcome = "proven (contract)" // a function-level law (effect/shape/composite) discharged by analysis (docs/89)
 	ProofMeasured       ProofOutcome = "measured (-Wperf)" // a measure law verified post-codegen, surfaced as a warning (docs/89 Stage 5)
 	ProofRefuted        ProofOutcome = "refuted"           // provably violated — a compile error
