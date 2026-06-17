@@ -70,6 +70,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// never invalidated. recordWrittenConstForTarget no-ops for a non-const RHS.
 		if !n.Mutable && n.Value != nil {
 			a.recordWrittenConstForTarget(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			// An immutable integer binding to a length-ish expression (`n = xs.count`) makes `n`
+			// provably equal to that expression for the binding's lifetime — a cross-variable bound
+			// equality (docs/86 brick 86-6) that lets `for i in 0..<n: xs[i]` discharge. Invalidated if
+			// the referenced container is mutated (shared with the index-bound invalidation sites).
+			if IsNumericType(bindingType) && !IsFloatType(bindingType) {
+				a.recordBoundEqual(n.Name, optimizationExprString(n.Value))
+			}
 		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)

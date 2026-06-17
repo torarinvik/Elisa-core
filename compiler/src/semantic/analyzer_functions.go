@@ -564,6 +564,12 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 // scope (no `result` binding). Each must be bool. Analysis attaches types so the backend can emit
 // the entry checks (debug builds only). Called from each body-analysis branch before the body.
 func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
+	// Reset the cross-variable bound-equality relation at every function entry. The relation is a
+	// global analyzer field (like currentIndexBounds) but a top-level `n = xs.count` binding records
+	// into it without a save/restore, so it must be cleared per function to avoid leaking equalities
+	// from one function body into the next. This is the single per-function entry hook (called
+	// unconditionally before each body, and nowhere else).
+	a.currentBoundEqual = nil
 	for _, req := range fn.Requires {
 		if req == nil {
 			continue
@@ -572,6 +578,10 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 		if reqType != nil && !IsBoolType(reqType) {
 			a.errorf(req.Pos(), "requires clause must be bool, got %s", reqType)
 		}
+		// A `requires n == xs.count` precondition is an ASSUMPTION inside the body (the callee may rely
+		// on it; callers must establish it — enforced by the runtime check and brick 86-5's static
+		// discharge). Seed it as a bound equality so `for i in 0..<n: xs[i]` discharges in the body.
+		a.collectBoundEqualitiesForCondition(req, true)
 	}
 }
 

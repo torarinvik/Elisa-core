@@ -29,6 +29,93 @@ func cloneIndexBoundFacts(src map[string]indexBoundFact) map[string]indexBoundFa
 	return out
 }
 
+// cloneBoundEqual deep-copies the bound-equality adjacency so a branch/loop scope edits its own
+// copy (mirrors cloneIndexBoundFacts; rides the same save/restore sites).
+func cloneBoundEqual(src map[string]map[string]bool) map[string]map[string]bool {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make(map[string]map[string]bool, len(src))
+	for k, neighbors := range src {
+		cp := make(map[string]bool, len(neighbors))
+		for n := range neighbors {
+			cp[n] = true
+		}
+		out[k] = cp
+	}
+	return out
+}
+
+// recordBoundEqual adds a symmetric `x == y` fact between two canonical upper-bound expression
+// strings. Empty or self equalities are ignored.
+func (a *Analyzer) recordBoundEqual(x, y string) {
+	if x == "" || y == "" || x == y {
+		return
+	}
+	if a.currentBoundEqual == nil {
+		a.currentBoundEqual = map[string]map[string]bool{}
+	}
+	if a.currentBoundEqual[x] == nil {
+		a.currentBoundEqual[x] = map[string]bool{}
+	}
+	if a.currentBoundEqual[y] == nil {
+		a.currentBoundEqual[y] = map[string]bool{}
+	}
+	a.currentBoundEqual[x][y] = true
+	a.currentBoundEqual[y][x] = true
+}
+
+// boundExprEqual reports whether two upper-bound expression strings are provably equal under the
+// current flow-sensitive equivalence relation (reflexive + transitive closure via a small BFS). The
+// relation is tiny in practice, so the unbounded walk is cheap and need not be memoized globally.
+func (a *Analyzer) boundExprEqual(x, y string) bool {
+	if x == y {
+		return true
+	}
+	if len(a.currentBoundEqual) == 0 || x == "" || y == "" {
+		return false
+	}
+	visited := map[string]bool{x: true}
+	queue := []string{x}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for next := range a.currentBoundEqual[cur] {
+			if next == y {
+				return true
+			}
+			if !visited[next] {
+				visited[next] = true
+				queue = append(queue, next)
+			}
+		}
+	}
+	return false
+}
+
+// invalidateBoundEqualReferencingBase drops every equality fact mentioning a mutated base, so a
+// `n == xs.count` fact cannot survive an `xs.push(..)` that changes the count. Called from the same
+// invalidation functions as the index-bound facts (so it shares their mutation-site coverage).
+func (a *Analyzer) invalidateBoundEqualReferencingBase(base string) {
+	if a == nil || len(a.currentBoundEqual) == 0 || base == "" {
+		return
+	}
+	for key, neighbors := range a.currentBoundEqual {
+		if indexBoundUpperReferencesBase(key, base) {
+			delete(a.currentBoundEqual, key)
+			continue
+		}
+		for n := range neighbors {
+			if indexBoundUpperReferencesBase(n, base) {
+				delete(neighbors, n)
+			}
+		}
+		if len(neighbors) == 0 {
+			delete(a.currentBoundEqual, key)
+		}
+	}
+}
+
 func cloneViewStaticLen(src map[string]int64) map[string]int64 {
 	if len(src) == 0 {
 		return nil
@@ -145,6 +232,7 @@ func (a *Analyzer) sliceSourceWritable(source ast.Expr) bool {
 }
 
 func (a *Analyzer) applyIndexBoundsFactsForCondition(cond ast.Expr, truthy bool) {
+	a.collectBoundEqualitiesForCondition(cond, truthy)
 	facts := indexBoundsFactsForCondition(cond, truthy)
 	if len(facts) == 0 {
 		return
@@ -188,6 +276,7 @@ func (a *Analyzer) invalidateIndexBoundsForAssignedTarget(target ast.Expr) {
 	delete(a.currentViewStaticLen, base)
 	delete(a.currentViewMutable, base)
 	a.invalidateIndexBoundsReferencingBase(base)
+	a.invalidateBoundEqualReferencingBase(base)
 }
 
 // invalidateIndexBoundsForContainer drops proofs whose upper bound refers to a
@@ -197,7 +286,9 @@ func (a *Analyzer) invalidateIndexBoundsForContainer(container ast.Expr) {
 	if a == nil || len(a.currentIndexBounds) == 0 || container == nil {
 		return
 	}
-	a.invalidateIndexBoundsReferencingBase(optimizationExprString(container))
+	base := optimizationExprString(container)
+	a.invalidateIndexBoundsReferencingBase(base)
+	a.invalidateBoundEqualReferencingBase(base)
 }
 
 func (a *Analyzer) invalidateIndexBoundsReferencingBase(base string) {
@@ -227,6 +318,30 @@ func indexBoundUpperReferencesBase(upper, base string) bool {
 	c := upper[len(base)]
 	isIdentChar := c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 	return !isIdentChar
+}
+
+// collectBoundEqualitiesForCondition records `A == B` equality facts from a truthy branch guard (and
+// the same under conjunction). Only the truthy branch of an `==` establishes equality; a falsy `==`
+// or any `!=` tells us inequality, which carries no usable upper-bound equivalence, so it is ignored.
+func (a *Analyzer) collectBoundEqualitiesForCondition(cond ast.Expr, truthy bool) {
+	switch n := stripOptimizationParens(cond).(type) {
+	case *ast.UnaryExpr:
+		if n.Op == lexer.TOKEN_NOT {
+			a.collectBoundEqualitiesForCondition(n.Operand, !truthy)
+		}
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			if truthy {
+				a.collectBoundEqualitiesForCondition(n.Left, true)
+				a.collectBoundEqualitiesForCondition(n.Right, true)
+			}
+		case lexer.TOKEN_EQEQ:
+			if truthy {
+				a.recordBoundEqual(optimizationExprString(n.Left), optimizationExprString(n.Right))
+			}
+		}
+	}
 }
 
 func (a *Analyzer) indexExprRequiresUncheckedIndexPermission(expr *ast.IndexExpr) bool {
@@ -281,7 +396,11 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 	if !ok || fact.Upper == "" {
 		return false
 	}
-	if fact.Upper != indexableUpperBoundString(expr.Object, objType) {
+	want := indexableUpperBoundString(expr.Object, objType)
+	// The index's proven upper bound must equal the container's length expression — either
+	// syntactically, or via a flow-known equality (`n == xs.count`), which is the cross-variable
+	// coupling that lets `for i in 0..<n: xs[i]` discharge when `n` is known equal to `xs.count`.
+	if fact.Upper != want && !a.boundExprEqual(fact.Upper, want) {
 		return false
 	}
 	// An upper-bound proof alone is unsound for a SIGNED index: a negative value

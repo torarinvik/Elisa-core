@@ -275,6 +275,15 @@ type Analyzer struct {
 	suppressGlobalReadCheck           int
 	currentPoolScopes                 []poolScopeState
 	currentIndexBounds                map[string]indexBoundFact
+	// currentBoundEqual is a flow-sensitive equivalence relation over upper-bound EXPRESSION STRINGS
+	// (the same canonical form as indexBoundFact.Upper / indexableUpperBoundString): a symmetric
+	// adjacency set recording that two length-ish expressions are provably equal — `n == xs.count`
+	// from a guard, or `n = xs.count` from an immutable binding. It lets a loop index whose bound is
+	// `n` discharge an `xs[i]` access whose bound is `xs.count` (docs/86 brick 86-6, the cross-variable
+	// coupling §8 flagged). It rides EXACTLY the same clone/save/restore/invalidate sites as
+	// currentIndexBounds, so it can never outlive a branch or survive a mutation that the index facts
+	// themselves wouldn't (soundness).
+	currentBoundEqual                 map[string]map[string]bool
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
 	// currentFunctionGuardedIndexes collects the positions of index accesses in the current function

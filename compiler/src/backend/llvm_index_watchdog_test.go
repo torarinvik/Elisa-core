@@ -75,3 +75,60 @@ func TestIndexWatchdogSubsumedForProvenLoopIndex(t *testing.T) {
 		t.Fatalf("a proven loop index should be subsumed (no debug watchdog), got:\n%s", output)
 	}
 }
+
+// Cross-variable coupling (docs/86 brick 86-6): a loop bound `n` known EQUAL to `xs.count` (via an
+// immutable binding) lets `xs[i]` in `for i in 0..<n` discharge — the equality bridges the loop's
+// `n` upper bound to the container's `xs.count` length expression. No debug watchdog at -O0.
+func TestIndexWatchdogSubsumedViaBoundEquality(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_bound_equality.elisa", `def sum(xs: darray[i32]&) -> i32:
+    total: mutable i32 = 0
+    n: usize = xs.count
+    for i in 0..<n:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") {
+		t.Fatalf("a loop index bounded by n==xs.count should be subsumed, got:\n%s", output)
+	}
+}
+
+// A `requires n == xs.count` precondition seeds the bound equality at function entry — the canonical
+// Dafny pattern — so `for i in 0..<n: xs[i]` discharges with no body guard. No debug watchdog at -O0.
+func TestIndexWatchdogSubsumedViaRequiresEquality(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_requires_equality.elisa", `def sum(xs: darray[i32]&, n: usize) -> i32:
+    requires n == xs.count
+    total: mutable i32 = 0
+    for i in 0..<n:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") {
+		t.Fatalf("a loop index bounded by a `requires n == xs.count` precondition should be subsumed, got:\n%s", output)
+	}
+}
+
+// Negative control: a loop bound `n` with NO known relation to `xs.count` must NOT be subsumed —
+// the access keeps its debug watchdog. Confirms the equality layer doesn't over-prove.
+func TestIndexWatchdogNotSubsumedWithoutEquality(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_no_equality.elisa", `def sum(xs: darray[i32]&, n: usize) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<n:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if !strings.Contains(output, "wd.in_bounds") {
+		t.Fatalf("an unrelated loop bound must NOT be subsumed (would be unsound), got:\n%s", output)
+	}
+}

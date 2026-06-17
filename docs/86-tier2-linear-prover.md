@@ -198,5 +198,24 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
    records a written-const fact (previously only assignments did). Both sound (immutable + const
    init = permanent exact value).
 
+6. **86-6 — cross-variable bound equality (relational coupling). [LANDED]** Closes the §8
+   loop-index gap: `for i in 0..<n: xs[i]` where `n` is known equal to `xs.count`. The index-bound
+   prover is *syntactic* — a loop sets `i`'s upper bound to the string `"n"`, while the access wants
+   `"xs.count"`, so they never matched and the access fell to a runtime check. Brick 86-6 adds a
+   flow-sensitive **equivalence relation over upper-bound expression strings** (`currentBoundEqual`,
+   a symmetric adjacency set with reflexive+transitive `boundExprEqual`). The bounds-proof check now
+   accepts `fact.Upper == want OR boundExprEqual(fact.Upper, want)`.
+
+   Equalities are recorded from three sources: an `==` guard (`if n == xs.count:`), an immutable
+   integer binding (`n: usize = xs.count`), and a `requires n == xs.count` precondition seeded at
+   function entry (the canonical Dafny pattern, no body guard needed). **Soundness** rests on the
+   relation riding *exactly* the same lifecycle as `currentIndexBounds`: cloned/saved/restored at the
+   if-block and loop boundaries (so an equality cannot leak out of a branch), invalidated whenever a
+   referenced container base is mutated (`invalidateBoundEqualReferencingBase`, folded into the same
+   `invalidateIndexBounds*` functions so it inherits their mutation-site coverage — a `requires`
+   equality dies the moment `xs.push(..)` changes the count), and reset per function in
+   `analyzeRequiresClauses` (the one entry hook, since a top-level binding records without a
+   save/restore). Negative control test confirms an unrelated `n` is NOT subsumed.
+
 Each brick: build → targeted test → full `./src/...` green → commit, per the established
 per-brick pattern.
