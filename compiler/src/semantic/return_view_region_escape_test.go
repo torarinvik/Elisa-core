@@ -54,6 +54,32 @@ def caller() -> void:
 	}
 }
 
+// The same inferred borrow, but routed through a local alias before return. Region inference must
+// still tie the returned view to the grown parameter's region; otherwise the call result appears
+// region-less and can escape its backing.
+func TestReturnedViewInferredRegionThroughLocalEscapeCaught(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_inferred_local_escape.elisa", `def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
+    out.push(65u8)
+    w: view[u8] = out[0:n]
+    return w
+
+def caller() -> void:
+    can Abort.Panic:
+        outer: mutable darray[u8] = []
+        outer.push(9u8)
+        escaped: mutable view[u8] = outer[0:1]
+        region inner(64):
+            v: mutable darray[u8] @inner = []
+            escaped <- head(&v, 1)
+        for b in escaped:
+            panic("must not reach")
+`)
+	errs := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errs, `region "inner"`) || !strings.Contains(errs, "dangling reference") {
+		t.Fatalf("expected inference through local view alias to tie the returned view to region \"inner\" and reject the escape, got:\n%s", errs)
+	}
+}
+
 // The valid case must NOT be rejected: when the source container outlives the view's use, returning
 // and reading the view is sound and must type-check cleanly.
 func TestReturnedViewWithinLifetimeAccepted(t *testing.T) {

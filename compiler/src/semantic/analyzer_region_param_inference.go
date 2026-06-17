@@ -105,11 +105,70 @@ func inferReturnViewRegion(fn *ast.FuncDecl, inferred map[string]string) {
 	}
 }
 
-// functionReturnsSliceOfParam reports whether the body has a `return param[a:b]` returning a slice
-// whose object is the named parameter as a bare identifier. Conservative (bare Ident object only),
-// scanning structurally via reflection like paramContainerIsGrown; a false negative just leaves the
-// return region-less (the pre-existing, safe-but-unchecked state), never the reverse.
+// functionReturnsSliceOfParam reports whether the body returns a slice whose object is the named
+// parameter as a bare identifier, either directly (`return param[a:b]`) or through simple local
+// aliases (`w = param[a:b]; return w`). Conservative: a false negative just leaves the return
+// region-less (the pre-existing, safe-but-unchecked state), never the reverse.
 func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
+	aliases := map[string]bool{}
+	valueIsParamSlice := func(expr ast.Expr) bool {
+		if slice, ok := unwrapParenForRegionPoly(expr).(*ast.SliceExpr); ok && slice != nil {
+			if id, ok := unwrapParenForRegionPoly(slice.Object).(*ast.Ident); ok && id != nil && id.Name == name {
+				return true
+			}
+		}
+		if id, ok := unwrapParenForRegionPoly(expr).(*ast.Ident); ok && id != nil && aliases[id.Name] {
+			return true
+		}
+		return false
+	}
+	var collect func([]ast.Stmt)
+	collect = func(body []ast.Stmt) {
+		for _, stmt := range body {
+			switch s := stmt.(type) {
+			case *ast.VarDeclStmt:
+				if s.Value != nil && valueIsParamSlice(s.Value) {
+					aliases[s.Name] = true
+				}
+			case *ast.AssignStmt:
+				if id, ok := s.Target.(*ast.Ident); ok && id != nil && s.Value != nil && valueIsParamSlice(s.Value) {
+					aliases[id.Name] = true
+				}
+			case *ast.IfStmt:
+				collect(s.Then)
+				for _, elif := range s.Elifs {
+					collect(elif.Body)
+				}
+				collect(s.Else)
+			case *ast.WhileStmt:
+				collect(s.Body)
+			case *ast.ForStmt:
+				collect(s.Body)
+			case *ast.IterForStmt:
+				collect(s.Body)
+			case *ast.ScopeStmt:
+				collect(s.Body)
+			case *ast.CanStmt:
+				collect(s.Body)
+			case *ast.RegionStmt:
+				collect(s.Body)
+			case *ast.InStoreStmt:
+				collect(s.Body)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					collect(arm.Body)
+				}
+			}
+		}
+	}
+	for {
+		before := len(aliases)
+		collect(stmts)
+		if len(aliases) == before {
+			break
+		}
+	}
+
 	found := false
 	var rec func(v reflect.Value)
 	rec = func(v reflect.Value) {
@@ -122,11 +181,9 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 				return
 			}
 			if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
-				if slice, ok := ret.Value.(*ast.SliceExpr); ok && slice != nil {
-					if id, ok := slice.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-						found = true
-						return
-					}
+				if valueIsParamSlice(ret.Value) {
+					found = true
+					return
 				}
 			}
 			rec(v.Elem())
