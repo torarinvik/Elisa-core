@@ -474,6 +474,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.validateCallArgAliasAccess(expr, appliedType.Params, callAliasArgs)
 	a.recordCallArgDisjoint(expr, appliedType.Params, callAliasArgs)
 	a.dischargeCallArgRefinements(expr, callAliasArgs)
+	a.dischargeCallRequires(expr, callAliasArgs)
 	originalTrackedByRoot := map[*Symbol]Type{}
 	loweredArgs := append([]ast.Expr(nil), orderedArgs...)
 	loweredArgs = append(loweredArgs, expr.ResolvedImplicitArgs...)

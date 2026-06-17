@@ -170,6 +170,33 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
    a `0..<xs.count` loop index (non-const, non-`trusted`) emits no `wd.in_bounds` at -O0.
 4. **86-4 (optional, scoped separately) — relational coupling** for the loop-index family
    (§8). Only if 86-1..3 don't already cover the real call sites.
+5. **86-5 — static precondition discharge (interprocedural). [LANDED]** Connects a callee's
+   `requires <bool-expr>` clauses to the CALLER's static facts. Previously `requires` was only a
+   runtime debug-check inside the callee body (design-by-contract); now at each direct call site
+   `f(args...)` the clause is re-interpreted with the callee's parameters substituted by the
+   actual argument expressions and proven against the caller's facts with the same affine/interval
+   machinery (`analyzer_requires_discharge.go`):
+   - **proven** — caller facts entail the precondition → `ProofProvenLinear` in `--explain`;
+     under `-strict` this is the line between "checked at runtime" and "guaranteed".
+   - **refuted** — caller facts prove the precondition is ALWAYS violated → hard compile error
+     (a definite contract break caught before the program runs).
+   - **unknown** — declined soundly; the callee's runtime check stands, a `proofLint` warns, and
+     `-strict` escalates to an error (Dafny-like prove-it-or-fail).
+
+   Mechanics: `dischargeCallRequires` (hooked next to `dischargeCallArgRefinements` in
+   `analyzeCallExpr`) builds a param→arg substitution; `proveRequiresClause` handles `and`
+   conjunctions structurally and comparison leaves via `substitutedAffine` (mirrors `affineOf`
+   plus the substitution leaf and a general product rule) + `boundAffine` over the difference
+   `L - R`. Cross-variable preconditions (`requires lo <= hi`) fall out for free. **Soundness:**
+   the fragment fails closed — any non-linear/unknown leaf or open bound makes a clause unknown;
+   refutation needs the negation to hold on the WHOLE bounded range, so range over-approximation
+   can only weaken a refutation to unknown, never fabricate one.
+
+   Enabler (broadens tier-2 generally): `boundAffine` now falls back to the **written-constant**
+   tracker (`writtenConstInt`) when a variable has no branch-derived range, so an immutable local
+   `k: i32 = 5` bounds to the point range `[5,5]`; and an immutable const-initialized var decl now
+   records a written-const fact (previously only assignments did). Both sound (immutable + const
+   init = permanent exact value).
 
 Each brick: build → targeted test → full `./src/...` green → commit, per the established
 per-brick pattern.

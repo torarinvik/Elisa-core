@@ -64,6 +64,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.markZeroedUninitialized(sym)
 		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
+		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
+		// that value for its whole lifetime — record it as a written-constant so the interval prover
+		// (boundAffine) and refinement discharge can treat it as an exact value. Sound: immutable, so
+		// never invalidated. recordWrittenConstForTarget no-ops for a non-const RHS.
+		if !n.Mutable && n.Value != nil {
+			a.recordWrittenConstForTarget(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)
 		a.markCreatedProtocolSymbol(sym, n.Value)

@@ -196,6 +196,17 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 	return acc, found
 }
 
+// writtenConstInt returns the exact integer value of a variable when a live written-constant fact
+// pins it to a compile-time integer (an immutable local or a `<- const` write). The bridge between
+// the written-const tracker and the interval prover.
+func (a *Analyzer) writtenConstInt(name string) (int64, bool) {
+	v, ok := a.lookupWrittenConst(name)
+	if !ok || v == nil {
+		return 0, false
+	}
+	return a.constIntValue(v)
+}
+
 // lawConstraint is one `self OP const` clause of a law body in the decidable fragment.
 type lawConstraint struct {
 	op lexer.TokenKind
@@ -512,6 +523,14 @@ func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
 	out := numRange{loKnown: true, lo: f.c, hiKnown: true, hi: f.c}
 	for name, coeff := range f.terms {
 		r, ok := a.lookupRangeFact(name)
+		if !ok {
+			// No branch-derived range, but a live written-constant fact (e.g. an immutable local
+			// `k: i32 = 5`) pins the variable to an exact value — a tight point range. Sound: the
+			// written-const fact is a proven exact value, invalidated on any mutation.
+			if c, known := a.writtenConstInt(name); known {
+				r, ok = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
 		if !ok {
 			return numRange{} // unknown variable: fully open, declines
 		}
