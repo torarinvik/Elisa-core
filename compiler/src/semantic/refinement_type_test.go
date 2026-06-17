@@ -200,6 +200,59 @@ def f(n: i64) -> i64:
 	}
 }
 
+// The proof report records every discharge decision with its outcome (docs/85 --explain).
+func TestProofReportRecordsOutcomes(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    a: i64 is Nat = 5          # proven (const)
+    b: i64 = needs_nat(n)      # runtime (n unknown)
+    if n > 0:
+        return needs_nat(n)    # proven (flow)
+    return a + b
+`
+	result := analyzeTreeTestSource(t, "proof_report.elisa", src)
+	var const_, flow, runtime int
+	for _, f := range result.ProofReport {
+		switch f.Outcome {
+		case ProofProvenConst:
+			const_++
+		case ProofProvenFlow:
+			flow++
+		case ProofRuntime:
+			runtime++
+		}
+	}
+	if const_ == 0 || flow == 0 || runtime == 0 {
+		t.Fatalf("proof report should record const/flow/runtime outcomes, got const=%d flow=%d runtime=%d (report=%+v)", const_, flow, runtime, result.ProofReport)
+	}
+}
+
+// A refuted refinement is recorded as such in the report.
+func TestProofReportRecordsRefutation(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f() -> i64:
+    x: i64 is Nat = 0 - 3
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "proof_refute.elisa", src, AnalyzeOptions{})
+	found := false
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofRefuted {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("a violated refinement should be recorded as refuted in the proof report, got %+v", result.ProofReport)
+	}
+}
+
 // A refinement-typed RETURN proves statically for a satisfying constant — no runtime check.
 func TestRefinementReturnConstantProven(t *testing.T) {
 	src := `

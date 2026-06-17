@@ -31,6 +31,30 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 }
 
+// ProofOutcome classifies how a refinement obligation was discharged (docs/85 discharge ladder).
+type ProofOutcome string
+
+const (
+	ProofProvenFlow  ProofOutcome = "proven (flow)"  // entailed by a branch-condition range fact
+	ProofProvenConst ProofOutcome = "proven (const)" // entailed by constant evaluation
+	ProofRefuted     ProofOutcome = "refuted"        // provably violated — a compile error
+	ProofRuntime     ProofOutcome = "runtime"        // unprovable — debug runtime check / -strict error
+)
+
+// ProofFact is one entry in the --explain proof report: where a refinement was discharged, on what
+// subject, by which law, and with what outcome.
+type ProofFact struct {
+	Pos       lexer.Pos
+	Subject   string
+	Predicate string
+	Outcome   ProofOutcome
+}
+
+// recordProof appends one discharge decision to the proof report (docs/85 observability).
+func (a *Analyzer) recordProof(pos lexer.Pos, subject, predicate string, outcome ProofOutcome) {
+	a.proofReport = append(a.proofReport, ProofFact{Pos: pos, Subject: subject, Predicate: predicate, Outcome: outcome})
+}
+
 // proofLint reports that a refinement obligation was not statically discharged. It is a WARNING by
 // default — so the user always KNOWS where a static guarantee fell back to a runtime check — and a
 // hard ERROR under `-strict` (EnforceStrictProofs), the Dafny-like prove-it-or-fail mode (docs/85).

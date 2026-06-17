@@ -227,6 +227,7 @@ type cliOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	proofStrict       bool
+	explainProofs     bool
 	concurrencyStrict bool
 }
 
@@ -314,6 +315,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// docs/85: promote refinement-proof fallbacks from warnings to hard errors — a
 			// refinement that cannot be discharged statically fails the build (Dafny-like).
 			options.proofStrict = true
+		case arg == "--explain" || arg == "-explain":
+			// docs/85 observability: after analysis, print every refinement-discharge decision
+			// (proven / refuted / runtime) so the user can audit what is statically guaranteed.
+			options.explainProofs = true
 		case arg == "-Wstrict":
 			// Unified strictness: turn on the shipped safety/performance proof levers together.
 			options.strictPolicy = true

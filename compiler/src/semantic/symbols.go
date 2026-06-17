@@ -77,6 +77,11 @@ type Result struct {
 	// emits each predicate call as a debug boundary check (trap on violation) before the return,
 	// elided in release. Only side-effect-free return values get a check.
 	ReturnRefinementChecks map[*ast.ReturnStmt][]*ast.CallExpr
+	// ProofReport records every refinement-discharge decision (docs/85: the "always known to the
+	// user" observability layer). The CLI prints it under --explain so the user can audit exactly
+	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —
+	// one entry per refinement obligation).
+	ProofReport []ProofFact
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo

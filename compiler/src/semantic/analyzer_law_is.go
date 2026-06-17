@@ -93,6 +93,7 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		// Not statically proven: fall back to a runtime check AND tell the user — a static guarantee
 		// was not achieved here (docs/85: the fallback must be KNOWN). Warning by default; hard error
 		// under -strict (prove-it-or-fail, the Dafny-like mode).
+		a.recordProof(n.Pos(), "\""+n.Name+"\"", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check", pred.Name, n.Name)
 		call := &ast.CallExpr{
 			Position: pred.Position,
@@ -114,6 +115,7 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 // the var-decl boundary and call-argument boundaries.
 func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos) bool {
 	if a.tryProveRefinementByFlow(value, lawDecl, pred.Args) {
+		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
 	if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
@@ -122,7 +124,10 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 		Args:     append([]ast.Expr{value}, pred.Args...),
 	}); known {
 		if !ok {
+			a.recordProof(pos, valueName, pred.Name, ProofRefuted)
 			a.errorf(pos, "refinement %q is violated: %s does not satisfy it", pred.Name, valueName)
+		} else {
+			a.recordProof(pos, valueName, pred.Name, ProofProvenConst)
 		}
 		return true
 	}
@@ -158,6 +163,7 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 			if a.tryDischargeRefinementStatically(args[i], name, pred, lawDecl, call.Pos()) {
 				continue
 			}
+			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
 			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check", pred.Name, name, decl.Name)
 			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
 			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
@@ -201,6 +207,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		if a.tryDischargeRefinementStatically(n.Value, "the returned value", pred, lawDecl, n.Pos()) {
 			continue
 		}
+		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check", pred.Name, a.currentFuncDecl.Name)
 		if !a.isSideEffectFreeRefinementArg(n.Value) {
 			continue

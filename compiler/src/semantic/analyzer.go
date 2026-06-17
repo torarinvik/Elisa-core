@@ -288,6 +288,7 @@ type Analyzer struct {
 	enforceStrictConcurrency         bool
 	enforcePerfLints                 bool
 	enforceStrictProofs              bool
+	proofReport                      []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -682,6 +683,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,
+		ProofReport:             a.proofReport,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,

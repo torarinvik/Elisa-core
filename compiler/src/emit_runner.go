@@ -229,6 +229,9 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	if !ok {
 		return 1
 	}
+	if options.explainProofs {
+		printProofReport(stderr, result.ProofReport)
+	}
 
 	switch options.emit {
 	case emitSemantic:
@@ -535,6 +538,31 @@ func writeOutputFile(path string, data []byte) error {
 		return err
 	}
 	return os.WriteFile(path, data, 0o644)
+}
+
+// printProofReport renders the refinement-discharge report under --explain (docs/85 observability):
+// one line per obligation showing where it is, the subject and law, and how it was discharged
+// (proven statically, refuted, or deferred to a runtime check). A trailing summary makes the
+// static-vs-runtime split scannable.
+func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
+	fmt.Fprintln(stderr, "── refinement proof report (--explain) ──")
+	if len(report) == 0 {
+		fmt.Fprintln(stderr, "  (no refinement obligations)")
+		return
+	}
+	var proven, refuted, runtime int
+	for _, f := range report {
+		fmt.Fprintf(stderr, "  %s: %s is %s — %s\n", f.Pos, f.Subject, f.Predicate, f.Outcome)
+		switch f.Outcome {
+		case semantic.ProofProvenFlow, semantic.ProofProvenConst:
+			proven++
+		case semantic.ProofRefuted:
+			refuted++
+		case semantic.ProofRuntime:
+			runtime++
+		}
+	}
+	fmt.Fprintf(stderr, "  %d proven statically, %d runtime-checked, %d refuted\n", proven, runtime, refuted)
 }
 
 // printPerfWarnings surfaces the backend's post-optimization performance-friction warnings (the
