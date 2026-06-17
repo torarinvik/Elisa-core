@@ -558,3 +558,80 @@ def caller(a: i64) -> i64:
 		t.Fatalf("needs_nat(a) under `if a > 5` should prove, got: %v", result.Errors())
 	}
 }
+
+// --- Mutable refinement flow (docs/85): predicate facts on mutable variables, invalidated at
+// every mutation site. Today's range prover refuses mutables; these facts carry on mutables
+// SOUNDLY because a mutation drops them. n is seeded from a parameter so it is never a tracked
+// constant — the predicate fact is the ONLY thing that can discharge the obligation. ---
+
+// A predicate fact gained by `if x is P:` discharges a later obligation on x even when x is a
+// MUTABLE variable — sound because no mutation happens between the narrowing and the use.
+func TestMutableRefinementFactProvesWhenUnmutated(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("narrowed mutable n (unmutated) should prove needs_pos(n), got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("unmutated narrowed mutable should be statically proven, got %d runtime checks", len(result.CallArgRefinementChecks))
+	}
+}
+
+// SOUNDNESS CORE: a write to x between the narrowing and the use DROPS the predicate fact, so the
+// obligation falls back to a runtime check. The compiler stops trusting the refinement exactly
+// where the mutation happens.
+func TestMutableRefinementFactDroppedByAssignment(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def f(seed: i64, other: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        n <- other
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_assign_drop.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("mutation `n = other` must drop the Positive fact, forcing a runtime check on needs_pos(n)")
+	}
+}
+
+// A mutating call through a mutable ref (`bump(&n)`, the same shape as `arr.pop()`) also drops the
+// fact — this is the "loses the refinement where it is called" behavior the design targets.
+func TestMutableRefinementFactDroppedByRefCall(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def bump(x: mutable i64&) -> void:
+    pass
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        bump(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "mut_refine_refcall_drop.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("passing &n to a mutable-ref param must drop the Positive fact, forcing a runtime check")
+	}
+}

@@ -487,6 +487,15 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			paramType = specializedType
 		}
 		a.recordCallArgPoststates(expr, loweredArgs[i], i, paramType, funcPoststatesForParam(appliedType.Poststates, i), originalTrackedByRoot)
+		// Mutable refinement flow (docs/85): passing a variable by ref (incl. the receiver of a
+		// mutating method like `arr.pop()`) may break any predicate that held on it, so drop its
+		// predicate facts at the call site — mirroring the named-state widening this same loop does
+		// for ref args. Conservative on two axes (any ref, not just mutable; no `ensures`-preserve
+		// credit yet); both only add runtime checks, never remove them, so the drop stays sound. A
+		// callee that re-establishes the predicate via `ensures` is a later refinement.
+		if rt, ok := paramType.(*RefType); ok && rt != nil {
+			a.invalidatePredFactsForTarget(loweredArgs[i])
+		}
 	}
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {

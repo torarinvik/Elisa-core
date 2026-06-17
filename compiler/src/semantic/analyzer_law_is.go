@@ -118,6 +118,12 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
+	// Mutable refinement flow (docs/85): a live predicate fact gained from a narrowing and not
+	// since invalidated by a mutation discharges the obligation with no runtime check.
+	if a.tryProveRefinementByFactSet(value, pred.Name, pred.Args) {
+		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
+		return true
+	}
 	if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
 		Position: pred.Position,
 		Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},

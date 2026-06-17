@@ -45,6 +45,9 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 			// decidable fragment (`self OP const` conjunctions) over an immutable int, record the
 			// implied integer range so a later `x is OtherLaw` / refinement binding discharges.
 			a.gatherLawIsRangeRefinement(scope, n, truthy)
+			// docs/85 (mutable refinement flow): record a predicate fact for `if x is BareLaw:`,
+			// usable to discharge a later obligation on x and invalidated at any mutation of x.
+			a.gatherLawIsPredFact(scope, n, truthy)
 			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
 			if ok {
 				a.bindRefinedExprType(scope, targetExpr, viewType)

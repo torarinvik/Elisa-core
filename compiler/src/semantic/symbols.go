@@ -381,6 +381,11 @@ type Scope struct {
 	// from a branch condition (`if a > 5` → a ∈ [6,∞)). Used by the refinement flow prover (docs/85
 	// 1d-2) to discharge value refinements statically. Immutable-only, so no invalidation is needed.
 	rangeFacts map[string]numRange
+	// predFacts holds bare law-predicates known to hold on a variable within this scope (var name →
+	// set of law names), gained from a flow narrowing (`if x is P:`). Unlike rangeFacts these MAY
+	// cover mutable variables, because they are invalidated at every mutation site (docs/85: mutable
+	// refinement flow — see analyzer_refinement_predfacts.go).
+	predFacts map[string]map[string]bool
 }
 
 func NewScope(parent *Scope) *Scope {

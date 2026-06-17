@@ -333,6 +333,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		if !n.Optional {
 			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
+			a.invalidatePredFactsForTarget(n.Target)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
@@ -360,6 +361,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
+		a.invalidatePredFactsForTarget(n.Target)
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		a.suppressUninitReadCheck++
@@ -384,6 +386,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordStorageViewAssignment(n.Target, n.Value)
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
+		a.invalidatePredFactsForTarget(n.Target)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
