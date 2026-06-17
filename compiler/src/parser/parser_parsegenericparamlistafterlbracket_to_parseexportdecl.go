@@ -286,6 +286,11 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		changes = p.parseChangesPathsAfterKeyword()
 	}
 
+	var preserves []ast.EnsuresPath
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
+
 	p.expect(lexer.TOKEN_COLON)
 
 	var body []ast.Stmt
@@ -306,7 +311,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Requires: requires, EnsureValues: ensures2, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Requires: requires, EnsureValues: ensures2, Params: params, ReturnType: retType, Body: body}
 }
 
 // liftLeadingContracts pulls leading `requires`/`ensure` value-contract statements (parsed as

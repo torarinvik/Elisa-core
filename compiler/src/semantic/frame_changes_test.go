@@ -107,3 +107,70 @@ def f(r: mutable Render&) changes ghost.px:
 		t.Fatalf("a non-parameter changes target must error, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// docs/87 87-2: `preserves Y` forbids writing Y; a write to a preserved place is an error.
+func TestPreservesWriteErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def f(r: mutable Render&) preserves r.health:
+    r.px <- 1
+    r.health <- 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "preserves_write.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "`preserves`") {
+		t.Fatalf("writing a preserved place must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A write to a place disjoint from the preserved set is clean (writing r.px under preserves r.health).
+func TestPreservesDisjointWriteClean(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def f(r: mutable Render&) preserves r.health:
+    r.px <- 1
+`
+	result := analyzeTreeTestSource(t, "preserves_disjoint.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("writing a place disjoint from the preserved set should be clean, got: %v", errs)
+	}
+}
+
+// preserves also blocks channel 2: passing a preserved place to a mutable-ref callee is an error.
+func TestPreservesMutableRefArgErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def zero(n: mutable i32&):
+    n <- 0
+
+def f(r: mutable Render&) preserves r.health:
+    zero(&r.health)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "preserves_refarg.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "`preserves`") {
+		t.Fatalf("passing a preserved place to a mutable-ref callee must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// docs/87 §7 consistency: a place may not be both changed and preserved.
+func TestChangesPreservesConflictErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+
+def f(r: mutable Render&) changes r.px preserves r.px:
+    r.px <- 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "frame_conflict.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "conflicts with") {
+		t.Fatalf("a place in both changes and preserves must error, got:\n%s", allDiagnostics(result))
+	}
+}

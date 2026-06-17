@@ -124,9 +124,16 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					}
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
-					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
+					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
+					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
-					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
+					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.checkFrameConsistency(fn)
+					defer func() {
+						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
+						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
+					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -314,9 +321,16 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
-					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
+					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
+					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
-					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
+					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.checkFrameConsistency(fn)
+					defer func() {
+						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
+						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
+					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -469,9 +483,16 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
-					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
+					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
+					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
-					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
+					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.checkFrameConsistency(fn)
+					defer func() {
+						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
+						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
+					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {

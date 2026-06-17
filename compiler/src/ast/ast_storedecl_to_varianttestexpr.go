@@ -140,6 +140,10 @@ type FuncDecl struct {
 	// An empty slice means no clause (unconstrained); a present clause is enforced — a write outside
 	// the set is a compile error.
 	Changes []EnsuresPath
+	// Preserves holds the frame condition `preserves <path>, ...` (docs/87 §7): the dual of Changes —
+	// caller-visible places the function must NOT write. A write that overlaps a preserved path is a
+	// compile error. `preserves Y ≡ Y ∩ changes(f) = ∅`.
+	Preserves []EnsuresPath
 	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
 	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
 	// function machinery (generics, modules, type checking, calls); the flag drives purity

@@ -502,7 +502,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// Uses the resolved appliedType.Params mutability signal (reliable post-substitution).
 		if i < len(appliedType.Params) {
 			if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
-				a.checkChangesMutableRefArg(loweredArgs[i])
+				a.checkFrameMutableRefArg(loweredArgs[i])
 			}
 		}
 		// docs/85 brick 2 (A): a callee postcondition `ensures <param i> is Law` lets the caller GAIN

@@ -183,11 +183,14 @@ type Analyzer struct {
 	inEnsureContext bool
 	currentFuncDecl *ast.FuncDecl
 	currentFuncType *FuncType
-	// currentChangesPaths / currentHasChanges hold the resolved frame condition (docs/87) of the
-	// function being analyzed, so the mutation sites can enforce that every caller-visible write
-	// lands in the declared `changes` set.
-	currentChangesPaths []framePath
-	currentHasChanges   bool
+	// currentChangesPaths / currentPreservesPaths and their Has flags hold the resolved frame
+	// conditions (docs/87) of the function being analyzed, so the mutation sites can enforce that
+	// every caller-visible write lands in the declared `changes` set and never touches a `preserves`
+	// place.
+	currentChangesPaths   []framePath
+	currentPreservesPaths []framePath
+	currentHasChanges     bool
+	currentHasPreserves   bool
 	// currentFuncSawPlainValueReturn records whether the current function has a
 	// value-returning path that is NOT a `return move <region>`. Combined with
 	// FuncType.ReturnsOwnedRegion it rejects functions that transfer an owned

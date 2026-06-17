@@ -54,8 +54,10 @@ param not named in `S` at all — is the error.
    clause; resolve each path against a ref param + its field chain; enforce channels 1 and 2
    over field paths within the body. Sound (catches all caller-visible writes via the two
    channels); field-granular (an index step `r.arr[i]` is covered at `r.arr` granularity).
-2. **87-2 — `preserves Y` (derived).** `preserves r.health` ≡ `r.health ∩ changes(f) = ∅`,
-   checked against the same resolved set; pure sugar over 87-1.
+2. **87-2 — `preserves Y` (derived). [LANDED]** `preserves r.health` is the dual blacklist:
+   a write that *overlaps* a preserved place (either path a prefix of the other) is an error,
+   over both channels. `changes`+`preserves` may coexist; a place in both is a conflict
+   (the §7 `Y ∩ changes(f) = ∅` consistency check). Clause parses after `changes`.
 3. **87-3 — interprocedural `changes` summaries.** A callee's own `changes` set refines
    channel 2: passing `r.x` to a callee that `changes self.a` only writes `r.x.a`, not all of
    `r.x`. Removes brick-1 conservatism; rides the disjoint-param/alias substrate (docs/84).

@@ -14,27 +14,40 @@ type framePath struct {
 	fields []string
 }
 
-// resolveChangesPaths validates a function's `changes` clause and returns the resolved frame paths.
-// Each path must root at a parameter that is a reference (writes only reach the caller through a
-// ref); a non-ref or unknown root is an error. Field existence is not deeply checked in brick 1.
-func (a *Analyzer) resolveChangesPaths(fn *ast.FuncDecl) []framePath {
-	if fn == nil || len(fn.Changes) == 0 {
+// resolveFramePaths validates a function's frame clause (`changes` or `preserves`) and returns the
+// resolved paths. Each path must root at a parameter that is a reference (writes only reach the
+// caller through a ref); a non-ref or unknown root is an error. clause names the clause for errors.
+func (a *Analyzer) resolveFramePaths(paths []ast.EnsuresPath, clause string) []framePath {
+	if len(paths) == 0 {
 		return nil
 	}
-	out := make([]framePath, 0, len(fn.Changes))
-	for _, p := range fn.Changes {
+	out := make([]framePath, 0, len(paths))
+	for _, p := range paths {
 		sym, ok := a.currentScope.Lookup(p.Root)
 		if !ok || sym == nil || sym.Kind != SymbolParam {
-			a.errorf(p.Position, "`changes` target %q is not a parameter", p.Root)
+			a.errorf(p.Position, "`%s` target %q is not a parameter", clause, p.Root)
 			continue
 		}
 		if !isFrameWritableRefType(sym.Type) {
-			a.errorf(p.Position, "`changes %s` has no effect: %q is not a mutable reference parameter (only writes through a ref reach the caller)", frameTargetString(p), p.Root)
+			a.errorf(p.Position, "`%s %s` has no effect: %q is not a mutable reference parameter (only writes through a ref reach the caller)", clause, frameTargetString(p), p.Root)
 			continue
 		}
 		out = append(out, framePath{root: p.Root, fields: append([]string(nil), p.Fields...)})
 	}
 	return out
+}
+
+// checkFrameConsistency enforces the docs/87 §7 identity `preserves Y ⟺ Y ∩ changes(f) = ∅`: a
+// place may not be in both clauses. An overlap is contradictory (it would be both required-writable
+// and forbidden-to-write).
+func (a *Analyzer) checkFrameConsistency(fn *ast.FuncDecl) {
+	for _, pres := range a.currentPreservesPaths {
+		for _, chg := range a.currentChangesPaths {
+			if framePathsOverlap(pres, chg) {
+				a.errorf(fn.Pos(), "`preserves %s` conflicts with `changes %s`: a place cannot be both preserved and changed", frameWriteString(pres.root, pres.fields), frameWriteString(chg.root, chg.fields))
+			}
+		}
+	}
 }
 
 // isFrameWritableRefType reports whether a param type is a reference whose pointee a callee body
@@ -45,27 +58,27 @@ func isFrameWritableRefType(t Type) bool {
 	return ok
 }
 
-// checkChangesWrite enforces the active `changes` clause at a direct write site: if the function
-// declared a frame and `target`'s root is a ref parameter, the written place must be covered by a
-// declared path, else it is a compile error (docs/87 channel 1).
-func (a *Analyzer) checkChangesWrite(target ast.Expr) {
-	if !a.currentHasChanges {
+// checkFrameWrite enforces the active frame clauses at a direct write site: if `target`'s root is a
+// ref parameter, the written place must be inside the `changes` set (if any) AND must not overlap a
+// `preserves` place (docs/87 channel 1).
+func (a *Analyzer) checkFrameWrite(target ast.Expr) {
+	if !a.currentHasChanges && !a.currentHasPreserves {
 		return
 	}
-	a.checkChangesPlace(target, "writes to")
+	a.checkFramePlace(target, "writes to")
 }
 
-// checkChangesMutableRefArg enforces the frame at a call argument passed by MUTABLE reference: the
+// checkFrameMutableRefArg enforces the frame at a call argument passed by MUTABLE reference: the
 // callee may write the place, so it counts as a write to it (docs/87 channel 2). Immutable-borrow
 // args are not writes and are not checked here.
-func (a *Analyzer) checkChangesMutableRefArg(arg ast.Expr) {
-	if !a.currentHasChanges {
+func (a *Analyzer) checkFrameMutableRefArg(arg ast.Expr) {
+	if !a.currentHasChanges && !a.currentHasPreserves {
 		return
 	}
-	a.checkChangesPlace(arg, "may write")
+	a.checkFramePlace(arg, "may write")
 }
 
-func (a *Analyzer) checkChangesPlace(place ast.Expr, verb string) {
+func (a *Analyzer) checkFramePlace(place ast.Expr, verb string) {
 	root, fields, ok := frameWritePath(place)
 	if !ok {
 		return
@@ -74,10 +87,35 @@ func (a *Analyzer) checkChangesPlace(place ast.Expr, verb string) {
 	if !found || sym == nil || sym.Kind != SymbolParam || !isFrameWritableRefType(sym.Type) {
 		return // not a caller-visible (ref-param) place: a local write is never a frame violation
 	}
-	if a.framePathCovered(root, fields) {
+	written := framePath{root: root, fields: fields}
+	if a.currentHasChanges && !a.framePathCovered(root, fields) {
+		a.errorf(place.Pos(), "%s %s, which is outside the `changes` set of %q", verb, frameWriteString(root, fields), a.currentFuncDecl.Name)
 		return
 	}
-	a.errorf(place.Pos(), "%s %s, which is outside the `changes` set of %q", verb, frameWriteString(root, fields), a.currentFuncDecl.Name)
+	for _, pres := range a.currentPreservesPaths {
+		if framePathsOverlap(written, pres) {
+			a.errorf(place.Pos(), "%s %s, which %q `preserves`", verb, frameWriteString(root, fields), a.currentFuncDecl.Name)
+			return
+		}
+	}
+}
+
+// framePathsOverlap reports whether two frame paths touch the same storage: same root and one field
+// chain is a prefix of the other (writing `r.health` touches `r.health.x`, and vice versa).
+func framePathsOverlap(a, b framePath) bool {
+	if a.root != b.root {
+		return false
+	}
+	shorter := a.fields
+	if len(b.fields) < len(shorter) {
+		shorter = b.fields
+	}
+	for i := range shorter {
+		if a.fields[i] != b.fields[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // framePathCovered reports whether a write to (root, fields) is permitted by some declared path:
