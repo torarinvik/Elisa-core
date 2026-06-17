@@ -173,9 +173,19 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	}
 	tr := a.newSMTTranslator(nil)
 	// Translate each substituted argument to a term FIRST, so the caller's free variables are
-	// collected before the fact preamble is emitted.
+	// collected before the fact preamble is emitted. An ARRAY-valued argument is mapped through the
+	// array env (docs/90 brick 90-13) so a quantified array precondition (`forall k: xs[k] >= 0`) can
+	// reference the caller's array symbol; a scalar argument is an integer term.
 	env := map[string]string{}
 	for name, argExpr := range subst {
+		if tr.isArrayLike(a.exprTypes[argExpr]) {
+			arr, ok := tr.arrayTermEnv(argExpr, nil)
+			if !ok {
+				return false, ""
+			}
+			env[name] = arr
+			continue
+		}
 		term, ok := tr.term(argExpr)
 		if !ok {
 			return false, "" // an argument outside the fragment → decline
@@ -186,7 +196,16 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if !ok {
 		return false, ""
 	}
-	query := tr.factPreamble() + "(assert (not " + obligation + "))\n"
+	// Assume the ENCLOSING (caller) function's own preconditions as hypotheses (docs/90 brick 90-13).
+	// This is the dual of brick 90-6 (which lets a callee assume its requires in its body): here a
+	// caller that itself carries `requires forall k: 0<=k<n implies data[k] >= 0` can discharge a
+	// callee's identical-or-weaker quantified array precondition, because both clauses translate
+	// against the SAME array symbol (the caller arg `data` and the caller requires both resolve to
+	// smtVar("data")). Contract-sound: the caller's callers must establish the caller's requires, and
+	// an SMT-proven precondition never drives bounds-check elision. A caller clause outside the
+	// fragment is silently skipped (fewer assumptions is conservative).
+	hyps := a.smtRequiresHypotheses(tr)
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {

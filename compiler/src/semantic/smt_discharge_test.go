@@ -327,6 +327,56 @@ def first(xs: darray[i64], n: i64) -> i64 is NonNeg:
 	}
 }
 
+// CALLER-SIDE QUANTIFIED ARRAY PRECONDITIONS (docs/90 brick 90-13): a caller that itself carries a
+// quantified array `requires` discharges a callee's identical precondition at the call site — the
+// dual of 90-6. `forward` requires `forall k: 0<=k<m implies data[k] >= 0` and passes data/m to
+// `consume`, which requires the same over its own params. The caller's requires is assumed as a
+// hypothesis, and both clauses translate against the same array symbol, so the call site is PROVEN.
+func TestSMTCallerQuantifiedArrayPreconditionProven(t *testing.T) {
+	src := `
+def consume(xs: darray[i64], n: i64) -> i64:
+    requires forall k: (0 <= k and k < n) implies xs[k] >= 0
+    return 0
+
+def forward(data: darray[i64], m: i64) -> i64:
+    requires forall k: (0 <= k and k < m) implies data[k] >= 0
+    return consume(data, m)
+`
+	result := analyzeWithSMT(t, "smt_caller_array_req.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Predicate == "requires" {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the callee precondition proven from the caller's matching precondition, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: WITHOUT a matching precondition on the caller, the callee's quantified array
+// precondition must NOT be SMT-proven (the caller has no fact about the array contents). It declines
+// to the runtime check (a warning), never a fabricated proof.
+func TestSMTCallerQuantifiedArrayPreconditionDeclinesWithoutFact(t *testing.T) {
+	src := `
+def consume(xs: darray[i64], n: i64) -> i64:
+    requires forall k: (0 <= k and k < n) implies xs[k] >= 0
+    return 0
+
+def forward(data: darray[i64], m: i64) -> i64:
+    return consume(data, m)
+`
+	result := analyzeWithSMT(t, "smt_caller_array_req_none.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Predicate == "requires" {
+			t.Fatalf("a callee array precondition must not be SMT-proven without a caller fact: %+v", result.ProofReport)
+		}
+	}
+}
+
 // With SMT off (default), the same nonlinear obligation is NOT proven and no solver runs.
 func TestSMTOffLeavesNonlinearUnproven(t *testing.T) {
 	src := `
