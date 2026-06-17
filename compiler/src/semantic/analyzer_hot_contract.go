@@ -64,6 +64,7 @@ func (a *Analyzer) checkHotContract(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || !funcHasAnnotation(fn, "hot") {
 		return
 	}
+	a.collectHotDisjointKernelCandidate(fn, fnType)
 	allowAllocation := hotAnnotationAllowsAllocation(fn)
 	seen := map[string]bool{}
 	for _, ref := range fnType.PermissionRefs {

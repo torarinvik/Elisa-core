@@ -302,6 +302,7 @@ type Analyzer struct {
 	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
 	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
+	hotDisjointKernelCandidates      []hotDisjointKernelCandidate
 	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
 	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
 	currentNamespace                 string
@@ -630,6 +631,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.validatePermissionUsage(activeDecls)
 	a.analyzeExports(activeDecls)
 	a.finalizeFuncDisjointParams(activeDecls)
+	a.lintHotKernelsForDisjointness()
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
 	}
