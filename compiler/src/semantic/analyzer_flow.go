@@ -59,6 +59,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bindingType = a.stampContainerRegion(bindingType)
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable}
 		a.defineLocal(sym, n.Pos())
+		a.recordRefinementChecks(n)
 		if n.Value != nil && isZeroedInitializer(n.Value) {
 			a.markZeroedUninitialized(sym)
 		}

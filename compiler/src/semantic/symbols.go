@@ -61,6 +61,11 @@ type Result struct {
 	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)
 	// single-target form for now.
 	LawIsCalls map[*ast.BinaryExpr]*ast.CallExpr
+	// RefinementChecks holds the discharge obligations for a refinement-typed var decl (docs/85
+	// Stage 1c-2): the predicate calls `P(x)` that must hold for the bound value. Codegen emits
+	// them as a debug boundary check (trap on violation), elided in release — "debug verifies what
+	// release assumes" — until the static prover (1d) elides the ones it can prove.
+	RefinementChecks map[*ast.VarDeclStmt][]*ast.CallExpr
 	Defer                   map[*ast.DeferStmt]*DeferInfo
 	Fold                    map[*ast.FoldExpr]*FoldInfo
 	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo

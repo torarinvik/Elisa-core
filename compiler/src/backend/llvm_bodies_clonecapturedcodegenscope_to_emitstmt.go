@@ -638,6 +638,9 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if s.g.trace != nil {
 			s.g.trace.recordValue(s, n.Pos().Line, n.Name, initValue, declType)
 		}
+		if err := s.emitRefinementChecks(n); err != nil {
+			return err
+		}
 		return nil
 	case *ast.LetDestructureStmt:
 		return s.emitLetDestructureStmt(n)

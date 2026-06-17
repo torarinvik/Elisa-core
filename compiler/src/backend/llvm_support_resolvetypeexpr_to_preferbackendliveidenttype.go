@@ -11,6 +11,9 @@ import (
 
 func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error) {
 	switch n := expr.(type) {
+	case *ast.RefinementTypeExpr:
+		// docs/85: refinement types are representation-erased — codegen sees the base type.
+		return s.resolveTypeExpr(n.Base)
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":

@@ -30,6 +30,40 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 	return true
 }
 
+// recordRefinementChecks records the discharge obligations for a refinement-typed var declaration
+// (docs/85 Stage 1c-2): for each bare predicate `P` in the declared type, the check `P(name)` that
+// must hold for the bound value. Codegen emits these as a debug boundary check (trap on
+// violation), elided in release. Bare predicates only for now; parametric `P[args]` discharge
+// (range/const-arg expansion) is a follow-up.
+func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
+	if a == nil || n == nil || a.refinementChecks == nil || n.Value == nil {
+		return
+	}
+	rt, ok := n.Type.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return
+	}
+	var checks []*ast.CallExpr
+	for _, pred := range rt.Preds {
+		if len(pred.Args) != 0 {
+			continue // parametric refinement discharge is a later brick
+		}
+		if _, _, ok := a.lookupLaw(pred.Name); !ok {
+			continue // not a law — already reported by validateRefinementPreds
+		}
+		call := &ast.CallExpr{
+			Position: pred.Position,
+			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
+			Args:     []ast.Expr{&ast.Ident{Position: n.Pos(), Name: n.Name}},
+		}
+		a.analyzeExpr(call)
+		checks = append(checks, call)
+	}
+	if len(checks) != 0 {
+		a.refinementChecks[n] = checks
+	}
+}
+
 // validateRefinementPreds checks that every predicate in a refinement type `Base is P, …` names a
 // law and that the law's subject (first parameter) accepts the base type. Representation is the
 // base type (erased); this only validates the predicates so a malformed refinement is a clear
