@@ -285,6 +285,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		errorType := a.analyzeExpr(n.Error)
 		currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 		if !ok {
+			// Bare expr-lambda inference (docs/64 Phase 5b): the lambda's error return is not yet known;
+			// accumulate the raised set and infer it from the body instead of erroring.
+			if a.lambdaErrorAccumulate {
+				if errSet, ok := errorType.(*ErrorSetType); ok {
+					a.lambdaErrorAccum = UnionErrorSets(a.lambdaErrorAccum, errSet)
+				}
+				result = neverType
+				return
+			}
 			a.errorf(n.Pos(), "raise requires the current function to return an error union%s", a.errorUnionReturnHint())
 			result = neverType
 			return
@@ -309,6 +318,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if recovery == nil {
 				currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 				if !ok {
+					// Bare expr-lambda inference (docs/64 Phase 5b): accumulate the propagated set and
+					// infer the lambda's error return from the body instead of erroring.
+					if a.lambdaErrorAccumulate {
+						a.lambdaErrorAccum = UnionErrorSets(a.lambdaErrorAccum, unionType.Errors)
+						result = unionType.Value
+						return
+					}
 					a.errorf(n.Pos(), "try without else requires the current function to return an error union%s", a.errorUnionReturnHint())
 				} else if !ErrorSetAssignable(currentUnion.Errors, unionType.Errors) {
 					a.errorf(n.Pos(), "cannot propagate %s from a function returning %s", ErrorSetDiagnosticName(unionType.Errors), ErrorSetDiagnosticName(currentUnion.Errors))

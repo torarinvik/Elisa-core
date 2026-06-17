@@ -210,7 +210,31 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		if expectedReturn == nil || IsInvalidType(expectedReturn) {
 			expectedReturn = nil
 		}
+		// Bare expr-lambda with no annotated/contextual error-union return (docs/64 Phase 5b): infer the
+		// error return from the body. `try`-without-else / `raise` accumulate their propagated sets into
+		// lambdaErrorAccum instead of checking a return type that isn't an error union yet.
+		savedAccumulate := a.lambdaErrorAccumulate
+		savedAccum := a.lambdaErrorAccum
+		inferErrorReturn := expr.ReturnType == nil
+		if _, ctxIsUnion := expectedReturn.(*ErrorUnionType); ctxIsUnion {
+			inferErrorReturn = false // a concrete contextual error union already drives the check.
+		}
+		if inferErrorReturn {
+			a.lambdaErrorAccumulate = true
+			a.lambdaErrorAccum = nil
+		}
 		bodyType := a.analyzeValueExpr(expr.BodyExpr, expectedReturn)
+		if inferErrorReturn && a.lambdaErrorAccum != nil && !a.lambdaErrorAccum.IsEmpty() {
+			// The body propagated errors: the lambda returns `<value> error[accumulated]`. If the body
+			// value is itself an error union (e.g. a tail call returning one), union into its set.
+			if existing, ok := bodyType.(*ErrorUnionType); ok {
+				bodyType = &ErrorUnionType{Value: existing.Value, Errors: UnionErrorSets(existing.Errors, a.lambdaErrorAccum)}
+			} else {
+				bodyType = &ErrorUnionType{Value: bodyType, Errors: a.lambdaErrorAccum}
+			}
+		}
+		a.lambdaErrorAccumulate = savedAccumulate
+		a.lambdaErrorAccum = savedAccum
 		if returnType == nil || IsInvalidType(returnType) {
 			returnType = bodyType
 			fnType.Return = bodyType

@@ -178,6 +178,14 @@ type Analyzer struct {
 	exportedGlobals              []*ExportedGlobal
 	currentScope                 *Scope
 	currentReturn                Type
+	// lambdaErrorAccumulate is true while analyzing the body of a bare expr-lambda with no annotated
+	// or contextual error-union return (docs/64 Phase 5b). In that mode `try`-without-else and `raise`
+	// UNION their operand's error set into lambdaErrorAccum instead of checking it against
+	// currentReturn (which is not yet an error union), so the lambda's error return is inferred from
+	// what its body actually propagates. An empty accumulator after the body means the lambda is
+	// infallible. Saved/restored around each lambda so nested lambdas don't cross-contaminate.
+	lambdaErrorAccumulate bool
+	lambdaErrorAccum      *ErrorSetType
 	// inEnsureContext is true while analyzing `ensure` postcondition expressions, enabling the
 	// `old(expr)` pseudo-call (the value of expr at function entry).
 	inEnsureContext bool

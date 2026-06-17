@@ -193,12 +193,12 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	}
 }
 
-// GAP 5b (bare-lambda error inference, NOT YET CLOSED): a bare lambda whose
-// body propagates errors (`lambda() => try seven()`) cannot infer its
-// error-union return, so it cannot bind R. Error-set inference for un-annotated
-// lambda returns is deferred; the diagnostic points at the two working
-// spellings (annotated lambda / named function), which DO bind R.
-func TestGapBareLambdaErrorInferenceHint(t *testing.T) {
+// GAP 5b (bare-lambda error inference, NOW CLOSED — docs/64 Phase 5b): a bare
+// lambda whose body propagates errors (`lambda() => try seven()`) infers its
+// error-union return from what the body propagates, so it binds R end to end
+// with no annotation. `try`-without-else / `raise` in the bare body accumulate
+// their error sets instead of requiring an already-declared error-union return.
+func TestGapBareLambdaErrorInferenceCloses(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_bare_lambda.elisa", `
 error IoErr:
     Bad
@@ -212,9 +212,32 @@ def seven() -> i64 error[IoErr]:
 def use() -> i64 error[IoErr]:
     return applyDouble(lambda() => try seven())
 `)
-	all := allDiagnostics(result)
-	if !strings.Contains(all, "annotate the lambda return type") {
-		t.Fatalf("gap moved or hint missing: expected the bare-lambda actionable hint, got:\n%s", all)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("bare lambda should infer its error-union return and bind R, got:\n%s", all)
+	}
+}
+
+// A bare lambda that propagates a DIFFERENT error than the caller's R can absorb is
+// still caught at the call site — inference does not launder an incompatible set.
+func TestBareLambdaInferredMismatchRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "bare_lambda_mismatch.elisa", `
+error IoErr:
+    Bad
+
+error NetErr:
+    Down
+
+def wantsIo(f: func() -> i64 error[IoErr]) -> i64 error[IoErr]:
+    return try f()
+
+def boom() -> i64 error[NetErr]:
+    return 1
+
+def use() -> i64 error[IoErr]:
+    return wantsIo(lambda() => try boom())
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
+		t.Fatalf("a bare lambda inferring error[NetErr] must not satisfy func() -> i64 error[IoErr]")
 	}
 }
 

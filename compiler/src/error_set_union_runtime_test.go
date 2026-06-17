@@ -150,3 +150,66 @@ def error_set_union_test() -> void:
 		}
 	}
 }
+
+// End-to-end (docs/64 Phase 5b): a BARE expr-lambda whose body propagates errors
+// (`lambda() => try ioFail()`) infers its error-union return from what it propagates,
+// binds the callee's error-set param R, and round-trips at runtime — both the ok and
+// the error paths. No annotation on the lambda.
+func TestRunCLIBareLambdaErrorInference(t *testing.T) {
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "bare_lambda_infer_fixture.elisa")
+	src := `error IoErr:
+    Bad
+
+def ioFail() -> i64 error[IoErr]:
+    raise IoErr.Bad
+
+def ioOk() -> i64 error[IoErr]:
+    return 7
+
+def applyOnce[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    return try f()
+
+def runInferredOk() -> i64:
+    catch applyOnce(lambda() => try ioOk()):
+        n:
+            return n
+        IoErr.Bad:
+            return -1
+
+def runInferredFail() -> i64:
+    catch applyOnce(lambda() => try ioFail()):
+        n:
+            return n
+        IoErr.Bad:
+            return 42
+
+@test
+def bare_lambda_infer_test() -> void:
+    can Abort.Panic:
+        if runInferredOk() != 7:
+            panic("expected inferred-ok bare lambda -> 7")
+        if runInferredFail() != 42:
+            panic("expected inferred IoErr.Bad through bare lambda -> 42")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write bare-lambda fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected bare-lambda inference test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] bare_lambda_infer_test",
+		"[ SUMMARY  ] 1 test(s) selected; passed=1 skipped=0 failed=0",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected bare-lambda output to contain %q, got:\n%s\nstderr:\n%s", check, stdout.String(), stderr.String())
+		}
+	}
+}
