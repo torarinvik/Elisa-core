@@ -287,6 +287,87 @@ func rangeEntailsConstraint(r numRange, k lawConstraint) bool {
 	}
 }
 
+// paramRefinementTypeExpr returns the refinement on a param's declared type expr — directly
+// (`tx: i32 is Bounded[..]`) or through a type alias (`tx: TileX`, `type TileX = i32 is Bounded[..]`).
+// The alias channel is aliasRefinements (namedTypes erases the refinement), keyed by the SAME
+// canonical name resolveType uses, so the seed is never confused with a like-named alias elsewhere.
+func (a *Analyzer) paramRefinementTypeExpr(te ast.TypeExpr) (*ast.RefinementTypeExpr, bool) {
+	switch n := te.(type) {
+	case *ast.RefinementTypeExpr:
+		return n, n != nil
+	case *ast.NamedType:
+		if _, canonical, ok := a.lookupVisibleType(n.Name); ok && canonical != "" {
+			if rt, found := a.aliasRefinements[canonical]; found {
+				return rt, true
+			}
+		}
+		if rt, found := a.aliasRefinements[n.Name]; found {
+			return rt, true
+		}
+	}
+	return nil, false
+}
+
+// seedParamRefinementFacts records, on the function entry scope, the integer range implied by each
+// IMMUTABLE integer param's declared refinement (docs/86 brick 86-2). This is what lets the docs/85
+// §13 form `def tile_index(tx: TileX, ty: TileY) -> usize is Bounded[..]` prove with NO body guard:
+// the params carry their bounds on entry, and tier-1/tier-2 read them from rangeFacts as usual.
+// Mutable params are skipped (a fact could be invalidated mid-body) — sound, just no seed.
+func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
+	if a.currentScope == nil {
+		return
+	}
+	for _, param := range params {
+		if a.paramIsMutable(param) {
+			continue
+		}
+		rt, ok := a.paramRefinementTypeExpr(param.Type)
+		if !ok {
+			continue
+		}
+		sym, ok := a.currentScope.Lookup(param.Name)
+		if !ok || sym == nil || sym.Mutable || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
+			continue
+		}
+		fact := numRange{}
+		any := false
+		for _, pred := range rt.Preds {
+			decl, _, ok := a.lookupLaw(pred.Name)
+			if !ok || decl == nil || len(pred.Args) != len(decl.Params)-1 {
+				continue
+			}
+			paramConsts := map[string]int64{}
+			bad := false
+			for i, arg := range pred.Args {
+				c, ok := a.constIntValue(arg)
+				if !ok {
+					bad = true
+					break
+				}
+				paramConsts[decl.Params[i+1].Name] = c
+			}
+			if bad {
+				continue
+			}
+			constraints, ok := a.lawConstraints(decl, paramConsts)
+			if !ok {
+				continue
+			}
+			for _, k := range constraints {
+				fact = fact.intersect(constraintToRange(k))
+				any = true
+			}
+		}
+		if !any {
+			continue
+		}
+		if a.currentScope.rangeFacts == nil {
+			a.currentScope.rangeFacts = map[string]numRange{}
+		}
+		a.currentScope.rangeFacts[param.Name] = a.currentScope.rangeFacts[param.Name].intersect(fact)
+	}
+}
+
 // --- tier-2: bounded linear arithmetic (docs/86) ---------------------------------------------
 //
 // The tier-1 flow prover (tryProveRefinementByFlow) discharges an obligation only when the subject

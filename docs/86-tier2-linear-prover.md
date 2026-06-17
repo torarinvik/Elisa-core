@@ -153,12 +153,15 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
 
 ## 9. Staged bricks
 
-1. **86-1 — affine core.** `affineOf` + `boundAffine` + `tryProveRefinementByLinear` wired
-   between flow and const-eval; `ProofProvenLinear`. Seeds from `rangeFacts` only. Test:
-   `tile_index` with locally-narrowed `tx`/`ty` (`if tx < 64 and ty < 64:`) proves.
-2. **86-2 — param refinement seeding.** Expose declared param refinement ranges as seed
-   facts so `tx: TileX`/`ty: TileY` carry bounds on entry; `tile_index` proves with no body
-   narrowing. Test: the docs/85 §13 form verbatim.
+1. **86-1 — affine core. [LANDED]** `affineOf` + `boundAffine` + `tryProveRefinementByLinear`
+   wired between flow and const-eval; `ProofProvenLinear`. Seeds from `rangeFacts` only. Test:
+   `tile_index` with locally-narrowed `tx`/`ty` proves.
+2. **86-2 — param refinement seeding. [LANDED]** `seedParamRefinementFacts` records each
+   immutable-int param's declared refinement range (direct or via alias) onto the entry scope,
+   so `tx: TileX`/`ty: TileY` carry bounds on entry; the docs/85 §13 form proves with no body
+   narrowing. Alias refinements (`type TileX = i32 is Bounded[..]`) are captured in
+   `aliasRefinements` (namedTypes erases them) and their predicate validation is **deferred**
+   to `validateAliasRefinements` (after laws are collected — aliases resolve far earlier).
 3. **86-3 — watchdog subsumption.** `Result.ProvenIndexBounds` + backend consult; mark
    proven index sites (tier-1 and tier-2). Test: a proven `arr[i]` emits no guard under
    `-fbounds-check` (IR assertion); an unproven one keeps exactly one.

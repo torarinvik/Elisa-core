@@ -83,6 +83,13 @@ type Analyzer struct {
 	file             *ast.File
 	diagnostics      []Diagnostic
 	namedTypes       map[string]Type
+	// aliasRefinements keeps a type alias's REFINEMENT target expr (`type TileX = i32 is Bounded[..]`)
+	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
+	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).
+	aliasRefinements map[string]*ast.RefinementTypeExpr
+	// deferredAliasRefinements holds alias refinements whose predicate validation is postponed until
+	// after law symbols are collected (aliases are resolved long before functions/laws exist).
+	deferredAliasRefinements []deferredAliasRefinement
 	staticInterfaces map[string]*StaticInterface
 	staticImpls      map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism
@@ -525,6 +532,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
+		aliasRefinements:                  map[string]*ast.RefinementTypeExpr{},
 		grantAliases:                      map[string][]ast.PermissionRef{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
@@ -638,6 +646,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.inferRegionParamsForGrownContainerParams(activeDecls)
 	a.warnOnByValueGrownContainerParams(activeDecls)
 	a.collectValueSymbols(activeDecls)
+	a.validateAliasRefinements()
 	a.collectStaticImpls(activeDecls)
 	a.classifyRegionPolymorphicFunctions(activeDecls)
 	a.analyzeDecls(activeDecls)

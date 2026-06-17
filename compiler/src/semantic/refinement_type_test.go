@@ -1323,3 +1323,55 @@ def tile_index(tx: i64, ty: i64) -> i64 is Bounded[0, 4095]:
 		t.Fatalf("a named const coefficient should fold into the affine form and prove, got: %v", result.Errors())
 	}
 }
+
+// --- tier-2 brick 86-2: param-refinement seeding (docs/86) -----------------------------------
+
+// A refinement-typed param (via alias) carries its bound on ENTRY: the docs/85 §13 form proves
+// with NO body guard — tx,ty ∈ [0,63] seed the range facts, tier-2 bounds tx*64+ty ⊆ [0,4095].
+func TestParamRefinementSeedsDerivedIndex(t *testing.T) {
+	src := boundedLaw + `
+type TileX = i64 is Bounded[0, 63]
+type TileY = i64 is Bounded[0, 63]
+
+def tile_index(tx: TileX, ty: TileY) -> i64 is Bounded[0, 4095]:
+    return tx * 64 + ty
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "param_seed_index.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("refinement-typed params should seed entry bounds and prove the derived index, got: %v", result.Errors())
+	}
+	var linear int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenLinear {
+			linear++
+		}
+	}
+	if linear == 0 {
+		t.Fatalf("the seeded derived index should be proven (linear), got report=%+v", result.ProofReport)
+	}
+}
+
+// Seeding also feeds tier-1: a bare refinement param proves a same-bound return with no guard.
+func TestParamRefinementSeedsBareReturn(t *testing.T) {
+	src := boundedLaw + `
+def echo(n: i64 is Bounded[0, 100]) -> i64 is Bounded[0, 100]:
+    return n
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "param_seed_bare.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("a bare refinement param should seed its bound and prove a same-bound return, got: %v", result.Errors())
+	}
+}
+
+// Soundness: a WIDER param refinement must NOT prove a tighter obligation. n ∈ [0,1000] does not
+// entail [0,100] — the seed is exact, never over-wide.
+func TestParamRefinementSeedDoesNotOverprove(t *testing.T) {
+	src := boundedLaw + `
+def narrow(n: i64 is Bounded[0, 1000]) -> i64 is Bounded[0, 100]:
+    return n
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "param_seed_overprove.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("a [0,1000] param must not prove a [0,100] return; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}

@@ -4,6 +4,24 @@ import (
 	"elisacore/src/ast"
 )
 
+// deferredAliasRefinement is an alias's refinement whose predicate validation waits until laws exist.
+type deferredAliasRefinement struct {
+	rt        *ast.RefinementTypeExpr
+	base      Type
+	namespace string
+	usings    []string
+}
+
+// validateAliasRefinements runs the postponed predicate checks for refinement-typed aliases, in
+// declaration order (deterministic diagnostics), once law symbols are in scope (docs/86 86-2).
+func (a *Analyzer) validateAliasRefinements() {
+	for _, d := range a.deferredAliasRefinements {
+		a.withResolutionContext(d.namespace, d.usings, func() {
+			a.validateRefinementPreds(d.rt, d.base)
+		})
+	}
+}
+
 func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 	for _, scoped := range decls {
 		aliasDecl, ok := scoped.Decl.(*ast.TypeAliasDecl)
@@ -12,7 +30,14 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			qualifiedName := joinQualifiedName(scoped.Namespace, aliasDecl.Name)
-			resolved := a.resolveType(aliasDecl.Target)
+			// A refinement target (`type TileX = i32 is Bounded[..]`) erases to its base here, but its
+			// predicate validation is DEFERRED: laws aren't collected until much later (docs/86 86-2).
+			target := aliasDecl.Target
+			refinement, _ := target.(*ast.RefinementTypeExpr)
+			if refinement != nil {
+				target = refinement.Base
+			}
+			resolved := a.resolveType(target)
 			if IsInvalidType(resolved) {
 				return
 			}
@@ -28,6 +53,17 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 				return
 			}
 			a.namedTypes[qualifiedName] = resolved
+			// Retain a refinement target so a param typed by this alias can be seeded with its
+			// bound on function entry (docs/86 tier-2 brick 86-2). resolved is already erased.
+			if refinement != nil {
+				a.aliasRefinements[qualifiedName] = refinement
+				a.deferredAliasRefinements = append(a.deferredAliasRefinements, deferredAliasRefinement{
+					rt:        refinement,
+					base:      resolved,
+					namespace: scoped.Namespace,
+					usings:    scoped.Usings,
+				})
+			}
 			if scoped.Private {
 				a.privateTypeNames[qualifiedName] = true
 			}

@@ -122,6 +122,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					if bindings := a.implicitBindingsForCurrentFunction(fnType); len(bindings) != 0 {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
+					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -307,6 +308,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
+					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -457,6 +459,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						}
 					}
 					a.defineRegionParamValueSymbols(fn)
+					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
