@@ -99,6 +99,36 @@ func TestCallArgRefinementViolatedTrapsInDebug(t *testing.T) {
 	}
 }
 
+const lawIsNarrowProgram = `
+law Positive(self: i64) = self > 0
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    if n is Positive:
+        return needs_nat(n)
+    return 0
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    print(f(%s).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// `if n is Positive:` narrows n so `needs_nat(n)` is statically proven (no runtime check) AND the
+// program runs correctly end-to-end through the narrowed branch.
+func TestLawIsNarrowingRunsEndToEnd(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(lawIsNarrowProgram, "%s", "7", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("narrowed branch should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "7" {
+		t.Fatalf("want 7 (narrowed branch returns needs_nat(7)), got %q", out)
+	}
+}
+
 const returnRefinementProgram = `
 law Positive(self: i64) = self > 0
 

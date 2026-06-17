@@ -116,6 +116,47 @@ def f(n: i64) -> i64:
 	}
 }
 
+// `if x is Law:` narrows x inside the branch: a refinement obligation on x discharges statically
+// there with no runtime check (docs/85 — predicate-test narrowing).
+func TestLawIsNarrowsBranch(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    if n is Positive:
+        return needs_nat(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "law_is_narrow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`if n is Positive` should narrow n so `needs_nat(n)` proves, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("narrowed call arg should be statically proven (no runtime check), got %d", len(result.CallArgRefinementChecks))
+	}
+}
+
+// Without the narrowing branch, the same call is unproven — confirms the narrowing is what proves it.
+func TestLawIsNarrowingIsLoadBearing(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def f(n: i64) -> i64:
+    return needs_nat(n)
+`
+	result := analyzeTreeTestSource(t, "law_is_nonarrow.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("un-narrowed call arg should be unproven (runtime check recorded)")
+	}
+}
+
 // A refinement-typed RETURN proves statically for a satisfying constant — no runtime check.
 func TestRefinementReturnConstantProven(t *testing.T) {
 	src := `

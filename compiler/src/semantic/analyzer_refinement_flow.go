@@ -70,6 +70,64 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
 }
 
+// gatherLawIsRangeRefinement narrows an immutable integer variable by a bare law inside the truthy
+// branch of `if x is Law:` (docs/85). When the law body is a decidable conjunction of `self OP
+// const`, its constraints become an integer range fact on x, so a later refinement obligation on x
+// (another `x is OtherLaw`, an `x`-initialized refinement binding, or passing x to a refinement
+// param) discharges statically. Bare (parameterless) laws only; parametric narrowing is a follow-up.
+func (a *Analyzer) gatherLawIsRangeRefinement(scope *Scope, n *ast.BinaryExpr, truthy bool) {
+	if !truthy || scope == nil || n == nil {
+		return
+	}
+	name, ok := immutableIntIdentName(a, scope, n.Left)
+	if !ok {
+		return
+	}
+	targets := flattenIsTargetExprs(n.Right)
+	if len(targets) != 1 {
+		return
+	}
+	lawName, ok := a.resolveBareLawIsTarget(targets[0])
+	if !ok {
+		return
+	}
+	decl, _, ok := a.lookupLaw(lawName)
+	if !ok || decl == nil || len(decl.Params) != 1 {
+		return
+	}
+	constraints, ok := a.lawConstraints(decl, map[string]int64{})
+	if !ok || len(constraints) == 0 {
+		return
+	}
+	fact := numRange{}
+	for _, k := range constraints {
+		fact = fact.intersect(constraintToRange(k))
+	}
+	if scope.rangeFacts == nil {
+		scope.rangeFacts = map[string]numRange{}
+	}
+	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
+}
+
+// constraintToRange converts one decidable `self OP const` law constraint into the integer range it
+// implies.
+func constraintToRange(k lawConstraint) numRange {
+	switch k.op {
+	case lexer.TOKEN_GTEQ:
+		return numRange{loKnown: true, lo: k.c}
+	case lexer.TOKEN_GT:
+		return numRange{loKnown: true, lo: k.c + 1}
+	case lexer.TOKEN_LTEQ:
+		return numRange{hiKnown: true, hi: k.c}
+	case lexer.TOKEN_LT:
+		return numRange{hiKnown: true, hi: k.c - 1}
+	case lexer.TOKEN_EQEQ:
+		return numRange{loKnown: true, lo: k.c, hiKnown: true, hi: k.c}
+	default:
+		return numRange{}
+	}
+}
+
 // immutableIntIdentName returns the name of `expr` when it is a bare identifier bound to an
 // IMMUTABLE integer-typed variable (so a branch-condition fact about it cannot be invalidated by a
 // later mutation). Mutable bindings return false — their facts would be unsound to carry.

@@ -41,6 +41,10 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 			// like `a is Nat` discharges statically inside `if a > 5:`.
 			a.gatherNumericRangeRefinement(scope, n, truthy)
 		case lexer.TOKEN_IS:
+			// docs/85: `if x is Law:` narrows x by the law inside the truthy branch. For a law in the
+			// decidable fragment (`self OP const` conjunctions) over an immutable int, record the
+			// implied integer range so a later `x is OtherLaw` / refinement binding discharges.
+			a.gatherLawIsRangeRefinement(scope, n, truthy)
 			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
 			if ok {
 				a.bindRefinedExprType(scope, targetExpr, viewType)

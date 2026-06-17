@@ -111,6 +111,15 @@ func (a *Analyzer) resolveNamedStateIsTarget(expr ast.Expr) (*StructType, Type, 
 		return nil, nil, false
 	}
 	if named, ok := typedExpr.Type.(*ast.NamedType); ok && named != nil {
+		// docs/85: a bare law name in `x is Law` is a predicate application, not a type/named-state
+		// target. Bail here so the narrowing passes that probe this helper don't resolve the law as a
+		// type (which would spuriously report "unknown type"); analyzeIsExpr handles the law via
+		// tryAnalyzeLawIsExpr.
+		if !strings.Contains(named.Name, ".") {
+			if _, _, isLaw := a.lookupLaw(named.Name); isLaw {
+				return nil, nil, false
+			}
+		}
 		if idx := strings.LastIndex(named.Name, "."); idx > 0 {
 			if base, _, ok := a.lookupVisibleType(named.Name[:idx]); ok {
 				switch base.(type) {
