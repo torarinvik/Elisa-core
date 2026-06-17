@@ -414,40 +414,55 @@ func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr, subst
 	fact := numRange{}
 	any := false
 	for _, pred := range rt.Preds {
-		decl, _, ok := a.lookupLaw(pred.Name)
-		if !ok || decl == nil || len(pred.Args) != len(decl.Params)-1 {
-			continue
-		}
-		paramConsts := map[string]int64{}
-		var paramRanges map[string]numRange
-		for i, arg := range pred.Args {
-			name := decl.Params[i+1].Name
-			if c, ok := a.substConstInt(arg, subst); ok {
-				paramConsts[name] = c
-				continue
-			}
-			// Not an exact constant: try a known interval for the (substituted) argument, used
-			// direction-aware in collectLawConstraints (brick 90-9). nil subst (param-entry seed) never
-			// reaches here with a range, so that path is unchanged.
-			if r, ok := a.substArgRange(arg, subst); ok {
-				if paramRanges == nil {
-					paramRanges = map[string]numRange{}
-				}
-				paramRanges[name] = r
-			}
-			// Either way leave the param out of paramConsts; collectLawConstraints declines any
-			// constraint whose operand it cannot resolve, dropping the whole predicate (sound).
-		}
-		constraints, ok := a.lawConstraintsRanged(decl, paramConsts, paramRanges)
+		r, ok := a.rangeFromLawApplication(pred.Name, pred.Args, subst)
 		if !ok {
 			continue
 		}
-		for _, k := range constraints {
-			fact = fact.intersect(constraintToRange(k))
-			any = true
-		}
+		fact = fact.intersect(r)
+		any = true
 	}
 	return fact, any
+}
+
+// rangeFromLawApplication computes the integer interval implied by ONE law application `Law[args...]`
+// (the subject being the value the law constrains). It is the per-predicate kernel shared by the
+// return-type seed (rangeFromRefinementTypeExpr) and the `ensures <param> is Law` post-call seed
+// (seedEnsuresParamRangeFacts). `subst` maps callee params to caller arguments for parametric bounds
+// (nil = exact-constant args). Returns ok=false when the args/law leave the decidable fragment.
+func (a *Analyzer) rangeFromLawApplication(lawName string, lawArgs []ast.Expr, subst map[string]ast.Expr) (numRange, bool) {
+	decl, _, ok := a.lookupLaw(lawName)
+	if !ok || decl == nil || len(lawArgs) != len(decl.Params)-1 {
+		return numRange{}, false
+	}
+	paramConsts := map[string]int64{}
+	var paramRanges map[string]numRange
+	for i, arg := range lawArgs {
+		name := decl.Params[i+1].Name
+		if c, ok := a.substConstInt(arg, subst); ok {
+			paramConsts[name] = c
+			continue
+		}
+		// Not an exact constant: try a known interval for the (substituted) argument, used
+		// direction-aware in collectLawConstraints (brick 90-9). nil subst (param-entry seed) never
+		// reaches here with a range, so that path is unchanged.
+		if r, ok := a.substArgRange(arg, subst); ok {
+			if paramRanges == nil {
+				paramRanges = map[string]numRange{}
+			}
+			paramRanges[name] = r
+		}
+		// Either way leave the param out of paramConsts; collectLawConstraints declines any
+		// constraint whose operand it cannot resolve, dropping the whole predicate (sound).
+	}
+	constraints, ok := a.lawConstraintsRanged(decl, paramConsts, paramRanges)
+	if !ok || len(constraints) == 0 {
+		return numRange{}, false
+	}
+	fact := numRange{}
+	for _, k := range constraints {
+		fact = fact.intersect(constraintToRange(k))
+	}
+	return fact, true
 }
 
 // substConstInt const-evaluates an integer expression, first replacing any identifier named in
@@ -554,17 +569,12 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 		return
 	}
 	decl, ok := a.resolveDirectCallFuncDecl(call)
-	if !ok || decl == nil || decl.ReturnType == nil {
+	if !ok || decl == nil {
 		return
 	}
-	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
-	if !ok || rt == nil {
-		return
-	}
-	// A parametric return refinement (`-> i64 is Bounded[0, n]`) names callee params in its bracket
-	// args; bind each to the caller's argument so the bound is resolved in the caller's terms. A
-	// constant refinement (`Bounded[0, 100]`) ignores the map. Absent args (variadic/defaulted) drop
-	// the predicate, never widen.
+	// Bind each callee parameter to the caller's argument, so a parametric postcondition
+	// (`-> i64 is Bounded[0, n]`, `ensure result <= n`) is resolved in the caller's terms. Absent args
+	// (variadic/defaulted) are simply not bound — the dependent clause then drops, never widens.
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(call.Args) || call.Args[i] == nil {
@@ -572,7 +582,23 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 		}
 		subst[param.Name] = call.Args[i]
 	}
-	fact, any := a.rangeFromRefinementTypeExpr(rt, subst)
+	fact := numRange{}
+	any := false
+	// (1) The refined return type (`-> i64 is Bounded[..]`) — bricks 90-7/8/9.
+	if rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr); ok && rt != nil {
+		if r, found := a.rangeFromRefinementTypeExpr(rt, subst); found {
+			fact = fact.intersect(r)
+			any = true
+		}
+	}
+	// (2) Value-contract postconditions over `result` (`ensure result >= 0`, `ensure result <= n`) —
+	// brick 90-10. These constrain the returned value, which IS this (immutable) binding, so the caller
+	// may assume them just like the return refinement. Reuses the same direction-aware bracket machinery
+	// with `result` as the subject.
+	if r, found := a.rangeFromEnsureResult(decl.EnsureValues, subst); found {
+		fact = fact.intersect(r)
+		any = true
+	}
 	if !any {
 		return
 	}
@@ -580,6 +606,82 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 		a.currentScope.rangeFacts = map[string]numRange{}
 	}
 	a.currentScope.rangeFacts[name] = a.currentScope.rangeFacts[name].intersect(fact)
+}
+
+// rangeFromEnsureResult computes the integer interval that a callee's value-contract postconditions
+// place on its returned value (docs/90 brick 90-10). Each `ensure` clause is an independent boolean;
+// this collects every `result OP operand` comparison appearing in conjunction position across all
+// clauses (a clause or sub-term outside the fragment is simply skipped — unlike a law body, partial
+// information is sound here because the clauses are independently true). The operand is resolved with
+// the same caller-substitution + direction-aware bounding used for refinement bracket args:
+// a constant after substitution, or a known interval (`>=`/`>` uses its lower bound, `<=`/`<` its
+// upper). `result` is the subject keyword bound in analyzeEnsureClauses.
+func (a *Analyzer) rangeFromEnsureResult(clauses []ast.Expr, subst map[string]ast.Expr) (numRange, bool) {
+	var constraints []lawConstraint
+	for _, clause := range clauses {
+		if clause == nil {
+			continue
+		}
+		a.collectResultConstraints(clause, subst, &constraints)
+	}
+	if len(constraints) == 0 {
+		return numRange{}, false
+	}
+	fact := numRange{}
+	for _, k := range constraints {
+		fact = fact.intersect(constraintToRange(k))
+	}
+	return fact, true
+}
+
+// collectResultConstraints gathers `result OP operand` comparisons from an `ensure` clause, recursing
+// through parentheses and `and`. Unlike collectLawConstraints it never fails: a comparison it cannot
+// resolve (operand not constant/ranged, or not about `result`) is skipped, since each conjunct that
+// IS resolvable is an independent sound fact about the result.
+func (a *Analyzer) collectResultConstraints(expr ast.Expr, subst map[string]ast.Expr, out *[]lawConstraint) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.collectResultConstraints(n.Inner, subst, out)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			a.collectResultConstraints(n.Left, subst, out)
+			a.collectResultConstraints(n.Right, subst, out)
+			return
+		}
+		// Normalize to `result OP operand`.
+		var operand ast.Expr
+		var op lexer.TokenKind
+		switch {
+		case isSelfIdent(n.Left, "result"):
+			operand, op = n.Right, n.Op
+		case isSelfIdent(n.Right, "result"):
+			operand, op = n.Left, flipComparison(n.Op)
+		default:
+			return
+		}
+		switch op {
+		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_EQEQ:
+		default:
+			return // `!=` gives no interval bound; skip
+		}
+		if c, ok := a.substConstInt(operand, subst); ok {
+			*out = append(*out, lawConstraint{op: op, c: c})
+			return
+		}
+		// Ranged operand (`ensure result <= n` with n ∈ [.., hi]): direction-aware, like bracket args.
+		if r, ok := a.substArgRange(operand, subst); ok {
+			switch op {
+			case lexer.TOKEN_GTEQ, lexer.TOKEN_GT:
+				if r.loKnown {
+					*out = append(*out, lawConstraint{op: op, c: r.lo})
+				}
+			case lexer.TOKEN_LTEQ, lexer.TOKEN_LT:
+				if r.hiKnown {
+					*out = append(*out, lawConstraint{op: op, c: r.hi})
+				}
+			}
+		}
+	}
 }
 
 // --- tier-2: bounded linear arithmetic (docs/86) ---------------------------------------------

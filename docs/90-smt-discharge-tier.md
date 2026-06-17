@@ -237,7 +237,36 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    callers pass `paramRanges == nil`, so 90-7/90-8 and the param-entry seed are byte-for-byte
    unchanged. Tests: `TestRangedReturnRefinementSeedsCallerFact` /
    `TestRangedReturnRefinementNoBoundNoSeed`.
-   - **Deferred**: `ensures <result> is Law` clauses beyond the return-type form; re-asserting facts
+   - **Deferred**: value-contract postconditions over `result` (done in 90-10); re-asserting facts
      after a mutating call.
+10. **90-10 — value-contract postconditions as caller facts. [LANDED]** Beyond the refined return
+    *type*, a function's design-by-contract postconditions over `result` (`ensure result >= 0`,
+    `ensure result <= n`) are equally a promise about the returned value. `seedReturnRefinementFacts`
+    now also reads `decl.EnsureValues`: each clause's `result OP operand` comparisons (in conjunction
+    position) contribute an interval on the result binding, with the same caller-substitution +
+    direction-aware bounding as refinement bracket args.
+    ```elisa
+    def clamp(n: i64) -> i64:
+        ensure result >= 0
+        ensure result <= n
+        return 0
+    def use() -> i64:
+        x = clamp(50)              # result ∈ [0, 50]
+        y: i64 is Bounded[0, 50] = x   # proven, no runtime check
+    ```
+    `rangeFromEnsureResult` / `collectResultConstraints` collect from the clauses; unlike a law body
+    they never fail-whole — a comparison outside the fragment is skipped, since each `ensure` conjunct
+    is independently true (partial information is sound). **Why this and not `ensures <param> is
+    Law`**: that channel already gains a *pred* fact at the call site (docs/85 brick 2A), and its only
+    syntactic form is a *mutable* ref param — a numeric range seeded on a mutable variable would never
+    be read (the flow prover admits only immutable idents), so a range seed there would be inert.
+    `ensure result` constrains the *immutable* result binding, which the flow prover does read. Same
+    soundness model as the rest: postconditions are a contract (debug-checked / release-elided), never
+    drive bounds-check elision, so a wrong one is garbage-in-garbage-out, never memory unsafety. Tests:
+    `TestEnsureResultPostconditionSeedsCallerFact` /
+    `TestEnsureResultParametricPostconditionSeedsCallerFact` / `TestEnsureResultNoPostconditionNoSeed`.
+    - **Deferred**: re-asserting facts about a mutable variable across a call from `ensures <param> is
+      Law` as a *range* (needs relaxing the immutable-ident gate for the post-call window — a larger,
+      riskier change to the dependence-freeze); `old(...)` in postconditions.
 
 Each brick: build → targeted test → full `./src/...` green → commit.

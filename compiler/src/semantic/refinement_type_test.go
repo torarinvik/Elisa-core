@@ -267,6 +267,80 @@ def use(k: i64) -> i64:
 	}
 }
 
+// docs/90 brick 90-10: a value-contract postcondition over `result` (`ensure result >= 0`) is a
+// promise about the returned value; binding the result lets the caller assume it as a flow fact, just
+// like a refined return type. `x = make()` therefore satisfies `Nat` with no runtime check.
+func TestEnsureResultPostconditionSeedsCallerFact(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def make() -> i64:
+    ensure result >= 0
+    return 5
+
+def use() -> i64:
+    x = make()
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "ensure_result_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensure result >= 0` should let `x is Nat` prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("Nat on a value with postcondition `result >= 0` should be proven, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Brick 90-10 with a PARAMETRIC postcondition: `ensure result <= n` resolves the bound from the
+// caller's argument, so `clamp(50)` yields `result ∈ [0, 50]`, discharging a `Bounded[0, 50]`
+// obligation statically.
+func TestEnsureResultParametricPostconditionSeedsCallerFact(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def clamp(n: i64) -> i64:
+    ensure result >= 0
+    ensure result <= n
+    return 0
+
+def use() -> i64:
+    x = clamp(50)
+    y: i64 is Bounded[0, 50] = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "ensure_result_param_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("parametric `ensure result <= n` should let `x is Bounded[0,50]` prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("Bounded[0,50] on a value with postconditions result>=0, result<=50 should be proven, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Soundness floor for brick 90-10: with NO value-contract postcondition, binding the result seeds
+// nothing and the obligation falls back to a runtime check.
+func TestEnsureResultNoPostconditionNoSeed(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def make() -> i64:
+    return 5
+
+def use() -> i64:
+    x = make()
+    y: i64 is Nat = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "ensure_result_noseed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("no postcondition should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("with no postcondition there is no caller fact: expected a runtime check")
+	}
+}
+
 // `if x is Law:` narrows x inside the branch: a refinement obligation on x discharges statically
 // there with no runtime check (docs/85 — predicate-test narrowing).
 func TestLawIsNarrowsBranch(t *testing.T) {
