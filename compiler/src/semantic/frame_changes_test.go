@@ -460,6 +460,87 @@ def f(xs: darray[i64]) -> bool:
 	}
 }
 
+// docs/85 §6: a composite law unions its members — a function clean against every member fulfills it.
+func TestCompositeLawFulfillsClean(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+law NoPanic forbids Abort.Panic
+law Leaf includes NoAlloc, NoPanic
+
+def add(x: i64, y: i64) -> i64 fulfills Leaf:
+    return x + y
+`
+	result := analyzeTreeTestSource(t, "composite_clean.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a function clean against all composite members should fulfill it, got: %v", errs)
+	}
+}
+
+// A composite law is violated if the function uses an effect any member forbids (here Memory.Allocate
+// via the included NoAlloc).
+func TestCompositeLawFulfillsViolationErrors(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+law NoPanic forbids Abort.Panic
+law Leaf includes NoAlloc, NoPanic
+
+def grow() -> i64 fulfills Leaf:
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(7)
+        return xs[0]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "composite_violation.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "fulfills Leaf") || !contains(allDiagnostics(result), "Memory.Allocate") {
+		t.Fatalf("a composite member's forbidden effect must be enforced, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A composite may union an effect law and a built-in shape law; both obligations are discharged.
+func TestCompositeLawMixesEffectAndShape(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+law HotKernel includes NoAlloc, NoBoundsChecks
+
+def get_third(xs: darray[i64]) -> i64 fulfills HotKernel:
+    return xs[2]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "composite_shape.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "requires NoBoundsChecks") {
+		t.Fatalf("a composite's shape member must be discharged, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A composite that includes a value law is malformed — `includes` composes only function-level laws.
+func TestCompositeLawRejectsValueMember(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+law Bad includes Positive
+
+def f() -> i64 fulfills Bad:
+    return 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "composite_value_member.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "composes only function-level laws") {
+		t.Fatalf("a composite including a value law must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A cyclic include graph is rejected.
+func TestCompositeLawRejectsCycle(t *testing.T) {
+	src := `
+law A includes B
+law B includes A
+
+def f() -> i64 fulfills A:
+    return 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "composite_cycle.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "cyclic") {
+		t.Fatalf("a cyclic composite must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
 func TestFrameLawInValueIsErrors(t *testing.T) {
 	src := `

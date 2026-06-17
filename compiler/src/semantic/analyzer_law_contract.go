@@ -40,6 +40,34 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 		}
 		return
 	}
+	// A COMPOSITE law (docs/85 §6) unions its members. Validate: no body, no subject, every member is
+	// a known function-level law (effect / shape / composite — not value or frame), and the include
+	// graph is acyclic.
+	if isCompositeLaw(fn) {
+		if len(fn.Body) != 0 {
+			a.errorf(fn.Pos(), "composite law %q has an `includes` clause and cannot also have a predicate body", fn.Name)
+		}
+		if len(fnType.Params) != 0 {
+			a.errorf(fn.Pos(), "composite law %q constrains the whole function and takes no subject parameter", fn.Name)
+		}
+		for _, m := range fn.Includes {
+			if isBuiltinShapeLaw(m) {
+				continue
+			}
+			decl, _, ok := a.lookupLaw(m)
+			if !ok || decl == nil {
+				a.errorf(fn.Pos(), "composite law %q includes %q, which is not a law", fn.Name, m)
+				continue
+			}
+			if !isEffectLaw(decl) && !isCompositeLaw(decl) {
+				a.errorf(fn.Pos(), "composite law %q includes %q, which is a %s law; `includes` composes only function-level laws (effect, shape, composite)", fn.Name, m, lawClassName(decl))
+			}
+		}
+		if a.compositeLawHasCycle(fn.Name, map[string]bool{}) {
+			a.errorf(fn.Pos(), "composite law %q is cyclic: it transitively includes itself", fn.Name)
+		}
+		return
+	}
 	if !IsBoolType(fnType.Return) {
 		a.errorf(fn.Pos(), "law %q must be a predicate returning bool, got %s", fn.Name, typeString(fnType.Return))
 	}

@@ -131,8 +131,8 @@ func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
 			a.errorf(fc.Position, "`fulfills` names %q, which is not a law", fc.Law)
 			continue
 		}
-		if isEffectLaw(decl) {
-			continue // effect laws are function-level; discharged after the effect set is inferred (checkEffectFulfills)
+		if isEffectLaw(decl) || isCompositeLaw(decl) {
+			continue // function-level laws are discharged after the body is analyzed (checkFunctionLevelFulfills)
 		}
 		if !isFrameLaw(decl) {
 			a.errorf(fc.Position, "`fulfills` requires a frame law (a `changes`/`preserves` law); %q is a value law — use it with `is` in a contract instead", fc.Law)
@@ -176,32 +176,130 @@ func isEffectLaw(decl *ast.FuncDecl) bool {
 	return decl != nil && decl.IsLaw && len(decl.Forbids) != 0
 }
 
-// checkEffectFulfills discharges each `fulfills <EffectLaw>` clause (docs/85 §4) after the function's
-// effect set is finalized: a conforming function must not use any effect the law forbids. The check
-// is against fnType.PermissionRefs — the transitive inferred-plus-declared effect set the whole
-// effect system (and `@hot`) trusts — so it is sound by construction: an effect the function uses is
-// in that set, and over-reporting only yields a safe false positive. Also enforces the class shape:
-// an effect law is applied with the subject-free `fulfills <Law>`, never `fulfills x is <Law>`.
-func (a *Analyzer) checkEffectFulfills(fn *ast.FuncDecl, fnType *FuncType) {
+// isCompositeLaw reports whether a law declaration is a COMPOSITE law (docs/85 §6): a named union of
+// member function-level laws, applied with the subject-free `fulfills <Law>`.
+func isCompositeLaw(decl *ast.FuncDecl) bool {
+	return decl != nil && decl.IsLaw && len(decl.Includes) != 0
+}
+
+// lawClassName names a law's discharge class for diagnostics (docs/85 §4).
+func lawClassName(decl *ast.FuncDecl) string {
+	switch {
+	case isFrameLaw(decl):
+		return "frame"
+	case isEffectLaw(decl):
+		return "effect"
+	case isCompositeLaw(decl):
+		return "composite"
+	default:
+		return "value"
+	}
+}
+
+// compositeLawHasCycle reports whether following `includes` from name eventually returns to a name
+// already on the current path (a transitive self-inclusion). `onPath` is the active DFS stack.
+func (a *Analyzer) compositeLawHasCycle(name string, onPath map[string]bool) bool {
+	if onPath[name] {
+		return true
+	}
+	decl, _, ok := a.lookupLaw(name)
+	if !ok || decl == nil || !isCompositeLaw(decl) {
+		return false
+	}
+	onPath[name] = true
+	for _, m := range decl.Includes {
+		if a.compositeLawHasCycle(m, onPath) {
+			return true
+		}
+	}
+	delete(onPath, name)
+	return false
+}
+
+// lawEffectiveForbids resolves the full forbidden-effect set a law contributes (docs/85 §6): its own
+// `forbids` plus, transitively, every included law's forbids. `visited` breaks include cycles (a
+// malformed cycle is diagnosed at the decl; here it just terminates).
+func (a *Analyzer) lawEffectiveForbids(name string, visited map[string]bool) []ast.PermissionRef {
+	if visited[name] {
+		return nil
+	}
+	visited[name] = true
+	decl, _, ok := a.lookupLaw(name)
+	if !ok || decl == nil {
+		return nil
+	}
+	out := append([]ast.PermissionRef(nil), decl.Forbids...)
+	for _, m := range decl.Includes {
+		out = append(out, a.lawEffectiveForbids(m, visited)...)
+	}
+	return out
+}
+
+// lawEffectiveShapes resolves the full set of built-in shape requirements a law contributes (docs/85
+// §6): a built-in shape name contributes itself; a composite contributes its members' shapes,
+// transitively. `visited` breaks include cycles.
+func (a *Analyzer) lawEffectiveShapes(name string, visited map[string]bool) []string {
+	if isBuiltinShapeLaw(name) {
+		return []string{name}
+	}
+	if visited[name] {
+		return nil
+	}
+	visited[name] = true
+	decl, _, ok := a.lookupLaw(name)
+	if !ok || decl == nil {
+		return nil
+	}
+	var out []string
+	for _, m := range decl.Includes {
+		out = append(out, a.lawEffectiveShapes(m, visited)...)
+	}
+	return out
+}
+
+// checkFunctionLevelFulfills discharges every subject-free `fulfills <Law>` clause (docs/85 §4/§6/§8)
+// after the function body is analyzed (so both fnType.PermissionRefs and currentFunctionGuardedIndexes
+// are final). It handles effect, shape, and composite laws uniformly via their effective obligation:
+//   - effect forbid-set (own + transitively included) ∩ the function's effect set must be empty;
+//   - each required built-in shape (own + transitively included) must hold.
+// Frame/value `fulfills` are handled in expandFulfills; an unknown law was already diagnosed there.
+// SOUNDNESS: PermissionRefs is the transitive effect set the whole effect system trusts, and the
+// shape audit counts every access that would emit a check — both over-report at worst (safe FP).
+func (a *Analyzer) checkFunctionLevelFulfills(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil {
 		return
 	}
 	for _, fc := range fn.Fulfills {
-		decl, _, ok := a.lookupLaw(fc.Law)
-		if !ok || decl == nil || !isEffectLaw(decl) {
-			continue // frame/value fulfills handled in expandFulfills; unknown law already diagnosed there
+		forbids := a.lawEffectiveForbids(fc.Law, map[string]bool{})
+		shapes := a.lawEffectiveShapes(fc.Law, map[string]bool{})
+		if len(forbids) == 0 && len(shapes) == 0 {
+			continue // not a function-level law (frame/value/unknown handled elsewhere)
 		}
 		if fc.Param != "" {
-			a.errorf(fc.Position, "effect law %q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
+			a.errorf(fc.Position, "%q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
 			continue
 		}
-		for _, forbidden := range decl.Forbids {
+		for _, forbidden := range forbids {
 			for _, used := range fnType.PermissionRefs {
 				if permissionRefForbidden(used, forbidden) {
 					a.errorf(fn.Pos(), "function %q `fulfills %s` but uses the `%s` effect, which %s forbids", fn.Name, fc.Law, lawEffectName(used), fc.Law)
 					break
 				}
 			}
+		}
+		for _, shape := range shapes {
+			a.dischargeShapeRequirement(fn, fc.Law, shape)
+		}
+	}
+}
+
+// dischargeShapeRequirement runs the audit for one built-in shape requirement on the current
+// function. via names the law the requirement came from (the fulfilled law, possibly a composite).
+func (a *Analyzer) dischargeShapeRequirement(fn *ast.FuncDecl, via, shape string) {
+	switch shape {
+	case "NoBoundsChecks":
+		if len(a.currentFunctionGuardedIndexes) > 0 {
+			a.errorf(a.currentFunctionGuardedIndexes[0], "function %q `fulfills %s` (requires NoBoundsChecks) but has an index access that is not statically proven in-bounds, so a runtime bounds check would be emitted; prove the index (e.g. iterate, or guard with a bound the prover understands)", fn.Name, via)
 		}
 	}
 }
@@ -216,34 +314,6 @@ func isBuiltinShapeLaw(name string) bool {
 		return true
 	default:
 		return false
-	}
-}
-
-// checkShapeFulfills discharges each `fulfills <ShapeLaw>` clause (docs/89) after the function body is
-// analyzed. A shape law is a function-level codegen guarantee, applied with the subject-free
-// `fulfills NoBoundsChecks` (a subject is a wrong-form error). `NoBoundsChecks` is violated iff the
-// body contains an index access that would emit a runtime bounds check — i.e. a bounds-requiring
-// access not statically proven in-bounds (collected in currentFunctionGuardedIndexes). SOUNDNESS:
-// the law certifies *provably* no checks; a `trusted` unchecked access is asserted, not proven, so it
-// is still counted (the honest, conservative reading — over-reporting only yields a false positive).
-func (a *Analyzer) checkShapeFulfills(fn *ast.FuncDecl) {
-	if fn == nil {
-		return
-	}
-	for _, fc := range fn.Fulfills {
-		if !isBuiltinShapeLaw(fc.Law) {
-			continue
-		}
-		if fc.Param != "" {
-			a.errorf(fc.Position, "shape law %q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
-			continue
-		}
-		switch fc.Law {
-		case "NoBoundsChecks":
-			if len(a.currentFunctionGuardedIndexes) > 0 {
-				a.errorf(a.currentFunctionGuardedIndexes[0], "function %q `fulfills NoBoundsChecks` but has an index access that is not statically proven in-bounds, so a runtime bounds check would be emitted; prove the index (e.g. iterate, or guard with a bound the prover understands)", fn.Name)
-			}
-		}
 	}
 }
 

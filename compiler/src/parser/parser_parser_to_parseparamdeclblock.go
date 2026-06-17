@@ -453,8 +453,9 @@ func (p *Parser) looksLikeLawDecl() bool {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return true
 	case lexer.TOKEN_IDENT:
-		// Subject-free effect law: `law NoAlloc forbids ...` (docs/85 §4) — no param list.
-		return p.tokens[p.pos+2].Text == "forbids"
+		// Subject-free function-level law with no param list: effect law `law NoAlloc forbids ...`
+		// (docs/85 §4) or composite law `law Leaf includes ...` (docs/85 §6).
+		return p.tokens[p.pos+2].Text == "forbids" || p.tokens[p.pos+2].Text == "includes"
 	default:
 		return false
 	}
@@ -496,6 +497,30 @@ func (p *Parser) parseLawDecl() ast.Decl {
 			GenericParams:    genericParams,
 			Params:           params,
 			Forbids:          forbids,
+			IsLaw:            true,
+		}
+	}
+	// A COMPOSITE law (docs/85 §6): `law Leaf includes NoAlloc, NoBoundsChecks` — a function-level
+	// law whose obligation is the union of its named members'. Members are bare law-name identifiers.
+	if p.peekIdentText("includes") {
+		p.matchIdentText("includes")
+		var includes []string
+		for {
+			includes = append(includes, p.expect(lexer.TOKEN_IDENT).Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expectNewline()
+		return &ast.FuncDecl{
+			Position:         pos,
+			Name:             name,
+			TypeParams:       typeParams,
+			RegionParams:     regionParams,
+			PermissionParams: permissionParams,
+			GenericParams:    genericParams,
+			Params:           params,
+			Includes:         includes,
 			IsLaw:            true,
 		}
 	}

@@ -101,19 +101,45 @@ Like effect laws, a shape law is function-level: applied with the subject-free `
 NoBoundsChecks` (a subject is a wrong-form error), and a value `is NoBoundsChecks` is a
 wrong-class error.
 
-## 6. What bricks 1–2 cover / defer
+## 6. Composite laws — `includes` (brick 3)
 
-**Covered:** effect-law decls (`forbids`, parse + shape validation); subject-free `fulfills
-<Law>` parsed and discharged against the inferred effect set; the built-in `NoBoundsChecks` shape
-law discharged against the bounds-proof analysis; the wrong-class / wrong-form diagnostics for
-both. Also fixed a latent parser gap: `-> RetType changes/preserves/fulfills` mis-parsed the
-return type as a legacy region prefix (the disambiguation list only knew `can`/`ensures`).
+The docs/85 §6 composition algebra, restricted to the function-level classes. A **composite law**
+unions its members' obligations under one name:
+
+```elisa
+law NoAlloc forbids Memory.Allocate
+law NoPanic forbids Abort.Panic
+law HotKernel includes NoAlloc, NoPanic, NoBoundsChecks
+
+def kernel(xs: darray[i64]) -> i64 fulfills HotKernel:   # one name, three obligations
+    ...
+```
+
+`fulfills HotKernel` discharges the **union**: the forbidden-effect set
+(`{Memory.Allocate, Abort.Panic}`, resolved transitively through nested `includes`) checked
+against the function's effect set, **and** every required built-in shape (`NoBoundsChecks`)
+audited. Members may be effect laws, built-in shape laws, or other composites.
+
+`checkFunctionLevelFulfills` is the single discharge pass for all subject-free `fulfills`: it
+computes a law's effective forbid-set (`lawEffectiveForbids`) and shape set
+(`lawEffectiveShapes`) — both transitive, both cycle-safe — so effect, shape, and composite laws
+flow through one uniform check. Validation (at the composite's decl): no body / no subject; every
+member resolves to a function-level law (a value or frame member is rejected — `includes` composes
+only function-level classes); the include graph is acyclic.
+
+## 7. What bricks 1–3 cover / defer
+
+**Covered:** effect-law decls (`forbids`); the built-in `NoBoundsChecks` shape law; composite
+laws (`includes`) unioning effect + shape obligations under one name, transitively + cycle-safe;
+subject-free `fulfills <Law>` discharged through one uniform pass; the wrong-class / wrong-form
+diagnostics for all three. Also fixed a latent parser gap: `-> RetType changes/preserves/fulfills`
+mis-parsed the return type as a legacy region prefix (the disambiguation list only knew
+`can`/`ensures`).
 
 **Deferred:**
-- **more shape laws** (`BranchFree`, `NoRealloc`, `NoAlloc`-as-codegen) — same `isBuiltinShapeLaw`
-  registry + a per-law body analysis; the registry and discharge dispatch are shaped to grow.
-- **user-defined shape/effect laws via `includes`** (docs/85 §6 algebra) — composing built-in
-  shape predicates into named laws.
-- **measure laws** (Stage 5).
+- **more built-in shape laws** (`BranchFree`, `NoRealloc`, `NoAlloc`-as-codegen) — same
+  `isBuiltinShapeLaw` registry + a per-law body analysis in `dischargeShapeRequirement`; both are
+  shaped to grow.
+- **measure laws** (Stage 5) — the deliberately non-prove, non-composable class.
 - **`includes` composition** of effect laws into larger laws (docs/85 §6 algebra).
 - **required-effect laws** (`requires` an effect) — only `forbids` exists now.

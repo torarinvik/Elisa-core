@@ -44,6 +44,11 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 		a.errorf(expr.Pos(), "%q is an effect law; apply it to a function with `fulfills %s`, not with `is` in a value position", lawName, lawName)
 		return true
 	}
+	// A composite law (docs/85 §6) is function-level — applied with the subject-free `fulfills`.
+	if decl, _, found := a.lookupLaw(lawName); found && isCompositeLaw(decl) {
+		a.errorf(expr.Pos(), "%q is a composite law; apply it to a function with `fulfills %s`, not with `is` in a value position", lawName, lawName)
+		return true
+	}
 	call := &ast.CallExpr{
 		Position: expr.Pos(),
 		Func:     &ast.Ident{Position: expr.Right.Pos(), Name: lawName},

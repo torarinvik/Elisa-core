@@ -165,6 +165,11 @@ type FuncDecl struct {
 	// function's inferred effect set. A non-empty Forbids (with no `=` body / `changes` clause) marks
 	// the law as an effect law; a function declares conformance with the subject-free `fulfills <Law>`.
 	Forbids []PermissionRef
+	// Includes holds the member law names of a COMPOSITE law (docs/85 §6): `law Leaf includes
+	// NoAlloc, NoBoundsChecks`. A composite is a function-level law whose obligation is the union of
+	// its members' obligations (effect forbid-sets ∪ shape requirements, resolved transitively). It
+	// has no subject, no body, and no direct `forbids` clause — its members supply everything.
+	Includes []string
 	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
 	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
 	// function machinery (generics, modules, type checking, calls); the flag drives purity
