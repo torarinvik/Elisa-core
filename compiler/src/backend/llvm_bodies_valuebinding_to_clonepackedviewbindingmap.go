@@ -569,6 +569,11 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	}
 
 	if !state.currentBlockTerminated() {
+		// Fall-through exit (no explicit `return`): check `ensures … is Law` postconditions here too,
+		// so a void function that omits a return still backs the caller's gained fact (docs/85 brick 2).
+		if err := state.emitRefinementPostconditionChecks(); err != nil {
+			return err
+		}
 		if err := state.emitActiveScopedCleanup(); err != nil {
 			return err
 		}
@@ -599,6 +604,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 }
 func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic.Type) error {
 	if err := s.emitPostconditionChecks(value, actual); err != nil {
+		return err
+	}
+	if err := s.emitRefinementPostconditionChecks(); err != nil {
 		return err
 	}
 	if err := s.emitActiveScopedCleanup(); err != nil {
@@ -989,6 +997,36 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 			continue
 		}
 		if err := s.emitContractCheck(cond, "postcondition failed"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// emitRefinementPostconditionChecks emits the runtime half of `ensures <param> is Law` (docs/85
+// brick 2 B): for each refinement postcondition, a debug-gated check `Law(param)` that panics if
+// false. Called at every exit — explicit returns AND implicit fall-through — so a void function
+// that omits `return` is still checked, keeping the caller's gained predicate fact sound. Elided in
+// release ("debug verifies what release assumes"). The static prove/refute half runs in the
+// analyzer (dischargeEnsuresRefinements); a statically-proven case still gets this (harmless,
+// debug-only) check.
+func (s *functionState) emitRefinementPostconditionChecks() error {
+	if s.decl == nil || len(s.decl.Ensures) == 0 {
+		return nil
+	}
+	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+		return nil
+	}
+	for _, clause := range s.decl.Ensures {
+		if clause.Kind != ast.EnsuresKindRefinement || clause.RefinementLaw == "" || clause.Target.Root == "" {
+			continue
+		}
+		call := &ast.CallExpr{
+			Position: clause.Position,
+			Func:     &ast.Ident{Position: clause.Position, Name: clause.RefinementLaw},
+			Args:     []ast.Expr{&ast.Ident{Position: clause.Position, Name: clause.Target.Root}},
+		}
+		if err := s.emitContractCheck(call, "postcondition failed"); err != nil {
 			return err
 		}
 	}

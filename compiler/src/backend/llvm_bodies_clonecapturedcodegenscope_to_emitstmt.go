@@ -871,6 +871,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		return nil
 	case *ast.ReturnStmt:
 		if n.Value == nil {
+			// docs/85 brick 2 B: enforce `ensures <param> is Law` postconditions on a void return too.
+			if err := s.emitRefinementPostconditionChecks(); err != nil {
+				return err
+			}
 			if err := s.emitActiveScopedCleanup(); err != nil {
 				return err
 			}

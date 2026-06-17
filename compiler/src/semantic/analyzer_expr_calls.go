@@ -495,6 +495,19 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// callee that re-establishes the predicate via `ensures` is a later refinement.
 		if rt, ok := paramType.(*RefType); ok && rt != nil {
 			a.invalidatePredFactsForTarget(loweredArgs[i])
+			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
+		}
+		// docs/85 brick 2 (A): a callee postcondition `ensures <param i> is Law` lets the caller GAIN
+		// the predicate fact on the argument bound to param i — applied AFTER the invalidation above so
+		// it survives. Sound because the callee's returns are checked against the same law (B). Only a
+		// plainly-rooted argument can carry the fact (the predicate is keyed by variable name).
+		for _, re := range appliedType.RefinementEnsures {
+			if re.ParamIndex != i {
+				continue
+			}
+			if root, ok := rootIdentName(loweredArgs[i]); ok {
+				recordPredFact(a.currentScope, root, re.LawName)
+			}
 		}
 	}
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)

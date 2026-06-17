@@ -386,6 +386,12 @@ type Scope struct {
 	// cover mutable variables, because they are invalidated at every mutation site (docs/85: mutable
 	// refinement flow — see analyzer_refinement_predfacts.go).
 	predFacts map[string]map[string]bool
+	// writtenConst records the last value written to a variable when that value is a compile-time
+	// integer constant (`x <- 0`, `n = 5`) — including writes through a non-aliased `mutable T&`
+	// param's pointee. Used to prove/refute a refinement obligation on the variable (e.g. an
+	// `ensures p is Positive` postcondition after `p <- 1`). Invalidated at every mutation site
+	// alongside predFacts, so it can never go stale; const-only RHS keeps re-evaluation stable.
+	writtenConst map[string]int64
 }
 
 func NewScope(parent *Scope) *Scope {

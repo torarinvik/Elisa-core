@@ -42,6 +42,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 	var resolvedPermissionRefs []ast.PermissionRef
 	var permissions []string
 	var poststates []FuncPoststate
+	var refinementEnsures []RefinementEnsure
 	defaultExprs := make([]ast.Expr, len(expandedExplicitParams))
 	hasDefaults := make([]bool, len(expandedExplicitParams))
 	a.withGenericParams(resolvedGenericParams, nil, func() {
@@ -61,6 +62,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 						retType = a.resolveType(ret)
 					}
 					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
+					refinementEnsures = a.resolveRefinementEnsures(name, allParams, ptypes, ensures)
 					defaultExprs, hasDefaults = a.validateExpandedFuncParamDefaults(name, explicitSpecs, ptypes[:len(expandedExplicitParams)])
 				})
 			})
@@ -83,6 +85,7 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 		HasNoRecurse:              false,
 		TemperatureMode:           FuncTemperatureModeDefault,
 		Poststates:                poststates,
+		RefinementEnsures:         refinementEnsures,
 		Params:                    ptypes,
 		ExplicitParamCount:        len(expandedExplicitParams),
 		ExplicitParamNames:        explicitNames,
@@ -245,6 +248,11 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 	}
 	seenTargets := make(map[string][]seenPoststateTarget, len(ensures))
 	for _, clause := range ensures {
+		// Refinement postconditions (`ensures arr is NonEmpty`) ride the lightweight
+		// RefinementEnsures channel (resolveRefinementEnsures), not the type-based poststate system.
+		if clause.Kind == ast.EnsuresKindRefinement {
+			continue
+		}
 		condition := funcPoststateConditionFromAST(clause.Condition)
 		if condition.Kind == FuncPoststateConditionReturnBool && !IsBoolType(returnType) {
 			a.errorf(clause.Position, "ensures %s on function %q requires a bool return type, got %s", funcPoststateConditionLabel(condition), name, returnType)
@@ -347,4 +355,62 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 		resolved = append(resolved, poststate)
 	}
 	return resolved
+}
+
+// resolveRefinementEnsures resolves `ensures <param> is <BareLaw>` postconditions (docs/85, mutable
+// refinement flow brick 2) into the lightweight RefinementEnsure channel. Validated here: the
+// target is a bare parameter (no field path) and the law is a real bare law whose subject accepts
+// the param type. Each becomes a (ParamIndex, LawName) the call site uses to GAIN a predicate fact
+// and the callee's returns use to discharge the postcondition.
+func (a *Analyzer) resolveRefinementEnsures(name string, params []ast.ParamDecl, paramTypes []Type, ensures []ast.EnsuresClause) []RefinementEnsure {
+	var out []RefinementEnsure
+	for _, clause := range ensures {
+		if clause.Kind != ast.EnsuresKindRefinement {
+			continue
+		}
+		if len(clause.Target.Fields) != 0 {
+			a.errorf(clause.Position, "ensures %q on function %q: refinement postconditions apply to a bare parameter, not a field path", clause.Target.Root, name)
+			continue
+		}
+		paramIndex := -1
+		for i, param := range params {
+			if param.Name == clause.Target.Root {
+				paramIndex = i
+				break
+			}
+		}
+		if paramIndex < 0 {
+			a.errorf(clause.Position, "ensures on function %q references unknown parameter %q", name, clause.Target.Root)
+			continue
+		}
+		decl, ft, ok := a.lookupLaw(clause.RefinementLaw)
+		if !ok || decl == nil {
+			a.errorf(clause.Position, "ensures %q is not a law", clause.RefinementLaw)
+			continue
+		}
+		// Bare laws only for now (a parametric `is Bounded[lo,hi]` postcondition is a later brick).
+		if len(decl.Params) != 1 {
+			a.errorf(clause.Position, "ensures %q must be a single-subject (bare) law for a refinement postcondition", clause.RefinementLaw)
+			continue
+		}
+		if paramIndex < len(paramTypes) && ft != nil && len(ft.Params) == 1 && len(decl.TypeParams) == 0 {
+			subject := ft.Params[0]
+			base := refinementSubjectBaseType(paramTypes[paramIndex])
+			if base != nil && !AssignableTo(base, subject) && !AssignableTo(subject, base) {
+				a.errorf(clause.Position, "ensures %q expects a subject of type %s, but parameter %q is %s", clause.RefinementLaw, typeString(subject), clause.Target.Root, typeString(base))
+				continue
+			}
+		}
+		out = append(out, RefinementEnsure{Position: clause.Position, ParamIndex: paramIndex, LawName: clause.RefinementLaw})
+	}
+	return out
+}
+
+// refinementSubjectBaseType strips a ref wrapper so a law over `darray[u8]` matches a
+// `mutable darray[u8]&` parameter (the subject is the pointee).
+func refinementSubjectBaseType(t Type) Type {
+	if rt, ok := t.(*RefType); ok && rt != nil {
+		return rt.Elem
+	}
+	return t
 }

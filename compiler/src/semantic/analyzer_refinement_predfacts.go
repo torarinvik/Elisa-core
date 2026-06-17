@@ -110,6 +110,66 @@ func rootIdentName(expr ast.Expr) (string, bool) {
 	}
 }
 
+// recordWrittenConstForTarget records (or clears) the written-constant fact for an assignment
+// `target <- value` / `target = value`. For a bare-identifier target whose RHS is a compile-time
+// integer constant, the variable is now known to equal that constant; any other target shape or a
+// non-constant RHS clears the fact (the value is no longer statically known). Sound because the
+// fact is invalidated again at the next mutation, and `mutable T&` pointees are non-aliased.
+func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
+	name, ok := target.(*ast.Ident)
+	if !ok || name == nil {
+		a.invalidateWrittenConst(rootIdentNameOrEmpty(target))
+		return
+	}
+	c, ok := a.constIntValue(value)
+	if !ok {
+		a.invalidateWrittenConst(name.Name)
+		return
+	}
+	if a.currentScope == nil {
+		return
+	}
+	// Drop any shadowed parent entry first so the lookup finds this fresh value.
+	a.invalidateWrittenConst(name.Name)
+	if a.currentScope.writtenConst == nil {
+		a.currentScope.writtenConst = map[string]int64{}
+	}
+	a.currentScope.writtenConst[name.Name] = c
+}
+
+func rootIdentNameOrEmpty(expr ast.Expr) string {
+	if name, ok := rootIdentName(expr); ok {
+		return name
+	}
+	return ""
+}
+
+// invalidateWrittenConst drops the written-constant fact for a variable across the scope chain,
+// mirroring invalidatePredFacts. Called at every mutation site that does not record a new constant.
+func (a *Analyzer) invalidateWrittenConst(name string) {
+	if name == "" {
+		return
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenConst != nil {
+			delete(scope.writtenConst, name)
+		}
+	}
+}
+
+// lookupWrittenConst returns the known integer value of a variable, if a written-constant fact for
+// it is live in the active scope chain.
+func (a *Analyzer) lookupWrittenConst(name string) (int64, bool) {
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenConst != nil {
+			if v, ok := scope.writtenConst[name]; ok {
+				return v, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // gatherLawIsPredFact records a predicate fact for `if x is Law:` where Law is a BARE law (no
 // bracket args) and x is a bare identifier — regardless of whether x is mutable. Mutable is safe
 // here because any later mutation of x invalidates the fact via invalidatePredFacts. The integer

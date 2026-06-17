@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -124,10 +126,20 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
+	// Written-constant substitution: when the subject is a bare variable whose last write was a
+	// compile-time integer constant (`p <- 0`, even through a non-aliased `mutable T&` pointee), use
+	// that constant as the const-eval subject. This proves `ensures p is Positive` after `p <- 1`
+	// and refutes it after `p <- 0`, where the bare identifier alone carries no const value.
+	constSubject := value
+	if ident, ok := value.(*ast.Ident); ok && ident != nil {
+		if c, known := a.lookupWrittenConst(ident.Name); known {
+			constSubject = &ast.IntLit{Position: ident.Pos(), Value: strconv.FormatInt(c, 10)}
+		}
+	}
 	if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
 		Position: pred.Position,
 		Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
-		Args:     append([]ast.Expr{value}, pred.Args...),
+		Args:     append([]ast.Expr{constSubject}, pred.Args...),
 	}); known {
 		if !ok {
 			a.recordProof(pos, valueName, pred.Name, ProofRefuted)
@@ -228,6 +240,37 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 	}
 	if len(checks) != 0 && a.returnRefinementChecks != nil {
 		a.returnRefinementChecks[n] = checks
+	}
+}
+
+// dischargeEnsuresRefinements discharges `ensures <param> is Law` postconditions (docs/85 brick 2,
+// half B) at each return: the parameter must satisfy the law at function exit, so the caller's
+// gained fact (half A) is backed. This is the STATIC half — prove (flow/factset/const), refute
+// (compile error), or report+warn/-strict. The RUNTIME fallback is emitted by the backend
+// (emitRefinementPostconditionChecks) uniformly on every exit path INCLUDING fall-through, so a
+// void function that never writes an explicit `return` is still checked — which keeps the call-site
+// gain sound. Static proof and runtime check are a sound pair (debug verifies what release assumes).
+func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
+	if a == nil || n == nil || a.currentFuncType == nil || a.currentFuncDecl == nil {
+		return
+	}
+	for _, re := range a.currentFuncType.RefinementEnsures {
+		if re.ParamIndex < 0 || re.ParamIndex >= len(a.currentFuncDecl.Params) {
+			continue
+		}
+		paramName := a.currentFuncDecl.Params[re.ParamIndex].Name
+		lawDecl, _, ok := a.lookupLaw(re.LawName)
+		if !ok {
+			continue
+		}
+		subject := &ast.Ident{Position: n.Pos(), Name: paramName}
+		pred := ast.RefinementPredExpr{Position: re.Position, Name: re.LawName}
+		valueName := "parameter \"" + paramName + "\""
+		if a.tryDischargeRefinementStatically(subject, valueName, pred, lawDecl, n.Pos()) {
+			continue
+		}
+		a.recordProof(n.Pos(), valueName, re.LawName, ProofRuntime)
+		a.proofLint(n.Pos(), "postcondition %q on parameter %q of %q could not be proven statically; it is checked at runtime (debug) — make it provable or accept the runtime check", re.LawName, paramName, a.currentFuncDecl.Name)
 	}
 }
 

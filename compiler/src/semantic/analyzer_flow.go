@@ -334,6 +334,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !n.Optional {
 			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 			a.invalidatePredFactsForTarget(n.Target)
+			a.recordWrittenConstForTarget(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
@@ -362,6 +363,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
 		a.invalidatePredFactsForTarget(n.Target)
+		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		a.suppressUninitReadCheck++
@@ -387,6 +389,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.invalidatePredFactsForTarget(n.Target)
+		a.recordWrittenConstForTarget(n.Target, n.Value)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
@@ -398,6 +401,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 	case *ast.ReturnStmt:
+		// docs/85 brick 2 (B): check `ensures <param> is Law` postconditions on every return path,
+		// including value-less returns in a void function, before the value-specific handling below.
+		a.dischargeEnsuresRefinements(n)
 		if n.Value == nil {
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
 				if !SameType(currentUnion.Value, a.namedTypes["void"]) {

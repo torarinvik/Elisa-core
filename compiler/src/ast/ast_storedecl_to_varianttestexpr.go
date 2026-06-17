@@ -88,6 +88,10 @@ const (
 	EnsuresKindNamedState EnsuresKind = iota
 	EnsuresKindRefState
 	EnsuresKindPreserve
+	// EnsuresKindRefinement is `ensures <param> is <BareLaw>` (docs/85, mutable refinement flow):
+	// a law-predicate postcondition on a parameter, carried in RefinementLaw. Distinct from the
+	// state kinds above — it rides the lightweight predicate-fact channel, not the type system.
+	EnsuresKindRefinement
 )
 
 type EnsuresPath struct {
@@ -102,6 +106,8 @@ type EnsuresClause struct {
 	Kind       EnsuresKind
 	StateCases []string
 	RefState   RefState
+	// RefinementLaw is the bare law name for EnsuresKindRefinement (`ensures arr is NonEmpty`).
+	RefinementLaw string
 }
 type FuncDecl struct {
 	Position         lexer.Pos

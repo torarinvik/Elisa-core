@@ -198,3 +198,38 @@ func TestRefinementDischargeElidedInRelease(t *testing.T) {
 		t.Fatalf("release build should elide the refinement check (no trap), got: %v", err)
 	}
 }
+
+const ensuresRefinementProgram = `
+law Positive(self: i64) = self > 0
+
+def store(p: mutable i64&, v: i64) -> void ensures p is Positive:
+    p <- v
+    return
+
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    n: mutable i64 = 5
+    store(&n, %s)
+    print(n.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    print("\n") can Console.Write
+    return 0
+`
+
+// A satisfying `ensures p is Positive` postcondition passes the debug return-check and runs.
+func TestEnsuresRefinementSatisfiedRuns(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(ensuresRefinementProgram, "%s", "1", 1), backend.OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("satisfying ensures postcondition should run cleanly: %v (out=%q)", err, out)
+	}
+	if out != "1" {
+		t.Fatalf("want output 1, got %q", out)
+	}
+}
+
+// A violated `ensures p is Positive` (the body writes 0) TRAPS at debug — the postcondition is
+// enforced at the callee's return, backing the caller's gained fact.
+func TestEnsuresRefinementViolatedTrapsInDebug(t *testing.T) {
+	out, err := buildRunRefinement(t, strings.Replace(ensuresRefinementProgram, "%s", "0", 1), backend.OptimizationLevel0)
+	if err == nil {
+		t.Fatalf("violated ensures postcondition must trap at debug, but program exited 0 (out=%q)", out)
+	}
+}

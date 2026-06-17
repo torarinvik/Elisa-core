@@ -498,6 +498,18 @@ type FuncPoststate struct {
 	RefState   RefState
 }
 
+// RefinementEnsure is a function postcondition of the form `ensures <param> is <BareLaw>`
+// (docs/85, mutable refinement flow brick 2). It is a lightweight predicate-fact channel kept
+// separate from FuncPoststate (which tracks named/ref states via the type system): at a call the
+// caller GAINS the predicate fact on the argument bound to ParamIndex; at the callee's returns the
+// postcondition is checked (debug runtime check + static attempt) so the caller's assumption is
+// backed. Bare laws over a bare parameter only for now.
+type RefinementEnsure struct {
+	Position   lexer.Pos
+	ParamIndex int
+	LawName    string
+}
+
 type FuncSegmentTransition int
 
 const (
@@ -546,6 +558,7 @@ type FuncType struct {
 	GuardEffects                 []FuncGuardEffect
 	BoundaryPointerParamIndices  []int
 	Poststates                   []FuncPoststate
+	RefinementEnsures            []RefinementEnsure
 	Params                       []Type
 	ExplicitParamCount           int
 	ExplicitParamNames           []string

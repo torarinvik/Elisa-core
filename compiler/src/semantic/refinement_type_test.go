@@ -635,3 +635,135 @@ def f(seed: i64) -> i64:
 		t.Fatalf("passing &n to a mutable-ref param must drop the Positive fact, forcing a runtime check")
 	}
 }
+
+// --- Mutable refinement flow brick 2: `ensures <param> is Law` postconditions. The caller GAINS
+// the fact at the call site (A); the callee's returns are checked (B) so the gain is backed. ---
+
+// After calling a function that `ensures arr is Positive` on a by-ref param, the caller knows the
+// predicate holds — a subsequent obligation on that variable proves with no runtime check, even
+// though the ref call would otherwise DROP the fact (brick 1).
+func TestEnsuresRefinementGainsFactAtCallSite(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def ensure_pos(p: mutable i64&) -> void ensures p is Positive:
+    p <- 1
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    ensure_pos(&n)
+    return needs_pos(n)
+`
+	result := analyzeTreeTestSource(t, "ensures_gain.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensures p is Positive` should let needs_pos(n) prove after ensure_pos(&n), got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("the gained postcondition fact should prove needs_pos(n) statically, got %d runtime checks", len(result.CallArgRefinementChecks))
+	}
+}
+
+// Without the `ensures`, the same ref call DROPS the fact (brick 1) — confirms the postcondition is
+// what carries the guarantee across the call.
+func TestEnsuresRefinementGainIsLoadBearing(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def needs_pos(x: i64 is Positive) -> i64:
+    return x
+
+def bump(p: mutable i64&) -> void:
+    p <- 1
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Positive:
+        bump(&n)
+        return needs_pos(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "ensures_loadbearing.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("a ref call WITHOUT `ensures` must drop the fact, forcing a runtime check")
+	}
+}
+
+// A refuted postcondition (`ensures p is Positive` but the body provably sets it non-positive) is a
+// compile error from the static half.
+func TestEnsuresRefinementRefutedStatically(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def bad(p: mutable i64&) -> void ensures p is Positive:
+    p <- 0
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_refute.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("`p <- 0` violates the Positive postcondition: expected a compile-time refutation, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// `ensures` referencing an unknown parameter, or a non-law, is rejected.
+func TestEnsuresRefinementValidation(t *testing.T) {
+	bad := `
+law Positive(self: i64) = self > 0
+def f(p: mutable i64&) -> void ensures q is Positive:
+    p <- 1
+`
+	r1 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_unknown_param.elisa", bad, AnalyzeOptions{})
+	if !contains(allDiagnostics(r1), "unknown parameter") {
+		t.Fatalf("ensures on unknown param should be rejected, got:\n%s", allDiagnostics(r1))
+	}
+	notLaw := `
+def f(p: mutable i64&) -> void ensures p is Nope:
+    p <- 1
+`
+	r2 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_notlaw.elisa", notLaw, AnalyzeOptions{})
+	if !contains(allDiagnostics(r2), "is not a law") {
+		t.Fatalf("ensures with a non-law predicate should be rejected, got:\n%s", allDiagnostics(r2))
+	}
+}
+
+// Written-constant tracking through a ref pointee PROVES a postcondition: `p <- 1` makes the
+// `ensures p is Positive` provable at the return (no warning), and the call-site gain follows.
+func TestEnsuresRefinementProvenByWrittenConst(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def set_pos(p: mutable i64&) -> void ensures p is Positive:
+    p <- 1
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_proven_write.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- 1` should statically prove `ensures p is Positive` (clean under -strict), got: %v", result.Errors())
+	}
+	for _, f := range result.ProofReport {
+		if f.Predicate == "Positive" && f.Outcome == ProofRuntime {
+			t.Fatalf("postcondition should be proven (not runtime) after `p <- 1`, report=%+v", result.ProofReport)
+		}
+	}
+}
+
+// A non-constant write (`p <- v`) cannot be proven — reported as unproven (warning; -strict error).
+func TestEnsuresRefinementUnprovenNonConstWrite(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def mk(p: mutable i64&, v: i64) -> void ensures p is Positive:
+    p <- v
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_unproven.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("a non-constant write should leave the postcondition unproven (warned), got:\n%s", allDiagnostics(result))
+	}
+	strict := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_unproven_strict.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(strict.Errors()) == 0 {
+		t.Fatalf("under -strict an unprovable postcondition should be a hard error")
+	}
+}

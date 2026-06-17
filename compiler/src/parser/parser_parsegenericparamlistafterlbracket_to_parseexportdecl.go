@@ -201,6 +201,11 @@ func (p *Parser) parseEnsuresClause() ast.EnsuresClause {
 	pos := p.cur().Pos
 	condition := p.parseEnsuresCondition()
 	target := p.parseEnsuresPath()
+	// `ensures <param> is <BareLaw>` (docs/85): a law-predicate postcondition, no `=>` arm.
+	if p.match(lexer.TOKEN_IS) {
+		law := p.expect(lexer.TOKEN_IDENT).Text
+		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindRefinement, RefinementLaw: law}
+	}
 	p.expect(lexer.TOKEN_FATARROW)
 	if p.matchIdentText("preserve") {
 		return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindPreserve}
