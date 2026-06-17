@@ -105,7 +105,7 @@ def half(n: Hundred) -> usize is Bounded[0, 50]:
 	}
 }
 
-// Signed division (docs/90 follow-up): Elisa truncates toward zero, while SMT-LIB `div` is Euclidean.
+// Signed division: Elisa truncates toward zero, while SMT-LIB `div` is Euclidean.
 // The SMT tier models truncation explicitly, so a signed dividend range can now prove a signed bound.
 func TestSMTProvesSignedTruncatingDivision(t *testing.T) {
 	src := `

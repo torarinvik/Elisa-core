@@ -306,7 +306,7 @@ func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {
 	// Partition: bare names that resolve to in-scope error-set generic params
 	// become the set's Params component; everything else is the concrete part.
 	// `error[R]` is the pure opaque placeholder; `error[R, Timeout]` carries
-	// both; `error[R, S]` unions two params (docs/64 Phase 5b follow-up).
+	// both; `error[R, S]` unions two params.
 	var paramNames []string
 	concreteExprTags := make([]ast.ErrorTagExpr, 0, len(expr.Tags))
 	seenParams := map[string]bool{}
