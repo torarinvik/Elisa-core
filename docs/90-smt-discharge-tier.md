@@ -119,8 +119,27 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
      caller's facts don't guarantee now warns with a concrete witness — *"it can fail when a=5, b=5"* —
      instead of a generic message. Honest framing (a hint, not a refutation: our facts are a subset),
      but a real input the caller's facts permit.
-4. **90-4 (future) — quantifiers** (`forall`/`exists` in specs): the capability the linear tier can
-   never reach, and the line between "refinement checker" and "verifier." Gated behind `-smt`, same
-   soundness contract (only `unsat` concludes), with trigger management as the main risk.
+4. **90-4 — quantifiers (`forall`/`exists`). [LANDED, arithmetic fragment]** The capability the
+   linear tier can structurally never reach, and the line between "refinement checker" and "verifier."
+   - **Surface** (logical-implication form, chosen by design): `forall i: <body>` / `exists i, j:
+     <body>` in a law body, with `implies` as a low-precedence right-associative connective. Bounds
+     live in the body as a guard: `law InRange(self: i64, n: i64) = forall k: (0 <= k and k < n)
+     implies self != k * 2`. `forall`/`exists`/`implies` are activated only inside law bodies (parser
+     `allowQuantifiers` flag), so ordinary code may still use them as identifiers; `implies` desugars
+     to `(not a) or b` at parse (no new analyzer/SMT/backend node).
+   - **AST/analyzer**: `ast.QuantifierExpr{Exists, Vars, Body}`; type-checked in a child scope (binders
+     are `i64`, body must be bool).
+   - **SMT**: `boolTerm` emits `(forall ((q_i Int) …) body)` / `(exists …)`, binders prefixed `q_` so
+     they never collide with a free variable's `v_` symbol. Same soundness contract — only `unsat`
+     concludes.
+   - **Spec-only (the key consequence)**: an unbounded quantifier is **not executable**, so a
+     quantified law has **no runtime fallback**. `lawBodyContainsQuantifier` routes it to SMT-only; if
+     neither SMT nor const-eval proves it, the obligation is a warning (error under `-strict`) and
+     emits **no** runtime check — never broken codegen. Proven by SMT → `proven (smt)`.
+   - **Scope**: arithmetic-only first (binders + scalars; no array indexing). Array-element quantifiers
+     (`forall i in 0..<n: xs[i] > 0`, modeling `xs[i]` via SMT array theory) are the next brick.
+   - **Deferred**: array-theory element quantifiers; quantifiers in `requires`/`ensure` clauses (only
+     law bodies activate the syntax today); trigger/pattern tuning (z3 auto-triggers; the 2 s timeout +
+     decline keeps a matching loop safe).
 
 Each brick: build → targeted test → full `./src/...` green → commit.

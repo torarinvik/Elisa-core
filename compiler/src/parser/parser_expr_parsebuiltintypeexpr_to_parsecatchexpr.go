@@ -94,7 +94,26 @@ func (p *Parser) parseBuiltinTypeExpr(pos lexer.Pos, name string) ast.TypeExpr {
 	}
 }
 func (p *Parser) parseExpr() ast.Expr {
+	// Quantifier prefix (docs/90 brick 90-4), only in law/spec bodies: `forall i: <body>` /
+	// `exists i: <body>`. Gated on allowQuantifiers so ordinary code can name a variable `forall`.
+	if p.allowQuantifiers && p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "forall" || p.cur().Text == "exists") && p.quantifierStartsHere() {
+		return p.parseQuantifier()
+	}
 	expr := p.parseOr()
+	// `implies` infix (lowest precedence, right-associative), only in law/spec bodies. Desugared to
+	// `(not a) or b` so the analyzer/SMT/backend need no new node.
+	if p.allowQuantifiers && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "implies" {
+		opPos := p.cur().Pos
+		p.advance()
+		right := p.parseExpr() // right-assoc; also catches nested implies / quantifiers
+		expr = &ast.BinaryExpr{
+			Position: opPos,
+			Op:       lexer.TOKEN_OR,
+			Left:     &ast.UnaryExpr{Position: opPos, Op: lexer.TOKEN_NOT, Operand: expr},
+			Right:    right,
+		}
+		return expr
+	}
 
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "first" || p.tokens[p.pos+1].Text == "each") {
 		return p.parseProjectionQueryExpr(expr)
@@ -134,6 +153,31 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 
 	return expr
+}
+
+// quantifierStartsHere confirms a `forall`/`exists` keyword is followed by a binder identifier (so a
+// variable literally named `forall` used in expression position is not misparsed as a quantifier).
+func (p *Parser) quantifierStartsHere() bool {
+	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
+}
+
+// parseQuantifier parses `forall i, j: <body>` / `exists i: <body>` (docs/90 brick 90-4). Binders are
+// comma-separated identifiers ranging over the integers; the body is a boolean expression (commonly a
+// guarded implication). Only reached when allowQuantifiers is set.
+func (p *Parser) parseQuantifier() ast.Expr {
+	pos := p.cur().Pos
+	exists := p.cur().Text == "exists"
+	p.advance() // forall / exists
+	var vars []string
+	for {
+		vars = append(vars, p.expect(lexer.TOKEN_IDENT).Text)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_COLON)
+	body := p.parseExpr()
+	return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: body}
 }
 
 func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {

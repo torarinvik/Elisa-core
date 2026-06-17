@@ -243,7 +243,29 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 		}
 		return true
 	}
+	// A quantified law body (docs/90 brick 90-4) is SPEC-ONLY: an unbounded `forall`/`exists` is not
+	// executable, so there is no runtime fallback. If neither SMT nor const-eval proved it, report it
+	// here (warning by default, error under -strict) and return resolved so the caller emits NO runtime
+	// check (which would generate broken code for a quantifier).
+	if a.lawBodyContainsQuantifier(lawDecl) {
+		a.recordProof(pos, valueName, pred.Name, ProofRuntime)
+		a.proofLint(pos, "quantified refinement %q on %s could not be proven statically (it has no runtime check); enable -smt or strengthen the facts", pred.Name, valueName)
+		return true
+	}
 	return false
+}
+
+// lawBodyContainsQuantifier reports whether a law's `= <bool-expr>` body contains a `forall`/`exists`
+// — making it spec-only (provable by SMT, never runtime-checkable).
+func (a *Analyzer) lawBodyContainsQuantifier(decl *ast.FuncDecl) bool {
+	body, ok := a.lawBodyExpr(decl)
+	if !ok {
+		return false
+	}
+	return a.walkStaticExpr(body, func(e ast.Expr) bool {
+		_, isQ := e.(*ast.QuantifierExpr)
+		return isQ
+	})
 }
 
 // dischargeCallArgRefinements discharges the refinement obligations on a direct call's arguments

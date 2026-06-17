@@ -722,6 +722,17 @@ type TernaryExpr struct {
 	Cond     Expr
 	Alt      Expr
 }
+// QuantifierExpr is a bound quantifier in a spec/law body (docs/90 brick 90-4): `forall i: <body>`
+// or `exists i: <body>`. The binders range over the integers; the body is a boolean expression
+// (typically a guarded implication `(0 <= i and i < n) implies <pred>`). Quantified bodies are
+// SPEC-ONLY — provable by the SMT tier, never compiled to a runtime check (an unbounded quantifier
+// is not executable).
+type QuantifierExpr struct {
+	Position lexer.Pos
+	Exists   bool // false = forall
+	Vars     []string
+	Body     Expr
+}
 type AddrOfExpr struct {
 	Position lexer.Pos
 	Operand  Expr

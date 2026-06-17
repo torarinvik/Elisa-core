@@ -600,6 +600,25 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		a.lookupField(t, n.Field, n.Pos())
 		result = a.namedTypes["usize"]
 		return
+	case *ast.QuantifierExpr:
+		// A spec-only bound quantifier (docs/90 brick 90-4). Binders range over the integers; the body
+		// must be bool. Type-checked in a child scope so the binders are in scope for the body and gone
+		// after. Never compiled to a runtime check (suppressed at discharge) — provable only by SMT.
+		saved := a.currentScope
+		scope := NewScope(saved)
+		intType := a.namedTypes["i64"]
+		for _, v := range n.Vars {
+			scope.Define(&Symbol{Name: v, Kind: SymbolLocal, Type: intType})
+		}
+		a.currentScope = scope
+		bodyType := a.analyzeExpr(n.Body)
+		a.currentScope = saved
+		if bodyType != nil && !IsBoolType(bodyType) {
+			a.errorf(n.Body.Pos(), "quantifier body must be bool, got %s", bodyType)
+		}
+		boolType := a.namedTypes["bool"]
+		a.exprTypes[n] = boolType
+		return boolType
 	case *ast.TernaryExpr:
 		condType := a.analyzeCondExpr(n.Cond)
 		if !IsBoolType(condType) {

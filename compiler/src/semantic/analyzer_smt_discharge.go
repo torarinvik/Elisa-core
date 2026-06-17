@@ -325,6 +325,28 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return tr.boolTerm(n.Inner, env)
+	case *ast.QuantifierExpr:
+		// Bind each quantifier variable to a fresh SMT Int symbol (prefix "q_" so it never collides
+		// with a free variable's "v_" symbol), then translate the body under the extended environment.
+		qenv := make(map[string]string, len(env)+len(n.Vars))
+		for k, v := range env {
+			qenv[k] = v
+		}
+		decls := make([]string, 0, len(n.Vars))
+		for _, v := range n.Vars {
+			sym := "q_" + v
+			qenv[v] = sym
+			decls = append(decls, "("+sym+" Int)")
+		}
+		body, ok := tr.boolTerm(n.Body, qenv)
+		if !ok {
+			return "", false
+		}
+		q := "forall"
+		if n.Exists {
+			q = "exists"
+		}
+		return "(" + q + " (" + strings.Join(decls, " ") + ") " + body + ")", true
 	case *ast.BoolLit:
 		if n.Value {
 			return "true", true

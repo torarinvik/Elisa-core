@@ -20,6 +20,10 @@ type Parser struct {
 	allowInMembership    bool
 	allowTernary         bool
 	allowWhereExpr       bool
+	// allowQuantifiers enables `forall`/`exists` prefix and `implies` infix in expression position.
+	// Set only while parsing law/spec bodies (docs/90 brick 90-4), so ordinary code may keep using
+	// `forall`/`exists`/`implies` as identifiers.
+	allowQuantifiers     bool
 	disallowIsComparison bool
 	staticFunctionDepth  int
 }
@@ -550,7 +554,10 @@ func (p *Parser) parseLawDecl() ast.Decl {
 		}
 	}
 	p.expect(lexer.TOKEN_ASSIGN)
+	savedQuant := p.allowQuantifiers
+	p.allowQuantifiers = true
 	predicate := p.parseExpr()
+	p.allowQuantifiers = savedQuant
 	p.expectNewline()
 	return &ast.FuncDecl{
 		Position:         pos,

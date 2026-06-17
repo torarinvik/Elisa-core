@@ -92,6 +92,7 @@ func (n *AlignofExpr) Pos() lexer.Pos    { return n.Position }
 func (n *OffsetofExpr) Pos() lexer.Pos   { return n.Position }
 func (n *TernaryExpr) Pos() lexer.Pos    { return n.Position }
 func (n *AddrOfExpr) Pos() lexer.Pos     { return n.Position }
+func (n *QuantifierExpr) Pos() lexer.Pos { return n.Position }
 func (n *SpecializeExpr) Pos() lexer.Pos { return n.Position }
 func (n *StructLitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *RecordUpdateExpr) Pos() lexer.Pos {
@@ -297,6 +298,7 @@ func (*AlignofExpr) nodeTag()                          {}
 func (*OffsetofExpr) nodeTag()                         {}
 func (*TernaryExpr) nodeTag()                          {}
 func (*AddrOfExpr) nodeTag()                           {}
+func (*QuantifierExpr) nodeTag()                       {}
 func (*SpecializeExpr) nodeTag()                       {}
 func (*StructLitExpr) nodeTag()                        {}
 func (*RecordUpdateExpr) nodeTag()                     {}
@@ -508,6 +510,7 @@ func (*AlignofExpr) exprTag()                          {}
 func (*OffsetofExpr) exprTag()                         {}
 func (*TernaryExpr) exprTag()                          {}
 func (*AddrOfExpr) exprTag()                           {}
+func (*QuantifierExpr) exprTag()                       {}
 func (*SpecializeExpr) exprTag()                       {}
 func (*StructLitExpr) exprTag()                        {}
 func (*RecordUpdateExpr) exprTag()                     {}

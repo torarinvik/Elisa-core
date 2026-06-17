@@ -177,6 +177,67 @@ def caller(a: Five, b: Five) -> i64:
 	}
 }
 
+// QUANTIFIERS (docs/90 brick 90-4): a `forall` law proven by SMT. `NotDouble[5]` holds for 11
+// (11 is not 0,2,4,6,8). The affine/const tiers can't reason about an unbounded quantifier — only SMT.
+func TestSMTProvesQuantifiedLaw(t *testing.T) {
+	src := `
+law NotDouble(self: i64, n: i64) = forall k: (0 <= k and k < n) implies self != k * 2
+
+def pick() -> i64:
+    x: i64 is NotDouble[5] = 11
+    return x
+`
+	result := analyzeWithSMT(t, "smt_forall.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the quantified law proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: SMT must NOT prove a quantified law that fails. `NotDouble[5]` is false for 4 (4 == 2*2).
+func TestSMTDeclinesFalseQuantifiedLaw(t *testing.T) {
+	src := `
+law NotDouble(self: i64, n: i64) = forall k: (0 <= k and k < n) implies self != k * 2
+
+def pick() -> i64:
+    x: i64 is NotDouble[5] = 4
+    return x
+`
+	result := analyzeWithSMT(t, "smt_forall_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("SMT must not prove NotDouble[5] for 4 (4 == 2*2): %+v", result.ProofReport)
+		}
+	}
+}
+
+// Spec-only: with SMT off, a quantified refinement that cannot be proven warns (no runtime check —
+// an unbounded quantifier is not executable) rather than erroring or emitting broken code.
+func TestQuantifiedLawSpecOnlyWhenSMTOff(t *testing.T) {
+	src := `
+law NotDouble(self: i64, n: i64) = forall k: (0 <= k and k < n) implies self != k * 2
+
+def pick(v: i64) -> i64:
+    x: i64 is NotDouble[5] = v
+    return x
+`
+	result := analyzeTreeTestSource(t, "smt_forall_off.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("quantified refinement should warn (not error) when SMT is off, got: %v", errs)
+	}
+	if !strings.Contains(strings.Join(result.Warnings(), "\n"), "quantified refinement") {
+		t.Fatalf("expected a spec-only quantified-refinement warning, got: %v", result.Warnings())
+	}
+}
+
 // With SMT off (default), the same nonlinear obligation is NOT proven and no solver runs.
 func TestSMTOffLeavesNonlinearUnproven(t *testing.T) {
 	src := `
