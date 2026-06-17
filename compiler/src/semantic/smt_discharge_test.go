@@ -282,6 +282,51 @@ def check(xs: darray[i64]) -> i64:
 	}
 }
 
+// THE PAYOFF (docs/90 brick 90-6): a quantified PRECONDITION is assumed in the body and discharges a
+// real indexed-value refinement. `requires forall k: 0<=k<n implies xs[k] >= 0` + `requires n > 0`
+// prove `return xs[0]` satisfies `is NonNeg` — by quantifier instantiation at k=0.
+func TestSMTQuantifiedRequiresDischargesReturn(t *testing.T) {
+	src := `
+law NonNeg(self: i64) = self >= 0
+
+def first(xs: darray[i64], n: i64) -> i64 is NonNeg:
+    requires n > 0
+    requires forall k: (0 <= k and k < n) implies xs[k] >= 0
+    return xs[0]
+`
+	result := analyzeWithSMT(t, "smt_req_quant.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the return discharged from the quantified precondition, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: WITHOUT the quantified precondition, `xs[0]` is not provably non-negative — the SMT tier
+// must NOT prove it (it declines; the obligation falls back).
+func TestSMTNoRequiresLeavesIndexUnproven(t *testing.T) {
+	src := `
+law NonNeg(self: i64) = self >= 0
+
+def first(xs: darray[i64], n: i64) -> i64 is NonNeg:
+    requires n > 0
+    return xs[0]
+`
+	result := analyzeWithSMT(t, "smt_req_none.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("xs[0] must not be SMT-proven NonNeg without a precondition: %+v", result.ProofReport)
+		}
+	}
+}
+
 // With SMT off (default), the same nonlinear obligation is NOT proven and no solver runs.
 func TestSMTOffLeavesNonlinearUnproven(t *testing.T) {
 	src := `

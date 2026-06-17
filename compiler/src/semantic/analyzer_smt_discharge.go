@@ -142,7 +142,15 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if !ok {
 		return false
 	}
-	query := tr.factPreamble() + "(assert (not " + obligation + "))\n"
+	// Assume the enclosing function's preconditions (docs/90 brick 90-6). A `requires forall k:
+	// 0<=k<n implies xs[k] >= 0` becomes a hypothesis, so `return xs[0] is NonNeg` discharges by
+	// quantifier instantiation. Contract-sound: the callee may assume its preconditions (callers must
+	// establish them), and an SMT-proven VALUE fact never drives bounds-check elision, so a violated
+	// precondition is garbage-in-garbage-out, not memory unsafety. Translated with the SAME translator
+	// so param/array symbols unify with the obligation. (factPreamble is built AFTER, once all decls
+	// are collected.)
+	hyps := a.smtRequiresHypotheses(tr)
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, _ := solver.Check(query)
 	if res == smt.Unsat {
@@ -190,6 +198,26 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// On sat, the model is an input permitted by the caller's known facts that violates the
 	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
 	return false, tr.counterexample(model)
+}
+
+// smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
+// (non-negated — they are assumed), using the given translator so free variables and arrays share the
+// obligation's symbols. A clause outside the fragment is silently skipped (sound: fewer assumptions is
+// conservative). Returns the concatenated `(assert …)` lines.
+func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
+	if a.currentFuncDecl == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, req := range a.currentFuncDecl.Requires {
+		if req == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(req, nil); ok {
+			b.WriteString("(assert " + h + ")\n")
+		}
+	}
+	return b.String()
 }
 
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).

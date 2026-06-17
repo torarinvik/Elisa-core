@@ -152,8 +152,26 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    ```
    A false array claim (`forall i: self[i] == self[0]`) is soundly declined. (Note: law bodies are
    single-line today — the multi-line form above is illustrative.)
-   - **Deferred**: quantifiers in `requires`/`ensure` clauses (only law bodies activate the syntax
-     today); multi-line law bodies; nested/multi-array models; trigger/pattern tuning (z3
-     auto-triggers; the 2 s timeout + decline keeps a matching loop safe).
+6. **90-6 — interprocedural quantified contracts (assume `requires`). [LANDED]** The practical
+   payoff: a function may **assume its `requires` clauses** as SMT hypotheses when discharging
+   obligations in its body. Quantifiers are now parsed in `requires`/`ensure` clauses (the
+   `allowQuantifiers` flag is set around those `parseExpr` calls too), and `trySMTProveRefinement`
+   asserts the enclosing `currentFuncDecl.Requires` (translated with the SAME translator, so param/array
+   symbols unify with the obligation) before the negated goal. So:
+   ```elisa
+   def first(xs: darray[i64], n: i64) -> i64 is NonNeg:
+       requires n > 0
+       requires forall k: (0 <= k and k < n) implies xs[k] >= 0
+       return xs[0]                       # proven: instantiate the forall at k = 0
+   ```
+   **Contract soundness**: a callee may assume its preconditions (callers must establish them — and
+   are warned, error under `-strict`, when they can't). Assuming them is safe even without a runtime
+   check because an SMT-proven *value* fact never drives bounds-check elision (that is the separate
+   syntactic/linear `indexBoundsProven` system, not fed by SMT) — so a violated precondition is
+   garbage-in-garbage-out, never memory unsafety. A clause outside the fragment is skipped (fewer
+   assumptions = conservative). Without the precondition, `xs[0] is NonNeg` correctly does NOT prove.
+   - **Deferred**: caller-side proof of quantified *array* preconditions (the caller rarely has the
+     quantified facts; declines to a warning today); using `ensure` postconditions as caller-side
+     facts; multi-line law/contract bodies; trigger/pattern tuning.
 
 Each brick: build → targeted test → full `./src/...` green → commit.

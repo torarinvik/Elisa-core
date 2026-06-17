@@ -98,7 +98,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeContractStmt() {
 				pos := p.cur().Pos
 				p.advance()
+				saved := p.allowQuantifiers
+				p.allowQuantifiers = true // docs/90 brick 90-6: quantified preconditions
 				cond := p.parseExpr()
+				p.allowQuantifiers = saved
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond}
 			}
@@ -107,7 +110,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeContractStmt() {
 				pos := p.cur().Pos
 				p.advance()
+				saved := p.allowQuantifiers
+				p.allowQuantifiers = true // docs/90 brick 90-6: quantified postconditions
 				cond := p.parseExpr()
+				p.allowQuantifiers = saved
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond}
 			}
