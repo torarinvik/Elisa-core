@@ -667,63 +667,102 @@ func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRe
 	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", valueRegion, root.Name, valueRegion, valueRegion, root.Name)
 }
 
-// checkFreshContainerStoreEscape rejects storing a freshly-built container whose ELEMENTS carry an
-// inner region into a longer-lived container. A list literal `[v]` or comprehension `[mk() for …]`
-// assigned to an outer container copies each element's header; an element typed `@inner` then dangles
-// once the inner region is freed. The store-site checks (checkNestedRegionStoreEscape) only see the
-// fresh container's OWN region — which is the target's region, not the element's — because element
-// types are never region-stamped. This is the construction-expression analogue of the push/dict.put
-// element-store check (which only fires on explicit container-mutation calls, never on `<-`/`=` of a
-// fresh literal or comprehension). Spread elements (`[...src]`) copy a whole source container, so they
-// route through the bulk-store check instead.
+// isFreshContainerProducer reports whether an expression CONSTRUCTS a fresh value whose interior may
+// carry a shorter-lived region than where the value is stored: a list literal, comprehension,
+// ternary (a runtime choice between branches), or struct literal. These are the forms whose OWN region
+// (the target's) hides their elements'/fields' region, so they need the interior-region escape check.
+func isFreshContainerProducer(expr ast.Expr) bool {
+	switch stripParenExpr(expr).(type) {
+	case *ast.ListLitExpr, *ast.ListComprehensionExpr, *ast.TernaryExpr, *ast.StructLitExpr:
+		return true
+	}
+	return false
+}
+
+// valueInteriorRegion returns the innermost (shortest-lived) tracked region reachable through a
+// value-producing expression's interior: the (non-spread) elements of a list literal or
+// comprehension, BOTH branches of a ternary (either may be chosen at runtime), and the fields of a
+// struct literal, recursing through these producer forms. A leaf is the expression's own
+// container/entry region or recorded interior-field taint. "" when nothing region-carrying is
+// reachable (scalars, region-less data).
+func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	stripped := stripParenExpr(expr)
+	switch n := stripped.(type) {
+	case *ast.ListLitExpr:
+		r := ""
+		for i, elem := range n.Elems {
+			if i < len(n.Spreads) && n.Spreads[i] {
+				continue // spreads are bulk-checked at the store site (with the scalar-elem exemption).
+			}
+			r = a.innerRegion(r, a.valueInteriorRegion(elem))
+		}
+		return r
+	case *ast.ListComprehensionExpr:
+		r := a.valueInteriorRegion(n.Value)
+		if n.Key != nil {
+			r = a.innerRegion(r, a.valueInteriorRegion(n.Key))
+		}
+		return r
+	case *ast.TernaryExpr:
+		return a.innerRegion(a.valueInteriorRegion(n.Value), a.valueInteriorRegion(n.Alt))
+	case *ast.StructLitExpr:
+		r := ""
+		for _, arg := range n.Args {
+			r = a.innerRegion(r, a.valueInteriorRegion(arg))
+		}
+		for _, spread := range n.Spreads {
+			r = a.innerRegion(r, a.valueInteriorRegion(spread))
+		}
+		return r
+	default:
+		return a.valueStoreRegion(stripped, a.exprTypes[stripped])
+	}
+}
+
+// checkFreshContainerStoreEscape rejects storing a freshly-built container/struct whose INTERIOR
+// carries a shorter-lived region than where it is stored. A list literal `[v]`, comprehension
+// `[mk() for ...]`, ternary `[v if c else w]`, or struct literal `Holder(xs: v)` copies each element's
+// /field's header; an interior typed `@inner` then dangles once the inner region is freed. The
+// store-site check (checkNestedRegionStoreEscape) only sees the fresh value's OWN region - which is
+// the target's - because element/field types are never region-stamped. This is the
+// construction-expression analogue of the push/dict.put element-store check (which only fires on
+// explicit container-mutation calls). Spread elements (`[...src]`) copy a whole source container, so
+// they route through the bulk-store check (which exempts scalar elements).
 func (a *Analyzer) checkFreshContainerStoreEscape(targetExpr ast.Expr, targetType Type, valueExpr ast.Expr) {
 	if a == nil || valueExpr == nil {
 		return
 	}
-	elemType := dArrayLikeElemType(targetType)
-	switch v := stripParenExpr(valueExpr).(type) {
-	case *ast.ListLitExpr:
-		for i, elem := range v.Elems {
-			if elem == nil {
-				continue
-			}
-			if i < len(v.Spreads) && v.Spreads[i] {
-				// `[...src]`: bulk copy of src's elements — same dangling semantics as extend.
+	if lit, ok := stripParenExpr(valueExpr).(*ast.ListLitExpr); ok {
+		elemType := dArrayLikeElemType(targetType)
+		for i, elem := range lit.Elems {
+			if elem != nil && i < len(lit.Spreads) && lit.Spreads[i] {
 				a.checkNestedRegionBulkStoreEscape(elem, targetExpr, targetType, elemType, a.exprTypes[elem])
-				continue
 			}
-			a.checkFreshElementRegionEscape(targetExpr, targetType, elem)
-		}
-	case *ast.ListComprehensionExpr:
-		// The per-element value (and, for a dict comprehension, the per-element key) is the source of
-		// the stored elements; each is recomputed per iteration but lives in whatever region its
-		// expression names — an inner-region element dangles once that region is freed.
-		a.checkFreshElementRegionEscape(targetExpr, targetType, v.Value)
-		if v.Key != nil {
-			a.checkFreshElementRegionEscape(targetExpr, targetType, v.Key)
 		}
 	}
-}
-
-// checkFreshElementRegionEscape checks one element expression of a freshly-built container against the
-// target's lifetime: a region-carrying element stored into a longer-lived (or region-less-outliving)
-// target container dangles once the element's region is freed.
-func (a *Analyzer) checkFreshElementRegionEscape(targetExpr ast.Expr, targetType Type, elem ast.Expr) {
-	if elem == nil {
+	if !isFreshContainerProducer(valueExpr) {
 		return
 	}
-	valueRegion := containerOrEntryRegion(a.exprTypes[elem])
+	a.checkInteriorRegionAgainstTarget(targetExpr, containerRegion(targetType), valueExpr, "fresh container")
+}
+
+// checkInteriorRegionAgainstTarget rejects a value whose interior region is freed before the target
+// storage: a longer-lived target region (or a region-less target that outlives the value's region)
+// leaves the stored interior dangling.
+func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetRegion string, valueExpr ast.Expr, via string) {
+	valueRegion := a.valueInteriorRegion(valueExpr)
 	if valueRegion == "" {
-		return // scalar / region-less element can't dangle.
+		return // scalar / region-less interior can't dangle.
 	}
-	targetRegion := containerRegion(targetType)
 	if targetRegion == "" {
-		// Region-less target container declared outside the element's region block.
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
 	if a.regionOutlives(targetRegion, valueRegion) {
-		a.errorf(elem.Pos(), "value in region %q is stored into longer-lived region %q via a fresh container; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, via, valueRegion, targetRegion, targetRegion)
 	}
 }
 

@@ -288,6 +288,12 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// region outlives it would leave the longer-lived buffer holding a dangling
 		// reference once the inner region is freed.
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], darrayType, darrayType.Elem, argType)
+		// A pushed FRESH producer (`ol.push([v])`, a ternary, a struct literal) hides its interior
+		// region behind its own (the container's) region, so the element check above misses it; check
+		// the pushed value's interior region against the container's lifetime.
+		if isFreshContainerProducer(expr.Args[0]) {
+			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(darrayType), expr.Args[0], "fresh container")
+		}
 		// Region-poly result element: its type is region-less but it lives in the ambient
 		// region, so pushing it into a container whose storage outlives the function dangles
 		// once that region is freed (same hole as the assignment path). Mirror the assignment
