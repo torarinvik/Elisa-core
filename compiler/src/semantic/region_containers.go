@@ -667,6 +667,81 @@ func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRe
 	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", valueRegion, root.Name, valueRegion, valueRegion, root.Name)
 }
 
+// checkFreshContainerStoreEscape rejects storing a freshly-built container whose ELEMENTS carry an
+// inner region into a longer-lived container. A list literal `[v]` or comprehension `[mk() for …]`
+// assigned to an outer container copies each element's header; an element typed `@inner` then dangles
+// once the inner region is freed. The store-site checks (checkNestedRegionStoreEscape) only see the
+// fresh container's OWN region — which is the target's region, not the element's — because element
+// types are never region-stamped. This is the construction-expression analogue of the push/dict.put
+// element-store check (which only fires on explicit container-mutation calls, never on `<-`/`=` of a
+// fresh literal or comprehension). Spread elements (`[...src]`) copy a whole source container, so they
+// route through the bulk-store check instead.
+func (a *Analyzer) checkFreshContainerStoreEscape(targetExpr ast.Expr, targetType Type, valueExpr ast.Expr) {
+	if a == nil || valueExpr == nil {
+		return
+	}
+	elemType := dArrayLikeElemType(targetType)
+	switch v := stripParenExpr(valueExpr).(type) {
+	case *ast.ListLitExpr:
+		for i, elem := range v.Elems {
+			if elem == nil {
+				continue
+			}
+			if i < len(v.Spreads) && v.Spreads[i] {
+				// `[...src]`: bulk copy of src's elements — same dangling semantics as extend.
+				a.checkNestedRegionBulkStoreEscape(elem, targetExpr, targetType, elemType, a.exprTypes[elem])
+				continue
+			}
+			a.checkFreshElementRegionEscape(targetExpr, targetType, elem)
+		}
+	case *ast.ListComprehensionExpr:
+		// The per-element value (and, for a dict comprehension, the per-element key) is the source of
+		// the stored elements; each is recomputed per iteration but lives in whatever region its
+		// expression names — an inner-region element dangles once that region is freed.
+		a.checkFreshElementRegionEscape(targetExpr, targetType, v.Value)
+		if v.Key != nil {
+			a.checkFreshElementRegionEscape(targetExpr, targetType, v.Key)
+		}
+	}
+}
+
+// checkFreshElementRegionEscape checks one element expression of a freshly-built container against the
+// target's lifetime: a region-carrying element stored into a longer-lived (or region-less-outliving)
+// target container dangles once the element's region is freed.
+func (a *Analyzer) checkFreshElementRegionEscape(targetExpr ast.Expr, targetType Type, elem ast.Expr) {
+	if elem == nil {
+		return
+	}
+	valueRegion := containerOrEntryRegion(a.exprTypes[elem])
+	if valueRegion == "" {
+		return // scalar / region-less element can't dangle.
+	}
+	targetRegion := containerRegion(targetType)
+	if targetRegion == "" {
+		// Region-less target container declared outside the element's region block.
+		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+		return
+	}
+	if a.regionOutlives(targetRegion, valueRegion) {
+		a.errorf(elem.Pos(), "value in region %q is stored into longer-lived region %q via a fresh container; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+	}
+}
+
+// dArrayLikeElemType returns the element type of a darray/array/deque-like container, or nil.
+func dArrayLikeElemType(t Type) Type {
+	switch ct := stripRefForBounds(t).(type) {
+	case *DArrayType:
+		if ct != nil {
+			return ct.Elem
+		}
+	case *ArrayType:
+		if ct != nil {
+			return ct.Elem
+		}
+	}
+	return nil
+}
+
 // rootIdentExpr peels field accesses and indexing down to the base identifier
 // of an lvalue expression, or nil when the root is not a plain identifier.
 func rootIdentExpr(expr ast.Expr) *ast.Ident {

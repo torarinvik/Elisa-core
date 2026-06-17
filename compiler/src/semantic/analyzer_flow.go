@@ -33,6 +33,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// freed (the var-decl analogue of the assignment/push check). Decided by
 			// the region outlives-lattice.
 			a.checkNestedRegionStoreEscape(n.Value, declType, valueType)
+			a.checkFreshContainerStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, declType, n.Value)
 		} else if declType == nil {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
 			declType = invalidType
@@ -336,6 +337,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// outlives-lattice, independent of whether the target outlives the
 		// function (the function-outliving case is handled just above).
 		a.checkNestedRegionStoreEscape(n.Target, targetType, valueType)
+		// A list literal `[v]` stored into a longer-lived container copies an inner-region element's
+		// header; the store-site check above only sees the literal's own (target) region, so the
+		// element regions are checked separately.
+		a.checkFreshContainerStoreEscape(n.Target, targetType, n.Value)
 		// Struct copy-by-value can launder a dangling interior region-container
 		// field (whose region is not on the struct type) past the region's death;
 		// the interior-taint side-table makes that region visible to the check.
