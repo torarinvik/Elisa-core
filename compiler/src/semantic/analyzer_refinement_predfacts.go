@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"elisacore/src/ast"
 )
 
@@ -214,12 +216,39 @@ func paramIsImmutableBorrow(p ast.ParamDecl) bool {
 	return true
 }
 
-// gatherLawIsPredFact records a predicate fact for `if x is Law:` where Law is a BARE law (no
-// bracket args) and x is a bare identifier — regardless of whether x is mutable. Mutable is safe
-// here because any later mutation of x invalidates the fact via invalidatePredFacts. The integer
-// range path (gatherLawIsRangeRefinement) handles the decidable `self OP const` fragment over
-// immutable ints; this complements it for laws outside that fragment (e.g. `darray is NonEmpty`,
-// whose body is `self.count > 0`) and for mutable subjects.
+// factKey builds the canonical predicate-fact key for a law applied to constant arguments. A bare
+// law is just its name; a parametric law `Bounded[0, 500]` whose args are all compile-time integer
+// constants is `Bounded[0,500]`. Returns false when any argument is not a constant integer (such a
+// fact can't be matched against an obligation soundly, so it is not tracked). Keying by exact arg
+// values means a fact only discharges an obligation with the SAME bounds — `Bounded[0,500]` never
+// proves `Bounded[10,20]` (no cross-bounds entailment here; that is the range prover's job).
+func (a *Analyzer) factKey(lawName string, argExprs []ast.Expr) (string, bool) {
+	if lawName == "" {
+		return "", false
+	}
+	if len(argExprs) == 0 {
+		return lawName, true
+	}
+	key := lawName + "["
+	for i, arg := range argExprs {
+		c, ok := a.constIntValue(arg)
+		if !ok {
+			return "", false
+		}
+		if i > 0 {
+			key += ","
+		}
+		key += strconv.FormatInt(c, 10)
+	}
+	return key + "]", true
+}
+
+// gatherLawIsPredFact records a predicate fact for `if x is Law:` / `if x is Law[consts]:` where x
+// is a bare identifier — regardless of whether x is mutable. Mutable is safe here because any later
+// mutation of x invalidates the fact via invalidatePredFacts. The integer range path
+// (gatherLawIsRangeRefinement) handles the decidable `self OP const` fragment over immutable ints;
+// this complements it for laws outside that fragment (e.g. `darray is NonEmpty`, body `self.count >
+// 0`), for mutable subjects, and for parametric laws applied to constant bounds.
 func (a *Analyzer) gatherLawIsPredFact(scope *Scope, n *ast.BinaryExpr, truthy bool) {
 	if !truthy || scope == nil || n == nil {
 		return
@@ -233,23 +262,28 @@ func (a *Analyzer) gatherLawIsPredFact(scope *Scope, n *ast.BinaryExpr, truthy b
 		return
 	}
 	lawName, lawArgs, ok := a.resolveLawIsTarget(targets[0])
-	if !ok || len(lawArgs) != 0 {
-		return // only bare laws carry a predicate fact for now
+	if !ok {
+		return
 	}
-	recordPredFact(scope, ident.Name, lawName)
+	key, ok := a.factKey(lawName, lawArgs)
+	if !ok {
+		return // non-constant parametric args can't be tracked soundly
+	}
+	recordPredFact(scope, ident.Name, key)
 }
 
-// tryProveRefinementByFactSet attempts to discharge `value is law` from a tracked predicate fact:
-// when value is a bare identifier with a live "law holds" fact (gained from a flow narrowing and
-// not since invalidated by a mutation), the obligation is proven with no runtime check. Bare laws
-// only (predArgs must be empty), mirroring gatherLawIsPredFact.
+// tryProveRefinementByFactSet attempts to discharge `value is law[args]` from a tracked predicate
+// fact: when value is a bare identifier with a live fact for the SAME (law, constant args) — gained
+// from a flow narrowing and not since invalidated by a mutation — the obligation is proven with no
+// runtime check.
 func (a *Analyzer) tryProveRefinementByFactSet(value ast.Expr, lawName string, predArgs []ast.Expr) bool {
-	if len(predArgs) != 0 || lawName == "" {
-		return false
-	}
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
 		return false
 	}
-	return a.lookupPredFact(ident.Name, lawName)
+	key, ok := a.factKey(lawName, predArgs)
+	if !ok {
+		return false
+	}
+	return a.lookupPredFact(ident.Name, key)
 }

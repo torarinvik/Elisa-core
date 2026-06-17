@@ -851,3 +851,72 @@ def f(seed: i64) -> i64:
 		t.Fatalf("explicit preserve should keep the fact (no runtime check), got %d", len(result.CallArgRefinementChecks))
 	}
 }
+
+// --- Mutable refinement flow brick 4: parametric facts. `if x is Bounded[0,500]:` carries a fact
+// keyed by the constant bounds, usable across mutations, with exact-match (no over-proving). ---
+
+// A parametric fact rides a MUTABLE variable: `if n is Bounded[0,500]:` proves a later
+// `Bounded[0,500]` obligation on n with no runtime check.
+func TestParametricMutableFactProves(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_b(x: i64 is Bounded[0, 500]) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Bounded[0, 500]:
+        return needs_b(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "param_mut_fact_proves.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("parametric fact on mutable n should prove needs_b(n), got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) != 0 {
+		t.Fatalf("parametric mutable fact should prove statically, got %d runtime checks", len(result.CallArgRefinementChecks))
+	}
+}
+
+// SOUNDNESS: a parametric fact discharges only the SAME bounds — `Bounded[0,500]` must NOT prove a
+// `Bounded[10,20]` obligation (exact key match, no cross-bounds entailment).
+func TestParametricMutableFactExactMatchOnly(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_tight(x: i64 is Bounded[10, 20]) -> i64:
+    return x
+
+def f(seed: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Bounded[0, 500]:
+        return needs_tight(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "param_mut_fact_exact.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("`Bounded[0,500]` must NOT prove the tighter `Bounded[10,20]` — a runtime check is required")
+	}
+}
+
+// A mutation drops a parametric fact just like a bare one.
+func TestParametricMutableFactDroppedByMutation(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def needs_b(x: i64 is Bounded[0, 500]) -> i64:
+    return x
+
+def f(seed: i64, other: i64) -> i64:
+    n: mutable i64 = seed
+    if n is Bounded[0, 500]:
+        n <- other
+        return needs_b(n)
+    return 0
+`
+	result := analyzeTreeTestSource(t, "param_mut_fact_drop.elisa", src)
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("mutation `n <- other` must drop the parametric fact, forcing a runtime check")
+	}
+}
