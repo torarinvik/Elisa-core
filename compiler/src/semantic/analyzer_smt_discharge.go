@@ -477,6 +477,17 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		if n.Exists {
 			q = "exists"
 		}
+		// Attach an E-matching trigger (docs/90 brick 90-16): for a quantifier over array contents, the
+		// `(select <arr> <idx>)` subterms whose index mentions a bound variable are the canonical
+		// instantiation pattern. Emitting them as `(! body :pattern (...))` gives z3 a deterministic,
+		// cheap instantiation strategy instead of relying on auto-pattern inference. Soundness/
+		// completeness are preserved: triggers only guide E-matching, and z3's MBQI (on by default)
+		// still completes any goal the trigger alone would miss. A purely arithmetic quantifier (no
+		// select term mentioning a binder) gets no pattern — there is no good ground trigger, so it is
+		// left to MBQI exactly as before.
+		if triggers := tr.collectSelectTriggers(n.Body, qenv, n.Vars); len(triggers) > 0 {
+			body = "(! " + body + " :pattern (" + strings.Join(triggers, " ") + "))"
+		}
 		return "(" + q + " (" + strings.Join(decls, " ") + ") " + body + ")", true
 	case *ast.BoolLit:
 		if n.Value {
@@ -524,6 +535,57 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 	default:
 		return "", false
 	}
+}
+
+// collectSelectTriggers gathers the `(select <arr> <idx>)` SMT terms in a quantifier body whose index
+// mentions one of the quantifier's bound variables — the canonical E-matching trigger for an
+// array-element quantifier (docs/90 brick 90-16). It walks the AST body for IndexExpr nodes, lowers
+// each through the same `qenv` (so the array/index symbols match the body), and keeps the distinct
+// ones referencing a binder, in stable order. Returns nil when there is no array indexing on a binder
+// (a purely arithmetic quantifier), leaving that quantifier patternless for MBQI.
+func (tr *smtTranslator) collectSelectTriggers(body ast.Expr, qenv map[string]string, vars []string) []string {
+	bound := make(map[string]bool, len(vars))
+	for _, v := range vars {
+		bound["q_"+v] = true
+	}
+	seen := map[string]bool{}
+	var triggers []string
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		switch n := e.(type) {
+		case *ast.ParenExpr:
+			walk(n.Inner)
+		case *ast.UnaryExpr:
+			walk(n.Operand)
+		case *ast.BinaryExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *ast.QuantifierExpr:
+			walk(n.Body) // nested quantifier: its own binders may still mention ours
+		case *ast.IndexExpr:
+			if term, ok := tr.termEnv(n, qenv); ok && termMentionsAnyBinder(term, bound) && !seen[term] {
+				seen[term] = true
+				triggers = append(triggers, term)
+			}
+			walk(n.Object)
+			walk(n.Index)
+		}
+	}
+	walk(body)
+	return triggers
+}
+
+// termMentionsAnyBinder reports whether an SMT term string contains any of the bound `q_*` symbols as
+// a whole token (so `q_i` does not spuriously match `q_index`).
+func termMentionsAnyBinder(term string, bound map[string]bool) bool {
+	for _, tok := range strings.FieldsFunc(term, func(r rune) bool {
+		return r != '_' && (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9')
+	}) {
+		if bound[tok] {
+			return true
+		}
+	}
+	return false
 }
 
 // factPreamble emits the declarations for every free variable the translation touched, plus the

@@ -321,4 +321,72 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
     `TestOldEnsureSatisfiedRuns` / `TestOldEnsureViolatedTrapsInDebug` / `TestOldResultSatisfiedRuns` /
     `TestOldResultViolatedTrapsInDebug` (end-to-end compile+run, satisfied passes / violated traps).
 
+13. **90-13 — caller-side quantified array preconditions. [LANDED]** The deferred half of 90-6: where
+    90-6 lets a callee *assume* its `requires` in-body, 90-13 lets a caller *discharge* a callee's
+    quantified array precondition at the call site from the caller's OWN matching precondition.
+    `trySMTProveRequires` now (a) maps array-typed arguments through the array env (so a clause
+    `forall k: 0<=k<n implies xs[k] >= 0` resolves `xs` to the caller's array symbol, instead of
+    immediately declining as a non-integer term) and (b) asserts the enclosing function's own
+    `requires` as SMT hypotheses (`smtRequiresHypotheses`, the same translator the in-body path uses).
+    Both clauses then translate against the same array symbol, so:
+    ```elisa
+    def consume(xs: darray[i64], n: i64) -> i64:
+        requires forall k: (0 <= k and k < n) implies xs[k] >= 0
+        return 0
+    def forward(data: darray[i64], m: i64) -> i64:
+        requires forall k: (0 <= k and k < m) implies data[k] >= 0
+        return consume(data, m)        # PROVEN from forward's own precondition
+    ```
+    **Sound and conservative**: only `unsat` concludes; an SMT-proven precondition never drives
+    bounds-check elision (GIGO, never memory unsafety); the caller's callers must establish the
+    caller's `requires`; a caller clause outside the fragment is skipped (fewer assumptions). Without a
+    matching caller precondition the call declines to the runtime check (a warning). Tests:
+    `TestSMTCallerQuantifiedArrayPrecondition{Proven,DeclinesWithoutFact}`.
+
+14. **90-14 — standing in-body invariants re-checked on mutation. [LANDED]** (design-by-contract
+    follow-up.) An in-body `invariant <bool-expr>` was checked only where written; now it is a STANDING
+    contract, re-asserted after every later mutation (within its block scope) of any variable it reads
+    — so `invariant x >= 0` before a loop re-checks on each `x <- ...` inside, the loop-invariant
+    idiom. Backend: `functionState.activeInvariants` records each invariant's condition + the set of
+    identifier names it reads (`collectInvariantIdentNames`); `emitStmt` (the single statement
+    chokepoint) calls `recheckInvariantsAfter`, which on an assignment form (`AssignStmt`/`AugAssignStmt`/
+    `AsRefAssignStmt` — the same envelope as brick 90-11) whose target root ident is in an invariant's
+    var set re-emits `emitContractCheck`. The list is truncated at block exit (`emitBlock`), so a
+    re-check never re-evaluates a condition whose variables have left scope. Debug-gated like all
+    contracts (registered only when the in-place check is emitted), and never drives codegen — a
+    re-check just re-evaluates the real condition, so it can only trap on a genuine violation, never
+    falsely on valid code; a missed node kind in the free-ident walk under-checks but never over-traps.
+    Tests (end-to-end compile+run): `TestInvariantRecheck{HoldsRuns,ViolatedTrapsInDebug,ElidedInRelease}`.
+
+15. **90-15 — block-form law bodies. [LANDED]** A law may name its sub-predicates in an indented block
+    ending in `return`, instead of packing everything onto one `= <expr>` line:
+    ```elisa
+    law SortedFirstMin(self: darray[i64], n: i64):
+        sorted   = forall i: (0 <= i and i < n - 1) implies self[i] <= self[i + 1]
+        firstMin = forall j: (0 <= j and j < n)     implies self[0] <= self[j]
+        return sorted implies firstMin
+    ```
+    Pure parser desugaring (`desugarLawBlock`): the `name = <expr>` bindings (immutable, resolved in
+    order — a later binding may reference an earlier one) are inlined into the final `return`
+    expression by capture-safe AST substitution (`substituteLawIdents` respects quantifier binders and
+    wraps each replacement in parens). The law is then represented EXACTLY like the `= <expr>` form (a
+    single predicate `ReturnStmt`), so every downstream tier (SMT, linear, flow, codegen) is byte-for-
+    byte unchanged. A block that is not `bindings* return` is a parse error. (Multi-line *parenthesized*
+    expressions already worked — the lexer suppresses newlines inside parens; 90-15 adds *named* parts.)
+    Required completing `ast.CloneExpr` for `QuantifierExpr` (it silently returned nil before, which
+    surfaced as a bogus "not requires bool operand" on a quantifier binding). Tests:
+    `TestBlockFormLaw{ProvesArrayQuantifierTheorem,DeclinesFalseClaim,ChainedBindings}`.
+
+16. **90-16 — SMT quantifier trigger tuning. [LANDED]** Array-element quantifiers now carry an explicit
+    E-matching trigger: a `forall`/`exists` over array contents is emitted as `(! <body> :pattern
+    (<select-terms>))`, where the pattern is the set of `(select <arr> <idx>)` subterms whose index
+    mentions a bound variable (`collectSelectTriggers`, the canonical array-quantifier trigger). This
+    gives z3 a deterministic, cheap instantiation strategy instead of relying on auto-pattern
+    inference, which matters as quantifier count scales. **Soundness/completeness preserved**: triggers
+    only guide E-matching, and z3's MBQI (on by default) still completes any goal the trigger alone
+    would miss — so no existing proof regresses (the whole quantifier suite passes with patterns on). A
+    purely arithmetic quantifier (no select term on a binder) gets no pattern and is left to MBQI
+    exactly as before. Test: `TestSMTTriggerPreservesArrayAndArithmeticProofs` (the sorted theorem and
+    `NotDouble` both still prove).
+
 Each brick: build → targeted test → full `./src/...` green → commit.
