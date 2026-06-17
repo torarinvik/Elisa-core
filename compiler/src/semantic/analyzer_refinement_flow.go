@@ -219,6 +219,16 @@ type lawConstraint struct {
 // law's remaining (static `[..]`) params to the refinement's bracket-arg constants, so a body like
 // `self >= lo and self <= hi` is interpreted against the actual bounds.
 func (a *Analyzer) lawConstraints(decl *ast.FuncDecl, paramConsts map[string]int64) ([]lawConstraint, bool) {
+	return a.lawConstraintsRanged(decl, paramConsts, nil)
+}
+
+// lawConstraintsRanged is lawConstraints with an extra `paramRanges` channel (docs/90 brick 90-9):
+// a static law param bound to a known INTERVAL (rather than an exact constant) is resolved
+// direction-aware — its lower bound for a `self >= param` constraint, its upper bound for a
+// `self <= param` constraint — which is the only sound way to use a non-constant bracket argument
+// (e.g. `cap_to(k)` with `k ∈ [0, 10]` yields `result <= 10`). paramConsts is consulted first;
+// paramRanges (nil for the exact-constant callers) is the fallback.
+func (a *Analyzer) lawConstraintsRanged(decl *ast.FuncDecl, paramConsts map[string]int64, paramRanges map[string]numRange) ([]lawConstraint, bool) {
 	if decl == nil || len(decl.Params) == 0 || len(decl.Body) != 1 {
 		return nil, false
 	}
@@ -228,40 +238,79 @@ func (a *Analyzer) lawConstraints(decl *ast.FuncDecl, paramConsts map[string]int
 	}
 	self := decl.Params[0].Name
 	var out []lawConstraint
-	if !a.collectLawConstraints(ret.Value, self, paramConsts, &out) {
+	if !a.collectLawConstraints(ret.Value, self, paramConsts, paramRanges, &out) {
 		return nil, false
 	}
 	return out, true
 }
 
 // collectLawConstraints walks a conjunction of `self OP <const>` comparisons, where the operand is
-// a literal constant or a static param bound in paramConsts. Any other shape makes the whole body
-// undecidable (returns false) so the prover stays sound by declining.
-func (a *Analyzer) collectLawConstraints(expr ast.Expr, self string, paramConsts map[string]int64, out *[]lawConstraint) bool {
+// a literal constant, a static param bound in paramConsts, or (brick 90-9) a static param bound to a
+// direction-appropriate interval in paramRanges. Any other shape makes the whole body undecidable
+// (returns false) so the prover stays sound by declining.
+func (a *Analyzer) collectLawConstraints(expr ast.Expr, self string, paramConsts map[string]int64, paramRanges map[string]numRange, out *[]lawConstraint) bool {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return a.collectLawConstraints(n.Inner, self, paramConsts, out)
+		return a.collectLawConstraints(n.Inner, self, paramConsts, paramRanges, out)
 	case *ast.BinaryExpr:
 		if n.Op == lexer.TOKEN_AND {
-			return a.collectLawConstraints(n.Left, self, paramConsts, out) && a.collectLawConstraints(n.Right, self, paramConsts, out)
+			return a.collectLawConstraints(n.Left, self, paramConsts, paramRanges, out) && a.collectLawConstraints(n.Right, self, paramConsts, paramRanges, out)
 		}
-		// `self OP <const>` (or the constant on the left).
-		if isSelfIdent(n.Left, self) {
-			if c, ok := a.operandConst(n.Right, paramConsts); ok {
-				*out = append(*out, lawConstraint{op: n.Op, c: c})
-				return true
-			}
+		// Normalize to `self OP operand` (the operand may sit on either side).
+		var operand ast.Expr
+		var op lexer.TokenKind
+		switch {
+		case isSelfIdent(n.Left, self):
+			operand, op = n.Right, n.Op
+		case isSelfIdent(n.Right, self):
+			operand, op = n.Left, flipComparison(n.Op)
+		default:
+			return false
 		}
-		if isSelfIdent(n.Right, self) {
-			if c, ok := a.operandConst(n.Left, paramConsts); ok {
-				*out = append(*out, lawConstraint{op: flipComparison(n.Op), c: c})
-				return true
-			}
+		if c, ok := a.operandConst(operand, paramConsts); ok {
+			*out = append(*out, lawConstraint{op: op, c: c})
+			return true
+		}
+		// Ranged fallback: a param bound to an interval contributes the bound that matches the
+		// comparison direction. `self >= param` (param ∈ [lo, hi]) ⟹ self >= lo; `self <= param` ⟹
+		// self <= hi. `==` against a non-constant interval cannot become a single constraint → decline.
+		if c, ok := a.operandRangeBound(operand, op, paramRanges); ok {
+			*out = append(*out, lawConstraint{op: op, c: c})
+			return true
 		}
 		return false
 	default:
 		return false
 	}
+}
+
+// operandRangeBound resolves a law-body operand that is a static param bound to an interval, picking
+// the bound that keeps `self OP operand` sound for the given direction. Returns ok=false when the
+// operand is not a ranged param, the needed side of its interval is unknown, or the operator is one
+// for which a single constant bound would be unsound (`==`, `!=`).
+func (a *Analyzer) operandRangeBound(expr ast.Expr, op lexer.TokenKind, paramRanges map[string]numRange) (int64, bool) {
+	if paramRanges == nil {
+		return 0, false
+	}
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil {
+		return 0, false
+	}
+	r, ok := paramRanges[ident.Name]
+	if !ok {
+		return 0, false
+	}
+	switch op {
+	case lexer.TOKEN_GTEQ, lexer.TOKEN_GT: // self >= param  ⟹  self >= param.lo
+		if r.loKnown {
+			return r.lo, true
+		}
+	case lexer.TOKEN_LTEQ, lexer.TOKEN_LT: // self <= param  ⟹  self <= param.hi
+		if r.hiKnown {
+			return r.hi, true
+		}
+	}
+	return 0, false
 }
 
 // operandConst resolves a law-body comparison operand to a constant: a literal, or a static law
@@ -370,19 +419,26 @@ func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr, subst
 			continue
 		}
 		paramConsts := map[string]int64{}
-		bad := false
+		var paramRanges map[string]numRange
 		for i, arg := range pred.Args {
-			c, ok := a.substConstInt(arg, subst)
-			if !ok {
-				bad = true
-				break
+			name := decl.Params[i+1].Name
+			if c, ok := a.substConstInt(arg, subst); ok {
+				paramConsts[name] = c
+				continue
 			}
-			paramConsts[decl.Params[i+1].Name] = c
+			// Not an exact constant: try a known interval for the (substituted) argument, used
+			// direction-aware in collectLawConstraints (brick 90-9). nil subst (param-entry seed) never
+			// reaches here with a range, so that path is unchanged.
+			if r, ok := a.substArgRange(arg, subst); ok {
+				if paramRanges == nil {
+					paramRanges = map[string]numRange{}
+				}
+				paramRanges[name] = r
+			}
+			// Either way leave the param out of paramConsts; collectLawConstraints declines any
+			// constraint whose operand it cannot resolve, dropping the whole predicate (sound).
 		}
-		if bad {
-			continue
-		}
-		constraints, ok := a.lawConstraints(decl, paramConsts)
+		constraints, ok := a.lawConstraintsRanged(decl, paramConsts, paramRanges)
 		if !ok {
 			continue
 		}
@@ -449,6 +505,26 @@ func (a *Analyzer) substConstInt(expr ast.Expr, subst map[string]ast.Expr) (int6
 	default:
 		return a.constIntValue(expr)
 	}
+}
+
+// substArgRange bounds a refinement bracket argument as an interval after substituting callee params
+// with caller arguments (docs/90 brick 90-9). It reuses the bounded-linear machinery: the substituted
+// expression's affine form, bounded over the caller's range facts. Used only as the fallback when the
+// argument is not an exact constant (e.g. `cap_to(k)` with `k ∈ [0, 10]` makes the bracket arg `n`
+// resolve to `[0, 10]`). Returns ok=false outside the linear fragment.
+func (a *Analyzer) substArgRange(arg ast.Expr, subst map[string]ast.Expr) (numRange, bool) {
+	if subst == nil {
+		return numRange{}, false
+	}
+	af, ok := a.substitutedAffine(arg, subst)
+	if !ok {
+		return numRange{}, false
+	}
+	r := a.boundAffine(af, a.currentScope)
+	if !r.loKnown && !r.hiKnown {
+		return numRange{}, false
+	}
+	return r, true
 }
 
 // seedReturnRefinementFacts records the integer range implied by a callee's REFINED return type onto

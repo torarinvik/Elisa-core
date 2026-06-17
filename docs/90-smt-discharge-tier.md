@@ -214,8 +214,30 @@ SMT tier: 200 obligations, 200 proven, 0 declined; solver 16.3ms (spawn 0.7ms, s
    predicate — no fact seeded, runtime fallback — never a fabricated bound. With `subst == nil`
    (the param-entry seed) the kernel is exactly the old constant path. Tests:
    `TestParametricReturnRefinementSeedsCallerFact` / `TestParametricReturnRefinementNonConstArgNoSeed`.
-   - **Deferred**: range-valued (non-constant) bracket arguments via direction-aware bounding (use the
-     arg's lower bound for a `>=` law constraint, upper bound for `<=`); `ensures <result> is Law`
-     clauses beyond the return-type form; re-asserting facts after a mutating call.
+   - **Deferred**: range-valued bracket arguments (done in 90-9); `ensures <result> is Law` clauses
+     beyond the return-type form; re-asserting facts after a mutating call.
+9. **90-9 — range-valued bracket arguments (direction-aware bounding). [LANDED]** Generalizes 90-8:
+   when a parametric return refinement's bracket argument is a non-constant caller value with a *known
+   interval* rather than an exact constant, it is resolved direction-aware. For `self OP param` with
+   `param ∈ [lo, hi]`: a `>=`/`>` constraint contributes `self >= lo` (since `self >= param >= lo`)
+   and a `<=`/`<` constraint contributes `self <= hi` (since `self <= param <= hi`); `==`/`!=` against
+   a non-constant interval cannot become a single sound constraint and is declined.
+   ```elisa
+   def cap_to(n: i64) -> i64 is Bounded[0, n]: ...
+   def use(k: i64 is AtMost10) -> i64:
+       x = cap_to(k)          # n ↦ k, k ∈ (−∞, 10]  ⟹  x <= 10  (and x >= 0)
+       y: i64 is AtMost10 = x # proven from the ranged fact — k is never a constant
+   ```
+   A new `paramRanges` channel threads through `lawConstraintsRanged` → `collectLawConstraints` (which
+   now normalizes each leaf to `self OP operand` once, then tries `operandConst` then
+   `operandRangeBound`). `substArgRange` bounds the substituted bracket argument by reusing the
+   bounded-linear machinery (`substitutedAffine` + `boundAffine` over the caller's range facts).
+   **Sound and conservative**: a bracket argument with no known interval on the needed side resolves
+   nothing → predicate dropped → runtime fallback, never a fabricated bound. The exact-constant
+   callers pass `paramRanges == nil`, so 90-7/90-8 and the param-entry seed are byte-for-byte
+   unchanged. Tests: `TestRangedReturnRefinementSeedsCallerFact` /
+   `TestRangedReturnRefinementNoBoundNoSeed`.
+   - **Deferred**: `ensures <result> is Law` clauses beyond the return-type form; re-asserting facts
+     after a mutating call.
 
 Each brick: build → targeted test → full `./src/...` green → commit.

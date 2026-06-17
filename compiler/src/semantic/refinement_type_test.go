@@ -216,6 +216,57 @@ def use(m: i64) -> i64:
 	}
 }
 
+// docs/90 brick 90-9: a parametric return refinement whose bracket argument is a NON-constant caller
+// value with a KNOWN interval is resolved direction-aware. `cap_to(k)` with `k <= 10` makes the
+// upper bound `self <= n` contribute `self <= 10`, so `x ∈ [0, 10]` and the downstream `AtMost10`
+// obligation discharges with no runtime check — without `k` ever being a compile-time constant.
+func TestRangedReturnRefinementSeedsCallerFact(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law AtMost10(self: i64) = self <= 10
+
+def cap_to(n: i64) -> i64 is Bounded[0, n]:
+    return 0
+
+def use(k: i64 is AtMost10) -> i64:
+    x = cap_to(k)
+    y: i64 is AtMost10 = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "ranged_return_refine_seed.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("ranged return-refinement seed should analyze cleanly, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("AtMost10 on a value bound from Bounded[0, n] with n<=10 should be proven via the ranged fact, got %d runtime checks", len(result.RefinementChecks))
+	}
+}
+
+// Soundness floor for brick 90-9: when the bracket-argument caller value has NO known interval (a
+// plain i64 param), the ranged fallback resolves nothing on the needed side, so no fact is seeded and
+// the downstream obligation falls back to a runtime check.
+func TestRangedReturnRefinementNoBoundNoSeed(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law AtMost10(self: i64) = self <= 10
+
+def cap_to(n: i64) -> i64 is Bounded[0, n]:
+    return 0
+
+def use(k: i64) -> i64:
+    x = cap_to(k)
+    y: i64 is AtMost10 = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "ranged_return_refine_nobound.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unbounded bracket argument should analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("a bracket argument with no known interval is not statically usable: expected a runtime check")
+	}
+}
+
 // `if x is Law:` narrows x inside the branch: a refinement obligation on x discharges statically
 // there with no runtime check (docs/85 — predicate-test narrowing).
 func TestLawIsNarrowsBranch(t *testing.T) {
