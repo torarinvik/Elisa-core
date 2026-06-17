@@ -164,3 +164,56 @@ def f() -> i64:
 		t.Fatalf("a proven refinement must NOT warn/error even under -strict, got: %v", result.Errors())
 	}
 }
+
+// FLOW entailment (docs/85 1d-2): inside `if a > 5:`, `a` satisfies `Nat` (a >= 0) by the branch
+// condition — proven statically, no warning, no runtime check. The headline refinement-type case.
+func TestRefinementFlowEntailmentProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    if a > 5:
+        x: i64 is Nat = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`if a > 5` should statically prove `a is Nat` (no error even under -strict), got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("flow-proven refinement should emit NO runtime check, got %d", len(result.RefinementChecks))
+	}
+}
+
+// Without the guard, the same refinement is NOT provable → warning (visible) + runtime check.
+func TestRefinementFlowNoGuardWarns(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    x: i64 is Nat = a
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_noguard.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("unguarded refinement should warn, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A guard that does NOT entail the predicate stays unproven (sound): `a > -5` does not imply a >= 0.
+func TestRefinementFlowInsufficientGuardWarns(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def f(a: i64) -> i64:
+    if a > 0 - 5:
+        x: i64 is Nat = a
+        return x
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_weakguard.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("`a > -5` does NOT entail Nat; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}

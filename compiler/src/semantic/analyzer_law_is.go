@@ -48,8 +48,15 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		if len(pred.Args) != 0 {
 			continue // parametric refinement discharge is a later brick
 		}
-		if _, _, ok := a.lookupLaw(pred.Name); !ok {
+		lawDecl, _, ok := a.lookupLaw(pred.Name)
+		if !ok {
 			continue // not a law — already reported by validateRefinementPreds
+		}
+		// Tier-2 discharge — FLOW entailment: when the initializer is an immutable integer with a
+		// known range fact (from an enclosing `if a > 5`), prove the law's constraints from it. This
+		// is the Dafny-like flow-sensitive proof (docs/85 1d-2). Proven → no runtime check.
+		if a.tryProveRefinementByFlow(n.Value, lawDecl) {
+			continue
 		}
 		// Tier-1 discharge (docs/85 §3) — constant entailment: when the initializer is a constant,
 		// evaluate the (pure) law on it at compile time. Proven → emit no runtime check; refuted →

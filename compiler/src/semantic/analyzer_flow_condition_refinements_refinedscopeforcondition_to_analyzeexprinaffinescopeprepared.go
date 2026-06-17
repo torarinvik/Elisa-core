@@ -33,6 +33,13 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 			if ok {
 				a.shadowRefinedExpr(scope, targetExpr, nonNull)
 			}
+			if n.Op == lexer.TOKEN_EQEQ {
+				a.gatherNumericRangeRefinement(scope, n, truthy)
+			}
+		case lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
+			// docs/85 1d-2: record an integer range fact for an immutable variable so a refinement
+			// like `a is Nat` discharges statically inside `if a > 5:`.
+			a.gatherNumericRangeRefinement(scope, n, truthy)
 		case lexer.TOKEN_IS:
 			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
 			if ok {

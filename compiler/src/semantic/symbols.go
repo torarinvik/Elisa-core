@@ -361,6 +361,10 @@ type Scope struct {
 	Symbols                 map[string]*Symbol
 	Refinements             map[string]Type
 	ConditionalBindingHints map[string]string
+	// rangeFacts holds known integer bounds for IMMUTABLE variables within this scope, gathered
+	// from a branch condition (`if a > 5` → a ∈ [6,∞)). Used by the refinement flow prover (docs/85
+	// 1d-2) to discharge value refinements statically. Immutable-only, so no invalidation is needed.
+	rangeFacts map[string]numRange
 }
 
 func NewScope(parent *Scope) *Scope {
