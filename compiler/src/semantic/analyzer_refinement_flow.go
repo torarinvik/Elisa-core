@@ -287,6 +287,218 @@ func rangeEntailsConstraint(r numRange, k lawConstraint) bool {
 	}
 }
 
+// --- tier-2: bounded linear arithmetic (docs/86) ---------------------------------------------
+//
+// The tier-1 flow prover (tryProveRefinementByFlow) discharges an obligation only when the subject
+// is a BARE immutable integer identifier with a range fact. Tier-2 generalizes the subject to an
+// affine form `c0 + sum(ci*xi)` over immutable integer variables, bounds it by interval arithmetic
+// over the same range facts, and checks the result entails the law's `self OP const` constraints. It
+// is the only tier that can prove a DERIVED index such as `tx*MAPHEIGHT + ty is Bounded[0..<4096]`
+// (docs/85 §3 tier 2). The law side is reused verbatim (lawConstraints); only the subject is richer.
+
+// affineForm is c0 + sum over terms of (coeff * variable), all integer. An empty terms map with a
+// nonzero const is a literal; a single {x:1} term is a bare variable. Coefficients are exact int64.
+type affineForm struct {
+	c     int64
+	terms map[string]int64
+}
+
+func (f affineForm) addTerm(name string, coeff int64) {
+	if coeff == 0 {
+		return
+	}
+	f.terms[name] += coeff
+	if f.terms[name] == 0 {
+		delete(f.terms, name)
+	}
+}
+
+// affineOf builds the affine form of an integer expression, or returns ok=false when the expression
+// leaves the linear-arithmetic fragment (non-linear product, unknown leaf, value-changing cast).
+// Only IMMUTABLE integer identifiers are admitted as variables, so a mutable binding can never enter
+// a form — the dependence-freeze (docs/85 §5.3) holds for free, same gate tier-1 uses.
+func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.affineOf(n.Inner, scope)
+	case *ast.IntLit:
+		if c, ok := a.constIntValue(n); ok {
+			return affineForm{c: c, terms: map[string]int64{}}, true
+		}
+		return affineForm{}, false
+	case *ast.Ident:
+		// A const-evaluable identifier (e.g. a module const like MAPHEIGHT) folds to its value.
+		if c, ok := a.constIntValue(n); ok {
+			return affineForm{c: c, terms: map[string]int64{}}, true
+		}
+		if name, ok := immutableIntIdentName(a, scope, n); ok {
+			return affineForm{c: 0, terms: map[string]int64{name: 1}}, true
+		}
+		return affineForm{}, false
+	case *ast.UnaryExpr:
+		if n.Op != lexer.TOKEN_MINUS {
+			return affineForm{}, false
+		}
+		inner, ok := a.affineOf(n.Operand, scope)
+		if !ok {
+			return affineForm{}, false
+		}
+		out := affineForm{c: -inner.c, terms: map[string]int64{}}
+		for k, v := range inner.terms {
+			out.terms[k] = -v
+		}
+		return out, true
+	case *ast.BinaryExpr:
+		return a.affineOfBinary(n, scope)
+	case *ast.CastExpr:
+		// A numeric-to-integer cast is value-preserving only when the target type can represent the
+		// subject's whole proven range; a narrowing cast wraps and would make the bound unsound.
+		inner, ok := a.affineOf(n.Operand, scope)
+		if !ok {
+			return affineForm{}, false
+		}
+		target := a.resolveType(n.Target)
+		if _, _, isInt := BitIntInfo(target); !isInt {
+			return affineForm{}, false
+		}
+		r := a.boundAffine(inner, scope)
+		if !r.loKnown || !r.hiKnown {
+			return affineForm{}, false // unbounded subject: cannot prove the cast is value-preserving
+		}
+		if !IntegerTypeFitsValue(target, r.lo) || !IntegerTypeFitsValue(target, r.hi) {
+			return affineForm{}, false // narrowing/wrapping cast: bound would be unsound
+		}
+		return inner, true
+	default:
+		return affineForm{}, false
+	}
+}
+
+func (a *Analyzer) affineOfBinary(n *ast.BinaryExpr, scope *Scope) (affineForm, bool) {
+	switch n.Op {
+	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
+		l, ok := a.affineOf(n.Left, scope)
+		if !ok {
+			return affineForm{}, false
+		}
+		r, ok := a.affineOf(n.Right, scope)
+		if !ok {
+			return affineForm{}, false
+		}
+		sign := int64(1)
+		if n.Op == lexer.TOKEN_MINUS {
+			sign = -1
+		}
+		out := affineForm{c: l.c + sign*r.c, terms: map[string]int64{}}
+		for k, v := range l.terms {
+			out.addTerm(k, v)
+		}
+		for k, v := range r.terms {
+			out.addTerm(k, sign*v)
+		}
+		return out, true
+	case lexer.TOKEN_STAR:
+		// Linear only when at least one side is a compile-time constant.
+		if c, ok := a.constIntValue(n.Right); ok {
+			return a.scaleAffine(n.Left, c, scope)
+		}
+		if c, ok := a.constIntValue(n.Left); ok {
+			return a.scaleAffine(n.Right, c, scope)
+		}
+		return affineForm{}, false // variable*variable: non-linear, decline (sound)
+	default:
+		return affineForm{}, false
+	}
+}
+
+func (a *Analyzer) scaleAffine(expr ast.Expr, k int64, scope *Scope) (affineForm, bool) {
+	inner, ok := a.affineOf(expr, scope)
+	if !ok {
+		return affineForm{}, false
+	}
+	out := affineForm{c: inner.c * k, terms: map[string]int64{}}
+	for name, v := range inner.terms {
+		out.addTerm(name, v*k)
+	}
+	return out, true
+}
+
+// boundAffine interval-evaluates an affine form by substituting each variable's known range. A
+// nonnegative coefficient keeps the bound orientation; a negative one swaps lo/hi. A variable with
+// no range fact (or an open bound on the needed side) makes that side of the result open, so a later
+// entailment on that side fails and the prover declines (fail-closed, docs/85 §9.2).
+func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
+	out := numRange{loKnown: true, lo: f.c, hiKnown: true, hi: f.c}
+	for name, coeff := range f.terms {
+		r, ok := a.lookupRangeFact(name)
+		if !ok {
+			return numRange{} // unknown variable: fully open, declines
+		}
+		var lo, hi int64
+		var loK, hiK bool
+		if coeff >= 0 {
+			lo, loK = r.lo, r.loKnown
+			hi, hiK = r.hi, r.hiKnown
+		} else {
+			lo, loK = r.hi, r.hiKnown
+			hi, hiK = r.lo, r.loKnown
+		}
+		if out.loKnown && loK {
+			out.lo += coeff * lo
+		} else {
+			out.loKnown = false
+		}
+		if out.hiKnown && hiK {
+			out.hi += coeff * hi
+		} else {
+			out.hiKnown = false
+		}
+	}
+	return out
+}
+
+// tryProveRefinementByLinear discharges `value is law[args]` when `value` is an affine form over
+// immutable integer variables whose bounded range entails every law constraint. Reuses lawConstraints
+// (the law side is unchanged) and rangeEntailsConstraint (the entailment check). Sound: any leaf
+// outside the fragment, or any open bound on a needed side, makes it decline to a runtime check.
+func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr, scope *Scope) bool {
+	// A bare identifier is already tier-1's job; tier-2 only earns its keep on derived forms.
+	if _, isIdent := value.(*ast.Ident); isIdent {
+		return false
+	}
+	if decl == nil || len(predArgs) != len(decl.Params)-1 {
+		return false
+	}
+	form, ok := a.affineOf(value, scope)
+	if !ok {
+		return false
+	}
+	// A constant-only form (no variable terms) is const-eval's job, not tier-2's — declining keeps
+	// the discharge recorded as proven (const) and tier-2 scoped to genuinely derived subjects.
+	if len(form.terms) == 0 {
+		return false
+	}
+	paramConsts := map[string]int64{}
+	for i, arg := range predArgs {
+		c, ok := a.constIntValue(arg)
+		if !ok {
+			return false
+		}
+		paramConsts[decl.Params[i+1].Name] = c
+	}
+	constraints, ok := a.lawConstraints(decl, paramConsts)
+	if !ok || len(constraints) == 0 {
+		return false
+	}
+	r := a.boundAffine(form, scope)
+	for _, k := range constraints {
+		if !rangeEntailsConstraint(r, k) {
+			return false
+		}
+	}
+	return true
+}
+
 // tryProveRefinementByFlow attempts a flow-sensitive static proof of `value is law`: when `value`
 // is a bare immutable integer identifier with a known range fact, and the law body is a decidable
 // conjunction of `self OP const` constraints, it checks the range entails every constraint. Returns

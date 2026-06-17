@@ -35,8 +35,9 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 type ProofOutcome string
 
 const (
-	ProofProvenFlow  ProofOutcome = "proven (flow)"  // entailed by a branch-condition range fact
-	ProofProvenConst ProofOutcome = "proven (const)" // entailed by constant evaluation
+	ProofProvenFlow   ProofOutcome = "proven (flow)"   // entailed by a branch-condition range fact
+	ProofProvenLinear ProofOutcome = "proven (linear)" // entailed by tier-2 bounded linear arithmetic (docs/86)
+	ProofProvenConst  ProofOutcome = "proven (const)"  // entailed by constant evaluation
 	ProofRefuted     ProofOutcome = "refuted"        // provably violated — a compile error
 	ProofRuntime     ProofOutcome = "runtime"        // unprovable — debug runtime check / -strict error
 )

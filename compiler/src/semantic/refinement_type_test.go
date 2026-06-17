@@ -1264,3 +1264,62 @@ def shut_it(p: mutable Door&) -> void ensures p is Opened:
 		t.Fatalf("`p <- Door.Shut` (plain enum) should REFUTE `ensures p is Opened`, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// --- tier-2: bounded linear arithmetic (docs/86) ---------------------------------------------
+
+// Tier-2 proves a DERIVED affine subject: `tx*64 + ty` with tx,ty ∈ [0,63] is bounded by
+// [0, 4095], discharging the return refinement with NO runtime check. Tier-1 cannot — the
+// subject is an expression, not a bare variable.
+func TestLinearDerivedIndexProven(t *testing.T) {
+	src := boundedLaw + `
+def tile_index(tx: i64, ty: i64) -> i64 is Bounded[0, 4095]:
+    if tx >= 0 and tx <= 63 and ty >= 0 and ty <= 63:
+        return tx * 64 + ty
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "linear_index.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("64*tx + ty over [0,63]² ⊆ [0,4095] should prove via tier-2, got: %v", result.Errors())
+	}
+	var linear int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenLinear {
+			linear++
+		}
+	}
+	if linear == 0 {
+		t.Fatalf("the derived-index discharge should be recorded as proven (linear), got report=%+v", result.ProofReport)
+	}
+}
+
+// Soundness: without the upper-bound guard, the affine bound is open on top and tier-2 must
+// DECLINE (stays unproven → runtime check / strict error), never over-prove.
+func TestLinearDerivedIndexInsufficientGuardDeclines(t *testing.T) {
+	src := boundedLaw + `
+def tile_index(tx: i64, ty: i64) -> i64 is Bounded[0, 4095]:
+    if tx >= 0 and ty >= 0:
+        return tx * 64 + ty
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "linear_index_weak.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("an unbounded-above affine subject must NOT prove the top of [0,4095], got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A const module value folds into the affine form: `tx*MAPHEIGHT + ty` with MAPHEIGHT a const.
+func TestLinearDerivedIndexFoldsNamedConst(t *testing.T) {
+	src := boundedLaw + `
+const module Map:
+    MAPHEIGHT: i64 = 64
+
+def tile_index(tx: i64, ty: i64) -> i64 is Bounded[0, 4095]:
+    if tx >= 0 and tx <= 63 and ty >= 0 and ty <= 63:
+        return tx * Map::MAPHEIGHT + ty
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "linear_index_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("a named const coefficient should fold into the affine form and prove, got: %v", result.Errors())
+	}
+}

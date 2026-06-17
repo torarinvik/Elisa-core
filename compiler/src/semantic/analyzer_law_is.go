@@ -177,6 +177,12 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
 	}
+	// Tier-2 (docs/86): a DERIVED affine subject (e.g. `tx*MAPHEIGHT + ty`) whose bounded range
+	// entails the law. Runs after the bare-variable tiers declined, before the const-eval backstop.
+	if a.tryProveRefinementByLinear(value, lawDecl, pred.Args, a.currentScope) {
+		a.recordProof(pos, valueName, pred.Name, ProofProvenLinear)
+		return true
+	}
 	// Written-constant substitution: when the subject is a bare variable whose last write was a
 	// compile-time constant of any kind (`p <- 0`, `ready <- true`, `d <- Door.Open` — even through a
 	// non-aliased `mutable T&` pointee), use that constant expr as the const-eval subject. This proves
