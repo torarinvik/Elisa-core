@@ -123,6 +123,9 @@ func isFrameLaw(decl *ast.FuncDecl) bool {
 // checker. Diagnoses a missing/non-frame law, an unknown or non-ref param, and subject mismatch.
 func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
 	for _, fc := range fn.Fulfills {
+		if isBuiltinShapeLaw(fc.Law) {
+			continue // built-in shape law (docs/89); discharged after the body is analyzed (checkShapeFulfills)
+		}
 		decl, _, ok := a.lookupLaw(fc.Law)
 		if !ok || decl == nil {
 			a.errorf(fc.Position, "`fulfills` names %q, which is not a law", fc.Law)
@@ -198,6 +201,47 @@ func (a *Analyzer) checkEffectFulfills(fn *ast.FuncDecl, fnType *FuncType) {
 					a.errorf(fn.Pos(), "function %q `fulfills %s` but uses the `%s` effect, which %s forbids", fn.Name, fc.Law, lawEffectName(used), fc.Law)
 					break
 				}
+			}
+		}
+	}
+}
+
+// isBuiltinShapeLaw reports whether a name is a built-in SHAPE law (docs/89, docs/85 §8): a local,
+// statically-decidable codegen property a function can `fulfills`. Shape laws are not user `law`
+// decls — they are predefined names discharged by a dedicated codegen analysis. Only `NoBoundsChecks`
+// exists today (user-defined shape laws need the `includes` algebra, deferred).
+func isBuiltinShapeLaw(name string) bool {
+	switch name {
+	case "NoBoundsChecks":
+		return true
+	default:
+		return false
+	}
+}
+
+// checkShapeFulfills discharges each `fulfills <ShapeLaw>` clause (docs/89) after the function body is
+// analyzed. A shape law is a function-level codegen guarantee, applied with the subject-free
+// `fulfills NoBoundsChecks` (a subject is a wrong-form error). `NoBoundsChecks` is violated iff the
+// body contains an index access that would emit a runtime bounds check — i.e. a bounds-requiring
+// access not statically proven in-bounds (collected in currentFunctionGuardedIndexes). SOUNDNESS:
+// the law certifies *provably* no checks; a `trusted` unchecked access is asserted, not proven, so it
+// is still counted (the honest, conservative reading — over-reporting only yields a false positive).
+func (a *Analyzer) checkShapeFulfills(fn *ast.FuncDecl) {
+	if fn == nil {
+		return
+	}
+	for _, fc := range fn.Fulfills {
+		if !isBuiltinShapeLaw(fc.Law) {
+			continue
+		}
+		if fc.Param != "" {
+			a.errorf(fc.Position, "shape law %q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
+			continue
+		}
+		switch fc.Law {
+		case "NoBoundsChecks":
+			if len(a.currentFunctionGuardedIndexes) > 0 {
+				a.errorf(a.currentFunctionGuardedIndexes[0], "function %q `fulfills NoBoundsChecks` but has an index access that is not statically proven in-bounds, so a runtime bounds check would be emitted; prove the index (e.g. iterate, or guard with a bound the prover understands)", fn.Name)
 			}
 		}
 	}

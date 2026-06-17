@@ -277,6 +277,11 @@ type Analyzer struct {
 	currentIndexBounds                map[string]indexBoundFact
 	currentFunctionUsedPermissions    map[string]bool
 	currentFunctionUsedPermissionRefs []ast.PermissionRef
+	// currentFunctionGuardedIndexes collects the positions of index accesses in the current function
+	// that would emit a runtime bounds check (bounds-requiring type, not statically proven). It backs
+	// the `NoBoundsChecks` shape law (docs/89): a function `fulfills NoBoundsChecks` is violated iff
+	// this list is non-empty. Saved/restored per function like currentFunctionUsedPermissionRefs.
+	currentFunctionGuardedIndexes []lexer.Pos
 	currentProgressSummary            *FunctionProgressSummary
 	loopDepth                         int
 	currentTrustedNonProgressDepth    int

@@ -408,6 +408,58 @@ def f(x: i64) -> bool:
 	}
 }
 
+// docs/89 Stage 4 (shape): a function whose every index access is statically proven in-bounds
+// fulfills the built-in `NoBoundsChecks` shape law cleanly.
+func TestShapeLawNoBoundsChecksClean(t *testing.T) {
+	src := `
+def sum(xs: darray[i64]) -> i64 fulfills NoBoundsChecks:
+    total: mutable i64 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i]
+    return total
+`
+	result := analyzeTreeTestSource(t, "shape_nobounds_clean.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a function with only proven index accesses should fulfill NoBoundsChecks, got: %v", errs)
+	}
+}
+
+// An unproven, bounds-requiring index access would emit a runtime bounds check → violates the law.
+func TestShapeLawNoBoundsChecksViolationErrors(t *testing.T) {
+	src := `
+def third(xs: darray[i64]) -> i64 fulfills NoBoundsChecks:
+    return xs[2]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "shape_nobounds_violation.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "fulfills NoBoundsChecks") {
+		t.Fatalf("an unproven index access under `fulfills NoBoundsChecks` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Applying a shape law with a subject is a wrong-form error — shape laws are function-level.
+func TestShapeLawWithSubjectErrors(t *testing.T) {
+	src := `
+def f(xs: darray[i64]) -> i64 fulfills xs is NoBoundsChecks:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "shape_subject.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "constrains the whole function") {
+		t.Fatalf("applying a shape law with a subject must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A shape law used in value `is` position is a wrong-class error.
+func TestShapeLawInValueIsErrors(t *testing.T) {
+	src := `
+def f(xs: darray[i64]) -> bool:
+    return xs is NoBoundsChecks
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "shape_value_is.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is a shape law") {
+		t.Fatalf("using a shape law with value `is` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
 func TestFrameLawInValueIsErrors(t *testing.T) {
 	src := `

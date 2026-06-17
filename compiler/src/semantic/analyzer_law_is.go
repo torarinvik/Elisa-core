@@ -21,6 +21,13 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 	if len(targets) != 1 {
 		return false
 	}
+	// A shape law (docs/89) has no user `law` decl, so resolveLawIsTarget won't recognize it; catch the
+	// wrong-class value `is NoBoundsChecks` on the bare target name before falling through to type
+	// resolution (which would report a misleading "unknown type").
+	if name, ok := bareTargetName(targets[0]); ok && isBuiltinShapeLaw(name) {
+		a.errorf(expr.Pos(), "%q is a shape law; apply it to a function with `fulfills %s`, not with `is` in a value position", name, name)
+		return true
+	}
 	lawName, lawArgs, ok := a.resolveLawIsTarget(targets[0])
 	if !ok {
 		return false

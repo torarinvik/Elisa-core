@@ -41,6 +41,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedAllocExpr := a.currentAllocExpr
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
 	savedProgressSummary := a.currentProgressSummary
 	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
 	savedTrustedAssumeProgressDepth := a.currentTrustedAssumeProgressDepth
@@ -66,6 +67,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentAllocExpr = nil
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
+	a.currentFunctionGuardedIndexes = nil
 	a.currentProgressSummary = a.beginFunctionProgressSummary(fn)
 	a.currentTrustedNonProgressDepth = 0
 	a.currentTrustedAssumeProgressDepth = 0
@@ -188,6 +190,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.checkHotContract(fn, fnType)
 		a.checkLawContract(fn, fnType)
 		a.checkEffectFulfills(fn, fnType)
+		a.checkShapeFulfills(fn)
 		a.finalizeFunctionAnalysis(fn, fnType)
 	}
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)
@@ -212,6 +215,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentAllocExpr = savedAllocExpr
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
 	a.currentProgressSummary = savedProgressSummary
 	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.currentTrustedAssumeProgressDepth = savedTrustedAssumeProgressDepth
@@ -251,6 +255,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
@@ -279,6 +284,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
+	a.currentFunctionGuardedIndexes = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentConservativeCallWidenings = nil
@@ -376,6 +382,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
@@ -414,6 +421,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
+	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
@@ -442,6 +450,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentPackedStoreResolutions = map[*Symbol]packedStoreResolution{}
 	a.currentFunctionUsedPermissions = map[string]bool{}
 	a.currentFunctionUsedPermissionRefs = nil
+	a.currentFunctionGuardedIndexes = nil
 	a.currentReturnProvenance = regionRefState{}
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentConservativeCallWidenings = nil
@@ -533,6 +542,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
+	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
