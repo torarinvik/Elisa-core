@@ -271,6 +271,8 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		BoundaryPointerParamIndices: append([]int(nil), specialized.BoundaryPointerParamIndices...),
 		Poststates:                  cloneFuncPoststates(specialized.Poststates),
 		RefinementEnsures:           append([]RefinementEnsure(nil), specialized.RefinementEnsures...),
+		FrameWrites:                 cloneFrameWrites(specialized.FrameWrites),
+		FrameBounded:                specialized.FrameBounded,
 		Params:                      append([]Type(nil), specialized.Params...),
 		ExplicitParamCount:          specialized.ExplicitParamCount,
 		ExplicitParamNames:          append([]string(nil), specialized.ExplicitParamNames...),

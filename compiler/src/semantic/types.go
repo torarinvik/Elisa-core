@@ -504,6 +504,14 @@ type FuncPoststate struct {
 // caller GAINS the predicate fact on the argument bound to ParamIndex; at the callee's returns the
 // postcondition is checked (debug runtime check + static attempt) so the caller's assumption is
 // backed. Bare laws over a bare parameter only for now.
+// FrameParamWrite is one place a callee may write through one of its reference parameters (docs/87
+// 87-3): the parameter's index plus the field suffix beneath it. Index steps are dropped (field
+// granularity), matching framePath. An empty Fields means the whole parameter place.
+type FrameParamWrite struct {
+	ParamIndex int
+	Fields     []string
+}
+
 type RefinementEnsure struct {
 	Position   lexer.Pos
 	ParamIndex int
@@ -563,6 +571,15 @@ type FuncType struct {
 	BoundaryPointerParamIndices  []int
 	Poststates                   []FuncPoststate
 	RefinementEnsures            []RefinementEnsure
+	// FrameWrites is the callee's EFFECTIVE frame (docs/87 87-3): every caller-visible place it may
+	// write, as a (param index, field suffix) pair — direct `changes` paths plus `fulfills`-expanded
+	// frame-law paths. FrameBounded reports whether the callee's writes are bounded at all (it has a
+	// `changes`/`fulfills` frame). A bounded callee lets a caller REFINE a mutable-ref argument from
+	// the whole place to just the written subpaths (`f(&r.x)` where `f changes self.a` writes only
+	// `r.x.a`); an unbounded callee keeps the conservative whole-place rule. Pure `preserves` does not
+	// bound writes, so it does not set FrameBounded.
+	FrameWrites                  []FrameParamWrite
+	FrameBounded                 bool
 	Params                       []Type
 	ExplicitParamCount           int
 	ExplicitParamNames           []string

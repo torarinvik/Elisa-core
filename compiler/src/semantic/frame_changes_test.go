@@ -263,6 +263,90 @@ law Bad(self: i32) changes self.px
 	}
 }
 
+// docs/87 87-3: a callee's declared `changes` frame REFINES a mutable-ref argument. Passing the
+// whole struct `r` to a callee that only `changes s.px` is checked as a write to `r.px` (not the
+// whole `r`), so it is clean under the caller's own `changes r.px` — where the conservative
+// whole-place rule would have rejected it.
+func TestInterprocChangesRefinesArgClean(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def bump(s: mutable Render&) changes s.px:
+    s.px <- s.px + 1
+
+def outer(r: mutable Render&) changes r.px:
+    bump(r)
+`
+	result := analyzeTreeTestSource(t, "interproc_refine_clean.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a callee frame should refine the arg to r.px and be clean under `changes r.px`, got: %v", errs)
+	}
+}
+
+// The refinement is sound, not just permissive: a callee that `changes s.health` refines the arg to
+// `r.health`, which is OUTSIDE the caller's `changes r.px` → error.
+func TestInterprocChangesRefinesArgErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def harm(s: mutable Render&) changes s.health:
+    s.health <- 0
+
+def outer(r: mutable Render&) changes r.px:
+    harm(r)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "interproc_refine_err.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("a callee that changes s.health refines the arg to r.health, which is outside `changes r.px`, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A callee with NO bounding frame leaves the arg unbounded, so the conservative whole-place rule
+// still applies: passing the whole `r` is a write to all of `r`, not covered by `changes r.px`.
+func TestInterprocUnboundedCalleeStaysConservative(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def wreck(s: mutable Render&):
+    s.health <- 0
+
+def outer(r: mutable Render&) changes r.px:
+    wreck(r)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "interproc_unbounded.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("an unbounded callee must keep the conservative whole-place rule, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A `fulfills`-derived frame is part of the effective summary too: a callee that `fulfills s is
+// MovesPlayerOnly` (changes self.px) refines the arg to r.px and is clean under `changes r.px`.
+func TestInterprocFulfillsRefinesArg(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+law MovesPlayerOnly(self: Render&) changes self.px
+
+def step(s: mutable Render&) fulfills s is MovesPlayerOnly:
+    s.px <- s.px + 1
+
+def outer(r: mutable Render&) changes r.px:
+    step(r)
+`
+	result := analyzeTreeTestSource(t, "interproc_fulfills.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a fulfills-derived callee frame should refine the arg and be clean, got: %v", errs)
+	}
+}
+
 // A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
 func TestFrameLawInValueIsErrors(t *testing.T) {
 	src := `

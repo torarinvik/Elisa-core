@@ -37,6 +37,67 @@ func (a *Analyzer) resolveFramePaths(paths []ast.EnsuresPath, clause string) []f
 	return out
 }
 
+// resolveFrameSummary computes a callee's EFFECTIVE write frame (docs/87 87-3) for its FuncType: the
+// (param index, field suffix) places it may write through its reference parameters, drawn from its
+// direct `changes` paths AND its `fulfills <param> is <FrameLaw>` clauses (the law's own `changes`
+// paths, rebound from the law subject to the named param). frameBounded reports whether the callee
+// has ANY such write-bounding clause — only then may a caller refine a mutable-ref argument. This
+// runs at signature-collection time (laws are already lookable, as resolveRefinementEnsures relies
+// on); no body/type info is needed, only param names and law shapes. It does NOT diagnose — the
+// authoritative validation runs in the callee's own analyzeFunc (resolveFramePaths / expandFulfills);
+// here a malformed clause is simply skipped so a summary never over-claims a bound.
+func (a *Analyzer) resolveFrameSummary(params []ast.ParamDecl, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause) ([]FrameParamWrite, bool) {
+	indexOf := func(name string) int {
+		for i, p := range params {
+			if p.Name == name {
+				return i
+			}
+		}
+		return -1
+	}
+	var out []FrameParamWrite
+	bounded := false
+	for _, p := range changes {
+		idx := indexOf(p.Root)
+		if idx < 0 {
+			continue
+		}
+		bounded = true
+		out = append(out, FrameParamWrite{ParamIndex: idx, Fields: append([]string(nil), p.Fields...)})
+	}
+	for _, fc := range fulfills {
+		idx := indexOf(fc.Param)
+		if idx < 0 {
+			continue
+		}
+		decl, _, ok := a.lookupLaw(fc.Law)
+		if !ok || decl == nil || !isFrameLaw(decl) || len(decl.Params) == 0 {
+			continue
+		}
+		subject := decl.Params[0].Name
+		for _, lp := range decl.Changes {
+			if lp.Root != subject {
+				continue
+			}
+			bounded = true
+			out = append(out, FrameParamWrite{ParamIndex: idx, Fields: append([]string(nil), lp.Fields...)})
+		}
+	}
+	return out, bounded
+}
+
+// cloneFrameWrites deep-copies a frame-write summary (each entry's Fields slice is owned).
+func cloneFrameWrites(in []FrameParamWrite) []FrameParamWrite {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]FrameParamWrite, len(in))
+	for i, w := range in {
+		out[i] = FrameParamWrite{ParamIndex: w.ParamIndex, Fields: append([]string(nil), w.Fields...)}
+	}
+	return out
+}
+
 // checkFrameConsistency enforces the docs/87 §7 identity `preserves Y ⟺ Y ∩ changes(f) = ∅`: a
 // place may not be in both clauses. An overlap is contradictory (it would be both required-writable
 // and forbidden-to-write).
@@ -119,11 +180,45 @@ func (a *Analyzer) checkFrameWrite(target ast.Expr) {
 // checkFrameMutableRefArg enforces the frame at a call argument passed by MUTABLE reference: the
 // callee may write the place, so it counts as a write to it (docs/87 channel 2). Immutable-borrow
 // args are not writes and are not checked here.
-func (a *Analyzer) checkFrameMutableRefArg(arg ast.Expr) {
+//
+// calleeSuffixes is the callee's effective frame for THIS parameter (docs/87 87-3): the field
+// suffixes it may write beneath the argument place. When non-nil (the callee declared a bounding
+// `changes`/`fulfills` frame), the arg is REFINED — only `arg ⊕ suffix` is treated as written, so
+// `f(&r.x)` where `f changes self.a` is checked as a write to `r.x.a`, not the whole `r.x`. When nil
+// (the callee's writes are unbounded), the conservative whole-place rule applies.
+func (a *Analyzer) checkFrameMutableRefArg(arg ast.Expr, calleeSuffixes [][]string) {
 	if !a.currentHasChanges && !a.currentHasPreserves {
 		return
 	}
-	a.checkFramePlace(arg, "may write")
+	if calleeSuffixes == nil {
+		a.checkFramePlace(arg, "may write")
+		return
+	}
+	root, fields, ok := frameWritePath(arg)
+	if !ok {
+		return
+	}
+	for _, suffix := range calleeSuffixes {
+		full := append(append([]string(nil), fields...), suffix...)
+		a.checkFrameResolvedPlace(arg, root, full, "may write")
+	}
+}
+
+// calleeFrameSuffixesForParam returns the field suffixes a callee may write beneath its parameter i
+// (docs/87 87-3), or nil if the callee declared no bounding frame (writes unbounded → caller stays
+// conservative). A callee that declares a frame but writes nothing through this param yields an
+// empty (non-nil) slice, refining the arg to "no caller-visible write".
+func calleeFrameSuffixesForParam(ft *FuncType, i int) [][]string {
+	if ft == nil || !ft.FrameBounded {
+		return nil
+	}
+	suffixes := [][]string{}
+	for _, w := range ft.FrameWrites {
+		if w.ParamIndex == i {
+			suffixes = append(suffixes, w.Fields)
+		}
+	}
+	return suffixes
 }
 
 func (a *Analyzer) checkFramePlace(place ast.Expr, verb string) {
@@ -131,6 +226,14 @@ func (a *Analyzer) checkFramePlace(place ast.Expr, verb string) {
 	if !ok {
 		return
 	}
+	a.checkFrameResolvedPlace(place, root, fields, verb)
+}
+
+// checkFrameResolvedPlace enforces the active frame clauses against an already-resolved (root,
+// fields) place, reporting at `place`. Shared by the direct-write path (checkFramePlace) and the
+// 87-3 refined mutable-ref-arg path (which synthesizes the place by appending the callee's frame
+// suffix to the argument place).
+func (a *Analyzer) checkFrameResolvedPlace(place ast.Expr, root string, fields []string, verb string) {
 	sym, found := a.currentScope.Lookup(root)
 	if !found || sym == nil || sym.Kind != SymbolParam || !isFrameWritableRefType(sym.Type) {
 		return // not a caller-visible (ref-param) place: a local write is never a frame violation

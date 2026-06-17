@@ -8,6 +8,14 @@ import (
 )
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic)
+}
+
+// funcTypeFromDeclWithFrame is funcTypeFromDecl plus the callee's frame clauses (docs/87 87-3), so
+// the resulting FuncType carries an effective-frame summary call sites use to refine mutable-ref
+// arguments. `changes` and `fulfills` are the only clauses that BOUND writes; `preserves` is a
+// blacklist that does not, so it is not threaded here.
+func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for _, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamErrorSet {
@@ -68,8 +76,11 @@ func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericPar
 			})
 		})
 	})
+	frameWrites, frameBounded := a.resolveFrameSummary(allParams, changes, fulfills)
 	return &FuncType{
 		Name:                      name,
+		FrameWrites:               frameWrites,
+		FrameBounded:              frameBounded,
 		TypeParams:                append([]string(nil), typeParams...),
 		RegionParams:              append([]string(nil), regionParams...),
 		PermissionParams:          append([]string(nil), permissionParams...),
