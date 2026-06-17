@@ -135,6 +135,11 @@ type FuncDecl struct {
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Body         []Stmt
+	// Changes holds the frame condition `changes <path>, ...` (docs/87): the upper bound on which
+	// caller-visible places the function may write. Each path is param-rooted (reusing EnsuresPath).
+	// An empty slice means no clause (unconstrained); a present clause is enforced — a write outside
+	// the set is a compile error.
+	Changes []EnsuresPath
 	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
 	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
 	// function machinery (generics, modules, type checking, calls); the flag drives purity

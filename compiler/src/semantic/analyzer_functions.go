@@ -123,6 +123,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
+					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					a.currentHasChanges = len(fn.Changes) != 0
+					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -309,6 +313,10 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
+					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					a.currentHasChanges = len(fn.Changes) != 0
+					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {
@@ -460,6 +468,10 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
+					a.currentChangesPaths = a.resolveChangesPaths(fn)
+					a.currentHasChanges = len(fn.Changes) != 0
+					defer func() { a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges }()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
 					for _, stmt := range fn.Body {

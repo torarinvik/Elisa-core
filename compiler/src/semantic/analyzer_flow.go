@@ -334,6 +334,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if !n.Optional {
 			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 			a.invalidatePredFactsForTarget(n.Target)
+			a.checkChangesWrite(n.Target)
 			a.recordWrittenConstForTarget(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
@@ -363,6 +364,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
 		a.invalidatePredFactsForTarget(n.Target)
+		a.checkChangesWrite(n.Target)
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 	case *ast.AsRefAssignStmt:
@@ -389,6 +391,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.invalidatePredFactsForTarget(n.Target)
+		a.checkChangesWrite(n.Target)
 		a.recordWrittenConstForTarget(n.Target, n.Value)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)

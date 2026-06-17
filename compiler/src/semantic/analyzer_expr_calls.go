@@ -497,6 +497,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			a.invalidatePredFactsForTarget(loweredArgs[i])
 			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
 		}
+		// Frame enforcement (docs/87 channel 2): passing a place by MUTABLE ref means the callee may
+		// write it, so it counts as a write to that place. An immutable borrow cannot write — skip it.
+		// Uses the resolved appliedType.Params mutability signal (reliable post-substitution).
+		if i < len(appliedType.Params) {
+			if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
+				a.checkChangesMutableRefArg(loweredArgs[i])
+			}
+		}
 		// docs/85 brick 2 (A): a callee postcondition `ensures <param i> is Law` lets the caller GAIN
 		// the predicate fact on the argument bound to param i — applied AFTER the invalidation above so
 		// it survives. Sound because the callee's returns are checked against the same law (B). Only a
