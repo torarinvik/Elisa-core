@@ -30,6 +30,60 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 	return true
 }
 
+// validateRefinementPreds checks that every predicate in a refinement type `Base is P, …` names a
+// law and that the law's subject (first parameter) accepts the base type. Representation is the
+// base type (erased); this only validates the predicates so a malformed refinement is a clear
+// error rather than a silent no-op. Discharge of the predicate at a binding boundary is separate.
+func (a *Analyzer) validateRefinementPreds(n *ast.RefinementTypeExpr, base Type) {
+	if a == nil || n == nil {
+		return
+	}
+	for _, pred := range n.Preds {
+		decl, ft, ok := a.lookupLaw(pred.Name)
+		if !ok {
+			a.errorf(pred.Position, "refinement predicate %q is not a law", pred.Name)
+			continue
+		}
+		if ft == nil || len(ft.Params) == 0 {
+			continue // signature not built yet, or a subjectless law (reported at its declaration)
+		}
+		// A generic law (subject is a type parameter) accepts any base via inference. A concrete
+		// subject must accept the base type.
+		if len(decl.TypeParams) == 0 && base != nil {
+			subject := ft.Params[0]
+			if !AssignableTo(base, subject) && !AssignableTo(subject, base) {
+				a.errorf(pred.Position, "refinement %q expects a subject of type %s, but the refined type is %s", pred.Name, typeString(subject), typeString(base))
+			}
+		}
+	}
+}
+
+// lookupLaw resolves a name to a law declaration (and its function type if already built),
+// following alias chains. It consults the current scope then the global scope, since refinement
+// types are resolved during signature building when the active scope may not yet chain to globals.
+// The FuncType may be nil if the law's signature is not built yet; callers that need the subject
+// type must tolerate that.
+func (a *Analyzer) lookupLaw(name string) (*ast.FuncDecl, *FuncType, bool) {
+	scopes := []*Scope{a.currentScope, a.globalScope}
+	for _, scope := range scopes {
+		if scope == nil {
+			continue
+		}
+		sym, ok := scope.Lookup(name)
+		if !ok {
+			continue
+		}
+		for sym != nil {
+			if decl, isDecl := sym.Node.(*ast.FuncDecl); isDecl && decl != nil && decl.IsLaw {
+				ft, _ := sym.Type.(*FuncType)
+				return decl, ft, true
+			}
+			sym = sym.AliasOf
+		}
+	}
+	return nil, nil, false
+}
+
 // resolveBareLawIsTarget returns the law name when `target` is a bare reference (an identifier or
 // plain named type, no bracket/value args) to a `law` declaration. Parametric targets
 // (`Bounded[0..500]`) and non-laws return false.

@@ -8,6 +8,13 @@ import (
 
 func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	switch n := expr.(type) {
+	case *ast.RefinementTypeExpr:
+		// docs/85: a refinement type is REPRESENTATION-ERASED — it resolves to its base type. The
+		// predicates are validated here (each must name a law whose subject accepts the base type);
+		// discharge (boundary check / static proof) is handled where the binding is processed.
+		base := a.resolveType(n.Base)
+		a.validateRefinementPreds(n, base)
+		return base
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":

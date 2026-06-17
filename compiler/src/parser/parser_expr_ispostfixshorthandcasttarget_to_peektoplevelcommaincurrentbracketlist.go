@@ -127,7 +127,40 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		errType := p.parseErrorSetExpr()
 		return &ast.ErrorUnionTypeExpr{Position: typ.Pos(), Value: typ, Errors: errType}
 	}
+	// docs/85: a refinement-type suffix `Base is Pred[…], …`. Only `is` directly followed by a
+	// predicate name in type position; the expression-level `is` operator never reaches here.
+	if p.peek() == lexer.TOKEN_IS && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		typ = p.parseRefinementTypeSuffix(typ)
+	}
 	return typ
+}
+
+// parseRefinementTypeSuffix parses `is Pred[…]` (and `, Pred` / `and Pred`) after a base type.
+func (p *Parser) parseRefinementTypeSuffix(base ast.TypeExpr) ast.TypeExpr {
+	pos := p.cur().Pos
+	p.expect(lexer.TOKEN_IS)
+	preds := []ast.RefinementPredExpr{p.parseRefinementPred()}
+	for p.match(lexer.TOKEN_COMMA) || p.matchIdentText("and") {
+		preds = append(preds, p.parseRefinementPred())
+	}
+	return &ast.RefinementTypeExpr{Position: pos, Base: base, Preds: preds}
+}
+
+// parseRefinementPred parses one predicate: a law name with optional static `[..]` args.
+func (p *Parser) parseRefinementPred() ast.RefinementPredExpr {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var args []ast.Expr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		for p.peek() != lexer.TOKEN_RBRACKET {
+			args = append(args, p.parseExpr())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
+	return ast.RefinementPredExpr{Position: pos, Name: name, Args: args}
 }
 func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
 	if p.peekOwnedQualifier() {

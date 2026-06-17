@@ -321,6 +321,23 @@ type MutableType struct {
 	Elem     TypeExpr
 }
 
+// RefinementTypeExpr is `Base is Pred[…], …` (docs/85): a base type refined by one or more law
+// predicates. It is REPRESENTATION-ERASED — it resolves to its base type for layout/codegen — and
+// the predicates become discharge obligations + in-scope facts on the binding it annotates.
+type RefinementTypeExpr struct {
+	Position lexer.Pos
+	Base     TypeExpr
+	Preds    []RefinementPredExpr
+}
+
+// RefinementPredExpr is one predicate application in a refinement type: a law name plus optional
+// static `[..]` args (e.g. `Bounded[0..500]`). `self` is bound to the refined value.
+type RefinementPredExpr struct {
+	Position lexer.Pos
+	Name     string
+	Args     []Expr
+}
+
 // OwnedType marks a binding/parameter as OWNING the lifetime/resource
 // obligation of an allocator/store value (e.g. `owned Arena`): it is affine
 // (move-only) and must be consumed (destroy/leak/move/return). A plain
