@@ -920,3 +920,72 @@ def f(seed: i64, other: i64) -> i64:
 		t.Fatalf("mutation `n <- other` must drop the parametric fact, forcing a runtime check")
 	}
 }
+
+// --- Mutable refinement flow: non-int written-const. The written-constant channel tracks any
+// const-evaluable kind (bool, enum), not just integers, through ref pointees and plain writes. ---
+
+// A BOOL written constant proves a bool law: `ready <- true` makes `ensures ready is On` provable.
+func TestEnsuresRefinementProvenByWrittenBool(t *testing.T) {
+	src := `
+law On(self: bool) = self
+def arm(p: mutable bool&) -> void ensures p is On:
+    p <- true
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_bool_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- true` should statically prove `ensures p is On`, got: %v", result.Errors())
+	}
+}
+
+// A BOOL written constant that violates the law is refuted (compile error), not merely warned.
+func TestEnsuresRefinementRefutedByWrittenBool(t *testing.T) {
+	src := `
+law On(self: bool) = self
+def disarm(p: mutable bool&) -> void ensures p is On:
+    p <- false
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_bool_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("`p <- false` should REFUTE `ensures p is On` (not just warn), got:\n%s", allDiagnostics(result))
+	}
+}
+
+// An ENUM written constant proves an enum law: `d <- Door.Open` makes `ensures d is Opened` provable.
+// (Const-enum members const-evaluate; plain `enum` members do not const-fold in the engine yet, so the
+// channel — which tracks any const-evaluable RHS — covers const enums here.)
+func TestEnsuresRefinementProvenByWrittenEnum(t *testing.T) {
+	src := `
+const enum Door of u8:
+    Open
+    Shut
+
+law Opened(self: Door) = self == Door.Open
+def open_it(p: mutable Door&) -> void ensures p is Opened:
+    p <- Door.Open
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_enum_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`p <- Door.Open` should statically prove `ensures p is Opened`, got: %v", result.Errors())
+	}
+}
+
+// An ENUM written constant that violates the law is refuted.
+func TestEnsuresRefinementRefutedByWrittenEnum(t *testing.T) {
+	src := `
+const enum Door of u8:
+    Open
+    Shut
+
+law Opened(self: Door) = self == Door.Open
+def shut_it(p: mutable Door&) -> void ensures p is Opened:
+    p <- Door.Shut
+    return
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_enum_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("`p <- Door.Shut` should REFUTE `ensures p is Opened`, got:\n%s", allDiagnostics(result))
+	}
+}

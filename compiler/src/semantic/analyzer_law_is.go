@@ -1,7 +1,6 @@
 package semantic
 
 import (
-	"strconv"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -127,13 +126,14 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 		return true
 	}
 	// Written-constant substitution: when the subject is a bare variable whose last write was a
-	// compile-time integer constant (`p <- 0`, even through a non-aliased `mutable T&` pointee), use
-	// that constant as the const-eval subject. This proves `ensures p is Positive` after `p <- 1`
-	// and refutes it after `p <- 0`, where the bare identifier alone carries no const value.
+	// compile-time constant of any kind (`p <- 0`, `ready <- true`, `d <- Door.Open` — even through a
+	// non-aliased `mutable T&` pointee), use that constant expr as the const-eval subject. This proves
+	// `ensures p is Positive` after `p <- 1` (refutes after `p <- 0`), and likewise for bool/enum
+	// laws, where the bare identifier alone carries no const value.
 	constSubject := value
 	if ident, ok := value.(*ast.Ident); ok && ident != nil {
 		if c, known := a.lookupWrittenConst(ident.Name); known {
-			constSubject = &ast.IntLit{Position: ident.Pos(), Value: strconv.FormatInt(c, 10)}
+			constSubject = c
 		}
 	}
 	if ok, known := a.evalConstBoolExpr(&ast.CallExpr{

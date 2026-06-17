@@ -387,11 +387,15 @@ type Scope struct {
 	// refinement flow — see analyzer_refinement_predfacts.go).
 	predFacts map[string]map[string]bool
 	// writtenConst records the last value written to a variable when that value is a compile-time
-	// integer constant (`x <- 0`, `n = 5`) — including writes through a non-aliased `mutable T&`
-	// param's pointee. Used to prove/refute a refinement obligation on the variable (e.g. an
-	// `ensures p is Positive` postcondition after `p <- 1`). Invalidated at every mutation site
-	// alongside predFacts, so it can never go stale; const-only RHS keeps re-evaluation stable.
-	writtenConst map[string]int64
+	// constant of ANY const-evaluable kind — int (`x <- 0`, `n = 5`), bool (`ready <- true`), enum
+	// (`state <- Door.Open`), float/char/string — including writes through a non-aliased `mutable T&`
+	// param's pointee. The stored expr IS the original const RHS, which keeps its resolved entry in
+	// a.exprTypes, so re-evaluating it (e.g. an enum/bool law application) reproduces the same value.
+	// Used to prove/refute a refinement obligation on the variable (e.g. an `ensures p is Positive`
+	// postcondition after `p <- 1`, or `ensures d is Open` after `d <- Door.Open`). Invalidated at
+	// every mutation site alongside predFacts, so it can never go stale; const-only RHS (no mutable
+	// reference) keeps re-evaluation stable.
+	writtenConst map[string]ast.Expr
 }
 
 func NewScope(parent *Scope) *Scope {

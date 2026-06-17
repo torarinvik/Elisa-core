@@ -114,17 +114,18 @@ func rootIdentName(expr ast.Expr) (string, bool) {
 
 // recordWrittenConstForTarget records (or clears) the written-constant fact for an assignment
 // `target <- value` / `target = value`. For a bare-identifier target whose RHS is a compile-time
-// integer constant, the variable is now known to equal that constant; any other target shape or a
-// non-constant RHS clears the fact (the value is no longer statically known). Sound because the
-// fact is invalidated again at the next mutation, and `mutable T&` pointees are non-aliased.
+// constant of any const-evaluable kind (int, bool, enum, float, char, string), the variable is now
+// known to equal that constant expr; any other target shape or a non-constant RHS clears the fact
+// (the value is no longer statically known). Sound because the fact is invalidated again at the next
+// mutation, `mutable T&` pointees are non-aliased, and the stored RHS references only literals /
+// immutable consts (evalConstExpr never resolves a mutable local) so re-evaluation is stable.
 func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
 	name, ok := target.(*ast.Ident)
 	if !ok || name == nil {
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(target))
 		return
 	}
-	c, ok := a.constIntValue(value)
-	if !ok {
+	if _, ok := a.evalConstExpr(value); !ok {
 		a.invalidateWrittenConst(name.Name)
 		return
 	}
@@ -134,9 +135,9 @@ func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
 	// Drop any shadowed parent entry first so the lookup finds this fresh value.
 	a.invalidateWrittenConst(name.Name)
 	if a.currentScope.writtenConst == nil {
-		a.currentScope.writtenConst = map[string]int64{}
+		a.currentScope.writtenConst = map[string]ast.Expr{}
 	}
-	a.currentScope.writtenConst[name.Name] = c
+	a.currentScope.writtenConst[name.Name] = value
 }
 
 func rootIdentNameOrEmpty(expr ast.Expr) string {
@@ -159,9 +160,10 @@ func (a *Analyzer) invalidateWrittenConst(name string) {
 	}
 }
 
-// lookupWrittenConst returns the known integer value of a variable, if a written-constant fact for
-// it is live in the active scope chain.
-func (a *Analyzer) lookupWrittenConst(name string) (int64, bool) {
+// lookupWrittenConst returns the known constant-value expr of a variable, if a written-constant fact
+// for it is live in the active scope chain. The expr is the original const RHS (any kind), suitable
+// for use as a const-eval subject.
+func (a *Analyzer) lookupWrittenConst(name string) (ast.Expr, bool) {
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
 		if scope.writtenConst != nil {
 			if v, ok := scope.writtenConst[name]; ok {
@@ -169,7 +171,7 @@ func (a *Analyzer) lookupWrittenConst(name string) (int64, bool) {
 			}
 		}
 	}
-	return 0, false
+	return nil, false
 }
 
 // callPreservesArgRefinements reports whether passing an argument as ref-param `paramIndex` of
