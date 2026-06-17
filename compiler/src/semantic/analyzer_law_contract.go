@@ -54,6 +54,12 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 			if isBuiltinShapeLaw(m) {
 				continue
 			}
+			// docs/85 §8 hard rule: measure laws are emergent and non-local, so they are NEVER a
+			// composable premise — including one in a law is a class error, not just unsupported.
+			if isBuiltinMeasureLaw(m) {
+				a.errorf(fn.Pos(), "composite law %q includes %q, a measure law; measure laws are not composable (docs/85 §8) — verify them with `fulfills %s` directly", fn.Name, m, m)
+				continue
+			}
 			decl, _, ok := a.lookupLaw(m)
 			if !ok || decl == nil {
 				a.errorf(fn.Pos(), "composite law %q includes %q, which is not a law", fn.Name, m)

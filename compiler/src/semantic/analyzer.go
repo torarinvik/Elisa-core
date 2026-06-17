@@ -282,6 +282,11 @@ type Analyzer struct {
 	// the `NoBoundsChecks` shape law (docs/89): a function `fulfills NoBoundsChecks` is violated iff
 	// this list is non-empty. Saved/restored per function like currentFunctionUsedPermissionRefs.
 	currentFunctionGuardedIndexes []lexer.Pos
+	// currentFunctionExpectsVectorize is set while analyzing a function that `fulfills Vectorizes` (a
+	// measure law, docs/89 Stage 5). It opts the function's range loops into the existing autovec
+	// verifier: each ForStmt is tagged AutovecExpected, so the post-optimization pass warns (verify-
+	// only, never build-gating) if the loop did not vectorize. Saved/restored per function.
+	currentFunctionExpectsVectorize bool
 	currentProgressSummary            *FunctionProgressSummary
 	loopDepth                         int
 	currentTrustedNonProgressDepth    int

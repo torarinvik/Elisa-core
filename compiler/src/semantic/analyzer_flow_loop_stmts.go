@@ -125,6 +125,13 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	if stmt.Reverse {
 		a.errorf(stmt.Pos(), "reverse range for loops are not supported yet; reverse iterable loops are")
 	}
+	// A function that `fulfills Vectorizes` (docs/89 Stage 5, measure class) opts its range loops into
+	// the autovec verifier: tag the loop expected-to-vectorize so the post-optimization pass warns if
+	// it didn't. Verify-only — the tag changes no codegen, just the -Wperf measurement.
+	if a.currentFunctionExpectsVectorize && !stmt.AutovecExpected {
+		stmt.AutovecExpected = true
+		stmt.AutovecReason = "fulfills Vectorizes"
+	}
 	startType := a.analyzeExpr(stmt.Start)
 	endType := a.analyzeExpr(stmt.End)
 	loopType := CommonNumericType(startType, endType)

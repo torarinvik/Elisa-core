@@ -42,6 +42,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
+	savedFunctionExpectsVectorize := a.currentFunctionExpectsVectorize
 	savedProgressSummary := a.currentProgressSummary
 	savedTrustedNonProgressDepth := a.currentTrustedNonProgressDepth
 	savedTrustedAssumeProgressDepth := a.currentTrustedAssumeProgressDepth
@@ -131,6 +132,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.currentFunctionExpectsVectorize = fulfillsVectorizes(fn)
 					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
@@ -215,6 +217,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
+	a.currentFunctionExpectsVectorize = savedFunctionExpectsVectorize
 	a.currentProgressSummary = savedProgressSummary
 	a.currentTrustedNonProgressDepth = savedTrustedNonProgressDepth
 	a.currentTrustedAssumeProgressDepth = savedTrustedAssumeProgressDepth
@@ -255,6 +258,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
+	savedFunctionExpectsVectorize := a.currentFunctionExpectsVectorize
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
@@ -333,6 +337,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.currentFunctionExpectsVectorize = fulfillsVectorizes(fn)
 					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
@@ -382,6 +387,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
+	a.currentFunctionExpectsVectorize = savedFunctionExpectsVectorize
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings
@@ -421,6 +427,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedFunctionPermissions := a.currentFunctionUsedPermissions
 	savedFunctionPermissionRefs := a.currentFunctionUsedPermissionRefs
 	savedFunctionGuardedIndexes := a.currentFunctionGuardedIndexes
+	savedFunctionExpectsVectorize := a.currentFunctionExpectsVectorize
 	savedReturnProvenance := a.currentReturnProvenance
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
@@ -499,6 +506,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.currentFunctionExpectsVectorize = fulfillsVectorizes(fn)
 					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
@@ -542,6 +550,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentFunctionUsedPermissions = savedFunctionPermissions
 	a.currentFunctionUsedPermissionRefs = savedFunctionPermissionRefs
 	a.currentFunctionGuardedIndexes = savedFunctionGuardedIndexes
+	a.currentFunctionExpectsVectorize = savedFunctionExpectsVectorize
 	a.currentReturnProvenance = savedReturnProvenance
 	a.currentReturnBorrowedOwnerRefs = savedReturnBorrowedOwnerRefs
 	a.currentConservativeCallWidenings = savedConservativeCallWidenings

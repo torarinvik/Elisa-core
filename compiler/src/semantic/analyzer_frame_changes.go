@@ -123,8 +123,8 @@ func isFrameLaw(decl *ast.FuncDecl) bool {
 // checker. Diagnoses a missing/non-frame law, an unknown or non-ref param, and subject mismatch.
 func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
 	for _, fc := range fn.Fulfills {
-		if isBuiltinShapeLaw(fc.Law) {
-			continue // built-in shape law (docs/89); discharged after the body is analyzed (checkShapeFulfills)
+		if isBuiltinFunctionLevelLaw(fc.Law) {
+			continue // built-in shape/measure law (docs/89); discharged elsewhere (checkFunctionLevelFulfills / backend verifier)
 		}
 		decl, _, ok := a.lookupLaw(fc.Law)
 		if !ok || decl == nil {
@@ -180,6 +180,40 @@ func isEffectLaw(decl *ast.FuncDecl) bool {
 // member function-level laws, applied with the subject-free `fulfills <Law>`.
 func isCompositeLaw(decl *ast.FuncDecl) bool {
 	return decl != nil && decl.IsLaw && len(decl.Includes) != 0
+}
+
+// isBuiltinMeasureLaw reports whether a name is a built-in MEASURE law (docs/85 §8, Stage 5): an
+// emergent, codegen-dependent property verified post-hoc (never proved, never build-gating, never a
+// composable premise — the §8 hard rule). Like shape laws these are predefined names, not user `law`
+// decls. Only `Vectorizes` exists today.
+func isBuiltinMeasureLaw(name string) bool {
+	switch name {
+	case "Vectorizes":
+		return true
+	default:
+		return false
+	}
+}
+
+// isBuiltinFunctionLevelLaw reports whether a name is any built-in (non-decl) function-level law — a
+// shape or measure property. Such names have no FuncDecl, so `fulfills`/`is` handling must recognize
+// them before falling through to law lookup.
+func isBuiltinFunctionLevelLaw(name string) bool {
+	return isBuiltinShapeLaw(name) || isBuiltinMeasureLaw(name)
+}
+
+// fulfillsVectorizes reports whether a function declares `fulfills Vectorizes` (subject-free). Measure
+// laws are not composable, so only a direct, well-formed clause counts.
+func fulfillsVectorizes(fn *ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	for _, fc := range fn.Fulfills {
+		if fc.Param == "" && fc.Law == "Vectorizes" {
+			return true
+		}
+	}
+	return false
 }
 
 // lawClassName names a law's discharge class for diagnostics (docs/85 §4).
@@ -272,11 +306,18 @@ func (a *Analyzer) checkFunctionLevelFulfills(fn *ast.FuncDecl, fnType *FuncType
 	for _, fc := range fn.Fulfills {
 		forbids := a.lawEffectiveForbids(fc.Law, map[string]bool{})
 		shapes := a.lawEffectiveShapes(fc.Law, map[string]bool{})
-		if len(forbids) == 0 && len(shapes) == 0 {
+		measure := isBuiltinMeasureLaw(fc.Law)
+		if len(forbids) == 0 && len(shapes) == 0 && !measure {
 			continue // not a function-level law (frame/value/unknown handled elsewhere)
 		}
 		if fc.Param != "" {
 			a.errorf(fc.Position, "%q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
+			continue
+		}
+		// A measure law (docs/85 §8) is verify-only: there is no static obligation to discharge here.
+		// `fulfills Vectorizes` opts the function's loops into the post-codegen autovec verifier (set
+		// in analyzeForStmt); a failure is a -Wperf warning, never a compile error. Nothing else to do.
+		if measure {
 			continue
 		}
 		for _, forbidden := range forbids {

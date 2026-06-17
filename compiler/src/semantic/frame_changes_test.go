@@ -1,6 +1,10 @@
 package semantic
 
-import "testing"
+import (
+	"testing"
+
+	"elisacore/src/ast"
+)
 
 // docs/87 brick 87-1: a write within the declared `changes` set is clean.
 func TestChangesWriteInSetIsClean(t *testing.T) {
@@ -538,6 +542,74 @@ def f() -> i64 fulfills A:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "composite_cycle.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "cyclic") {
 		t.Fatalf("a cyclic composite must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// docs/89 Stage 5 (measure): `fulfills Vectorizes` compiles with no static obligation and tags the
+// function's range loops expected-to-vectorize, opting them into the post-codegen autovec verifier.
+func TestMeasureLawVectorizesTagsLoops(t *testing.T) {
+	src := `
+def scale(xs: darray[i64]) -> i64 fulfills Vectorizes:
+    total: mutable i64 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i] * 2
+    return total
+`
+	result := analyzeTreeTestSource(t, "measure_vectorizes.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a measure law is verify-only and should compile cleanly, got: %v", errs)
+	}
+	fn, ok := result.File.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected a FuncDecl, got %T", result.File.Decls[0])
+	}
+	for _, stmt := range fn.Body {
+		if forStmt, ok := stmt.(*ast.ForStmt); ok {
+			if !forStmt.AutovecExpected {
+				t.Fatalf("a range loop in a `fulfills Vectorizes` function must be tagged AutovecExpected")
+			}
+			return
+		}
+	}
+	t.Fatalf("did not find the range loop to check its AutovecExpected tag")
+}
+
+// Applying a measure law with a subject is a wrong-form error.
+func TestMeasureLawWithSubjectErrors(t *testing.T) {
+	src := `
+def f(xs: darray[i64]) -> i64 fulfills xs is Vectorizes:
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "measure_subject.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "constrains the whole function") {
+		t.Fatalf("applying a measure law with a subject must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A measure law used in value `is` position is a wrong-class error.
+func TestMeasureLawInValueIsErrors(t *testing.T) {
+	src := `
+def f(x: i64) -> bool:
+    return x is Vectorizes
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "measure_value_is.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is a measure law") {
+		t.Fatalf("using a measure law with value `is` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// docs/85 §8 hard rule: a measure law is NOT composable — including it in a law is a class error.
+func TestMeasureLawNotComposable(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+law Bad includes NoAlloc, Vectorizes
+
+def f() -> i64 fulfills Bad:
+    return 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "measure_composable.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "not composable") {
+		t.Fatalf("including a measure law in a composite must error, got:\n%s", allDiagnostics(result))
 	}
 }
 

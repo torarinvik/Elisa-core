@@ -1,10 +1,11 @@
-# 89 — Effect & shape laws (docs/85 §4, §8, Stage 4)
+# 89 — Function-level laws: effect, shape, composite, measure (docs/85 §4, §6, §8, Stages 4–5)
 
-Status: **design + bricks 1–2.** Implements the **effect** discharge class (brick 1) and the
-first **shape** law (brick 2) from docs/85 §4 — the *function-level* law classes (value laws are
-about a value, frame laws about a place; effect/shape laws are about the whole function). Effect
-laws build on the effect-grant / permission system (`@hot` is judged against the same set); shape
-laws build on the bounds-proof analysis.
+Status: **design + bricks 1–4.** Implements the **function-level** law classes from docs/85 —
+the ones about the whole function rather than a value (value laws) or a place (frame laws):
+**effect** (brick 1, §4), **shape** (brick 2, §8), **composite** `includes` (brick 3, §6), and
+**measure** (brick 4, §8, Stage 5). Effect laws build on the effect-grant / permission system
+(`@hot` is judged against the same set); shape laws on the bounds-proof analysis; composite laws
+union the others; measure laws are verify-only, riding the existing post-codegen autovec verifier.
 
 ## 1. The effect discharge class
 
@@ -127,19 +128,48 @@ flow through one uniform check. Validation (at the composite's decl): no body / 
 member resolves to a function-level law (a value or frame member is rejected — `includes` composes
 only function-level classes); the include graph is acyclic.
 
-## 7. What bricks 1–3 cover / defer
+## 7. Measure laws — `Vectorizes` (brick 4, Stage 5)
+
+A **measure law** (docs/85 §8) is an *emergent, codegen-dependent* property — vectorization,
+inlining, a cycle budget. It is the deliberately weak class: **never proved, never build-gating,
+never a composable premise** (§8 hard rule). It is *verified post-hoc* and surfaced as a warning.
+Like shape laws it is a built-in name, not a user `law` decl. The first is `Vectorizes`:
+
+```elisa
+def scale(xs: darray[i64]) -> i64 fulfills Vectorizes:
+    total: mutable i64 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i] * 2     # if this loop fails to vectorize → -Wperf warning
+    return total
+```
+
+**Discharge:** `fulfills Vectorizes` carries *no static obligation*. Instead the analyzer tags the
+function's range loops `AutovecExpected` (in `analyzeForStmt`, gated on
+`currentFunctionExpectsVectorize`), opting them into the **existing** post-optimization autovec
+verifier (`verifyAutovecExpectations`): a marked loop that lacks `llvm.loop.isvectorized` after the
+pipeline produces a `-Wperf` warning. The tag changes no codegen — it is purely a measurement
+hook. A failure is *always* a warning, never a compile error — that is what makes it measure-class.
+
+**The §8 hard rule is enforced:** a measure law cannot be `includes`d into another law (a class
+error, not merely unsupported), so a measure property can never masquerade as a provable premise
+that something else relies on transitively. Subject form and value `is` are wrong-form /
+wrong-class errors, as for the other function-level classes.
+
+## 8. What bricks 1–4 cover / defer
 
 **Covered:** effect-law decls (`forbids`); the built-in `NoBoundsChecks` shape law; composite
-laws (`includes`) unioning effect + shape obligations under one name, transitively + cycle-safe;
-subject-free `fulfills <Law>` discharged through one uniform pass; the wrong-class / wrong-form
-diagnostics for all three. Also fixed a latent parser gap: `-> RetType changes/preserves/fulfills`
-mis-parsed the return type as a legacy region prefix (the disambiguation list only knew
-`can`/`ensures`).
+laws (`includes`) unioning effect + shape obligations transitively + cycle-safe; the `Vectorizes`
+measure law (verify-only via the autovec verifier, non-composable); subject-free `fulfills <Law>`
+through one uniform discharge pass; the wrong-class / wrong-form / non-composable diagnostics for
+all four. Also fixed a latent parser gap: `-> RetType changes/preserves/fulfills` mis-parsed the
+return type as a legacy region prefix (the disambiguation list only knew `can`/`ensures`).
+
+The discharge-class ladder (docs/85 §4) is now complete: **value · frame · effect · shape ·
+measure**, plus **composite** composition over the function-level classes.
 
 **Deferred:**
 - **more built-in shape laws** (`BranchFree`, `NoRealloc`, `NoAlloc`-as-codegen) — same
-  `isBuiltinShapeLaw` registry + a per-law body analysis in `dischargeShapeRequirement`; both are
-  shaped to grow.
-- **measure laws** (Stage 5) — the deliberately non-prove, non-composable class.
-- **`includes` composition** of effect laws into larger laws (docs/85 §6 algebra).
+  `isBuiltinShapeLaw` registry + a per-law body analysis in `dischargeShapeRequirement`.
+- **more measure laws** (`Inlined`, cycle/alloc budgets) — same `isBuiltinMeasureLaw` registry +
+  a post-codegen verifier hook.
 - **required-effect laws** (`requires` an effect) — only `forbids` exists now.
