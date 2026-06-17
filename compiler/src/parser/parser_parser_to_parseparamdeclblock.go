@@ -452,6 +452,9 @@ func (p *Parser) looksLikeLawDecl() bool {
 	switch p.tokens[p.pos+2].Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
 		return true
+	case lexer.TOKEN_IDENT:
+		// Subject-free effect law: `law NoAlloc forbids ...` (docs/85 §4) — no param list.
+		return p.tokens[p.pos+2].Text == "forbids"
 	default:
 		return false
 	}
@@ -466,9 +469,36 @@ func (p *Parser) parseLawDecl() ast.Decl {
 	p.expectIdentText("law")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
-	p.expect(lexer.TOKEN_LPAREN)
-	params, _ := p.parseExplicitSignatureParamList(true, false)
-	p.expect(lexer.TOKEN_RPAREN)
+	// An EFFECT law (docs/85 §4, Stage 4) is subject-free: `law NoAlloc forbids Memory.Allocate`. It
+	// constrains the whole function, not a value or a place, so it takes no parameter list. Value and
+	// frame laws keep their `(subject ...)` list.
+	var params []ast.ParamDecl
+	if p.match(lexer.TOKEN_LPAREN) {
+		params, _ = p.parseExplicitSignatureParamList(true, false)
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	if p.peekIdentText("forbids") {
+		p.matchIdentText("forbids")
+		var forbids []ast.PermissionRef
+		for {
+			forbids = append(forbids, p.parsePermissionRefGroup()...)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expectNewline()
+		return &ast.FuncDecl{
+			Position:         pos,
+			Name:             name,
+			TypeParams:       typeParams,
+			RegionParams:     regionParams,
+			PermissionParams: permissionParams,
+			GenericParams:    genericParams,
+			Params:           params,
+			Forbids:          forbids,
+			IsLaw:            true,
+		}
+	}
 	// A FRAME law (docs/88) carries a `changes`/`preserves` clause instead of an `= <bool-expr>`
 	// body: `law MovesPlayerOnly(self: Render&) changes self.px, self.py`. It is a named, reusable
 	// frame applied with `fulfills`; it has no predicate body.

@@ -28,6 +28,18 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 		}
 		return
 	}
+	// An EFFECT law (docs/85 §4, Stage 4) is a named set of forbidden effects — a function-level
+	// discharge class with no value subject and no body. Validate its shape here; conformance is
+	// discharged against each fulfilling function's effect set (checkEffectFulfills).
+	if isEffectLaw(fn) {
+		if len(fn.Body) != 0 {
+			a.errorf(fn.Pos(), "effect law %q has a `forbids` clause and cannot also have a predicate body", fn.Name)
+		}
+		if len(fnType.Params) != 0 {
+			a.errorf(fn.Pos(), "effect law %q constrains the whole function and takes no subject parameter", fn.Name)
+		}
+		return
+	}
 	if !IsBoolType(fnType.Return) {
 		a.errorf(fn.Pos(), "law %q must be a predicate returning bool, got %s", fn.Name, typeString(fnType.Return))
 	}

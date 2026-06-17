@@ -128,8 +128,15 @@ func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
 			a.errorf(fc.Position, "`fulfills` names %q, which is not a law", fc.Law)
 			continue
 		}
+		if isEffectLaw(decl) {
+			continue // effect laws are function-level; discharged after the effect set is inferred (checkEffectFulfills)
+		}
 		if !isFrameLaw(decl) {
 			a.errorf(fc.Position, "`fulfills` requires a frame law (a `changes`/`preserves` law); %q is a value law — use it with `is` in a contract instead", fc.Law)
+			continue
+		}
+		if fc.Param == "" {
+			a.errorf(fc.Position, "frame law %q needs a subject: write `fulfills <param> is %s`", fc.Law, fc.Law)
 			continue
 		}
 		sym, found := a.currentScope.Lookup(fc.Param)
@@ -157,6 +164,53 @@ func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
 			a.currentHasPreserves = true
 		}
 	}
+}
+
+// isEffectLaw reports whether a law declaration is an EFFECT law (docs/85 §4, Stage 4): a named set
+// of forbidden effects, discharged against a function's inferred effect set, applied with the
+// subject-free `fulfills <Law>`.
+func isEffectLaw(decl *ast.FuncDecl) bool {
+	return decl != nil && decl.IsLaw && len(decl.Forbids) != 0
+}
+
+// checkEffectFulfills discharges each `fulfills <EffectLaw>` clause (docs/85 §4) after the function's
+// effect set is finalized: a conforming function must not use any effect the law forbids. The check
+// is against fnType.PermissionRefs — the transitive inferred-plus-declared effect set the whole
+// effect system (and `@hot`) trusts — so it is sound by construction: an effect the function uses is
+// in that set, and over-reporting only yields a safe false positive. Also enforces the class shape:
+// an effect law is applied with the subject-free `fulfills <Law>`, never `fulfills x is <Law>`.
+func (a *Analyzer) checkEffectFulfills(fn *ast.FuncDecl, fnType *FuncType) {
+	if fn == nil || fnType == nil {
+		return
+	}
+	for _, fc := range fn.Fulfills {
+		decl, _, ok := a.lookupLaw(fc.Law)
+		if !ok || decl == nil || !isEffectLaw(decl) {
+			continue // frame/value fulfills handled in expandFulfills; unknown law already diagnosed there
+		}
+		if fc.Param != "" {
+			a.errorf(fc.Position, "effect law %q constrains the whole function; write `fulfills %s`, not `fulfills %s is %s`", fc.Law, fc.Law, fc.Param, fc.Law)
+			continue
+		}
+		for _, forbidden := range decl.Forbids {
+			for _, used := range fnType.PermissionRefs {
+				if permissionRefForbidden(used, forbidden) {
+					a.errorf(fn.Pos(), "function %q `fulfills %s` but uses the `%s` effect, which %s forbids", fn.Name, fc.Law, lawEffectName(used), fc.Law)
+					break
+				}
+			}
+		}
+	}
+}
+
+// permissionRefForbidden reports whether a used effect ref is barred by a forbid entry: a bare family
+// forbid (`Memory`) bars every member of that family; a member forbid (`Memory.Allocate`) bars only
+// that exact effect.
+func permissionRefForbidden(used, forbid ast.PermissionRef) bool {
+	if used.Name != forbid.Name {
+		return false
+	}
+	return forbid.Member == "" || forbid.Member == used.Member
 }
 
 // isFrameWritableRefType reports whether a param type is a reference whose pointee a callee body

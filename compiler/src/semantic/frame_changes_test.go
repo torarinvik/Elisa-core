@@ -347,6 +347,67 @@ def outer(r: mutable Render&) changes r.px:
 	}
 }
 
+// docs/85 §4 Stage 4: an effect law forbids effects; a conforming function that uses none is clean.
+func TestEffectLawFulfillsClean(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+
+def pure_add(x: i64, y: i64) -> i64 fulfills NoAlloc:
+    return x + y
+`
+	result := analyzeTreeTestSource(t, "effect_law_clean.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a function using no forbidden effect should fulfill the effect law cleanly, got: %v", errs)
+	}
+}
+
+// The effect law is discharged against the inferred effect set: a function that allocates while
+// `fulfills NoAlloc` is a compile error.
+func TestEffectLawFulfillsViolationErrors(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+
+def grow() -> i64 fulfills NoAlloc:
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(7)
+        return xs[0]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "effect_law_violation.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "uses the `Memory.Allocate` effect") {
+		t.Fatalf("allocating under `fulfills NoAlloc` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Applying an effect law with a subject (`fulfills f is NoAlloc`) is a wrong-form error — effect
+// laws are function-level.
+func TestEffectLawWithSubjectErrors(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+
+def f(x: i64) -> i64 fulfills x is NoAlloc:
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "effect_law_subject.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "constrains the whole function") {
+		t.Fatalf("applying an effect law with a subject must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// An effect law used in value `is` position is a wrong-class error.
+func TestEffectLawInValueIsErrors(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+
+def f(x: i64) -> bool:
+    return x is NoAlloc
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "effect_law_value_is.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is an effect law") {
+		t.Fatalf("using an effect law with value `is` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
 func TestFrameLawInValueIsErrors(t *testing.T) {
 	src := `

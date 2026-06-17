@@ -102,6 +102,9 @@ type EnsuresPath struct {
 
 // FulfillsClause is `fulfills <Param> is <Law>` (docs/88): the function declares it satisfies the
 // named frame law, with the law's subject bound to Param.
+// FulfillsClause is a `fulfills` application on a function. For a FRAME law it is `<param> is <Law>`
+// (Param names the subject the law binds to). For a function-level EFFECT law it is the subject-free
+// `fulfills <Law>` (Param == ""), since an effect law constrains the whole function, not a place.
 type FulfillsClause struct {
 	Position lexer.Pos
 	Param    string
@@ -156,6 +159,12 @@ type FuncDecl struct {
 	// the function by binding the law's subject to the named param. Each expands into the function's
 	// Changes/Preserves sets (the law's paths rebased from `self` to the param).
 	Fulfills []FulfillsClause
+	// Forbids holds the forbidden effects of an EFFECT law (docs/85 §4, Stage 4):
+	// `law NoAlloc forbids Memory.Allocate, Abort.Panic`. An effect law is the function-level
+	// discharge class — it names effects a conforming function must not use, discharged against the
+	// function's inferred effect set. A non-empty Forbids (with no `=` body / `changes` clause) marks
+	// the law as an effect law; a function declares conformance with the subject-free `fulfills <Law>`.
+	Forbids []PermissionRef
 	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
 	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
 	// function machinery (generics, modules, type checking, calls); the flag drives purity

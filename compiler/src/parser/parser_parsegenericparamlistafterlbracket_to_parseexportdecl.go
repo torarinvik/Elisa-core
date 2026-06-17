@@ -241,16 +241,21 @@ func (p *Parser) parseChangesPathsAfterKeyword() []ast.EnsuresPath {
 	}
 	return paths
 }
-// parseFulfillsClausesAfterKeyword parses a comma-separated list of `<param> is <Law>` frame-law
-// applications for a `fulfills` clause (docs/88), e.g. `fulfills r is MovesPlayerOnly`.
+// parseFulfillsClausesAfterKeyword parses a comma-separated `fulfills` list (docs/88, docs/85 §4).
+// Each item is either a FRAME-law application `<param> is <Law>` (e.g. `fulfills r is
+// MovesPlayerOnly`) or a subject-free EFFECT-law application `<Law>` (e.g. `fulfills NoAlloc`). The
+// form is told apart by whether `is` follows the first identifier.
 func (p *Parser) parseFulfillsClausesAfterKeyword() []ast.FulfillsClause {
 	clauses := make([]ast.FulfillsClause, 0, 2)
 	for {
 		pos := p.cur().Pos
-		param := p.expect(lexer.TOKEN_IDENT).Text
-		p.expect(lexer.TOKEN_IS)
-		law := p.expect(lexer.TOKEN_IDENT).Text
-		clauses = append(clauses, ast.FulfillsClause{Position: pos, Param: param, Law: law})
+		first := p.expect(lexer.TOKEN_IDENT).Text
+		if p.match(lexer.TOKEN_IS) {
+			law := p.expect(lexer.TOKEN_IDENT).Text
+			clauses = append(clauses, ast.FulfillsClause{Position: pos, Param: first, Law: law})
+		} else {
+			clauses = append(clauses, ast.FulfillsClause{Position: pos, Param: "", Law: first})
+		}
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}

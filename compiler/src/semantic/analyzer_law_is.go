@@ -31,6 +31,12 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 		a.errorf(expr.Pos(), "%q is a frame law; apply it to a function with `fulfills ... is %s`, not with `is` in a value position", lawName, lawName)
 		return true
 	}
+	// An effect law (docs/85 §4) is a function-level effect bound, not a value predicate — applied
+	// with the subject-free `fulfills`, never value `is`.
+	if decl, _, found := a.lookupLaw(lawName); found && isEffectLaw(decl) {
+		a.errorf(expr.Pos(), "%q is an effect law; apply it to a function with `fulfills %s`, not with `is` in a value position", lawName, lawName)
+		return true
+	}
 	call := &ast.CallExpr{
 		Position: expr.Pos(),
 		Func:     &ast.Ident{Position: expr.Right.Pos(), Name: lawName},

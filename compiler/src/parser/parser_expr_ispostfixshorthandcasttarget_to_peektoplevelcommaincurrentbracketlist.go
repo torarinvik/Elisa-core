@@ -941,6 +941,19 @@ func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 	}
 	return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: tag}}
 }
+// isPostReturnClauseKeyword reports whether an identifier begins a post-return-type signature clause
+// (`-> RetType <clause> ...`). These must NOT be mistaken for a legacy `<region> T&` prefix on the
+// return type, so an `ident ident` where the second is one of these is the return type followed by a
+// clause, not a region-prefixed reference.
+func isPostReturnClauseKeyword(text string) bool {
+	switch text {
+	case "can", "effects", "ensures", "changes", "preserves", "fulfills":
+		return true
+	default:
+		return false
+	}
+}
+
 func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, string) {
 	switch p.peek() {
 	case lexer.TOKEN_HEAP:
@@ -953,7 +966,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "can" && p.tokens[p.pos+1].Text != "effects" && p.tokens[p.pos+1].Text != "ensures" {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && !isPostReturnClauseKeyword(p.tokens[p.pos+1].Text) {
 			// The legacy `<ident> T&` region prefix is removed (docs/68 §7): use the
 			// canonical `T& @r` suffix. Now that refstorage params are gone this prefix is
 			// unambiguously a region, so we can reject it. Recover by treating the ident as
