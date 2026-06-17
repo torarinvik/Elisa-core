@@ -120,6 +120,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractInvariant, Cond: cond}
 			}
+		case "decreases":
+			// `decreases <int-expr>` termination measure (lifted into the decl when leading; docs/86
+			// brick 86-7). Skip if it's actually a variable named `decreases`.
+			if p.looksLikeContractStmt() {
+				pos := p.cur().Pos
+				p.advance()
+				measure := p.parseExpr()
+				p.expectNewline()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractDecreases, Cond: measure}
+			}
 		case "expect":
 			if p.looksLikeExpectPatternStmt() {
 				return p.parseExpectPatternStmt()

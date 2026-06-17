@@ -192,6 +192,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.checkHotContract(fn, fnType)
 		a.checkLawContract(fn, fnType)
 		a.checkFunctionLevelFulfills(fn, fnType)
+		a.checkTermination(fn, fnType)
 		a.finalizeFunctionAnalysis(fn, fnType)
 	}
 	a.finishFunctionProgressSummary(fn, a.currentFunctionUsedPermissionRefs)

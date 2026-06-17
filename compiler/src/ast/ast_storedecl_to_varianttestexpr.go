@@ -143,6 +143,11 @@ type FuncDecl struct {
 	// return in debug builds. They may reference `result` (the returned value) and `old(expr)`
 	// (the value of expr at function entry). Distinct from Ensures (typestate).
 	EnsureValues []Expr
+	// Decreases holds the termination measure(s) from leading `decreases <int-expr>` clauses
+	// (docs/86 brick 86-7). Multiple components form a lexicographic tuple. When present, every
+	// self-recursive call must provably decrease the measure (and keep it bounded below), proving
+	// termination at compile time. Empty = no termination obligation (status quo).
+	Decreases    []Expr
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Body         []Stmt

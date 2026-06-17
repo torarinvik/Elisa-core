@@ -217,5 +217,35 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
    `analyzeRequiresClauses` (the one entry hook, since a top-level binding records without a
    save/restore). Negative control test confirms an unrelated `n` is NOT subsumed.
 
+7. **86-7 — recursive-function termination (`decreases`). [LANDED]** The Dafny termination story:
+   a function with a `decreases <measure>` clause proves it terminates by showing the measure
+   strictly decreases — and stays bounded below — at every recursive call (a strictly-decreasing
+   sequence of naturals is finite). Implemented for **direct self-recursion**, reusing the
+   bounded-linear prover: the measure at a recursive call is the measure expression with the callee's
+   parameters substituted by the call's arguments (`substitutedAffine`), and the obligation is that
+   `measure(params) - measure(args)` is a provably-positive constant.
+
+   - Surface: `decreases <int-expr>` as a leading body clause (parsed like `requires`/`ensure` into a
+     `ContractStmt`, lifted to `FuncDecl.Decreases`). Multiple `decreases` lines form a lexicographic
+     tuple, satisfied at the first component that strictly decreases with all earlier components
+     provably unchanged.
+   - Discharge (`analyzer_termination.go`, `checkTermination` called once per function after the body,
+     where params are still in scope): collect direct self-calls (`walkStaticStmts`), substitute
+     args, prove `measureStrictlyDecreases` (difference's lower bound > 0) and `measureBoundedBelow`
+     (unsigned type, or a provable ≥ 0 floor). Proven → `ProofProvenLinear` "termination of f";
+     unprovable → hard error (`the function may not terminate`).
+   - **Opt-in and additive:** termination is checked ONLY when a `decreases` clause is present, so
+     existing recursive code is unaffected. With the clause it is an explicit claim, so an unprovable
+     measure is a hard error (like `ensures`). A `decreases` on a non-recursive function warns
+     (unused clause / likely a typo'd recursive call).
+   - **Soundness:** the prover fails closed (any non-affine arg, e.g. `f(n/2)`, or an unbounded
+     measure → not proven → error, never a false "terminates"). Strict-decrease + bounded-below is a
+     complete termination argument for the cases it proves.
+
+   **Deferred (docs/86 §9 follow-ups):** while-loop variants (a loop `decreases` requires tracking
+   the measure's change THROUGH the body — a dataflow problem, unlike the substitution available at a
+   call); mutual recursion (a→b→a); and division/multiplicative measures (`f(n/2)`), which need
+   monotonicity reasoning beyond linear affine arithmetic.
+
 Each brick: build → targeted test → full `./src/...` green → commit, per the established
 per-brick pattern.

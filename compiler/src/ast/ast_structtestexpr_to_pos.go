@@ -467,6 +467,7 @@ const (
 	ContractRequire   ContractKind = iota // precondition: `requires <bool-expr>` at function start
 	ContractEnsure                         // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
 	ContractInvariant                      // in-body assertion: `invariant <bool-expr>`, checked in place
+	ContractDecreases                      // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
 )
 
 // ContractStmt is a value-contract clause written as a leading body statement. The parser produces
