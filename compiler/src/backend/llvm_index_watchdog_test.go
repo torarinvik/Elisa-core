@@ -56,3 +56,22 @@ func TestCheckedGetIndexHasNoWatchdogDuplicate(t *testing.T) {
 		t.Fatalf("checked get index must not get a duplicate watchdog bounds check, got:\n%s", output)
 	}
 }
+
+// Watchdog subsumption (docs/86 86-3): an index the analyzer proved in-bounds — here a
+// `0..<xs.count` loop index (proven upper bound + non-negative) — emits NO debug watchdog,
+// even at -O0. A proven access is never double-instrumented.
+func TestIndexWatchdogSubsumedForProvenLoopIndex(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_subsumed_proven.elisa", `def sum(xs: darray[i32]&) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") {
+		t.Fatalf("a proven loop index should be subsumed (no debug watchdog), got:\n%s", output)
+	}
+}

@@ -162,9 +162,12 @@ Fail-closed (§9.2): a missing/false entry always keeps the check. Subsumption c
    narrowing. Alias refinements (`type TileX = i32 is Bounded[..]`) are captured in
    `aliasRefinements` (namedTypes erases them) and their predicate validation is **deferred**
    to `validateAliasRefinements` (after laws are collected — aliases resolve far earlier).
-3. **86-3 — watchdog subsumption.** `Result.ProvenIndexBounds` + backend consult; mark
-   proven index sites (tier-1 and tier-2). Test: a proven `arr[i]` emits no guard under
-   `-fbounds-check` (IR assertion); an unproven one keeps exactly one.
+3. **86-3 — watchdog subsumption. [LANDED]** The analyzer already proved index bounds into
+   `indexBoundsProven` (const-in-array, const-in-static-view, var-with-proven-upper-bound +
+   non-negativity) but the set only drove a permission lint. Now exposed as
+   `Result.IndexBoundsProven` and consulted by `emitDebugIndexBoundsGuard` (which takes the
+   `*ast.IndexExpr`): a proven site emits NO debug guard — never double-instrumented. Test:
+   a `0..<xs.count` loop index (non-const, non-`trusted`) emits no `wd.in_bounds` at -O0.
 4. **86-4 (optional, scoped separately) — relational coupling** for the loop-index family
    (§8). Only if 86-1..3 don't already cover the real call sites.
 

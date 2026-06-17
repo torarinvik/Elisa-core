@@ -77,6 +77,12 @@ type Result struct {
 	// emits each predicate call as a debug boundary check (trap on violation) before the return,
 	// elided in release. Only side-effect-free return values get a check.
 	ReturnRefinementChecks map[*ast.ReturnStmt][]*ast.CallExpr
+	// IndexBoundsProven marks each `arr[i]` whose index the analyzer proved in-bounds (const index in
+	// a fixed/static-length container, or a variable index with a proven upper bound + non-negativity).
+	// The backend consults it to SKIP the debug bounds-check guard for that site — watchdog subsumption
+	// (docs/85 §9.6, docs/86 86-3): a proven index disables the debug check, so a proven access is never
+	// double-instrumented. Sound by construction: a missing/false entry always keeps the guard.
+	IndexBoundsProven map[*ast.IndexExpr]bool
 	// ProofReport records every refinement-discharge decision (docs/85: the "always known to the
 	// user" observability layer). The CLI prints it under --explain so the user can audit exactly
 	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —

@@ -82,7 +82,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			return nil, nil, err
 		}
 		if userFacing {
-			if err := s.emitDebugIndexBoundsGuard(arrayPtr, t, indexValue); err != nil {
+			if err := s.emitDebugIndexBoundsGuard(expr, arrayPtr, t, indexValue); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -99,7 +99,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			return nil, nil, err
 		}
 		if userFacing {
-			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
+			if err := s.emitDebugIndexBoundsGuard(expr, containerPtr, t, indexValue); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -110,7 +110,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			return nil, nil, err
 		}
 		if userFacing {
-			if err := s.emitDebugIndexBoundsGuard(containerPtr, t, indexValue); err != nil {
+			if err := s.emitDebugIndexBoundsGuard(expr, containerPtr, t, indexValue); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -127,7 +127,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		}
 		if arrayElem, ok := t.Elem.(*semantic.ArrayType); ok {
 			if userFacing {
-				if err := s.emitDebugIndexBoundsGuard(basePtr, arrayElem, indexValue); err != nil {
+				if err := s.emitDebugIndexBoundsGuard(expr, basePtr, arrayElem, indexValue); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -141,7 +141,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		}
 		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
 			if userFacing {
-				if err := s.emitDebugIndexBoundsGuard(basePtr, t.Elem, indexValue); err != nil {
+				if err := s.emitDebugIndexBoundsGuard(expr, basePtr, t.Elem, indexValue); err != nil {
 					return nil, nil, err
 				}
 			}
@@ -172,7 +172,7 @@ func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, c
 // accesses, which emit no check in release, are still verified while testing.
 // In release builds this is a no-op (zero overhead): "debug verifies what
 // release assumes." Only containers carrying a runtime count are guarded.
-func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) error {
+func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) error {
 	if s == nil || s.g == nil {
 		return nil
 	}
@@ -180,6 +180,11 @@ func (s *functionState) emitDebugIndexBoundsGuard(containerPtr C.LLVMValueRef, c
 	// (ELISACORE_FORCE_BOUNDS_CHECK). The forced mode lets optimized/cross builds trap
 	// at the offending indexing site rather than crashing later on a derived bad pointer.
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
+		return nil
+	}
+	// Watchdog subsumption (docs/85 §9.6, docs/86 86-3): the analyzer proved this index in-bounds,
+	// so the debug guard would be redundant. Skip it — a proven access is never double-instrumented.
+	if expr != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr] {
 		return nil
 	}
 	var countValue C.LLVMValueRef

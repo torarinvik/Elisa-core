@@ -692,6 +692,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,
+		IndexBoundsProven:       a.indexBoundsProven,
 		ProofReport:             a.proofReport,
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
