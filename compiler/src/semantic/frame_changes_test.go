@@ -174,3 +174,108 @@ def f(r: mutable Render&) changes r.px preserves r.px:
 		t.Fatalf("a place in both changes and preserves must error, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// docs/88: a function `fulfills` a frame law — writes within the law's frame are clean.
+func TestFulfillsFrameLawInFrameClean(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    py: mutable i32
+    health: mutable i32
+
+law MovesPlayerOnly(self: Render&) changes self.px, self.py
+
+def clip_move(r: mutable Render&, dx: i32) fulfills r is MovesPlayerOnly:
+    r.px <- r.px + dx
+    r.py <- r.py + 1
+`
+	result := analyzeTreeTestSource(t, "fulfills_clean.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("writes within the fulfilled frame should be clean, got: %v", errs)
+	}
+}
+
+// A write outside the fulfilled frame is a compile error (the docs/88 §13 headline).
+func TestFulfillsFrameLawOutOfFrameErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    py: mutable i32
+    health: mutable i32
+
+law MovesPlayerOnly(self: Render&) changes self.px, self.py
+
+def bad(r: mutable Render&) fulfills r is MovesPlayerOnly:
+    r.health <- 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "fulfills_bad.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("a write to r.health under `fulfills r is MovesPlayerOnly` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A frame law may also carry `preserves`; fulfilling it forbids writing the preserved place.
+func TestFulfillsFrameLawWithPreserves(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+law NoHeal(self: Render&) preserves self.health
+
+def f(r: mutable Render&) fulfills r is NoHeal:
+    r.health <- 99
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "fulfills_preserves.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "`preserves`") {
+		t.Fatalf("fulfilling a preserves frame law must forbid writing the preserved place, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// `fulfills` a VALUE law is a wrong-class error.
+func TestFulfillsValueLawErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+
+law Positive(self: i32) = self > 0
+
+def f(r: mutable Render&) fulfills r is Positive:
+    r.px <- 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "fulfills_value.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "requires a frame law") {
+		t.Fatalf("fulfilling a value law must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A frame law whose subject is not a reference parameter is rejected at the law decl.
+func TestFrameLawNonRefSubjectErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+
+law Bad(self: i32) changes self.px
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "framelaw_nonref.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "not a mutable reference parameter") {
+		t.Fatalf("a frame law over a non-ref subject must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// A frame law used in value `is` position (instead of `fulfills`) is a wrong-class error.
+func TestFrameLawInValueIsErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+
+law MovesPlayerOnly(self: Render&) changes self.px
+
+def f(r: mutable Render&) -> bool:
+    return r is MovesPlayerOnly
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "framelaw_value_is.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is a frame law") {
+		t.Fatalf("using a frame law with value `is` must error, got:\n%s", allDiagnostics(result))
+	}
+}

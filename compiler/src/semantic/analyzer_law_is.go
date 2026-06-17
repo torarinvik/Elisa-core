@@ -25,6 +25,12 @@ func (a *Analyzer) tryAnalyzeLawIsExpr(expr *ast.BinaryExpr) bool {
 	if !ok {
 		return false
 	}
+	// A frame law (docs/88) is not a bool predicate — it cannot be applied with value `is`; it is
+	// applied to a function with `fulfills`. Reject the wrong-class use with a clear diagnostic.
+	if decl, _, found := a.lookupLaw(lawName); found && isFrameLaw(decl) {
+		a.errorf(expr.Pos(), "%q is a frame law; apply it to a function with `fulfills ... is %s`, not with `is` in a value position", lawName, lawName)
+		return true
+	}
 	call := &ast.CallExpr{
 		Position: expr.Pos(),
 		Func:     &ast.Ident{Position: expr.Right.Pos(), Name: lawName},

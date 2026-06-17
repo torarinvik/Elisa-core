@@ -129,6 +129,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
@@ -326,6 +327,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
@@ -488,6 +490,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					a.currentPreservesPaths = a.resolveFramePaths(fn.Preserves, "preserves")
 					a.currentHasChanges = len(fn.Changes) != 0
 					a.currentHasPreserves = len(fn.Preserves) != 0
+					a.expandFulfills(fn)
 					a.checkFrameConsistency(fn)
 					defer func() {
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges

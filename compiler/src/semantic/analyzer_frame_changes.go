@@ -50,6 +50,54 @@ func (a *Analyzer) checkFrameConsistency(fn *ast.FuncDecl) {
 	}
 }
 
+// isFrameLaw reports whether a law declaration is a FRAME law (docs/88): a named `changes`/
+// `preserves` set with no predicate body, vs a value law (`= <bool-expr>`).
+func isFrameLaw(decl *ast.FuncDecl) bool {
+	return decl != nil && decl.IsLaw && (len(decl.Changes) != 0 || len(decl.Preserves) != 0)
+}
+
+// expandFulfills applies each `fulfills <param> is <FrameLaw>` clause (docs/88) by rebinding the
+// law's frame paths from its subject (`self`) to the named param and appending them to the
+// function's resolved `changes` / `preserves` sets — so enforcement is exactly docs/87, no new
+// checker. Diagnoses a missing/non-frame law, an unknown or non-ref param, and subject mismatch.
+func (a *Analyzer) expandFulfills(fn *ast.FuncDecl) {
+	for _, fc := range fn.Fulfills {
+		decl, _, ok := a.lookupLaw(fc.Law)
+		if !ok || decl == nil {
+			a.errorf(fc.Position, "`fulfills` names %q, which is not a law", fc.Law)
+			continue
+		}
+		if !isFrameLaw(decl) {
+			a.errorf(fc.Position, "`fulfills` requires a frame law (a `changes`/`preserves` law); %q is a value law — use it with `is` in a contract instead", fc.Law)
+			continue
+		}
+		sym, found := a.currentScope.Lookup(fc.Param)
+		if !found || sym == nil || sym.Kind != SymbolParam {
+			a.errorf(fc.Position, "`fulfills %s is %s`: %q is not a parameter", fc.Param, fc.Law, fc.Param)
+			continue
+		}
+		if !isFrameWritableRefType(sym.Type) {
+			a.errorf(fc.Position, "`fulfills %s is %s`: %q is not a reference parameter, so it exposes no caller-visible state to frame", fc.Param, fc.Law, fc.Param)
+			continue
+		}
+		subject := decl.Params[0].Name
+		for _, p := range decl.Changes {
+			if p.Root != subject {
+				continue
+			}
+			a.currentChangesPaths = append(a.currentChangesPaths, framePath{root: fc.Param, fields: append([]string(nil), p.Fields...)})
+			a.currentHasChanges = true
+		}
+		for _, p := range decl.Preserves {
+			if p.Root != subject {
+				continue
+			}
+			a.currentPreservesPaths = append(a.currentPreservesPaths, framePath{root: fc.Param, fields: append([]string(nil), p.Fields...)})
+			a.currentHasPreserves = true
+		}
+	}
+}
+
 // isFrameWritableRefType reports whether a param type is a reference whose pointee a callee body
 // can write back to the caller (a plain or mutable ref; the write itself is gated elsewhere by
 // mutability, but for frame purposes any ref param exposes caller-visible state).

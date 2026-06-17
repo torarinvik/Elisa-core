@@ -99,6 +99,14 @@ type EnsuresPath struct {
 	Root     string
 	Fields   []string
 }
+
+// FulfillsClause is `fulfills <Param> is <Law>` (docs/88): the function declares it satisfies the
+// named frame law, with the law's subject bound to Param.
+type FulfillsClause struct {
+	Position lexer.Pos
+	Param    string
+	Law      string
+}
 type EnsuresClause struct {
 	Position   lexer.Pos
 	Condition  EnsuresCondition
@@ -144,6 +152,10 @@ type FuncDecl struct {
 	// caller-visible places the function must NOT write. A write that overlaps a preserved path is a
 	// compile error. `preserves Y ≡ Y ∩ changes(f) = ∅`.
 	Preserves []EnsuresPath
+	// Fulfills holds `fulfills <param> is <FrameLaw>` clauses (docs/88): applying a named frame law to
+	// the function by binding the law's subject to the named param. Each expands into the function's
+	// Changes/Preserves sets (the law's paths rebased from `self` to the param).
+	Fulfills []FulfillsClause
 	// IsLaw marks a `law` declaration (docs/85): a pure, total, bool-returning predicate whose
 	// first value parameter is its subject. It is represented as a FuncDecl so it reuses all the
 	// function machinery (generics, modules, type checking, calls); the flag drives purity

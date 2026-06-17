@@ -469,6 +469,31 @@ func (p *Parser) parseLawDecl() ast.Decl {
 	p.expect(lexer.TOKEN_LPAREN)
 	params, _ := p.parseExplicitSignatureParamList(true, false)
 	p.expect(lexer.TOKEN_RPAREN)
+	// A FRAME law (docs/88) carries a `changes`/`preserves` clause instead of an `= <bool-expr>`
+	// body: `law MovesPlayerOnly(self: Render&) changes self.px, self.py`. It is a named, reusable
+	// frame applied with `fulfills`; it has no predicate body.
+	if p.peekIdentText("changes") || p.peekIdentText("preserves") {
+		var changes, preserves []ast.EnsuresPath
+		if p.matchIdentText("changes") {
+			changes = p.parseChangesPathsAfterKeyword()
+		}
+		if p.matchIdentText("preserves") {
+			preserves = p.parseChangesPathsAfterKeyword()
+		}
+		p.expectNewline()
+		return &ast.FuncDecl{
+			Position:         pos,
+			Name:             name,
+			TypeParams:       typeParams,
+			RegionParams:     regionParams,
+			PermissionParams: permissionParams,
+			GenericParams:    genericParams,
+			Params:           params,
+			Changes:          changes,
+			Preserves:        preserves,
+			IsLaw:            true,
+		}
+	}
 	p.expect(lexer.TOKEN_ASSIGN)
 	predicate := p.parseExpr()
 	p.expectNewline()

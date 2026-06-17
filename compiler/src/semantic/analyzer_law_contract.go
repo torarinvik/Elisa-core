@@ -16,6 +16,18 @@ func (a *Analyzer) checkLawContract(fn *ast.FuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil || !fn.IsLaw {
 		return
 	}
+	// A FRAME law (docs/88) is a named `changes`/`preserves` set, not a bool predicate — it has no
+	// body to be pure or total. Validate its shape here; its paths are validated like any frame
+	// clause when it is applied (expandFulfills). A law may not be both frame and predicate.
+	if isFrameLaw(fn) {
+		if len(fn.Body) != 0 {
+			a.errorf(fn.Pos(), "frame law %q has a `changes`/`preserves` clause and cannot also have a predicate body", fn.Name)
+		}
+		if len(fnType.Params) == 0 {
+			a.errorf(fn.Pos(), "frame law %q needs a subject reference parameter (conventionally `self`)", fn.Name)
+		}
+		return
+	}
 	if !IsBoolType(fnType.Return) {
 		a.errorf(fn.Pos(), "law %q must be a predicate returning bool, got %s", fn.Name, typeString(fnType.Return))
 	}

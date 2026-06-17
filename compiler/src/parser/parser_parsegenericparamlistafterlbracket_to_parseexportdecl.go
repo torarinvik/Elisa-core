@@ -241,6 +241,22 @@ func (p *Parser) parseChangesPathsAfterKeyword() []ast.EnsuresPath {
 	}
 	return paths
 }
+// parseFulfillsClausesAfterKeyword parses a comma-separated list of `<param> is <Law>` frame-law
+// applications for a `fulfills` clause (docs/88), e.g. `fulfills r is MovesPlayerOnly`.
+func (p *Parser) parseFulfillsClausesAfterKeyword() []ast.FulfillsClause {
+	clauses := make([]ast.FulfillsClause, 0, 2)
+	for {
+		pos := p.cur().Pos
+		param := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_IS)
+		law := p.expect(lexer.TOKEN_IDENT).Text
+		clauses = append(clauses, ast.FulfillsClause{Position: pos, Param: param, Law: law})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	return clauses
+}
 func (p *Parser) parseEnsuresClausesAfterKeyword() []ast.EnsuresClause {
 	clauses := make([]ast.EnsuresClause, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_COLON))
 	for {
@@ -291,6 +307,11 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		preserves = p.parseChangesPathsAfterKeyword()
 	}
 
+	var fulfills []ast.FulfillsClause
+	if p.matchIdentText("fulfills") {
+		fulfills = p.parseFulfillsClausesAfterKeyword()
+	}
+
 	p.expect(lexer.TOKEN_COLON)
 
 	var body []ast.Stmt
@@ -311,7 +332,7 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Requires: requires, EnsureValues: ensures2, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, EnsureValues: ensures2, Params: params, ReturnType: retType, Body: body}
 }
 
 // liftLeadingContracts pulls leading `requires`/`ensure` value-contract statements (parsed as
