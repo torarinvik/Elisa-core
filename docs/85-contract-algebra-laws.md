@@ -1,149 +1,210 @@
-# 85 — Contract Algebra: composable `law`s
+# 85 — Laws, refinements, and one discharge model
 
-Status: **design proposal.** Grounds the "contract algebra" discussion in Elisa's
-*existing* contract + effect + property machinery, separates what already works from
-what is genuinely new, and stakes a bottom-up implementation ladder. No code yet.
+Status: **design (revised after an adversarial review).** This supersedes the first
+proposal. It unifies refinement types, design-by-contract, frame conditions, effects, and
+performance shape into one surface — but only as far as is *honest*: where the axes differ
+in reliability, the model says so explicitly. The §11 hazard table maps every criticism
+from the review to its resolution here.
 
-## 1. The idea
+## 1. The model in one sentence
 
-A `law` is a **named, parameterized, reusable correctness property** built by composing
-smaller laws. Tiny laws are atoms (`FinitePosition`, `ValidDeltaTime`); they compose into
-mechanics (`BasicMovement`, `DamageApplication`); those compose into systems
-(`PlayerController`, `ProjectileUpdate`); those into the architecture (`GameFrame`,
-`RenderFrame`). A function declares `fulfills SomeLaw(args)` and the compiler must
-**discharge** it — prove it, test it, or record an explicit review obligation. The
-composition is simultaneously a proof structure, a design document, and an AI-repair map.
+A **law** is a pure total `bool` function with an implicit `self`; the **`is`** operator
+applies it in type, flow, or contract position; obligations are **discharged** against one
+sound flow-fact lattice (prove), else a debug check/measure, else a `-strict` error — and
+each law declares a **discharge class** so a uniform surface never implies a uniform
+guarantee.
 
-This is domain-specific correctness as a *composable, checked* contract — the natural
-extension of Elisa's existing design-by-contract.
+## 2. Primitives
 
-## 2. What Elisa already has (the atoms are real)
+- **`law`** — a pure, total, deterministic `bool` function with implicit `self`. Not a new
+  AST kind: it reuses functions, generics, modules, the type checker, and the effect system
+  (purity is *enforced* by requiring an empty effect set; totality by the existing
+  progress/recursion checks). `law Bounded[lo, hi] = self >= lo and self <= hi`.
+- **`is`** — the one application operator. `x is P[a]` ≡ apply `P` to `x`. Type position →
+  refinement type; flow position → narrowing (today's `is`); contract position → obligation.
+- **Composition = conjunction.** `includes` is clause-set union; a composite holds iff its
+  parts do. Frame composition is *union of `changes` sets* (§7). Nothing more exotic.
+- **One discharge routine** with the ladder of §6.
 
-The discussion's primitive laws are, almost entirely, **expressible in today's syntax**:
+## 3. The soundness core is the fact lattice — not "independent provers"
 
-| discussion law | today in Elisa |
+There is **one** flow-sensitive abstract domain (the existing `FactTransform` / `is`
+narrowing engine, extended) with sound transfer functions. Decision procedures *query* it;
+they do not each carry their own truth. So:
+
+- The soundness obligation lives on the **lattice + transfer functions** (the central thing
+  to get right), plus each decision procedure being sound *relative to* the lattice.
+- Decision procedures chain through the shared facts (interval prop establishes `x > 0`, the
+  linear prover uses it) — which is why "independent monotone provers" was the wrong framing:
+  cooperation is the point, so the coupling is real and the soundness must be central.
+
+Prover tiers (all query the one lattice):
+
+1. **known-facts + intervals** — always on, fast: single-variable bounds, sign, non-empty,
+   tag-state. Discharges the easy refinements.
+2. **bounded linear arithmetic** — multi-variable index bounds combining facts and struct
+   invariants (e.g. the framebuffer index of §13.5). Budgeted; *required* for the
+   interesting cases — interval propagation alone cannot prove them, and the design says so.
+3. **external SMT** — a *pluggable, off-by-default* procedure for the residual. Never a
+   dependency of the core.
+
+## 4. Discharge classes (the honesty layer)
+
+Every law has a class fixing *how it can be discharged* and *whether it may climb into type
+position or gate a build by proof*. This is what stops `ensure Vectorizes` from looking like
+`requires Positive`.
+
+| class | example | discharged by | refinement type? | prove-gates build? |
+|---|---|---|---|---|
+| **value** | `Positive`, `Bounded[..]`, `NonEmpty` | fact lattice | yes | yes |
+| **frame** | `changes`, `preserves` | mutation/alias analysis | no | yes |
+| **effect** | `forbid Time.Now` | effect-grant system | no | yes |
+| **shape** | `NoAlloc`, `NoBoundsChecks`, `BranchFree` | local codegen analyses | no | yes |
+| **measure** | `Vectorizes`, `Inlined`, cycle/alloc budgets | debug measure / IR verify / benchmark | no | **no** |
+
+The hard rule: **measure-class laws are never `prove`-discharged and never a composable
+premise.** They are verified post-hoc (the autovec metadata verifier), surfaced via
+`-Wperf`, or measured in debug — but you cannot `includes Vectorizes` into another law and
+rely on it transitively, because vectorization is emergent and non-local (inlining into a
+caller can create or destroy it). See §8.
+
+## 5. Refinement types — the precise rules
+
+1. **Erasure is of representation only.** `T is P` has the exact bytes of `T` — transparent
+   to layout, ABI, FFI, regions, monomorphization. But *verification may still emit code*:
+   an unproven obligation at a boundary inserts a (debug) check. "Erased" ≠ "free."
+2. **Invariant under mutation.** `T is P <: T` covariantly in *immutable* position only.
+   `mutable darray[T is P]` is **not** `mutable darray[T]` (you could store a non-`P` through
+   the wider alias). Refinements are invariant under `mutable` refs/aggregates. Non-negotiable.
+3. **Dependence requires a freeze.** A dependent refinement like `i is Bounded[0..<xs.count]`
+   mentions a runtime value; it is valid only while `xs` is immutable/borrowed for the
+   refinement's scope. A mutation of `xs` invalidates it — routed through the *same*
+   storage-view invalidation chokepoint that already catches iterator invalidation.
+4. **Runtime fallback only at function boundaries.** Params, returns, `requires`, `ensure`
+   may debug-check the residual. Refinements on **struct fields and element types are
+   prove-only** — no runtime fallback — so the model never silently inserts a per-element
+   check, and erasure stays honest.
+
+## 6. The discharge ladder
+
+```
+obligation ─► query the fact lattice
+   ├─ Proven    → emit nothing; (subsume the bounds watchdog — no double check)
+   ├─ Refuted   → WARNING, escalated to error only on a provably-reachable path with no
+   │              unknowns (refutation-soundness is weaker than proof-soundness, so it must
+   │              not reject valid programs on an incomplete analysis)
+   └─ Unknown   → boundary check in debug / measure in debug (elided in release);
+                  under -strict, a hard error for load-bearing (non-`measure`) laws
+```
+
+`-strict` is the dial from earlier: it turns `Unknown` into "prove it or it won't compile"
+for everything except `measure` laws. Default keeps "debug verifies what release assumes."
+
+## 7. Frame conditions — `changes` is primitive, `preserves` is derived
+
+`preserves <all but X>` is the frame problem (whole-call-graph, alias-sensitive, and brittle
+to new fields). So the primitive is the **upper bound on mutation**:
+
+- `changes S` — the function (transitively, through aliases) writes at most the places in `S`.
+- `preserves Y` ≡ `Y ∩ changes(f) = ∅` — derived, robust to new fields.
+
+Discharged by the interprocedural mutation/alias analysis (the substrate from the noalias
+work). Open-world by construction.
+
+## 8. Performance — local shape (provable) vs emergent (measure only)
+
+- **shape laws** (`NoAlloc`, `NoBoundsChecks`, `NoRealloc`, `BranchFree`) are *local,
+  stable, compositional* — genuinely `prove`-class, and they may gate a build.
+- **measure laws** (`Vectorizes`, `Inlined`, `CacheFriendly`, cycle/alloc budgets) are
+  *emergent and non-local*. They are NOT proven and NOT composable premises. `Vectorizes`
+  is *verified* against this function's final emitted IR (the existing autovec marker) and
+  surfaced through `-Wperf` — a diagnostic, not a guarantee you can build on.
+
+This kills the category error of treating "this loop is fast" as a local proof.
+
+## 9. Soundness invariants (must always hold)
+
+1. **Representation erasure** (§5.1) — refinements never change bytes.
+2. **Fail-closed for load-bearing facts** — `Unknown` never *assumes* a fact the codegen
+   depends on; the optimization is simply not taken (the generalized noalias rule).
+3. **Invariance under mutation** (§5.2).
+4. **Dependence freeze** (§5.3).
+5. **Purity of laws** — enforced by the effect system; a law may not observe or mutate.
+6. **Watchdog subsumption** — a proven index disables the debug bounds check; an unproven
+   one keeps exactly one. Never double-instrument.
+7. **Refutation is conservative** (§6) — incomplete analysis warns, does not reject.
+
+## 10. Non-goals
+
+- No separate "law runtime" — everything desugars to existing contracts/effects/analyses.
+- No per-axis syntax — one `law`/`is`/`ensure`; only the discharge class differs.
+- No trusted backdoor — the existing `trusted` block is the only escape hatch, reused as-is.
+- No flow-fact duplication — refinement narrowing *is* the existing engine, extended.
+- No build-gating on `measure` laws.
+
+## 11. Hazards from the review → resolutions
+
+| smell | resolution |
 |---|---|
-| `ensure entity.position.x is finite` | `ensure` postcondition clause (leading body stmt; debug-checked) |
-| `require dt >= 0` | `requires` precondition clause |
-| `ensure result == old(x) + delta` | `ensure` with `result` and `old(...)` — both implemented |
-| struct field law (`health >= 0`) | struct `invariant <bool>` (checked on construct/mutate, debug) |
-| randomized property | `@property` fuzz harness (source-generated test) |
-| `forbid Time.Now / Random.Unseeded` | the effect-grant system — a function's `can [...]` set |
+| over-unification implies uniform reliability | discharge classes (§4); reliability stated + shown |
+| perf laws conflate local vs emergent | shape vs measure split (§8) |
+| decidable core too weak for the demos | explicit prover tiers; tier-2 linear solver required (§3) |
+| `Refuted`→error doubles soundness surface | refutation = warning unless provably reachable (§6, §9.7) |
+| "independent monotone provers" illusory | soundness centralized in the fact lattice (§3) |
+| subtyping + mutation covariance hole | invariance under mutation (§5.2) |
+| dependent refinements go stale | dependence-freeze via the invalidation chokepoint (§5.3) |
+| closed-world `preserves` brittle | `changes` primitive, `preserves` derived (§7) |
+| runtime fallback explodes off-boundary | boundary-only fallback; field/element prove-only (§5.4) |
+| black box | proof report `--explain` (§12) |
+| compile-time blowup | summaries + cache + capped solver + degrade-not-hang (§12) |
+| "erased" too strong / watchdog double-check | erasure is representation-only (§5.1); watchdog subsumption (§9.6) |
 
-So `requires` / `ensure(result, old)` / `invariant` / `@property` / effect grants are the
-**atoms already shipped** (see memory: design-by-contract-impl, effect-alias-redesign).
-The contract *runtime* (snapshot `old`, assert at entry/exit, debug-gated, elided in
-release) exists and is the substrate to reuse.
+## 12. Observability and budget (first-class, not afterthoughts)
 
-## 3. What is genuinely new
+- **Proof report.** `elisac --explain` (and per-line annotation) shows each obligation as
+  *proven (which tier) / debug-checked / measured / refuted*. Without this the system is a
+  black box and debug performance is unpredictable; it is a Stage-1 requirement, not later.
+- **Budget.** Per-function discharge summaries (reuse `FunctionAnalysis`), cached results,
+  a cap on tier-2/SMT calls, and **degrade to a runtime check rather than hang** when the
+  budget is exceeded.
 
-1. **`law Name(params): …`** — a named, parameterized bundle of contract clauses,
-   declared once and reused. Today a `requires`/`ensure` clause is anonymous and inlined
-   per-function; a `law` lifts it into a first-class, composable entity.
-2. **`includes OtherLaw(args)`** — composition. The included law's clauses are flattened
-   (with params substituted) into the including law. Composition is **conjunction**: an
-   `includes` can only *add* obligations, never relax a parent.
-3. **`fulfills Name(args)`** on a function — attaches the law's clauses to that function
-   and obliges the compiler to discharge them.
-4. **Frame conditions `changes {place…}` / `preserves {place…}`** — *new and the
-   powerful part*: a bound on **what state the function may mutate**. `BasicMovement`
-   changing only `position` and preserving `health/velocity/sprite/team` is what stops an
-   AI from "accidentally" mutating unrelated state. (§5 — this rides on analysis we are
-   already building.)
-5. **Verification strengths `prove` / `test` / `inspect`** — a law clause declares *how*
-   it is discharged: statically proven, property-tested, or surfaced as a human/AI review
-   obligation. Not every visual game property is statically provable; the strength makes
-   that explicit instead of silently unchecked.
+## 13. Worked examples (Wolf3D, honest forms)
 
-## 4. Semantics (desugaring-first, matching Elisa's pattern)
+```elisa
+type TileX = i32 is Bounded[0..<MAPWIDTH]          # value-class refinement
+type TileY = i32 is Bounded[0..<MAPHEIGHT]
 
-Elisa's recurring lever is **pure desugaring** (comprehensions, fold, the grammar DSL).
-The law algebra follows suit wherever possible:
+# value: result refinement proven by the linear prover (tier 2)
+def tile_index(tx: TileX, ty: TileY) -> usize is Bounded[0..<4096]:
+    return (tx * MAPHEIGHT + ty).usize()           # tilemap[...] needs no check (watchdog subsumed)
 
-- A `law` is **not** a runtime object. It is a named template of clauses.
-- `fulfills L(args)` **desugars** the substituted `require`/`ensure` clauses of `L` into
-  the function's existing precondition/postcondition lists — reusing the working contract
-  runtime verbatim. `includes` flattens transitively first.
-- `changes`/`preserves` lower to frame assertions: snapshot `old(p)` for each preserved
-  place `p`, assert `p == old(p)` at every exit (debug); statically discharge where the
-  mutation/alias analysis can prove the function never writes `p` (§5).
-- `forbid`/`effects` clauses constrain the function's effect-grant set — they *are* the
-  existing effect system, named and composed.
-- Strengths map to existing machinery: `prove` → static contract discharge / type-level
-  facts; `test` → generated `@property` cases; `inspect` → a recorded review obligation
-  emitted into tooling (never a silent pass).
+# frame: `changes` primitive; mutation analysis discharges it; preserves derived
+law MovesPlayerOnly: changes self.px, self.py      # ⇒ preserves health/score/tilemap/...
+def clip_move(r: mutable Render&, xmove: i32, ymove: i32):
+    fulfills r is MovesPlayerOnly                  # a stray r.health <- … is a compile error
 
-A `fulfills` is **verified, not asserted**: every clause must be discharged by *some*
-strength, or the compiler errors — composition can never launder an unchecked claim.
+# shape (provable, build-gating) vs measure (verify-only) — kept distinct
+law HotPixelLoop: includes NoAlloc, NoBoundsChecks # shape: local, provable
+def scale_column(r: mutable Render&, pm: VSwap&,
+                 x: i32 is Bounded[0..<r.vw],       # dependent on r.vw: valid while r frozen in this call
+                 texcol: i32 is Bounded[0..<TEXTURESIZE]):
+    fulfills HotPixelLoop                           # NOT `Vectorizes` — that loop is data-dependent;
+    ...                                             # Vectorizes would be measure-only anyway
+```
 
-## 5. Convergence with the noalias / disjointness work
+Note `x: i32 is Bounded[0..<r.vw]` is a *dependent* refinement (§5.3): sound because `r` is
+not reassigned within the call; the analysis ties its validity to that.
 
-The frame conditions are not a new soundness island — they ride the **same substrate**
-we are already building for sound vectorization:
+## 14. Staged implementation
 
-- `preserves entity.velocity` is the statement "this function does not mutate
-  `entity.velocity`." Proving it statically is a **mutation + aliasing** question — the
-  exact analysis behind `proven_distinct` / the borrowed-owner mutation tracking. A
-  `preserves` that the analysis can discharge needs no runtime check; one it cannot falls
-  back to the debug snapshot.
-- `proven_distinct(a, b)` — the derived buffer-disjointness predicate (docs/84) — *is
-  itself a law*: a named, checked, composable property with `prove` strength. The optional
-  `disjoint(a, b)` assertion (docs/84 §3.4) is the `law`-algebra's checked-assertion form.
-- `forbid Time.Now / Random.Unseeded` (`DeterministicUpdate`) is the effect system.
+- **Stage 1** — `law` (pure predicate, implicit `self`, purity enforced) + `is` in type and
+  contract position + the discharge dispatcher with the **tier-1** lattice prover and the
+  boundary-only runtime fallback. Ship the **proof report** with it. Value-class only.
+- **Stage 2** — the tier-2 linear prover (multi-var index bounds) + watchdog subsumption.
+- **Stage 3** — `changes`/`preserves` frame laws on the mutation analysis; dependence-freeze.
+- **Stage 4** — shape laws (`NoAlloc`/`NoBoundsChecks`) on the effect/bounds analyses;
+  `-Wperf`/`-strict` wired as the dials (the `-Wperf` disjoint hint is the first instance).
+- **Stage 5** — measure laws (verify/benchmark), optional SMT prover plug-in.
 
-So the algebra is mostly a **naming + composition layer over machinery Elisa already has**
-(contracts, effects, mutation/alias analysis), plus the frame-condition lowering. One
-source of truth; the laws compose the facts the compiler already computes.
-
-## 6. Soundness & the four principles
-
-- **Checked, never trusted.** A law is debug-checked by default (like today's contracts),
-  statically proven where the analysis allows, `@property`-tested where requested, and
-  `inspect` is an *explicit* obligation surfaced to a human/AI — never a silent pass. This
-  mirrors the noalias rule: emit the guarantee only when discharged, never on a guess.
-- **Composition only conjoins.** `includes`/`fulfills` add obligations; nothing relaxes a
-  parent law. A bigger law is strictly stronger than its parts.
-- **Pit of success.** Naming a law and writing `fulfills` is less work than re-deriving the
-  invariants per function, and the composition tree doubles as the design doc — the easy
-  path is the correct one (principle 3).
-
-## 7. Implementation ladder (bottom-up, each independently shippable)
-
-- **Stage 0 — today.** Atoms work: `requires`/`ensure`/`old`/`result`/`invariant`/
-  `@property`/effect grants.
-- **Stage 1 — `law` + `includes` + `fulfills`, pure desugaring.** Named clause bundles;
-  `includes` flattens; `fulfills` lowers the substituted `require`/`ensure` into the
-  function's existing contract lists. **No new runtime.** Demonstrable end-to-end on the
-  `FinitePosition` → `ValidDeltaTime` → `BasicMovement` → `update_position` example. This
-  is the minimal slice that proves the algebra.
-- **Stage 2 — frame conditions.** `changes`/`preserves`, debug-checked via `old`-snapshot
-  first; then statically discharged through the mutation/alias analysis (§5).
-- **Stage 3 — effect laws.** `forbid`/`effects` clauses compose onto the effect-grant
-  system (`DeterministicUpdate`, `RenderDoesNotMutateGameState`).
-- **Stage 4 — verification strengths.** `prove` / `test` / `inspect` selectors mapping to
-  static discharge / `@property` generation / review obligation.
-- **Stage 5 — quantified laws + tooling.** `ensure each x in xs`, `includes each layer`;
-  the composition-tree diagnostic and the law-path failure format ("Failed law:
-  `ParallaxScrolling > DeeperLayersMoveSlower`") as the AI-repair map.
-
-## 8. Open questions / risks
-
-- **`law` as a keyword** — contextual (like `requires`), to avoid breaking identifiers.
-- **`fulfills` discharge policy** — default to debug-runtime-checked (matches existing
-  contracts), escalate to static where provable, require an explicit strength for
-  visual/untestable properties. Never silently skip.
-- **Frame conditions over collections / aliasing** — `preserves layers.world_position`
-  across a `darray` needs the aliasing analysis; debug-check first, static later. This is
-  the hardest piece and the one that most depends on the noalias substrate.
-- **Quantified composition** (`includes each`) — desugar to a loop of clause instantiations;
-  watch for O(n²) pairwise laws (`DeeperLayersMoveSlower` over all layer pairs).
-- **Scope discipline** — keep laws a *desugaring + checking* layer; resist turning them
-  into a runtime reflection system. The value is compile-time guarantees, not a framework.
-
-## 9. Recommendation
-
-Build **Stage 1** as the first concrete slice: `law` / `includes` / `fulfills` desugaring
-to the existing contract runtime, validated on the movement-law composition. It proves the
-algebra with near-zero new runtime risk and immediately demonstrates the bottom-up
-composition the discussion is after. Frame conditions (Stage 2) are the high-value next
-step and the point where this work and the noalias/mutation analysis become one substrate.
+Refinement-type *subtyping under mutation* (§5.2) and the dependence-freeze (§5.3) are part
+of Stage 1's type rules from the first commit — they are soundness, not polish.
