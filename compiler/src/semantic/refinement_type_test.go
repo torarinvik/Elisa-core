@@ -280,3 +280,77 @@ def f(a: i64) -> i64:
 		t.Fatalf("a >= 10 alone does not bound the top of [0,500]; must stay unproven, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// Call-site discharge: a constant argument satisfying the param refinement is proven.
+func TestRefinementCallArgConstantProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller() -> i64:
+    return needs_nat(7)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_ok.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("needs_nat(7) should prove (clean under -strict), got: %v", result.Errors())
+	}
+}
+
+// Call-site discharge: a constant argument that violates the param refinement is refuted.
+func TestRefinementCallArgRefuted(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller() -> i64:
+    return needs_nat(0 - 3)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_refute.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") {
+		t.Fatalf("needs_nat(-3) should be refuted, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Call-site discharge: an unprovable argument warns by default, errors under -strict.
+func TestRefinementCallArgUnprovenWarnsThenStrictErrors(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller(n: i64) -> i64:
+    return needs_nat(n)
+`
+	warn := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_warn.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(warn), "could not be proven statically") || len(warn.Errors()) != 0 {
+		t.Fatalf("unprovable arg should warn (not error) by default, got:\n%s", allDiagnostics(warn))
+	}
+	strict := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_strict.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(strict.Errors()) == 0 {
+		t.Fatal("unprovable call arg must be a hard error under -strict")
+	}
+}
+
+// Call-site discharge composes with flow: needs_nat(a) inside `if a > 5` is proven.
+func TestRefinementCallArgFlowProven(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+def needs_nat(x: i64 is Nat) -> i64:
+    return x
+
+def caller(a: i64) -> i64:
+    if a > 5:
+        return needs_nat(a)
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_callarg_flow.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("needs_nat(a) under `if a > 5` should prove, got: %v", result.Errors())
+	}
+}

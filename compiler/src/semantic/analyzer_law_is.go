@@ -1,6 +1,9 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+)
 
 // tryAnalyzeLawIsExpr handles `subject is Law` as predicate application (docs/85 §2): `is` is
 // UFCS first-arg binding, so `x is P` ≡ `P(x)`. When the (single) target resolves to a law, this
@@ -49,25 +52,9 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		if !ok {
 			continue // not a law — already reported by validateRefinementPreds
 		}
-		// `subject is P[args]` is the law call `P(subject, args...)` (the bracket args follow the
-		// subject — UFCS first-arg binding, docs/85).
-		callArgsAfterSubject := append([]ast.Expr(nil), pred.Args...)
-		// Tier-2 — FLOW entailment: an immutable integer with a known range fact (from an enclosing
-		// `if a > 5`) proven against the law's `self OP const` constraints (with bracket args bound).
-		if a.tryProveRefinementByFlow(n.Value, lawDecl, pred.Args) {
+		// Try to discharge statically (flow then constant entailment). Proven/refuted → done.
+		if a.tryDischargeRefinementStatically(n.Value, "\""+n.Name+"\"", pred, lawDecl, n.Pos()) {
 			continue
-		}
-		// Tier-1 — CONSTANT entailment: when the initializer is constant, const-evaluate the (pure)
-		// law on it. Proven → no check; refuted → compile error; unknown → runtime fallback.
-		if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
-			Position: pred.Position,
-			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
-			Args:     append([]ast.Expr{n.Value}, callArgsAfterSubject...),
-		}); known {
-			if !ok {
-				a.errorf(n.Pos(), "refinement %q is violated: %q does not satisfy it", pred.Name, n.Name)
-			}
-			continue // proven (or refuted) at compile time — no runtime check
 		}
 		// Not statically proven: fall back to a runtime check AND tell the user — a static guarantee
 		// was not achieved here (docs/85: the fallback must be KNOWN). Warning by default; hard error
@@ -76,13 +63,68 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
-			Args:     append([]ast.Expr{&ast.Ident{Position: n.Pos(), Name: n.Name}}, callArgsAfterSubject...),
+			Args:     append([]ast.Expr{&ast.Ident{Position: n.Pos(), Name: n.Name}}, pred.Args...),
 		}
 		a.analyzeExpr(call)
 		checks = append(checks, call)
 	}
 	if len(checks) != 0 {
 		a.refinementChecks[n] = checks
+	}
+}
+
+// tryDischargeRefinementStatically attempts to discharge one refinement obligation `value is
+// pred` at compile time, by flow entailment then constant entailment. Returns true when statically
+// resolved: PROVEN (nothing emitted) or REFUTED (a compile error is emitted here). Returns false
+// when the obligation is unknown — the caller decides the runtime/observability fallback. Shared by
+// the var-decl boundary and call-argument boundaries.
+func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos) bool {
+	if a.tryProveRefinementByFlow(value, lawDecl, pred.Args) {
+		return true
+	}
+	if ok, known := a.evalConstBoolExpr(&ast.CallExpr{
+		Position: pred.Position,
+		Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
+		Args:     append([]ast.Expr{value}, pred.Args...),
+	}); known {
+		if !ok {
+			a.errorf(pos, "refinement %q is violated: %s does not satisfy it", pred.Name, valueName)
+		}
+		return true
+	}
+	return false
+}
+
+// dischargeCallArgRefinements discharges the refinement obligations on a direct call's arguments
+// against the callee's refinement-typed parameters (docs/85: the function-contract boundary). The
+// callee's param refinements survive on its decl's parameter type exprs (the resolved FuncType is
+// erased), so a direct by-name call can read them and prove/refute/warn each argument with the same
+// discharge tiers as a var declaration. Runtime enforcement of an unproven arg at the call site is
+// a follow-up; under -strict an unproven arg is already a hard error.
+func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Expr) {
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok {
+		return
+	}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			break
+		}
+		rt, ok := param.Type.(*ast.RefinementTypeExpr)
+		if !ok || rt == nil {
+			continue
+		}
+		for _, pred := range rt.Preds {
+			lawDecl, _, ok := a.lookupLaw(pred.Name)
+			if !ok {
+				continue
+			}
+			name := "argument " + itoaParam(i+1)
+			if a.tryDischargeRefinementStatically(args[i], name, pred, lawDecl, call.Pos()) {
+				continue
+			}
+			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check", pred.Name, name, decl.Name)
+		}
 	}
 }
 
