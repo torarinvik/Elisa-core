@@ -5,9 +5,9 @@ import (
 	"testing"
 )
 
-// This file pins the KNOWN GAPS in error-set polymorphism (docs/64 Phase 5b
-// follow-up). Each test asserts the analyzer's CURRENT behavior so the gap is
-// visible and intentional; the phase that closes a gap flips its assertion.
+// This file pins error-set polymorphism Phase 5b regressions. It started as a
+// known-gap file; as each gap closed, its assertion flipped to lock the fixed
+// behavior in place.
 
 // CLOSED GAP 1 (symbolic sets): a param unions with concrete sets
 // (`error[R, Timeout]`) and with other params (`error[R, S]`), so combinators
@@ -196,7 +196,7 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 	}
 }
 
-// GAP 5b (bare-lambda error inference, NOW CLOSED — docs/64 Phase 5b): a bare
+// CLOSED GAP 5b (bare-lambda error inference — docs/64 Phase 5b): a bare
 // lambda whose body propagates errors (`lambda() => try seven()`) infers its
 // error-union return from what the body propagates, so it binds R end to end
 // with no annotation. `try`-without-else / `raise` in the bare body accumulate
