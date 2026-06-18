@@ -211,3 +211,31 @@ container params a callee retains vs. only reads; downgrade a caller's arg-escap
 death when the callee provably doesn't retain it; measure the reclaimed count on the corpus via the
 harness) → G1 early-free + reuse (only if the measured uplift is real; ASan-gated). Build and *measure*
 the interprocedural precision before writing any early-free codegen.
+
+## 8d. Interprocedural arg-retention — built and MEASURED (read-only)
+
+Built the read-only interprocedural arg-retention analysis (`analyzer_param_retention.go`): a monotone
+whole-program fixpoint computing, per function, which storage parameters are RETAINED (returned as
+storage, stored out, address-taken, or re-passed to a retaining position) vs. only READ. Sound-
+conservative: retained unless provably read-only; unresolved/external/method-arg/qualified callees and
+any ambiguous use → retained. The death analysis now downgrades a caller's arg-escape to an
+in-function death when the callee provably does not retain that argument.
+
+**Measured uplift on the corpus** (same 41 programs / 68 inferred allocations):
+
+| metric | before (G0 conservative) | after (interprocedural) |
+|---|---|---|
+| arg-escapes | 29 | **21** (8 reclaimed) |
+| in-function deaths | 10 | **18** |
+| functions with >1 cohort | 0 | **1** |
+
+So interprocedural precision is the right lever — it moved 8 allocations (28% of the conservative
+arg-escapes) from "escapes to caller" to "dies in-function," and produced the first multi-cohort
+function. The remaining 21 are genuine retainers, method-call args, or qualified/unresolved callees
+(still conservative). Further precision (method-param mapping, qualified-call resolution, return-of-
+derived-storage) would reclaim more — incremental, each measurable via the harness.
+
+Key correctness lesson: the retention pass must run as a POST pass (after body analysis, so exprTypes
+is complete) and resolve callees via the GLOBAL scope — `resolveDirectCallFuncDecl` uses currentScope,
+which is torn down post-analysis, so it silently failed (returned conservative-retain for everything,
+zero uplift) until switched to a globalScope resolver. All read-only; no codegen changed.

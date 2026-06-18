@@ -340,7 +340,18 @@ func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, returnOut, argOut map[stri
 				}
 			case *ast.CallExpr:
 				for _, arg := range n.Args {
-					if typeCarriesRegionStorage(a.exprTypes[arg]) {
+					if !typeCarriesRegionStorage(a.exprTypes[arg]) {
+						continue
+					}
+					// Interprocedural precision (docs/91): a storage argument escapes only if the callee
+					// actually RETAINS that position. A proven read-only callee (e.g. `sum(xs)`) does not,
+					// so the value stays an in-function death. Unresolved/external callees, container
+					// mutations, and non-ident args fall back to conservative retain (callRetainsArg).
+					if base, ok := aliasSourceName(arg); ok {
+						if a.callRetainsArg(n, base, a.paramRetained) {
+							collectIdentNamesInto(arg, argOut)
+						}
+					} else {
 						collectIdentNamesInto(arg, argOut)
 					}
 				}

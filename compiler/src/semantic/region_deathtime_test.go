@@ -146,21 +146,20 @@ func TestDeathTimeAliasExtendsLife(t *testing.T) {
 	}
 }
 
-// A value (or an alias) passed as a storage-carrying call ARGUMENT escapes — the callee may retain
-// it — so its death is deferred to the caller (cohort DeathIndex -1), never early-freed.
-func TestDeathTimeCallArgEscapes(t *testing.T) {
+// A value passed to a callee that RETAINS the argument (here `retain` returns it — a storage return)
+// escapes: its death is deferred to the caller (cohort DeathIndex -1).
+func TestDeathTimeRetainingCallArgEscapes(t *testing.T) {
 	var result *Result
 	withDeathTimeDump(t, func() {
-		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_escape_arg.elisa", `def consume(d: darray[i64]) -> i64:
-    can Abort.Panic:
-        return d[0]
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_retain_arg.elisa", `def retain(d: darray[i64]) -> darray[i64]:
+    return d
 
 def f() -> i64:
     can Memory.Allocate, Abort.Panic:
         v: mutable darray[i64] = []
         v.push(1)
-        r: i64 = consume(v)
-        return r
+        keep: darray[i64] = retain(v)
+        return keep[0]
 `, AnalyzeOptions{})
 	})
 	cohorts := result.DeathTimeCohorts["f"]
@@ -169,7 +168,38 @@ def f() -> i64:
 		t.Fatalf("v must be present, cohorts=%+v", cohorts)
 	}
 	if cv.DeathIndex != -1 {
-		t.Fatalf("v is passed as a storage-carrying call argument and must be treated as escaping (DeathIndex -1), got @%d", cv.DeathIndex)
+		t.Fatalf("v is passed to a retaining callee (returns the arg) and must escape (DeathIndex -1), got @%d", cv.DeathIndex)
+	}
+}
+
+// THE INTERPROCEDURAL WIN (docs/91): a value passed to a callee that only READS it (returns a scalar)
+// is NOT retained, so it is reclaimed as an in-function death rather than conservatively escaping —
+// the uplift the arg-retention summaries deliver.
+func TestDeathTimeReaderCallArgReclaimed(t *testing.T) {
+	var result *Result
+	withDeathTimeDump(t, func() {
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_reader_arg.elisa", `def total(d: darray[i64]) -> i64:
+    can Abort.Panic:
+        s: mutable i64 = 0
+        for x in d:
+            s <- s + x
+        return s
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        v: mutable darray[i64] = []
+        v.push(1)
+        r: i64 = total(v)
+        return r
+`, AnalyzeOptions{})
+	})
+	cohorts := result.DeathTimeCohorts["f"]
+	cv, ok := cohortContaining(cohorts, "v")
+	if !ok {
+		t.Fatalf("v must be present, cohorts=%+v", cohorts)
+	}
+	if cv.DeathIndex == -1 {
+		t.Fatalf("v is passed only to a READER (total returns a scalar; does not retain), so it must be reclaimed as an in-function death, not escape")
 	}
 }
 

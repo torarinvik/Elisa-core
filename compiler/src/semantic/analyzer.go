@@ -153,6 +153,7 @@ type Analyzer struct {
 	// surfaced on Result).
 	deathTimeCohorts      map[string][]DeathTimeCohort
 	deathEscapeStats      map[string]DeathTimeEscapeStats
+	paramRetained         map[*ast.FuncDecl][]bool
 	recordDeathCohortsOpt bool
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
@@ -729,6 +730,19 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.analyzeExports(activeDecls)
 	a.finalizeFuncDisjointParams(activeDecls)
 	a.lintHotKernelsForDisjointness()
+	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body
+	// analysis so exprTypes is complete and the whole-program retention fixpoint can be computed.
+	// Read-only observability (surfaced on Result; dumped under ELISA_DUMP_DEATHTIME); no codegen.
+	if dumpDeathTime || a.recordDeathCohortsOpt {
+		funcs := collectRegionPolyCandidateFuncs(activeDecls)
+		a.paramRetained = a.computeParamRetention(funcs)
+		for _, fn := range funcs {
+			if dumpDeathTime {
+				a.recordDeathTimeCohorts(fn)
+			}
+			a.recordDeathTimeData(fn)
+		}
+	}
 	a.closeSMT()
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
