@@ -38,15 +38,21 @@ func (a *Analyzer) resolveCalleeFuncDecl(call *ast.CallExpr) (*ast.FuncDecl, boo
 	if !ok || ident == nil {
 		return nil, false
 	}
-	sym, ok := a.globalScope.Lookup(ident.Name)
-	if !ok || sym == nil {
-		return nil, false
+	// Try the canonical (namespace/using/import-qualified) name recorded during analysis first, then
+	// the bare name — so qualified free-function calls resolve in this post-pass, not just unqualified.
+	names := []string{}
+	if canon, ok := a.resolvedValueNames[ident]; ok && canon != "" {
+		names = append(names, canon)
 	}
-	decl, ok := sym.Node.(*ast.FuncDecl)
-	if !ok || decl == nil {
-		return nil, false
+	names = append(names, ident.Name)
+	for _, name := range names {
+		if sym, ok := a.globalScope.Lookup(name); ok && sym != nil {
+			if decl, ok := sym.Node.(*ast.FuncDecl); ok && decl != nil {
+				return decl, true
+			}
+		}
 	}
-	return decl, true
+	return nil, false
 }
 
 // paramStorageType returns the i-th expanded parameter's RESOLVED type from the function's FuncType

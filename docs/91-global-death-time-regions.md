@@ -239,3 +239,33 @@ Key correctness lesson: the retention pass must run as a POST pass (after body a
 is complete) and resolve callees via the GLOBAL scope — `resolveDirectCallFuncDecl` uses currentScope,
 which is torn down post-analysis, so it silently failed (returned conservative-retain for everything,
 zero uplift) until switched to a globalScope resolver. All read-only; no codegen changed.
+
+## 8e. DECISIVE FINDING — the global model adds ~nothing over scope-regions on real code
+
+After interprocedural precision, the harness over 41 corpus programs reports: 49 functions with
+inferred allocations, **1 multi-cohort function, 0 early-dying allocations**. The strongest real-app
+check — the Wolf3D renderer (`wolf_render.elisa`) — has 4 functions with inferred allocations and
+**0 multi-cohort**. So the pattern the global death-time model uniquely optimizes (several
+distinct-lifetime allocations in ONE scope, freed mid-function and their stacks reused by the next
+cohort) is **virtually absent in real Elisa code**.
+
+Why: Elisa already auto-regions per scope/function and the landed multi-stack model (docs/71) already
+splits within-scope lifetimes across stacks; allocations that outlive a scope are returns handled by
+region-poly threading. So allocations either (a) escape via return (handled), or (b) die at function
+scope (handled by scope-regions). There is little residual "dies mid-function, reuse the stack"
+opportunity for a global death partition to capture.
+
+**Conclusion (four-principles: performance first, but not complexity/risk for no measured gain):**
+do NOT build **G1** (mid-function early-free + cross-cohort reuse). It is the complex, UAF-sensitive
+codegen stage, and the data shows ~zero performance payoff over the existing model. Building it would
+add risk and complexity against principle 1's own intent.
+
+**What we keep:** (1) the read-only death-point / cohort / arg-retention analysis — sound, useful as a
+diagnostic (`ELISA_DUMP_DEATHTIME`) and a measurement harness to re-evaluate if allocation patterns
+change; (2) the validation that the EXISTING scope-based multi-stack region model already realizes the
+user's death-cohort vision — just scoped per region rather than as one global partition, which
+empirically captures essentially all the reclamation. The user's mental model is, in effect, already
+implemented; the global reframe's extra machinery is not justified by measured benefit.
+
+If a future workload (measured via this harness) shows real multi-cohort/early-dying density, G1
+becomes worth revisiting — gated on that evidence, not built speculatively.

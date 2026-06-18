@@ -56,6 +56,29 @@ func TestDeathTimeTightnessReport(t *testing.T) {
 			continue
 		}
 		analyzed++
+		// Per-program: does this program exhibit the pattern the death-time model optimizes (a
+		// function with >1 cohort / an allocation that dies early)? Surface those so we can tell
+		// whether real apps benefit beyond what scope-regions already give.
+		progMulti, progEarly := 0, 0
+		for _, cohorts := range result.DeathTimeCohorts {
+			if len(cohorts) > 1 {
+				progMulti++
+			}
+			maxD := -1
+			for _, c := range cohorts {
+				if c.DeathIndex > maxD {
+					maxD = c.DeathIndex
+				}
+			}
+			for _, c := range cohorts {
+				if c.DeathIndex >= 0 && c.DeathIndex < maxD {
+					progEarly += len(c.Allocs)
+				}
+			}
+		}
+		if progMulti > 0 || progEarly > 0 {
+			t.Logf("  [pattern] %s: %d multi-cohort func(s), %d early-dying alloc(s)", filepath.Base(path), progMulti, progEarly)
+		}
 		for _, st := range result.DeathTimeEscapeStats {
 			returnEscapes += st.ReturnEscapes
 			argEscapes += st.ArgEscapes
