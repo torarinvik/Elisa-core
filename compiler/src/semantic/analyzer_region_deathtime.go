@@ -122,19 +122,61 @@ func stmtMentionsName(stmt ast.Stmt, name string) bool {
 	return found
 }
 
+// loopRange is the contiguous pre-order index span [start, end] of a loop construct's subtree.
+// (A pre-order DFS numbers a node and all its descendants contiguously, so a loop owns [start, end].)
+type loopRange struct{ start, end int }
+
+func isLoopStmt(s ast.Stmt) bool {
+	switch s.(type) {
+	case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
+		return true
+	}
+	return false
+}
+
 // analyzeDeathTimeAllocs computes the inferred allocations of a function and their death points.
+//
+// Liveness, not just lexical last-mention (docs/91 G0 hardening): a use INSIDE a loop keeps the
+// value live until the loop EXITS — the back-edge can re-reach the use on a later iteration, so the
+// value is live across the whole loop. So a use at index u is lifted to the exit index of the
+// outermost loop that encloses u but NOT the binding's declaration (the loops whose iterations the
+// value spans). A binding declared inside the loop is per-iteration (reset/reused each pass) and is
+// not lifted by that loop. This is a sound over-approximation: death is never reported earlier than
+// a real dynamic last use (it can only be pushed later). [Caveat for G1: intra-function ALIASING
+// (`w = v; w.push(..)`) is not yet modeled here — a value used only via an alias would look dead too
+// early. The escape checker covers cross-region/return escapes; alias-aware death is the remaining
+// prerequisite before G1 frees on this analysis. The dump is read-only, so this is safe today.]
 func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 	var stmts []ast.Stmt
+	var loops []loopRange
 	var collect func([]ast.Stmt)
 	collect = func(body []ast.Stmt) {
 		for _, s := range body {
+			idx := len(stmts)
 			stmts = append(stmts, s)
 			for _, sub := range childStmtBlocks(s) {
 				collect(sub)
 			}
+			if isLoopStmt(s) {
+				loops = append(loops, loopRange{start: idx, end: len(stmts) - 1})
+			}
 		}
 	}
 	collect(fn.Body)
+
+	// liftDeath pushes a use index out to the exit of the outermost loop that spans the use but not
+	// the declaration (the value crosses that loop's back-edge, so it lives until the loop exits).
+	liftDeath := func(declIdx, useIdx int) int {
+		death := useIdx
+		for _, lp := range loops {
+			enclosesUse := lp.start <= useIdx && useIdx <= lp.end
+			enclosesDecl := lp.start <= declIdx && declIdx <= lp.end
+			if enclosesUse && !enclosesDecl && lp.end > death {
+				death = lp.end
+			}
+		}
+		return death
+	}
 
 	var allocs []deathTimeAlloc
 	for i, s := range stmts {
@@ -154,7 +196,7 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 		allocs = append(allocs, deathTimeAlloc{name: vd.Name, declIndex: i, deathIndex: i, kind: kind})
 	}
 
-	// Identify escaping bindings (appear in a return) and compute lexical last-use otherwise.
+	// Identify escaping bindings (appear in a return) and compute loop-aware last-use otherwise.
 	returnsName := func(name string) bool {
 		for _, s := range stmts {
 			if ret, ok := s.(*ast.ReturnStmt); ok && ret.Value != nil && stmtMentionsName(ret, name) {
@@ -169,11 +211,15 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 			al.deathIndex = -1
 			continue
 		}
+		death := al.declIndex
 		for i := al.declIndex + 1; i < len(stmts); i++ {
 			if stmtMentionsName(stmts[i], al.name) {
-				al.deathIndex = i
+				if d := liftDeath(al.declIndex, i); d > death {
+					death = d
+				}
 			}
 		}
+		al.deathIndex = death
 	}
 	return allocs
 }

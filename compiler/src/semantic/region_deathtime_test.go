@@ -87,6 +87,36 @@ func TestDeathTimeCohortsSharedDeathGroups(t *testing.T) {
 	}
 }
 
+// Loop-aware liveness (docs/91 G0 hardening): two allocations declared before a loop and used at
+// DIFFERENT statements inside it both die when the loop EXITS (their uses can recur on the
+// back-edge), so they share one cohort. With plain lexical last-mention they would have landed in
+// two different cohorts (the two distinct in-loop push statements).
+func TestDeathTimeLoopLiftsUsesToLoopExit(t *testing.T) {
+	var result *Result
+	withDeathTimeDump(t, func() {
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_loop.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        a: mutable darray[i64] = []
+        b: mutable darray[i64] = []
+        i: mutable i64 = 0
+        while i < 3:
+            a.push(i)
+            b.push(i)
+            i <- i + 1
+        return 0
+`, AnalyzeOptions{})
+	})
+	cohorts := result.DeathTimeCohorts["f"]
+	ca, oka := cohortContaining(cohorts, "a")
+	cb, okb := cohortContaining(cohorts, "b")
+	if !oka || !okb {
+		t.Fatalf("a and b must be present, got a=%v b=%v cohorts=%+v", oka, okb, cohorts)
+	}
+	if ca.DeathIndex != cb.DeathIndex {
+		t.Fatalf("a and b are both live across the loop, so loop-lifting must put them in one cohort (same loop-exit death), got a@%d b@%d", ca.DeathIndex, cb.DeathIndex)
+	}
+}
+
 // --- pure-helper unit tests (no analyzer needed) ---
 
 func TestStmtMentionsName(t *testing.T) {
