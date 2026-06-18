@@ -89,3 +89,16 @@ def caller() -> i64:
 		t.Fatalf("storing an @r-returned view past the region must be rejected at the caller, got: %s", errs)
 	}
 }
+
+// Returning a REF into the grown field with a region-less type also loses the @r tie (was a confirmed
+// use-after-free via `&m.bits[0]`) → reject. The check peels &/index/field to the borrowed region.
+func TestS4ReturnRefRegionlessRejected(t *testing.T) {
+	errs := s4analyze(t, "s4_ret_ref", `def leak[@r](m: mutable Mod& @r) -> u8&:
+    can Memory.Allocate, Abort.Panic:
+        m.bits.push(65)
+        return &m.bits[0]
+`)
+	if !strings.Contains(errs, "region parameter") {
+		t.Fatalf("returning a region-less ref into a grown @r field must be rejected, got: %s", errs)
+	}
+}

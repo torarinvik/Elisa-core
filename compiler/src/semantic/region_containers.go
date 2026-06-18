@@ -115,14 +115,57 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	if a == nil || valueExpr == nil {
 		return
 	}
-	region := containerOrEntryRegion(valueType)
+	// The returned value's region: its own type's region if it carries one (a returned container /
+	// view), else the region it BORROWS from — peeling `&`/index/slice/field down to the underlying
+	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
+	// carries no region itself).
+	region := regionParamReturnTypeRegion(valueType)
+	if region == "" {
+		region = a.returnBorrowedRegion(valueExpr)
+	}
 	if region == "" || !a.lookupRegionParam(region) {
 		return
 	}
-	if containerOrEntryRegion(a.currentReturn) == region {
+	if regionParamReturnTypeRegion(a.currentReturn) == region {
 		return // the return type carries the same @r — sound, and checked at the call site
 	}
 	a.errorf(valueExpr.Pos(), "value tied to region parameter %q cannot be returned with a region-less type (its lifetime is the caller's %q region); annotate the return type with `@%s` (e.g. `-> view[u8] @%s`) so the borrow stays tied to the caller's region", region, region, region, region)
+}
+
+// regionParamReturnTypeRegion returns a type's region for the return-escape check: a reference's own
+// `@r` (RefType.Region, e.g. `u8& @r`) or a container/view's stamped region. Used for both the
+// returned value's type and the declared return type so `-> u8& @r` / `-> view[u8] @r` are recognized.
+func regionParamReturnTypeRegion(t Type) string {
+	if rt, ok := stripRefForBounds(t).(*RefType); ok && rt != nil && rt.Region != "" {
+		return rt.Region
+	}
+	if rt, ok := t.(*RefType); ok && rt != nil && rt.Region != "" {
+		return rt.Region
+	}
+	return containerOrEntryRegion(t)
+}
+
+// returnBorrowedRegion finds the region a returned BORROW points into, peeling address-of, indexing,
+// slicing, parens/casts, and field access down to the underlying region-carrying base. "" if none.
+func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
+	switch n := stripParenExpr(e).(type) {
+	case *ast.AddrOfExpr:
+		return a.returnBorrowedRegion(n.Operand)
+	case *ast.IndexExpr:
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.SliceExpr:
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.CastExpr:
+		return a.returnBorrowedRegion(n.Operand)
+	case *ast.FieldExpr:
+		if r := containerOrEntryRegion(a.exprTypes[n]); r != "" {
+			return r
+		}
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.Ident:
+		return a.fieldObjectRegion(a.exprTypes[n])
+	}
+	return regionParamReturnTypeRegion(a.exprTypes[e])
 }
 
 // checkReturnRegionContainerEscape rejects returning a container allocated in a

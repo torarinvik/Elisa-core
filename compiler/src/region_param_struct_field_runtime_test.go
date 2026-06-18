@@ -85,3 +85,19 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("returning a region-less view into a grown @r field and storing it past the region must be REJECTED at compile time (was a segfault), got %s", status)
 	}
 }
+
+func TestS4ReturnRefUAFRejectedNotSegfault(t *testing.T) {
+	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> u8& can[Memory.Allocate, Abort.Panic]:
+    m.bits.push(65)
+    return &m.bits[0]
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    escaped: mutable u8& = zeroed
+    region inner(64):
+        m: mutable Mod& @inner = new[inner] Mod(bits: [])
+        escaped <- leak(m) can Memory.Allocate, Abort.Panic
+    print(escaped.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("returning a region-less ref into a grown @r field must be REJECTED at compile time (was a segfault), got %s", status)
+	}
+}
