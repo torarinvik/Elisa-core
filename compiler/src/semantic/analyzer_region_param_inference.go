@@ -508,9 +508,13 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {
-					// receiver must be `param.<field>` (a FieldExpr whose object is the param Ident)
-					if fieldRecv, ok := growth.Object.(*ast.FieldExpr); ok && fieldRecv != nil {
-						if id, ok := fieldRecv.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+					// Receiver must be a FIELD/INDEX PATH rooted at the param — `param.f.push(..)`,
+					// `param.a.b.push(..)` (any depth), `param.f[i].push(..)`. A path deeper than the
+					// bare param means the grown container is a (possibly nested) field of the struct
+					// param, so the param carries the region the field backing grows into. (The bare-param
+					// case `param.push` is a CONTAINER param, handled by paramContainerIsGrown.)
+					if _, isPath := growth.Object.(*ast.FieldExpr); isPath {
+						if root := rootIdentExpr(growth.Object); root != nil && root.Name == name {
 							found = true
 							return
 						}

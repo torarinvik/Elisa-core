@@ -195,6 +195,46 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 3: growing a NESTED container field (`m.inner.items.push(..)`) infers + threads the region
+// through the intermediate struct-VALUE field, single-hop AND multi-hop. The region is resolved by
+// path-walking the object expression (fieldObjectExprRegion) and only the LEAF container's region
+// annotation is set — intermediate struct TYPE descriptors are NOT copied, which previously desynced
+// the backend's struct layout/place resolution and miscompiled (SIGBUS) multi-hop nested growth.
+func TestS4Stage3NestedFieldGrowthSingleHopRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    m.inner.items.push(65)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    m: mutable Mod = Mod(inner: Inner(items: []))
+    in perm:
+        fill((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
+    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("single-hop nested-field growth must run (65), got %s %q", status, out)
+	}
+}
+
+// The multi-hop nested case is the one that SIGBUS'd before the type-mutation-free fix: the region is
+// threaded through an intermediate forwarding hop AND the grown field is nested.
+func TestS4Stage3NestedFieldGrowthMultiHopRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def grow(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    m.inner.items.push(65)
+    return
+def mid(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    grow((&m).cast[mutable Mod&])
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    m: mutable Mod = Mod(inner: Inner(items: []))
+    in perm:
+        mid((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
+    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("multi-hop nested-field growth must run (65) — was a SIGBUS, got %s %q", status, out)
+	}
+}
+
 // S4 Stage 3: a region-poly field-growth callee reached via a reborrow cast inside `in perm:` threads
 // the program-lifetime `perm` arena through the whole chain (PascalCase callees included) and runs —
 // the region-inference replacement for a per-hop `in perm:`. (Exercises StructLitExpr forwarding,

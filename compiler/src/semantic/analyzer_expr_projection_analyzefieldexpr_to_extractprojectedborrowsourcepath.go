@@ -69,7 +69,13 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		// field's region to `@r` (growth-site gate + backend growth owner read it), AND makes the
 		// existing escape checks fire on the field's true region (store-past-region, return-container).
 		// No-op for non-container fields / region-less objects (stampContainerRegion returns unchanged).
-		if region := a.fieldObjectRegion(objType); region != "" {
+		// fieldObjectExprRegion path-walks the object EXPRESSION so a NESTED field
+		// (`m.inner.items` on `m: Mod& @r`) inherits the region through an intermediate struct-VALUE
+		// field — WITHOUT copying that intermediate's TYPE descriptor, which desynced the backend's
+		// struct layout/place resolution and miscompiled nested-field growth through a threaded region
+		// (docs/91 S4 Stage 3). Only the LEAF container's region annotation is set (stampContainerRegion
+		// copies the *type descriptor*, compile-time metadata only — no runtime data copy whatsoever).
+		if region := a.fieldObjectExprRegion(expr.Object, objType); region != "" {
 			if stamped, changed := stampContainerRegion(field.Type, region); changed {
 				field.Type = stamped
 			}
@@ -83,6 +89,26 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), true)
 	return invalidType
+}
+
+// fieldObjectExprRegion resolves the region a field-access OBJECT lives in, walking the object
+// expression's field/index path inward so a nested field inherits its enclosing region through
+// region-LESS intermediate struct-VALUE fields, WITHOUT stamping (copying) those intermediates' type
+// descriptors. The immediate object's own type region takes precedence — so an intermediate REFERENCE
+// field that carries its own `@other` (`self.other_ref.items`) stops the walk there, while a plain
+// struct-value field (`self.dynamic_info`, region-less) recurses to its enclosing object. "" when no
+// enclosing region is found. (docs/91 S4 Stage 3 — nested-field growth, type-mutation-free.)
+func (a *Analyzer) fieldObjectExprRegion(objExpr ast.Expr, objType Type) string {
+	if region := a.fieldObjectRegion(objType); region != "" {
+		return region
+	}
+	switch n := stripParenExpr(objExpr).(type) {
+	case *ast.FieldExpr:
+		return a.fieldObjectExprRegion(n.Object, a.exprTypes[n.Object])
+	case *ast.IndexExpr:
+		return a.fieldObjectExprRegion(n.Object, a.exprTypes[n.Object])
+	}
+	return ""
 }
 
 // fieldObjectRegion returns the region a field-access object carries: a struct ref's `@r`
