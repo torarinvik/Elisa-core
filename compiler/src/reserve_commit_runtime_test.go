@@ -30,16 +30,16 @@ def reserve_commit_runtime_test() -> void:
     can Abort.Panic, Memory.Allocate:
         region big(1048576) using reserve_commit:
             xs: mutable darray[i64] @big = []
-            xs.push(100i64)
+            xs.push(100)
             e0: i64& = &xs[0]
             for i in 0..<50000:
                 xs.push(i.i64())
-            xs[0] <- 777i64
-            if e0[0] != 777i64:
+            xs[0] <- 777
+            if e0[0] != 777:
                 panic("reserve_commit relocated: interior ref stale after growth")
             if xs.count != 50001:
                 panic("reserve_commit: unexpected count after growth")
-            if xs[50000] != 49999i64:
+            if xs[50000] != 49999:
                 panic("reserve_commit: data corrupted across growth")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

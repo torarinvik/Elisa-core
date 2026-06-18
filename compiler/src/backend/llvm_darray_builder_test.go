@@ -452,7 +452,7 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugarAcrossElementTypes(t *testing.T) 
         ints: mutable darray[i64] = []
         names: mutable darray[u32] = []
         ints.push(1)
-        names.push(7u32)
+        names.push(7)
         return ints.count + names.count
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_darray_push_multi_type.elisa", src)

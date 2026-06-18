@@ -233,7 +233,7 @@ static elif ELISA_TARGET_OS_WINDOWS:
 	@c_opaque(windows.h, CONDITION_VARIABLE)
 	extern Win32ConditionVariable
 
-	const WIN32_WAIT_INFINITE = 0xffffffffu32
+	const WIN32_WAIT_INFINITE = 0xffffffff
 
 	@callconv(winapi)
 	extern InitializeCriticalSection(section: mutable Win32CriticalSection&) -> void can[Memory.Allocate]
@@ -1228,8 +1228,8 @@ static elif ELISA_TARGET_OS_WINDOWS:
 	extern GetActiveProcessorCount(group: u16) -> u32
 
 	def perf_cores() -> i64:
-		n: u32 = GetActiveProcessorCount(0xffffu16)  # ALL_PROCESSOR_GROUPS = 0xffff
-		if n > 0u32:
+		n: u32 = GetActiveProcessorCount(0xffff)  # ALL_PROCESSOR_GROUPS = 0xffff
+		if n > 0:
 			return n.i64()
 		return 1
 

@@ -745,7 +745,7 @@ type GuestFsSelector = id[GuestFsSelectorRole]
 extern load_fs(selector: GuestFsSelector) -> void
 
 def main() -> int:
-    load_fs(0u32.cast[GuestFsSelector])
+    load_fs(zeroed)
     return 0
 `)
 
@@ -770,7 +770,7 @@ extern load_fs(selector: GuestFsSelector) -> void can[Unsafe.SegmentMutation, Se
 
 def main() -> int:
     can Unsafe.SegmentMutation, Segment.Guest:
-        load_fs(0u32.cast[GuestFsSelector])
+        load_fs(zeroed)
     return 0
 `)
 	stdout.Reset()

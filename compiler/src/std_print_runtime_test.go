@@ -38,12 +38,12 @@ def main() -> int can[Console.Write]:
 	print(Label("tagged")) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print('Z') can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(42) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(-9i64) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(7u32) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(99u64) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(-9) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(7) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(99) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(5.usize()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(3.5) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
-	print(2.25f32) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(2.25) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(sview("view", 0, -1)) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	region scratch:
 		in scratch:

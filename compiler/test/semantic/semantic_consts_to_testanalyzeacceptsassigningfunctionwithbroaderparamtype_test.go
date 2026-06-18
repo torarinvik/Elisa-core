@@ -66,8 +66,8 @@ func requireNoWarnings(t *testing.T, result *semantic.Result) {
 
 func TestAnalyzeWarnsOnNumericLiteralTypeSuffixes(t *testing.T) {
 	src := `def use() -> i64:
-    x: i64 = 42i64
-    y: f64 = 1.5f64
+    x: i64 = 42
+    y: f64 = 1.5
     return x
 `
 	result, errs := parseAndAnalyze(t, "numeric_literal_suffix_warning.elisa", src)

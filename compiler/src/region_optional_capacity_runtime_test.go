@@ -25,7 +25,7 @@ def region_optional_capacity_test() -> void:
             xs: mutable darray[i64] @r = []
             for i in 0..<20000:
                 xs.push(i.i64())
-            if xs[0] != 0i64 or xs[19999] != 19999i64:
+            if xs[0] != 0 or xs[19999] != 19999:
                 panic("no-capacity region: data wrong after growth")
             if xs.count != 20000:
                 panic("no-capacity region: count wrong")

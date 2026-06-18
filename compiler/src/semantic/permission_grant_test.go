@@ -181,7 +181,7 @@ func TestSegmentMutationPermissionRequiresLocalGrantError(t *testing.T) {
 extern load_fs(selector: u16) -> void can[Unsafe.SegmentMutation]
 
 def run() -> void:
-    load_fs(7u16)
+    load_fs(7)
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if !strings.Contains(all, `call to "load_fs" requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.SegmentMutation or a surrounding can ...: block`) {
@@ -720,7 +720,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
     view: view[i32] = items[0:items.count]
     items.clear()
     trusted Unsafe.UncheckedIndex:
-        return view[0u]
+        return view[0]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if !strings.Contains(all, `stale reference requires can[Unsafe] and has no explicit local effect grant; add can Unsafe.StaleRef or a surrounding can ...: block`) {
@@ -746,7 +746,7 @@ def read_stale(items: mutable darray[i32]&) -> i32:
     items.clear()
     trusted Unsafe.StaleRef:
         trusted Unsafe.UncheckedIndex:
-            return view[0u]
+            return view[0]
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 	all := allDiagnostics(result)
 	if strings.Contains(all, `stale reference requires`) || strings.Contains(all, `unchecked index requires`) || strings.Contains(all, `explicit local effect grant`) {

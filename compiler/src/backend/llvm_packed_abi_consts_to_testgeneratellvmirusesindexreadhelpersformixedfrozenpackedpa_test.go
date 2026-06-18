@@ -96,7 +96,7 @@ func TestGenerateLLVMIRRecordsCanonicalPackedLoweringMetadataByDefault(t *testin
 	Lit(value: int)
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
@@ -128,7 +128,7 @@ func TestGenerateLLVMIRExplicitPackedModeKeepsCanonicalPackedLoweringMetadata(t 
 	Lit(value: int)
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
@@ -163,7 +163,7 @@ packed enum Pair:
 	End
 
 def sum_pair() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(span: 7, left: 2, right: 3)
@@ -202,7 +202,7 @@ func TestGenerateLLVMIRUsesIndexReadHelperForMultiFieldPackedPayloadMatch(t *tes
 	End
 
 def sum_pair() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(left: 2, right: 3)
@@ -239,7 +239,7 @@ func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForPackedPayloadMatchByDefau
 	End
 
 def sum_pair() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Pair.Store[Local] = Pair.Store(scratch)
 	in store:
 		node: Pair = new Pair.Both(left: 2, right: 3)
@@ -281,7 +281,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedPayloadMatchInIndexSOA
 	End
 
 def fold_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -317,7 +317,7 @@ func TestGenerateLLVMIRUsesCanonicalIndexReadHelpersForFrozenPackedPayloadMatchB
 	End
 
 def fold_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -458,7 +458,7 @@ def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Froz
 			return score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
 
 def fold_frozen() -> i64:
-	region scratch(512u)
+	region scratch(512)
 	types: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
 	exprs: Expr.Store[Local] = Expr.Store(scratch)
 	clauses: Clause.Store[Local] = Clause.Store(scratch)
@@ -524,7 +524,7 @@ def score_expr(node: Expr, exprs: Expr.Store[Frozen], clauses: Clause.Store[Froz
 			return score_expr(scrutinee, exprs, clauses, types) + score_clause(match_clauses, clauses, exprs, types) + score_type(ty, types)
 
 def fold_frozen() -> i64:
-	region scratch(512u)
+	region scratch(512)
 	types: TypeExpr.Store[Local] = TypeExpr.Store(scratch)
 	exprs: Expr.Store[Local] = Expr.Store(scratch)
 	clauses: Clause.Store[Local] = Clause.Store(scratch)
@@ -568,9 +568,9 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenPackedPayloadMatchInInd
 	End
 
 def fold_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	node: Expr = new[store] Expr.Hold(value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match node in frozen:

@@ -109,7 +109,7 @@ value = do:
   base + 2
 defer block:
   cleanup()
-pool workers(2u):
+pool workers(2):
   parallel for node in frozen:
     pass
 ```
@@ -350,10 +350,10 @@ def annotate(owner: Arena) -> i32:
     _ = new Expr.Add(span: 5, left: left, right: right)
 
   frozen: Expr.Store[Frozen] = freeze(move store)
-  node: Expr = frozen[2u]
+  node: Expr = frozen[2]
   key: NodeKey[Expr] = dense_key(node, frozen)
-  depths: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1i32)
-  depths[key] <- 0i32
+  depths: NodeTable[Expr, i32] = node_table_fill.specialize[Expr, i32]()(owner, frozen, -1)
+  depths[key] <- 0
   again: Expr = frozen[key]
   all_depths: dview[i32] = depths.values
   return again.span

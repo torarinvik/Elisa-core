@@ -23,7 +23,7 @@ func TestRunCLIRegionParamContainerPushThreadsArenaViaHiddenParam(t *testing.T) 
 	src := `def fill[@r](out: mutable darray[u8] @r) -> u64:
     for i in 0..<10:
         out.push((65 + i).u8())
-    sum: mutable u64 = 0u64
+    sum: mutable u64 = 0
     for i in 0..<out.count.i64():
         sum <- sum + out[i].u64()
     return sum
@@ -34,7 +34,7 @@ def region_param_push_test() -> void:
         region a(4096):
             v: mutable darray[u8] @a = []
             s: u64 = fill(v)
-            if s != 695u64:
+            if s != 695:
                 panic("expected sum 695 (65..74)")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -69,7 +69,7 @@ func TestRunCLIDArrayPushArrayLiteralBulkAppend(t *testing.T) {
 	src := `def fill[@r](out: mutable darray[u8] @r) -> u64:
     out.push([10, 20, 30])
     out.extend([40, 50])
-    sum: mutable u64 = 0u64
+    sum: mutable u64 = 0
     for i in 0..<out.count.i64():
         sum <- sum + out[i].u64()
     return sum
@@ -80,7 +80,7 @@ def darray_push_array_literal_test() -> void:
         region a(4096):
             v: mutable darray[u8] @a = []
             s: u64 = fill(v)
-            if s != 150u64:
+            if s != 150:
                 panic("expected sum 150")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -114,7 +114,7 @@ func TestRunCLIRegionParamListComprehensionThreadsArenaViaHiddenParam(t *testing
 	fixturePath := filepath.Join(fixtureDir, "region_param_list_comp_fixture.elisa")
 	src := `def bumped[@r](items: darray[u8] @r) -> u64:
     out: darray[u8] @r = [item + 1 for item in items]
-    sum: mutable u64 = 0u64
+    sum: mutable u64 = 0
     for i in 0..<out.count.i64():
         sum <- sum + out[i].u64()
     return sum
@@ -128,7 +128,7 @@ def region_param_list_comp_test() -> void:
             v.push(20)
             v.push(30)
             s: u64 = bumped(v)
-            if s != 63u64:
+            if s != 63:
                 panic("expected sum 63 ((10+1)+(20+1)+(30+1))")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -162,7 +162,7 @@ func TestRunCLIRegionParamEachQueryThreadsArenaViaHiddenParam(t *testing.T) {
 	fixturePath := filepath.Join(fixtureDir, "region_param_each_query_fixture.elisa")
 	src := `def bumped[@r](items: darray[u8] @r) -> u64:
     out: darray[u8] @r = item + 1 for each item in items
-    sum: mutable u64 = 0u64
+    sum: mutable u64 = 0
     for i in 0..<out.count.i64():
         sum <- sum + out[i].u64()
     return sum
@@ -174,7 +174,7 @@ def region_param_each_query_test() -> void:
             v: mutable darray[u8] @a = []
             v.push([10, 20, 30])
             s: u64 = bumped(v)
-            if s != 63u64:
+            if s != 63:
                 panic("expected sum 63 ((10+1)+(20+1)+(30+1))")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -426,7 +426,7 @@ func TestRunCLIRegionParamSequenceRewriteUsesHiddenArena(t *testing.T) {
 	fixturePath := filepath.Join(fixtureDir, "region_param_sequence_rewrite.elisa")
 	src := `def keep_non_zero[@r](items: darray[u32] @r) -> darray[u32] @r:
     return rewrite items as sequence[u32]:
-        item when item != 0u32:
+        item when item != 0:
             emit item
 
 @test
@@ -434,11 +434,11 @@ def region_param_sequence_rewrite_test() -> void:
     can Abort.Panic, Memory.Allocate:
         region a(4096):
             src: mutable darray[u32] @a = []
-            src.push([0u32, 7u32, 0u32, 9u32])
+            src.push([0, 7, 0, 9])
             kept: darray[u32] @a = keep_non_zero(src)
             if kept.count != 2:
                 panic("expected two kept items")
-            if kept[0] != 7u32 or kept[1] != 9u32:
+            if kept[0] != 7 or kept[1] != 9:
                 panic("unexpected kept contents")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -538,12 +538,12 @@ def inferred_region_builders_test() -> void:
     can Abort.Panic, Memory.Allocate:
         region a(4096):
             src: mutable darray[u8] @a = []
-            src.push([0u8, 1u8, 2u8, 3u8])
-            comp = [item + 1 for item in src if item > 0u8]
-            query = item + 2 for each item in src where item > 1u8
-            if comp.count != 3 or comp[0] != 2u8 or comp[2] != 4u8:
+            src.push([0, 1, 2, 3])
+            comp = [item + 1 for item in src if item > 0]
+            query = item + 2 for each item in src where item > 1
+            if comp.count != 3 or comp[0] != 2 or comp[2] != 4:
                 panic("unexpected list comprehension result")
-            if query.count != 2 or query[0] != 4u8 or query[1] != 5u8:
+            if query.count != 2 or query[0] != 4 or query[1] != 5:
                 panic("unexpected each query result")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -587,10 +587,10 @@ include "` + filepath.Join(stdDir, "allocator.elisa") + `"
 
 def fill_and_sum[A: Allocator](s: mutable A.State&, n: usize) -> u64 can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
-        raw: mutable heap void& = get A.allocate(s, n) else return 0u64
+        raw: mutable heap void& = get A.allocate(s, n) else return 0
         trusted Unsafe.PointerCast:
             buf: mutable heap u8& = raw.cast[mutable heap u8&]
-            sum: mutable u64 = 0u64
+            sum: mutable u64 = 0
             for i in 0..<n.i64():
                 buf[i] <- (i + 1).u8()
                 sum <- sum + buf[i].u64()
@@ -603,15 +603,15 @@ def allocator_interface_test() -> void:
             alloc: mutable Arena& = &a
             before: ArenaMark = arena_snapshot(alloc)
             bump_sum: u64 = fill_and_sum[BumpAllocator](alloc, 10)
-            if bump_sum != 55u64:
+            if bump_sum != 55:
                 panic("bump: expected 55 (1..10)")
             arena_rewind(alloc, before)
             again: u64 = fill_and_sum[BumpAllocator](alloc, 10)
-            if again != 55u64:
+            if again != 55:
                 panic("bump after rewind: expected 55")
         m: mutable MallocAllocator = MallocAllocator(0)
         malloc_sum: u64 = fill_and_sum[MallocAllocator](&m, 10)
-        if malloc_sum != 55u64:
+        if malloc_sum != 55:
             panic("malloc: expected 55 (1..10)")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -746,7 +746,7 @@ func TestRunCLIRegionParamDarrayLiteralThreadsArenaViaHiddenParam(t *testing.T) 
 	fixturePath := filepath.Join(fixtureDir, "region_param_darray_literal.elisa")
 	src := `def build[@r](anchor: mutable darray[u8] @r) -> u64:
     xs: darray[u8] @r = [10, 20, 30]
-    sum: mutable u64 = 0u64
+    sum: mutable u64 = 0
     for i in 0..<xs.count.i64():
         sum <- sum + xs[i].u64()
     return sum
@@ -757,7 +757,7 @@ def region_param_darray_literal_test() -> void:
         region a(4096):
             anchor: mutable darray[u8] @a = []
             sum: u64 = build(anchor)
-            if sum != 60u64:
+            if sum != 60:
                 panic("expected sum 60")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

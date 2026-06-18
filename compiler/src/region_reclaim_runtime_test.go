@@ -234,23 +234,23 @@ func TestContinueDoesNotFreeEnclosingRegion(t *testing.T) {
 def scan(src: static u8&, n: usize) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         kinds: mutable darray[i32] = []
-        i: mutable usize = 0u
+        i: mutable usize = 0
         while i < n:
             c: u8 = src[i]
-            if c == 34u8:
+            if c == 34:
                 kinds.push(7)
-                i <- i + 1u
-                while i < n and src[i] != 34u8:
-                    i <- i + 1u
-                i <- i + 1u
+                i <- i + 1
+                while i < n and src[i] != 34:
+                    i <- i + 1
+                i <- i + 1
                 continue
-            i <- i + 1u
+            i <- i + 1
         return kinds.count.i64()
 @test
 def continue_region() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         s: static u8& = "x\"hello\"y\"world\"z\"three\"q"
-        if scan(s, 24u) != 3:
+        if scan(s, 24) != 3:
             panic("continue freed the enclosing region mid-loop")
 `
 	runSingleTestProgramExpectOK(t, "continue_region", src,
@@ -270,25 +270,25 @@ func TestBreakDoesNotFreeEnclosingRegion(t *testing.T) {
 def scan(src: static u8&, n: usize) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         kinds: mutable darray[i32] = []
-        i: mutable usize = 0u
+        i: mutable usize = 0
         while i < n:
             c: u8 = src[i]
-            if c == 34u8:
+            if c == 34:
                 kinds.push(7)
-                i <- i + 1u
+                i <- i + 1
                 while i < n:
-                    if src[i] == 34u8:
+                    if src[i] == 34:
                         break
-                    i <- i + 1u
-                i <- i + 1u
+                    i <- i + 1
+                i <- i + 1
                 continue
-            i <- i + 1u
+            i <- i + 1
         return kinds.count.i64()
 @test
 def break_region() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         s: static u8& = "x\"hello\"y\"world\"z\"three\"q"
-        if scan(s, 24u) != 3:
+        if scan(s, 24) != 3:
             panic("break freed the enclosing region mid-loop")
 `
 	runSingleTestProgramExpectOK(t, "break_region", src,
@@ -406,15 +406,15 @@ def f(n: usize) -> i64:
         xs: mutable darray[i64] = []
         xs.push(42)
         anchor: i64& = &xs[0]
-        i: mutable usize = 1u
+        i: mutable usize = 1
         while i < n:
             xs.push(i.i64())
-            i <- i + 1u
+            i <- i + 1
         return anchor[0]
 @test
 def iref() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        if f(100000u) != 42:
+        if f(100000) != 42:
             panic("interior ref invalidated under default reserve_commit (base moved)")
 `
 	runSingleTestProgramExpectOK(t, "iref", src,
@@ -439,16 +439,16 @@ def run(n: usize, m: usize) -> i64:
             xs: mutable darray[i64] = []
             xs.push(100)
             anchor: i64& = &xs[0]
-            j: mutable usize = 1u
+            j: mutable usize = 1
             while j < m:
                 xs.push(j.i64())
-                j <- j + 1u
+                j <- j + 1
             total <- total + anchor[0]
         return total
 @test
 def lbiref() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        if run(50u, 5000u) != 5000:
+        if run(50, 5000) != 5000:
             panic("loop-body interior ref invalidated within iteration (base moved)")
 `
 	runSingleTestProgramExpectOK(t, "lbiref", src,

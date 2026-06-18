@@ -62,7 +62,7 @@ func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
     mark scratch as cp
     value: i32& @scratch = new[scratch] seed
     restore scratch from cp
-    return value[0u]
+    return value[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `reference "value" cannot be used: region dependency facts were invalidated by restore of region "scratch" from checkpoint "cp"`) {
@@ -77,7 +77,7 @@ func TestAnalyzeInvalidatedDArrayViewDiagnosticUsesFactVocabulary(t *testing.T) 
         items: mutable darray[i32] = [1, 2, 3]
         view: view[i32] = items[0:items.count]
         items.push(4)
-        return view[0u]
+        return view[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `view "view" cannot be used: storage dependency facts were invalidated by darray push of items`) {
@@ -93,7 +93,7 @@ func TestAnalyzeCopiedDArrayViewInvalidatesWithSourceMutation(t *testing.T) {
         view: view[i32] = items[0:items.count]
         copy: view[i32] = view
         items.clear()
-        return copy[0u]
+        return copy[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `view "copy" cannot be used: storage dependency facts were invalidated by darray clear of items`) {
@@ -109,7 +109,7 @@ func TestAnalyzeBranchDArrayMutationInvalidatesViewAfterMerge(t *testing.T) {
         view: view[i32] = items[0:items.count]
         if cond:
             items.push(4)
-        return view[0u]
+        return view[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, `view "view" cannot be used: storage dependency facts were invalidated by darray push of items`) {
@@ -214,7 +214,7 @@ def build(owner: Arena, key: cstr[key_shape]) -> usize:
     in alloc:
         pending: mutable PendingGotoStore = zeroed
         pending.reserve(8)
-        pending.push(1u32, 2u32)
+        pending.push(1, 2)
         pending.truncate(1)
         pending.clear()
         values: mutable dict[cstr[key_shape], i64] = zeroed

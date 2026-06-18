@@ -22,15 +22,15 @@ func TestRunCLIAutoReserveBoundedFillRunsCorrectly(t *testing.T) {
 	src := `@test
 def auto_reserve_runtime_test() -> void:
     can Memory.Allocate, Abort.Panic:
-        n: usize = 5000u
+        n: usize = 5000
         xs: mutable darray[i64] = []
         for i in 0..<n:
-            xs.push((i.i64()) * 2i64)
+            xs.push((i.i64()) * 2)
         if xs.count != n:
             panic("auto-reserve: wrong length")
-        if xs[0] != 0i64:
+        if xs[0] != 0:
             panic("auto-reserve: element 0 wrong")
-        if xs[4999] != 9998i64:
+        if xs[4999] != 9998:
             panic("auto-reserve: last element wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

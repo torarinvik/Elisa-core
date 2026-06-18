@@ -299,7 +299,7 @@ struct Registry[K, T]:
 extern RegistrySlot
 type RegistryId = id[RegistrySlot]
 
-global registry: RegistryNamespace = RegistryNamespace(0u8)
+global registry: RegistryNamespace = RegistryNamespace(0)
 
 def new[K, T](api: RegistryNamespace, owner: mutable Arena&) -> Registry[K, T]:
     _ = api
@@ -310,7 +310,7 @@ def declare[K, T](table: mutable Registry[K, T]&, key: K, value: T) -> RegistryI
     _ = table
     _ = key
     _ = value
-    return 1u32.cast[RegistryId]
+    return zeroed
 
 def lookup[K, T](table: Registry[K, T]&, key: K) -> T?:
     _ = table
@@ -431,7 +431,7 @@ struct IndexMapNamespace:
 struct IndexMap[K, T]:
     marker: u8
 
-global indexmap: IndexMapNamespace = IndexMapNamespace(0u8)
+global indexmap: IndexMapNamespace = IndexMapNamespace(0)
 
 def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
     _ = api
@@ -442,7 +442,7 @@ def set[K, T](map: mutable IndexMap[K, T]&, key: K, value: T) -> usize:
     _ = map
     _ = key
     _ = value
-    return 0usize
+    return 0
 
 def get[K, T](map: IndexMap[K, T]&, key: K) -> T?:
     _ = map
@@ -456,7 +456,7 @@ def has[K, T](map: IndexMap[K, T]&, key: K) -> bool:
 
 def count[K, T](map: IndexMap[K, T]&) -> usize:
     _ = map
-    return 0usize
+    return 0
 
 def read(a: mutable Arena&) -> i32:
     can Global.Read, Memory.Allocate, Abort.Panic:
@@ -559,7 +559,7 @@ struct IndexMap[K, T]:
 
 def count[K, T](map: IndexMap[K, T]&) -> usize:
     _ = map
-    return 0usize
+    return 0
 
 def read(counter: Counter) -> usize:
     return counter.count
@@ -700,7 +700,7 @@ def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 
 def read(flag: bool) -> (value: bool, after: usize):
     value: mutable bool = flag
-    after: mutable usize = 7usize
+    after: mutable usize = 7
     return (value, after)
 `)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -740,7 +740,7 @@ def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
 
 def read(flag: bool) -> (value: bool, after: usize):
     value: mutable bool = flag
-    after: mutable usize = 7usize
+    after: mutable usize = 7
     return (value, after)
 `)
 	if errs := result.Errors(); len(errs) != 0 {

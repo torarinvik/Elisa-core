@@ -33,8 +33,8 @@ def hot_kernel_test() -> void:
         ys: mutable darray[i64] = []
         for i in 0..<4:
             xs.push(i.i64())
-            ys.push(2i64)
-        if dot(xs, ys, 4u) != 12i64:
+            ys.push(2)
+        if dot(xs, ys, 4) != 12:
             panic("hot dot kernel wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

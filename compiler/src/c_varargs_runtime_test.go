@@ -61,7 +61,7 @@ int64_t elisa_varargs_check_unpromoted_wide_values(const char *tag, ...) {
     double f64 = va_arg(ap, double);
     uint64_t u64 = va_arg(ap, uint64_t);
     va_end(ap);
-    return tag && strcmp(tag, "wide") == 0 && u32 == 0xfedcba98u &&
+    return tag && strcmp(tag, "wide") == 0 && u32 == 0xfedcba98 &&
            f64 > 2.24 && f64 < 2.26 && u64 == 0x1122334455667788ULL;
 }
 `)

@@ -37,9 +37,9 @@ def build[B: Builder](value: i64) -> B.Node:
 @test
 def parametric_impl_test() -> void:
     can Abort.Panic:
-        if build[BoxTag[i64]](7) != 7i64:
+        if build[BoxTag[i64]](7) != 7:
             panic("parametric impl dispatch wrong")
-        if build[BoxTag[bool]](9) != 9i64:
+        if build[BoxTag[bool]](9) != 9:
             panic("second instantiation of the blanket impl wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
@@ -87,9 +87,9 @@ def use_holder[H: Holder](value: H.Item) -> H.Item:
 @test
 def holder_test() -> void:
     can Abort.Panic:
-        if use_holder[BoxTag[i64]](42i64) != 42i64:
+        if use_holder[BoxTag[i64]](42) != 42:
             panic("T-referencing parametric method (i64) wrong")
-        if use_holder[BoxTag[u8]](5u8) != 5u8:
+        if use_holder[BoxTag[u8]](5) != 5:
             panic("T-referencing parametric method (u8) wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

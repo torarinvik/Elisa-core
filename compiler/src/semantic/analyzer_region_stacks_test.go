@@ -233,10 +233,10 @@ func TestDefaultBackingFallsBackToChainedOnWindows(t *testing.T) {
 	src := `def f(n: usize) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         xs: mutable darray[i64] = []
-        i: mutable usize = 0u
+        i: mutable usize = 0
         while i < n:
             xs.push(i.i64())
-            i <- i + 1u
+            i <- i + 1
         return xs.count.i64()
 `
 	win := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_win.elisa", src,

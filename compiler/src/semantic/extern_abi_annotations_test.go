@@ -77,17 +77,17 @@ func TestFunctionABIAnnotationsPopulateFunctionType(t *testing.T) {
 @callconv(winapi)
 def winapi_callback(arg: void&) -> u32:
 	_ = arg
-	return 0u32
+	return 0
 
 @c_abi(c)
 def c_callback(arg: void&) -> u32:
 	_ = arg
-	return 1u32
+	return 1
 
 @stdcall
 def stdcall_callback(arg: void&) -> u32:
 	_ = arg
-	return 2u32
+	return 2
 `)
 
 	tests := map[string]string{
@@ -115,12 +115,12 @@ func TestFunctionABIAnnotationsRejectInvalidValues(t *testing.T) {
 @callconv(vectorcall)
 def bad_callconv(arg: void&) -> u32:
 	_ = arg
-	return 0u32
+	return 0
 
 @stdcall(extra)
 def bad_stdcall(arg: void&) -> u32:
 	_ = arg
-	return 0u32
+	return 0
 `)
 
 	allErrors := strings.Join(result.Errors(), "\n")

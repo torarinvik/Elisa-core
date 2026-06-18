@@ -394,7 +394,7 @@ def contextual_unary() -> i32:
 }
 func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 	src := `def ok() -> usize:
-	which: usize = 1i32
+	which: usize = 1
 	return which
 `
 	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.elisa", src)

@@ -14,14 +14,14 @@ func TestAnalyzeSequenceRewriteExpr(t *testing.T) {
 	can Abort.Panic, Memory.Allocate:
 		in owner:
 			return rewrite items as sequence[u32]:
-				item when item != 0u32:
+				item when item != 0:
 					emit item
 `)
 }
 func TestAnalyzeSequenceRewriteUsesExpectedRegionParam(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "sequence_rewrite_region_param.elisa", `def keep_non_zero[@r](items: darray[u32] @r) -> darray[u32] @r:
 	return rewrite items as sequence[u32]:
-		item when item != 0u32:
+		item when item != 0:
 			emit item
 `)
 	all := strings.Join(result.Errors(), "\n")

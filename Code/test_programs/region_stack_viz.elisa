@@ -56,10 +56,10 @@ def label_size(x: i64, base_y: i64, total_bytes: i64, name: u8&) -> void:
     can Console.Format, Abort.Panic:
         py: i64 = 6
         buf: u8[32] = zeroed
-        snprintf(&buf[0], 32u, "%lld B", total_bytes)
+        snprintf(&buf[0], 32, "%lld B", total_bytes)
         top: i64 = base_y - total_bytes / py - 30
-        DrawText(&buf[0], x.i32(), top.i32(), 20, 0xFFFFFFFFu32)
-        DrawText(name, x.i32(), (base_y + 12).i32(), 20, 0xFFAAAAAAu32)
+        DrawText(&buf[0], x.i32(), top.i32(), 20, 0xFFFFFFFF)
+        DrawText(name, x.i32(), (base_y + 12).i32(), 20, 0xFFAAAAAA)
 
 @test
 def region_stack_viz() -> void:
@@ -72,10 +72,10 @@ def region_stack_viz() -> void:
         sz_node: i64 = size_of(Node).i64()
         sz_vec: i64 = size_of(Vec3).i64()
         # colors per object type
-        c_i64: u32 = 0xFF4488FFu32
-        c_px: u32 = 0xFF44CC88u32
-        c_node: u32 = 0xFFFFAA44u32
-        c_vec: u32 = 0xFFEE5577u32
+        c_i64: u32 = 0xFF4488FF
+        c_px: u32 = 0xFF44CC88
+        c_node: u32 = 0xFFFFAA44
+        c_vec: u32 = 0xFFEE5577
         # stack 0: i64 + Pixel + Vec3
         a0: mutable darray[i64] = []
         a1: mutable darray[Pixel] = []
@@ -107,9 +107,9 @@ def region_stack_viz() -> void:
                 _ = d2.resize(triangle(frame + 90, 140, 90).usize())
 
                 BeginDrawing()
-                ClearBackground(0xFF161620u32)
-                DrawText("Elisa region stacks - each bar is one arena; segments are different heap object types; label = live bytes", 24, 22, 20, 0xFFEEEEEEu32)
-                DrawText("blue = darray[i64]   green = darray[Pixel](4B)   orange = darray[Node](16B)   red = darray[Vec3](24B)", 24, 50, 18, 0xFF999999u32)
+                ClearBackground(0xFF161620)
+                DrawText("Elisa region stacks - each bar is one arena; segments are different heap object types; label = live bytes", 24, 22, 20, 0xFFEEEEEE)
+                DrawText("blue = darray[i64]   green = darray[Pixel](4B)   orange = darray[Node](16B)   red = darray[Vec3](24B)", 24, 50, 18, 0xFF999999)
                 base_y: i64 = 600
 
                 # stack 0

@@ -24,12 +24,12 @@ struct BoxHolder:
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_side_common_frozen_helper_indexed_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	out: int = wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	out: int = wrapped.items[0].node.span + wrapped.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -61,7 +61,7 @@ struct Box:
 	node: mutable Expr
 
 def fold_common_frozen_wrapped_reassign() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	boxed: Box = Box(new[store] Expr.Lit(span: 7, value: 5))
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
@@ -104,16 +104,16 @@ struct BoxHolder:
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_common_frozen_helper_indexed_reassign() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	first: int = wrapped.items[0u].node.span
-	wrapped.items[0u].node <- other
+	first: int = wrapped.items[0].node.span
+	wrapped.items[0].node <- other
 	_ = frozen
-	out: int = first + wrapped.items[0u].node.span
+	out: int = first + wrapped.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -151,12 +151,12 @@ struct Wrapper:
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_helper_indexed_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	out: int = wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	out: int = wrapped.meta.items[0].node.span + wrapped.meta.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -194,12 +194,12 @@ struct Wrapper:
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
-	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	out: int = wrapped.meta.items[0u].node.span + wrapped.meta.items[0u].node.span
+	out: int = wrapped.meta.items[0].node.span + wrapped.meta.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -237,16 +237,16 @@ struct Wrapper:
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
-	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	first: int = wrapped.meta.items[0u].node.span
-	wrapped.meta.items[0u].node <- other
+	first: int = wrapped.meta.items[0].node.span
+	wrapped.meta.items[0].node <- other
 	_ = frozen
-	out: int = first + wrapped.meta.items[0u].node.span
+	out: int = first + wrapped.meta.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -284,16 +284,16 @@ struct Wrapper:
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_helper_indexed_reassign() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	first: int = wrapped.meta.items[0u].node.span
-	wrapped.meta.items[0u].node <- other
+	first: int = wrapped.meta.items[0].node.span
+	wrapped.meta.items[0].node <- other
 	_ = frozen
-	out: int = first + wrapped.meta.items[0u].node.span
+	out: int = first + wrapped.meta.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -327,7 +327,7 @@ def read(owner: Arena) -> int:
 		_ = new Expr.Add(span: 5, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	node: Expr = frozen[2u]
+	node: Expr = frozen[2]
 	key: NodeKey[Expr] = dense_key(node, frozen)
 	again: Expr = frozen[key]
 	return again.span
@@ -369,7 +369,7 @@ def make_box(owner: Arena) -> FrozenBox:
 
 def read(owner: Arena) -> int:
 	box: FrozenBox = make_box(owner)
-	node: Expr = box.store[2u]
+	node: Expr = box.store[2]
 	key: NodeKey[Expr] = dense_key(node, box.store)
 	again: Expr = box.store[key]
 	_ = again
@@ -399,9 +399,9 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenRepeatedCommonFieldRead
 	End
 
 def fold_common_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	node: Expr = new[store] Expr.Hold(span: 7, value: local_ref)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	in frozen:
@@ -433,9 +433,9 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedFrozenMatchedPayloadRepeatedC
 	Wrap(child: Expr)
 
 def fold_child_common_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -487,14 +487,14 @@ struct BoxHolder:
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_helper_indexed_child_common_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: held)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.items[0u].node in frozen:
+	match wrapped.items[0].node in frozen:
 		Expr.Wrap(child: child_alias):
 			out: int = child_alias.span + child_alias.span
 			destroy scratch
@@ -545,14 +545,14 @@ struct Wrapper:
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
-	wrapped: Wrapper = wrap_submeta(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0].node in frozen:
 		Expr.Wrap(child: child_alias):
 			out: int = child_alias.span + child_alias.span
 			destroy scratch

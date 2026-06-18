@@ -182,10 +182,10 @@ def ref_param_growth_explicit_region_lives() -> void:
             fill(&v, 50000)
             if v.count != 50000:
                 panic("caller lost count (header update dropped)")
-            sum: mutable u64 = 0u64
+            sum: mutable u64 = 0
             for i in 0..<v.count.i64():
                 sum <- sum + v[i].u64()
-            if sum != 6367960u64:
+            if sum != 6367960:
                 panic("grown elements corrupted (UAF / wrong region?)")
 `
 
@@ -218,10 +218,10 @@ def ref_param_growth_inferred_region_lives() -> void:
         fill(&v, 50000)
         if v.count != 50000:
             panic("caller lost count (header update dropped)")
-        sum: mutable u64 = 0u64
+        sum: mutable u64 = 0
         for i in 0..<v.count.i64():
             sum <- sum + v[i].u64()
-        if sum != 6367960u64:
+        if sum != 6367960:
             panic("grown elements corrupted (UAF / wrong region?)")
 `
 
@@ -257,10 +257,10 @@ def inferred_region_param_growth_lives() -> void:
         fill(&v, 50000)
         if v.count != 50000:
             panic("caller lost count (header update dropped)")
-        sum: mutable u64 = 0u64
+        sum: mutable u64 = 0
         for i in 0..<v.count.i64():
             sum <- sum + v[i].u64()
-        if sum != 6367960u64:
+        if sum != 6367960:
             panic("grown elements corrupted (UAF / wrong region?)")
 `
 
@@ -310,7 +310,7 @@ const inferredRegionParamDStrGrowthBody = `
 def build_msg(out: mutable dstr&, n: usize) -> void:
     i: mutable usize = 0
     while i < n:
-        out.push((65u8 + (i % 26u).u8()))
+        out.push((65 + (i % 26).u8()))
         i <- i + 1
 
 @test
@@ -320,10 +320,10 @@ def inferred_region_param_dstr_growth_lives() -> void:
         build_msg(&s, 50000)
         if s.count != 50000:
             panic("caller lost dstr count (header update dropped)")
-        sum: mutable u64 = 0u64
+        sum: mutable u64 = 0
         for i in 0..<s.count.i64():
             sum <- sum + s[i].u64()
-        if sum != 3874976u64:
+        if sum != 3874976:
             panic("grown dstr bytes corrupted (UAF / wrong region?)")
 `
 
@@ -356,13 +356,13 @@ def inferred_region_param_multi_growth_lives() -> void:
         fill_two(&xs, &ys, 40000)
         if xs.count != 40000 or ys.count != 40000:
             panic("caller lost count on one of two grown params")
-        suma: mutable u64 = 0u64
+        suma: mutable u64 = 0
         for i in 0..<xs.count.i64():
             suma <- suma + xs[i].u64()
         sumb: mutable i64 = 0
         for i in 0..<ys.count.i64():
             sumb <- sumb + ys[i]
-        if suma != 5093856u64:
+        if suma != 5093856:
             panic("grown param a corrupted (UAF / wrong region?)")
         if sumb != 1599960000:
             panic("grown param b corrupted (UAF / wrong region?)")
@@ -388,16 +388,16 @@ def dstr_string_literal_init_lives() -> void:
         empty: mutable dstr = ""
         if empty.count != 0:
             panic("empty dstr literal not empty")
-        empty.push(90u8)
-        if empty.count != 1 or empty[0] != 90u8:
+        empty.push(90)
+        if empty.count != 1 or empty[0] != 90:
             panic("empty dstr literal not growable")
         s: mutable dstr = "AB\nC"
         if s.count != 4:
             panic("dstr literal wrong length (escape decode?)")
-        if s[0] != 65u8 or s[1] != 66u8 or s[2] != 10u8 or s[3] != 67u8:
+        if s[0] != 65 or s[1] != 66 or s[2] != 10 or s[3] != 67:
             panic("dstr literal wrong bytes")
-        s.push(33u8)
-        if s.count != 5 or s[4] != 33u8:
+        s.push(33)
+        if s.count != 5 or s[4] != 33:
             panic("dstr literal not growable after init")
 `
 
@@ -428,21 +428,21 @@ def pick(b: bool) -> dstr:
 def dstr_literal_return_assign_lives() -> void:
     can Abort.Panic, Memory.Allocate:
         m: dstr = make_msg()
-        if m.count != 2 or m[0] != 72u8 or m[1] != 105u8:
+        if m.count != 2 or m[0] != 72 or m[1] != 105:
             panic("return string literal wrong")
         y: dstr = pick(true)
-        if y.count != 3 or y[0] != 121u8:
+        if y.count != 3 or y[0] != 121:
             panic("nested-return string literal wrong")
         n: dstr = pick(false)
-        if n.count != 3 or n[2] != 10u8:
+        if n.count != 3 or n[2] != 10:
             panic("nested-return escape literal wrong")
         s: mutable dstr = []
-        s.push(64u8)
+        s.push(64)
         s <- "ab\nc"
-        if s.count != 4 or s[0] != 97u8 or s[2] != 10u8 or s[3] != 99u8:
+        if s.count != 4 or s[0] != 97 or s[2] != 10 or s[3] != 99:
             panic("local-assign string literal wrong")
-        s.push(33u8)
-        if s.count != 5 or s[4] != 33u8:
+        s.push(33)
+        if s.count != 5 or s[4] != 33:
             panic("local-assign result not growable")
 `
 
@@ -463,7 +463,7 @@ func TestDStrStringLiteralReturnAssign(t *testing.T) {
 // threading path. ASan would catch a use-after-free here.
 const inferredRegionParamReassignBody = `
 def repl_da(s: mutable darray[u8]&) -> void:
-    s <- [88u8, 89u8, 90u8]
+    s <- [88, 89, 90]
 
 def repl_str(s: mutable dstr&) -> void:
     s <- "Hello"
@@ -472,17 +472,17 @@ def repl_str(s: mutable dstr&) -> void:
 def inferred_region_param_reassign_lives() -> void:
     can Abort.Panic, Memory.Allocate:
         v: mutable darray[u8] = []
-        v.push(65u8)
+        v.push(65)
         repl_da(&v)
-        if v.count != 3 or v[0] != 88u8 or v[2] != 90u8:
+        if v.count != 3 or v[0] != 88 or v[2] != 90:
             panic("darray bare-reassign wrong")
         s: mutable dstr = []
-        s.push(64u8)
+        s.push(64)
         repl_str(&s)
-        if s.count != 5 or s[0] != 72u8 or s[4] != 111u8:
+        if s.count != 5 or s[0] != 72 or s[4] != 111:
             panic("dstr bare-string-reassign wrong")
-        s.push(33u8)
-        if s.count != 6 or s[5] != 33u8:
+        s.push(33)
+        if s.count != 6 or s[5] != 33:
             panic("post-reassign growth wrong")
 `
 
@@ -535,7 +535,7 @@ const returnViewIntoGrownParamBody = `
 def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
     i: mutable usize = 0
     while i < n:
-        out.push(65u8)
+        out.push(65)
         i <- i + 1
     return out[0:n]
 

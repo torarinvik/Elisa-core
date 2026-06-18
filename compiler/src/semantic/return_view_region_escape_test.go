@@ -10,13 +10,13 @@ import (
 // the view dropped its `@r` during surface resolution, so the escape was uncaught and segfaulted.)
 func TestReturnedViewExplicitRegionEscapeCaught(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_explicit_escape.elisa", `def head[@r](out: mutable darray[u8]& @r, n: usize) -> view[u8] @r:
-    out.push(65u8)
+    out.push(65)
     return out[0:n]
 
 def caller() -> void:
     can Abort.Panic:
         outer: mutable darray[u8] = []
-        outer.push(9u8)
+        outer.push(9)
         escaped: mutable view[u8] = outer[0:1]
         region inner(64):
             v: mutable darray[u8] @inner = []
@@ -34,13 +34,13 @@ def caller() -> void:
 // the returned view's region to it (inferReturnViewRegion). The escape must still be caught.
 func TestReturnedViewInferredRegionEscapeCaught(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_inferred_escape.elisa", `def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
-    out.push(65u8)
+    out.push(65)
     return out[0:n]
 
 def caller() -> void:
     can Abort.Panic:
         outer: mutable darray[u8] = []
-        outer.push(9u8)
+        outer.push(9)
         escaped: mutable view[u8] = outer[0:1]
         region inner(64):
             v: mutable darray[u8] @inner = []
@@ -59,14 +59,14 @@ def caller() -> void:
 // region-less and can escape its backing.
 func TestReturnedViewInferredRegionThroughLocalEscapeCaught(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_inferred_local_escape.elisa", `def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
-    out.push(65u8)
+    out.push(65)
     w: view[u8] = out[0:n]
     return w
 
 def caller() -> void:
     can Abort.Panic:
         outer: mutable darray[u8] = []
-        outer.push(9u8)
+        outer.push(9)
         escaped: mutable view[u8] = outer[0:1]
         region inner(64):
             v: mutable darray[u8] @inner = []
@@ -87,7 +87,7 @@ def caller() -> void:
 // program below segfaulted at runtime when the branch was not taken).
 func TestReturnedViewConditionalRebindStillRejected(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_conditional_rebind.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize, flag: bool) -> view[u8]:
-    out.push(65u8)
+    out.push(65)
     w: mutable view[u8] = out[0:n]
     if flag:
         w <- src[0:n]
@@ -96,7 +96,7 @@ func TestReturnedViewConditionalRebindStillRejected(t *testing.T) {
 def caller() -> usize:
     can Abort.Panic:
         outer: mutable darray[u8] = []
-        outer.push(9u8)
+        outer.push(9)
         escaped: mutable view[u8] = outer[0:1]
         region inner(64):
             v: mutable darray[u8] @inner = []
@@ -114,7 +114,7 @@ def caller() -> usize:
 // rejection, never under-rejection); precise flow-sensitive invalidation is a future refinement.
 func TestReturnedViewUnconditionalRebindConservativelyRejected(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_uncond_rebind.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize) -> view[u8]:
-    out.push(65u8)
+    out.push(65)
     w: mutable view[u8] = out[0:n]
     w <- src[0:n]
     return w
@@ -122,7 +122,7 @@ func TestReturnedViewUnconditionalRebindConservativelyRejected(t *testing.T) {
 def caller() -> usize:
     can Abort.Panic:
         outer: mutable darray[u8] = []
-        outer.push(9u8)
+        outer.push(9)
         escaped: mutable view[u8] = outer[0:1]
         region inner(64):
             v: mutable darray[u8] @inner = []
@@ -138,7 +138,7 @@ def caller() -> usize:
 // and reading the view is sound and must type-check cleanly.
 func TestReturnedViewWithinLifetimeAccepted(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_ok.elisa", `def head(out: mutable darray[u8]&, n: usize) -> view[u8]:
-    out.push(65u8)
+    out.push(65)
     return out[0:n]
 
 def caller() -> usize:

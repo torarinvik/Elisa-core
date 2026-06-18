@@ -263,8 +263,8 @@ def hash_sview_fnv1a() -> void:
         e: u64 = hash_sview(sview("", 0, 0))
         assert_eq(a == b, true)
         assert_eq(a == c, false)
-        assert_eq(a == 0u64, false)
-        assert_eq(e == 0xcbf29ce484222325u64, true)
+        assert_eq(a == 0, false)
+        assert_eq(e == 0xcbf29ce484222325, true)
 `
 	fixturePath := filepath.Join(fixtureDir, "hash_sview.elisa")
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

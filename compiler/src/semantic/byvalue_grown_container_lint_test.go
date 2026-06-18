@@ -11,7 +11,7 @@ import (
 func TestByValueGrownContainerParamWarns(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "byval_grown.elisa", `def fill(out: mutable darray[u8]) -> usize:
     region r(64):
-        out.push(1u8)
+        out.push(1)
     return out.count
 `)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -27,7 +27,7 @@ func TestByValueGrownContainerParamWarns(t *testing.T) {
 // region is inferred, so it compiles cleanly).
 func TestByRefGrownContainerParamNoWarn(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "byref_grown.elisa", `def fill(out: mutable darray[u8]&) -> void:
-    out.push(1u8)
+    out.push(1)
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("by-ref grown container should compile via inferred region, got errors: %v", errs)
@@ -42,7 +42,7 @@ func TestByRefGrownContainerParamNoWarn(t *testing.T) {
 func TestByValueGrownThenReturnedNoWarn(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "byval_grown_returned.elisa", `def build(seed: mutable darray[u8]) -> darray[u8]:
     region r(64):
-        seed.push(1u8)
+        seed.push(1)
     return seed
 `)
 	if warnings := strings.Join(result.Warnings(), "\n"); strings.Contains(warnings, "by-value darray parameter") {

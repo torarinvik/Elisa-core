@@ -196,7 +196,7 @@ def arena_da_fill[T](dst: view[T], value: T):
 
 def kernel(buf: view[u8]) -> void:
 	whole: view[u8] = buf[0:8]
-	arena_da_fill(whole[0:4], 7u8)
+	arena_da_fill(whole[0:4], 7)
 `)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {

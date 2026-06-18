@@ -25,12 +25,12 @@ def adopt_runtime_test() -> void:
         region parent(4096):
             region child(256):
                 v: mutable darray[u8] @child = []
-                v.push(42u8)
-                v.push(99u8)
+                v.push(42)
+                v.push(99)
                 adopt child into parent
-                if v[0] != 42u8:
+                if v[0] != 42:
                     panic("adopt corrupted v[0]")
-                if v[1] != 99u8:
+                if v[1] != 99:
                     panic("adopt corrupted v[1]")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

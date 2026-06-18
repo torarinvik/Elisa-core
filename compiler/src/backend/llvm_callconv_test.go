@@ -12,7 +12,7 @@ func TestGenerateLLVMIRAppliesCallConvToDefinedCallbackFunction(t *testing.T) {
 @callconv(winapi)
 def thread_entry(arg: void&) -> u32:
 	_ = arg
-	return 0u32
+	return 0
 `)
 
 	g, err := compileLLVMModuleWithTarget(result, OptimizationLevel0, DefaultPackedLoweringProfile(), "i686-pc-windows-msvc")

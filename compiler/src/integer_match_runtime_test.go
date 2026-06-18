@@ -34,19 +34,19 @@ def decode_u16(addr: u16) -> i32:
 @test
 def integer_match_dispatch() -> void:
     can Abort.Panic:
-        if decode_u8(0xA9u8) != 1:
+        if decode_u8(0xA9) != 1:
             panic("u8 0xA9")
-        if decode_u8(0x8Du8) != 2:
+        if decode_u8(0x8D) != 2:
             panic("u8 0x8D")
-        if decode_u8(0x00u8) != 3:
+        if decode_u8(0x00) != 3:
             panic("u8 0x00")
-        if decode_u8(0x42u8) != 99:
+        if decode_u8(0x42) != 99:
             panic("u8 default")
-        if decode_u16(0x2000u16) != 10:
+        if decode_u16(0x2000) != 10:
             panic("u16 0x2000")
-        if decode_u16(0x4016u16) != 20:
+        if decode_u16(0x4016) != 20:
             panic("u16 0x4016")
-        if decode_u16(0x1234u16) != 30:
+        if decode_u16(0x1234) != 30:
             panic("u16 default")
 `
 

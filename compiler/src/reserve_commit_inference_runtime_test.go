@@ -25,16 +25,16 @@ func TestRunCLIReserveCommitInferenceKeepsInteriorRefStable(t *testing.T) {
         xs: mutable darray[i64] = []
         anchor: mutable i64&? = null
         for i in 0..<n:
-            xs.push(i.i64() * 10i64)
+            xs.push(i.i64() * 10)
             if i == 0:
                 anchor <- &xs[0]
         if anchor != null:
             return anchor[0]
-        return -1i64
+        return -1
 @test
 def reserve_commit_inference_test() -> void:
     can Memory.Allocate, Abort.Panic:
-        if build(500u) != 0i64:
+        if build(500) != 0:
             panic("inferred reserve_commit: interior ref stale after growth")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

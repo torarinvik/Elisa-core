@@ -22,16 +22,16 @@ func TestRunCLIDarrayResizePresizesAndFillsByIndex(t *testing.T) {
 	src := `@test
 def darray_resize_runtime_test() -> void:
     can Memory.Allocate, Abort.Panic:
-        n: usize = 1000u
+        n: usize = 1000
         xs: mutable darray[i64] = []
         _ = xs.resize(n)
         if xs.count != n:
             panic("resize: count not sealed to n")
         for i in 0..<n:
-            xs[i] <- (i.i64()) * 3i64
-        if xs[0] != 0i64:
+            xs[i] <- (i.i64()) * 3
+        if xs[0] != 0:
             panic("resize: element 0 wrong")
-        if xs[999] != 2997i64:
+        if xs[999] != 2997:
             panic("resize: last element wrong")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

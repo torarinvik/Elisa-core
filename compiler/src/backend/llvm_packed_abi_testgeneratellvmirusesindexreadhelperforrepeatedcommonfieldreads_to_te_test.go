@@ -15,7 +15,7 @@ func TestGenerateLLVMIRUsesIndexReadHelperForRepeatedCommonFieldReads(t *testing
 	Lit(value: int)
 
 def fold_common() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
@@ -49,7 +49,7 @@ func TestGenerateLLVMIRUsesSideWordHelpersForRepeatedSideTableCommonFieldReadsBy
 	Lit(value: int)
 
 def fold_common() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
@@ -85,7 +85,7 @@ func TestGenerateLLVMIRUsesSideWordHelpersForRepeatedSideTableCommonFieldReadsIn
 	Lit(value: int)
 
 def fold_common() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(span: 7, value: 5)
@@ -121,7 +121,7 @@ func TestGenerateLLVMIRUsesIndexWordReadForFrozenRepeatedCommonFieldReads(t *tes
 	Lit(value: int)
 
 def fold_common_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -153,7 +153,7 @@ func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheForFrozenRepeatedCommo
 	Lit(value: int)
 
 def fold_common_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -188,7 +188,7 @@ func TestGenerateLLVMIRUsesCanonicalVariantSparseReadCacheAcrossMatchedAccessorP
 	Wrap(child: Expr)
 
 def fold_child_common_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	child: Expr = new[store] Expr.Int(span: 5, value: 7)
 	node: Expr = new[store] Expr.Wrap(span: 9, child: child)
@@ -428,7 +428,7 @@ func TestGenerateLLVMIRUsesIndexWordReadForFrozenRepeatedCommonFieldReadsOutside
 	Lit(value: int)
 
 def fold_common_frozen_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -464,7 +464,7 @@ struct Box:
 extern wrap_node(node: Expr) -> Box
 
 def fold_common_frozen_wrapped_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -504,12 +504,12 @@ struct BoxHolder:
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_common_frozen_helper_indexed_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	wrapped: BoxHolder = wrap_indexed_node(node)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	out: int = wrapped.items[0u].node.span + wrapped.items[0u].node.span
+	out: int = wrapped.items[0].node.span + wrapped.items[0].node.span
 	destroy scratch
 	return out
 `
@@ -541,7 +541,7 @@ struct Box:
 extern wrap_node(node: Expr) -> Box
 
 def fold_side_common_frozen_wrapped_direct() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)

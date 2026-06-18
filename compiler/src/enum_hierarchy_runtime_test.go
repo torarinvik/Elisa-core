@@ -568,7 +568,7 @@ def make(depth: i64) -> Tree:
 
 def main() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        region scratch(65536u)
+        region scratch(65536)
         root: Tree = make(3)
         out: i64 = total(root) - 8
         destroy scratch
@@ -1020,7 +1020,7 @@ enum Tree layout(handle: ptr):
 
 def main() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        region r(65536u)
+        region r(65536)
         store: Tree.Store[Local] = Tree.Store(r)
         t: Tree = new[store] Tree.Leaf(value: 1)
         frozen: Tree.Store[Frozen] = freeze(move store)

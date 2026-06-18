@@ -88,7 +88,7 @@ func TestAnalyzeHotContractRejectsRawPointerChase(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "hot_rawptr.elisa", `@hot
 def chase(p: heap i64&) -> i64:
     can Unsafe.PointerArithmetic, Unsafe.PointerCast:
-        return (p + 1u).u64().i64()
+        return (p + 1).u64().i64()
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, "@hot function") || !strings.Contains(all, "Unsafe.PointerArithmetic") {

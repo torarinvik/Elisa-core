@@ -97,12 +97,12 @@ static uint8_t *read_file_cstr(const char *path) {
         fclose(file);
         return NULL;
     }
-    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1);
     if (buffer == NULL) {
         fclose(file);
         return NULL;
     }
-    size_t read_count = fread(buffer, 1u, (size_t)size, file);
+    size_t read_count = fread(buffer, 1, (size_t)size, file);
     fclose(file);
     if (read_count != (size_t)size) {
         free(buffer);
@@ -128,7 +128,7 @@ int main(int argc, char **argv) {
 		printf("%llu\n", (unsigned long long)frontend_lexer_token_checksum(source));
 	} else if (strcmp(argv[1], "kinds") == 0) {
 		uintptr_t count = (uintptr_t)frontend_lexer_token_count(source);
-		uintptr_t alloc_count = count == 0 ? 1u : count;
+		uintptr_t alloc_count = count == 0 ? 1 : count;
 		uint64_t *kinds = (uint64_t *)malloc(sizeof(uint64_t) * (size_t)alloc_count);
 		if (kinds == NULL) {
 			fprintf(stderr, "failed to allocate %llu token kinds\n", (unsigned long long)count);

@@ -22,13 +22,13 @@ func TestRunCLIRefParamMethodCallDoesNotTrap(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "ref_param_method_call.elisa")
 	src := `def doubleRef(off: mutable usize&) -> u64:
-    return off.u64() * 2u64
+    return off.u64() * 2
 
 @test
 def ref_param_method_call_test() -> void:
     can Abort.Panic:
         x: mutable usize = 21
-        if doubleRef(x) != 42u64:
+        if doubleRef(x) != 42:
             panic("ref-param .u64() miscompiled")
 `
 	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {

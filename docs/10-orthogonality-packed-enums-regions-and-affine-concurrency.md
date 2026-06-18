@@ -101,7 +101,7 @@ stops being predictable.
 The language should instead make this flow explicit:
 
 ```elisa
-region parse_arena(1_000_000u)
+region parse_arena(1_000_000)
 store: Expr.Store[Local] = Expr.Store(parse_arena)
 
 in store:

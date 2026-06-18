@@ -144,7 +144,7 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 	}
 }
 func TestParseSequenceRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0u32:\n                    emit item\n")
+	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0:\n                    emit item\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}

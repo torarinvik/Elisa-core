@@ -22,17 +22,17 @@ func TestRunCLIEarlyFreeReclaimsDeadObject(t *testing.T) {
 	src := `def f(n: usize) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         scratch: mutable darray[i64] = []
-        scratch.push(10i64)
-        scratch.push(20i64)
+        scratch.push(10)
+        scratch.push(20)
         summary: mutable i64 = scratch[0] + scratch[1]
         kept: mutable darray[i64] = []
         kept.push(summary)
-        kept.push(summary * 2i64)
+        kept.push(summary * 2)
         return kept[0] + kept[1]
 @test
 def early_free_test() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        if f(0u) != 90i64:
+        if f(0) != 90:
             panic("early-free changed the result")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

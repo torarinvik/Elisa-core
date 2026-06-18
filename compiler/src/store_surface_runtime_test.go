@@ -43,9 +43,9 @@ def store_over_darray() -> void:
         xs.push(33)
         if how_many[darray[i64]](xs) != 3:
             panic("Store.store_count over darray wrong")
-        if get_at[darray[i64]](xs, 0u) != 11i64:
+        if get_at[darray[i64]](xs, 0) != 11:
             panic("Store.store_get[0] over darray wrong")
-        if get_at[darray[i64]](xs, 2u) != 33i64:
+        if get_at[darray[i64]](xs, 2) != 33:
             panic("Store.store_get[2] over darray wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_darray.elisa")
@@ -94,7 +94,7 @@ def store_over_deque_inline() -> void:
             _ = arena_deque_push_back[i64](a, dq, 100)
             _ = arena_deque_push_back[i64](a, dq, 200)
             _ = arena_deque_push_back[i64](a, dq, 300)
-            if get_at[Deque[i64]](dq, 2u) != 300i64:
+            if get_at[Deque[i64]](dq, 2) != 300:
                 panic("Store.store_get[2] over deque (inline) wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_deque_inline.elisa")
@@ -144,13 +144,13 @@ def store_over_deque() -> void:
             _ = arena_deque_push_back[i64](a, dq, 200)
             _ = arena_deque_push_back[i64](a, dq, 300)
             n: usize = how_many[Deque[i64]](dq)
-            v0: i64 = get_at[Deque[i64]](dq, 0u)
-            v2: i64 = get_at[Deque[i64]](dq, 2u)
+            v0: i64 = get_at[Deque[i64]](dq, 0)
+            v2: i64 = get_at[Deque[i64]](dq, 2)
             if n != 3:
                 panic("Store.store_count over deque wrong")
-            if v0 != 100i64:
+            if v0 != 100:
                 panic("Store.store_get[0] over deque wrong")
-            if v2 != 300i64:
+            if v2 != 300:
                 panic("Store.store_get[2] over deque wrong")
 `
 	fixturePath := filepath.Join(fixtureDir, "store_over_deque.elisa")

@@ -88,7 +88,7 @@ law Bounded(self: usize, lo: usize, hi: usize) = self >= lo and self <= hi
 type Hundred = usize is Bounded[0, 100]
 
 def half(n: Hundred) -> usize is Bounded[0, 50]:
-    return n / 2u
+    return n / 2
 `
 	result := analyzeWithSMT(t, "smt_division.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

@@ -11,9 +11,9 @@ func TestTerminationProvenCountdown(t *testing.T) {
 	src := `
 def countdown(n: usize) -> usize:
     decreases n
-    if n == 0u:
-        return 0u
-    return countdown(n - 1u)
+    if n == 0:
+        return 0
+    return countdown(n - 1)
 `
 	result := analyzeTreeTestSource(t, "term_countdown.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -35,7 +35,7 @@ func TestTerminationRefutedIncreasing(t *testing.T) {
 	src := `
 def grow(n: usize) -> usize:
     decreases n
-    return grow(n + 1u)
+    return grow(n + 1)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_grow.elisa", src)
 	errText := strings.Join(result.Errors(), "\n")
@@ -63,7 +63,7 @@ func TestTerminationUnusedClauseWarns(t *testing.T) {
 	src := `
 def plain(n: usize) -> usize:
     decreases n
-    return n + 1u
+    return n + 1
 `
 	result := analyzeTreeTestSource(t, "term_unused.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -81,9 +81,9 @@ func TestTerminationProvenLexicographic(t *testing.T) {
 def walk(a: usize, b: usize) -> usize:
     decreases a
     decreases b
-    if b == 0u:
+    if b == 0:
         return a
-    return walk(a, b - 1u)
+    return walk(a, b - 1)
 `
 	result := analyzeTreeTestSource(t, "term_lex.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -104,7 +104,7 @@ def walk(a: usize, b: usize) -> usize:
 func TestTerminationNoClauseNoObligation(t *testing.T) {
 	src := `
 def loop_forever(n: usize) -> usize:
-    return loop_forever(n + 1u)
+    return loop_forever(n + 1)
 `
 	result := analyzeTreeTestSource(t, "term_noclause.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

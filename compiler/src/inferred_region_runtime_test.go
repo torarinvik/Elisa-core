@@ -26,7 +26,7 @@ def inferred_region_runtime_test() -> void:
         xs: mutable darray[i64] = []
         for i in 0..<1000:
             xs.push(i.i64())
-        if xs[0] != 0i64 or xs[999] != 999i64:
+        if xs[0] != 0 or xs[999] != 999:
             panic("auto region: data wrong")
         if xs.count != 1000:
             panic("auto region: count wrong")

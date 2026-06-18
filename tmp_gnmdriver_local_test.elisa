@@ -4,15 +4,15 @@ include "elisa-shad-ps4-from-scratch/core/libraries/gnmdriver/gnmdriver.elisa"
 @test
 def gnmdriver_smoke_paths() -> void:
     can Abort.Panic:
-        workload: mutable u64 = 0u64
-        assert sceGnmBeginWorkload(0x0fu32, &workload) == 0
-        assert workload == 1u64
+        workload: mutable u64 = 0
+        assert sceGnmBeginWorkload(0x0f, &workload) == 0
+        assert workload == 1
 
-        stream_ret: mutable u32 = 0u32
-        assert sceGnmCreateWorkloadStream(0xdeadbeefu64, &stream_ret) == 0
-        assert stream_ret == 1u32
+        stream_ret: mutable u32 = 0
+        assert sceGnmCreateWorkloadStream(0xdeadbeef, &stream_ret) == 0
+        assert stream_ret == 1
 
-        rptr: mutable u32 = 0u32
-        assert sceGnmMapComputeQueue(0u32, 0u32, 0x1000u64, 0x100u32, &rptr) == 1
-        assert rptr == 0u32
+        rptr: mutable u32 = 0
+        assert sceGnmMapComputeQueue(0, 0, 0x1000, 0x100, &rptr) == 1
+        assert rptr == 0
         assert g_compute_queues[0].used == true

@@ -29,14 +29,14 @@ struct Wrapper:
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	local_ref: i32& @scratch = new[scratch] 7i32
+	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
 	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
-	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1u:2u], 0u, 1u)
+	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	match wrapped.meta.items[0u].node in frozen:
+	match wrapped.meta.items[0].node in frozen:
 		Expr.Wrap(child: child_alias):
 			out: int = child_alias.span + child_alias.span
 			destroy scratch
@@ -74,7 +74,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPayloadlessPackedMatchWithMa
 	No
 
 def choose() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Flag.Store[Local] = Flag.Store(scratch)
 	node: Flag = new[store] Flag.Yes(span: 7)
 	frozen: Flag.Store[Frozen] = freeze(move store)
@@ -110,7 +110,7 @@ func TestGenerateLLVMIRUsesIndexTagReadHelperForPayloadlessPackedMatch(t *testin
 	No
 
 def choose() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Flag.Store[Local] = Flag.Store(scratch)
 	in store:
 		node: Flag = new Flag.Yes
@@ -148,7 +148,7 @@ func TestGenerateOptimizedLLVMIRUsesDirectPrefixColumnLoadsForFrozenRepeatedComm
 	Lit(value: int)
 
 def fold_common_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -183,7 +183,7 @@ func TestGenerateOptimizedLLVMIRUsesDirectDenseMetadataLoadsForFrozenPackedMatch
 	End
 
 def fold_match_frozen() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -238,7 +238,7 @@ def fold(node: Expr, frozen: Expr.Store[Frozen]) -> int:
 			return 0
 
 def fold_export() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Wide(span: 7, cost: 11, first: 2, second: 3, third: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -271,7 +271,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfPatternInIndexSOA(t 
 	End
 
 def fold_if_pattern() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -307,7 +307,7 @@ func TestGenerateLLVMIRAvoidsEagerDecodeForFrozenMixedPackedMatchInIndexSOA(t *t
 	End
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -345,7 +345,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForFrozenPackedIfVariantViewInIndexSO
 	End
 
 def fold_view() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	node: Expr = new[store] Expr.Lit(span: 7, value: 5)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -378,13 +378,13 @@ func TestGenerateLLVMIRUsesIndexTailViewFastPathForFrozenPackedIfVariantViewInIn
 	Block(count: usize, items: tail int)
 
 def fold_view() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	source_items: array[int, 3] = [1, 2, 3]
-	node: Expr = new[store] Expr.Block(count: 3u, items: source_items[0u:3u])
+	node: Expr = new[store] Expr.Block(count: 3, items: source_items[0:3])
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	if node in frozen is Expr.Block:
-		out: int = node.items[0u] + node.items[2u]
+		out: int = node.items[0] + node.items[2]
 		destroy scratch
 		return out
 	destroy scratch
@@ -425,12 +425,12 @@ def walk(owner: Arena) -> int:
 		_ = new Expr.Add(span: 3, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	total: mutable int = 0
-	index: mutable usize = 0u
+	index: mutable usize = 0
 	while index < frozen.count:
 		node: Expr = frozen[index]
 		if node in frozen is Expr.Int(value: value):
 			total <- total + value + node.value + node.span
-		index <- index + 1u
+		index <- index + 1
 	return total
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_count_index_index_soa.elisa", src)
@@ -470,9 +470,9 @@ def walk(owner: Arena) -> int:
 		right: Expr = new Expr.Int(span: 2, value: 4)
 		_ = new Expr.Add(span: 3, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	chunk: view[Expr] = frozen[1u:frozen.count]
-	if chunk.len > 0u:
-		node: Expr = chunk[0u]
+	chunk: view[Expr] = frozen[1:frozen.count]
+	if chunk.len > 0:
+		node: Expr = chunk[0]
 		if node in frozen is Expr.Int(value: value):
 			return value + node.span
 	return 0
@@ -503,7 +503,7 @@ func TestGenerateLLVMIRUsesIndexReadHelpersForMixedPackedMatchInIndexSOA(t *test
 	End
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		node: Expr = new Expr.Lit(value: 5)
@@ -536,14 +536,14 @@ func TestGenerateLLVMIRUsesIndexTailViewFastPathInIndexSOA(t *testing.T) {
 	Block(count: usize, items: tail int)
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		source_items: array[int, 3] = [1, 2, 3]
-		node: Expr = new Expr.Block(count: 3u, items: source_items[0u:3u])
+		node: Expr = new Expr.Block(count: 3, items: source_items[0:3])
 		match node:
 			Expr.Block(count: _, items: items):
-				out: int = items[0u] + items[2u]
+				out: int = items[0] + items[2]
 				destroy scratch
 				return out
 `
@@ -567,14 +567,14 @@ func TestGenerateLLVMIRUsesIndexTailViewFastPathForNonFinalTailPayloadInIndexSOA
 	Block(items: tail int, count: usize)
 
 def fold() -> int:
-	region scratch(256u)
+	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	in store:
 		source_items: array[int, 3] = [1, 2, 3]
-		node: Expr = new Expr.Block(items: source_items[0u:3u], count: 3u)
+		node: Expr = new Expr.Block(items: source_items[0:3], count: 3)
 		match node:
 			Expr.Block(items: items, count: count):
-				out: int = count.int() + items[0u] + items[2u]
+				out: int = count.int() + items[0] + items[2]
 				destroy scratch
 				return out
 `

@@ -414,7 +414,7 @@ func TestLowerFileStatefulListCollectsValuesIntoDarray(t *testing.T) {
 	file := parseGrammarTestFile(t, `grammar PascalFrontend:
     collect(state: mutable ParserState&) -> Token:
         items = token(TokenKind.IDENT)*
-        return items[0u]
+        return items[0]
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)

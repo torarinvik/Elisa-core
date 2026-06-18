@@ -20,7 +20,7 @@ def first_tag(owner: Arena) -> Expr.Tag:
 		_ = new Expr.Add(left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	tags: view[Expr.Tag] = frozen.tags
-	return tags[0u]
+	return tags[0]
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_packed_store_tags_index_soa.elisa", src)
 	output, err := generateLLVMIRWithPackedABIForTest(result, packedEnumABIIndexSOA)
@@ -53,7 +53,7 @@ def visit(owner: Arena) -> int can[Pool.Create, Pool.Shutdown, Pool.Submit, Pool
 		_ = new Expr.Int(span: 1, value: 3)
 		_ = new Expr.Int(span: 2, value: 4)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	pool workers(2u):
+	pool workers(2):
 		parallel for node in frozen:
 			if node in frozen is Expr.Int(value: value):
 				_ = value + node.span
