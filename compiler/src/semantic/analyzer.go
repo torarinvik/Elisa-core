@@ -148,9 +148,12 @@ type Analyzer struct {
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
 	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
-	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded only when
-	// ELISA_DUMP_DEATHTIME is set (read-only observability; surfaced on Result).
-	deathTimeCohorts map[string][]DeathTimeCohort
+	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
+	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
+	// surfaced on Result).
+	deathTimeCohorts      map[string][]DeathTimeCohort
+	deathEscapeStats      map[string]DeathTimeEscapeStats
+	recordDeathCohortsOpt bool
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
 	deferInfo                    map[*ast.DeferStmt]*DeferInfo
@@ -546,6 +549,10 @@ type AnalyzeOptions struct {
 	SMTSolverBinary  string
 	TargetTriple     string
 	TargetDebug      bool
+	// RecordDeathTimeCohorts records the docs/91 G0 inferred death cohorts on Result.DeathTimeCohorts
+	// (programmatic access, e.g. the tightness-validation harness) without needing the
+	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
+	RecordDeathTimeCohorts bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -649,6 +656,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictProofs:               options.EnforceStrictProofs,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
+		recordDeathCohortsOpt:             options.RecordDeathTimeCohorts,
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
@@ -746,6 +754,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		PostfixShorthandCalls:   a.postfixShorthandCalls,
 		RegionStacks:            a.regionStacks,
 		DeathTimeCohorts:        a.deathTimeCohorts,
+		DeathTimeEscapeStats:    a.deathEscapeStats,
 		ResolvedTypeNames:       a.resolvedTypeNames,
 		ResolvedValueNames:      a.resolvedValueNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,

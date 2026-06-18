@@ -28,10 +28,22 @@ import (
 var dumpDeathTime = os.Getenv("ELISA_DUMP_DEATHTIME") != ""
 
 type deathTimeAlloc struct {
-	name       string
-	declIndex  int
-	deathIndex int // statement index of last use; -1 == escapes (death deferred to caller)
-	kind       string
+	name        string
+	declIndex   int
+	deathIndex  int    // statement index of last use; -1 == escapes (death deferred to caller)
+	kind        string
+	escapeReason string // "" (in-function), "return", or "arg" — why deathIndex is -1
+}
+
+// DeathTimeEscapeStats breaks down, per function, why inferred allocations escape (docs/91 G0
+// validation). ReturnEscapes are genuine (the value is returned; region-poly threading already
+// handles these). ArgEscapes are CONSERVATIVE — passed to a call we assume may retain it; these are
+// the ones interprocedural escape precision (G3) could reclaim for early-free. InFunction have a
+// concrete in-function death point.
+type DeathTimeEscapeStats struct {
+	ReturnEscapes int
+	ArgEscapes    int
+	InFunction    int
 }
 
 // DeathTimeCohort is one inferred death cohort (docs/91 G0): the set of inferred allocations that
@@ -206,7 +218,8 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 	// All conservative: death is only ever pushed later, never earlier. (The existing escape checker
 	// is the independent backstop for G1; interprocedural precision is G3.)
 	uf := newNameUnionFind()
-	escaped := map[string]bool{}
+	returnEscaped := map[string]bool{}
+	argEscaped := map[string]bool{}
 	for _, s := range stmts {
 		switch n := s.(type) {
 		case *ast.VarDeclStmt:
@@ -220,21 +233,31 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 				}
 			}
 		}
-		a.collectEscapedNames(s, escaped)
+		a.collectEscapedNames(s, returnEscaped, argEscaped)
 	}
 
 	// Class members of each inferred allocation, for the per-class death scan.
 	for k := range allocs {
 		al := &allocs[k]
 		members := uf.classMembers(al.name)
-		classEscapes := false
+		sawReturn, sawArg := false, false
 		for _, m := range members {
-			if escaped[m] {
-				classEscapes = true
-				break
+			if returnEscaped[m] {
+				sawReturn = true
+			}
+			if argEscaped[m] {
+				sawArg = true
 			}
 		}
-		if classEscapes {
+		if sawReturn || sawArg {
+			// Prefer the "return" reason: a returned value is a genuine escape (region-poly
+			// threading already handles it), whereas an arg-only escape is the conservative case
+			// interprocedural precision (G3) could reclaim.
+			if sawReturn {
+				al.escapeReason = "return"
+			} else {
+				al.escapeReason = "arg"
+			}
 			al.deathIndex = -1
 			continue
 		}
@@ -295,11 +318,11 @@ func aliasSourceName(e ast.Expr) (string, bool) {
 	return "", false
 }
 
-// collectEscapedNames marks identifiers that escape in a statement: every ident in a `return` value,
-// and every ident inside a storage-carrying call ARGUMENT (the callee may retain it — a method
-// RECEIVER `v.push(..)` is not an argument, so `v` itself is not flagged there). Conservative and
-// reflection-driven so it covers nested calls/positions.
-func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, out map[string]bool) {
+// collectEscapedNames marks identifiers that escape in a statement, split by reason: every ident in
+// a `return` value goes to returnOut (genuine escape), and every ident inside a storage-carrying call
+// ARGUMENT goes to argOut (conservative — the callee may retain it; a method RECEIVER `v.push(..)` is
+// not an argument, so `v` itself is not flagged). Reflection-driven so it covers nested positions.
+func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, returnOut, argOut map[string]bool) {
 	var walk func(v reflect.Value)
 	walk = func(v reflect.Value) {
 		if !v.IsValid() {
@@ -313,12 +336,12 @@ func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, out map[string]bool) {
 			switch n := v.Interface().(type) {
 			case *ast.ReturnStmt:
 				if n.Value != nil {
-					collectIdentNamesInto(n.Value, out)
+					collectIdentNamesInto(n.Value, returnOut)
 				}
 			case *ast.CallExpr:
 				for _, arg := range n.Args {
 					if typeCarriesRegionStorage(a.exprTypes[arg]) {
-						collectIdentNamesInto(arg, out)
+						collectIdentNamesInto(arg, argOut)
 					}
 				}
 			}
@@ -413,6 +436,38 @@ func (u *nameUnionFind) classMembers(name string) []string {
 	return members
 }
 
+// recordDeathTimeData computes a function's cohorts AND escape breakdown from one analysis pass and
+// stores both on the analyzer (surfaced on Result). Used by the programmatic recording path.
+func (a *Analyzer) recordDeathTimeData(fn *ast.FuncDecl) {
+	if fn == nil || len(fn.Body) == 0 {
+		return
+	}
+	allocs := a.analyzeDeathTimeAllocs(fn)
+	if len(allocs) == 0 {
+		return
+	}
+	cohorts := cohortsFromAllocs(allocs)
+	var stats DeathTimeEscapeStats
+	for _, al := range allocs {
+		switch {
+		case al.deathIndex != -1:
+			stats.InFunction++
+		case al.escapeReason == "return":
+			stats.ReturnEscapes++
+		default:
+			stats.ArgEscapes++
+		}
+	}
+	if a.deathTimeCohorts == nil {
+		a.deathTimeCohorts = map[string][]DeathTimeCohort{}
+	}
+	if a.deathEscapeStats == nil {
+		a.deathEscapeStats = map[string]DeathTimeEscapeStats{}
+	}
+	a.deathTimeCohorts[fn.Name] = cohorts
+	a.deathEscapeStats[fn.Name] = stats
+}
+
 // computeDeathTimeCohorts groups a function's inferred allocations into death cohorts (docs/91 G0).
 func (a *Analyzer) computeDeathTimeCohorts(fn *ast.FuncDecl) []DeathTimeCohort {
 	if fn == nil || len(fn.Body) == 0 {
@@ -422,6 +477,11 @@ func (a *Analyzer) computeDeathTimeCohorts(fn *ast.FuncDecl) []DeathTimeCohort {
 	if len(allocs) == 0 {
 		return nil
 	}
+	return cohortsFromAllocs(allocs)
+}
+
+// cohortsFromAllocs groups allocations by death point into sorted cohorts.
+func cohortsFromAllocs(allocs []deathTimeAlloc) []DeathTimeCohort {
 	byDeath := map[int][]deathTimeAlloc{}
 	for _, al := range allocs {
 		byDeath[al.deathIndex] = append(byDeath[al.deathIndex], al)

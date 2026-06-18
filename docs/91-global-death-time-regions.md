@@ -187,3 +187,27 @@ runtime depot. So:
    cohort in the same context (the safe, static G2). ASan-gated; the escape checker is the backstop.
 3. **G3: interprocedural cohorts** via the whole-program fixpoint (decision §8.2).
 A shared cross-thread depot is explicitly *not* on this path (§8b). §8 decisions 1–2 are settled.
+
+## 8c. G0 validation finding — the payoff is interprocedural, not intra-function (measured)
+
+The read-only G0 analysis was run over the real test-program corpus
+(`src/deathtime_validation_test.go`, `TestDeathTimeTightnessReport`). Over 41 analyzed programs,
+68 inferred allocations:
+
+- **58 escape (85%)**: 29 are *genuine returns* (region-poly threading already handles these — the
+  death-time model adds nothing), and **29 are CONSERVATIVE arg-escapes** — passed to a call we must
+  assume may retain them, because we lack interprocedural retention info.
+- **10 are in-function**, but **0 die early** (every function's inferred allocations fall in a single
+  cohort).
+
+**Conclusion — this re-sequences the plan.** G1 (intra-function early-free / reset-and-reuse) would
+deliver ~nothing on real code: nothing dies early intra-function. The model's actual payoff is the
+**29 conservative arg-escapes** — and reclaiming them needs **interprocedural escape precision** (a
+per-function "is this parameter retained?" summary). So the interprocedural step is not a follow-on;
+it is the **prerequisite for any value at all**.
+
+**Revised order:** G0 (done) → **interprocedural arg-retention summaries** (read-only: compute which
+container params a callee retains vs. only reads; downgrade a caller's arg-escape to an in-function
+death when the callee provably doesn't retain it; measure the reclaimed count on the corpus via the
+harness) → G1 early-free + reuse (only if the measured uplift is real; ASan-gated). Build and *measure*
+the interprocedural precision before writing any early-free codegen.

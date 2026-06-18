@@ -46,10 +46,13 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	// docs/91 G0: read-only inferred death-cohort analysis (ELISA_DUMP_DEATHTIME). Observability
-	// only — computes + records + dumps cohorts; no codegen impact.
+	// docs/91 G0: read-only inferred death-cohort analysis. Observability only — records cohorts on
+	// Result (programmatic, e.g. the tightness harness) and dumps under ELISA_DUMP_DEATHTIME; no
+	// codegen impact.
 	if dumpDeathTime {
 		a.recordDeathTimeCohorts(fn)
+	} else if a.recordDeathCohortsOpt {
+		a.recordDeathTimeData(fn)
 	}
 	// Names in scope at every region entry: function parameters. A reserve_commit reservation
 	// (sized from the proven bound) is emitted at region entry, so its bound must resolve there.
