@@ -98,7 +98,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, ref := range n.Refs {
 			parts = append(parts, formatPermissionRef(ref))
 		}
-		f.writeLine(level, "grant "+n.Name+" = "+strings.Join(parts, ", "))
+		f.writeLine(level, "alias "+n.Name+" = "+strings.Join(parts, ", "))
 	case *ast.GlobalDecl:
 		line := "global "
 		if n.Mutable {
