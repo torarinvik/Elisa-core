@@ -195,6 +195,49 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 3: a region-poly field-growth callee reached via a reborrow cast inside `in perm:` threads
+// the program-lifetime `perm` arena through the whole chain (PascalCase callees included) and runs —
+// the region-inference replacement for a per-hop `in perm:`. (Exercises StructLitExpr forwarding,
+// the perm ambient-binding, cast region-preservation, threading-tolerant arg assignability, and the
+// backend ambient-arena threading together.)
+func TestS4Stage3PermAmbientThreadsAndRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def Grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    self.bits.push(65)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    m: mutable Mod = Mod(bits: [])
+    in perm:
+        Grow((&m).cast[mutable Mod&])
+    print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("perm ambient binding must thread through a PascalCase region-poly callee and run (65), got %s %q", status, out)
+	}
+}
+
+// SOUNDNESS GATE for Stage 3: the ambient binding is RESTRICTED to `perm` (program-lifetime). Binding
+// a region param to a SHORTER ambient region (`in inner:`) and then storing the struct past it would
+// be a use-after-free the (interprocedural) growth hides from the interior-taint checks — so it is a
+// conservative "cannot infer region parameter" COMPILE error, never a miscompile/segfault.
+func TestS4Stage3ShortAmbientRegionRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def Grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    self.bits.push(65)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        mods: mutable darray[Mod] = []
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            in inner:
+                Grow((&m).cast[mutable Mod&])
+            mods.push(m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("binding a region param to a short ambient region must be REJECTED (not a segfault), got %s", status)
+	}
+}
+
 // SOUNDNESS: because the reborrow cast now preserves the region, an escape THROUGH the cast (returning
 // a region-less view of the grown field) is still caught — previously the region-erasing cast could
 // have HIDDEN it. The cast region-provenance is a soundness improvement, not just ergonomics.

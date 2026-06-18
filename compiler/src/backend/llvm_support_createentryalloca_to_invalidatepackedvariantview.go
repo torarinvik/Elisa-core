@@ -328,6 +328,16 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 				arena = owner.arenaRef
 			}
 		}
+		// docs/91 S4 Stage 3: ambient-region fallback. When the region param binds to neither an
+		// argument's region nor a same-named region owner, it was bound by the semantic layer to the
+		// caller's AMBIENT allocation scope (`in perm:` / `in <arena>:`). Thread that scope's arena —
+		// s.treeAllocOwner is exactly the current ambient arena (set by emitInStore), mirroring the
+		// semantic ambient binding so the region-poly callee grows the field into the caller's scope.
+		if arena == nil {
+			if ambient, _ := s.treeOwnerArenaRefValue(s.treeAllocOwner, regionParam); ambient != nil {
+				arena = ambient
+			}
+		}
 		out = append(out, arena)
 	}
 	return out

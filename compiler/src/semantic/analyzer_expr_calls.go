@@ -6,6 +6,27 @@ import (
 	"elisacore/src/ast"
 )
 
+// assignableThreadingRegionParam reports whether a region-LESS reference argument satisfies a parameter
+// whose reference type carries one of the callee's REGION PARAMS (docs/91 S4 Stage 3). There the region
+// is THREADED — bound from the argument's region or the caller's ambient scope — not carried by the
+// value, so a region-less `T&` arg is acceptable (a by-value stack struct whose growable fields the
+// callee allocates into the threaded region). Soundness holds downstream: the by-value-struct
+// interior-taint escape checks reject binding to a region shorter-lived than where the grown value is
+// later stored. An arg that already carries a region is left to the normal AssignableTo path.
+func assignableThreadingRegionParam(expected, actual Type, regionParams map[string]bool) bool {
+	er, ok := expected.(*RefType)
+	if !ok || er == nil || er.Region == "" || !regionParams[er.Region] {
+		return false
+	}
+	ar, ok := actual.(*RefType)
+	if !ok || ar == nil || ar.Region != "" {
+		return false
+	}
+	stripped := cloneRefType(er)
+	stripped.Region = ""
+	return AssignableTo(stripped, ar)
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	return a.analyzeCallExprWithExpected(expr, nil)
 }
@@ -315,7 +336,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
-			if !AssignableTo(expectedType, argType) {
+			if !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) {
 				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
 				a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
 				a.reportShapeMismatchNotes(orderedArgs[i].Pos(), expectedType, argType)
@@ -400,6 +421,20 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if _, ok := regionBindings[name]; !ok {
 			if sym, _ := a.lookupRegionState(name); sym != nil {
 				regionBindings[name] = name
+			}
+		}
+		// docs/91 S4 Stage 3: an otherwise-unbound region param binds to the ambient `perm` scope. A
+		// region-poly callee that grows a struct-field container then allocates into `perm` — the
+		// region-inference equivalent of wrapping each growth in a per-hop `in perm:`, so the caller
+		// writes ONE `in perm:` at the origin instead of scattering them through the call chain.
+		// RESTRICTED TO perm (program-lifetime): perm outlives every storage, so the grown field can
+		// never dangle however the struct is later stored — always sound. A SHORTER ambient region
+		// (`in inner:`) is NOT bound here: the growth is interprocedural so the interior-taint escape
+		// checks can't see it, and binding to a short region would be a use-after-free. Such a call
+		// stays a conservative "cannot infer region parameter" error rather than a miscompile.
+		if _, ok := regionBindings[name]; !ok {
+			if a.activeContainerRegionName() == "perm" {
+				regionBindings[name] = "perm"
 			}
 		}
 		if _, ok := regionBindings[name]; !ok {
