@@ -52,6 +52,9 @@ type Result struct {
 	InitCalls               map[*ast.StructLitExpr]*ast.CallExpr
 	PostfixShorthandCalls   map[*ast.CastExpr]*ast.CallExpr
 	RegionStacks            map[*ast.RegionStmt]RegionStackAssignment
+	// DeathTimeCohorts: docs/91 G0 inferred death cohorts per function name, populated only when
+	// ELISA_DUMP_DEATHTIME is set (read-only observability of the global death-time model).
+	DeathTimeCohorts        map[string][]DeathTimeCohort
 	ResolvedTypeNames       map[ast.TypeExpr]string
 	ResolvedValueNames      map[*ast.Ident]string
 	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo

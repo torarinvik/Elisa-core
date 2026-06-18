@@ -148,6 +148,9 @@ type Analyzer struct {
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
 	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
+	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded only when
+	// ELISA_DUMP_DEATHTIME is set (read-only observability; surfaced on Result).
+	deathTimeCohorts map[string][]DeathTimeCohort
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
 	deferInfo                    map[*ast.DeferStmt]*DeferInfo
@@ -742,6 +745,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		InitCalls:               a.loweredInitCalls,
 		PostfixShorthandCalls:   a.postfixShorthandCalls,
 		RegionStacks:            a.regionStacks,
+		DeathTimeCohorts:        a.deathTimeCohorts,
 		ResolvedTypeNames:       a.resolvedTypeNames,
 		ResolvedValueNames:      a.resolvedValueNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
