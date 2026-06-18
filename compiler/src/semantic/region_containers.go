@@ -102,6 +102,29 @@ func containerRegion(t Type) string {
 	}
 }
 
+// checkRegionParamReturnEscape rejects returning a value tied to a function REGION PARAMETER's
+// region (`@r`) when the declared return type does not carry that same region. A region param's
+// lifetime is the caller's argument; returning a borrow/value of it with a region-LESS type loses the
+// tie, so a caller could store the result past the region's death — a use-after-free. The sound form
+// is `-> T @r` (verified: the escape checker catches a caller that then stores it past the region,
+// and accepts use within the region's lifetime). This is the borrow-out coverage that makes S4
+// (struct-field container growth on a `Mod& @r` param) safe — docs/91 S4. Conservative: it only
+// fires for a region that is a function region PARAM (caller-provided lifetime); scope-owned region
+// returns are handled by checkReturnRegionContainerEscape.
+func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Type) {
+	if a == nil || valueExpr == nil {
+		return
+	}
+	region := containerOrEntryRegion(valueType)
+	if region == "" || !a.lookupRegionParam(region) {
+		return
+	}
+	if containerOrEntryRegion(a.currentReturn) == region {
+		return // the return type carries the same @r — sound, and checked at the call site
+	}
+	a.errorf(valueExpr.Pos(), "value tied to region parameter %q cannot be returned with a region-less type (its lifetime is the caller's %q region); annotate the return type with `@%s` (e.g. `-> view[u8] @%s`) so the borrow stays tied to the caller's region", region, region, region, region)
+}
+
 // checkReturnRegionContainerEscape rejects returning a container allocated in a
 // *scope-owned* region (`region NAME(...):`), which would dangle once the region
 // is freed at scope exit. Borrowed arenas (`in <arena>:`, region == arena var,

@@ -459,6 +459,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		a.checkReturnRegionContainerEscape(n.Value, valueType)
 		a.checkRegionAggregateReturnEscape(n.Value, valueType)
+		a.checkRegionParamReturnEscape(n.Value, valueType)
 		// Approach A: `return move <region>` transfers an owned region to the
 		// caller. Consume it locally (discharging the must-consume obligation)
 		// and mark the function as returning an owned region. All value-returns

@@ -281,6 +281,13 @@ func containerRegionName(t semantic.Type) string {
 			if tt == nil {
 				return ""
 			}
+			// A struct/non-container ref carries its region on the reference itself (`Mod& @r`);
+			// container refs carry it on the elem (RefType.Region cleared by S1's stampContainerRegion).
+			// Returning the ref's own region first lets a region-param STRUCT ref param thread its
+			// caller's region for field-container growth (docs/91 S4); container refs fall through.
+			if tt.Region != "" {
+				return tt.Region
+			}
 			t = tt.Elem
 		default:
 			return ""

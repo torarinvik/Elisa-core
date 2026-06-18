@@ -63,6 +63,17 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	field, ok := a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
 	if ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
+		// docs/91 S4: a container field of a region-carrying struct lives in the struct's region.
+		// Struct fields are not region-stamped at declaration, so propagate the object's region onto a
+		// region-carrying field type here — this lets `m.bits.push(..)` on a `m: Mod& @r` resolve the
+		// field's region to `@r` (growth-site gate + backend growth owner read it), AND makes the
+		// existing escape checks fire on the field's true region (store-past-region, return-container).
+		// No-op for non-container fields / region-less objects (stampContainerRegion returns unchanged).
+		if region := a.fieldObjectRegion(objType); region != "" {
+			if stamped, changed := stampContainerRegion(field.Type, region); changed {
+				field.Type = stamped
+			}
+		}
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
 			a.errorf(expr.Pos(), consumedFactUseMessage(affineHandleKind(field.Type), affineValueDisplayName(expr), state.ConsumedBy))
@@ -72,6 +83,28 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), true)
 	return invalidType
+}
+
+// fieldObjectRegion returns the region a field-access object carries: a struct ref's `@r`
+// (RefType.Region, where region rides for non-container elems) or a struct value's RegionOwner.
+// Peels references. "" when the object carries no region. (docs/91 S4)
+func (a *Analyzer) fieldObjectRegion(objType Type) string {
+	switch t := objType.(type) {
+	case *RefType:
+		if t == nil {
+			return ""
+		}
+		if t.Region != "" {
+			return t.Region
+		}
+		return a.fieldObjectRegion(t.Elem)
+	case *StructType:
+		if t == nil {
+			return ""
+		}
+		return t.RegionOwner
+	}
+	return ""
 }
 
 func (a *Analyzer) resolveProjectedFieldValueExpr(objectExpr ast.Expr, field string) (ast.Expr, bool) {
