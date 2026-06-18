@@ -58,7 +58,7 @@ static uint8_t *read_entire_file(const char *path, size_t *out_len) {
         return NULL;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1);
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
     if (buffer == NULL) {
         fclose(file);
         return NULL;
@@ -130,17 +130,17 @@ int main(int argc, char **argv) {
         }
     }
 
-    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, 0, iterations) != -1) {
+    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, 0u, iterations) != -1) {
         fprintf(stderr, "expected zero-worker parse request to fail\n");
         free(input);
         return 1;
     }
-    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, workers, 0) != -1) {
+    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, workers, 0u) != -1) {
         fprintf(stderr, "expected zero-iteration parse request to fail\n");
         free(input);
         return 1;
     }
-    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, (uintptr_t)lua_frontend_parallel_max_workers() + 1, 1) != -1) {
+    if (lua_frontend_parallel_parse_checksum_with_len(input, (uintptr_t)input_len, (uintptr_t)lua_frontend_parallel_max_workers() + 1u, 1u) != -1) {
         fprintf(stderr, "expected oversized worker request to fail\n");
         free(input);
         return 1;

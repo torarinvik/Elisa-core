@@ -186,6 +186,11 @@ type Analyzer struct {
 	// infallible. Saved/restored around each lambda so nested lambdas don't cross-contaminate.
 	lambdaErrorAccumulate bool
 	lambdaErrorAccum      *ErrorSetType
+	// constEvalExpectedType is the declared type of the const currently being evaluated (set around
+	// evalConstExpr for a ConstDecl). It lets a suffixless literal exceeding i64 max be accepted when
+	// the const's type is u64/usize/uintptr — the declared type standing in for the `u64` suffix. nil
+	// elsewhere, where const-eval keeps its signed-default behavior.
+	constEvalExpectedType Type
 	// inEnsureContext is true while analyzing `ensure` postcondition expressions, enabling the
 	// `old(expr)` pseudo-call (the value of expr at function entry).
 	inEnsureContext bool

@@ -63,7 +63,7 @@ static uint8_t *read_entire_file(const char *path, size_t *out_len) {
         return NULL;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1);
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
     if (buffer == NULL) {
         fprintf(stderr, "failed to allocate %ld bytes\n", size);
         fclose(file);
@@ -106,9 +106,9 @@ static int scratch_reserve(ScratchBuffer *scratch, size_t required) {
         return 1;
     }
 
-    size_t next_capacity = scratch->capacity == 0 ? 64 : scratch->capacity;
+    size_t next_capacity = scratch->capacity == 0u ? 64u : scratch->capacity;
     while (next_capacity < required) {
-        size_t grown = next_capacity * 2;
+        size_t grown = next_capacity * 2u;
         if (grown < next_capacity) {
             next_capacity = required;
             break;
@@ -129,7 +129,7 @@ static int scratch_reserve(ScratchBuffer *scratch, size_t required) {
 static void scratch_release(ScratchBuffer *scratch) {
     free(scratch->data);
     scratch->data = NULL;
-    scratch->capacity = 0;
+    scratch->capacity = 0u;
 }
 
 static uint64_t hash_value_string_fallback(JsonParserValue *value, ScratchBuffer *scratch, int *ok) {
@@ -140,7 +140,7 @@ static uint64_t hash_value_string_fallback(JsonParserValue *value, ScratchBuffer
         return 0;
     }
 
-    size_t required = (size_t)len + 1;
+    size_t required = (size_t)len + 1u;
     if (!scratch_reserve(scratch, required)) {
         fprintf(stderr, "value string scratch reserve failed\n");
         *ok = 0;
@@ -189,7 +189,7 @@ static uint64_t hash_object_key_fallback(JsonParserObjectIter *iter, ScratchBuff
         return 0;
     }
 
-    size_t required = (size_t)len + 1;
+    size_t required = (size_t)len + 1u;
     if (!scratch_reserve(scratch, required)) {
         fprintf(stderr, "object key scratch reserve failed\n");
         *ok = 0;
@@ -532,7 +532,7 @@ static int document_copy_only(const uint8_t *input, size_t input_len, uint8_t *s
     if (scratch == NULL) {
         return 0;
     }
-    if (input_len > 0) {
+    if (input_len > 0u) {
         memcpy(scratch, input, input_len);
     }
     scratch[input_len] = 0;
@@ -606,7 +606,7 @@ int main(int argc, char **argv) {
 
     uint8_t *copy_scratch = NULL;
     if (mode == BENCHMARK_MODE_COPY) {
-        copy_scratch = (uint8_t *)malloc(input_len + 1);
+        copy_scratch = (uint8_t *)malloc(input_len + 1u);
         if (copy_scratch == NULL) {
             fprintf(stderr, "failed to allocate copy scratch\n");
             free(docs);
