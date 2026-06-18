@@ -196,32 +196,221 @@ func (a *Analyzer) analyzeDeathTimeAllocs(fn *ast.FuncDecl) []deathTimeAlloc {
 		allocs = append(allocs, deathTimeAlloc{name: vd.Name, declIndex: i, deathIndex: i, kind: kind})
 	}
 
-	// Identify escaping bindings (appear in a return) and compute loop-aware last-use otherwise.
-	returnsName := func(name string) bool {
-		for _, s := range stmts {
-			if ret, ok := s.(*ast.ReturnStmt); ok && ret.Value != nil && stmtMentionsName(ret, name) {
-				return true
+	// Alias-aware death (docs/91 G0 hardening). A value used only through an alias would otherwise
+	// look dead at its last DIRECT mention — too early, which would be a use-after-free once G1 frees
+	// on this. Two bindings that may share storage (`w = v`, `w = v[a:b]`, `w = &v`, `w = v.field`,
+	// when the RHS type carries region storage) are unioned into one class; the class's death is the
+	// MAX loop-aware last-use over ALL members (uses of any alias keep the shared buffer live). And a
+	// binding (or any alias) that ESCAPES — appears in a `return`, or is passed as a storage-carrying
+	// call argument (the callee may retain it) — has death = -1 (caller region; never early-freed).
+	// All conservative: death is only ever pushed later, never earlier. (The existing escape checker
+	// is the independent backstop for G1; interprocedural precision is G3.)
+	uf := newNameUnionFind()
+	escaped := map[string]bool{}
+	for _, s := range stmts {
+		switch n := s.(type) {
+		case *ast.VarDeclStmt:
+			if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+				uf.union(n.Name, base)
+			}
+		case *ast.AssignStmt:
+			if tgt, ok := stripParenExpr(n.Target).(*ast.Ident); ok {
+				if base, ok := aliasSourceName(n.Value); ok && typeCarriesRegionStorage(a.exprTypes[n.Value]) {
+					uf.union(tgt.Name, base)
+				}
 			}
 		}
-		return false
+		a.collectEscapedNames(s, escaped)
 	}
+
+	// Class members of each inferred allocation, for the per-class death scan.
 	for k := range allocs {
 		al := &allocs[k]
-		if returnsName(al.name) {
+		members := uf.classMembers(al.name)
+		classEscapes := false
+		for _, m := range members {
+			if escaped[m] {
+				classEscapes = true
+				break
+			}
+		}
+		if classEscapes {
 			al.deathIndex = -1
 			continue
 		}
 		death := al.declIndex
-		for i := al.declIndex + 1; i < len(stmts); i++ {
-			if stmtMentionsName(stmts[i], al.name) {
-				if d := liftDeath(al.declIndex, i); d > death {
-					death = d
+		for i := 0; i < len(stmts); i++ {
+			used := false
+			for _, m := range members {
+				if stmtMentionsName(stmts[i], m) {
+					used = true
+					break
 				}
+			}
+			if !used {
+				continue
+			}
+			if d := liftDeath(al.declIndex, i); d > death {
+				death = d
 			}
 		}
 		al.deathIndex = death
 	}
 	return allocs
+}
+
+// --- alias-aware death helpers (docs/91 G0) ---
+
+func stripDeathExpr(e ast.Expr) ast.Expr {
+	for {
+		switch n := e.(type) {
+		case *ast.ParenExpr:
+			e = n.Inner
+		case *ast.CastExpr:
+			e = n.Operand
+		case *ast.MoveExpr:
+			e = n.Operand
+		default:
+			return e
+		}
+	}
+}
+
+// aliasSourceName returns the base identifier a storage-aliasing expression borrows from:
+// `v`, `v[a:b]`, `v[i]`, `v.field`, `&v` (after stripping parens/casts/moves). The caller gates on
+// the expression's type actually carrying region storage, so a scalar read (`v.count`) is excluded.
+func aliasSourceName(e ast.Expr) (string, bool) {
+	switch n := stripDeathExpr(e).(type) {
+	case *ast.Ident:
+		return n.Name, true
+	case *ast.SliceExpr:
+		return aliasSourceName(n.Object)
+	case *ast.IndexExpr:
+		return aliasSourceName(n.Object)
+	case *ast.FieldExpr:
+		return aliasSourceName(n.Object)
+	case *ast.AddrOfExpr:
+		return aliasSourceName(n.Operand)
+	}
+	return "", false
+}
+
+// collectEscapedNames marks identifiers that escape in a statement: every ident in a `return` value,
+// and every ident inside a storage-carrying call ARGUMENT (the callee may retain it — a method
+// RECEIVER `v.push(..)` is not an argument, so `v` itself is not flagged there). Conservative and
+// reflection-driven so it covers nested calls/positions.
+func (a *Analyzer) collectEscapedNames(stmt ast.Stmt, out map[string]bool) {
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.ReturnStmt:
+				if n.Value != nil {
+					collectIdentNamesInto(n.Value, out)
+				}
+			case *ast.CallExpr:
+				for _, arg := range n.Args {
+					if typeCarriesRegionStorage(a.exprTypes[arg]) {
+						collectIdentNamesInto(arg, out)
+					}
+				}
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if v.Field(i).CanInterface() {
+					walk(v.Field(i))
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(stmt))
+}
+
+func collectIdentNamesInto(expr ast.Expr, out map[string]bool) {
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
+				out[id.Name] = true
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				if v.Field(i).CanInterface() {
+					walk(v.Field(i))
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
+}
+
+// nameUnionFind is a tiny string union-find for alias classes.
+type nameUnionFind struct {
+	parent map[string]string
+}
+
+func newNameUnionFind() *nameUnionFind { return &nameUnionFind{parent: map[string]string{}} }
+
+func (u *nameUnionFind) find(x string) string {
+	if _, ok := u.parent[x]; !ok {
+		u.parent[x] = x
+		return x
+	}
+	root := x
+	for u.parent[root] != root {
+		root = u.parent[root]
+	}
+	for u.parent[x] != root {
+		u.parent[x], x = root, u.parent[x]
+	}
+	return root
+}
+
+func (u *nameUnionFind) union(a, b string) {
+	ra, rb := u.find(a), u.find(b)
+	if ra != rb {
+		u.parent[ra] = rb
+	}
+}
+
+// classMembers returns all names in the same alias class as `name` (including itself).
+func (u *nameUnionFind) classMembers(name string) []string {
+	root := u.find(name)
+	members := []string{}
+	for n := range u.parent {
+		if u.find(n) == root {
+			members = append(members, n)
+		}
+	}
+	if len(members) == 0 {
+		members = append(members, name)
+	}
+	return members
 }
 
 // computeDeathTimeCohorts groups a function's inferred allocations into death cohorts (docs/91 G0).

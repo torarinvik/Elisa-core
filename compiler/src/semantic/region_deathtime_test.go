@@ -117,6 +117,85 @@ func TestDeathTimeLoopLiftsUsesToLoopExit(t *testing.T) {
 	}
 }
 
+// Alias-aware death (docs/91 G0 hardening): a value used only through an alias must stay live until
+// the ALIAS's last use, not just its own last direct mention. Here `v` is aliased by the view `w`,
+// and `w` is used at the same statement that uses `x`; alias-awareness must extend `v`'s life to
+// there, putting `v` and `x` in the same cohort. Without it, `v` would die at the earlier `w = v[..]`
+// statement — a different (too-early) cohort, which would be a use-after-free once G1 frees on this.
+func TestDeathTimeAliasExtendsLife(t *testing.T) {
+	var result *Result
+	withDeathTimeDump(t, func() {
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_alias.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        v: mutable darray[i64] = []
+        x: mutable darray[i64] = []
+        v.push(1)
+        w: view[i64] = v[0:1]
+        x.push(w[0].i64())
+        return 0
+`, AnalyzeOptions{})
+	})
+	cohorts := result.DeathTimeCohorts["f"]
+	cv, okv := cohortContaining(cohorts, "v")
+	cx, okx := cohortContaining(cohorts, "x")
+	if !okv || !okx {
+		t.Fatalf("v and x must be present, got v=%v x=%v cohorts=%+v", okv, okx, cohorts)
+	}
+	if cv.DeathIndex != cx.DeathIndex {
+		t.Fatalf("alias `w` of `v` is used at the same statement as `x`, so alias-awareness must keep v live there (same cohort), got v@%d x@%d", cv.DeathIndex, cx.DeathIndex)
+	}
+}
+
+// A value (or an alias) passed as a storage-carrying call ARGUMENT escapes — the callee may retain
+// it — so its death is deferred to the caller (cohort DeathIndex -1), never early-freed.
+func TestDeathTimeCallArgEscapes(t *testing.T) {
+	var result *Result
+	withDeathTimeDump(t, func() {
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_escape_arg.elisa", `def consume(d: darray[i64]) -> i64:
+    can Abort.Panic:
+        return d[0]
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        v: mutable darray[i64] = []
+        v.push(1)
+        r: i64 = consume(v)
+        return r
+`, AnalyzeOptions{})
+	})
+	cohorts := result.DeathTimeCohorts["f"]
+	cv, ok := cohortContaining(cohorts, "v")
+	if !ok {
+		t.Fatalf("v must be present, cohorts=%+v", cohorts)
+	}
+	if cv.DeathIndex != -1 {
+		t.Fatalf("v is passed as a storage-carrying call argument and must be treated as escaping (DeathIndex -1), got @%d", cv.DeathIndex)
+	}
+}
+
+// Control: a method RECEIVER (`v.push(..)`) is NOT a call argument, so it must not be flagged as
+// escaping — v stays a normal in-function cohort.
+func TestDeathTimeMethodReceiverNotEscape(t *testing.T) {
+	var result *Result
+	withDeathTimeDump(t, func() {
+		result = analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "dt_receiver.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        v: mutable darray[i64] = []
+        v.push(1)
+        v.push(2)
+        return 0
+`, AnalyzeOptions{})
+	})
+	cohorts := result.DeathTimeCohorts["f"]
+	cv, ok := cohortContaining(cohorts, "v")
+	if !ok {
+		t.Fatalf("v must be present, cohorts=%+v", cohorts)
+	}
+	if cv.DeathIndex == -1 {
+		t.Fatalf("v is only a method receiver (not a call argument), so it must NOT be flagged escaping")
+	}
+}
+
 // --- pure-helper unit tests (no analyzer needed) ---
 
 func TestStmtMentionsName(t *testing.T) {
