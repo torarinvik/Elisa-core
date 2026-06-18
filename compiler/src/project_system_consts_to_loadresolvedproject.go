@@ -62,6 +62,8 @@ type projectCLIOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	concurrencyStrict bool
+	proofStrict       bool
+	enableSMT         bool
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -147,6 +149,8 @@ type resolvedProjectTarget struct {
 	strictPolicy          bool
 	perfStrict            bool
 	concurrencyStrict     bool
+	proofStrict           bool
+	enableSMT             bool
 }
 type projectResolver struct {
 	searchPaths []string
@@ -237,6 +241,8 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		strictPolicy:      target.strictPolicy,
 		perfStrict:        target.perfStrict,
 		concurrencyStrict: target.concurrencyStrict,
+		proofStrict:       target.proofStrict,
+		enableSMT:         target.enableSMT,
 	}
 
 	switch options.command {
@@ -413,10 +419,19 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.perfStrict = true
 		case arg == "-Wconcurrency":
 			options.concurrencyStrict = true
+		case arg == "-smt":
+			// docs/90: enable the optional SMT discharge tier for contract/refinement
+			// obligations the bounded-linear prover declines.
+			options.enableSMT = true
+		case arg == "-strict":
+			// docs/85: promote refinement/contract proof fallbacks to hard errors —
+			// an obligation that cannot be discharged statically fails the build.
+			options.proofStrict = true
 		case arg == "-Wstrict":
 			options.strictPolicy = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
+			options.proofStrict = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {
