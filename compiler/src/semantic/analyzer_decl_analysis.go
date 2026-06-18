@@ -18,7 +18,10 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					if !AssignableTo(sym.Type, valueType) {
 						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type, valueType)
 					}
-					if value, ok := a.evalConstExpr(n.Value); ok {
+					a.constEvalExpectedType = sym.Type
+					value, ok := a.evalConstExpr(n.Value)
+					a.constEvalExpectedType = nil
+					if ok {
 						a.constValues[joinQualifiedName(scoped.Namespace, n.Name)] = value
 					} else {
 						a.errorf(n.Value.Pos(), "const %q initializer must be a compile-time %s value", n.Name, sym.Type)

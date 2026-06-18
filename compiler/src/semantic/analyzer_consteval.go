@@ -122,7 +122,10 @@ func (a *Analyzer) analyzeStaticOnlyStmts(stmts []ast.Stmt) {
 func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
-		value, ok := ParseIntLiteral(n)
+		// constEvalExpectedType lets a declared u64/usize/uintptr const accept a suffixless literal
+		// that exceeds i64 max (it stands in for the `u64` suffix). nil in non-const contexts, where
+		// this reduces to ParseIntLiteral.
+		value, ok := ParseIntLiteralForType(n, a.constEvalExpectedType)
 		if !ok {
 			return ConstValue{}, false
 		}
@@ -2379,6 +2382,49 @@ func ParseIntLiteral(expr *ast.IntLit) (int64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// isUnsigned64CapableType reports whether a type is one of the 64-bit-wide unsigned builtins
+// (u64/usize/uintptr on a 64-bit target), the only integer types that can hold a literal value
+// exceeding i64 max. Peels a non-null reference wrapper.
+func isUnsigned64CapableType(t Type) bool {
+	b, ok := stripRefForBounds(t).(*BuiltinType)
+	if !ok || b == nil {
+		return false
+	}
+	switch b.Name {
+	case "u64", "usize", "uintptr":
+		return true
+	}
+	return false
+}
+
+// ParseIntLiteralForType parses an integer literal in the context of an expected type. It behaves
+// exactly like ParseIntLiteral, EXCEPT that a suffixless literal whose value overflows signed i64 but
+// fits u64 is accepted when the target is a 64-bit unsigned type — so a declared `u64`/`usize`/
+// `uintptr` stands in for the explicit `u64` suffix (e.g. `global X: u64 = 0xcbf29ce484222325`). The
+// bit pattern is stored in the returned int64 (matching how `~0u64` / suffixed literals are stored).
+// Signed-typed contexts are unaffected: a too-large literal there still fails, so overflow stays an
+// error. A nil/unknown target reduces to ParseIntLiteral.
+func ParseIntLiteralForType(expr *ast.IntLit, target Type) (int64, bool) {
+	if v, ok := ParseIntLiteral(expr); ok {
+		return v, true
+	}
+	if expr == nil || strings.HasPrefix(expr.Suffix, "u") {
+		// A `u`-suffixed literal already attempted ParseUint inside ParseIntLiteral; nothing more to try.
+		return 0, false
+	}
+	if !isUnsigned64CapableType(target) {
+		return 0, false
+	}
+	base := 10
+	if expr.IsHex {
+		base = 0
+	}
+	if u, err := strconv.ParseUint(expr.Value, base, 64); err == nil {
+		return int64(u), true
+	}
+	return 0, false
 }
 
 func ParseFloatLiteral(expr *ast.FloatLit) (float64, bool) {

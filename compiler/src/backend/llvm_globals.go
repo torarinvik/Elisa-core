@@ -91,7 +91,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		if err != nil {
 			return nil, err
 		}
-		value, err := parseConstIntLiteral(n)
+		value, err := parseConstIntLiteralForType(n, actual)
 		if err != nil {
 			return nil, err
 		}
@@ -478,10 +478,16 @@ func constValueType(result *semantic.Result, value semantic.ConstValue) semantic
 }
 
 func parseConstIntLiteral(expr *ast.IntLit) (int64, error) {
-	// Route through the semantic parser so unsigned-typed literals with the top
-	// bit set (e.g. 0xFFFFFFFFFFFFFFFFu64) are parsed with ParseUint and their
-	// bit pattern stored in the int64, rather than overflowing a signed parse.
-	if v, ok := semantic.ParseIntLiteral(expr); ok {
+	return parseConstIntLiteralForType(expr, nil)
+}
+
+// parseConstIntLiteralForType parses a const/global integer literal, honoring the declared target
+// type. A suffixless literal exceeding i64 max but fitting u64 is accepted when the target is a
+// 64-bit unsigned type (u64/usize/uintptr) — the declared type stands in for the `u64` suffix,
+// matching how function-body literals already lower (emitIntLiteral parses via ParseUint). Suffixed
+// and signed-typed literals are unchanged; a too-large literal in a signed context still errors.
+func parseConstIntLiteralForType(expr *ast.IntLit, target semantic.Type) (int64, error) {
+	if v, ok := semantic.ParseIntLiteralForType(expr, target); ok {
 		return v, nil
 	}
 	return 0, fmt.Errorf("invalid integer literal %q", expr.Value)
