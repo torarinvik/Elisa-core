@@ -855,16 +855,16 @@ func (p *Parser) parseErrorPayloadDecl() ast.ParamDecl {
 	}
 	return ast.ParamDecl{Position: pos, Type: p.parseTypeExpr()}
 }
-func (p *Parser) parseAliasDecl() *ast.GrantAliasDecl {
+func (p *Parser) parseAliasDecl() *ast.AliasDecl {
 	pos := p.cur().Pos
 	// `alias Name = cap1, cap2, …` declares a capability set, referenced via `can`.
-	// (The AST node is still named GrantAliasDecl for historical reasons.)
+	// (The AST node is still named AliasDecl for historical reasons.)
 	p.expectIdentText("alias")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_ASSIGN)
 	refs := p.parsePermissionRefs(false)
 	p.expectNewline()
-	return &ast.GrantAliasDecl{Position: pos, Name: name, Refs: refs}
+	return &ast.AliasDecl{Position: pos, Name: name, Refs: refs}
 }
 func (p *Parser) parsePermissionDecl() *ast.PermissionDecl {
 	pos := p.cur().Pos

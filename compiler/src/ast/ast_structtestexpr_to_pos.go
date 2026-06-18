@@ -600,7 +600,7 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
-func (n *GrantAliasDecl) Pos() lexer.Pos { return n.Position }
+func (n *AliasDecl) Pos() lexer.Pos { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *ImportDecl) Pos() lexer.Pos     { return n.Position }

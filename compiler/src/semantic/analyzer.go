@@ -99,7 +99,7 @@ type Analyzer struct {
 	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
-	grantAliases            map[string][]ast.PermissionRef
+	capabilityAliases            map[string][]ast.PermissionRef
 	globalScope             *Scope
 	functionTypes           map[string]*FuncType
 	externLinkNames         map[string]externLinkNameSignature
@@ -602,7 +602,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		aliasRefinements:                  map[string]*ast.RefinementTypeExpr{},
-		grantAliases:                      map[string][]ast.PermissionRef{},
+		capabilityAliases:                      map[string][]ast.PermissionRef{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		externLinkNames:                   map[string]externLinkNameSignature{},
@@ -675,7 +675,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
-	a.collectGrantAliases(activeDecls)
+	a.collectCapabilityAliases(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
@@ -700,7 +700,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectPermissionDecls(generatedScopedDecls)
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
-		a.collectGrantAliases(generatedScopedDecls)
+		a.collectCapabilityAliases(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
 		a.populateConstEnumMembers(generatedScopedDecls)
 		a.populateStructFields(generatedScopedDecls)

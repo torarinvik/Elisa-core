@@ -190,7 +190,7 @@ func (*ConstEnumDecl) nodeTag()                        {}
 func (*ConstEnumMemberDecl) nodeTag()                  {}
 func (*ErrorDecl) nodeTag()                            {}
 func (*PermissionDecl) nodeTag()                       {}
-func (*GrantAliasDecl) nodeTag()                       {}
+func (*AliasDecl) nodeTag()                       {}
 func (*NamespaceDecl) nodeTag()                        {}
 func (*UsingDecl) nodeTag()                            {}
 func (*ImportDecl) nodeTag()                           {}
@@ -384,7 +384,7 @@ func (*KeywordMapDecl) declTag()                       {}
 func (*ConstEnumDecl) declTag()                        {}
 func (*ErrorDecl) declTag()                            {}
 func (*PermissionDecl) declTag()                       {}
-func (*GrantAliasDecl) declTag()                       {}
+func (*AliasDecl) declTag()                       {}
 func (*NamespaceDecl) declTag()                        {}
 func (*UsingDecl) declTag()                            {}
 func (*ImportDecl) declTag()                           {}

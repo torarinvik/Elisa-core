@@ -93,7 +93,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 			f.writeLine(level+1, line)
 		}
-	case *ast.GrantAliasDecl:
+	case *ast.AliasDecl:
 		parts := make([]string, 0, len(n.Refs))
 		for _, ref := range n.Refs {
 			parts = append(parts, formatPermissionRef(ref))
