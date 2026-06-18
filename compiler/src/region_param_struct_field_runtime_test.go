@@ -174,6 +174,29 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// Region-poly forwarding: a wrapper that merely FORWARDS a container ref param to a region-requiring
+// callee (without growing it itself) is inferred region-poly so the caller's region threads through —
+// it runs end-to-end, and the escape through the wrapper is still caught (see the escape test below).
+func TestRegionPolyForwardingThreadsRegion(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def sink(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    dst.push(v) can Memory.Allocate, Abort.Panic
+    return
+def mid(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    sink(dst, v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(8192):
+        mods: mutable darray[Mod] = []
+        m: mutable Mod = Mod(bits: [])
+        m.bits.push(65) can Memory.Allocate, Abort.Panic
+        mid(mods, m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("a forwarding wrapper must thread the caller's region and run (65), got %s %q", status, out)
+	}
+}
+
 // S4 W5: an inner-region-grown by-value struct passed to a callee that STORES it into an outer
 // container dangles when the inner region frees — a COMPILE error via the interprocedural
 // store-target summary, not a segfault. The callee body is locally correct; the escape is a

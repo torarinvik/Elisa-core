@@ -132,3 +132,20 @@ func TestS4ReturnRefRegionlessRejected(t *testing.T) {
 		t.Fatalf("returning a region-less ref into a grown @r field must be rejected, got: %s", errs)
 	}
 }
+
+// Region-poly forwarding inference: a wrapper that forwards a region-less container ref param to a
+// callee requiring a region there is itself made region-poly (no "cannot infer region parameter").
+func TestRegionPolyForwardingInferred(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "fwd.elisa", `struct Mod:
+    bits: mutable darray[u8]
+def sink(dst: mutable darray[Mod]&, v: Mod) -> void:
+    can Memory.Allocate, Abort.Panic:
+        dst.push(v)
+def mid(dst: mutable darray[Mod]&, v: Mod) -> void:
+    can Memory.Allocate, Abort.Panic:
+        sink(dst, v)
+`).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("forwarding a container ref param to a region-requiring callee must infer region-poly, got: %s", errs)
+	}
+}
