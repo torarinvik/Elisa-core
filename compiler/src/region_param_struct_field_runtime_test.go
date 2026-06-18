@@ -195,6 +195,25 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 3: growing a NESTED container field (`m.inner.items.push(..)`, two field hops) is inferred
+// and threads the region through the intermediate struct-value field — paramFieldContainerIsGrown
+// matches any field PATH rooted at the param, and stampFieldRegion propagates the region onto a
+// nested struct field's RegionOwner so deeper accesses inherit it.
+func TestS4Stage3NestedFieldGrowthRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    m.inner.items.push(65)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    m: mutable Mod = Mod(inner: Inner(items: []))
+    in perm:
+        fill((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
+    print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("nested-field growth must infer + thread the region and run (65), got %s %q", status, out)
+	}
+}
+
 // S4 Stage 3: a region-poly field-growth callee reached via a reborrow cast inside `in perm:` threads
 // the program-lifetime `perm` arena through the whole chain (PascalCase callees included) and runs —
 // the region-inference replacement for a per-hop `in perm:`. (Exercises StructLitExpr forwarding,
