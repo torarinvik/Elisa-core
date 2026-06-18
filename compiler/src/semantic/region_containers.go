@@ -199,7 +199,18 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 	}
 	region := a.regionAggregateConstructionRegion(value)
 	if region == "" {
-		return
+		// A by-value aggregate whose interior field was grown into a scope-owned LOCAL region
+		// (recorded as interior taint, e.g. `m.bits.push(..)` then `return m`) dangles once that
+		// region frees at block exit — the same UAF as construction-into-a-local-region, but the
+		// region rode in via field growth rather than a construction-call argument.
+		taint := a.returnedAggregateTaintRegion(value)
+		if taint == "" || isSynthesizedAutoRegion(taint) {
+			return
+		}
+		if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
+			return // not a live scope-owned local region (e.g. a region param the caller owns)
+		}
+		region = taint
 	}
 	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
 }
@@ -673,6 +684,48 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	}
 	if region := a.structInteriorTaintRegion(value); region != "" {
 		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
+	}
+}
+
+// returnedAggregateTaintRegion returns the interior-TAINT region (a grown field's region, recorded in
+// the taint side-table — never a value's OWN stamped container/view region) reachable through a
+// by-value aggregate return: a tainted struct local, or the elements/fields of a fresh producer
+// (list/struct literal, comprehension, ternary), recursing. The value's own container/view region is
+// deliberately EXCLUDED — that is what checkReturnRegionContainerEscape / checkRegionParamReturnEscape
+// handle (incl. the accepted explicit-`@r` and within-lifetime forms); folding it in here over-rejects.
+func (a *Analyzer) returnedAggregateTaintRegion(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	switch n := stripParenExpr(expr).(type) {
+	case *ast.ListLitExpr:
+		r := ""
+		for i, e := range n.Elems {
+			if i < len(n.Spreads) && n.Spreads[i] {
+				continue
+			}
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(e))
+		}
+		return r
+	case *ast.ListComprehensionExpr:
+		r := a.returnedAggregateTaintRegion(n.Value)
+		if n.Key != nil {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(n.Key))
+		}
+		return r
+	case *ast.TernaryExpr:
+		return a.innerRegion(a.returnedAggregateTaintRegion(n.Value), a.returnedAggregateTaintRegion(n.Alt))
+	case *ast.StructLitExpr:
+		r := ""
+		for _, arg := range n.Args {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(arg))
+		}
+		for _, sp := range n.Spreads {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(sp))
+		}
+		return r
+	default:
+		return a.structInteriorTaintRegion(stripParenExpr(expr))
 	}
 }
 

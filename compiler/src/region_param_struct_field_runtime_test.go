@@ -140,6 +140,40 @@ func TestS4Stage2ByValueDictPutInnerToOuterUAFRejected(t *testing.T) {
 	}
 }
 
+// S4 Stage 2 SAFETY (return vector): returning a by-VALUE struct whose field was grown in a
+// scope-owned local region dangles once that region frees at block exit — must be a COMPILE error.
+func TestS4Stage2ReturnByValueTaintedStructRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> Mod can[Memory.Allocate, Abort.Panic]:
+    region inner(4096):
+        m: mutable Mod = Mod(bits: [])
+        m.bits.push(65) can Memory.Allocate, Abort.Panic
+        return m
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    g: mutable Mod = leak() can Memory.Allocate, Abort.Panic
+    print(g.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("returning a by-value struct grown in a local region must be REJECTED (was a segfault), got %s", status)
+	}
+}
+
+// Same return UAF wrapped in a fresh darray literal (`return [m]`) — the return check descends into
+// fresh producers via returnedAggregateTaintRegion.
+func TestS4Stage2ReturnListOfTaintedStructRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> darray[Mod] can[Memory.Allocate, Abort.Panic]:
+    region inner(4096):
+        m: mutable Mod = Mod(bits: [])
+        m.bits.push(65) can Memory.Allocate, Abort.Panic
+        return [m]
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    g: mutable darray[Mod] = leak() can Memory.Allocate, Abort.Panic
+    print(g[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("returning a fresh list of a locally-grown by-value struct must be REJECTED (was a segfault), got %s", status)
+	}
+}
+
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
