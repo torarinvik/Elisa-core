@@ -269,3 +269,31 @@ implemented; the global reframe's extra machinery is not justified by measured b
 
 If a future workload (measured via this harness) shows real multi-cohort/early-dying density, G1
 becomes worth revisiting — gated on that evidence, not built speculatively.
+
+## 8f. CORRECTION to §8e — the pattern IS present in allocation-heavy code
+
+§8e's "decisive" verdict was WRONG due to corpus bias: the harness only ran `Code/test_programs/`
+(small wrappers) plus the Wolf3D renderer (graphics, few heap temporaries). Re-running the death-time
+dump over the real allocation-heavy code — the ATPL, Lua, and **Pascal** language frontends — flips it:
+
+- **1663** functions with inferred allocations; **519** in-function (non-escape) death cohorts.
+- **56** functions have **≥2 distinct in-function death points** — genuine early-free + stack-reuse
+  opportunities (an allocation provably dead before another that is still live).
+- Some are rich: `pascal_llvm_backend_lowers_exit_statements` (10 cohorts / 11 allocs),
+  `__grammar_try__PascalFrontend__declarations` (8/8). Compiler frontends allocate many
+  distinct-lifetime temporaries per function — exactly the pattern the global death-time model
+  optimizes.
+
+So the model's incremental benefit is **domain-dependent**, not ~nil: graphics/game code (Wolf3D) and
+tiny programs show little, but allocation-heavy transformation code (parsers, AST lowering) shows
+real, sometimes dense, opportunity. The earlier conclusion was an artifact of measuring the wrong
+programs — a reminder to choose the corpus to match the optimization.
+
+**Revised stance on G1:** there IS measured opportunity, so G1 (mid-function early-free + cross-cohort
+reuse) is back on the table for allocation-heavy domains. But "56 functions with the pattern" is a
+COUNT, not a magnitude — many are test functions allocating small one-shot ASTs. Before committing to
+the UAF-sensitive codegen, quantify the actual win: peak-RSS / allocation-count reduction on a hot
+real workload (e.g. running the Pascal frontend over a large input), early-free ON vs OFF. Build G1
+behind a flag, measure that, and only default it on if the memory/perf win is real — still
+ASan-gated, escape-checker-backstopped. The measurement discipline stands; only §8e's premature
+conclusion is retracted.
