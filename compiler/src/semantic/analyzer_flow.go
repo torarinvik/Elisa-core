@@ -368,6 +368,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordBorrowedOwnerRefTarget(n.Target, targetType, n.Value)
 			a.recordFunctionValueTarget(n.Target, n.Value)
 			a.recordLocalRefAliasAssignment(n, targetType)
+			a.recordStructAliasCarrierFieldAssignment(n.Target, targetType, n.Value)
 		}
 		if AssignableTo(targetType, valueType) {
 			a.bindActivePackedStoreType(targetType)

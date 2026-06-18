@@ -59,6 +59,21 @@ func (a *Analyzer) cloneAliasCarriers() map[string][]string {
 	return clone
 }
 
+func (a *Analyzer) cloneAliasCarrierFieldOverrides() map[string]map[string][]string {
+	if len(a.currentAliasCarrierFieldOverrides) == 0 {
+		return map[string]map[string][]string{}
+	}
+	clone := make(map[string]map[string][]string, len(a.currentAliasCarrierFieldOverrides))
+	for name, fields := range a.currentAliasCarrierFieldOverrides {
+		fieldClone := make(map[string][]string, len(fields))
+		for field, roots := range fields {
+			fieldClone[field] = append([]string(nil), roots...)
+		}
+		clone[name] = fieldClone
+	}
+	return clone
+}
+
 // recordStructAliasCarrier records (or clears) a non-reference local's laundered-reference content.
 // When `value` is a reference-returning call that aliases parameters, the local carries those
 // param roots; otherwise any stale carrier is dropped (a whole-local rebind replaces the content).
@@ -72,12 +87,45 @@ func (a *Analyzer) recordStructAliasCarrier(name string, value ast.Expr) {
 	}
 	if len(roots) == 0 {
 		delete(a.currentAliasCarriers, name)
+		delete(a.currentAliasCarrierFieldOverrides, name)
 		return
 	}
 	if a.currentAliasCarriers == nil {
 		a.currentAliasCarriers = map[string][]string{}
 	}
 	a.currentAliasCarriers[name] = roots
+	delete(a.currentAliasCarrierFieldOverrides, name)
+}
+
+// recordStructAliasCarrierFieldAssignment overrides the carried roots for a reference field on a
+// struct/value local. Whole-local carriers are coarse ("this value carries roots from wrap(v)"), so
+// `r.p <- w` needs a field-specific replacement to avoid stale `r.p` roots while preserving any
+// other fields on `r`.
+func (a *Analyzer) recordStructAliasCarrierFieldAssignment(target ast.Expr, targetType Type, value ast.Expr) {
+	field, ok := stripOptimizationParens(target).(*ast.FieldExpr)
+	if !ok {
+		return
+	}
+	if _, isRef := StripAggregateStateType(targetType).(*RefType); !isRef {
+		return
+	}
+	ident, ok := stripOptimizationParens(field.Object).(*ast.Ident)
+	if !ok || ident.Name == "" {
+		return
+	}
+	if _, hasCarrier := a.currentAliasCarriers[ident.Name]; !hasCarrier {
+		return
+	}
+	roots := a.aliasRootsForExpr(value)
+	if a.currentAliasCarrierFieldOverrides == nil {
+		a.currentAliasCarrierFieldOverrides = map[string]map[string][]string{}
+	}
+	fields := a.currentAliasCarrierFieldOverrides[ident.Name]
+	if fields == nil {
+		fields = map[string][]string{}
+		a.currentAliasCarrierFieldOverrides[ident.Name] = fields
+	}
+	fields[field.Field] = append([]string(nil), roots...)
 }
 
 func (a *Analyzer) recordUnsafeAliasExpr(expr ast.Expr) {
@@ -493,6 +541,15 @@ func (a *Analyzer) aliasRootsForExpr(expr ast.Expr) []string {
 		// structural root so same-field and param-direct uses both conflict.
 		if _, isRef := a.exprTypes[n].(*RefType); isRef {
 			if ident, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok {
+				if fields := a.currentAliasCarrierFieldOverrides[ident.Name]; fields != nil {
+					if roots, ok := fields[n.Field]; ok {
+						out := append([]string(nil), roots...)
+						if root := a.aliasRootForExpr(expr); root != "" {
+							out = append(out, root)
+						}
+						return out
+					}
+				}
 				if carried, ok := a.currentAliasCarriers[ident.Name]; ok && len(carried) != 0 {
 					roots := append([]string(nil), carried...)
 					if root := a.aliasRootForExpr(expr); root != "" {

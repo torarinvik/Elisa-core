@@ -54,3 +54,27 @@ def run(v: mutable i32&, w: mutable i32&) -> void:
 		t.Fatal("expected rebind to a disjoint param to drop the stale alias and stay safe")
 	}
 }
+
+// Re-binding the carried reference field itself also replaces the carrier. The whole-local rebind
+// path above already handled `r = wrap(w)`; this locks the field-assignment variant.
+func TestStructCarrierFieldRebindDisjointStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_disjoint.elisa", `
+def run(v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected field rebind to a disjoint param to drop the stale alias and stay safe")
+	}
+}
+
+func TestStructCarrierFieldRebindAliasCaught(t *testing.T) {
+	if !structCarrierCaught(t, "carrier_field_rebind_alias.elisa", `
+def run(v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(w)
+    r.p <- v
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected field rebind to an aliased param to require unsafe grant")
+	}
+}

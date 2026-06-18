@@ -256,17 +256,19 @@ type Analyzer struct {
 	// reference-typed field access `r.p` is then known to alias v, closing the laundering gap for
 	// mutable wrappers (which, unlike immutable ones, get no value binding to resolve through). It
 	// follows the same scope save/restore lifecycle as currentAliasBindings. Re-bound on every
-	// whole-local assignment; field-level rebinds (`r.p = &w`) are a deeper, pre-existing gap.
+	// whole-local assignment; reference-field assignments use currentAliasCarrierFieldOverrides to
+	// replace only the assigned field's roots without dropping sibling carried fields.
 	// Keyed by local NAME (not *Symbol): a declaration and a later assignment to the same local
 	// can resolve to distinct Symbol instances, but the name is stable, and block-scope cloning of
 	// this map already isolates shadowed names.
-	currentAliasCarriers map[string][]string
-	currentPackedVariantViews     map[*Symbol]*PackedVariantViewType
-	currentPackedStores           map[string]*PackedEnumStoreType
-	currentPackedStoreResolutions map[*Symbol]packedStoreResolution
-	currentRewriteDefault         *rewriteDefaultContext
-	currentSequenceRewrite        *sequenceRewriteContext
-	currentAllocExpr              ast.Expr
+	currentAliasCarriers              map[string][]string
+	currentAliasCarrierFieldOverrides map[string]map[string][]string
+	currentPackedVariantViews         map[*Symbol]*PackedVariantViewType
+	currentPackedStores               map[string]*PackedEnumStoreType
+	currentPackedStoreResolutions     map[*Symbol]packedStoreResolution
+	currentRewriteDefault             *rewriteDefaultContext
+	currentSequenceRewrite            *sequenceRewriteContext
+	currentAllocExpr                  ast.Expr
 	// localArenaEscapeLocals tracks local collection variables whose backing
 	// buffer was grown while a function-local Arena value was the active
 	// allocation owner. Such a buffer is freed when the local arena goes out of

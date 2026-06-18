@@ -18,17 +18,20 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
 	savedAliasCarriers := a.currentAliasCarriers
+	savedAliasCarrierFieldOverrides := a.currentAliasCarrierFieldOverrides
 	a.inferUntypedDArrayBuilderLocals(stmts, scope)
 	a.currentScope = scope
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
 	a.currentAliasCarriers = a.cloneAliasCarriers()
+	a.currentAliasCarrierFieldOverrides = a.cloneAliasCarrierFieldOverrides()
 	for _, stmt := range stmts {
 		a.analyzeStmt(stmt)
 	}
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
 	a.currentAliasCarriers = savedAliasCarriers
+	a.currentAliasCarrierFieldOverrides = savedAliasCarrierFieldOverrides
 	a.currentScope = saved
 }
 
@@ -1205,6 +1208,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	savedAliasAccesses := a.currentAliasAccesses
 	savedAliasBindings := a.currentAliasBindings
 	savedAliasCarriers := a.currentAliasCarriers
+	savedAliasCarrierFieldOverrides := a.currentAliasCarrierFieldOverrides
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedIndexBounds := a.currentIndexBounds
 	savedBoundEqual := a.currentBoundEqual
@@ -1219,6 +1223,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasAccesses = a.cloneAliasAccesses()
 	a.currentAliasBindings = a.cloneAliasBindings()
 	a.currentAliasCarriers = a.cloneAliasCarriers()
+	a.currentAliasCarrierFieldOverrides = a.cloneAliasCarrierFieldOverrides()
 	a.currentIndexBounds = cloneIndexBoundFacts(a.currentIndexBounds)
 	a.currentBoundEqual = cloneBoundEqual(a.currentBoundEqual)
 	a.currentViewStaticLen = cloneViewStaticLen(a.currentViewStaticLen)
@@ -1237,6 +1242,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
 	a.currentAliasCarriers = savedAliasCarriers
+	a.currentAliasCarrierFieldOverrides = savedAliasCarrierFieldOverrides
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentIndexBounds = savedIndexBounds
 	a.currentBoundEqual = savedBoundEqual
