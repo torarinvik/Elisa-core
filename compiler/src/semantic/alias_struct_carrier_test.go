@@ -78,3 +78,29 @@ def run(v: mutable i32&, w: mutable i32&) -> void:
 		t.Fatal("expected field rebind to an aliased param to require unsafe grant")
 	}
 }
+
+func TestStructCarrierFieldRebindMaybeAliasAcrossBranchCaught(t *testing.T) {
+	if !structCarrierCaught(t, "carrier_field_rebind_branch_maybe_alias.elisa", `
+def run(cond: bool, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    if cond:
+        r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected maybe-stale branch carrier to require unsafe grant")
+	}
+}
+
+func TestStructCarrierFieldRebindDisjointAcrossBranchesStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_branch_disjoint.elisa", `
+def run(cond: bool, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    if cond:
+        r.p <- w
+    else:
+        r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected all-branches field rebind to a disjoint param to stay safe")
+	}
+}

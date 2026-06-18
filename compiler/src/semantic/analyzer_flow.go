@@ -557,6 +557,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		var mergedAffine map[affineValueKey]affineValueState
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
+		var mergedAliasCarriers map[string][]string
+		var mergedAliasCarrierFieldOverrides map[string]map[string][]string
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
@@ -564,6 +566,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
 			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, thenSnapshot.StorageViewDeps)
+			mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, thenSnapshot.AliasCarriers, thenSnapshot.AliasCarrierFieldOverrides)
+			mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, thenSnapshot.AliasCarriers)
 			functionValueBranches = append(functionValueBranches, thenSnapshot.FunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, thenSnapshot.SpecializedValueTypes)
 		}
@@ -577,6 +581,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elifSnapshot.StorageViewDeps)
+				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elifSnapshot.AliasCarriers, elifSnapshot.AliasCarrierFieldOverrides)
+				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elifSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elifSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elifSnapshot.SpecializedValueTypes)
 			}
@@ -587,6 +593,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
+				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elseSnapshot.AliasCarriers, elseSnapshot.AliasCarrierFieldOverrides)
+				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elseSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
@@ -596,6 +604,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
+				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elseSnapshot.AliasCarriers, elseSnapshot.AliasCarrierFieldOverrides)
+				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elseSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
 			}
@@ -613,6 +623,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentStorageViewDeps = mergedStorageViewDeps
+		a.currentAliasCarriers = mergedAliasCarriers
+		a.currentAliasCarrierFieldOverrides = mergedAliasCarrierFieldOverrides
 		if mergedFunctionValues, ok := a.intersectFunctionValueFlows(functionValueBranches...); ok {
 			a.currentFunctionValues = mergedFunctionValues
 		}

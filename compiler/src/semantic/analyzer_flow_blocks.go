@@ -28,6 +28,7 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	for _, stmt := range stmts {
 		a.analyzeStmt(stmt)
 	}
+	savedAliasCarriers, savedAliasCarrierFieldOverrides = a.propagateAliasCarrierBlockEffects(saved, scope, savedAliasCarriers, savedAliasCarrierFieldOverrides)
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings
 	a.currentAliasCarriers = savedAliasCarriers
@@ -554,12 +555,14 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 }
 
 type affineFlowSnapshot struct {
-	Affine                map[affineValueKey]affineValueState
-	BorrowedOwnerRefs     map[*Symbol]borrowedOwnerRefState
-	FunctionValues        map[*Symbol]*FuncType
-	SpecializedValueTypes map[*Symbol]Type
-	ValueBindings         map[*Symbol]ast.Expr
-	StorageViewDeps       map[*Symbol]storageViewDependencyState
+	Affine                     map[affineValueKey]affineValueState
+	BorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
+	FunctionValues             map[*Symbol]*FuncType
+	SpecializedValueTypes      map[*Symbol]Type
+	ValueBindings              map[*Symbol]ast.Expr
+	StorageViewDeps            map[*Symbol]storageViewDependencyState
+	AliasCarriers              map[string][]string
+	AliasCarrierFieldOverrides map[string]map[string][]string
 }
 
 type borrowedOwnerRefSummaryTarget struct {
@@ -1232,7 +1235,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), StorageViewDeps: a.cloneStorageViewDeps()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues

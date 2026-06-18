@@ -74,6 +74,160 @@ func (a *Analyzer) cloneAliasCarrierFieldOverrides() map[string]map[string][]str
 	return clone
 }
 
+func mergeAliasCarrierRoots(dst []string, src []string) []string {
+	if len(dst) == 0 {
+		return append([]string(nil), src...)
+	}
+	seen := map[string]bool{}
+	for _, root := range dst {
+		seen[root] = true
+	}
+	out := append([]string(nil), dst...)
+	for _, root := range src {
+		if root == "" || seen[root] {
+			continue
+		}
+		seen[root] = true
+		out = append(out, root)
+	}
+	return out
+}
+
+func mergeAliasCarriers(dst map[string][]string, src map[string][]string) map[string][]string {
+	if dst == nil && src == nil {
+		return nil
+	}
+	merged := map[string][]string{}
+	for name, roots := range dst {
+		merged[name] = mergeAliasCarrierRoots(nil, roots)
+	}
+	for name, roots := range src {
+		merged[name] = mergeAliasCarrierRoots(merged[name], roots)
+	}
+	return merged
+}
+
+func mergeAliasCarrierFieldOverrides(
+	dstCarriers map[string][]string,
+	dstOverrides map[string]map[string][]string,
+	srcCarriers map[string][]string,
+	srcOverrides map[string]map[string][]string,
+) map[string]map[string][]string {
+	fieldsByName := map[string]map[string]bool{}
+	collect := func(overrides map[string]map[string][]string) {
+		for name, fields := range overrides {
+			if fieldsByName[name] == nil {
+				fieldsByName[name] = map[string]bool{}
+			}
+			for field := range fields {
+				fieldsByName[name][field] = true
+			}
+		}
+	}
+	collect(dstOverrides)
+	collect(srcOverrides)
+	if len(fieldsByName) == 0 {
+		return map[string]map[string][]string{}
+	}
+	merged := map[string]map[string][]string{}
+	effective := func(carriers map[string][]string, overrides map[string]map[string][]string, name, field string) []string {
+		if fields := overrides[name]; fields != nil {
+			if roots, ok := fields[field]; ok {
+				return roots
+			}
+		}
+		return carriers[name]
+	}
+	for name, fields := range fieldsByName {
+		for field := range fields {
+			roots := mergeAliasCarrierRoots(nil, effective(dstCarriers, dstOverrides, name, field))
+			roots = mergeAliasCarrierRoots(roots, effective(srcCarriers, srcOverrides, name, field))
+			if merged[name] == nil {
+				merged[name] = map[string][]string{}
+			}
+			merged[name][field] = roots
+		}
+	}
+	return merged
+}
+
+func (a *Analyzer) propagateAliasCarrierBlockEffects(parent, block *Scope, savedCarriers map[string][]string, savedOverrides map[string]map[string][]string) (map[string][]string, map[string]map[string][]string) {
+	carriers := cloneAliasCarrierMap(savedCarriers)
+	overrides := cloneAliasCarrierOverrideMap(savedOverrides)
+	names := map[string]bool{}
+	for name := range savedCarriers {
+		names[name] = true
+	}
+	for name := range savedOverrides {
+		names[name] = true
+	}
+	for name := range a.currentAliasCarriers {
+		names[name] = true
+	}
+	for name := range a.currentAliasCarrierFieldOverrides {
+		names[name] = true
+	}
+	for name := range names {
+		if block != nil {
+			if _, shadowed := block.Symbols[name]; shadowed {
+				continue
+			}
+		}
+		if parent != nil {
+			if _, ok := parent.Lookup(name); !ok {
+				continue
+			}
+		}
+		if roots, ok := a.currentAliasCarriers[name]; ok {
+			carriers[name] = append([]string(nil), roots...)
+		} else {
+			delete(carriers, name)
+		}
+		if fields, ok := a.currentAliasCarrierFieldOverrides[name]; ok {
+			if overrides == nil {
+				overrides = map[string]map[string][]string{}
+			}
+			overrides[name] = cloneAliasCarrierFieldMap(fields)
+		} else {
+			delete(overrides, name)
+		}
+	}
+	return carriers, overrides
+}
+
+func cloneAliasCarrierMap(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(src))
+	for name, roots := range src {
+		clone[name] = append([]string(nil), roots...)
+	}
+	return clone
+}
+
+func cloneAliasCarrierOverrideMap(src map[string]map[string][]string) map[string]map[string][]string {
+	if len(src) == 0 {
+		return map[string]map[string][]string{}
+	}
+	clone := make(map[string]map[string][]string, len(src))
+	for name, fields := range src {
+		clone[name] = cloneAliasCarrierFieldMap(fields)
+	}
+	return clone
+}
+
+func cloneAliasCarrierFieldMap(src map[string][]string) map[string][]string {
+	if len(src) == 0 {
+		return map[string][]string{}
+	}
+	clone := make(map[string][]string, len(src))
+	for field, roots := range src {
+		clone[field] = append([]string(nil), roots...)
+	}
+	return clone
+}
+
 // recordStructAliasCarrier records (or clears) a non-reference local's laundered-reference content.
 // When `value` is a reference-returning call that aliases parameters, the local carries those
 // param roots; otherwise any stale carrier is dropped (a whole-local rebind replaces the content).
