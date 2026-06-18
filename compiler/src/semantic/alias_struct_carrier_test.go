@@ -123,3 +123,48 @@ def run(choice: Choice, v: mutable i32&, w: mutable i32&) -> void:
 		t.Fatal("expected all-match-arms field rebind to a disjoint param to stay safe")
 	}
 }
+
+func TestStructCarrierFieldRebindDisjointAcrossOptionalMatchArmsStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_optional_match_disjoint.elisa", `
+def run(maybe: i32&?, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    match maybe:
+        null:
+            r.p <- w
+        _:
+            r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected all-optional-match-arms field rebind to a disjoint param to stay safe")
+	}
+}
+
+func TestStructCarrierFieldRebindDisjointAcrossIntegerMatchArmsStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_integer_match_disjoint.elisa", `
+def run(choice: i32, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    match choice:
+        0:
+            r.p <- w
+        _:
+            r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected all-integer-match-arms field rebind to a disjoint param to stay safe")
+	}
+}
+
+func TestStructCarrierFieldRebindDisjointAcrossStringMatchArmsStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_string_match_disjoint.elisa", `
+def run(choice: cstr, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    match choice:
+        "a":
+            r.p <- w
+        _:
+            r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected all-string-match-arms field rebind to a disjoint param to stay safe")
+	}
+}
