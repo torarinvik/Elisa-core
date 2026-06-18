@@ -80,10 +80,40 @@ def caller() -> void:
 	}
 }
 
-// Do not over-infer: if a local initially aliases the grown parameter but is later reassigned to
-// a different source, returning that local must not be stamped with the grown parameter's region.
-func TestReturnedViewInferredRegionInvalidatesReassignedLocalAlias(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_reassigned_alias_ok.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize) -> view[u8]:
+// CONDITIONAL rebind is the soundness-critical case (a regression caught at runtime): when a local
+// is reassigned to a different source only on SOME path, the other path still returns the grown
+// param's region-local slice. The region stamp must be kept so the escape checker rejects the
+// dangling return — flow-INSENSITIVE invalidation here was a confirmed use-after-free hole (the
+// program below segfaulted at runtime when the branch was not taken).
+func TestReturnedViewConditionalRebindStillRejected(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_conditional_rebind.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize, flag: bool) -> view[u8]:
+    out.push(65u8)
+    w: mutable view[u8] = out[0:n]
+    if flag:
+        w <- src[0:n]
+    return w
+
+def caller() -> usize:
+    can Abort.Panic:
+        outer: mutable darray[u8] = []
+        outer.push(9u8)
+        escaped: mutable view[u8] = outer[0:1]
+        region inner(64):
+            v: mutable darray[u8] @inner = []
+            escaped <- head(&v, &outer, 1, false)
+        return escaped[0].usize()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "dangling") && !strings.Contains(all, "outlives") && !strings.Contains(all, "longer-lived") {
+		t.Fatalf("conditionally-rebound view that still returns the grown param's region-local slice must be rejected; got:\n%s", all)
+	}
+}
+
+// Conservative over-rejection (sound, documented): a local that is ALWAYS rebound away from the grown
+// param before return is in fact safe, but the analysis stamps it whenever it is EVER aliased to the
+// param slice, so this is rejected. This is the deliberate cost of fail-closed inference (over-
+// rejection, never under-rejection); precise flow-sensitive invalidation is a future refinement.
+func TestReturnedViewUnconditionalRebindConservativelyRejected(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "ret_view_uncond_rebind.elisa", `def head(out: mutable darray[u8]&, src: darray[u8]&, n: usize) -> view[u8]:
     out.push(65u8)
     w: mutable view[u8] = out[0:n]
     w <- src[0:n]
@@ -99,8 +129,8 @@ def caller() -> usize:
             escaped <- head(&v, &outer, 1)
         return escaped[0].usize()
 `)
-	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("returning a reassigned view alias backed by outer storage should remain accepted, got:\n%s", strings.Join(errs, "\n"))
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "dangling") && !strings.Contains(all, "outlives") && !strings.Contains(all, "longer-lived") {
+		t.Fatalf("unconditional-rebind case is conservatively rejected (fail-closed); got:\n%s", all)
 	}
 }
 

@@ -110,15 +110,21 @@ func inferReturnViewRegion(fn *ast.FuncDecl, inferred map[string]string) {
 // aliases (`w = param[a:b]; return w`). Conservative: a false negative just leaves the return
 // region-less (the pre-existing, safe-but-unchecked state), never the reverse.
 func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
+	// SOUNDNESS: a local that is EVER aliased to the grown param's slice (on any path) is treated as
+	// param-backed when returned, so the region stamp is applied and the escape checker can reject a
+	// dangling return. We deliberately do NOT invalidate the alias on a later reassignment: doing so
+	// flow-insensitively (a conditional `if c: w <- other`) would drop the stamp on the path that
+	// still returns the param-backed view — a use-after-free hole (a regression that was caught at
+	// runtime). Over-stamping only over-rejects (e.g. `w = param[a:b]; w <- other; return w`, where w
+	// is always rebound), which is sound; precise flow-sensitive invalidation is a future refinement.
 	aliases := map[string]bool{}
-	invalidAliases := map[string]bool{}
 	valueIsParamSlice := func(expr ast.Expr) bool {
 		if slice, ok := unwrapParenForRegionPoly(expr).(*ast.SliceExpr); ok && slice != nil {
 			if id, ok := unwrapParenForRegionPoly(slice.Object).(*ast.Ident); ok && id != nil && id.Name == name {
 				return true
 			}
 		}
-		if id, ok := unwrapParenForRegionPoly(expr).(*ast.Ident); ok && id != nil && aliases[id.Name] && !invalidAliases[id.Name] {
+		if id, ok := unwrapParenForRegionPoly(expr).(*ast.Ident); ok && id != nil && aliases[id.Name] {
 			return true
 		}
 		return false
@@ -128,19 +134,12 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 		for _, stmt := range body {
 			switch s := stmt.(type) {
 			case *ast.VarDeclStmt:
-				if !invalidAliases[s.Name] && s.Value != nil && valueIsParamSlice(s.Value) {
+				if s.Value != nil && valueIsParamSlice(s.Value) {
 					aliases[s.Name] = true
 				}
 			case *ast.AssignStmt:
-				if id, ok := s.Target.(*ast.Ident); ok && id != nil {
-					if s.Value != nil && valueIsParamSlice(s.Value) {
-						if !invalidAliases[id.Name] {
-							aliases[id.Name] = true
-						}
-					} else if aliases[id.Name] {
-						delete(aliases, id.Name)
-						invalidAliases[id.Name] = true
-					}
+				if id, ok := s.Target.(*ast.Ident); ok && id != nil && s.Value != nil && valueIsParamSlice(s.Value) {
+					aliases[id.Name] = true
 				}
 			case *ast.IfStmt:
 				collect(s.Then)
@@ -170,10 +169,9 @@ func functionReturnsSliceOfParam(stmts []ast.Stmt, name string) bool {
 		}
 	}
 	for {
-		beforeAliases := len(aliases)
-		beforeInvalid := len(invalidAliases)
+		before := len(aliases)
 		collect(stmts)
-		if len(aliases) == beforeAliases && len(invalidAliases) == beforeInvalid {
+		if len(aliases) == before {
 			break
 		}
 	}
