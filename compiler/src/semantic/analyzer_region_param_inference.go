@@ -42,29 +42,71 @@ var containerGrowthMethods = map[string]bool{
 // (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
 // arena comes from.
 func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
-	for _, fn := range collectRegionPolyCandidateFuncs(decls) {
-		inferRegionParamsForGrownContainerParamsIn(fn)
+	cands := collectRegionPolyCandidateFuncs(decls)
+	// Resolve direct free-function call targets by name for the forwarding trigger. Overloads/last-wins
+	// is acceptable: a wrong match only forgoes (or, at worst, conservatively adds) an inferred region
+	// param — soundness is unaffected (the region threading is still verified at the real call site).
+	funcByName := map[string]*ast.FuncDecl{}
+	explicit := map[*ast.FuncDecl]bool{}
+	for _, fn := range cands {
+		if fn == nil {
+			continue
+		}
+		funcByName[fn.Name] = fn
+		// Functions that already manage regions explicitly are left alone: a hand-written `[@r]` owns
+		// the threading, and an `Arena&` param self-threads its allocator.
+		if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
+			explicit[fn] = true
+		}
+	}
+	// Fixpoint: making one function region-polymorphic turns it into a region-REQUIRING callee, so a
+	// caller that merely FORWARDS a container/struct ref param to it must itself become region-poly to
+	// thread the region through. Iterate until no function gains a new region param. Each per-function
+	// pass is idempotent (an already-stamped param's type carries its region, so it no longer matches
+	// the region-LESS predicates), so reprocessing only ever picks up newly-enabled params.
+	for {
+		changed := false
+		for _, fn := range cands {
+			if fn == nil || explicit[fn] {
+				continue
+			}
+			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName) {
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
 	}
 }
 
-func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
+func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl) bool {
 	if fn == nil || len(fn.Body) == 0 {
-		return
+		return false
 	}
-	// Don't touch functions that already manage regions explicitly: a hand-written `[@r]`
-	// owns the threading, and an `Arena&` param self-threads its allocator (same gate as
-	// functionBuildsAndReturnsLocalContainer / the parser's auto-region wrap).
-	if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
-		return
-	}
+	changed := false
 	inferred := map[string]string{} // param name -> inferred region-param name
 	for i := range fn.Params {
 		p := &fn.Params[i]
-		stamp, ok := regionlessRefContainer(p.Type)
-		if !ok {
-			continue
+		var stamp func(string)
+		if cstamp, ok := regionlessRefContainer(p.Type); ok {
+			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
+			// requires a region there (so the region must thread through this function too).
+			if paramContainerIsGrown(fn.Body, p.Name) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+				stamp = cstamp
+			}
+		} else if sstamp, ok := regionlessRefStruct(p.Type); ok {
+			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
+			// (`def fill(m: mutable Mod&): m.bits.push(..)`), or which is forwarded to a region-
+			// requiring callee. Stamp the inferred region onto the struct ref (`Mod& @r`): the
+			// field-region propagation pushes it onto the resolved field container, and the same
+			// return-escape checks that guard the explicit `[@r]` form cover every borrow-out vector
+			// regardless of how the region param was introduced — no new lifetime power.
+			if paramFieldContainerIsGrown(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+				stamp = sstamp
+			}
 		}
-		if !paramContainerIsGrown(fn.Body, p.Name) && !paramContainerReassignedFromLiteral(fn.Body, p.Name) {
+		if stamp == nil {
 			continue
 		}
 		// Param names are unique within a function, so the per-param suffix yields a unique,
@@ -73,8 +115,147 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 		stamp(name)
 		fn.RegionParams = append(fn.RegionParams, name)
 		inferred[p.Name] = name
+		changed = true
 	}
-	inferReturnViewRegion(fn, inferred)
+	if len(inferred) > 0 {
+		inferReturnViewRegion(fn, inferred)
+	}
+	return changed
+}
+
+// paramForwardedToRegionRequiringCallee reports whether the body passes the named parameter (as a bare
+// identifier, `&param`, or a reborrow cast) as an argument to a resolved direct free-function call
+// whose parameter at that position REQUIRES a region (its type carries one of the callee's region
+// params). Such a forward makes this function region-polymorphic over the param even though it never
+// grows it itself — the callee's region must be threaded in. Conservative: an unresolved/method/
+// indirect callee, or a non-region-requiring position, simply doesn't trigger (a false negative
+// re-surfaces as the existing "cannot infer region parameter" error, never an unsound accept).
+//
+// IMPORTANT: a PascalCase callee `Name(args)` parses as an *ast.StructLitExpr (constructor-or-call
+// ambiguity) at this pre-pass — name resolution only reclassifies it to a call later. So a free call
+// to a region-requiring function with an uppercase name (the bulk of the loader's call graph) is a
+// StructLitExpr here, not a CallExpr; both forms are handled below.
+func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
+	found := false
+	// checkCall tests whether passing `name` at some position of a call to `calleeName(args)` lands in a
+	// region-requiring callee parameter.
+	checkCall := func(calleeName string, args []ast.Expr) bool {
+		callee := funcByName[calleeName]
+		if callee == nil {
+			return false
+		}
+		params := a.expandedFuncDeclParams(callee)
+		rps := map[string]bool{}
+		for _, rp := range callee.RegionParams {
+			rps[rp] = true
+		}
+		if len(rps) == 0 {
+			return false
+		}
+		for argPos, arg := range args {
+			if forwardsParamIdent(arg, name) && argPos < len(params) && typeExprCarriesRegionParam(params[argPos].Type, rps) {
+				return true
+			}
+		}
+		return false
+	}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.CallExpr:
+				if ident, ok := n.Func.(*ast.Ident); ok && ident != nil && checkCall(ident.Name, n.Args) {
+					found = true
+					return
+				}
+			case *ast.StructLitExpr:
+				// `Name(args)` paren-call form of a PascalCase free function (Brace==false). Spreads are
+				// not positional forwards, so only Args are checked.
+				if n != nil && !n.Brace && checkCall(n.Name, n.Args) {
+					found = true
+					return
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
+}
+
+// forwardsParamIdent reports whether an argument expression passes the parameter `name` through: a bare
+// identifier, `&name` (address-of), or a reborrow reinterpret cast `(&name).cast[T&]` — peeling parens,
+// address-of, and casts (S4 Stage 3: the loader's pervasive `(&self).cast[mutable T&]` reborrow idiom).
+// This only decides region-poly inference; the region is still verified at the real call site (where
+// the cast now preserves the operand's region), so seeing through the cast here is sound.
+func forwardsParamIdent(arg ast.Expr, name string) bool {
+	for {
+		switch e := unwrapParenForRegionPoly(arg).(type) {
+		case *ast.Ident:
+			return e != nil && e.Name == name
+		case *ast.AddrOfExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		case *ast.CastExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		default:
+			return false
+		}
+	}
+}
+
+// typeExprCarriesRegionParam reports whether a parameter type-expr is annotated with a region that is
+// one of the callee's region params (so passing a value there REQUIRES supplying that region). Peels
+// the mutable/owned/tail/ref qualifiers and checks the region annotation on the reference, the
+// container builtin, or a generic type.
+func typeExprCarriesRegionParam(t ast.TypeExpr, regionParams map[string]bool) bool {
+	for t != nil {
+		switch n := t.(type) {
+		case *ast.MutableType:
+			t = n.Elem
+		case *ast.OwnedType:
+			t = n.Elem
+		case *ast.TailType:
+			t = n.Elem
+		case *ast.RefType:
+			if n.Region != "" && regionParams[n.Region] {
+				return true
+			}
+			t = n.Elem
+		case *ast.BuiltinTypeExpr:
+			return n.Region != "" && regionParams[n.Region]
+		case *ast.GenericType:
+			return n.Region != "" && regionParams[n.Region]
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // inferReturnViewRegion ties a function's region-less `view[T]` return type to an inferred region
@@ -262,6 +443,102 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 			return nil, false
 		}
 	}
+}
+
+// regionlessRefStruct reports whether a parameter type is a by-reference (`&`) region-less STRUCT
+// (a *ast.NamedType that is NOT a region-carrying container — those go through regionlessRefContainer),
+// and if so returns a closure that stamps a region name onto the enclosing *ast.RefType. A struct
+// has no `@r` surface of its own; the region rides on the ref, and the field-region propagation in
+// analyzeFieldExpr (plus the backend's containerRegionName reading RefType.Region for struct refs)
+// pushes it onto the resolved container field — the same normalization the dstr path relies on.
+//
+// The `&` is required for the same reason as containers: only a reference makes the callee's field
+// growth (header realloc + count) visible in the caller. An existing `@r` on the ref means the user
+// already manages the region: leave it alone (Stage 0's explicit form).
+func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
+	var ref *ast.RefType
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.OwnedType:
+			typ = t.Elem
+		case *ast.RefType:
+			if t.Region != "" {
+				return nil, false
+			}
+			ref = t
+			typ = t.Elem
+		case *ast.NamedType:
+			if ref == nil || t.Name == "dstr" {
+				return nil, false
+			}
+			r := ref
+			return func(region string) { r.Region = region }, true
+		default:
+			return nil, false
+		}
+	}
+}
+
+// paramFieldContainerIsGrown reports whether the body contains a growth-method call whose receiver is
+// a FIELD of the named struct parameter — `param.field.push(...)`. Mirrors paramContainerIsGrown but
+// peels one field access (the container lives inside the struct). A false negative only forgoes the
+// ergonomic rewrite (the old "active region" error still fires, which is safe); a false positive only
+// threads an unused region param.
+func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or local `region:`
+			// (RegionStmt) scope already has its allocation region supplied lexically — no region
+			// param threading is needed (and forcing `@r` would make the call site demand a region
+			// the struct ref doesn't carry). Don't descend into those scopes.
+			switch v.Interface().(type) {
+			case *ast.InStoreStmt, *ast.RegionStmt:
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {
+					// Receiver must be a FIELD/INDEX PATH rooted at the param — `param.f.push(..)`,
+					// `param.a.b.push(..)` (any depth), `param.f[i].push(..)`. A path deeper than the
+					// bare param means the grown container is a (possibly nested) field of the struct
+					// param, so the param carries the region the field backing grows into. (The bare-param
+					// case `param.push` is a CONTAINER param, handled by paramContainerIsGrown.)
+					if _, isPath := growth.Object.(*ast.FieldExpr); isPath {
+						if root := rootIdentExpr(growth.Object); root != nil && root.Name == name {
+							found = true
+							return
+						}
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)

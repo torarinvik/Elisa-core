@@ -346,7 +346,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// the interior-taint side-table makes that region visible to the check.
 		a.checkStructCopyInteriorRegionEscape(n.Target, targetType, n.Value, valueType)
 		a.recordStructInteriorRegionTaint(n.Target, n.Value, valueType)
-		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
+		a.checkStoredBorrowEscapesLocal(n.Target, targetType, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
 				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
@@ -459,6 +459,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		a.checkReturnRegionContainerEscape(n.Value, valueType)
 		a.checkRegionAggregateReturnEscape(n.Value, valueType)
+		a.checkRegionParamReturnEscape(n.Value, valueType)
 		// Approach A: `return move <region>` transfers an owned region to the
 		// caller. Consume it locally (discharging the must-consume obligation)
 		// and mark the function as returning an owned region. All value-returns

@@ -188,6 +188,9 @@ func (a *Analyzer) analyzeBuiltinSetRegionMutationCall(expr *ast.CallExpr) (Type
 			a.errorf(expr.Args[0].Pos(), "set %s expects element of type %s, got %s", method, setType.Elem, elemType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], setType, setType.Elem, elemType)
+		if !isFreshContainerProducer(expr.Args[0]) {
+			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(setType), expr.Args[0], "by-value copy")
+		}
 		a.consumeAffineValueExpr(expr.Args[0], setType.Elem, "move into set "+method)
 	}
 	boolType := a.namedTypes["bool"]

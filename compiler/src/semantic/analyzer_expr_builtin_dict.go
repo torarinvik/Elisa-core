@@ -302,6 +302,10 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value, argType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], entryType.Dict, entryType.Dict.Value, argType)
+		a.checkFreshProducerElementEscape(fieldExpr.Object, entryType.Dict, expr.Args[0])
+		if !isFreshContainerProducer(expr.Args[0]) {
+			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(entryType.Dict), expr.Args[0], "by-value copy")
+		}
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
 	}
 	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
@@ -371,6 +375,12 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 			a.errorf(expr.Args[1].Pos(), "dict %s expects value of type %s, got %s", method, dictType.Value, valueType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[1], dictType, dictType.Value, valueType)
+		a.checkFreshProducerElementEscape(fieldExpr.Object, dictType, expr.Args[1])
+		// By-value copy of a region-less struct whose interior field was grown into a shorter-lived
+		// region (interior taint) dangles when that region dies but the dict outlives it (S4 Stage 2).
+		if !isFreshContainerProducer(expr.Args[1]) {
+			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(dictType), expr.Args[1], "by-value copy")
+		}
 		// Region-poly result value: region-less type but lives in the ambient region, so
 		// putting it into a dict whose storage outlives the function dangles once that region
 		// frees (same hole as assignment/push). Gate on the receiver dict outliving the function.

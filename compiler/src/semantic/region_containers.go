@@ -102,6 +102,72 @@ func containerRegion(t Type) string {
 	}
 }
 
+// checkRegionParamReturnEscape rejects returning a value tied to a function REGION PARAMETER's
+// region (`@r`) when the declared return type does not carry that same region. A region param's
+// lifetime is the caller's argument; returning a borrow/value of it with a region-LESS type loses the
+// tie, so a caller could store the result past the region's death — a use-after-free. The sound form
+// is `-> T @r` (verified: the escape checker catches a caller that then stores it past the region,
+// and accepts use within the region's lifetime). This is the borrow-out coverage that makes S4
+// (struct-field container growth on a `Mod& @r` param) safe — docs/91 S4. Conservative: it only
+// fires for a region that is a function region PARAM (caller-provided lifetime); scope-owned region
+// returns are handled by checkReturnRegionContainerEscape.
+func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Type) {
+	if a == nil || valueExpr == nil {
+		return
+	}
+	// The returned value's region: its own type's region if it carries one (a returned container /
+	// view), else the region it BORROWS from — peeling `&`/index/slice/field down to the underlying
+	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
+	// carries no region itself).
+	region := regionParamReturnTypeRegion(valueType)
+	if region == "" {
+		region = a.returnBorrowedRegion(valueExpr)
+	}
+	if region == "" || !a.lookupRegionParam(region) {
+		return
+	}
+	if regionParamReturnTypeRegion(a.currentReturn) == region {
+		return // the return type carries the same @r — sound, and checked at the call site
+	}
+	a.errorf(valueExpr.Pos(), "value tied to region parameter %q cannot be returned with a region-less type (its lifetime is the caller's %q region); annotate the return type with `@%s` (e.g. `-> view[u8] @%s`) so the borrow stays tied to the caller's region", region, region, region, region)
+}
+
+// regionParamReturnTypeRegion returns a type's region for the return-escape check: a reference's own
+// `@r` (RefType.Region, e.g. `u8& @r`) or a container/view's stamped region. Used for both the
+// returned value's type and the declared return type so `-> u8& @r` / `-> view[u8] @r` are recognized.
+func regionParamReturnTypeRegion(t Type) string {
+	if rt, ok := stripRefForBounds(t).(*RefType); ok && rt != nil && rt.Region != "" {
+		return rt.Region
+	}
+	if rt, ok := t.(*RefType); ok && rt != nil && rt.Region != "" {
+		return rt.Region
+	}
+	return containerOrEntryRegion(t)
+}
+
+// returnBorrowedRegion finds the region a returned BORROW points into, peeling address-of, indexing,
+// slicing, parens/casts, and field access down to the underlying region-carrying base. "" if none.
+func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
+	switch n := stripParenExpr(e).(type) {
+	case *ast.AddrOfExpr:
+		return a.returnBorrowedRegion(n.Operand)
+	case *ast.IndexExpr:
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.SliceExpr:
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.CastExpr:
+		return a.returnBorrowedRegion(n.Operand)
+	case *ast.FieldExpr:
+		if r := containerOrEntryRegion(a.exprTypes[n]); r != "" {
+			return r
+		}
+		return a.returnBorrowedRegion(n.Object)
+	case *ast.Ident:
+		return a.fieldObjectRegion(a.exprTypes[n])
+	}
+	return regionParamReturnTypeRegion(a.exprTypes[e])
+}
+
 // checkReturnRegionContainerEscape rejects returning a container allocated in a
 // *scope-owned* region (`region NAME(...):`), which would dangle once the region
 // is freed at scope exit. Borrowed arenas (`in <arena>:`, region == arena var,
@@ -133,7 +199,18 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 	}
 	region := a.regionAggregateConstructionRegion(value)
 	if region == "" {
-		return
+		// A by-value aggregate whose interior field was grown into a scope-owned LOCAL region
+		// (recorded as interior taint, e.g. `m.bits.push(..)` then `return m`) dangles once that
+		// region frees at block exit — the same UAF as construction-into-a-local-region, but the
+		// region rode in via field growth rather than a construction-call argument.
+		taint := a.returnedAggregateTaintRegion(value)
+		if taint == "" || isSynthesizedAutoRegion(taint) {
+			return
+		}
+		if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
+			return // not a live scope-owned local region (e.g. a region param the caller owns)
+		}
+		region = taint
 	}
 	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
 }
@@ -610,6 +687,146 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	}
 }
 
+// argInteriorLocalRegion returns the interior-taint region of a by-value aggregate argument when that
+// region is a live scope-owned LOCAL region (the dangerous case: it frees at block exit). "" for a
+// region param the caller owns, a destroyed/unknown region, or an untainted argument.
+func (a *Analyzer) argInteriorLocalRegion(arg ast.Expr) string {
+	taint := a.structInteriorTaintRegion(arg)
+	if taint == "" || isSynthesizedAutoRegion(taint) {
+		return ""
+	}
+	if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
+		return ""
+	}
+	return taint
+}
+
+// checkInterprocStoreEscape rejects passing a by-value struct, whose interior field was grown in a
+// scope-owned local region, as an argument that the callee STORES into another argument that outlives
+// that region (docs/91 S4 W5: `def stash(dst: darray[Mod]&, v: Mod): dst.push(v)` then `stash(mods, m)`
+// with m grown in an inner region and mods in an outer one — m's field dangles when inner frees but
+// mods keeps the reference). The callee body is locally correct; the escape is a CALL-SITE property,
+// resolved here via the structural store-target summary (paramStoreTargets) + the live interior-taint
+// table. Precise: fires only when the target argument's region provably outlives the source's taint
+// region, so a same-region cohort pass (`stash(mods, m)` both in one region) is accepted.
+func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []ast.Expr) {
+	if a == nil || call == nil || a.paramStoreTargets == nil {
+		return
+	}
+	callee, ok := a.resolveCalleeFuncDecl(call)
+	if !ok || callee == nil {
+		return
+	}
+	targets, ok := a.paramStoreTargets[callee]
+	if !ok {
+		return
+	}
+	for i, arg := range orderedArgs {
+		if i >= len(targets) || len(targets[i]) == 0 {
+			continue
+		}
+		srcRegion := a.argInteriorLocalRegion(arg)
+		if srcRegion == "" {
+			continue
+		}
+		for tj := range targets[i] {
+			if tj == storeTargetGlobal {
+				// The callee stores the argument into program-lifetime storage (a global/perm
+				// container, or relayed there) — that outlives every local region unconditionally.
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", srcRegion, srcRegion)
+				continue
+			}
+			if tj < 0 || tj >= len(orderedArgs) {
+				continue
+			}
+			targetArg := orderedArgs[tj]
+			targetRegion := containerRegion(a.exprTypes[targetArg])
+			if targetRegion == "" {
+				a.checkRegionlessTargetStoreEscape(targetArg, srcRegion)
+				continue
+			}
+			if a.regionOutlives(targetRegion, srcRegion) {
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", srcRegion, targetRegion, srcRegion, targetRegion)
+			}
+		}
+	}
+}
+
+// returnedAggregateTaintRegion returns the interior-TAINT region (a grown field's region, recorded in
+// the taint side-table — never a value's OWN stamped container/view region) reachable through a
+// by-value aggregate return: a tainted struct local, or the elements/fields of a fresh producer
+// (list/struct literal, comprehension, ternary), recursing. The value's own container/view region is
+// deliberately EXCLUDED — that is what checkReturnRegionContainerEscape / checkRegionParamReturnEscape
+// handle (incl. the accepted explicit-`@r` and within-lifetime forms); folding it in here over-rejects.
+func (a *Analyzer) returnedAggregateTaintRegion(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	switch n := stripParenExpr(expr).(type) {
+	case *ast.ListLitExpr:
+		r := ""
+		for i, e := range n.Elems {
+			if i < len(n.Spreads) && n.Spreads[i] {
+				continue
+			}
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(e))
+		}
+		return r
+	case *ast.ListComprehensionExpr:
+		r := a.returnedAggregateTaintRegion(n.Value)
+		if n.Key != nil {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(n.Key))
+		}
+		return r
+	case *ast.TernaryExpr:
+		return a.innerRegion(a.returnedAggregateTaintRegion(n.Value), a.returnedAggregateTaintRegion(n.Alt))
+	case *ast.StructLitExpr:
+		r := ""
+		for _, arg := range n.Args {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(arg))
+		}
+		for _, sp := range n.Spreads {
+			r = a.innerRegion(r, a.returnedAggregateTaintRegion(sp))
+		}
+		return r
+	default:
+		return a.structInteriorTaintRegion(stripParenExpr(expr))
+	}
+}
+
+// recordGrownFieldInteriorTaint taints a region-less aggregate local when one of its CONTAINER FIELDS
+// is grown (`m.bits.push(..)`) into the ambient region. The growth allocates the field's backing in
+// the ambient region (the lexical ambient-region-at-push rule), so a later by-VALUE copy of the whole
+// struct (`mods.push(m)`) carries an interior reference into that region — exactly the interior taint
+// the store-side checks consult via valueStoreRegion. Mirrors the field-store taint path
+// (recordStructInteriorRegionTaint), but the region source is the ambient alloc context, not an
+// assigned value. Only a field-path receiver taints (a bare container local carries its own region).
+func (a *Analyzer) recordGrownFieldInteriorTaint(receiverExpr ast.Expr) {
+	if a == nil || a.currentStructInteriorRegionTaint == nil || a.currentScope == nil {
+		return
+	}
+	field, ok := stripParenExpr(receiverExpr).(*ast.FieldExpr)
+	if !ok || field == nil {
+		return
+	}
+	root := rootIdentExpr(field)
+	if root == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil {
+		return
+	}
+	region := a.activeContainerRegionName()
+	if region == "" {
+		return
+	}
+	if _, tracked := a.regionLifetimeOrdinal(region); !tracked {
+		return
+	}
+	a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
+}
+
 // checkStructCopyInteriorRegionEscape rejects copying a region-less aggregate that
 // holds an interior reference into an inner region (recorded via interior taint)
 // into storage that outlives that region. A struct's TYPE never carries its
@@ -764,6 +981,19 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 	if a.regionOutlives(targetRegion, valueRegion) {
 		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, via, valueRegion, targetRegion, targetRegion)
 	}
+}
+
+// checkFreshProducerElementEscape rejects passing a FRESH producer value (list literal, comprehension,
+// ternary, struct literal) whose interior carries a shorter-lived region than the container it is
+// stored into, at a container-mutation site (push / extend / dict.put / dict-entry insert). The
+// element-store checks (checkNestedRegionElementStoreEscape / ...Bulk...) see only the producer's OWN
+// region — which is the container's — so they miss its interior; this descends into it. A no-op for a
+// non-producer argument, which the element/bulk store checks already cover.
+func (a *Analyzer) checkFreshProducerElementEscape(receiverExpr ast.Expr, containerType Type, argExpr ast.Expr) {
+	if argExpr == nil || !isFreshContainerProducer(argExpr) {
+		return
+	}
+	a.checkInteriorRegionAgainstTarget(receiverExpr, containerRegion(containerType), argExpr, "fresh container")
 }
 
 // dArrayLikeElemType returns the element type of a darray/array/deque-like container, or nil.

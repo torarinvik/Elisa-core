@@ -370,3 +370,85 @@ def f() -> i64:
 		t.Fatalf("same-lifetime struct-literal field store must be accepted; got: %s", all)
 	}
 }
+
+// docs sweep (this session): the fresh-producer interior-region check must fire at EVERY
+// container-mutation site that takes a value/element argument, not just `<-`/`=`/`.push`. These
+// three (extend, dict.put, bulk-push) were runtime-confirmed segfaults before the fix — a fresh
+// list literal `[v]` whose element lives in an inner region, copied into a longer-lived container.
+
+func TestNestedRegionExtendFreshProducerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "extend_fresh_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            ol: mutable darray[darray[u8]] @outer = []
+            region a(4096):
+                v: mutable darray[u8] @a = []
+                v.push(66)
+                ol.extend([v])
+            return 0
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"outer\"") {
+		t.Fatalf("extend of a fresh list literal carrying an inner-region element must be rejected; got: %s", all)
+	}
+}
+
+func TestNestedRegionDictPutFreshProducerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "dict_put_fresh_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            d: mutable dict[i64, darray[darray[u8]]] @outer = zeroed
+            region a(4096):
+                v: mutable darray[u8] @a = []
+                v.push(66)
+                d.put(1, [v])
+            return 0
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"outer\"") {
+		t.Fatalf("dict.put of a fresh list literal carrying an inner-region element must be rejected; got: %s", all)
+	}
+}
+
+func TestNestedRegionBulkPushFreshProducerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "bulkpush_fresh_escape.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            ol: mutable darray[darray[u8]] @outer = []
+            region a(4096):
+                v: mutable darray[u8] @a = []
+                v.push(66)
+                ol.push([v])
+            return 0
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"outer\"") {
+		t.Fatalf("bulk-push of a fresh list literal carrying an inner-region element must be rejected; got: %s", all)
+	}
+}
+
+// Controls: same-region and scalar-element bulk operations must stay accepted (no false positive).
+func TestNestedRegionExtendSameRegionAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "extend_same_ok.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region a(8192):
+            ol: mutable darray[darray[u8]] @a = []
+            v: mutable darray[u8] @a = []
+            v.push(66)
+            ol.extend([v])
+            return i64(ol[0][0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "dangling") || strings.Contains(all, "longer-lived") {
+		t.Fatalf("same-region extend of a fresh literal must be accepted; got: %s", all)
+	}
+}
+
+func TestNestedRegionExtendScalarAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "extend_scalar_ok.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region a(8192):
+            xs: mutable darray[u8] @a = []
+            xs.extend([1, 2, 3])
+            return i64(xs[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "dangling") || strings.Contains(all, "longer-lived") {
+		t.Fatalf("scalar-element extend must be accepted; got: %s", all)
+	}
+}

@@ -46,6 +46,9 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
+	// docs/91 G0 death-time analysis runs as a POST pass in AnalyzeWithOptions (after body analysis,
+	// so exprTypes is complete and the interprocedural arg-retention fixpoint can be computed) — not
+	// here, where it would see incomplete types and no whole-program view.
 	// Names in scope at every region entry: function parameters. A reserve_commit reservation
 	// (sized from the proven bound) is emitted at region entry, so its bound must resolve there.
 	paramNames := map[string]bool{}

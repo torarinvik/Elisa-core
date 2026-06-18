@@ -148,6 +148,14 @@ type Analyzer struct {
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
 	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
+	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
+	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
+	// surfaced on Result).
+	deathTimeCohorts      map[string][]DeathTimeCohort
+	deathEscapeStats      map[string]DeathTimeEscapeStats
+	paramRetained         map[*ast.FuncDecl][]bool
+	paramStoreTargets     map[*ast.FuncDecl][]map[int]bool
+	recordDeathCohortsOpt bool
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
 	deferInfo                    map[*ast.DeferStmt]*DeferInfo
@@ -543,6 +551,10 @@ type AnalyzeOptions struct {
 	SMTSolverBinary  string
 	TargetTriple     string
 	TargetDebug      bool
+	// RecordDeathTimeCohorts records the docs/91 G0 inferred death cohorts on Result.DeathTimeCohorts
+	// (programmatic access, e.g. the tightness-validation harness) without needing the
+	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
+	RecordDeathTimeCohorts bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -646,6 +658,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictProofs:               options.EnforceStrictProofs,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
+		recordDeathCohortsOpt:             options.RecordDeathTimeCohorts,
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
@@ -708,6 +721,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.validateAliasRefinements()
 	a.collectStaticImpls(activeDecls)
 	a.classifyRegionPolymorphicFunctions(activeDecls)
+	// docs/91 S4 W5: interprocedural store-target summaries — computed BEFORE body analysis
+	// (purely structural; no exprTypes dependency) so checkInterprocStoreEscape can consult them
+	// at call sites while the interior-taint side-table is live.
+	a.paramStoreTargets = a.computeParamStoreTargets(collectRegionPolyCandidateFuncs(activeDecls))
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {
@@ -718,6 +735,19 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.analyzeExports(activeDecls)
 	a.finalizeFuncDisjointParams(activeDecls)
 	a.lintHotKernelsForDisjointness()
+	// docs/91 G0: death-time cohort + interprocedural arg-retention analysis. Runs AFTER body
+	// analysis so exprTypes is complete and the whole-program retention fixpoint can be computed.
+	// Read-only observability (surfaced on Result; dumped under ELISA_DUMP_DEATHTIME); no codegen.
+	if dumpDeathTime || a.recordDeathCohortsOpt {
+		funcs := collectRegionPolyCandidateFuncs(activeDecls)
+		a.paramRetained = a.computeParamRetention(funcs)
+		for _, fn := range funcs {
+			if dumpDeathTime {
+				a.recordDeathTimeCohorts(fn)
+			}
+			a.recordDeathTimeData(fn)
+		}
+	}
 	a.closeSMT()
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
@@ -742,6 +772,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		InitCalls:               a.loweredInitCalls,
 		PostfixShorthandCalls:   a.postfixShorthandCalls,
 		RegionStacks:            a.regionStacks,
+		DeathTimeCohorts:        a.deathTimeCohorts,
+		DeathTimeEscapeStats:    a.deathEscapeStats,
 		ResolvedTypeNames:       a.resolvedTypeNames,
 		ResolvedValueNames:      a.resolvedValueNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,

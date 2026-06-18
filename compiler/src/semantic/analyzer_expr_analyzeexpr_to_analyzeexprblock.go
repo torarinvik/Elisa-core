@@ -601,6 +601,20 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			a.recordFunctionPermissionRefs(unsafeBufferReinterpretRefs(n.Position))
 		}
 		a.recordUnsafeLifetimeWiden(n, src, dst)
+		// S4 Stage 3: a reinterpret cast to a region-LESS reference inherits the operand's pointee
+		// region — a reborrow `(&x).cast[T&]` or a darray-element ref (`xs[i].cast[T&]`) aliases the
+		// same allocation, so the result lives in the same region. Sound: a reinterpret cannot change
+		// where the pointee lives, so it cannot forge a longer-lived region (it only recovers the
+		// region the cast would otherwise erase); an explicit `@r` on the target is respected (only a
+		// region-less target inherits). This lets region-poly threading survive the loader's pervasive
+		// `(&self).cast[mutable Module&]` reborrow idiom instead of forcing an explicit `in perm:`.
+		if dstRef, ok := dst.(*RefType); ok && dstRef.Region == "" {
+			if region := a.returnBorrowedRegion(n.Operand); region != "" {
+				cloned := cloneRefType(dstRef)
+				cloned.Region = region
+				dst = cloned
+			}
+		}
 		result = dst
 		return
 	case *ast.SizeofExpr:
