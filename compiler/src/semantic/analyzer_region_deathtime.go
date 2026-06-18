@@ -53,6 +53,7 @@ type DeathTimeEscapeStats struct {
 // stack, per docs/71).
 type DeathTimeCohort struct {
 	DeathIndex int
+	BirthIndex int // earliest member declaration index (the cohort's [Birth,Death] live interval)
 	Allocs     []string
 	Growables  int
 }
@@ -506,9 +507,12 @@ func cohortsFromAllocs(allocs []deathTimeAlloc) []DeathTimeCohort {
 	for _, d := range deaths {
 		members := byDeath[d]
 		sort.Slice(members, func(i, j int) bool { return members[i].name < members[j].name })
-		c := DeathTimeCohort{DeathIndex: d}
+		c := DeathTimeCohort{DeathIndex: d, BirthIndex: members[0].declIndex}
 		for _, al := range members {
 			c.Allocs = append(c.Allocs, al.name)
+			if al.declIndex < c.BirthIndex {
+				c.BirthIndex = al.declIndex
+			}
 			if al.kind == "growable" {
 				c.Growables++
 			}
@@ -536,7 +540,7 @@ func (a *Analyzer) recordDeathTimeCohorts(fn *ast.FuncDecl) {
 	}
 	fmt.Fprintf(os.Stderr, "death-time cohorts for %s: %d cohort(s) over %d inferred allocation(s)\n", fn.Name, len(cohorts), total)
 	for _, c := range cohorts {
-		label := fmt.Sprintf("dies@stmt%d", c.DeathIndex)
+		label := fmt.Sprintf("live[%d..%d]", c.BirthIndex, c.DeathIndex)
 		if c.DeathIndex == -1 {
 			label = "escapes (caller region)"
 		}

@@ -297,3 +297,33 @@ real workload (e.g. running the Pascal frontend over a large input), early-free 
 behind a flag, measure that, and only default it on if the memory/perf win is real — still
 ASan-gated, escape-checker-backstopped. The measurement discipline stands; only §8e's premature
 conclusion is retracted.
+
+## 8g. MAGNITUDE measured — the win is small (~5%); G1 not justified
+
+§8f confirmed the early-free/reuse pattern exists in allocation-heavy frontends; §8g measures HOW BIG
+it is. The win = (in-function cohorts, which today each live to scope exit) − (peak simultaneously-live
+cohorts, which is all early-free+reuse needs). Measured via the `ELISA_DUMP_DEATHTIME` dump (which now
+prints each cohort's `live[birth..death]` interval) over the ATPL + Lua + Pascal frontends, computing
+peak interval-overlap per function:
+
+```
+299 functions with in-function cohorts
+in-function arena stacks — today (live to scope exit): 519
+in-function arena stacks — early-free + reuse (peak):  491
+STACKS SAVED: 28  (5.4%)   in 20 functions
+```
+
+So even in the best-case domain, early-free + cross-cohort reuse saves **~28 arena stacks, 5.4% of
+in-function stacks** — and in-function stacks are a minority (most inferred allocations escape via
+returns, handled by region-poly threading). It is an UPPER BOUND: the live model's over-split cap
+(~6 stacks/region, merging the rest) already captures some of this, so the realized saving is ≤5.4%.
+Several stacks are `reserve_commit` (commit only touched pages), shrinking the real RSS delta further.
+
+**FINAL VERDICT: do not build G1.** Not for §8e's wrong reason (it isn't zero), but for the measured
+one: a ≤5.4% reduction in a minority sub-category of arena stacks does not justify the complexity and
+use-after-free risk of mid-function early-free + cross-cohort reuse codegen (four principles —
+performance first, but the gain must be real and worth its risk; here it is marginal). The existing
+scope-based multi-stack model (docs/71) + region-poly return threading already capture essentially all
+the practical reclamation. Keep the read-only death/cohort/arg-retention analysis as a diagnostic and
+the `ELISA_DUMP_DEATHTIME` + interval dump as the re-measurement tool. Revisit only if a measured
+workload shows a materially larger (e.g. >25%) in-function stack-reuse opportunity.
