@@ -93,7 +93,7 @@ static void print_result(const bench_result *result) {
 }
 
 int main(void) {
-    const size_t len = 1u << 24;
+    const size_t len = 1 << 24;
     const uintptr_t rounds = 24;
     const int samples = 6;
     const uint64_t seed = UINT64_C(0x0123456789abcdef);

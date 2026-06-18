@@ -9,14 +9,14 @@ fn check(a: &Vec<Node>, i: i32) -> i64 {
     if n.left < 0 { 1 } else { 1 + check(a, n.left) + check(a, n.right) }
 }
 fn main() {
-    let (max_depth, min_depth) = (18i64, 4i64);
+    let (max_depth, min_depth) = (18, 4);
     let mut total;
     { let mut a = Vec::new(); let s = make(&mut a, max_depth+1); total = check(&a, s); }
     let mut la = Vec::new(); let ll = make(&mut la, max_depth);
     let mut d = min_depth;
     while d <= max_depth {
-        let iters = 1i64 << (max_depth - d + min_depth);
-        let mut s = 0i64;
+        let iters = 1 << (max_depth - d + min_depth);
+        let mut s = 0;
         for _ in 0..iters { let mut a = Vec::new(); let t = make(&mut a, d); s += check(&a, t); }
         total += s;
         d += 2;

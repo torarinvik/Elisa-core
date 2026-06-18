@@ -83,10 +83,10 @@ static bench_result run_bench(const char *name,
             out.best_ns = elapsed;
             out.checksum = checksum ^ work_dst[len / 2];
         }
-        bench_sink ^= checksum ^ work_dst[(sample * 257u) % len];
+        bench_sink ^= checksum ^ work_dst[(sample * 257) % len];
     }
 
-    double bytes_moved = (double)len * (double)rounds * (double)(sizeof(uint64_t) * 3u);
+    double bytes_moved = (double)len * (double)rounds * (double)(sizeof(uint64_t) * 3);
     out.gib_per_s = bytes_moved / ((double)out.best_ns / 1000000000.0) / (1024.0 * 1024.0 * 1024.0);
     return out;
 }
@@ -100,7 +100,7 @@ static void print_result(const bench_result *result) {
 }
 
 int main(void) {
-    const size_t len = 1u << 22;
+    const size_t len = 1 << 22;
     const uintptr_t rounds = 16;
     const int samples = 5;
     const uint64_t seed_dst = UINT64_C(0x13579bdf2468ace0);

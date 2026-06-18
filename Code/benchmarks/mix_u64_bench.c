@@ -88,7 +88,7 @@ static bench_result run_bench(const char *name,
             out.best_ns = elapsed;
             out.checksum = checksum ^ work[len / 2];
         }
-        bench_sink ^= checksum ^ work[(sample * 131u) % len];
+        bench_sink ^= checksum ^ work[(sample * 131) % len];
     }
 
     out.ns_per_elem_round = (double)out.best_ns / (double)(len * (size_t)inner_rounds);
@@ -104,7 +104,7 @@ static void print_result(const bench_result *result) {
 }
 
 int main(void) {
-    const size_t len = 1u << 20;
+    const size_t len = 1 << 20;
     const uintptr_t inner_rounds = 12;
     const int samples = 7;
     const uint64_t seed = UINT64_C(0x123456789abcdef0);

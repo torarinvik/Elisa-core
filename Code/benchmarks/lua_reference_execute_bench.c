@@ -34,7 +34,7 @@ static uint8_t *read_entire_file(const char *path, size_t *out_len) {
         return NULL;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1);
     if (buffer == NULL) {
         fprintf(stderr, "failed to allocate %ld bytes\n", size);
         fclose(file);

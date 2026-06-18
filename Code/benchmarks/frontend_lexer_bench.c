@@ -26,13 +26,13 @@ static uint8_t *read_file_cstr(const char *path, size_t *out_len) {
         return NULL;
     }
 
-    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1u);
+    uint8_t *buffer = (uint8_t *)malloc((size_t)size + 1);
     if (buffer == NULL) {
         fclose(file);
         return NULL;
     }
 
-    size_t read_count = fread(buffer, 1u, (size_t)size, file);
+    size_t read_count = fread(buffer, 1, (size_t)size, file);
     fclose(file);
     if (read_count != (size_t)size) {
         free(buffer);
