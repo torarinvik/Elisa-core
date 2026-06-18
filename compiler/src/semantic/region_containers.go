@@ -730,6 +730,12 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 			continue
 		}
 		for tj := range targets[i] {
+			if tj == storeTargetGlobal {
+				// The callee stores the argument into program-lifetime storage (a global/perm
+				// container, or relayed there) — that outlives every local region unconditionally.
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", srcRegion, srcRegion)
+				continue
+			}
 			if tj < 0 || tj >= len(orderedArgs) {
 				continue
 			}
