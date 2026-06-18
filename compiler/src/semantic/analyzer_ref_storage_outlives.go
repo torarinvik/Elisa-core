@@ -102,8 +102,15 @@ func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type)
 // assignment-side analog of the return-site check: the stored reference dangles
 // the instant the local frame is gone. Found by auditing the emulator, where
 // path/string builders store interior references into long-lived singletons.
-func (a *Analyzer) checkStoredBorrowEscapesLocal(target, value ast.Expr, valueType Type) {
+func (a *Analyzer) checkStoredBorrowEscapesLocal(target ast.Expr, targetType Type, value ast.Expr, valueType Type) {
 	if a == nil || target == nil || !a.lvalueStorageOutlivesFunction(target) {
+		return
+	}
+	// Only a borrow-like TARGET slot can CAPTURE a forwarded reference. Storing a `T&` value into a
+	// non-reference target (a scalar/value field, e.g. `u32 <- u32&`) deref-copies the pointee VALUE —
+	// no reference is retained, so the pointee's lifetime is irrelevant. Without this, the check
+	// false-positived on the common `self.field <- ref_param` value copy (over-rejection).
+	if targetType != nil && !isBorrowLikeType(targetType) {
 		return
 	}
 	// Rebinding a local reference variable (e.g. `r <- &x` where r is a local

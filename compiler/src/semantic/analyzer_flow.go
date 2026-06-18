@@ -346,7 +346,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// the interior-taint side-table makes that region visible to the check.
 		a.checkStructCopyInteriorRegionEscape(n.Target, targetType, n.Value, valueType)
 		a.recordStructInteriorRegionTaint(n.Target, n.Value, valueType)
-		a.checkStoredBorrowEscapesLocal(n.Target, n.Value, valueType)
+		a.checkStoredBorrowEscapesLocal(n.Target, targetType, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {
 				if from, fromType, ok := a.freezeMovedPackedStoreSource(n.Value); ok {
