@@ -70,7 +70,9 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		// existing escape checks fire on the field's true region (store-past-region, return-container).
 		// No-op for non-container fields / region-less objects (stampContainerRegion returns unchanged).
 		if region := a.fieldObjectRegion(objType); region != "" {
-			field.Type = stampFieldRegion(field.Type, region)
+			if stamped, changed := stampContainerRegion(field.Type, region); changed {
+				field.Type = stamped
+			}
 		}
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
@@ -81,23 +83,6 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), true)
 	return invalidType
-}
-
-// stampFieldRegion propagates an object's region onto a region-less field type. A CONTAINER field
-// gets its allocation region (stampContainerRegion). A nested STRUCT-value field gets its RegionOwner
-// stamped so a DEEPER field access inherits the region too (`m.inner.items` on `m: Mod& @r` — inner is
-// a struct value with no region of its own, but it lives in @r, so items grows into @r). Idempotent:
-// only stamps when currently region-less. (docs/91 S4 Stage 3 — nested-field growth.)
-func stampFieldRegion(t Type, region string) Type {
-	if stamped, changed := stampContainerRegion(t, region); changed {
-		return stamped
-	}
-	if st, ok := t.(*StructType); ok && st != nil && st.RegionOwner == "" {
-		cp := *st
-		cp.RegionOwner = region
-		return &cp
-	}
-	return t
 }
 
 // fieldObjectRegion returns the region a field-access object carries: a struct ref's `@r`
