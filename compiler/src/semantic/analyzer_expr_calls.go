@@ -382,6 +382,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			a.warnOnLegacyRawAtomicCall(expr.Pos(), ft.Name, argType)
 		}
 	}
+	// docs/91 S4 W5: a by-value struct grown in a local region, passed to a callee that stores it into
+	// a longer-lived argument, dangles when the local region frees — caught at the call site.
+	a.checkInterprocStoreEscape(expr, orderedArgs)
 	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
 	for _, name := range ft.RegionParams {
 		if _, ok := regionBindings[name]; !ok && a.lookupRegionParam(name) {

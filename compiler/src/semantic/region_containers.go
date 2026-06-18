@@ -687,6 +687,65 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	}
 }
 
+// argInteriorLocalRegion returns the interior-taint region of a by-value aggregate argument when that
+// region is a live scope-owned LOCAL region (the dangerous case: it frees at block exit). "" for a
+// region param the caller owns, a destroyed/unknown region, or an untainted argument.
+func (a *Analyzer) argInteriorLocalRegion(arg ast.Expr) string {
+	taint := a.structInteriorTaintRegion(arg)
+	if taint == "" || isSynthesizedAutoRegion(taint) {
+		return ""
+	}
+	if sym, state := a.lookupRegionState(taint); sym == nil || state.Destroyed || state.DeclScope == nil {
+		return ""
+	}
+	return taint
+}
+
+// checkInterprocStoreEscape rejects passing a by-value struct, whose interior field was grown in a
+// scope-owned local region, as an argument that the callee STORES into another argument that outlives
+// that region (docs/91 S4 W5: `def stash(dst: darray[Mod]&, v: Mod): dst.push(v)` then `stash(mods, m)`
+// with m grown in an inner region and mods in an outer one — m's field dangles when inner frees but
+// mods keeps the reference). The callee body is locally correct; the escape is a CALL-SITE property,
+// resolved here via the structural store-target summary (paramStoreTargets) + the live interior-taint
+// table. Precise: fires only when the target argument's region provably outlives the source's taint
+// region, so a same-region cohort pass (`stash(mods, m)` both in one region) is accepted.
+func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []ast.Expr) {
+	if a == nil || call == nil || a.paramStoreTargets == nil {
+		return
+	}
+	callee, ok := a.resolveCalleeFuncDecl(call)
+	if !ok || callee == nil {
+		return
+	}
+	targets, ok := a.paramStoreTargets[callee]
+	if !ok {
+		return
+	}
+	for i, arg := range orderedArgs {
+		if i >= len(targets) || len(targets[i]) == 0 {
+			continue
+		}
+		srcRegion := a.argInteriorLocalRegion(arg)
+		if srcRegion == "" {
+			continue
+		}
+		for tj := range targets[i] {
+			if tj < 0 || tj >= len(orderedArgs) {
+				continue
+			}
+			targetArg := orderedArgs[tj]
+			targetRegion := containerRegion(a.exprTypes[targetArg])
+			if targetRegion == "" {
+				a.checkRegionlessTargetStoreEscape(targetArg, srcRegion)
+				continue
+			}
+			if a.regionOutlives(targetRegion, srcRegion) {
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", srcRegion, targetRegion, srcRegion, targetRegion)
+			}
+		}
+	}
+}
+
 // returnedAggregateTaintRegion returns the interior-TAINT region (a grown field's region, recorded in
 // the taint side-table — never a value's OWN stamped container/view region) reachable through a
 // by-value aggregate return: a tainted struct local, or the elements/fields of a fresh producer

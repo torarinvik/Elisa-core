@@ -174,6 +174,63 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 W5: an inner-region-grown by-value struct passed to a callee that STORES it into an outer
+// container dangles when the inner region frees — a COMPILE error via the interprocedural
+// store-target summary, not a segfault. The callee body is locally correct; the escape is a
+// call-site property.
+func TestS4W5InterprocStoreEscapeRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    dst.push(v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        mods: mutable darray[Mod] = []
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            stash(mods, m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("interprocedural store of an inner-grown by-value struct into an outer container must be REJECTED (was a segfault), got %s", status)
+	}
+}
+
+// W5 must NOT over-reject: a SAME-region cohort (struct and target container in one region, dying
+// together) passed to a storing callee runs correctly.
+func TestS4W5InterprocSameRegionCohortRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    dst.push(v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(8192):
+        mods: mutable darray[Mod] = []
+        m: mutable Mod = Mod(bits: [])
+        m.bits.push(65) can Memory.Allocate, Abort.Panic
+        stash(mods, m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("same-region cohort passed to a storing callee must run (65), got %s %q", status, out)
+	}
+}
+
+// W5 must NOT over-reject: passing a tainted by-value struct to a READ-ONLY callee (no store) runs.
+func TestS4W5InterprocReadOnlyPassRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def peek(v: Mod) -> i64 can[Abort.Panic]:
+    return v.bits[0].i64()
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            print(peek(m).i64()) can Console.Write, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("read-only pass of a tainted struct must run (65), got %s %q", status, out)
+	}
+}
+
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)

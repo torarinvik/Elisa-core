@@ -154,6 +154,7 @@ type Analyzer struct {
 	deathTimeCohorts      map[string][]DeathTimeCohort
 	deathEscapeStats      map[string]DeathTimeEscapeStats
 	paramRetained         map[*ast.FuncDecl][]bool
+	paramStoreTargets     map[*ast.FuncDecl][]map[int]bool
 	recordDeathCohortsOpt bool
 	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables               map[ast.Expr]NodeTableInfo
@@ -720,6 +721,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.validateAliasRefinements()
 	a.collectStaticImpls(activeDecls)
 	a.classifyRegionPolymorphicFunctions(activeDecls)
+	// docs/91 S4 W5: interprocedural store-target summaries — computed BEFORE body analysis
+	// (purely structural; no exprTypes dependency) so checkInterprocStoreEscape can consult them
+	// at call sites while the interior-taint side-table is live.
+	a.paramStoreTargets = a.computeParamStoreTargets(collectRegionPolyCandidateFuncs(activeDecls))
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {
