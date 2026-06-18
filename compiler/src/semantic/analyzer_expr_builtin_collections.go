@@ -256,6 +256,10 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
+	// Growing a container that is a FIELD of a region-less struct local (`m.bits.push(..)`) allocates
+	// the field backing in the ambient region; taint the struct so a later by-value copy of it into a
+	// longer-lived container is caught (S4 Stage 2 — by-value region-struct element storage).
+	a.recordGrownFieldInteriorTaint(fieldExpr.Object)
 	pushArgType := darrayType.Elem
 	bulkPush := false
 	if list, ok := expr.Args[0].(*ast.ListLitExpr); ok && list != nil && !darrayElemPrefersListLiteralAsSingleValue(darrayType.Elem) {
@@ -295,6 +299,14 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// region behind its own (the container's) region, so the element check above misses it; check
 		// the pushed value's interior region against the container's lifetime.
 		a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
+		// A by-VALUE copy of a region-less struct/local whose interior field was grown into a
+		// shorter-lived region (interior taint) dangles when that region dies but the container
+		// outlives it. The element/fresh checks above miss it (the arg's TYPE carries no region and it
+		// is not a fresh producer), so consult the taint side-table directly (S4 Stage 2). A no-op for
+		// fresh producers (already covered above) and for scalar/region-less args.
+		if !isFreshContainerProducer(expr.Args[0]) {
+			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(darrayType), expr.Args[0], "by-value copy")
+		}
 		// Region-poly result element: its type is region-less but it lives in the ambient
 		// region, so pushing it into a container whose storage outlives the function dangles
 		// once that region is freed (same hole as the assignment path). Mirror the assignment

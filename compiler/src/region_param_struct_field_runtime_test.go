@@ -88,6 +88,58 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 2: storing a region-carrying struct BY VALUE in a container is sound when the struct's
+// interior field backing lives in the same (or a longer-lived) region as the container — a death
+// cohort: the modules and the table die together. Runs end-to-end with a PLAIN struct, no annotation.
+func TestS4Stage2ByValueSameRegionCohortRuns(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(8192):
+        mods: mutable darray[Mod] = []
+        m: mutable Mod = Mod(bits: [])
+        m.bits.push(65) can Memory.Allocate, Abort.Panic
+        mods.push(m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("same-region by-value struct cohort must run (65), got %s %q", status, out)
+	}
+}
+
+// S4 Stage 2 SAFETY: a by-value struct whose field backing was grown in a SHORTER-lived inner region,
+// pushed into an outer container, dangles when the inner region dies — must be a COMPILE error, not a
+// segfault. The field-growth taint side-table + the by-value element-store consult close this.
+func TestS4Stage2ByValueInnerToOuterUAFRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        mods: mutable darray[Mod] = []
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            mods.push(m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("pushing an inner-grown by-value struct into an outer darray must be REJECTED (was a segfault), got %s", status)
+	}
+}
+
+// Same UAF via dict.put (a different container-mutation handler) is also rejected.
+func TestS4Stage2ByValueDictPutInnerToOuterUAFRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        d: mutable dict[i64, Mod] = {}
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            d.put(1, m) can Memory.Allocate, Abort.Panic
+        if d.get(1) is hit:
+            print(hit.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("dict.put of an inner-grown by-value struct into an outer dict must be REJECTED (was a segfault), got %s", status)
+	}
+}
+
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)

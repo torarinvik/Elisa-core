@@ -676,6 +676,39 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	}
 }
 
+// recordGrownFieldInteriorTaint taints a region-less aggregate local when one of its CONTAINER FIELDS
+// is grown (`m.bits.push(..)`) into the ambient region. The growth allocates the field's backing in
+// the ambient region (the lexical ambient-region-at-push rule), so a later by-VALUE copy of the whole
+// struct (`mods.push(m)`) carries an interior reference into that region — exactly the interior taint
+// the store-side checks consult via valueStoreRegion. Mirrors the field-store taint path
+// (recordStructInteriorRegionTaint), but the region source is the ambient alloc context, not an
+// assigned value. Only a field-path receiver taints (a bare container local carries its own region).
+func (a *Analyzer) recordGrownFieldInteriorTaint(receiverExpr ast.Expr) {
+	if a == nil || a.currentStructInteriorRegionTaint == nil || a.currentScope == nil {
+		return
+	}
+	field, ok := stripParenExpr(receiverExpr).(*ast.FieldExpr)
+	if !ok || field == nil {
+		return
+	}
+	root := rootIdentExpr(field)
+	if root == nil {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(root.Name)
+	if !ok || sym == nil {
+		return
+	}
+	region := a.activeContainerRegionName()
+	if region == "" {
+		return
+	}
+	if _, tracked := a.regionLifetimeOrdinal(region); !tracked {
+		return
+	}
+	a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
+}
+
 // checkStructCopyInteriorRegionEscape rejects copying a region-less aggregate that
 // holds an interior reference into an inner region (recorded via interior taint)
 // into storage that outlives that region. A struct's TYPE never carries its
