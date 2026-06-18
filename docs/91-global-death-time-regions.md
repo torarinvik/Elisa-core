@@ -121,7 +121,7 @@ control-flow paths, **interprocedurally**.
 |---|---|---|
 | **G0 — death-point analysis (read-only)** | Compute + expose each allocation's inferred death point and cohort via `--explain regions`. No codegen change; pure analysis + a dump. Lets us *see* the cohorts the model would form and validate the analysis against real programs before trusting it. | low |
 | **G1 — intra-function early free** | For a single function, free an inferred cohort at its death point inside the function (not just at body exit) when the analysis proves it dead. Reuse `assignRegionStacks` for stacks. ASan-validate. | high |
-| **G2 — stack pool** | Thread-local pool; cohorts draw/return stacks. Realizes idea 3. Self-contained; can land independently. | medium |
+| **G2 — stack reuse** | Reuse a dead cohort's stacks for the next cohort. **See the G2 finding below — a global runtime depot is the wrong shape; the safe realization is static per-context reuse, which rides on G1.** | see below |
 | **G3 — interprocedural cohorts** | Death points that cross calls, via per-function escape/death summaries; merge cohorts across the call graph. | high |
 | **G4 — diagnostics** | `-Wperf` region-explosion warning; `--explain regions` cohort/free-point report (built early in G0, refined here). | low |
 
@@ -148,10 +148,42 @@ independent of the death analysis.
    where provably dead" (close to today) vs. aggressive "free at exact last-use" (tighter,
    more analysis-fragile). Start conservative; tighten with G0 evidence.
 
-## 9. Recommendation
+## 8b. G2 finding — a global runtime depot is the wrong shape (investigated)
 
-Build **G0 (death-point analysis + `--explain regions` dump)** first: it's low-risk, it makes
-the whole model *observable*, and it's the prerequisite for everything else. In parallel, build
-**G2 (stack pool)** since it's independent and directly delivers the user's idea 3. Defer the
-behavior-changing early-free (G1) and interprocedural cohorts (G3) until G0's analysis is
-proven sound and tight on real programs. Resolve §8 decisions 1–2 before G1.
+Investigating the "thin runtime stack depot" (a free-list of returned arena blocks that
+`new_region_backend` draws from and `free_region_backend`/`arena_free` return to) surfaced three
+blockers that make a **global** depot the wrong design for Elisa's concurrent runtime:
+
+1. **No thread-local storage.** The runtime has no TLS, so a process-global free-list would be
+   shared across `spawn`/worker threads that create and free arenas concurrently → a data race on
+   the free-list itself. Unacceptable for a memory-safety-first system.
+2. **Layering.** `arena.elisa` is foundational — concurrency (mutex, atomics) is built *on* it, not
+   under it. Guarding the depot with `pthread_mutex`/`compare_exchange` (defined in the concurrency
+   module) creates an `arena → concurrency → arena` cycle; a lock-free Treiber stack has ABA hazards
+   in a foundational module we do not want.
+3. **Contention.** Even with a correct global lock, serializing *every* region create/free across
+   all threads is a perf regression precisely for the parallel workloads regions are meant to serve.
+
+**Conclusion: the safe, fast realization of "a dead cohort's stacks feed the next" is STATIC,
+per-execution-context reuse, not a shared runtime depot.** Each thread already owns its arena handles
+on its own call stack (inherently thread-local, no sharing). When the death analysis proves cohort A
+dead before cohort B begins in the same context, the compiler emits **`reset`-and-reuse of the same
+arena** for B instead of free+alloc — exactly the "bus reassigned to the next guest pool, planned in
+advance at compile time" model, and race-free by construction. (Loop-iteration reuse via `arena_reset`
+already works this way; this generalizes it across sequential cohorts.)
+
+**This re-sequences the plan:** G2 is not a standalone runtime piece — it is the codegen half of G1
+(once the death analysis knows a cohort dies, reuse its arena for the next). A shared cross-thread
+depot, if ever wanted, is a separate, carefully-designed optimization with its own concurrency story,
+not the default path.
+
+**Revised after the G2 finding (§8b).** G0 (death-point analysis + dump) — LANDED, read-only,
+observable. The next track is **G0 → real intra-function liveness → G1**, because G2 (stack reuse)
+turns out to be the *codegen half of G1* (static per-context `reset`-and-reuse), not an independent
+runtime depot. So:
+1. **Harden G0's lexical last-use into real intra-function liveness** (handle loops/branches
+   soundly). Still read-only — validate on real programs via the dump.
+2. **G1: free a proven-dead cohort at its death point**, and reuse its arena for the next sequential
+   cohort in the same context (the safe, static G2). ASan-gated; the escape checker is the backstop.
+3. **G3: interprocedural cohorts** via the whole-program fixpoint (decision §8.2).
+A shared cross-thread depot is explicitly *not* on this path (§8b). §8 decisions 1–2 are settled.
