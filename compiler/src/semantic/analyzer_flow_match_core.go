@@ -205,6 +205,8 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 	var baselineBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var baselineFunctionValues map[*Symbol]*FuncType
 	var baselineSpecializedValueTypes map[*Symbol]Type
+	var baselineAliasCarriers map[string][]string
+	var baselineAliasCarrierFieldOverrides map[string]map[string][]string
 	cloneBaseline := func() {
 		if baselineCloned {
 			return
@@ -213,12 +215,16 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 		baselineBorrowedOwnerRefs = a.cloneBorrowedOwnerRefBindings()
 		baselineFunctionValues = a.cloneFunctionValueBindings()
 		baselineSpecializedValueTypes = a.cloneSpecializedValueTypeBindings()
+		baselineAliasCarriers = a.cloneAliasCarriers()
+		baselineAliasCarrierFieldOverrides = a.cloneAliasCarrierFieldOverrides()
 		baselineCloned = true
 	}
 	var mergedAffine map[affineValueKey]affineValueState
 	var mergedBorrowedOwnerRefs map[*Symbol]borrowedOwnerRefState
 	var mergedFunctionValues map[*Symbol]*FuncType
 	var mergedSpecializedValueTypes map[*Symbol]Type
+	var mergedAliasCarriers map[string][]string
+	var mergedAliasCarrierFieldOverrides map[string]map[string][]string
 	hasFallthrough := false
 	priorPatterns := make([]ast.MatchPattern, 0, len(stmt.Arms))
 	covered := map[string]bool{}
@@ -239,12 +245,15 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 				mergedBorrowedOwnerRefs = armSnapshot.BorrowedOwnerRefs
 				mergedFunctionValues = armSnapshot.FunctionValues
 				mergedSpecializedValueTypes = armSnapshot.SpecializedValueTypes
+				mergedAliasCarriers = armSnapshot.AliasCarriers
+				mergedAliasCarrierFieldOverrides = armSnapshot.AliasCarrierFieldOverrides
 				hasFallthrough = true
 			} else {
 				mergedAffine = mergeAffineValueStates(mergedAffine, armSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, armSnapshot.BorrowedOwnerRefs)
 				mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, armSnapshot.FunctionValues)
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
+				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
 		}
 		priorPatterns = append(priorPatterns, arm.Pattern)
@@ -256,17 +265,22 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 			mergedBorrowedOwnerRefs = baselineBorrowedOwnerRefs
 			mergedFunctionValues = baselineFunctionValues
 			mergedSpecializedValueTypes = baselineSpecializedValueTypes
+			mergedAliasCarriers = baselineAliasCarriers
+			mergedAliasCarrierFieldOverrides = baselineAliasCarrierFieldOverrides
 		} else {
 			mergedAffine = mergeAffineValueStates(mergedAffine, baselineAffine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, baselineBorrowedOwnerRefs)
 			mergedFunctionValues = a.mergeFunctionValueBindings(mergedFunctionValues, baselineFunctionValues)
 			mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, baselineSpecializedValueTypes)
+			mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierBaseline(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, baselineAliasCarriers, baselineAliasCarrierFieldOverrides)
 		}
 	}
 	a.currentAffineValues = mergedAffine
 	a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
+	a.currentAliasCarriers = mergedAliasCarriers
+	a.currentAliasCarrierFieldOverrides = mergedAliasCarrierFieldOverrides
 	a.recordAffineDestructureConsumption(stmt.Value, valueType, "match over affine enum")
 }
 

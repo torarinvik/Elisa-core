@@ -104,3 +104,22 @@ def run(cond: bool, v: mutable i32&, w: mutable i32&) -> void:
 		t.Fatal("expected all-branches field rebind to a disjoint param to stay safe")
 	}
 }
+
+func TestStructCarrierFieldRebindDisjointAcrossMatchArmsStaysSafe(t *testing.T) {
+	if structCarrierCaught(t, "carrier_field_rebind_match_disjoint.elisa", `
+enum Choice:
+    A
+    B
+
+def run(choice: Choice, v: mutable i32&, w: mutable i32&) -> void:
+    r: mutable Ref = wrap(v)
+    match choice:
+        Choice.A:
+            r.p <- w
+        Choice.B:
+            r.p <- w
+    mutate_pair(r.p, v)
+`) {
+		t.Fatal("expected all-match-arms field rebind to a disjoint param to stay safe")
+	}
+}

@@ -151,6 +151,18 @@ func mergeAliasCarrierFieldOverrides(
 	return merged
 }
 
+func mergeAliasCarrierSnapshot(carriers map[string][]string, overrides map[string]map[string][]string, snapshot affineFlowSnapshot) (map[string][]string, map[string]map[string][]string) {
+	overrides = mergeAliasCarrierFieldOverrides(carriers, overrides, snapshot.AliasCarriers, snapshot.AliasCarrierFieldOverrides)
+	carriers = mergeAliasCarriers(carriers, snapshot.AliasCarriers)
+	return carriers, overrides
+}
+
+func mergeAliasCarrierBaseline(carriers map[string][]string, overrides map[string]map[string][]string, baselineCarriers map[string][]string, baselineOverrides map[string]map[string][]string) (map[string][]string, map[string]map[string][]string) {
+	overrides = mergeAliasCarrierFieldOverrides(carriers, overrides, baselineCarriers, baselineOverrides)
+	carriers = mergeAliasCarriers(carriers, baselineCarriers)
+	return carriers, overrides
+}
+
 func (a *Analyzer) propagateAliasCarrierBlockEffects(parent, block *Scope, savedCarriers map[string][]string, savedOverrides map[string]map[string][]string) (map[string][]string, map[string]map[string][]string) {
 	carriers := cloneAliasCarrierMap(savedCarriers)
 	overrides := cloneAliasCarrierOverrideMap(savedOverrides)
