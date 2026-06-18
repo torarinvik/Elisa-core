@@ -174,6 +174,40 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 3: a reborrow reinterpret cast `(&self).cast[mutable Mod&]` PRESERVES the operand's region,
+// so a wrapper forwarding a region-poly struct ref through such a cast threads the caller's region and
+// runs — instead of the cast erasing the region and forcing an explicit `in <region>:`.
+func TestS4Stage3ReborrowCastPreservesRegion(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    self.bits.push(65)
+    return
+def caller(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    grow((&self).cast[mutable Mod&])
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(4096):
+        m: mutable Mod& @a = new[a] Mod(bits: [])
+        caller(m) can Memory.Allocate, Abort.Panic
+        print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "65" {
+		t.Fatalf("a reborrow-cast forward must preserve the region and run (65), got %s %q", status, out)
+	}
+}
+
+// SOUNDNESS: because the reborrow cast now preserves the region, an escape THROUGH the cast (returning
+// a region-less view of the grown field) is still caught — previously the region-erasing cast could
+// have HIDDEN it. The cast region-provenance is a soundness improvement, not just ergonomics.
+func TestS4Stage3ReborrowCastEscapeStillCaught(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak(self: mutable Mod&) -> view[u8] can[Memory.Allocate, Abort.Panic]:
+    self.bits.push(65)
+    return ((&self).cast[mutable Mod&]).bits[0:1]
+`)
+	if status != "REJECTED" {
+		t.Fatalf("returning a region-less view through a reborrow cast must be REJECTED (cast preserves region), got %s", status)
+	}
+}
+
 // Region-poly forwarding: a wrapper that merely FORWARDS a container ref param to a region-requiring
 // callee (without growing it itself) is inferred region-poly so the caller's region threads through —
 // it runs end-to-end, and the escape through the wrapper is still caught (see the escape test below).

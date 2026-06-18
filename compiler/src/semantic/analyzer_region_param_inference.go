@@ -180,18 +180,29 @@ func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name 
 }
 
 // forwardsParamIdent reports whether an argument expression passes the parameter `name` through: a bare
-// identifier, or `&name` (address-of), unwrapping parens.
+// identifier, `&name` (address-of), or a reborrow reinterpret cast `(&name).cast[T&]` — peeling parens,
+// address-of, and casts (S4 Stage 3: the loader's pervasive `(&self).cast[mutable T&]` reborrow idiom).
+// This only decides region-poly inference; the region is still verified at the real call site (where
+// the cast now preserves the operand's region), so seeing through the cast here is sound.
 func forwardsParamIdent(arg ast.Expr, name string) bool {
-	arg = unwrapParenForRegionPoly(arg)
-	if id, ok := arg.(*ast.Ident); ok && id != nil {
-		return id.Name == name
-	}
-	if addr, ok := arg.(*ast.AddrOfExpr); ok && addr != nil {
-		if id, ok := unwrapParenForRegionPoly(addr.Operand).(*ast.Ident); ok && id != nil {
-			return id.Name == name
+	for {
+		switch e := unwrapParenForRegionPoly(arg).(type) {
+		case *ast.Ident:
+			return e != nil && e.Name == name
+		case *ast.AddrOfExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		case *ast.CastExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		default:
+			return false
 		}
 	}
-	return false
 }
 
 // typeExprCarriesRegionParam reports whether a parameter type-expr is annotated with a region that is
