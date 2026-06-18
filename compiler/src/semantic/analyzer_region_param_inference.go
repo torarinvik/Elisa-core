@@ -61,10 +61,21 @@ func inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl) {
 	for i := range fn.Params {
 		p := &fn.Params[i]
 		stamp, ok := regionlessRefContainer(p.Type)
-		if !ok {
-			continue
-		}
-		if !paramContainerIsGrown(fn.Body, p.Name) && !paramContainerReassignedFromLiteral(fn.Body, p.Name) {
+		if ok {
+			if !paramContainerIsGrown(fn.Body, p.Name) && !paramContainerReassignedFromLiteral(fn.Body, p.Name) {
+				continue
+			}
+		} else if structStamp, structOK := regionlessRefStruct(p.Type); structOK && paramFieldContainerIsGrown(fn.Body, p.Name) {
+			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
+			// — `def fill(m: mutable Mod&): m.bits.push(..)` — needs the caller's region threaded to
+			// the field's backing growth, exactly like a grown container param. Stamp the inferred
+			// region onto the struct ref (`Mod& @r`): the field-region propagation pushes it onto the
+			// resolved field container, and the same return-escape checks that guard the explicit
+			// `[@r]` form (checkRegionParamReturnEscape) cover every borrow-out vector regardless of
+			// how the region param was introduced — so this spells, automatically, only the proven-
+			// sound Stage 0 shape and adds no new lifetime power.
+			stamp = structStamp
+		} else {
 			continue
 		}
 		// Param names are unique within a function, so the per-param suffix yields a unique,
@@ -262,6 +273,98 @@ func regionlessRefContainer(typ ast.TypeExpr) (func(region string), bool) {
 			return nil, false
 		}
 	}
+}
+
+// regionlessRefStruct reports whether a parameter type is a by-reference (`&`) region-less STRUCT
+// (a *ast.NamedType that is NOT a region-carrying container — those go through regionlessRefContainer),
+// and if so returns a closure that stamps a region name onto the enclosing *ast.RefType. A struct
+// has no `@r` surface of its own; the region rides on the ref, and the field-region propagation in
+// analyzeFieldExpr (plus the backend's containerRegionName reading RefType.Region for struct refs)
+// pushes it onto the resolved container field — the same normalization the dstr path relies on.
+//
+// The `&` is required for the same reason as containers: only a reference makes the callee's field
+// growth (header realloc + count) visible in the caller. An existing `@r` on the ref means the user
+// already manages the region: leave it alone (Stage 0's explicit form).
+func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
+	var ref *ast.RefType
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.OwnedType:
+			typ = t.Elem
+		case *ast.RefType:
+			if t.Region != "" {
+				return nil, false
+			}
+			ref = t
+			typ = t.Elem
+		case *ast.NamedType:
+			if ref == nil || t.Name == "dstr" {
+				return nil, false
+			}
+			r := ref
+			return func(region string) { r.Region = region }, true
+		default:
+			return nil, false
+		}
+	}
+}
+
+// paramFieldContainerIsGrown reports whether the body contains a growth-method call whose receiver is
+// a FIELD of the named struct parameter — `param.field.push(...)`. Mirrors paramContainerIsGrown but
+// peels one field access (the container lives inside the struct). A false negative only forgoes the
+// ergonomic rewrite (the old "active region" error still fires, which is safe); a false positive only
+// threads an unused region param.
+func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or local `region:`
+			// (RegionStmt) scope already has its allocation region supplied lexically — no region
+			// param threading is needed (and forcing `@r` would make the call site demand a region
+			// the struct ref doesn't carry). Don't descend into those scopes.
+			switch v.Interface().(type) {
+			case *ast.InStoreStmt, *ast.RegionStmt:
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {
+					// receiver must be `param.<field>` (a FieldExpr whose object is the param Ident)
+					if fieldRecv, ok := growth.Object.(*ast.FieldExpr); ok && fieldRecv != nil {
+						if id, ok := fieldRecv.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+							found = true
+							return
+						}
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
 }
 
 // paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)

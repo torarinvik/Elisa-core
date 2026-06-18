@@ -90,6 +90,36 @@ def caller() -> i64:
 	}
 }
 
+// S4 Stage 1: ZERO-annotation inference. `def fill(m: mutable Mod&): m.bits.push(..)` over a plain
+// (region-param-less) struct is rewritten in place into the `[@r]`/`Mod& @r` form — the caller's
+// region threads to the field growth automatically, no annotation required.
+func TestS4Stage1ZeroAnnotationGrowthInferred(t *testing.T) {
+	errs := analyzeTreeTestSourceWithSemanticErrors(t, "s4s1_growth.elisa",
+		"struct Mod:\n    bits: mutable darray[u8]\n"+`def fill(m: mutable Mod&) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        m.bits.push(65)
+        return i64(m.bits[0])
+`).Errors()
+	if joined := strings.Join(errs, " | "); joined != "" {
+		t.Fatalf("zero-annotation struct-field growth must be accepted (region inferred), got: %s", joined)
+	}
+}
+
+// Stage 1 must NOT widen the safe surface: the inferred region param drives the SAME borrow-out
+// escape check as the explicit form, so a region-less view return over the inferred param is still
+// rejected (was a use-after-free; the escape coverage is independent of how the region arrived).
+func TestS4Stage1InferredReturnViewRegionlessRejected(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "s4s1_leak.elisa",
+		"struct Mod:\n    bits: mutable darray[u8]\n"+`def leak(m: mutable Mod&) -> view[u8]:
+    can Memory.Allocate, Abort.Panic:
+        m.bits.push(65)
+        return m.bits[0:1]
+`).Errors(), " | ")
+	if !strings.Contains(errs, "region parameter") {
+		t.Fatalf("region-less view return over an INFERRED region param must be rejected, got: %s", errs)
+	}
+}
+
 // Returning a REF into the grown field with a region-less type also loses the @r tie (was a confirmed
 // use-after-free via `&m.bits[0]`) → reject. The check peels &/index/field to the borrowed region.
 func TestS4ReturnRefRegionlessRejected(t *testing.T) {

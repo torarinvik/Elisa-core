@@ -70,6 +70,24 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 Stage 1 end-to-end: ZERO-annotation `def fill(m: mutable Mod&): m.bits.push(..)` over a plain
+// struct runs correctly — the caller's region is threaded to the field growth with no `[@r]` written.
+func TestS4Stage1ZeroAnnotationRunsEndToEnd(t *testing.T) {
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    m.bits.push(65)
+    m.bits.push(66)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(4096):
+        m: mutable Mod& @a = new[a] Mod(bits: [])
+        fill(m) can Memory.Allocate, Abort.Panic
+        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "131" {
+		t.Fatalf("expected RAN 131 (region inferred, no annotation), got %s %q", status, out)
+	}
+}
+
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
