@@ -766,6 +766,19 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 	}
 }
 
+// checkFreshProducerElementEscape rejects passing a FRESH producer value (list literal, comprehension,
+// ternary, struct literal) whose interior carries a shorter-lived region than the container it is
+// stored into, at a container-mutation site (push / extend / dict.put / dict-entry insert). The
+// element-store checks (checkNestedRegionElementStoreEscape / ...Bulk...) see only the producer's OWN
+// region — which is the container's — so they miss its interior; this descends into it. A no-op for a
+// non-producer argument, which the element/bulk store checks already cover.
+func (a *Analyzer) checkFreshProducerElementEscape(receiverExpr ast.Expr, containerType Type, argExpr ast.Expr) {
+	if argExpr == nil || !isFreshContainerProducer(argExpr) {
+		return
+	}
+	a.checkInteriorRegionAgainstTarget(receiverExpr, containerRegion(containerType), argExpr, "fresh container")
+}
+
 // dArrayLikeElemType returns the element type of a darray/array/deque-like container, or nil.
 func dArrayLikeElemType(t Type) Type {
 	switch ct := stripRefForBounds(t).(type) {

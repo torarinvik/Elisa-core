@@ -302,6 +302,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 			a.errorf(expr.Args[0].Pos(), "dict entry insert expects %s, got %s", entryType.Dict.Value, argType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[0], entryType.Dict, entryType.Dict.Value, argType)
+		a.checkFreshProducerElementEscape(fieldExpr.Object, entryType.Dict, expr.Args[0])
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
 	}
 	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
@@ -371,6 +372,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 			a.errorf(expr.Args[1].Pos(), "dict %s expects value of type %s, got %s", method, dictType.Value, valueType)
 		}
 		a.checkNestedRegionElementStoreEscape(expr.Args[1], dictType, dictType.Value, valueType)
+		a.checkFreshProducerElementEscape(fieldExpr.Object, dictType, expr.Args[1])
 		// Region-poly result value: region-less type but lives in the ambient region, so
 		// putting it into a dict whose storage outlives the function dangles once that region
 		// frees (same hole as assignment/push). Gate on the receiver dict outliving the function.

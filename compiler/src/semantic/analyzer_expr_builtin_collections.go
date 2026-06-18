@@ -283,6 +283,9 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// container into a longer-lived target leaves dangling element references
 		// once the source region is freed.
 		a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, argType)
+		// A bulk source that is itself a FRESH producer (`xs.push([v])`) hides its interior region
+		// behind its own (the container's) region; descend into it.
+		a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
 	} else {
 		// Nested-region escape: pushing an inner-@r value into a darray whose element
 		// region outlives it would leave the longer-lived buffer holding a dangling
@@ -291,9 +294,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		// A pushed FRESH producer (`ol.push([v])`, a ternary, a struct literal) hides its interior
 		// region behind its own (the container's) region, so the element check above misses it; check
 		// the pushed value's interior region against the container's lifetime.
-		if isFreshContainerProducer(expr.Args[0]) {
-			a.checkInteriorRegionAgainstTarget(fieldExpr.Object, containerRegion(darrayType), expr.Args[0], "fresh container")
-		}
+		a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
 		// Region-poly result element: its type is region-less but it lives in the ambient
 		// region, so pushing it into a container whose storage outlives the function dangles
 		// once that region is freed (same hole as the assignment path). Mirror the assignment
@@ -373,6 +374,8 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	// longer-lived target leaves dangling element references once the source
 	// region is freed.
 	a.checkNestedRegionBulkStoreEscape(expr.Args[0], fieldExpr.Object, darrayType, darrayType.Elem, sourceType)
+	// A fresh-producer source (`ol.extend([v])`) hides its interior region behind its own; descend in.
+	a.checkFreshProducerElementEscape(fieldExpr.Object, darrayType, expr.Args[0])
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{
