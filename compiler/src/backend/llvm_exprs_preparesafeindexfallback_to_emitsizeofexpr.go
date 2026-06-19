@@ -523,11 +523,46 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	if err != nil {
 		return nil, nil, err
 	}
+	// An explicit `.cast[<integer>]` on a pointer/reference reinterprets the pointer
+	// ADDRESS (ptrtoint); it never dereferences the pointee. Without this the
+	// ref-to-numeric operand falls into coerceValue's implicit auto-deref -- correct
+	// for the *value-conversion* forms (`off.u64()` reads a `usize&`'s pointee) but
+	// wrong for an explicit reinterpret cast: `name.cast[usize]` would read the first
+	// byte at the address instead of the address itself. Gated to the explicit
+	// `.cast[T]` origin so the `.u64()`/`as`/`to` value forms keep their deref; makes
+	// every integer target behave like the established `.uintptr()` idiom.
+	if value != nil && expr.Origin == ast.CastExprOriginExplicitCast &&
+		isReferenceLikeOperand(actualType) && isIntegerCastTarget(targetType) &&
+		C.LLVMGetTypeKind(C.LLVMTypeOf(value)) == C.LLVMPointerTypeKind {
+		expectedLLVM, err := s.g.lowerType(targetType)
+		if err != nil {
+			return nil, nil, err
+		}
+		return C.LLVMBuildPtrToInt(s.builder, value, expectedLLVM, cStringFree("cast.addr")), targetType, nil
+	}
 	coerced, err := s.coerceValue(value, actualType, targetType)
 	if err != nil {
 		return nil, nil, err
 	}
 	return coerced, targetType, nil
+}
+
+// isIntegerCastTarget reports whether t is an integer reinterpret target (numeric
+// but not floating point) for an explicit pointer/reference `.cast`.
+func isIntegerCastTarget(t semantic.Type) bool {
+	return isNumericCastType(t) && !isFloatType(t)
+}
+
+// isReferenceLikeOperand reports whether t is a pointer/reference whose address an
+// explicit integer `.cast` should reinterpret (ptrtoint) rather than dereference.
+func isReferenceLikeOperand(t semantic.Type) bool {
+	switch v := t.(type) {
+	case *semantic.RefType:
+		return true
+	case *semantic.OptionalType:
+		return isReferenceLikeOperand(v.Value)
+	}
+	return isPointerLikeType(t)
 }
 func (s *functionState) emitSizeofExpr(expr *ast.SizeofExpr) (C.LLVMValueRef, semantic.Type, error) {
 	t, err := s.resolveTypeExpr(expr.Type)
