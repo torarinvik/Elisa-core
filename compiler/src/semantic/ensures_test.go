@@ -357,3 +357,35 @@ def bad(player: Player[Alive]&) -> void can[Abort] ensures return true => player
 		t.Fatalf("expected non-bool conditional ensures diagnostic, got:\n%s", errText)
 	}
 }
+
+// docs/85/90: a general-boolean `ensure` postcondition is statically DISCHARGED under
+// -strict via the SMT tier (substitute `result` -> the returned expression and prove the
+// clause). A provable clause raises no diagnostic; an unprovable one is a hard error.
+// Without -strict it stays a silent debug runtime check (no warning noise).
+func TestEnsureBooleanStaticallyDischargedUnderStrict(t *testing.T) {
+	provable := `
+def add10(x: i64) -> i64:
+    ensure result > x
+    return x + 10
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_ok.elisa", provable, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("a provable `ensure result > x` for `return x + 10` should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	unprovable := `
+def bad(x: i64) -> i64:
+    ensure result > x
+    return x - 1
+`
+	r2 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_bad.elisa", unprovable, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r2), "could not be proven statically") {
+		t.Fatalf("an unprovable `ensure result > x` for `return x - 1` must be a -strict error, got:\n%s", allDiagnostics(r2))
+	}
+
+	// Non-strict: the same unprovable clause is silent (runtime check only).
+	r3 := analyzeFunctionAnalysisTestSource(t, "ensure_silent.elisa", unprovable)
+	if contains(allDiagnostics(r3), "could not be proven") {
+		t.Fatalf("without -strict an unproven ensure must be silent, got:\n%s", allDiagnostics(r3))
+	}
+}

@@ -455,6 +455,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			return
 		}
 		a.dischargeReturnRefinements(n)
+		a.dischargeEnsureBooleans(n)
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)
 		a.checkReturnRegionContainerEscape(n.Value, valueType)
