@@ -1655,3 +1655,23 @@ def narrow(n: i64 is Bounded[0, 1000]) -> i64 is Bounded[0, 100]:
 		t.Fatalf("a [0,1000] param must not prove a [0,100] return; must stay unproven, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// Two parameters, each carrying a parametric refinement, must PARSE (the `,` in
+// `Bounded[lo, hi]` previously collided with the parameter separator, breaking the
+// param list) AND statically discharge a multiplicative return bound from both
+// input bounds (31*4096 + 4095 == 131071) — the voice-state index proof shape.
+func TestMultiParamRefinementParsesAndDischarges(t *testing.T) {
+	src := `
+law Bounded(self: usize, lo: usize, hi: usize) = self >= lo and self <= hi
+
+def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) -> usize is Bounded[0, 131071]:
+    return rack * 4096 + voice
+`
+	result := analyzeTreeTestSource(t, "multi_param_refine.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("two-param refinement should parse and analyze cleanly, got:\n%s", allDiagnostics(result))
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
+	}
+}

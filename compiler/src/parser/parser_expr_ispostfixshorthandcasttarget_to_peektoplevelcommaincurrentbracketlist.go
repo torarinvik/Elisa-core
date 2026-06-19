@@ -140,8 +140,22 @@ func (p *Parser) parseRefinementTypeSuffix(base ast.TypeExpr) ast.TypeExpr {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IS)
 	preds := []ast.RefinementPredExpr{p.parseRefinementPred()}
-	for p.match(lexer.TOKEN_COMMA) || p.matchIdentText("and") {
-		preds = append(preds, p.parseRefinementPred())
+	for {
+		if p.matchIdentText("and") {
+			preds = append(preds, p.parseRefinementPred())
+			continue
+		}
+		// A `,` continues the predicate list ONLY when followed by a parametric
+		// predicate (`, Law[`). In a parameter list `(a: T is Law[..], b: U ..)`
+		// the comma is the parameter separator (`, name:`), not a predicate
+		// separator — consuming it there mis-parses the next parameter. The `[`
+		// lookahead disambiguates; additional bare predicates use `and`.
+		if p.peek() == lexer.TOKEN_COMMA && p.peekAt(1) == lexer.TOKEN_IDENT && p.peekAt(2) == lexer.TOKEN_LBRACKET {
+			p.advance()
+			preds = append(preds, p.parseRefinementPred())
+			continue
+		}
+		break
 	}
 	return &ast.RefinementTypeExpr{Position: pos, Base: base, Preds: preds}
 }
