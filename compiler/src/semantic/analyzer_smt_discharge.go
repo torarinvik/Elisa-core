@@ -107,19 +107,29 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if solver == nil || decl == nil || len(decl.Params) == 0 {
 		return false
 	}
-	// Bind the law's static params to constant bracket args (same as the linear tier).
-	paramConsts := map[string]int64{}
+	tr := a.newSMTTranslator(nil)
+	// Bind the law's static params to the bracket args. A compile-time-constant arg folds to its value
+	// (`Bounded[0, 500]`); a VALUE-DEPENDENT arg (`Index[cap]`, `Bounded[0, n]`, `Aligned[page]`) binds
+	// the law param to the argument's SMT term, so the law body proves RELATIONALLY against the runtime
+	// value (docs — dependent refinements). An arg outside the SMT fragment declines the whole proof.
+	// Sound: the arg term is the same faithful translation used for the subject and hypotheses, so the
+	// obligation is exactly the law body evaluated at the actual argument values.
+	varParamEnv := map[string]string{}
 	for i, arg := range predArgs {
 		if i+1 >= len(decl.Params) {
 			break
 		}
-		c, ok := a.constIntValue(arg)
+		pname := decl.Params[i+1].Name
+		if c, ok := a.constIntValue(arg); ok {
+			tr.paramConsts[pname] = c
+			continue
+		}
+		term, ok := tr.term(arg)
 		if !ok {
 			return false
 		}
-		paramConsts[decl.Params[i+1].Name] = c
+		varParamEnv[pname] = term
 	}
-	tr := a.newSMTTranslator(paramConsts)
 	// Bind the law's `self` to the subject. An array/darray subject is modeled as an SMT array (so the
 	// law body's `self[i]` becomes a select); any other subject is an integer term.
 	self := decl.Params[0].Name
@@ -134,6 +144,9 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 		return false
 	}
 	env := map[string]string{self: subjectTerm}
+	for k, v := range varParamEnv {
+		env[k] = v
+	}
 	// The law body as an SMT boolean, with `self` replaced by the subject term.
 	body, ok := a.lawBodyExpr(decl)
 	if !ok {
