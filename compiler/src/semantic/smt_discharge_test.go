@@ -550,3 +550,71 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 100]:
 		t.Fatalf("SMT profile should be disabled by default, got %+v", result.SMTProfile)
 	}
 }
+
+// docs/85 gap #2: the prover reasons THROUGH immutable local definitions and value-preserving
+// (same-sign, widening) integer conversions. `rack.usize()*4096 + voice.usize()` over bounded
+// u32 params proves its [0,131071] return bound DIRECTLY — no inner/outer usize restructuring.
+func TestRefinementThroughLocalsAndWideningConversions(t *testing.T) {
+	src := `
+law Bounded(self: usize, lo: usize, hi: usize) = self >= lo and self <= hi
+
+def to_slot(rack: u32 is Bounded[0, 31], voice: u32 is Bounded[0, 4095]) -> usize is Bounded[0, 131071]:
+    return rack.usize() * 4096 + voice.usize()
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "through_conv.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("u32.usize() widening + bounded params should prove the return bound directly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// A SIGN-changing conversion (i64 -> u64) is NOT value-preserving (it wraps for negatives), so it
+// is correctly NOT treated as identity — soundness floor for the conversion-transparency rule.
+func TestSignChangingConversionNotIdentity(t *testing.T) {
+	src := `
+def widen(x: i64) -> i64:
+    ensure result == x
+    r: i64 = x.u64().i64()
+    return r
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r), "could not be proven") {
+		t.Fatalf("a sign-changing i64->u64->i64 round-trip must NOT be assumed identity, got:\n%s", allDiagnostics(r))
+	}
+}
+
+// docs/85 gap #3: a fall-through after an early-return guard establishes the negated condition as a
+// flow fact for the static provers (`if x < 0: return 0` ⟹ `x >= 0` afterwards; `if a == 0: return`
+// ⟹ `a >= 1` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the
+// real align_up postcondition `result >= value` discharges fully under -strict.
+func TestFallThroughGuardFactsDischargeAlignUp(t *testing.T) {
+	src := `
+def align_up(value: u64, alignment: u64) -> u64:
+    ensure result >= value
+    if alignment == 0:
+        return value
+    rem: u64 = value % alignment
+    if rem == 0:
+        return value
+    return value + (alignment - rem)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "alignup.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("align_up's `ensure result >= value` should discharge via guard + local + modulo facts, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The guard-narrowing soundness floor: a `<` guard establishes the post-guard lower bound, so a
+// downstream `ensure result >= 0` on a clamp proves; nothing weaker is admitted.
+func TestFallThroughGuardClampDischarges(t *testing.T) {
+	src := `
+def clamp_nonneg(x: i64) -> i64:
+    ensure result >= 0
+    if x < 0:
+        return 0
+    return x
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "clamp.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("clamp_nonneg should discharge via the fall-through guard fact, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

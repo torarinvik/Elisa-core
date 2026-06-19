@@ -172,11 +172,14 @@ func (a *Analyzer) checkForwardedRefStoreEscapes(value ast.Expr, valueType Type)
 	if a == nil || value == nil {
 		return
 	}
-	// `trusted Unsafe.StaleRef:` is the explicit escape hatch: the author takes
-	// responsibility for a stored reference whose pointee lifetime the type system
-	// cannot prove (e.g. the trusted runtime caching a caller pointer in an async
-	// task record). Inside such a block, do not flag the store.
-	if a.currentTrustedStaleRefDepth > 0 {
+	// Two explicit escape hatches discharge this check for a stored reference whose
+	// pointee lifetime the type system cannot prove (e.g. a guest/FFI pointer cached
+	// in a program-lifetime handle table):
+	//   - `can Unsafe.StaleRef:` — the PREFERRED, tracked form: it surfaces
+	//     Unsafe.StaleRef in the function's effect signature, so every such store is
+	//     auditable through the capability system.
+	//   - `trusted Unsafe.StaleRef:` — the untracked local-suppression form.
+	if a.currentGrantedStaleRefDepth > 0 || a.currentTrustedStaleRefDepth > 0 {
 		return
 	}
 	rt, ok := valueType.(*RefType)
@@ -208,7 +211,7 @@ func (a *Analyzer) checkForwardedRefStoreEscapes(value ast.Expr, valueType Type)
 			return
 		}
 	}
-	a.errorf(value.Pos(), "storing a forwarded reference into longer-lived storage; its pointee may not outlive the function. Annotate the reference as `heap`/`static` if its target outlives the frame, store the value/owner by value, or take responsibility with `trusted Unsafe.StaleRef:`")
+	a.errorf(value.Pos(), "storing a forwarded reference into longer-lived storage; its pointee may not outlive the function. Annotate the reference as `heap`/`static` if its target outlives the frame, store the value/owner by value, or take responsibility with `can Unsafe.StaleRef:` (tracked) or `trusted Unsafe.StaleRef:`")
 }
 
 func (a *Analyzer) checkBorrowEscapesLocal(value ast.Expr, valueType Type, message string) {

@@ -30,22 +30,50 @@ import (
 // Mirrors dischargeCallArgRefinements (refinement-typed params); this covers arbitrary boolean
 // preconditions in the bounded-linear fragment.
 func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
-	decl, ok := a.resolveDirectCallFuncDecl(call)
-	if !ok || decl == nil || len(decl.Requires) == 0 {
+	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil && len(decl.Requires) > 0 {
+		a.checkCalleeRequires(call, decl.Name, decl.Requires, decl.Params, args)
 		return
 	}
+	// Boundary preconditions: an `extern f(...) requires <bool>` is checked at every call site so the
+	// caller cannot hand native code an out-of-domain argument (docs/85 gap #4 — the FFI boundary made
+	// a checked contract). The native body is trusted to honour its `ensures`.
+	if ext, ok := a.resolveDirectCallExternFuncDecl(call); ok && ext != nil && len(ext.Requires) > 0 {
+		a.checkCalleeRequires(call, ext.Name, ext.Requires, ext.Params, args)
+	}
+}
+
+// resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.
+func (a *Analyzer) resolveDirectCallExternFuncDecl(call *ast.CallExpr) (*ast.ExternFuncDecl, bool) {
+	if call == nil || a.currentScope == nil {
+		return nil, false
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return nil, false
+	}
+	ext, ok := sym.Node.(*ast.ExternFuncDecl)
+	return ext, ok && ext != nil
+}
+
+// checkCalleeRequires discharges/checks a callee's precondition clauses against the caller's
+// arguments — shared by ordinary and extern (FFI boundary) calls.
+func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requires []ast.Expr, params []ast.ParamDecl, args []ast.Expr) {
 	// Map each callee parameter name to the caller's argument expression. A param with no
 	// corresponding argument (variadic tail, defaulted) is simply absent — a clause that mentions it
 	// then leaves the fragment and declines.
 	subst := map[string]ast.Expr{}
-	for i, param := range decl.Params {
+	for i, param := range params {
 		if i >= len(args) || args[i] == nil {
 			continue
 		}
 		subst[param.Name] = args[i]
 	}
-	subject := "precondition of " + decl.Name
-	for _, req := range decl.Requires {
+	subject := "precondition of " + declName
+	for _, req := range requires {
 		if req == nil {
 			continue
 		}
@@ -55,7 +83,7 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 			a.recordProof(call.Pos(), subject, clauseName, ProofProvenLinear)
 		case requiresRefuted:
 			a.recordProof(call.Pos(), subject, clauseName, ProofRefuted)
-			a.errorf(call.Pos(), "precondition of %q is violated: the argument provably does not satisfy `requires`", decl.Name)
+			a.errorf(call.Pos(), "precondition of %q is violated: the argument provably does not satisfy `requires`", declName)
 		default:
 			// SMT fallback (docs/90 brick 3): the linear clause prover declined, but the solver may
 			// still discharge a non-linear precondition (e.g. `requires lo * 2 <= cap`) under the
@@ -70,9 +98,9 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 			// input the caller's facts permit that violates the precondition) sharpens the message.
 			a.recordProof(call.Pos(), subject, clauseName, ProofRuntime)
 			if counterexample != "" {
-				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; it can fail when %s (or accept the runtime check)", decl.Name, counterexample)
+				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; it can fail when %s (or accept the runtime check)", declName, counterexample)
 			} else {
-				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; pass a provable value or accept the runtime check", decl.Name)
+				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; pass a provable value or accept the runtime check", declName)
 			}
 		}
 	}

@@ -15,7 +15,18 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	}
 	if !stmt.SuppressPermissionInference {
 		a.recordFunctionPermissionRefs(refs)
+		// A tracked `can Unsafe.StaleRef:` grant discharges the forwarded-ref-store
+		// check within its scope (like `trusted`), but — unlike `trusted` — the
+		// recordFunctionPermissionRefs above surfaces Unsafe.StaleRef in the function's
+		// effects, so the stored-borrow stays auditable through the capability system.
+		grantsStaleRef := permissionRefsContain(refs, "Unsafe", "StaleRef")
+		if grantsStaleRef {
+			a.currentGrantedStaleRefDepth++
+		}
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		if grantsStaleRef {
+			a.currentGrantedStaleRefDepth--
+		}
 		return
 	}
 	granted := a.grantedPermissionRefs(refs)

@@ -371,6 +371,70 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// W5 tightness (adversarial sweep): the interprocedural store-escape stays closed across the harder
+// vectors — a TRANSITIVE relay (mid → stash → store), a NESTED-field store target, and an INDIRECT
+// store via a function-pointer arg. Each is REJECTED (the fn-pointer case fail-closed at the boundary:
+// the storing function is region-poly and can't be passed where a region-less func is expected).
+func TestS4W5TransitiveRelayStoreEscapeRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    dst.push(v) can Memory.Allocate, Abort.Panic
+    return
+def mid(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    stash(dst, v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        mods: mutable darray[Mod] = []
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            mid(mods, m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("transitive interprocedural store-escape must be REJECTED, got %s", status)
+	}
+}
+
+func TestS4W5NestedFieldStoreEscapeRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\nstruct Box:\n    items: mutable darray[Mod]\n"+`def stash(b: mutable Box&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    b.items.push(v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        box: mutable Box& @outer = new[outer] Box(items: [])
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            stash(box, m) can Memory.Allocate, Abort.Panic
+        print(box.items[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("interprocedural store into a nested struct field must be REJECTED, got %s", status)
+	}
+}
+
+func TestS4W5IndirectFnPtrStoreRejected(t *testing.T) {
+	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def doStore(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    dst.push(v) can Memory.Allocate, Abort.Panic
+    return
+def stash(fn: func(mutable darray[Mod]&, Mod) -> void can[Memory.Allocate, Abort.Panic], dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+    fn(dst, v) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region outer(8192):
+        mods: mutable darray[Mod] = []
+        region inner(4096):
+            m: mutable Mod = Mod(bits: [])
+            m.bits.push(65) can Memory.Allocate, Abort.Panic
+            stash(doStore, mods, m) can Memory.Allocate, Abort.Panic
+        print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "REJECTED" {
+		t.Fatalf("indirect store via a region-poly fn-pointer must be REJECTED (fail-closed at the boundary), got %s", status)
+	}
+}
+
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)

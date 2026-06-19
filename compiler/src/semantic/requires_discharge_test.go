@@ -102,3 +102,31 @@ def caller(buf: u8&, n: i32) -> u8:
 		t.Fatalf("expected the unprovable precondition to be recorded as runtime, got %d: %+v", runtime, result.ProofReport)
 	}
 }
+
+// docs/85 gap #4: an `extern f(...) requires <bool>` makes the FFI boundary a CHECKED contract —
+// the precondition is discharged at every call site (refuted = compile error; unproven = -strict
+// error / debug runtime check), so the caller cannot hand native code an out-of-domain argument.
+func TestExternRequiresCheckedAtCallSite(t *testing.T) {
+	src := `
+extern checked_div(a: i64, b: i64) -> i64 requires b != 0
+
+def bad_call() -> i64:
+    return checked_div(10, 0)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ext_bad.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r), "precondition of \"checked_div\" is violated") {
+		t.Fatalf("passing b=0 to an extern `requires b != 0` must be a compile error, got:\n%s", allDiagnostics(r))
+	}
+
+	ok := `
+extern checked_div(a: i64, b: i64) -> i64 requires b != 0
+
+def good_call(x: i64) -> i64:
+    requires x != 0
+    return checked_div(10, x)
+`
+	r2 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ext_ok.elisa", ok, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r2.Errors(); len(errs) != 0 {
+		t.Fatalf("a caller whose own `requires x != 0` establishes the extern precondition should discharge, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

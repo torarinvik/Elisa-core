@@ -99,7 +99,7 @@ type Analyzer struct {
 	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
-	grantAliases            map[string][]ast.PermissionRef
+	capabilityAliases            map[string][]ast.PermissionRef
 	globalScope             *Scope
 	functionTypes           map[string]*FuncType
 	externLinkNames         map[string]externLinkNameSignature
@@ -324,6 +324,12 @@ type Analyzer struct {
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int
+	// currentGrantedStaleRefDepth tracks an enclosing *tracked* `can Unsafe.StaleRef:`
+	// grant (vs the untracked `trusted` suppression in currentTrustedStaleRefDepth).
+	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the
+	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
+	// auditable through the capability system rather than invisibly suppressed.
+	currentGrantedStaleRefDepth int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
@@ -602,7 +608,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		aliasRefinements:                  map[string]*ast.RefinementTypeExpr{},
-		grantAliases:                      map[string][]ast.PermissionRef{},
+		capabilityAliases:                      map[string][]ast.PermissionRef{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		externLinkNames:                   map[string]externLinkNameSignature{},
@@ -675,7 +681,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectPermissionDecls(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
-	a.collectGrantAliases(activeDecls)
+	a.collectCapabilityAliases(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
@@ -700,7 +706,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectPermissionDecls(generatedScopedDecls)
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
-		a.collectGrantAliases(generatedScopedDecls)
+		a.collectCapabilityAliases(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
 		a.populateConstEnumMembers(generatedScopedDecls)
 		a.populateStructFields(generatedScopedDecls)

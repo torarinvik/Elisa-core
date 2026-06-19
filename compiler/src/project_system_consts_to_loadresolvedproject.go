@@ -62,6 +62,8 @@ type projectCLIOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	concurrencyStrict bool
+	proofStrict       bool
+	enableSMT         bool
 }
 type projectDefinition struct {
 	Version               string                             `json:"version,omitempty"`
@@ -147,6 +149,8 @@ type resolvedProjectTarget struct {
 	strictPolicy          bool
 	perfStrict            bool
 	concurrencyStrict     bool
+	proofStrict           bool
+	enableSMT             bool
 }
 type projectResolver struct {
 	searchPaths []string
@@ -237,6 +241,8 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		strictPolicy:      target.strictPolicy,
 		perfStrict:        target.perfStrict,
 		concurrencyStrict: target.concurrencyStrict,
+		proofStrict:       target.proofStrict,
+		enableSMT:         target.enableSMT,
 	}
 
 	switch options.command {
@@ -273,7 +279,9 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 	if len(args) == 0 {
 		return projectCLIOptions{}, fmt.Errorf("missing project command")
 	}
-	options := projectCLIOptions{trust: trustNone, packedProfile: backend.DefaultPackedLoweringProfile()}
+	// docs/90: SMT discharge tier ON by default (see the main CLI note); `-nosmt` opts out.
+	// docs/85: prove-it-or-fail (`-strict`) is also the default; `-permissive` opts out.
+	options := projectCLIOptions{trust: trustNone, enableSMT: true, proofStrict: true, packedProfile: backend.DefaultPackedLoweringProfile()}
 	switch args[0] {
 	case "init":
 		options.command = projectCommandInit
@@ -413,10 +421,25 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.perfStrict = true
 		case arg == "-Wconcurrency":
 			options.concurrencyStrict = true
+		case arg == "-smt":
+			// docs/90: SMT discharge tier — ON by default; explicit opt-in kept for back-compat.
+			options.enableSMT = true
+		case arg == "-nosmt":
+			// Opt out of the default-on SMT discharge tier.
+			options.enableSMT = false
+		case arg == "-strict":
+			// docs/85: prove-it-or-fail — an obligation that cannot be discharged statically
+			// fails the build. ON by default now; explicit opt-in / harmless no-op for back-compat.
+			options.proofStrict = true
+		case arg == "-permissive":
+			// Opt out of default-on strict proofs: an unprovable refinement/contract degrades to
+			// a warning + debug runtime check instead of failing the build.
+			options.proofStrict = false
 		case arg == "-Wstrict":
 			options.strictPolicy = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
+			options.proofStrict = true
 		case arg == "-o":
 			i++
 			if i >= len(args) {

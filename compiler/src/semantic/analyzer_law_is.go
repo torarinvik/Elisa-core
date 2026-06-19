@@ -392,6 +392,34 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 	}
 }
 
+// dischargeEnsureBooleans statically discharges the general-boolean `ensure <bool>`
+// postconditions (FuncDecl.EnsureValues) at each return: substitute `result` with the
+// returned expression and prove the clause via the discharge ladder (SMT, assuming the
+// function's `requires` as hypotheses). The backend still emits the debug runtime check
+// uniformly, so a proven clause is a sound pair (debug verifies what release assumes);
+// the static half upgrades a contract from "checked" to "proven". Under `-strict` an
+// ensure clause that cannot be proven at a return is a hard error (the Dafny-like mode);
+// without `-strict` it stays a silent runtime check (no warning noise). `old(...)` and
+// locals in the clause/return are free SMT vars (sound: fewer facts only declines).
+func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
+	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
+		return
+	}
+	if len(a.currentFuncDecl.EnsureValues) == 0 || !a.enforceStrictProofs {
+		return
+	}
+	subst := map[string]ast.Expr{"result": n.Value}
+	for _, clause := range a.currentFuncDecl.EnsureValues {
+		if clause == nil {
+			continue
+		}
+		if proven, _ := a.trySMTProveRequires(clause, subst); proven {
+			continue
+		}
+		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check", a.currentFuncDecl.Name)
+	}
+}
+
 // isSideEffectFreeRefinementArg reports whether a call argument can be safely re-evaluated by a
 // runtime refinement predicate check (no observable side effect, no double cost worth worrying
 // about). Conservatively: bare identifiers, literals, and parenthesizations of those.

@@ -488,13 +488,24 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	if p.matchIdentText("can") {
 		permissions = p.parsePermissionRefs(true)
 	}
+	// Boundary preconditions: `extern f(...) -> T requires <bool>[, <bool>]` — checked at calls.
+	var requires []ast.Expr
+	if p.matchIdentText("requires") {
+		saved := p.allowQuantifiers
+		p.allowQuantifiers = true
+		requires = append(requires, p.parseExpr())
+		for p.match(lexer.TOKEN_COMMA) {
+			requires = append(requires, p.parseExpr())
+		}
+		p.allowQuantifiers = saved
+	}
 	var ensures []ast.EnsuresClause
 	if p.matchIdentText("ensures") {
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Requires: requires, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
 }
 func (p *Parser) parseExportDecl() ast.Decl {
 	pos := p.cur().Pos

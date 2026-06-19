@@ -197,6 +197,8 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 		strictPolicy:          warnings.Strict || options.strictPolicy,
 		perfStrict:            warnings.Strict || warnings.Perf || options.perfStrict,
 		concurrencyStrict:     warnings.Strict || warnings.Concurrency || options.concurrencyStrict,
+		proofStrict:           options.proofStrict,
+		enableSMT:             options.enableSMT,
 	}, nil
 }
 func projectTargetWarningsFor(definition projectTargetDefinition) projectTargetWarnings {

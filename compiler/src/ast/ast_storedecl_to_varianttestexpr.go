@@ -199,9 +199,13 @@ type ExternFuncDecl struct {
 	RegionParams     []string
 	Permissions      []PermissionRef
 	Ensures          []EnsuresClause
-	Params           []ParamDecl
-	ReturnType       TypeExpr
-	Variadic         bool
+	// Requires holds value-contract preconditions on the boundary (`requires <bool-expr>`),
+	// checked/discharged at every call site so the caller cannot pass the native function an
+	// argument outside its specified domain. The native body is trusted to honour its `ensures`.
+	Requires   []Expr
+	Params     []ParamDecl
+	ReturnType TypeExpr
+	Variadic   bool
 }
 type ExternVarDecl struct {
 	Position    lexer.Pos

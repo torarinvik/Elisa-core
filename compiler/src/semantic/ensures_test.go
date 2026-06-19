@@ -357,3 +357,60 @@ def bad(player: Player[Alive]&) -> void can[Abort] ensures return true => player
 		t.Fatalf("expected non-bool conditional ensures diagnostic, got:\n%s", errText)
 	}
 }
+
+// docs/85/90: a general-boolean `ensure` postcondition is statically DISCHARGED under
+// -strict via the SMT tier (substitute `result` -> the returned expression and prove the
+// clause). A provable clause raises no diagnostic; an unprovable one is a hard error.
+// Without -strict it stays a silent debug runtime check (no warning noise).
+func TestEnsureBooleanStaticallyDischargedUnderStrict(t *testing.T) {
+	provable := `
+def add10(x: i64) -> i64:
+    ensure result > x
+    return x + 10
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_ok.elisa", provable, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("a provable `ensure result > x` for `return x + 10` should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	unprovable := `
+def bad(x: i64) -> i64:
+    ensure result > x
+    return x - 1
+`
+	r2 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_bad.elisa", unprovable, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r2), "could not be proven statically") {
+		t.Fatalf("an unprovable `ensure result > x` for `return x - 1` must be a -strict error, got:\n%s", allDiagnostics(r2))
+	}
+
+	// Non-strict: the same unprovable clause is silent (runtime check only).
+	r3 := analyzeFunctionAnalysisTestSource(t, "ensure_silent.elisa", unprovable)
+	if contains(allDiagnostics(r3), "could not be proven") {
+		t.Fatalf("without -strict an unproven ensure must be silent, got:\n%s", allDiagnostics(r3))
+	}
+}
+
+// A `requires`-seeded interval bound makes a guarded integer modulo discharge via the SMT tier's
+// NATIVE `mod`/`div` (Euclidean == truncating for non-negative operands). Both prove that the
+// `requires alignment >= 1` precondition reaches the modulo-soundness gate (provablyPositive) AND
+// that z3's native mod theory cracks the divisibility goal. align_down is fully provable; the
+// requires-bound case verifies the seed path end-to-end.
+func TestEnsureModuloDischargesWithRequiresSeededBound(t *testing.T) {
+	src := `
+def align_down(value: u64, alignment: u64) -> u64:
+    ensure result <= value
+    ensure alignment == 0 or (result % alignment) == 0
+    if alignment == 0:
+        return value
+    return value - (value % alignment)
+
+def round_down(value: u64, alignment: u64) -> u64:
+    requires alignment >= 1
+    ensure (result % alignment) == 0
+    return value - (value % alignment)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_mod_ok.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("guarded/requires-bounded modulo postconditions should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

@@ -150,7 +150,13 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// so param/array symbols unify with the obligation. (factPreamble is built AFTER, once all decls
 	// are collected.)
 	hyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	// docs/85 gap #2: assert the defining equality of every immutable integer local in
+	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
+	// treating them as free variables. Must run before factPreamble so the locals and the
+	// variables of their defining expressions are declared.
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, _ := solver.Check(query)
 	if res == smt.Unsat {
@@ -205,7 +211,13 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// an SMT-proven precondition never drives bounds-check elision. A caller clause outside the
 	// fragment is silently skipped (fewer assumptions is conservative).
 	hyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	// docs/85 gap #2: assert the defining equality of every immutable integer local in
+	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
+	// treating them as free variables. Must run before factPreamble so the locals and the
+	// variables of their defining expressions are declared.
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
@@ -239,6 +251,91 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 	return b.String()
 }
 
+// smtFlowFactHypotheses asserts the scope's flow range-facts — branch-derived bounds on
+// immutable variables (`if alignment == 0: return` ⟹ `alignment >= 1` afterwards; `if n < cap`
+// ⟹ `n <= cap-1` in the then-branch) — as SMT hypotheses. These are already soundly
+// flow-scoped and immutable-only (the linear prover uses them at the same program point), so
+// surfacing them to the SMT tier lets branchy and loop-exit reasoning discharge (docs/85 gap #3:
+// loop-carried/flow facts). A fact with no known bound contributes nothing.
+func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for name, r := range sc.rangeFacts {
+			if seen[name] {
+				continue // a closer scope's fact shadows an outer one
+			}
+			seen[name] = true
+			if !r.loKnown && !r.hiKnown {
+				continue
+			}
+			v := smtVar(name)
+			tr.decls[name] = true
+			if r.loKnown {
+				b.WriteString("(assert (>= " + v + " " + smtInt(r.lo) + "))\n")
+			}
+			if r.hiKnown {
+				b.WriteString("(assert (<= " + v + " " + smtInt(r.hi) + "))\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+// smtImmutableLocalHypotheses asserts the defining equality of every immutable integer
+// local in scope (`rem: u64 = value % alignment` -> `(assert (= rem (mod value alignment)))`),
+// so the prover can reason THROUGH locals instead of treating them as unconstrained free
+// variables (docs/85 gap #2). Sound: an immutable local equals its initializer wherever it
+// is in scope, and it is never reassigned. A definition outside the integer fragment (a call,
+// a float) is skipped — fewer hypotheses only declines a proof, never admits an unsound one.
+func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for name, sym := range sc.Symbols {
+			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+				continue
+			}
+			seen[name] = true // a closer scope's binding shadows an outer one
+			vd, ok := sym.Node.(*ast.VarDeclStmt)
+			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
+				continue
+			}
+			eterm, ok := tr.termEnv(vd.Value, nil)
+			if !ok {
+				continue
+			}
+			tr.decls[name] = true
+			b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
+		}
+	}
+	return b.String()
+}
+
+// smtIntWidthSign resolves an integer type to (signedness, bit-width) for the value-preserving
+// conversion check, including the pointer-width aliases BitIntInfo does not parse (usize/uintptr
+// are unsigned 64-bit, isize/int are signed 64-bit on the targets we emit).
+func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
+	if s, b, k := BitIntInfo(t); k {
+		return s, b, true
+	}
+	if bt, isB := t.(*BuiltinType); isB {
+		switch bt.Name {
+		case "usize", "uintptr":
+			return false, 64, true
+		case "isize", "int":
+			return true, 64, true
+		}
+	}
+	return false, 0, false
+}
+
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).
 func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 	if decl == nil || len(decl.Body) != 1 {
@@ -259,6 +356,14 @@ type smtTranslator struct {
 	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	paramConsts map[string]int64 // law static params bound to constants
+	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
+	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
+	// divisor). Each is a free integer constrained only by what is provably true (never a false
+	// relation), so the term stays PRESENT — letting the rest of the clause (a guarding `or`, an
+	// outer comparison) still discharge — without the abstraction ever fabricating a proof.
+	auxDecls []string // declaration + sound-constraint lines, in mint order
+	auxVars  []string // the fresh symbols, for the Sat counterexample query
+	auxSeq   int      // monotonic counter → deterministic fresh names
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -381,6 +486,18 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return "", false
 		}
 		return "(- " + inner + ")", true
+	case *ast.CastExpr:
+		// A value-preserving integer conversion — widening or same-width, SAME signedness
+		// (`x.u64()`, `x.usize()`, an i32 used as i64) — is the IDENTITY in the unbounded-Int
+		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
+		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
+		// and decline here (sound: a declined term only forgoes a proof).
+		ssign, sbits, sok := smtIntWidthSign(tr.a.exprTypes[n.Operand])
+		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
+		if sok && dok && ssign == dsign && dbits >= sbits {
+			return tr.termEnv(n.Operand, env)
+		}
+		return "", false
 	case *ast.BinaryExpr:
 		var op string
 		switch n.Op {
@@ -395,8 +512,14 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// Model truncating division explicitly from abs/sign, and model remainder as x-y*q. Still
 			// require a provably non-zero divisor: SMT-LIB division is total at zero, which could
 			// otherwise fabricate proofs for source programs that may divide by zero at runtime.
+			// When the divisor is NOT provably non-zero we do not give up on the whole clause —
+			// that would lose a guarding `or` (`alignment == 0 or (x % alignment) == 0`) or an
+			// outer disjunct that makes the clause hold regardless of this sub-term. Instead we
+			// mint a fresh under-constrained symbol: a free integer, asserted `>= 0` only when the
+			// dividend is provably non-negative (true of unsigned `%`/`/`). That is sound — it
+			// states nothing false — so the result is just opaque, never a fabricated proof.
 			if !tr.a.provablyNonZero(n.Right) {
-				return "", false
+				return tr.freshAux(tr.a.provablyNonNeg(n.Left)), true
 			}
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
@@ -405,6 +528,20 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			r, ok := tr.termEnv(n.Right, env)
 			if !ok {
 				return "", false
+			}
+			// Preferred path: a non-negative dividend with a positive divisor (the overwhelmingly
+			// common integer case — unsigned `%`/`/`, page/alignment math). Use SMT-LIB's NATIVE
+			// `mod`/`div` directly: they are Euclidean, and Euclidean == truncating for non-negative
+			// operands, so this is exact (no abs/sign dance). It also engages z3's dedicated div/mod
+			// theory, which discharges divisibility goals like `(value - value%alignment) %
+			// alignment == 0` instantly where the nested-`div`/fresh-symbol encodings stall. Identical
+			// `(mod l r)` sub-terms are syntactically shared, so a `rem = value % alignment`
+			// hypothesis and a later `value % alignment` obligation refer to the same term.
+			if tr.a.provablyNonNeg(n.Left) && tr.a.provablyPositive(n.Right) {
+				if n.Op == lexer.TOKEN_PERCENT {
+					return "(mod " + l + " " + r + ")", true
+				}
+				return "(div " + l + " " + r + ")", true
 			}
 			if n.Op == lexer.TOKEN_PERCENT {
 				q := smtTruncDiv(l, r)
@@ -616,6 +753,20 @@ func termMentionsAnyBinder(term string, bound map[string]bool) bool {
 	return false
 }
 
+// freshAux mints a new under-constrained integer symbol for a sub-term we cannot model precisely but
+// must keep PRESENT (so the surrounding clause can still discharge). It is constrained only by what
+// provably holds — `>= 0` when nonNeg — never by a false relation, so it can never fabricate a proof.
+func (tr *smtTranslator) freshAux(nonNeg bool) string {
+	tr.auxSeq++
+	v := "aux_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
+	if nonNeg {
+		tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
+	}
+	return v
+}
+
 // factPreamble emits the declarations for every free variable the translation touched, plus the
 // integer flow facts known about them (range bounds, written-constant equalities) as hypotheses. The
 // facts are a SOUND SUBSET of what holds, which is why only an `unsat` result concludes a proof.
@@ -663,6 +814,11 @@ func (tr *smtTranslator) factPreamble() string {
 		b.WriteString("(declare-const " + sym + " Int)\n")
 		b.WriteString("(assert (>= " + sym + " 0))\n")
 	}
+	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
+	// mint order — deterministic because the counter is monotonic over a single translation.
+	for _, line := range tr.auxDecls {
+		b.WriteString(line)
+	}
 	return b.String()
 }
 
@@ -674,6 +830,7 @@ func (tr *smtTranslator) declaredSMTVars() []string {
 		out = append(out, smtVar(name))
 	}
 	sort.Strings(out)
+	out = append(out, tr.auxVars...)
 	return out
 }
 

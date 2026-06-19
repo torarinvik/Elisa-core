@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"strings"
 )
 
@@ -583,6 +584,31 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 		// on it; callers must establish it — enforced by the runtime check and brick 86-5's static
 		// discharge). Seed it as a bound equality so `for i in 0..<n: xs[i]` discharges in the body.
 		a.collectBoundEqualitiesForCondition(req, true)
+		// Likewise seed the interval prover from a numeric-comparison precondition (`requires
+		// alignment >= 1`, `requires n < cap`): the clause holds throughout the body, so recording
+		// its range fact lets tier-1/tier-2 AND the SMT modulo-soundness gate (provablyPositive) see
+		// the bound — which is what makes a guarded `value % alignment` use the precise Euclidean
+		// model rather than an opaque symbol. Reuses the branch-fact narrower (truthy = assumed).
+		a.seedRangeFactsFromCondition(req)
+	}
+}
+
+// seedRangeFactsFromCondition records the integer range fact implied by a boolean precondition onto
+// the function-entry scope. A bare comparison (`x >= 1`) narrows directly; a conjunction (`a >= 0 and
+// a < n`) seeds each side. Anything else is ignored (sound: fewer facts only forgoes proofs). This is
+// the `requires`-clause analogue of the branch-flow narrowing already done for `if` guards.
+func (a *Analyzer) seedRangeFactsFromCondition(cond ast.Expr) {
+	switch n := cond.(type) {
+	case *ast.ParenExpr:
+		a.seedRangeFactsFromCondition(n.Inner)
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_AND:
+			a.seedRangeFactsFromCondition(n.Left)
+			a.seedRangeFactsFromCondition(n.Right)
+		case lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_EQEQ:
+			a.gatherNumericRangeRefinement(a.currentScope, n, true)
+		}
 	}
 }
 

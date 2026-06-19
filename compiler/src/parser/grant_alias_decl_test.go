@@ -6,17 +6,17 @@ import (
 	"elisacore/src/ast"
 )
 
-// `grant Name = ref, ref` parses into a GrantAliasDecl with its permission refs.
-func TestParseGrantAliasDecl(t *testing.T) {
+// `grant Name = ref, ref` parses into a AliasDecl with its permission refs.
+func TestParseAliasDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 alias HostSeg = Segment.Host, Unsafe.SegmentMutation
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
-	decl, ok := file.Decls[0].(*ast.GrantAliasDecl)
+	decl, ok := file.Decls[0].(*ast.AliasDecl)
 	if !ok {
-		t.Fatalf("expected GrantAliasDecl, got %T", file.Decls[0])
+		t.Fatalf("expected AliasDecl, got %T", file.Decls[0])
 	}
 	if decl.Name != "HostSeg" {
 		t.Fatalf("expected name HostSeg, got %q", decl.Name)
