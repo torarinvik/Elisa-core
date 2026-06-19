@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -638,11 +639,16 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
 	a           *Analyzer
-	decls       map[string]bool  // Elisa ident -> declared as an SMT Int const
-	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
-	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
-	nonNegDecls map[string]bool  // SMT Int consts known non-negative by type (e.g. unsigned field projections)
-	paramConsts map[string]int64 // law static params bound to constants
+	decls       map[string]bool // Elisa ident -> declared as an SMT Int const
+	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
+	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
+	// unsignedBits records the bit-width of each free var known to be unsigned, so factPreamble can
+	// assert the true upper bound `< 2^width`. This is what makes the wraparound model (wrapUnsignedArith)
+	// PRECISE rather than merely sound: with operands pinned to [0, 2^width) an in-range computation does
+	// not actually wrap, so divisibility/alignment proofs through `value - value%alignment` survive.
+	unsignedBits map[string]int
+	paramConsts  map[string]int64 // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
 	// divisor). Each is a free integer constrained only by what is provably true (never a false
@@ -659,12 +665,13 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:           a,
-		decls:       map[string]bool{},
-		arrayDecls:  map[string]bool{},
-		lenDecls:    map[string]bool{},
-		nonNegDecls: map[string]bool{},
-		paramConsts: paramConsts,
+		a:            a,
+		decls:        map[string]bool{},
+		arrayDecls:   map[string]bool{},
+		lenDecls:     map[string]bool{},
+		nonNegDecls:  map[string]bool{},
+		unsignedBits: map[string]int{},
+		paramConsts:  paramConsts,
 	}
 }
 
@@ -742,9 +749,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if t, ok := smtNumericValueType(sym.Type); ok {
 				name := smtVar(n.Name)
 				tr.decls[n.Name] = true
-				if smtTypeNonNegative(t) {
-					tr.nonNegDecls[n.Name] = true
-				}
+				tr.markNonNeg(n.Name, t)
 				return name, true
 			}
 		}
@@ -789,9 +794,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// `ensure result <= self.total` on unsigned storage.
 			name := smtProjectionName(n)
 			tr.decls[name] = true
-			if smtTypeNonNegative(t) {
-				tr.nonNegDecls[name] = true
-			}
+			tr.markNonNeg(name, t)
 			return smtVar(name), true
 		}
 		return "", false
@@ -877,9 +880,86 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if !ok {
 			return "", false
 		}
-		return "(" + op + " " + l + " " + r + ")", true
+		return tr.wrapUnsignedArith(n, op, l, r), true
 	default:
 		return "", false
+	}
+}
+
+// wrapUnsignedArith models the machine semantics of `+`/`-`/`*` on an unsigned result type, which
+// WRAP modulo 2^width. Modeling them as unbounded-ℤ operations is UNSOUND for postconditions a wrap
+// can violate — e.g. `ensure result <= a` for unsigned `a - b` holds in ℤ (since b ≥ 0) but is FALSE
+// on the machine when b > a (the subtraction underflows to a huge value). SMT-LIB `mod` is Euclidean,
+// so `(mod (- l r) 2^W)` is EXACTLY the wrapped unsigned value (nonnegative, in [0, 2^W)), and the
+// same `(mod raw 2^W)` form is exact for `+` and `*`. For signed types we keep the clean ℤ term
+// (signed overflow is a separate, currently-unmodeled concern); the prover only ever concludes on
+// `unsat`, so wrapping can never fabricate a proof — at worst it declines a goal it cannot reduce.
+func (tr *smtTranslator) wrapUnsignedArith(n *ast.BinaryExpr, op, l, r string) string {
+	raw := "(" + op + " " + l + " " + r + ")"
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	if !ok || signed || bits <= 0 || bits > 64 {
+		return raw
+	}
+	// A subtraction proven not to underflow (`r <= l`) equals its ℤ value on the machine, so emit the
+	// clean term — this both stays sound and keeps divisibility/alignment goals (`value - value%m`)
+	// tractable for the solver, which the nested `mod 2^W` layer otherwise defeats within the timeout.
+	if n.Op == lexer.TOKEN_MINUS && tr.a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
+		return raw
+	}
+	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// provablyNoUnsignedUnderflow reports whether `left - right` cannot underflow, i.e. `right <= left`
+// holds for all admissible values. It recognizes the canonical alignment shape `X - (X % m)` (a
+// remainder is always ≤ its nonnegative dividend) and, more generally, an affine difference whose
+// interval lower bound is ≥ 0. Type-level non-negativity is NOT sufficient (an underflowed unsigned
+// result is still nonnegative), so this is deliberately a VALUE-level check.
+func (a *Analyzer) provablyNoUnsignedUnderflow(left, right ast.Expr) bool {
+	l := stripOptimizationParens(left)
+	if rem, ok := stripOptimizationParens(right).(*ast.BinaryExpr); ok && rem.Op == lexer.TOKEN_PERCENT {
+		// `X - (X % m)`: the remainder of a non-negative dividend is ≤ the dividend.
+		if a.provablyNonNeg(rem.Left) && exprsSyntacticallyEqual(l, stripOptimizationParens(rem.Left)) {
+			return true
+		}
+	}
+	diff := &ast.BinaryExpr{Position: left.Pos(), Left: left, Op: lexer.TOKEN_MINUS, Right: right}
+	if f, ok := a.affineOf(diff, a.currentScope); ok {
+		if r := a.boundAffine(f, a.currentScope); r.loKnown && r.lo >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// exprsSyntacticallyEqual reports whether two expressions are the same lvalue path (ident or nested
+// field access). It is intentionally conservative — only the shapes the underflow check needs — and
+// uses the SMT projection name (already path-stable for idents/fields) for the comparison.
+func exprsSyntacticallyEqual(x, y ast.Expr) bool {
+	switch x.(type) {
+	case *ast.Ident, *ast.FieldExpr, *ast.ParenExpr:
+		switch y.(type) {
+		case *ast.Ident, *ast.FieldExpr, *ast.ParenExpr:
+			return smtProjectionName(x) == smtProjectionName(y)
+		}
+	}
+	return false
+}
+
+// smtPow2 returns 2^bits as a decimal literal (bits in [1, 64]).
+func smtPow2(bits int) string {
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits)).String()
+}
+
+// markNonNeg records a free var's non-negativity and, for an unsigned integer type, its bit-width so
+// factPreamble can assert the true `[0, 2^width)` bound. Both facts are guaranteed by the type and
+// therefore always sound.
+func (tr *smtTranslator) markNonNeg(name string, t Type) {
+	if !smtTypeNonNegative(t) {
+		return
+	}
+	tr.nonNegDecls[name] = true
+	if _, bits, ok := smtIntWidthSign(t); ok && bits > 0 && bits <= 64 {
+		tr.unsignedBits[name] = bits
 	}
 }
 
@@ -1198,6 +1278,12 @@ func (tr *smtTranslator) factPreamble() string {
 		}
 		if tr.nonNegDecls[name] {
 			b.WriteString("(assert (>= " + v + " 0))\n")
+		}
+		if bits, ok := tr.unsignedBits[name]; ok && bits > 0 && bits <= 64 {
+			// True type bound: an unsigned value lives in [0, 2^width). Pinning the upper bound makes
+			// the wraparound model exact for in-range computations (so divisibility through
+			// `value - value%alignment` proves) and still sound (it can only remove counterexamples).
+			b.WriteString("(assert (< " + v + " " + smtPow2(bits) + "))\n")
 		}
 	}
 	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT

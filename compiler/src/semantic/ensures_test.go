@@ -472,35 +472,73 @@ def capped_count(flag: bool) -> usize:
 }
 
 func TestEnsureDischargesFromReturnedCallPostcondition(t *testing.T) {
+	// A SOUND postcondition (`n % 8 < 8` holds for all unsigned n — no wraparound) propagated through a
+	// returned direct call, including the extern-arg and Pascal-cased variants.
 	src := `
-const BASE: usize = 24
+def cap8(n: usize) -> usize:
+    ensure result < 8
+    return n % 8
 
-def align_like(n: usize) -> usize:
-    ensure result >= n
-    return n + 8
-
-def reclen(extra: usize) -> usize:
-    ensure result >= BASE
-    return align_like(BASE + extra + 1)
+def low_bits(extra: usize) -> usize:
+    ensure result < 8
+    return cap8(extra + 1)
 
 extern strlen_like(name: static u8&) -> usize
 
-def reclen_from_call(name: static u8&) -> usize:
-    ensure result >= BASE
+def low_bits_from_call(name: static u8&) -> usize:
+    ensure result < 8
     extra: usize = strlen_like(name)
-    return align_like(BASE + extra + 1)
+    return cap8(extra + 1)
 
-def AlignLike(n: usize) -> usize:
-    ensure result >= n
-    return n + 8
+def Cap8(n: usize) -> usize:
+    ensure result < 8
+    return n % 8
 
-def ReclenPascal(name: static u8&) -> usize:
-    ensure result >= BASE
+def LowBitsPascal(name: static u8&) -> usize:
+    ensure result < 8
     extra: usize = strlen_like(name)
-    return AlignLike(BASE + extra + 1)
+    return Cap8(extra + 1)
 `
 	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_returned_call.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
 	if errs := r.Errors(); len(errs) != 0 {
 		t.Fatalf("callee postcondition on a returned direct call should discharge caller ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// TestEnsureRejectsUnsignedWraparoundPostconditions pins the soundness fix: a postcondition that holds
+// only in unbounded ℤ but is FALSE on the wrapping machine must NOT discharge under -strict. Unsigned
+// `a - b` underflows when b > a, and `n + k` overflows near the type max, so neither `result <= a` nor
+// `result >= n` is a valid postcondition without a bound or guard.
+func TestEnsureRejectsUnsignedWraparoundPostconditions(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"sub_underflow", `
+def f(a: u64, b: u64) -> u64:
+    ensure result <= a
+    return a - b
+`},
+		{"sub_underflow_field", `
+struct Mgr:
+    total: u64
+    usage: u64
+def avail(self: Mgr&) -> u64:
+    ensure result <= self.total
+    return self.total - self.usage
+`},
+		{"add_overflow", `
+def g(n: usize) -> usize:
+    ensure result >= n
+    return n + 8
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", tc.src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) == 0 {
+				t.Fatalf("unsigned wraparound postcondition must NOT discharge under -strict (unsound), but it was accepted")
+			}
+		})
 	}
 }
