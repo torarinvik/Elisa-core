@@ -324,6 +324,12 @@ type Analyzer struct {
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int
+	// currentGrantedStaleRefDepth tracks an enclosing *tracked* `can Unsafe.StaleRef:`
+	// grant (vs the untracked `trusted` suppression in currentTrustedStaleRefDepth).
+	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the
+	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
+	// auditable through the capability system rather than invisibly suppressed.
+	currentGrantedStaleRefDepth int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening

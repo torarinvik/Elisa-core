@@ -74,6 +74,38 @@ def f(x: mutable u8&) -> void:
 	}
 }
 
+// `can Unsafe.StaleRef:` is the PREFERRED, tracked escape hatch: like `trusted` it
+// discharges the forwarded-ref-store check, but it surfaces Unsafe.StaleRef in the
+// function's effect signature so the unsafe store is auditable through the capability
+// system (a caller without the grant is flagged), rather than invisibly suppressed.
+func TestForwardedRefCanStaleRefAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "fwdref_can_ok.elisa", `global mutable g: mutable u8&? = null
+def f(x: mutable u8&) -> void:
+    can Unsafe.StaleRef:
+        g <- x
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a can Unsafe.StaleRef-wrapped store to be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The tracking half of the contract: a `can Unsafe.StaleRef:` store surfaces the
+// capability, so a caller that neither grants nor trusts it is flagged for the
+// missing Unsafe.StaleRef effect (a `trusted` store, being local, would not).
+func TestForwardedRefCanStaleRefPropagatesToCaller(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "fwdref_can_propagate.elisa", `global mutable g: mutable u8&? = null
+def store(x: mutable u8&) -> void:
+    can Unsafe.StaleRef:
+        g <- x
+def caller(x: mutable u8&) -> void:
+    store(x)
+`)
+	joined := strings.Join(append(result.Errors(), result.Warnings()...), "\n")
+	if !strings.Contains(joined, "StaleRef") {
+		t.Fatalf("expected caller of a can-StaleRef store to be flagged for the missing Unsafe.StaleRef capability, got:\n%s", joined)
+	}
+}
+
 func hasErrorContaining(errs []string, substr string) bool {
 	for _, e := range errs {
 		if strings.Contains(e, substr) {
