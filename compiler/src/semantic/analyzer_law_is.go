@@ -416,6 +416,14 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		if proven, _ := a.trySMTProveRequires(clause, subst); proven {
 			continue
 		}
+		if call, ok := a.proofCallExpr(n.Value); ok {
+			if a.tryProveEnsureByReturnCallRange(clause, call) {
+				continue
+			}
+			if a.trySMTProveEnsureFromReturnCall(clause, call) {
+				continue
+			}
+		}
 		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check", a.currentFuncDecl.Name)
 	}
 }

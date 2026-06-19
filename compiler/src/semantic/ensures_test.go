@@ -414,3 +414,93 @@ def round_down(value: u64, alignment: u64) -> u64:
 		t.Fatalf("guarded/requires-bounded modulo postconditions should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestEnsureUsesOnlyProvenInvariantFacts(t *testing.T) {
+	src := `
+def bad(x: u64) -> u64:
+    ensure result > x
+    y: mutable u64 = 0
+    invariant y > x
+    return y
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_unproven_invariant.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	diags := allDiagnostics(r)
+	if !contains(diags, "invariant could not be proven statically") {
+		t.Fatalf("unproven invariant should be reported as runtime-only, got:\n%s", diags)
+	}
+	if !contains(diags, "ensure postcondition") {
+		t.Fatalf("unproven invariant must not discharge a strict ensure, got:\n%s", diags)
+	}
+}
+
+func TestEnsureDischargesFromProvenInvariantAndAssignmentFacts(t *testing.T) {
+	src := `
+def contains_out(addr: u64, start_out: mutable u64&, end_out: mutable u64&) -> bool:
+    ensure not result or (start_out <= addr and addr < end_out)
+    lo: u64 = 10
+    hi: u64 = 20
+    if addr >= lo and addr < hi:
+        start_out <- lo
+        end_out <- hi
+        invariant start_out <= addr and addr < end_out
+        return true
+    return false
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_proven_invariant_out.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("proven invariant plus exact assignment facts should discharge strict ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestEnsureDischargesFromCountUpWhileExitFact(t *testing.T) {
+	src := `
+const MAX_NAME: usize = 32
+
+def capped_count(flag: bool) -> usize:
+    ensure result <= MAX_NAME
+    n: mutable usize = 0
+    while n < MAX_NAME and flag:
+        invariant n <= MAX_NAME
+        n <- n + 1
+    invariant n <= MAX_NAME
+    return n
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_countup_exit.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("count-up loop exit fact should discharge strict cap ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestEnsureDischargesFromReturnedCallPostcondition(t *testing.T) {
+	src := `
+const BASE: usize = 24
+
+def align_like(n: usize) -> usize:
+    ensure result >= n
+    return n + 8
+
+def reclen(extra: usize) -> usize:
+    ensure result >= BASE
+    return align_like(BASE + extra + 1)
+
+extern strlen_like(name: static u8&) -> usize
+
+def reclen_from_call(name: static u8&) -> usize:
+    ensure result >= BASE
+    extra: usize = strlen_like(name)
+    return align_like(BASE + extra + 1)
+
+def AlignLike(n: usize) -> usize:
+    ensure result >= n
+    return n + 8
+
+def ReclenPascal(name: static u8&) -> usize:
+    ensure result >= BASE
+    extra: usize = strlen_like(name)
+    return AlignLike(BASE + extra + 1)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_returned_call.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("callee postcondition on a returned direct call should discharge caller ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

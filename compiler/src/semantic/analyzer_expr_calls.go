@@ -56,6 +56,7 @@ func (a *Analyzer) maybeEmitDirectCallDeprecation(expr *ast.CallExpr) {
 }
 
 func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
+	defer a.invalidateSMTAssertFactsForCall(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.

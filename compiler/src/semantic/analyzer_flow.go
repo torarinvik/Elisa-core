@@ -64,6 +64,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Value != nil && isZeroedInitializer(n.Value) {
 			a.markZeroedUninitialized(sym)
 		}
+		if n.Mutable && n.Value != nil {
+			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
 		// that value for its whole lifetime — record it as a written-constant so the interval prover
@@ -375,6 +378,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
+		a.invalidateSMTAssertFactsForTarget(n.Target)
+		if !n.Optional {
+			a.recordSMTAssignmentFact(n.Target, n.Value)
+		}
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
 		if sym, ok := a.globalStorageRoot(n.Target); ok {
@@ -394,6 +401,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.checkFrameWrite(n.Target)
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
+		a.invalidateSMTAssertFactsForTarget(n.Target)
 	case *ast.AsRefAssignStmt:
 		a.suppressUninitReadCheck++
 		a.suppressGlobalReadCheck++
@@ -431,6 +439,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.bindActivePackedStoreType(targetType)
 		}
 		a.consumeAffineValueExpr(n.Value, targetType, "assignment")
+		a.invalidateSMTAssertFactsForTarget(n.Target)
+		a.recordSMTAssignmentFact(n.Target, n.Value)
 	case *ast.ReturnStmt:
 		// docs/85 brick 2 (B): check `ensures <param> is Law` postconditions on every return path,
 		// including value-less returns in a void function, before the value-specific handling below.
@@ -677,6 +687,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		a.currentStorageViewDeps = mergedStorageViewDeps
+		a.applyCountUpWhileExitFacts(n)
 	case *ast.ForStmt:
 		a.analyzeForStmt(n)
 	case *ast.IterForStmt:
@@ -699,6 +710,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			a.applyConditionRefinements(a.currentScope, cond, true)
 			a.applyIndexBoundsFactsForCondition(cond, true)
+			a.recordSMTAssertFact(cond)
 			return
 		}
 		exprType := a.analyzeExpr(n.Expr)
@@ -729,9 +741,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Kind != ast.ContractInvariant {
 			a.errorf(n.Pos(), "`requires`/`ensure` contracts must be the first statements of the function body")
 		} else if n.Cond != nil {
-			condType := a.analyzeExpr(n.Cond)
+			condType := a.analyzeCondExpr(n.Cond)
 			if condType != nil && !IsBoolType(condType) {
 				a.errorf(n.Cond.Pos(), "invariant must be bool, got %s", condType)
+			}
+			a.applyConditionRefinements(a.currentScope, n.Cond, true)
+			a.applyIndexBoundsFactsForCondition(n.Cond, true)
+			if a.canAssumeContractFact(n.Cond) {
+				a.recordSMTAssertFact(n.Cond)
 			}
 		}
 	case *ast.StaticAssertStmt:

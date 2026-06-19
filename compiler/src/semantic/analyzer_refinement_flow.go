@@ -85,6 +85,106 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
 }
 
+func (a *Analyzer) applyCountUpWhileExitFacts(stmt *ast.WhileStmt) {
+	if a == nil || a.currentScope == nil || stmt == nil {
+		return
+	}
+	name, bound, ok := a.countUpLoopUpperBound(stmt.Cond)
+	if !ok || !bodyHasOnlyUnitIncrement(stmt.Body, name) {
+		return
+	}
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = a.currentScope.rangeFacts[name].intersect(numRange{hiKnown: true, hi: bound})
+}
+
+func (a *Analyzer) countUpLoopUpperBound(expr ast.Expr) (string, int64, bool) {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			if name, bound, ok := a.countUpLoopUpperBound(n.Left); ok {
+				return name, bound, true
+			}
+			return a.countUpLoopUpperBound(n.Right)
+		}
+		if n.Op != lexer.TOKEN_LT {
+			return "", 0, false
+		}
+		id, ok := stripOptimizationParens(n.Left).(*ast.Ident)
+		if !ok || id == nil {
+			return "", 0, false
+		}
+		bound, ok := a.constIntValue(n.Right)
+		if !ok {
+			return "", 0, false
+		}
+		return id.Name, bound, true
+	default:
+		return "", 0, false
+	}
+}
+
+func bodyHasOnlyUnitIncrement(body []ast.Stmt, name string) bool {
+	if name == "" {
+		return false
+	}
+	seenIncrement := false
+	for _, stmt := range body {
+		assign, ok := stmt.(*ast.AssignStmt)
+		if !ok {
+			if stmtWritesRoot(stmt, name) {
+				return false
+			}
+			continue
+		}
+		root, ok := rootIdentName(assign.Target)
+		if !ok || root != name {
+			continue
+		}
+		if seenIncrement || !isUnitIncrementOf(assign.Value, name) {
+			return false
+		}
+		seenIncrement = true
+	}
+	return seenIncrement
+}
+
+func stmtWritesRoot(stmt ast.Stmt, name string) bool {
+	var target ast.Expr
+	switch n := stmt.(type) {
+	case *ast.AssignStmt:
+		target = n.Target
+	case *ast.AugAssignStmt:
+		target = n.Target
+	case *ast.AsRefAssignStmt:
+		target = n.Target
+	default:
+		return false
+	}
+	root, ok := rootIdentName(target)
+	return ok && root == name
+}
+
+func isUnitIncrementOf(expr ast.Expr, name string) bool {
+	bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_PLUS {
+		return false
+	}
+	if id, ok := stripOptimizationParens(bin.Left).(*ast.Ident); ok && id != nil && id.Name == name {
+		return isOneLiteral(bin.Right)
+	}
+	if id, ok := stripOptimizationParens(bin.Right).(*ast.Ident); ok && id != nil && id.Name == name {
+		return isOneLiteral(bin.Left)
+	}
+	return false
+}
+
+func isOneLiteral(expr ast.Expr) bool {
+	lit, ok := stripOptimizationParens(expr).(*ast.IntLit)
+	return ok && lit != nil && lit.Value == "1"
+}
+
 // gatherLawIsRangeRefinement narrows an immutable integer variable by a law inside the truthy branch
 // of `if x is Law:` (docs/85). When the law body is a decidable conjunction of `self OP const`, its
 // constraints become an integer range fact on x, so a later refinement obligation on x (another `x
@@ -625,7 +725,7 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 	if !IsNumericType(bindingType) || IsFloatType(bindingType) {
 		return
 	}
-	call, ok := value.(*ast.CallExpr)
+	call, ok := a.proofCallExpr(value)
 	if !ok {
 		return
 	}
@@ -734,6 +834,61 @@ func (a *Analyzer) rangeFromEnsureResult(clauses []ast.Expr, subst map[string]as
 		fact = fact.intersect(constraintToRange(k))
 	}
 	return fact, true
+}
+
+func (a *Analyzer) tryProveEnsureByReturnCallRange(clause ast.Expr, call *ast.CallExpr) bool {
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil || len(decl.EnsureValues) == 0 {
+		return false
+	}
+	args := proofCallArgs(call)
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	resultRange, ok := a.rangeFromEnsureResult(decl.EnsureValues, subst)
+	if !ok {
+		return false
+	}
+	var constraints []lawConstraint
+	a.collectResultConstraints(clause, nil, &constraints)
+	if len(constraints) == 0 {
+		return false
+	}
+	for _, constraint := range constraints {
+		if !rangeEntailsConstraint(resultRange, constraint) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) proofCallExpr(expr ast.Expr) (*ast.CallExpr, bool) {
+	expr = stripOptimizationParens(expr)
+	switch n := expr.(type) {
+	case *ast.CallExpr:
+		return n, n != nil
+	case *ast.StructLitExpr:
+		if a != nil && a.loweredInitCalls != nil {
+			if call := a.loweredInitCalls[n]; call != nil {
+				return call, true
+			}
+		}
+	}
+	return nil, false
+}
+
+func proofCallArgs(call *ast.CallExpr) []ast.Expr {
+	if call == nil {
+		return nil
+	}
+	if call.ResolvedArgsValid && call.ResolvedCommonArgs == nil {
+		return call.ResolvedArgs
+	}
+	return call.Args
 }
 
 // collectResultConstraints gathers `result OP operand` comparisons from an `ensure` clause, recursing
@@ -936,6 +1091,11 @@ func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
 			// written-const fact is a proven exact value, invalidated on any mutation.
 			if c, known := a.writtenConstInt(name); known {
 				r, ok = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		if !ok {
+			if sym, found := a.currentScope.Lookup(name); found && sym != nil && smtTypeNonNegative(sym.Type) {
+				r, ok = numRange{loKnown: true, lo: 0}, true
 			}
 		}
 		if !ok {

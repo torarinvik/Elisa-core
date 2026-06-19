@@ -155,8 +155,9 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
 	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, _ := solver.Check(query)
 	if res == smt.Unsat {
@@ -178,25 +179,9 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
-	// Translate each substituted argument to a term FIRST, so the caller's free variables are
-	// collected before the fact preamble is emitted. An ARRAY-valued argument is mapped through the
-	// array env (docs/90 brick 90-13) so a quantified array precondition (`forall k: xs[k] >= 0`) can
-	// reference the caller's array symbol; a scalar argument is an integer term.
-	env := map[string]string{}
-	for name, argExpr := range subst {
-		if tr.isArrayLike(a.exprTypes[argExpr]) {
-			arr, ok := tr.arrayTermEnv(argExpr, nil)
-			if !ok {
-				return false, ""
-			}
-			env[name] = arr
-			continue
-		}
-		term, ok := tr.term(argExpr)
-		if !ok {
-			return false, "" // an argument outside the fragment → decline
-		}
-		env[name] = term
+	env, ok := a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return false, ""
 	}
 	obligation, ok := tr.boolTerm(clause, env)
 	if !ok {
@@ -216,8 +201,9 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
 	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
@@ -229,6 +215,101 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// On sat, the model is an input permitted by the caller's known facts that violates the
 	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
 	return false, tr.counterexample(model)
+}
+
+func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
+	solver := a.openSMT()
+	if solver == nil || clause == nil || call == nil {
+		return false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil || len(decl.EnsureValues) == 0 {
+		return false
+	}
+	tr := a.newSMTTranslator(nil)
+	retSym := "__return_call_result"
+	retTerm := smtVar(retSym)
+	tr.decls[retSym] = true
+	callerEnv := map[string]string{"result": retTerm}
+	obligation, ok := tr.boolTerm(clause, callerEnv)
+	if !ok {
+		return false
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	calleeEnv, ok := a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return false
+	}
+	calleeEnv["result"] = retTerm
+	var calleeHyps strings.Builder
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(ensure, calleeEnv); ok {
+			calleeHyps.WriteString("(assert " + h + ")\n")
+		}
+	}
+	if calleeHyps.Len() == 0 {
+		return false
+	}
+	hyps := a.smtRequiresHypotheses(tr)
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + calleeHyps.String() + "(assert (not " + obligation + "))\n"
+	a.smtStats.Attempts++
+	res, _ := solver.Check(query)
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		return true
+	}
+	a.smtStats.Declined++
+	return false
+}
+
+func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		if lit, ok := argExpr.(*ast.BoolLit); ok {
+			if lit.Value {
+				env[name] = "true"
+			} else {
+				env[name] = "false"
+			}
+			continue
+		}
+		if IsBoolType(a.exprTypes[argExpr]) {
+			bterm, ok := tr.boolTerm(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = bterm
+			continue
+		}
+		if tr.isArrayLike(a.exprTypes[argExpr]) {
+			arr, ok := tr.arrayTermEnv(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = arr
+			continue
+		}
+		term, ok := tr.term(argExpr)
+		if !ok {
+			return nil, false
+		}
+		env[name] = term
+	}
+	return env, true
 }
 
 // smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
@@ -285,6 +366,190 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 	return b.String()
 }
 
+type smtFact struct {
+	Expr ast.Expr
+	Deps map[string]bool
+}
+
+// smtAssertHypotheses translates flow-local proof facts into SMT assumptions. A fact may come from a
+// branch guard, a proven invariant/assertion, or an exact assignment equality. Facts carry dependency
+// roots and are invalidated on mutation of any root; calls still clear them conservatively.
+func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == nil {
+				continue
+			}
+			if h, ok := tr.boolTerm(fact.Expr, nil); ok {
+				b.WriteString("(assert " + h + ")\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+func (a *Analyzer) recordSMTAssertFact(expr ast.Expr) {
+	if a == nil || a.currentScope == nil || expr == nil {
+		return
+	}
+	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
+		a.recordSMTAssertFact(bin.Left)
+		a.recordSMTAssertFact(bin.Right)
+		return
+	}
+	a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+}
+
+func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
+	if truthy || expr == nil {
+		return expr
+	}
+	return &ast.UnaryExpr{Position: expr.Pos(), Op: lexer.TOKEN_NOT, Operand: expr}
+}
+
+func (a *Analyzer) clearSMTAssertFacts() {
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		sc.smtAssertFacts = nil
+	}
+}
+
+func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
+	name, ok := rootIdentName(target)
+	if !ok || name == "" {
+		a.clearSMTAssertFacts()
+		return
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		if len(sc.smtAssertFacts) == 0 {
+			continue
+		}
+		out := sc.smtAssertFacts[:0]
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Deps != nil && fact.Deps[name] {
+				continue
+			}
+			out = append(out, fact)
+		}
+		sc.smtAssertFacts = out
+	}
+}
+
+func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
+	if a == nil || expr == nil {
+		return
+	}
+	for _, arg := range expr.Args {
+		if arg == nil {
+			continue
+		}
+		if rt, ok := a.exprTypes[arg].(*RefType); ok && rt != nil && rt.Mutable {
+			a.invalidateSMTAssertFactsForTarget(arg)
+		}
+	}
+}
+
+func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
+	if a == nil || target == nil || value == nil {
+		return
+	}
+	targetType := a.exprTypes[target]
+	if targetType == nil {
+		if name, ok := rootIdentName(target); ok && a.currentScope != nil {
+			if sym, found := a.currentScope.Lookup(name); found && sym != nil {
+				targetType = sym.Type
+			}
+		}
+	}
+	valueType := a.exprTypes[value]
+	if !isSMTExactAssignmentType(targetType) || !isSMTExactAssignmentType(valueType) {
+		return
+	}
+	a.recordSMTAssertFact(&ast.BinaryExpr{
+		Position: target.Pos(),
+		Left:     target,
+		Op:       lexer.TOKEN_EQEQ,
+		Right:    value,
+	})
+}
+
+func isSMTExactAssignmentType(t Type) bool {
+	t = stripRefForBounds(t)
+	return t != nil && (IsNumericType(t) || IsBoolType(t)) && !IsFloatType(t)
+}
+
+func smtFactDeps(expr ast.Expr) map[string]bool {
+	deps := map[string]bool{}
+	collectSMTFactDeps(expr, deps)
+	if len(deps) == 0 {
+		return nil
+	}
+	return deps
+}
+
+func collectSMTFactDeps(expr ast.Expr, out map[string]bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n != nil {
+			out[n.Name] = true
+		}
+	case *ast.ParenExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Inner, out)
+		}
+	case *ast.UnaryExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	case *ast.BinaryExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Left, out)
+			collectSMTFactDeps(n.Right, out)
+		}
+	case *ast.FieldExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Object, out)
+		}
+	case *ast.IndexExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Object, out)
+			collectSMTFactDeps(n.Index, out)
+		}
+	case *ast.CallExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Func, out)
+			for _, arg := range n.Args {
+				collectSMTFactDeps(arg, out)
+			}
+		}
+	case *ast.CastExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	case *ast.AddrOfExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	}
+}
+
+func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if a.proveRequiresClause(expr, nil) == requiresProven {
+		return true
+	}
+	if proven, _ := a.trySMTProveRequires(expr, nil); proven {
+		return true
+	}
+	a.proofLint(expr.Pos(), "invariant could not be proven statically at this point; keeping the debug runtime check but not using it as a release proof fact")
+	return false
+}
+
 // smtImmutableLocalHypotheses asserts the defining equality of every immutable integer
 // local in scope (`rem: u64 = value % alignment` -> `(assert (= rem (mod value alignment)))`),
 // so the prover can reason THROUGH locals instead of treating them as unconstrained free
@@ -313,6 +578,13 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			}
 			tr.decls[name] = true
 			b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
+			if bin, ok := stripOptimizationParens(vd.Value).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_PERCENT {
+				rterm, rok := tr.termEnv(bin.Right, nil)
+				if rok && a.provablyPositive(bin.Right) {
+					b.WriteString("(assert (>= " + smtVar(name) + " 0))\n")
+					b.WriteString("(assert (< " + smtVar(name) + " " + rterm + "))\n")
+				}
+			}
 		}
 	}
 	return b.String()
@@ -322,6 +594,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 // conversion check, including the pointer-width aliases BitIntInfo does not parse (usize/uintptr
 // are unsigned 64-bit, isize/int are signed 64-bit on the targets we emit).
 func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
+	t = stripRefForBounds(t)
 	if s, b, k := BitIntInfo(t); k {
 		return s, b, true
 	}
@@ -334,6 +607,19 @@ func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
 		}
 	}
 	return false, 0, false
+}
+
+func smtNumericValueType(t Type) (Type, bool) {
+	t = stripRefForBounds(t)
+	if t == nil || !IsNumericType(t) || IsFloatType(t) {
+		return nil, false
+	}
+	return t, true
+}
+
+func smtTypeNonNegative(t Type) bool {
+	signed, _, ok := smtIntWidthSign(t)
+	return ok && !signed
 }
 
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).
@@ -355,6 +641,7 @@ type smtTranslator struct {
 	decls       map[string]bool  // Elisa ident -> declared as an SMT Int const
 	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
+	nonNegDecls map[string]bool  // SMT Int consts known non-negative by type (e.g. unsigned field projections)
 	paramConsts map[string]int64 // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
@@ -376,6 +663,7 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		decls:       map[string]bool{},
 		arrayDecls:  map[string]bool{},
 		lenDecls:    map[string]bool{},
+		nonNegDecls: map[string]bool{},
 		paramConsts: paramConsts,
 	}
 }
@@ -450,6 +738,23 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			tr.decls[n.Name] = true
 			return name, true
 		}
+		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) {
+			if t, ok := smtNumericValueType(sym.Type); ok {
+				name := smtVar(n.Name)
+				tr.decls[n.Name] = true
+				if smtTypeNonNegative(t) {
+					tr.nonNegDecls[n.Name] = true
+				}
+				return name, true
+			}
+		}
+		return "", false
+	case *ast.CallExpr:
+		return tr.callResultTerm(n)
+	case *ast.StructLitExpr:
+		if call, ok := tr.a.proofCallExpr(n); ok {
+			return tr.callResultTerm(call)
+		}
 		return "", false
 	case *ast.IndexExpr:
 		// Array element access `arr[idx]` → `(select <arr> <idx>)` over SMT array theory (docs/90
@@ -475,6 +780,19 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			lenSym := arr + "_len"
 			tr.lenDecls[lenSym] = true
 			return lenSym, true
+		}
+		if t, ok := smtNumericValueType(tr.a.exprTypes[n]); ok && !IsFloatType(t) {
+			// Numeric struct-field reads are modeled as fresh-ish projection symbols keyed by
+			// their syntactic path (`self.total`, `area.size`). We assert only facts guaranteed
+			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other
+			// fields or heap state. That is sound and is enough for practical contracts like
+			// `ensure result <= self.total` on unsigned storage.
+			name := smtProjectionName(n)
+			tr.decls[name] = true
+			if smtTypeNonNegative(t) {
+				tr.nonNegDecls[name] = true
+			}
+			return smtVar(name), true
 		}
 		return "", false
 	case *ast.UnaryExpr:
@@ -659,11 +977,30 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return "true", true
 		}
 		return "false", true
+	case *ast.Ident:
+		if env != nil {
+			if bound, ok := env[n.Name]; ok {
+				return bound, true
+			}
+		}
+		if c, ok := tr.a.evalConstBoolExpr(n); ok {
+			if c {
+				return "true", true
+			}
+			return "false", true
+		}
+		return "", false
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			inner, ok := tr.boolTerm(n.Operand, env)
 			if !ok {
 				return "", false
+			}
+			if inner == "true" {
+				return "false", true
+			}
+			if inner == "false" {
+				return "true", true
 			}
 			return "(not " + inner + ")", true
 		}
@@ -675,9 +1012,31 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if !ok {
 				return "", false
 			}
+			if n.Op == lexer.TOKEN_OR && l == "true" {
+				return "true", true
+			}
+			if n.Op == lexer.TOKEN_AND && l == "false" {
+				return "false", true
+			}
 			r, ok := tr.boolTerm(n.Right, env)
 			if !ok {
 				return "", false
+			}
+			if n.Op == lexer.TOKEN_OR {
+				if r == "true" {
+					return "true", true
+				}
+				if l == "false" {
+					return r, true
+				}
+			}
+			if n.Op == lexer.TOKEN_AND {
+				if r == "false" {
+					return "false", true
+				}
+				if l == "true" {
+					return r, true
+				}
 			}
 			conn := "and"
 			if n.Op == lexer.TOKEN_OR {
@@ -767,6 +1126,50 @@ func (tr *smtTranslator) freshAux(nonNeg bool) string {
 	return v
 }
 
+func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	resultType := tr.a.exprTypes[call]
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	if resultType == nil && direct && decl != nil {
+		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
+			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+				resultType = fnType.Return
+			}
+		}
+	}
+	if !isSMTExactAssignmentType(resultType) || IsBoolType(resultType) {
+		return "", false
+	}
+	ret := tr.freshAux(smtTypeNonNegative(resultType))
+	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
+		return ret, true
+	}
+	args := proofCallArgs(call)
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return ret, true
+	}
+	env["result"] = ret
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(ensure, env); ok {
+			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+		}
+	}
+	return ret, true
+}
+
 // factPreamble emits the declarations for every free variable the translation touched, plus the
 // integer flow facts known about them (range bounds, written-constant equalities) as hypotheses. The
 // facts are a SOUND SUBSET of what holds, which is why only an `unsat` result concludes a proof.
@@ -792,6 +1195,9 @@ func (tr *smtTranslator) factPreamble() string {
 		}
 		if c, ok := tr.a.writtenConstInt(name); ok {
 			b.WriteString("(assert (= " + v + " " + smtInt(c) + "))\n")
+		}
+		if tr.nonNegDecls[name] {
+			b.WriteString("(assert (>= " + v + " 0))\n")
 		}
 	}
 	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT
@@ -902,4 +1308,29 @@ func smtTruncDiv(left, right string) string {
 // smtVar maps an Elisa identifier to a collision-free SMT symbol.
 func smtVar(name string) string {
 	return "v_" + name
+}
+
+func smtProjectionName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.FieldExpr:
+		return smtProjectionName(n.Object) + "__field__" + n.Field
+	case *ast.ParenExpr:
+		return smtProjectionName(n.Inner)
+	default:
+		return "expr__" + smtSanitize(fmt.Sprintf("%T_%s", expr, expr.Pos().String()))
+	}
+}
+
+func smtSanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
