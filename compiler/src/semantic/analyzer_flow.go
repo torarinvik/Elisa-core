@@ -671,6 +671,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		mergedFunctionValues := a.cloneFunctionValueBindings()
 		mergedSpecializedValueTypes := a.cloneSpecializedValueTypeBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
+		// Verify leading `invariant` clauses inductively (establishment + preservation) BEFORE the body
+		// is analyzed — the body's own mutations (`i <- i + 1`) invalidate the entry facts upward, so
+		// establishment must read the pristine pre-loop scope. Exit facts are seeded after the body.
+		provenInvariants, loopExitFactsSound := a.proveLoopInvariants(n)
 		a.loopDepth++
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
 		a.loopDepth--
@@ -687,6 +691,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.currentFunctionValues = mergedFunctionValues
 		a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		a.currentStorageViewDeps = mergedStorageViewDeps
+		// Export `inv ∧ ¬cond` as after-loop facts when every invariant was proven inductive above.
+		if loopExitFactsSound {
+			a.seedLoopExitFacts(n, provenInvariants)
+		}
 		a.applyCountUpWhileExitFacts(n)
 	case *ast.ForStmt:
 		a.analyzeForStmt(n)
