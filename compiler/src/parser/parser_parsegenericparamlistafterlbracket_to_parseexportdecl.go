@@ -279,6 +279,14 @@ func (p *Parser) parseFuncDeclWithAnnotations(annotations []ast.Annotation) *ast
 func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotation, isStatic bool) *ast.FuncDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
+	return p.parseFuncDeclRest(pos, annotations, isStatic)
+}
+
+// parseFuncDeclRest parses everything after the opening keyword of a function-shaped declaration
+// (`def` or `lemma`): the name, signature, contract clauses, and body. Shared so a `lemma` reuses
+// the entire function grammar (generics, params, requires/ensure, body) and differs only by the
+// IsLemma flag its caller sets on the returned decl.
+func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, isStatic bool) *ast.FuncDecl {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()

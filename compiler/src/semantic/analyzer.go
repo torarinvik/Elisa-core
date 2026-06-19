@@ -382,6 +382,8 @@ type Analyzer struct {
 	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
+	lemmaCalls                       map[*ast.CallExpr]bool
+	lemmasInAnalysis                 map[*ast.FuncDecl]bool
 	refinementChecks                 map[*ast.VarDeclStmt][]*ast.CallExpr
 	callArgRefinementChecks          map[*ast.CallExpr][]*ast.CallExpr
 	returnRefinementChecks           map[*ast.ReturnStmt][]*ast.CallExpr
@@ -794,6 +796,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		CallArgDisjoint:         a.callArgDisjoint,
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
+		LemmaCalls:              a.lemmaCalls,
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,

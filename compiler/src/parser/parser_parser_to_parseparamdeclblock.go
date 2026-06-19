@@ -307,6 +307,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("law") && p.looksLikeLawDecl() {
 		return p.parseLawDecl()
 	}
+	if p.peekIdentText("lemma") && p.looksLikeLemmaDecl() {
+		return p.parseLemmaDecl()
+	}
 	if p.peekIdentText("tokenset") {
 		return p.parseTokenSetDecl()
 	}
@@ -463,6 +466,36 @@ func (p *Parser) looksLikeLawDecl() bool {
 	default:
 		return false
 	}
+}
+
+// looksLikeLemmaDecl distinguishes a `lemma` declaration (`lemma Name(...)` / `lemma Name[...]`) from
+// an identifier that merely happens to be spelled `lemma` (contextual keyword, like `law`).
+func (p *Parser) looksLikeLemmaDecl() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	switch p.tokens[p.pos+2].Kind {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseLemmaDecl parses a ghost lemma (`lemma Name[generics](params) requires … ensure …:` body). It
+// reuses the entire function grammar via parseFuncDeclRest and only sets IsLemma — the analyzer then
+// verifies the body proves the ensures and erases both the decl and its call sites from codegen.
+func (p *Parser) parseLemmaDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("lemma")
+	fn := p.parseFuncDeclRest(pos, nil, false)
+	if fn != nil {
+		fn.IsLemma = true
+	}
+	return fn
 }
 
 // parseLawDecl parses a predicate law (docs/85 Stage 1): `law Name[generics](self: T, …) = <bool-expr>`.

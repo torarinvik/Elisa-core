@@ -180,6 +180,12 @@ type FuncDecl struct {
 	// function machinery (generics, modules, type checking, calls); the flag drives purity
 	// enforcement and lets `is` resolve it as a predicate.
 	IsLaw bool
+	// IsLemma marks a `lemma` declaration (ghost code): a verification-only function whose `ensure`
+	// postconditions are PROVEN from its `requires` + body, and which is invoked as a statement to
+	// INJECT those (proven) postconditions as assumable facts at the call site. It is erased from
+	// codegen (no body emitted, no call emitted) — it exists purely to give the prover a manually
+	// supplied, separately-verified fact it could not derive automatically.
+	IsLemma bool
 }
 type ParamDecl struct {
 	Position     lexer.Pos

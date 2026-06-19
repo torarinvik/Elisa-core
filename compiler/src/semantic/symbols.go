@@ -70,6 +70,10 @@ type Result struct {
 	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)
 	// single-target form for now.
 	LawIsCalls map[*ast.BinaryExpr]*ast.CallExpr
+	// LemmaCalls marks statement-position calls that target a `lemma` (ghost code). They are
+	// verification-only — the analyzer has already discharged the lemma's requires and injected its
+	// (separately-proven) ensures as facts — so codegen must emit NOTHING for them.
+	LemmaCalls map[*ast.CallExpr]bool
 	// RefinementChecks holds the discharge obligations for a refinement-typed var decl (docs/85
 	// Stage 1c-2): the predicate calls `P(x)` that must hold for the bound value. Codegen emits
 	// them as a debug boundary check (trap on violation), elided in release — "debug verifies what

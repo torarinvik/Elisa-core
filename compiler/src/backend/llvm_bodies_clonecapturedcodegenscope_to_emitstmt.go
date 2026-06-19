@@ -982,6 +982,11 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.PanicStmt:
 		return s.emitPanicWithBacktrace(n.Pos(), n.Message)
 	case *ast.ExprStmt:
+		if call, ok := n.Expr.(*ast.CallExpr); ok && s.g != nil && s.g.result != nil && s.g.result.LemmaCalls[call] {
+			// A lemma call is ghost code: verification already consumed it (requires discharged,
+			// ensures injected as facts). Emit nothing.
+			return nil
+		}
 		_, _, err := s.emitExpr(n.Expr, nil)
 		return err
 	case *ast.DiscardStmt:
