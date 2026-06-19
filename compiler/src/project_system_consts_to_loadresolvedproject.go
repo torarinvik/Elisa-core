@@ -279,7 +279,8 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 	if len(args) == 0 {
 		return projectCLIOptions{}, fmt.Errorf("missing project command")
 	}
-	options := projectCLIOptions{trust: trustNone, packedProfile: backend.DefaultPackedLoweringProfile()}
+	// docs/90: SMT discharge tier ON by default (see the main CLI note); `-nosmt` opts out.
+	options := projectCLIOptions{trust: trustNone, enableSMT: true, packedProfile: backend.DefaultPackedLoweringProfile()}
 	switch args[0] {
 	case "init":
 		options.command = projectCommandInit
@@ -420,9 +421,11 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 		case arg == "-Wconcurrency":
 			options.concurrencyStrict = true
 		case arg == "-smt":
-			// docs/90: enable the optional SMT discharge tier for contract/refinement
-			// obligations the bounded-linear prover declines.
+			// docs/90: SMT discharge tier — ON by default; explicit opt-in kept for back-compat.
 			options.enableSMT = true
+		case arg == "-nosmt":
+			// Opt out of the default-on SMT discharge tier.
+			options.enableSMT = false
 		case arg == "-strict":
 			// docs/85: promote refinement/contract proof fallbacks to hard errors —
 			// an obligation that cannot be discharged statically fails the build.

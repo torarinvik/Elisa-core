@@ -233,7 +233,11 @@ type cliOptions struct {
 }
 
 func parseArgs(args []string) (cliOptions, error) {
-	options := cliOptions{emit: emitAST, packedProfile: backend.DefaultPackedLoweringProfile()}
+	// docs/90: the SMT discharge tier is ON by default (cheap — a single lazy z3 spawn,
+	// only for obligations the bounded-linear prover declines; sound — only `unsat`
+	// concludes; graceful — a missing solver latches off and falls back to the runtime
+	// check). `-nosmt` opts out.
+	options := cliOptions{emit: emitAST, enableSMT: true, packedProfile: backend.DefaultPackedLoweringProfile()}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -321,9 +325,14 @@ func parseArgs(args []string) (cliOptions, error) {
 			// (proven / refuted / runtime) so the user can audit what is statically guaranteed.
 			options.explainProofs = true
 		case arg == "-smt":
-			// docs/90: enable the optional SMT discharge tier for obligations the bounded-linear
-			// prover declines (non-linear products, richer boolean bodies). Spawns a solver (z3).
+			// docs/90: the SMT discharge tier (for obligations the bounded-linear prover declines
+			// — non-linear products, richer boolean bodies). ON by default now; this flag is the
+			// explicit opt-in and is kept as a harmless no-op for back-compat.
 			options.enableSMT = true
+		case arg == "-nosmt":
+			// Opt out of the default-on SMT discharge tier (e.g. to avoid the z3 dependency or
+			// pin a build to the bounded-linear prover only).
+			options.enableSMT = false
 		case arg == "-Wstrict":
 			// Unified strictness: turn on the shipped safety/performance proof levers together.
 			options.strictPolicy = true

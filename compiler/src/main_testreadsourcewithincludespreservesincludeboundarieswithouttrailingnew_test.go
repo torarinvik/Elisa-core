@@ -551,6 +551,25 @@ func TestParseArgsAcceptsUnifiedStrictFlag(t *testing.T) {
 	}
 }
 
+// docs/90: the SMT discharge tier is ON by default; `-nosmt` opts out. (A missing
+// solver latches off and falls back to the runtime check, so default-on is safe.)
+func TestParseArgsEnablesSMTByDefault(t *testing.T) {
+	def, err := parseArgs([]string{"fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if !def.enableSMT || !semanticOptionsForCLI(def).EnableSMT {
+		t.Fatalf("expected SMT discharge ON by default, got enableSMT=%v", def.enableSMT)
+	}
+	off, err := parseArgs([]string{"-nosmt", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs(-nosmt) returned error: %v", err)
+	}
+	if off.enableSMT || semanticOptionsForCLI(off).EnableSMT {
+		t.Fatalf("expected -nosmt to disable SMT discharge, got enableSMT=%v", off.enableSMT)
+	}
+}
+
 func TestRunCLIConcurrencyStrictPromotesRawAtomicDeprecation(t *testing.T) {
 	prevSuppress, hadSuppress := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
 	_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
