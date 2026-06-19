@@ -550,3 +550,34 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 100]:
 		t.Fatalf("SMT profile should be disabled by default, got %+v", result.SMTProfile)
 	}
 }
+
+// docs/85 gap #2: the prover reasons THROUGH immutable local definitions and value-preserving
+// (same-sign, widening) integer conversions. `rack.usize()*4096 + voice.usize()` over bounded
+// u32 params proves its [0,131071] return bound DIRECTLY — no inner/outer usize restructuring.
+func TestRefinementThroughLocalsAndWideningConversions(t *testing.T) {
+	src := `
+law Bounded(self: usize, lo: usize, hi: usize) = self >= lo and self <= hi
+
+def to_slot(rack: u32 is Bounded[0, 31], voice: u32 is Bounded[0, 4095]) -> usize is Bounded[0, 131071]:
+    return rack.usize() * 4096 + voice.usize()
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "through_conv.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("u32.usize() widening + bounded params should prove the return bound directly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// A SIGN-changing conversion (i64 -> u64) is NOT value-preserving (it wraps for negatives), so it
+// is correctly NOT treated as identity — soundness floor for the conversion-transparency rule.
+func TestSignChangingConversionNotIdentity(t *testing.T) {
+	src := `
+def widen(x: i64) -> i64:
+    ensure result == x
+    r: i64 = x.u64().i64()
+    return r
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signchg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r), "could not be proven") {
+		t.Fatalf("a sign-changing i64->u64->i64 round-trip must NOT be assumed identity, got:\n%s", allDiagnostics(r))
+	}
+}

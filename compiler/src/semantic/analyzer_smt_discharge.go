@@ -150,7 +150,12 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// so param/array symbols unify with the obligation. (factPreamble is built AFTER, once all decls
 	// are collected.)
 	hyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	// docs/85 gap #2: assert the defining equality of every immutable integer local in
+	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
+	// treating them as free variables. Must run before factPreamble so the locals and the
+	// variables of their defining expressions are declared.
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, _ := solver.Check(query)
 	if res == smt.Unsat {
@@ -205,7 +210,12 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// an SMT-proven precondition never drives bounds-check elision. A caller clause outside the
 	// fragment is silently skipped (fewer assumptions is conservative).
 	hyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	// docs/85 gap #2: assert the defining equality of every immutable integer local in
+	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
+	// treating them as free variables. Must run before factPreamble so the locals and the
+	// variables of their defining expressions are declared.
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
@@ -237,6 +247,57 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		}
 	}
 	return b.String()
+}
+
+// smtImmutableLocalHypotheses asserts the defining equality of every immutable integer
+// local in scope (`rem: u64 = value % alignment` -> `(assert (= rem (mod value alignment)))`),
+// so the prover can reason THROUGH locals instead of treating them as unconstrained free
+// variables (docs/85 gap #2). Sound: an immutable local equals its initializer wherever it
+// is in scope, and it is never reassigned. A definition outside the integer fragment (a call,
+// a float) is skipped — fewer hypotheses only declines a proof, never admits an unsound one.
+func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for name, sym := range sc.Symbols {
+			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+				continue
+			}
+			seen[name] = true // a closer scope's binding shadows an outer one
+			vd, ok := sym.Node.(*ast.VarDeclStmt)
+			if !ok || vd == nil || vd.Value == nil || sym.Type == nil || !IsNumericType(sym.Type) {
+				continue
+			}
+			eterm, ok := tr.termEnv(vd.Value, nil)
+			if !ok {
+				continue
+			}
+			tr.decls[name] = true
+			b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
+		}
+	}
+	return b.String()
+}
+
+// smtIntWidthSign resolves an integer type to (signedness, bit-width) for the value-preserving
+// conversion check, including the pointer-width aliases BitIntInfo does not parse (usize/uintptr
+// are unsigned 64-bit, isize/int are signed 64-bit on the targets we emit).
+func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
+	if s, b, k := BitIntInfo(t); k {
+		return s, b, true
+	}
+	if bt, isB := t.(*BuiltinType); isB {
+		switch bt.Name {
+		case "usize", "uintptr":
+			return false, 64, true
+		case "isize", "int":
+			return true, 64, true
+		}
+	}
+	return false, 0, false
 }
 
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).
@@ -381,6 +442,18 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return "", false
 		}
 		return "(- " + inner + ")", true
+	case *ast.CastExpr:
+		// A value-preserving integer conversion — widening or same-width, SAME signedness
+		// (`x.u64()`, `x.usize()`, an i32 used as i64) — is the IDENTITY in the unbounded-Int
+		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
+		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
+		// and decline here (sound: a declined term only forgoes a proof).
+		ssign, sbits, sok := smtIntWidthSign(tr.a.exprTypes[n.Operand])
+		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
+		if sok && dok && ssign == dsign && dbits >= sbits {
+			return tr.termEnv(n.Operand, env)
+		}
+		return "", false
 	case *ast.BinaryExpr:
 		var op string
 		switch n.Op {
