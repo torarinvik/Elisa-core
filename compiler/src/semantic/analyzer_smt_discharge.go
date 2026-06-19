@@ -650,6 +650,7 @@ type smtTranslator struct {
 	// divisibility/alignment proofs through `value - value%alignment` survive.
 	unsignedBits map[string]int
 	signedBits   map[string]int
+	boolDecls    map[string]bool  // free bool-typed idents declared as SMT Bool consts
 	paramConsts  map[string]int64 // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
@@ -674,6 +675,7 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		nonNegDecls:  map[string]bool{},
 		unsignedBits: map[string]int{},
 		signedBits:   map[string]int{},
+		boolDecls:    map[string]bool{},
 		paramConsts:  paramConsts,
 	}
 }
@@ -694,6 +696,17 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		if tr.isArrayLike(tr.a.exprTypes[n]) {
 			tr.arrayDecls[n.Name] = true
 			return smtVar(n.Name), true
+		}
+		return "", false
+	case *ast.FieldExpr:
+		// An array-valued struct field, possibly through a reference (`r.data`, `self.buf`). Model it
+		// as a stable array symbol keyed by its syntactic path, so two reads of the same path share the
+		// symbol (and thus its `.count`/`.len`). This is what lets `ensure result <= r.data.count;
+		// return r.data.count` discharge — both sides resolve to the same length symbol.
+		if tr.isArrayLike(tr.a.exprTypes[n]) {
+			name := smtProjectionName(n)
+			tr.arrayDecls[name] = true
+			return smtVar(name), true
 		}
 		return "", false
 	default:
@@ -1180,6 +1193,14 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			}
 			return "false", true
 		}
+		// A free IMMUTABLE bool-typed identifier (a bool param/immutable local) → a stable SMT Bool
+		// const, so a boolean postcondition over it (`ensure result == (p != q)`) can discharge. Only
+		// immutable bindings qualify (a reassigned bool would make the const stale).
+		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && !sym.Mutable && IsBoolType(sym.Type) {
+			name := smtBoolVar(n.Name)
+			tr.boolDecls[name] = true
+			return name, true
+		}
 		return "", false
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
@@ -1234,7 +1255,7 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				conn = "or"
 			}
 			return "(" + conn + " " + l + " " + r + ")", true
-		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
 				return "", false
@@ -1244,6 +1265,37 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return "", false
 			}
 			return smtCompare(n.Op, l, r), true
+		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			// Pointer-null test (`p == null` / `p != null`). Model null-ness as a Bool predicate keyed by
+			// the pointer's syntactic path, so the same pointer's null-ness is consistent between a branch
+			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
+			// fall-through guard `p != null` and the disjunct refer to the same predicate.
+			if ptr := nullComparePointer(n); ptr != nil {
+				pred := "isnull_" + smtProjectionName(stripOptimizationParens(ptr))
+				tr.boolDecls[pred] = true
+				if n.Op == lexer.TOKEN_EQEQ {
+					return pred, true
+				}
+				return "(not " + pred + ")", true
+			}
+			// Numeric equality is the common case; try integer terms first.
+			if l, lok := tr.termEnv(n.Left, env); lok {
+				if r, rok := tr.termEnv(n.Right, env); rok {
+					return smtCompare(n.Op, l, r), true
+				}
+			}
+			// Boolean equality: both sides are bool-valued (e.g. `result == ((x % m) == 0)`). SMT `=`
+			// is polymorphic, so equate the two Bool terms directly (negated for `!=`).
+			if bl, blok := tr.boolTerm(n.Left, env); blok {
+				if br, brok := tr.boolTerm(n.Right, env); brok {
+					eq := "(= " + bl + " " + br + ")"
+					if n.Op == lexer.TOKEN_BANGEQ {
+						return "(not " + eq + ")", true
+					}
+					return eq, true
+				}
+			}
+			return "", false
 		default:
 			return "", false
 		}
@@ -1413,6 +1465,15 @@ func (tr *smtTranslator) factPreamble() string {
 	for _, name := range arrays {
 		b.WriteString("(declare-const " + smtVar(name) + " (Array Int Int))\n")
 	}
+	// Free bool consts (bool params/locals appearing in a boolean postcondition). Deterministic order.
+	bools := make([]string, 0, len(tr.boolDecls))
+	for name := range tr.boolDecls {
+		bools = append(bools, name)
+	}
+	sort.Strings(bools)
+	for _, name := range bools {
+		b.WriteString("(declare-const " + name + " Bool)\n")
+	}
 	// Length symbols (`arr.count`/`.len`), each a non-negative Int.
 	lens := make([]string, 0, len(tr.lenDecls))
 	for sym := range tr.lenDecls {
@@ -1511,6 +1572,24 @@ func smtTruncDiv(left, right string) string {
 // smtVar maps an Elisa identifier to a collision-free SMT symbol.
 func smtVar(name string) string {
 	return "v_" + name
+}
+
+// smtBoolVar names an SMT Bool const for a free bool identifier — a distinct namespace from the
+// integer `v_` consts so an int and a bool of the same Elisa name never collide.
+func smtBoolVar(name string) string {
+	return "b_" + name
+}
+
+// nullComparePointer returns the non-null operand of a `p == null` / `p != null` comparison, or nil if
+// neither operand is the null literal.
+func nullComparePointer(n *ast.BinaryExpr) ast.Expr {
+	if _, ok := stripOptimizationParens(n.Right).(*ast.NullLit); ok {
+		return n.Left
+	}
+	if _, ok := stripOptimizationParens(n.Left).(*ast.NullLit); ok {
+		return n.Right
+	}
+	return nil
 }
 
 func smtProjectionName(expr ast.Expr) string {

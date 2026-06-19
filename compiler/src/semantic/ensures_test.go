@@ -535,6 +535,74 @@ func TestEnsureRequiresRelationalNoUnderflow(t *testing.T) {
 	}
 }
 
+// TestEnsureDischargesNewProverShapes covers three prover-power additions: a `.count` length read
+// through a reference, a boolean-valued equality postcondition, and a pointer-null disjunction. Each
+// has a paired negative case that must still be rejected (soundness floor).
+func TestEnsureDischargesNewProverShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		ok   bool
+	}{
+		{"count_through_ref", `
+struct Reader:
+    data: darray[u8]
+def remaining(r: Reader&) -> u64:
+    ensure result <= r.data.count
+    return r.data.count
+`, true},
+		{"count_through_ref_guarded_sub", `
+struct Reader:
+    data: darray[u8]
+def left(r: Reader&, used: u64) -> u64:
+    requires used <= r.data.count
+    ensure result <= r.data.count
+    return r.data.count - used
+`, true},
+		{"bool_modulo_equality", `
+def is_aligned(x: u64, m: u64) -> bool:
+    requires m >= 1
+    ensure result == ((x % m) == 0)
+    return (x % m) == 0
+`, true},
+		{"bool_modulo_equality_wrong", `
+def bad(x: u64, m: u64) -> bool:
+    requires m >= 1
+    ensure result == ((x % m) == 1)
+    return (x % m) == 0
+`, false},
+		{"free_bool_xor", `
+def neq(p: bool, q: bool) -> bool:
+    ensure result == (p != q)
+    return p != q
+`, true},
+		{"pointer_null_disjunction", `
+def write_out(out_ptr: void&?, val: i64) -> bool:
+    ensure (out_ptr != null) or (result == false)
+    if out_ptr == null:
+        return false
+    return true
+`, true},
+		{"pointer_null_disjunction_wrong", `
+def bad(out_ptr: void&?, val: i64) -> bool:
+    ensure (out_ptr != null) or (result == false)
+    return true
+`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", tc.src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			errs := r.Errors()
+			if tc.ok && len(errs) != 0 {
+				t.Fatalf("expected discharge, got:\n%s", strings.Join(errs, "\n"))
+			}
+			if !tc.ok && len(errs) == 0 {
+				t.Fatalf("expected rejection (unsound otherwise), but it discharged")
+			}
+		})
+	}
+}
+
 // TestEnsureRejectsUnsignedWraparoundPostconditions pins the soundness fix: a postcondition that holds
 // only in unbounded ℤ but is FALSE on the wrapping machine must NOT discharge under -strict. Unsigned
 // `a - b` underflows when b > a, and `n + k` overflows near the type max, so neither `result <= a` nor
