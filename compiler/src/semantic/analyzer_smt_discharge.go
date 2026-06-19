@@ -746,6 +746,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if _, ok := immutableIntIdentName(tr.a, tr.a.currentScope, n); ok {
 			name := smtVar(n.Name)
 			tr.decls[n.Name] = true
+			// Emit the identifier's true type bounds (unsigned `[0, 2^w)`, signed `[-2^(w-1), 2^(w-1))`).
+			// Without these an immutable unsigned param is an unconstrained Int, so a goal like
+			// `a - b <= a` (which needs `b >= 0`) cannot discharge. The bounds are guaranteed by the type
+			// and therefore always sound (asserting more true facts only ever proves more, never less).
+			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
+				tr.markIntVar(n.Name, sym.Type)
+			}
 			return name, true
 		}
 		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) {
@@ -972,6 +979,58 @@ func (a *Analyzer) provablyNoUnsignedUnderflow(left, right ast.Expr) bool {
 		if r := a.boundAffine(f, a.currentScope); r.loKnown && r.lo >= 0 {
 			return true
 		}
+	}
+	// A `requires`-supplied relational bound (`requires b <= a`, `requires a >= b`, …) establishes
+	// `left >= right` symbolically, which the constant-interval prover above cannot see (it relates two
+	// variables, not a variable to a constant). Recognizing it here emits the CLEAN `left - right` term
+	// — which the solver discharges trivially — instead of the wrapped `(mod … 2^W)` form that z3 stalls
+	// on. This is what lets the natural precondition pattern prove `ensure result <= a; return a - b`.
+	if a.knownRequiresGE(left, right) {
+		return true
+	}
+	return false
+}
+
+// knownRequiresGE reports whether the enclosing function's `requires` clauses imply `left >= right`.
+// Only IMMUTABLE integer identifiers qualify: a `requires` constrains a parameter's ENTRY value, so it
+// stays valid for a later subtraction only if neither operand has been reassigned since entry. A clause
+// is read as a conjunction; any conjunct of the form `left >= right`, `left > right`, `right <= left`,
+// or `right < left` suffices (each implies `left - right` cannot underflow for unsigned operands).
+func (a *Analyzer) knownRequiresGE(left, right ast.Expr) bool {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil {
+		return false
+	}
+	ln, lok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(left))
+	rn, rok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(right))
+	if !lok || !rok {
+		return false
+	}
+	for _, req := range a.currentFuncDecl.Requires {
+		if requiresConjunctImpliesGE(req, ln, rn) {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresConjunctImpliesGE(e ast.Expr, geName, leName string) bool {
+	bin, ok := stripOptimizationParens(e).(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	if bin.Op == lexer.TOKEN_AND {
+		return requiresConjunctImpliesGE(bin.Left, geName, leName) || requiresConjunctImpliesGE(bin.Right, geName, leName)
+	}
+	li, lok := stripOptimizationParens(bin.Left).(*ast.Ident)
+	ri, rok := stripOptimizationParens(bin.Right).(*ast.Ident)
+	if !lok || !rok || li == nil || ri == nil {
+		return false
+	}
+	switch bin.Op {
+	case lexer.TOKEN_GTEQ, lexer.TOKEN_GT: // geName >= leName  /  geName > leName
+		return li.Name == geName && ri.Name == leName
+	case lexer.TOKEN_LTEQ, lexer.TOKEN_LT: // leName <= geName  /  leName < geName
+		return li.Name == leName && ri.Name == geName
 	}
 	return false
 }

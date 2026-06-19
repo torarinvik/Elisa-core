@@ -505,6 +505,36 @@ def LowBitsPascal(name: static u8&) -> usize:
 	}
 }
 
+// TestEnsureRequiresRelationalNoUnderflow: a `requires` relational bound (`requires b <= a`, etc.)
+// establishes that unsigned `a - b` cannot underflow, so `ensure result <= a` discharges. Each of the
+// four equivalent relational forms works; the wrong-direction precondition and the unguarded case must
+// still be rejected (soundness floor — a precondition that does NOT imply `a >= b` proves nothing).
+func TestEnsureRequiresRelationalNoUnderflow(t *testing.T) {
+	provable := []string{"b <= a", "a >= b", "b < a", "a > b"}
+	for _, form := range provable {
+		t.Run("proves_"+form, func(t *testing.T) {
+			src := "def t(a: u64, b: u64) -> u64:\n    requires " + form + "\n    ensure result <= a\n    return a - b\n"
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "req_noundf.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) != 0 {
+				t.Fatalf("`requires %s` should discharge `ensure result <= a; return a - b`, got:\n%s", form, strings.Join(errs, "\n"))
+			}
+		})
+	}
+	rejected := []struct{ name, req string }{
+		{"wrong_direction", "a <= b"},
+		{"unrelated", "b >= 1"},
+	}
+	for _, tc := range rejected {
+		t.Run("rejects_"+tc.name, func(t *testing.T) {
+			src := "def t(a: u64, b: u64) -> u64:\n    requires " + tc.req + "\n    ensure result <= a\n    return a - b\n"
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "req_bad.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) == 0 {
+				t.Fatalf("`requires %s` does NOT establish a>=b, so unsigned a-b<=a must be rejected (unsound otherwise)", tc.req)
+			}
+		})
+	}
+}
+
 // TestEnsureRejectsUnsignedWraparoundPostconditions pins the soundness fix: a postcondition that holds
 // only in unbounded ℤ but is FALSE on the wrapping machine must NOT discharge under -strict. Unsigned
 // `a - b` underflows when b > a, and `n + k` overflows near the type max, so neither `result <= a` nor
