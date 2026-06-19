@@ -356,6 +356,14 @@ type smtTranslator struct {
 	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	paramConsts map[string]int64 // law static params bound to constants
+	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
+	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
+	// divisor). Each is a free integer constrained only by what is provably true (never a false
+	// relation), so the term stays PRESENT — letting the rest of the clause (a guarding `or`, an
+	// outer comparison) still discharge — without the abstraction ever fabricating a proof.
+	auxDecls []string // declaration + sound-constraint lines, in mint order
+	auxVars  []string // the fresh symbols, for the Sat counterexample query
+	auxSeq   int      // monotonic counter → deterministic fresh names
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -504,8 +512,14 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// Model truncating division explicitly from abs/sign, and model remainder as x-y*q. Still
 			// require a provably non-zero divisor: SMT-LIB division is total at zero, which could
 			// otherwise fabricate proofs for source programs that may divide by zero at runtime.
+			// When the divisor is NOT provably non-zero we do not give up on the whole clause —
+			// that would lose a guarding `or` (`alignment == 0 or (x % alignment) == 0`) or an
+			// outer disjunct that makes the clause hold regardless of this sub-term. Instead we
+			// mint a fresh under-constrained symbol: a free integer, asserted `>= 0` only when the
+			// dividend is provably non-negative (true of unsigned `%`/`/`). That is sound — it
+			// states nothing false — so the result is just opaque, never a fabricated proof.
 			if !tr.a.provablyNonZero(n.Right) {
-				return "", false
+				return tr.freshAux(tr.a.provablyNonNeg(n.Left)), true
 			}
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
@@ -514,6 +528,20 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			r, ok := tr.termEnv(n.Right, env)
 			if !ok {
 				return "", false
+			}
+			// Preferred path: a non-negative dividend with a positive divisor (the overwhelmingly
+			// common integer case — unsigned `%`/`/`, page/alignment math). Use SMT-LIB's NATIVE
+			// `mod`/`div` directly: they are Euclidean, and Euclidean == truncating for non-negative
+			// operands, so this is exact (no abs/sign dance). It also engages z3's dedicated div/mod
+			// theory, which discharges divisibility goals like `(value - value%alignment) %
+			// alignment == 0` instantly where the nested-`div`/fresh-symbol encodings stall. Identical
+			// `(mod l r)` sub-terms are syntactically shared, so a `rem = value % alignment`
+			// hypothesis and a later `value % alignment` obligation refer to the same term.
+			if tr.a.provablyNonNeg(n.Left) && tr.a.provablyPositive(n.Right) {
+				if n.Op == lexer.TOKEN_PERCENT {
+					return "(mod " + l + " " + r + ")", true
+				}
+				return "(div " + l + " " + r + ")", true
 			}
 			if n.Op == lexer.TOKEN_PERCENT {
 				q := smtTruncDiv(l, r)
@@ -725,6 +753,20 @@ func termMentionsAnyBinder(term string, bound map[string]bool) bool {
 	return false
 }
 
+// freshAux mints a new under-constrained integer symbol for a sub-term we cannot model precisely but
+// must keep PRESENT (so the surrounding clause can still discharge). It is constrained only by what
+// provably holds — `>= 0` when nonNeg — never by a false relation, so it can never fabricate a proof.
+func (tr *smtTranslator) freshAux(nonNeg bool) string {
+	tr.auxSeq++
+	v := "aux_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
+	if nonNeg {
+		tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
+	}
+	return v
+}
+
 // factPreamble emits the declarations for every free variable the translation touched, plus the
 // integer flow facts known about them (range bounds, written-constant equalities) as hypotheses. The
 // facts are a SOUND SUBSET of what holds, which is why only an `unsat` result concludes a proof.
@@ -772,6 +814,11 @@ func (tr *smtTranslator) factPreamble() string {
 		b.WriteString("(declare-const " + sym + " Int)\n")
 		b.WriteString("(assert (>= " + sym + " 0))\n")
 	}
+	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
+	// mint order — deterministic because the counter is monotonic over a single translation.
+	for _, line := range tr.auxDecls {
+		b.WriteString(line)
+	}
 	return b.String()
 }
 
@@ -783,6 +830,7 @@ func (tr *smtTranslator) declaredSMTVars() []string {
 		out = append(out, smtVar(name))
 	}
 	sort.Strings(out)
+	out = append(out, tr.auxVars...)
 	return out
 }
 

@@ -280,7 +280,8 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 		return projectCLIOptions{}, fmt.Errorf("missing project command")
 	}
 	// docs/90: SMT discharge tier ON by default (see the main CLI note); `-nosmt` opts out.
-	options := projectCLIOptions{trust: trustNone, enableSMT: true, packedProfile: backend.DefaultPackedLoweringProfile()}
+	// docs/85: prove-it-or-fail (`-strict`) is also the default; `-permissive` opts out.
+	options := projectCLIOptions{trust: trustNone, enableSMT: true, proofStrict: true, packedProfile: backend.DefaultPackedLoweringProfile()}
 	switch args[0] {
 	case "init":
 		options.command = projectCommandInit
@@ -427,9 +428,13 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			// Opt out of the default-on SMT discharge tier.
 			options.enableSMT = false
 		case arg == "-strict":
-			// docs/85: promote refinement/contract proof fallbacks to hard errors —
-			// an obligation that cannot be discharged statically fails the build.
+			// docs/85: prove-it-or-fail — an obligation that cannot be discharged statically
+			// fails the build. ON by default now; explicit opt-in / harmless no-op for back-compat.
 			options.proofStrict = true
+		case arg == "-permissive":
+			// Opt out of default-on strict proofs: an unprovable refinement/contract degrades to
+			// a warning + debug runtime check instead of failing the build.
+			options.proofStrict = false
 		case arg == "-Wstrict":
 			options.strictPolicy = true
 			options.perfStrict = true

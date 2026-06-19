@@ -389,3 +389,28 @@ def bad(x: i64) -> i64:
 		t.Fatalf("without -strict an unproven ensure must be silent, got:\n%s", allDiagnostics(r3))
 	}
 }
+
+// A `requires`-seeded interval bound makes a guarded integer modulo discharge via the SMT tier's
+// NATIVE `mod`/`div` (Euclidean == truncating for non-negative operands). Both prove that the
+// `requires alignment >= 1` precondition reaches the modulo-soundness gate (provablyPositive) AND
+// that z3's native mod theory cracks the divisibility goal. align_down is fully provable; the
+// requires-bound case verifies the seed path end-to-end.
+func TestEnsureModuloDischargesWithRequiresSeededBound(t *testing.T) {
+	src := `
+def align_down(value: u64, alignment: u64) -> u64:
+    ensure result <= value
+    ensure alignment == 0 or (result % alignment) == 0
+    if alignment == 0:
+        return value
+    return value - (value % alignment)
+
+def round_down(value: u64, alignment: u64) -> u64:
+    requires alignment >= 1
+    ensure (result % alignment) == 0
+    return value - (value % alignment)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_mod_ok.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("guarded/requires-bounded modulo postconditions should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
