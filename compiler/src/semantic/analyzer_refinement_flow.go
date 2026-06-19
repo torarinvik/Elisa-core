@@ -32,22 +32,31 @@ func (r numRange) intersect(o numRange) numRange {
 // `5 < a`, `a == k`, etc. Immutable-only so the fact holds for the whole branch with no
 // invalidation. Called from applyConditionRefinementsInternal for comparison operators.
 func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr, truthy bool) {
-	if !truthy || scope == nil || n == nil {
+	if scope == nil || n == nil {
 		return
 	}
 	// Normalize to `ident OP const`. If the constant is on the left (`5 < a`), flip the operator.
 	op := n.Op
 	name, ok := immutableIntIdentName(a, scope, n.Left)
+	identExpr := n.Left
 	var c int64
 	var cok bool
 	if ok {
 		c, cok = a.constIntValue(n.Right)
 	} else if name, ok = immutableIntIdentName(a, scope, n.Right); ok {
+		identExpr = n.Right
 		c, cok = a.constIntValue(n.Left)
 		op = flipComparison(op)
 	}
 	if !ok || !cok {
 		return
+	}
+	// The FALSY branch (the fall-through after `if a < c: return …`, or an else) narrows by the
+	// LOGICAL NEGATION of the comparison: `not (a < c)` is `a >= c`. `==` falsy is `!=`, which is not
+	// a single contiguous range, so it contributes nothing (default below). This is what makes an
+	// early-return guard establish the post-guard bound for the static provers (docs/85 gap #3).
+	if !truthy {
+		op = negateComparison(op)
 	}
 	var fact numRange
 	switch op {
@@ -61,6 +70,12 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 		fact = numRange{hiKnown: true, hi: c}
 	case lexer.TOKEN_EQEQ: // a == c
 		fact = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+	case lexer.TOKEN_BANGEQ: // a != c — a single range only for an UNSIGNED zero-check: a != 0 ⇒ a >= 1
+		if signed, _, ok := smtIntWidthSign(a.exprTypes[identExpr]); ok && !signed && c == 0 {
+			fact = numRange{loKnown: true, lo: 1}
+		} else {
+			return
+		}
 	default:
 		return
 	}
@@ -176,6 +191,28 @@ func flipComparison(op lexer.TokenKind) lexer.TokenKind {
 		return lexer.TOKEN_GT
 	case lexer.TOKEN_LTEQ:
 		return lexer.TOKEN_GTEQ
+	default:
+		return op
+	}
+}
+
+// negateComparison returns the LOGICAL negation of a comparison operator (`not (a < c)` is `a >= c`),
+// used to narrow the falsy branch of a condition. `==`/`!=` negate to each other; neither yields a
+// single contiguous integer range, so gatherNumericRangeRefinement's switch ignores them.
+func negateComparison(op lexer.TokenKind) lexer.TokenKind {
+	switch op {
+	case lexer.TOKEN_GT:
+		return lexer.TOKEN_LTEQ
+	case lexer.TOKEN_GTEQ:
+		return lexer.TOKEN_LT
+	case lexer.TOKEN_LT:
+		return lexer.TOKEN_GTEQ
+	case lexer.TOKEN_LTEQ:
+		return lexer.TOKEN_GT
+	case lexer.TOKEN_EQEQ:
+		return lexer.TOKEN_BANGEQ
+	case lexer.TOKEN_BANGEQ:
+		return lexer.TOKEN_EQEQ
 	default:
 		return op
 	}

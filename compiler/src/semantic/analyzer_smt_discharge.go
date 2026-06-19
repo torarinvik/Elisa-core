@@ -155,7 +155,8 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + "(assert (not " + obligation + "))\n"
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, _ := solver.Check(query)
 	if res == smt.Unsat {
@@ -215,7 +216,8 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + "(assert (not " + obligation + "))\n"
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
@@ -244,6 +246,40 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		}
 		if h, ok := tr.boolTerm(req, nil); ok {
 			b.WriteString("(assert " + h + ")\n")
+		}
+	}
+	return b.String()
+}
+
+// smtFlowFactHypotheses asserts the scope's flow range-facts — branch-derived bounds on
+// immutable variables (`if alignment == 0: return` ⟹ `alignment >= 1` afterwards; `if n < cap`
+// ⟹ `n <= cap-1` in the then-branch) — as SMT hypotheses. These are already soundly
+// flow-scoped and immutable-only (the linear prover uses them at the same program point), so
+// surfacing them to the SMT tier lets branchy and loop-exit reasoning discharge (docs/85 gap #3:
+// loop-carried/flow facts). A fact with no known bound contributes nothing.
+func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for name, r := range sc.rangeFacts {
+			if seen[name] {
+				continue // a closer scope's fact shadows an outer one
+			}
+			seen[name] = true
+			if !r.loKnown && !r.hiKnown {
+				continue
+			}
+			v := smtVar(name)
+			tr.decls[name] = true
+			if r.loKnown {
+				b.WriteString("(assert (>= " + v + " " + smtInt(r.lo) + "))\n")
+			}
+			if r.hiKnown {
+				b.WriteString("(assert (<= " + v + " " + smtInt(r.hi) + "))\n")
+			}
 		}
 	}
 	return b.String()

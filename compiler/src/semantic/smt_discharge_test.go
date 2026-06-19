@@ -581,3 +581,40 @@ def widen(x: i64) -> i64:
 		t.Fatalf("a sign-changing i64->u64->i64 round-trip must NOT be assumed identity, got:\n%s", allDiagnostics(r))
 	}
 }
+
+// docs/85 gap #3: a fall-through after an early-return guard establishes the negated condition as a
+// flow fact for the static provers (`if x < 0: return 0` ⟹ `x >= 0` afterwards; `if a == 0: return`
+// ⟹ `a >= 1` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the
+// real align_up postcondition `result >= value` discharges fully under -strict.
+func TestFallThroughGuardFactsDischargeAlignUp(t *testing.T) {
+	src := `
+def align_up(value: u64, alignment: u64) -> u64:
+    ensure result >= value
+    if alignment == 0:
+        return value
+    rem: u64 = value % alignment
+    if rem == 0:
+        return value
+    return value + (alignment - rem)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "alignup.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("align_up's `ensure result >= value` should discharge via guard + local + modulo facts, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// The guard-narrowing soundness floor: a `<` guard establishes the post-guard lower bound, so a
+// downstream `ensure result >= 0` on a clamp proves; nothing weaker is admitted.
+func TestFallThroughGuardClampDischarges(t *testing.T) {
+	src := `
+def clamp_nonneg(x: i64) -> i64:
+    ensure result >= 0
+    if x < 0:
+        return 0
+    return x
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "clamp.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("clamp_nonneg should discharge via the fall-through guard fact, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
