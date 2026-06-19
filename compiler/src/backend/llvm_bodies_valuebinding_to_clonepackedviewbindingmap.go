@@ -115,14 +115,14 @@ type functionState struct {
 	// blocks (if/match/loop arms) never register here and keep distinct keys (plus the explicit
 	// invalidatePackedReadCaches at mutations/binds), so cross-branch reuse stays blocked.
 	straightLineBlockParent map[C.LLVMBasicBlockRef]C.LLVMBasicBlockRef
-	scopedCleanups               []scopedCleanupBinding
-	checkpoints                  map[string]checkpointBinding
-	poolScopes                   []activePoolBinding
-	breakTargets                 []C.LLVMBasicBlockRef
-	continueTargets              []C.LLVMBasicBlockRef
-	loopCleanupFloors            []int
-	cleanupDepth                 int
-	scopePool                    []*codegenScope
+	scopedCleanups          []scopedCleanupBinding
+	checkpoints             map[string]checkpointBinding
+	poolScopes              []activePoolBinding
+	breakTargets            []C.LLVMBasicBlockRef
+	continueTargets         []C.LLVMBasicBlockRef
+	loopCleanupFloors       []int
+	cleanupDepth            int
+	scopePool               []*codegenScope
 	// reduceReassocScope counts active comprehension-fold accumulator-update scopes. While > 0, FP
 	// ops emitted in the scope get reassociation+contraction (not full fast-math), so the reduction
 	// re-brackets into a vectorizable tree — a fold's reduction order is defined as a tree, not strict

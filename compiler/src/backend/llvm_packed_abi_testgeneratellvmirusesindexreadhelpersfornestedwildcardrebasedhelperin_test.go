@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -369,7 +370,13 @@ def fold_view() -> int:
 	if strings.Contains(output, "call ptr @ctx_packed_store_decode_index(") {
 		t.Fatalf("expected frozen packed if variant view in index-soa mode to avoid eager decode, got:\n%s", output)
 	}
-	if strings.Contains(output, "@llvm.trap") {
+	// Contracts-live builds trap signed `+`/`-`/`*` on overflow; those traps (in `signed.arith.*`
+	// blocks) come from the fixture's ordinary `int` accumulation and are orthogonal to the packed
+	// view. A trap NOT from that path would mean the view eagerly trapped on a variant mismatch
+	// instead of falling through, which is what this test guards against.
+	trapCount := strings.Count(output, "call void @llvm.trap()")
+	signedTraps := len(regexp.MustCompile(`signed\.arith\.overflow\.trap\d*:`).FindAllString(output, -1))
+	if trapCount > signedTraps {
 		t.Fatalf("expected packed if variant view in index-soa mode to preserve ordinary if fallthrough instead of trapping on mismatch, got:\n%s", output)
 	}
 }

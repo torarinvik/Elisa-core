@@ -763,6 +763,7 @@ func (s *functionState) bindPackedVariantViewInternal(name string, viewType *sem
 	}
 	s.scope.packedViewPtrs[name] = binding
 }
+
 // markPackedVariantViewHandleBlock stamps the just-bound view's handle with the current basic
 // block, marking it as a MEMOIZED load that is only safe to reuse from this block (see
 // packedVariantViewBinding.handleBlock).

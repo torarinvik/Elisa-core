@@ -237,6 +237,7 @@ func enumIsTagOnly(enum *semantic.EnumType) bool {
 	// agree on representation (bare u32 vs {tag, union}).
 	return enumLeavesAreTagOnly(enumLayoutLeaves(enum))
 }
+
 // payloadSlotBytes is the granularity (in bytes) of one inline packed-enum payload slot for the
 // given enum. The payload union is tiled into a `[maxSlots x slotType]` array; field byte-offsets
 // are computed against that tiling and every inline payload read/write strides by this many bytes.

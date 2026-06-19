@@ -643,11 +643,13 @@ type smtTranslator struct {
 	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
-	// unsignedBits records the bit-width of each free var known to be unsigned, so factPreamble can
-	// assert the true upper bound `< 2^width`. This is what makes the wraparound model (wrapUnsignedArith)
-	// PRECISE rather than merely sound: with operands pinned to [0, 2^width) an in-range computation does
-	// not actually wrap, so divisibility/alignment proofs through `value - value%alignment` survive.
+	// unsignedBits / signedBits record the bit-width of each free var known to be unsigned / signed, so
+	// factPreamble can assert the true type bound (`[0, 2^w)` unsigned, `[-2^(w-1), 2^(w-1))` signed).
+	// This is what makes the wraparound model (wrapMachineArith) PRECISE rather than merely sound: with
+	// operands pinned to their representable range an in-range computation does not actually wrap, so
+	// divisibility/alignment proofs through `value - value%alignment` survive.
 	unsignedBits map[string]int
+	signedBits   map[string]int
 	paramConsts  map[string]int64 // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
@@ -671,6 +673,7 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		lenDecls:     map[string]bool{},
 		nonNegDecls:  map[string]bool{},
 		unsignedBits: map[string]int{},
+		signedBits:   map[string]int{},
 		paramConsts:  paramConsts,
 	}
 }
@@ -749,7 +752,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			if t, ok := smtNumericValueType(sym.Type); ok {
 				name := smtVar(n.Name)
 				tr.decls[n.Name] = true
-				tr.markNonNeg(n.Name, t)
+				tr.markIntVar(n.Name, t)
 				return name, true
 			}
 		}
@@ -794,7 +797,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			// `ensure result <= self.total` on unsigned storage.
 			name := smtProjectionName(n)
 			tr.decls[name] = true
-			tr.markNonNeg(name, t)
+			tr.markIntVar(name, t)
 			return smtVar(name), true
 		}
 		return "", false
@@ -880,33 +883,75 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if !ok {
 			return "", false
 		}
-		return tr.wrapUnsignedArith(n, op, l, r), true
+		return tr.wrapMachineArith(n, op, l, r), true
 	default:
 		return "", false
 	}
 }
 
-// wrapUnsignedArith models the machine semantics of `+`/`-`/`*` on an unsigned result type, which
-// WRAP modulo 2^width. Modeling them as unbounded-ℤ operations is UNSOUND for postconditions a wrap
-// can violate — e.g. `ensure result <= a` for unsigned `a - b` holds in ℤ (since b ≥ 0) but is FALSE
-// on the machine when b > a (the subtraction underflows to a huge value). SMT-LIB `mod` is Euclidean,
-// so `(mod (- l r) 2^W)` is EXACTLY the wrapped unsigned value (nonnegative, in [0, 2^W)), and the
-// same `(mod raw 2^W)` form is exact for `+` and `*`. For signed types we keep the clean ℤ term
-// (signed overflow is a separate, currently-unmodeled concern); the prover only ever concludes on
-// `unsat`, so wrapping can never fabricate a proof — at worst it declines a goal it cannot reduce.
-func (tr *smtTranslator) wrapUnsignedArith(n *ast.BinaryExpr, op, l, r string) string {
+// wrapMachineArith models the machine semantics of `+`/`-`/`*` on a fixed-width integer result, which
+// WRAP modulo 2^width (two's complement for signed). Modeling them as unbounded-ℤ operations is
+// UNSOUND for postconditions a wrap can violate — e.g. `ensure result <= a` for unsigned `a - b` holds
+// in ℤ (b ≥ 0) but is FALSE when b > a (underflow), and `ensure result >= a` for signed `a + b` holds
+// in ℤ (b ≥ 0) but is FALSE on signed overflow. When the result is PROVABLY in range (affine interval
+// within the type, or a no-underflow subtraction) the ℤ term equals the machine value, so we emit it
+// clean — keeping divisibility/alignment goals tractable. Otherwise we emit the exact wrapped value:
+// `(mod raw 2^W)` for unsigned (Euclidean mod == unsigned wrap), and a recentered mod for signed. The
+// prover only ever concludes on `unsat`, so a wrap can never fabricate a proof — at worst it declines.
+func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) string {
 	raw := "(" + op + " " + l + " " + r + ")"
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
-	if !ok || signed || bits <= 0 || bits > 64 {
+	if !ok || bits <= 0 || bits > 64 {
 		return raw
 	}
-	// A subtraction proven not to underflow (`r <= l`) equals its ℤ value on the machine, so emit the
-	// clean term — this both stays sound and keeps divisibility/alignment goals (`value - value%m`)
-	// tractable for the solver, which the nested `mod 2^W` layer otherwise defeats within the timeout.
-	if n.Op == lexer.TOKEN_MINUS && tr.a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
+	if signed {
+		// Signed overflow TRAPS in debug builds (where contracts are checked), so reaching a return
+		// without trapping implies no overflow — the prover may soundly assume the ℤ value. Release
+		// wraps for perf, but contracts are off there, so nothing relies on the wrap. Hence: no wrap
+		// modeling for signed; the debug trap backs the assumption (see codegen signed-overflow check).
 		return raw
 	}
+	if tr.a.provablyNoArithWrap(n, signed, bits) {
+		return raw
+	}
+	// Unsigned wraps modulo 2^W with well-defined two's-complement semantics (and is frequently an
+	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
+	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
 	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// provablyNoArithWrap reports whether `n` (an int `+`/`-`/`*`) cannot wrap — its true result is within
+// the representable range of its width. It recognizes the no-underflow subtraction shapes (unsigned)
+// and, for any width/signedness, an affine result whose interval lies inside [min, max]. Type-level
+// reasoning alone is NOT sufficient (a wrapped result is still type-valid), so this is a VALUE check.
+func (a *Analyzer) provablyNoArithWrap(n *ast.BinaryExpr, signed bool, bits int) bool {
+	// No-underflow subtraction (e.g. `X - X%m`) is exact at any width and is the shape alignment math
+	// relies on; it does not depend on the int64 interval prover, so it is safe for 64-bit too.
+	if n.Op == lexer.TOKEN_MINUS && !signed && a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
+		return true
+	}
+	// The affine interval prover computes in int64, so a 64-bit type's range (or a wide intermediate
+	// sum) can overflow it. Restrict the interval-based in-range gate to widths ≤ 32, where the bounds
+	// and any sum/product of them sit comfortably inside int64 with no overflow risk. 64-bit results
+	// that are not a no-underflow subtraction take the (sound, exact) wrap path.
+	if bits > 32 {
+		return false
+	}
+	f, ok := a.affineOf(n, a.currentScope)
+	if !ok {
+		return false
+	}
+	r := a.boundAffine(f, a.currentScope)
+	if !r.loKnown || !r.hiKnown {
+		return false
+	}
+	var lo, hi int64
+	if signed {
+		lo, hi = -(int64(1) << (bits - 1)), (int64(1)<<(bits-1))-1
+	} else {
+		lo, hi = 0, (int64(1)<<bits)-1
+	}
+	return r.lo >= lo && r.hi <= hi
 }
 
 // provablyNoUnsignedUnderflow reports whether `left - right` cannot underflow, i.e. `right <= left`
@@ -950,15 +995,22 @@ func smtPow2(bits int) string {
 	return new(big.Int).Lsh(big.NewInt(1), uint(bits)).String()
 }
 
-// markNonNeg records a free var's non-negativity and, for an unsigned integer type, its bit-width so
-// factPreamble can assert the true `[0, 2^width)` bound. Both facts are guaranteed by the type and
-// therefore always sound.
-func (tr *smtTranslator) markNonNeg(name string, t Type) {
-	if !smtTypeNonNegative(t) {
+// markIntVar records a free var's integer type so factPreamble can assert its true representable
+// range — `[0, 2^width)` for unsigned, `[-2^(width-1), 2^(width-1))` for signed. These bounds are
+// guaranteed by the type and therefore always sound; they make the wraparound model precise.
+func (tr *smtTranslator) markIntVar(name string, t Type) {
+	signed, bits, ok := smtIntWidthSign(t)
+	if !ok || bits <= 0 || bits > 64 {
+		// Width unknown (e.g. an abstract numeric) — fall back to the non-negativity flag alone.
+		if smtTypeNonNegative(t) {
+			tr.nonNegDecls[name] = true
+		}
 		return
 	}
-	tr.nonNegDecls[name] = true
-	if _, bits, ok := smtIntWidthSign(t); ok && bits > 0 && bits <= 64 {
+	if signed {
+		tr.signedBits[name] = bits
+	} else {
+		tr.nonNegDecls[name] = true
 		tr.unsignedBits[name] = bits
 	}
 }
@@ -1284,6 +1336,12 @@ func (tr *smtTranslator) factPreamble() string {
 			// the wraparound model exact for in-range computations (so divisibility through
 			// `value - value%alignment` proves) and still sound (it can only remove counterexamples).
 			b.WriteString("(assert (< " + v + " " + smtPow2(bits) + "))\n")
+		}
+		if bits, ok := tr.signedBits[name]; ok && bits > 0 && bits <= 64 {
+			// True type bound: a signed value lives in [-2^(width-1), 2^(width-1)).
+			bias := smtPow2(bits - 1)
+			b.WriteString("(assert (>= " + v + " (- " + bias + ")))\n")
+			b.WriteString("(assert (< " + v + " " + bias + "))\n")
 		}
 	}
 	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT
