@@ -180,7 +180,22 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
-	env, ok := a.smtEnvForSubst(tr, subst)
+	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
+	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
+	// read to that field's construction argument — so `ensure result.a == 1` discharges.
+	substForEnv := subst
+	if res, ok := subst["result"]; ok {
+		if sl, ok := stripOptimizationParens(res).(*ast.StructLitExpr); ok {
+			tr.resultFields = a.structLitFieldMap(sl)
+			substForEnv = map[string]ast.Expr{}
+			for k, v := range subst {
+				if k != "result" {
+					substForEnv[k] = v
+				}
+			}
+		}
+	}
+	env, ok := a.smtEnvForSubst(tr, substForEnv)
 	if !ok {
 		return false, ""
 	}
@@ -650,8 +665,9 @@ type smtTranslator struct {
 	// divisibility/alignment proofs through `value - value%alignment` survive.
 	unsignedBits map[string]int
 	signedBits   map[string]int
-	boolDecls    map[string]bool  // free bool-typed idents declared as SMT Bool consts
-	paramConsts  map[string]int64 // law static params bound to constants
+	boolDecls    map[string]bool     // free bool-typed idents declared as SMT Bool consts
+	resultFields map[string]ast.Expr // when `result` is a struct literal, its field -> arg expr
+	paramConsts  map[string]int64    // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
 	// divisor). Each is a free integer constrained only by what is provably true (never a false
@@ -798,6 +814,15 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "(select " + arr + " " + idx + ")", true
 	case *ast.FieldExpr:
+		// `result.field` where `result` is bound to a struct literal → that field's construction
+		// argument, so `ensure result.a == 1` for `return Pair(1, 2)` proves.
+		if tr.resultFields != nil {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
+				if arg, ok := tr.resultFields[n.Field]; ok {
+					return tr.termEnv(arg, env)
+				}
+			}
+		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
 		if n.Field == "count" || n.Field == "len" {
@@ -1578,6 +1603,39 @@ func smtVar(name string) string {
 // integer `v_` consts so an int and a bool of the same Elisa name never collide.
 func smtBoolVar(name string) string {
 	return "b_" + name
+}
+
+// structLitFieldMap maps each field name of a struct literal to its construction argument, handling
+// both named args and positional args (resolved against the struct declaration's field order). Returns
+// nil if the field order cannot be resolved.
+func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr {
+	if sl == nil {
+		return nil
+	}
+	args := sl.LoweredArgs()
+	var ordered []string
+	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
+		for _, fd := range st.Decl.Fields {
+			ordered = append(ordered, fd.Name)
+		}
+	}
+	out := map[string]ast.Expr{}
+	for i, arg := range args {
+		name := sl.ArgName(i)
+		if name == "" {
+			if i >= len(ordered) {
+				continue
+			}
+			name = ordered[i]
+		}
+		if name != "" && arg != nil {
+			out[name] = arg
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // nullComparePointer returns the non-null operand of a `p == null` / `p != null` comparison, or nil if

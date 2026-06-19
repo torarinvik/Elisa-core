@@ -588,6 +588,23 @@ def bad(out_ptr: void&?, val: i64) -> bool:
     ensure (out_ptr != null) or (result == false)
     return true
 `, false},
+		{"struct_result_field", `
+struct Pair:
+    a: i64
+    b: i64
+def mk() -> Pair:
+    ensure result.a == 1
+    ensure result.b == 2
+    return Pair(1, 2)
+`, true},
+		{"struct_result_field_wrong", `
+struct Pair:
+    a: i64
+    b: i64
+def bad() -> Pair:
+    ensure result.a == 9
+    return Pair(1, 2)
+`, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
