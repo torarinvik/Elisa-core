@@ -576,6 +576,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 		}
 	}
+	// Hand the deferred SMT-fact invalidation (analyzeCallExprWithExpected) the resolved callee frame
+	// and position-aligned arguments, so facts about places this call provably does not write survive.
+	a.cacheCallFrameContext(expr, appliedType, loweredArgs)
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {
 	case "pool_shutdown":

@@ -458,6 +458,14 @@ func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
 	if a == nil || expr == nil {
 		return
 	}
+	// A resolved call carries its callee frame: drop only the facts the callee can actually falsify,
+	// letting facts about provably-untouched places survive (docs/87 frame-aware fact survival).
+	if ctx, ok := a.callFrameContexts[expr]; ok {
+		delete(a.callFrameContexts, expr)
+		a.invalidateSMTAssertFactsFramed(ctx.ft, ctx.args)
+		return
+	}
+	// Unresolved/builtin call: conservative whole-argument invalidation.
 	for _, arg := range expr.Args {
 		if arg == nil {
 			continue
