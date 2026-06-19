@@ -938,6 +938,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return "(- " + l + " (* " + r + " " + q + "))", true
 			}
 			return smtTruncDiv(l, r), true
+		case lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET,
+			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			// Bitwise/shift ops are modeled exactly via the SMT bitvector theory (see bitwiseTerm).
+			return tr.bitwiseTerm(n, env)
 		default:
 			return "", false
 		}
@@ -984,6 +988,84 @@ func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) st
 	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
 	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
 	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// bitwiseTerm models a fixed-width bitwise/shift operator (`&`, `|`, `^`, `<<`, `>>`) by bridging the
+// unbounded-Int operand terms into SMT bitvectors at the result's machine width, applying the matching
+// bitvector operator, and reading the result back as an unsigned integer. `(_ int2bv W)` reduces each
+// operand modulo 2^W — exactly the machine bit pattern (two's complement for any sign) — and `bv2nat`
+// reads the result in [0, 2^W), exactly the unsigned machine value. The produced Int term therefore
+// EQUALS the machine result, so it composes soundly with further Int reasoning (a mask `x & 0xFFF` is
+// provably `< 0x1000`, a shift `x >> 12` provably `< 2^(W-12)`, etc.).
+//
+// Soundness gates — anything outside them declines (returns ok=false), which only forgoes a proof,
+// never fabricates one:
+//   - Result must be UNSIGNED, width 1..64 (the `bv2nat` read is the unsigned value; a signed result
+//     would need the signed read and is left for a follow-up).
+//   - Operands must share the result width (Elisa bitwise is same-type), so int2bv at W is the exact
+//     bit pattern with no narrowing/sign surprise.
+//   - Shift amounts must be a compile-time constant in [0, W): the machine leaves shifts ≥ width
+//     undefined (LLVM poison), so assuming the bitvector "shift past width ⇒ 0" rule would be unsound.
+//
+// Bridging the Int and BV theories can be costly for the solver on relational goals; the per-query
+// timeout turns any hard case into Unknown → runtime fallback, so soundness holds regardless of cost.
+func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (string, bool) {
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	if !ok || signed || bits <= 0 || bits > 64 {
+		return "", false
+	}
+	width := strconv.Itoa(bits)
+	// An operand is bit-faithful at the result width when it is a same-width integer (Elisa bitwise is
+	// same-type) or a compile-time constant (`int2bv` reduces it modulo 2^W exactly).
+	sameWidthOrConst := func(e ast.Expr) bool {
+		if _, ebits, ok := smtIntWidthSign(tr.a.exprTypes[e]); ok && ebits == bits {
+			return true
+		}
+		_, isConst := tr.a.constIntValue(e)
+		return isConst
+	}
+	if !sameWidthOrConst(n.Left) {
+		return "", false
+	}
+	var bvop, rbv string
+	switch n.Op {
+	case lexer.TOKEN_AMPERSAND:
+		bvop = "bvand"
+	case lexer.TOKEN_PIPE:
+		bvop = "bvor"
+	case lexer.TOKEN_CARET:
+		bvop = "bvxor"
+	case lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		c, isConst := tr.a.constIntValue(n.Right)
+		if !isConst || c < 0 || c >= int64(bits) {
+			return "", false
+		}
+		rbv = "((_ int2bv " + width + ") " + strconv.FormatInt(c, 10) + ")"
+		if n.Op == lexer.TOKEN_LSHIFT {
+			bvop = "bvshl"
+		} else {
+			bvop = "bvlshr" // unsigned result ⇒ logical right shift
+		}
+	default:
+		return "", false
+	}
+	l, ok := tr.termEnv(n.Left, env)
+	if !ok {
+		return "", false
+	}
+	lbv := "((_ int2bv " + width + ") " + l + ")"
+	if rbv == "" {
+		// Binary bitwise: the right operand must also be a same-width integer (or a constant).
+		if !sameWidthOrConst(n.Right) {
+			return "", false
+		}
+		r, ok := tr.termEnv(n.Right, env)
+		if !ok {
+			return "", false
+		}
+		rbv = "((_ int2bv " + width + ") " + r + ")"
+	}
+	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
 }
 
 // provablyNoArithWrap reports whether `n` (an int `+`/`-`/`*`) cannot wrap — its true result is within
