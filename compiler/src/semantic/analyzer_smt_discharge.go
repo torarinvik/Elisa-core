@@ -269,6 +269,24 @@ func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[st
 	return p, ce, true
 }
 
+// smtDischargeFormulaWithHyps discharges a lowered VC-IR formula against a CALLER-SUPPLIED hypothesis
+// block (already built from `tr`), rather than the analyzer's standard set. It is the loop-preservation
+// prover's bridge into the central VC IR: that prover deliberately assumes ONLY the loop condition +
+// invariants (loop variables free, no ambient assert/flow facts), so it cannot route through smtCheckVC
+// (which layers the standard block). Routing through the IR gains the smart-constructor folder — a
+// goal that constant-folds to `true` is valid under ANY hypotheses and concludes with NO solver call,
+// and structural comparisons/arithmetic are normalized — while keeping emission byte-identical for
+// every atom (opaque leaves emit their already-translated string verbatim), so the proof verdict is
+// preserved for goals the folder does not touch.
+func (a *Analyzer) smtDischargeFormulaWithHyps(tr *smtTranslator, goal vcFormula, hyps string) (bool, string) {
+	if isVCTrue(goal) {
+		a.smtStats.Attempts++
+		a.smtStats.Proven++
+		return true, ""
+	}
+	return a.smtCheckQuery(tr, hyps, emitVCFormula(goal))
+}
+
 // smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
 // from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, asks
 // the solver, updates the stats, and returns proven (only on `unsat`) plus a counterexample on `sat`.
