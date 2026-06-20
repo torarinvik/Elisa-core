@@ -744,7 +744,17 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 				return bound, true
 			}
 		}
-		if tr.isArrayLike(tr.a.exprTypes[n]) {
+		// Resolve the array's element type from exprTypes (set once the node is analyzed) OR, when that
+		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
+		// the symbol's declared type via scope lookup. The declared type is authoritative for a param or
+		// local, so this is sound and is what lets `arr[k]` in a quantified loop invariant translate.
+		t := tr.a.exprTypes[n]
+		if t == nil && tr.a.currentScope != nil {
+			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
+				t = sym.Type
+			}
+		}
+		if tr.isArrayLike(t) {
 			tr.arrayDecls[n.Name] = true
 			return smtVar(n.Name), true
 		}
