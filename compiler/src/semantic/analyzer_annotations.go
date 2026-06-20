@@ -11,7 +11,7 @@ import (
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated":
+	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
 		return true
 	default:
 		return false
@@ -432,6 +432,33 @@ func structDeclHasAnnotation(structDecl *ast.StructDecl, annotationName string) 
 	return false
 }
 
+// checkExternContractDiscipline enforces (under -strict-externs) that every extern function is either
+// CONTRACTED (a `requires`/`ensure` boundary contract the call site checks/assumes) or explicitly
+// `@trusted("reason")`. An extern that is neither leaves its native boundary unspecified — the call
+// site assumes nothing and the native body is checked by nothing — so the discipline flags it. Off
+// unless RequireExternContracts (it is NOT implied by -strict, which is on by default; most programs
+// link uncontracted libc/host externs and blanket enforcement would break them).
+func (a *Analyzer) checkExternContractDiscipline(fn *ast.ExternFuncDecl) {
+	if a == nil || fn == nil || !a.requireExternContracts {
+		return
+	}
+	if len(fn.Requires) > 0 || len(fn.Ensures) > 0 || externHasTrustedAnnotation(fn) {
+		return
+	}
+	a.errorf(fn.Pos(), "extern function %q has no contract: under -strict-externs every extern must declare a `requires`/`ensure` boundary contract or be annotated `@trusted(\"reason\")` to document why the unverified native body is trusted", fn.Name)
+}
+
+// externHasTrustedAnnotation reports whether an extern carries a `@trusted` annotation (its reason is
+// validated separately in applyExternFuncAnnotations).
+func externHasTrustedAnnotation(fn *ast.ExternFuncDecl) bool {
+	for _, ann := range fn.Annotations {
+		if ann.Name == "trusted" {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *FuncType) {
 	if fn == nil || fnType == nil {
 		return
@@ -519,6 +546,14 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				a.errorf(annotation.Position, "@nonblocking on extern function %q does not take arguments", fn.Name)
 			}
 			nonblockingPos = annotation.Position
+		case "trusted":
+			// `@trusted("reason")` documents that an extern is intentionally uncontracted: the native
+			// body is assumed to honour an unwritten contract, and the REASON records why that trust is
+			// warranted. The reason is mandatory so the trust is never silent (this is what
+			// -strict-externs accepts in lieu of an actual `requires`/`ensure`).
+			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+				a.errorf(annotation.Position, "@trusted on extern function %q requires exactly one non-empty reason string explaining why the unverified native body is trusted", fn.Name)
+			}
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)
 		case "borrows_return_field":

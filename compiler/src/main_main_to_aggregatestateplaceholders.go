@@ -233,6 +233,7 @@ type cliOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	proofStrict       bool
+	strictExterns     bool
 	explainProofs     bool
 	enableSMT         bool
 	concurrencyStrict bool
@@ -335,6 +336,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Opt out of default-on strict proofs: an unprovable refinement/contract degrades to
 			// a warning + debug runtime check instead of failing the build.
 			options.proofStrict = false
+		case arg == "-strict-externs":
+			// Opt-in extern contract discipline: every extern must declare a `requires`/`ensure`
+			// boundary contract or be `@trusted("reason")`. NOT implied by -strict (see RequireExternContracts).
+			options.strictExterns = true
 		case arg == "--explain" || arg == "-explain":
 			// docs/85 observability: after analysis, print every refinement-discharge decision
 			// (proven / refuted / runtime) so the user can audit what is statically guaranteed.

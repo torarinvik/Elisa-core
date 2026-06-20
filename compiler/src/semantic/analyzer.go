@@ -362,6 +362,7 @@ type Analyzer struct {
 	enforceStrictConcurrency    bool
 	enforcePerfLints            bool
 	enforceStrictProofs         bool
+	requireExternContracts      bool
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
@@ -585,6 +586,12 @@ type AnalyzeOptions struct {
 	SMTSolverBinary string
 	TargetTriple    string
 	TargetDebug     bool
+	// RequireExternContracts enforces extern contract DISCIPLINE: every extern function must carry a
+	// `requires`/`ensure` boundary contract OR an explicit `@trusted("reason")` annotation. An extern
+	// that is neither is an error. Opt-in (the `-strict-externs` channel) and deliberately NOT implied
+	// by -strict: -strict is on by default, and most real programs link uncontracted libc/host externs,
+	// so blanket enforcement would break them. This makes "is this native boundary specified?" auditable.
+	RequireExternContracts bool
 	// RecordDeathTimeCohorts records the docs/91 G0 inferred death cohorts on Result.DeathTimeCohorts
 	// (programmatic access, e.g. the tightness-validation harness) without needing the
 	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
@@ -690,6 +697,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
+		requireExternContracts:            options.RequireExternContracts,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
 		recordDeathCohortsOpt:             options.RecordDeathTimeCohorts,
