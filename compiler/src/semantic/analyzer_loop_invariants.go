@@ -316,9 +316,23 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		}
 		env[st.arrayName] = "(store " + arrTerm + " " + idxTerm + " " + valTerm + ")"
 	}
-	obligation, ok := tr.boolTerm(target, env)
-	if !ok {
-		return false, ""
+	// Lower the obligation into the central VC IR (shared folder + smart constructors) so a
+	// preservation/termination goal that constant-folds to `true` is discharged with NO solver call and
+	// structural comparisons/arithmetic are normalized. lowerVCFormula has the SAME symbol-declaration
+	// side effects as boolTerm and emits opaque atoms verbatim, so the SMT query is byte-identical for
+	// any goal the folder does not touch (behavior-preserving). When the target is outside the IR
+	// fragment (quantifiers, array selects, …) lowering declines and we fall back to the opaque boolTerm
+	// translation — the identical pre-IR path.
+	goal, lowered := tr.lowerVCFormula(target, env)
+	var obligation string
+	if lowered {
+		obligation = emitVCFormula(goal)
+	} else {
+		var ok bool
+		obligation, ok = tr.boolTerm(target, env)
+		if !ok {
+			return false, ""
+		}
 	}
 	// Hypotheses are translated with an identity environment, so a loop variable `i` in a hypothesis
 	// and the `i` inside a substituted term (`i + 1`) resolve to the SAME free SMT constant.
@@ -349,7 +363,15 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	// result the counterexample is a loop state satisfying cond + the invariants but VIOLATING the
 	// invariant after one body step — a concrete witness to non-preservation.
 	reqHyps := a.smtRequiresHypotheses(tr)
-	return a.smtCheckQuery(tr, reqHyps+hypSB.String(), obligation)
+	hyps := reqHyps + hypSB.String()
+	// When the obligation lowered into the IR, discharge through the IR-aware helper so a goal that the
+	// smart constructors folded to `true` concludes with no solver call; the loop's OWN hypothesis set is
+	// passed through unchanged (loop variables free — the inductive hypothesis). Otherwise the opaque
+	// obligation goes straight to the shared check primitive (the pre-IR path).
+	if lowered {
+		return a.smtDischargeFormulaWithHyps(tr, goal, hyps)
+	}
+	return a.smtCheckQuery(tr, hyps, obligation)
 }
 
 // loopArrayStore is a captured array-element assignment `array[index] <- value` in a loop body. The
@@ -378,7 +400,8 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 	for _, s := range body {
 		switch n := s.(type) {
 		case *ast.ContractStmt:
-			if n.Kind != ast.ContractInvariant {
+			// Leading `invariant` / `decreases` clauses are specifications, not body effects — skip them.
+			if n.Kind != ast.ContractInvariant && n.Kind != ast.ContractDecreases {
 				return nil, nil, false
 			}
 		case *ast.AssignStmt:

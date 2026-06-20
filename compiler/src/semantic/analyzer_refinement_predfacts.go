@@ -117,12 +117,135 @@ func containsString(items []string, target string) bool {
 	return false
 }
 
+// mutatingBuiltinCollectionMethods are the builtin darray/dict/set methods that change a container's
+// contents or layout. Unlike a user method with a `mutable T&` self (whose RefType param drives the
+// ref-arg fact invalidation), these are modeled with a VALUE receiver, so a mutation through them
+// would otherwise leave a stale flow fact about the receiver. Pure reads (count/get/contains/rows/
+// valid/entry) are intentionally excluded: they cannot break a fact, so dropping for them would only
+// cost completeness. A stdlib method like `pop` carries a real `T&` self and is already handled.
+var mutatingBuiltinCollectionMethods = map[string]bool{
+	"push": true, "extend": true, "reserve": true, "resize": true, "clear": true,
+	"truncate": true, "insert": true, "remove": true, "set": true, "put": true,
+	"add": true, "get_or_insert": true,
+}
+
+// mutatingBuiltinMethodReceiver returns the receiver PLACE of a mutating builtin collection method
+// call (`xs.clear()` → xs, `b.items.push(v)` → b.items), or ok=false. A mutating builtin is modeled
+// with a value receiver, so a call through it is invisible to the ref-arg machinery — both the
+// fact-invalidation and the frame-enforcement hooks treat it as a write to this place. Gated to a
+// collection-typed receiver so an unrelated user method of the same name is untouched (a real mutable
+// `T&` self is already handled by the ref-arg paths).
+func (a *Analyzer) mutatingBuiltinMethodReceiver(expr *ast.CallExpr) (ast.Expr, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	field, ok := stripParenExpr(expr.Func).(*ast.FieldExpr)
+	if !ok || field == nil || field.Object == nil || !mutatingBuiltinCollectionMethods[field.Field] {
+		return nil, false
+	}
+	if !a.receiverIsBuiltinCollection(field.Object) {
+		return nil, false
+	}
+	return field.Object, true
+}
+
+// invalidateFactsForMutatingBuiltinMethod drops every flow fact about the receiver of a mutating
+// builtin collection method, closing the hole where such a value-receiver method slipped past the
+// ref-arg invalidation (e.g. a `NonEmpty` fact surviving `xs.clear()`). It mirrors the per-channel
+// drops the ref-arg path performs (predicate, range, written-const, and SMT assert facts). Over-
+// dropping only adds runtime checks, so the conservative drop stays sound.
+func (a *Analyzer) invalidateFactsForMutatingBuiltinMethod(expr *ast.CallExpr) {
+	recv, ok := a.mutatingBuiltinMethodReceiver(expr)
+	if !ok {
+		return
+	}
+	a.invalidatePredFactsForTarget(recv)
+	a.invalidateRangeFactsForTarget(recv)
+	a.invalidateWrittenConst(rootIdentNameOrEmpty(recv))
+	a.invalidateSMTAssertFactsForTarget(recv)
+}
+
+// receiverIsBuiltinCollection reports whether an expression's resolved type is a builtin darray/dict/
+// set (peeling a ref) — the carriers whose builtin mutating methods this audit covers. An unknown type
+// (nil) returns false: the name-set gate alone is then the only filter, which stays sound because the
+// fact channels are only consulted for variables that were narrowed in the first place.
+func (a *Analyzer) receiverIsBuiltinCollection(obj ast.Expr) bool {
+	switch stripRefForBounds(a.exprTypes[obj]).(type) {
+	case *DArrayType, *DictType, *SetType:
+		return true
+	}
+	return false
+}
+
 // invalidatePredFactsForTarget drops predicate facts about the root variable of a mutation target
 // expression (an identifier, or a field/index path rooted at one). Conservative: any write under a
 // root invalidates the root's facts.
 func (a *Analyzer) invalidatePredFactsForTarget(target ast.Expr) {
-	if name, ok := rootIdentName(target); ok {
+	for _, name := range a.mutationRootsForTarget(target) {
 		a.invalidatePredFacts(name)
+	}
+}
+
+// mutationRootsForTarget returns every root variable a write to `target` mutates: its structural root
+// PLUS any place it ALIASES. A borrow local (`r: mutable T& = &x`) mutated through — `r <- …`,
+// `bump(r)`, `r.clear()` — writes the underlying place x, so fact invalidation must drop facts for x
+// too; otherwise a fact narrowed on x survives a mutation laundered through r (audit cluster C). Roots
+// are deduped; an empty result means the target had no identifiable root (callers treat that as
+// "invalidate conservatively").
+func (a *Analyzer) mutationRootsForTarget(target ast.Expr) []string {
+	seen := map[string]bool{}
+	var roots []string
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			roots = append(roots, name)
+		}
+	}
+	if name, ok := rootIdentName(target); ok {
+		add(name)
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			add(r)
+		}
+	}
+	return roots
+}
+
+// borrowLaunderedRoots returns the underlying place root(s) that a LOCAL borrow alias points at, read
+// from its recorded alias binding (`r: mutable T& = &x` → [x]; transitively through chained borrows).
+// Restricted to a SymbolLocal: the broad aliasRootsForExpr also relates ref PARAMETERS (e.g. distinct
+// `mutable u64&` out-params) and struct carriers, which would over-invalidate unrelated places. `seen`
+// guards against a cyclic binding.
+func (a *Analyzer) borrowLaunderedRoots(name string, seen map[string]bool) []string {
+	if a.currentScope == nil || name == "" || seen[name] {
+		return nil
+	}
+	seen[name] = true
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || sym.Kind != SymbolLocal {
+		return nil
+	}
+	binding, ok := a.currentAliasBindings[sym]
+	if !ok || len(binding.Roots) == 0 {
+		return nil
+	}
+	var out []string
+	for _, root := range binding.Roots {
+		if root == name {
+			continue
+		}
+		out = append(out, root)
+		out = append(out, a.borrowLaunderedRoots(root, seen)...)
+	}
+	return out
+}
+
+// invalidateWrittenConstForLaunderedRoots drops the written-const fact of every place a write to
+// `target` reaches THROUGH a borrow-local alias (not the target's own root, which its callers handle).
+func (a *Analyzer) invalidateWrittenConstForLaunderedRoots(target ast.Expr) {
+	if name, ok := rootIdentName(target); ok {
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			a.invalidateWrittenConst(r)
+		}
 	}
 }
 
@@ -172,6 +295,10 @@ func rootIdentName(expr ast.Expr) (string, bool) {
 // mutation, `mutable T&` pointees are non-aliased, and the stored RHS references only literals /
 // immutable consts (evalConstExpr never resolves a mutable local) so re-evaluation is stable.
 func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
+	// A write laundered through a borrow-local alias (`r := &y; r <- 9`) mutates the underlying place, so
+	// its written-const fact (`y == 5`) must drop too — the per-target handling below only touches the
+	// alias's own root (audit: writtenConst alias channel, sibling of cluster C).
+	a.invalidateWrittenConstForLaunderedRoots(target)
 	name, ok := target.(*ast.Ident)
 	if !ok || name == nil {
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(target))

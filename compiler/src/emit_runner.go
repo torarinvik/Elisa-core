@@ -522,6 +522,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		EnforcePerfLints:         options.perfStrict,
 		EnforceStrictConcurrency: options.concurrencyStrict,
 		EnforceStrictProofs:      options.proofStrict,
+		RequireExternContracts:   options.strictExterns,
 		EnableSMT:                options.enableSMT,
 	}
 }

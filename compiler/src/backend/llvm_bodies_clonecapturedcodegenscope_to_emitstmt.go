@@ -600,6 +600,11 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	}
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		if n.Ghost || (s.g != nil && s.g.result != nil && s.g.result.GhostDecls[n]) {
+			// A `ghost` declaration is verification-only: the analyzer proved no real value depends on
+			// it, so emit NOTHING (the variable, its initializer, and any side effects are erased).
+			return nil
+		}
 		var declType semantic.Type
 		var err error
 		if n.Type != nil {
@@ -987,6 +992,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			// ensures injected as facts). Emit nothing.
 			return nil
 		}
+		if s.g != nil && s.g.result != nil && s.g.result.GhostContracts[n.Expr] {
+			// An `assert` that reads a ghost var is verification-only — erase its runtime check.
+			return nil
+		}
 		_, _, err := s.emitExpr(n.Expr, nil)
 		return err
 	case *ast.DiscardStmt:
@@ -1002,6 +1011,11 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if n.Kind != ast.ContractInvariant || n.Cond == nil {
 			return nil
 		}
+		if s.g != nil && s.g.result != nil && s.g.result.GhostContracts[n.Cond] {
+			// A ghost-reading invariant is verification-only (the ghost it reads is erased and has no
+			// runtime storage); the obligation was discharged statically. Emit nothing.
+			return nil
+		}
 		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
 			return nil
 		}
@@ -1012,6 +1026,17 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		// block exits (docs/90 brick 90-14).
 		s.registerActiveInvariant(n.Cond)
 		return nil
+	case *ast.AssertByStmt:
+		// The `by:` proof block is verification-only (already consumed by the analyzer) and is ERASED:
+		// nothing from it is lowered. COND itself was statically proven; emit it as a debug-gated
+		// assertion check, consistent with an ordinary assert (and a no-op at higher opt levels).
+		if n.Cond == nil {
+			return nil
+		}
+		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+			return nil
+		}
+		return s.emitContractCheck(n.Cond, "assertion failed")
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
 	case *ast.StaticAssertBlockStmt:

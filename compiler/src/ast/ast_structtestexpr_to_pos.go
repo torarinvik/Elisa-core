@@ -268,6 +268,11 @@ type VarDeclStmt struct {
 	Type     TypeExpr
 	Value    Expr
 	Owner    Expr
+	// Ghost marks a verification-only local (`ghost x: T = expr`). It exists solely to give the
+	// prover a value to reason about (usable in requires/ensure/invariant/assert) and is fully
+	// ERASED from codegen. SOUNDNESS: no real variable/return/field/effect may depend on a ghost
+	// value (enforced in the analyzer), and the backend emits nothing for a ghost decl.
+	Ghost bool
 }
 type LetDestructureStmt struct {
 	Position lexer.Pos
@@ -460,23 +465,36 @@ type StaticAssertStmt struct {
 	Message  Expr
 }
 
+// AssertByStmt is a Dafny-style proof-carrying assert: `assert COND by:` followed by an indented
+// proof block. The block holds verification-only statements (lemma calls, nested asserts) that
+// establish intermediate facts used ONLY to prove COND. After the assert, ONLY COND is exported as a
+// fact (the block's facts are scoped out). The whole proof block is erased from codegen; COND itself
+// lowers to an ordinary (debug-gated) assertion check.
+type AssertByStmt struct {
+	Position lexer.Pos
+	Cond     Expr
+	Proof    []Stmt
+}
+
 // ContractKind distinguishes value-contract clauses.
 type ContractKind int
 
 const (
-	ContractRequire   ContractKind = iota // precondition: `requires <bool-expr>` at function start
-	ContractEnsure                         // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
-	ContractInvariant                      // in-body assertion: `invariant <bool-expr>`, checked in place
-	ContractDecreases                      // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
+	ContractRequire      ContractKind = iota // precondition: `requires <bool-expr>` at function start
+	ContractEnsure                            // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
+	ContractInvariant                         // in-body assertion: `invariant <bool-expr>`, checked in place
+	ContractDecreases                         // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
+	ContractDecreasesWild                     // termination opt-out: `decreases * "reason"` (Dafny-style wildcard)
 )
 
 // ContractStmt is a value-contract clause written as a leading body statement. The parser produces
 // it for `requires <bool-expr>`; the function-decl parser lifts leading ones into FuncDecl.Requires
 // (so it normally never reaches the statement analyzer/backend — see liftLeadingRequires).
 type ContractStmt struct {
-	Position lexer.Pos
-	Kind     ContractKind
-	Cond     Expr
+	Position   lexer.Pos
+	Kind       ContractKind
+	Cond       Expr
+	WildReason string // non-empty iff Kind == ContractDecreasesWild; the mandatory reason string
 }
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos

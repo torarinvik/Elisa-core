@@ -57,24 +57,32 @@ type vcTerm interface{ isVCTerm() }
 type (
 	vcIntLit struct{ Val int64 }
 	vcOpaque struct{ SMT string }
+	// vcOldEntry is a contract `old(expr)` value — the ENTRY-time translation of expr, held as a fixed
+	// SMT term. Unlike vcOpaque it is treated as fully-structural (an entry value is immutable, so it is
+	// substitution-safe) yet WP never rewrites it: a bare `p` in the same clause is the EXIT value and is
+	// threaded, while `old(p)` stays anchored to the entry value `v_p`.
+	vcOldEntry struct{ SMT string }
 	// vcVar is a substitutable integer variable (its Elisa name plus its SMT symbol). Weakest-
 	// precondition transport (brick 3) replaces it with an assigned term; it emits its SMT symbol.
 	vcVar struct{ Name, SMT string }
 	vcNeg struct{ Arg vcTerm }
-	// vcArith is a machine `+`/`-`/`*`. WrapBits>0 reproduces wrapMachineArith's unsigned wraparound
-	// `(mod (op l r) 2^WrapBits)`; 0 means the result is provably in range (emit the clean operation).
+	// vcArith is a machine `+`/`-`/`*`. WrapBits>0 reproduces wrapMachineArith's wraparound at that width;
+	// 0 means the result is provably in range (emit the clean operation). SignedWrap selects the
+	// two's-complement recentered wrap `((raw+2^(W-1)) mod 2^W) - 2^(W-1)` over the unsigned `mod 2^W`.
 	vcArith struct {
-		Op       string
-		L, R     vcTerm
-		WrapBits int
+		Op         string
+		L, R       vcTerm
+		WrapBits   int
+		SignedWrap bool
 	}
 )
 
-func (vcIntLit) isVCTerm() {}
-func (vcOpaque) isVCTerm() {}
-func (vcVar) isVCTerm()    {}
-func (vcNeg) isVCTerm()    {}
-func (vcArith) isVCTerm()  {}
+func (vcIntLit) isVCTerm()   {}
+func (vcOpaque) isVCTerm()   {}
+func (vcOldEntry) isVCTerm() {}
+func (vcVar) isVCTerm()      {}
+func (vcNeg) isVCTerm()      {}
+func (vcArith) isVCTerm()    {}
 
 // vcMkAtom wraps a translated SMT boolean term, folding the literals so `true`/`false` atoms become the
 // IR constants (which then drive the structural simplifications below).
@@ -129,6 +137,23 @@ func vcMkOr(l, r vcFormula) vcFormula {
 func isVCTrue(f vcFormula) bool  { _, ok := f.(vcTrue); return ok }
 func isVCFalse(f vcFormula) bool { _, ok := f.(vcFalse); return ok }
 
+// vcConjuncts flattens a formula's top-level conjunction into independent sub-goals, dropping the
+// trivially-true ones — `A ∧ (B ∧ C)` → [A, B, C]. A non-conjunction returns itself; a `vcTrue`
+// returns the empty slice (nothing to prove). This is the splitter behind multi-goal batching (brick
+// 4): proving every returned sub-goal proves the original conjunction, so the split is SOUND, and
+// because each sub-goal is a strictly smaller query the solver decides them where it might time out
+// (return `unknown`) on the whole conjunction — splitting only ever proves MORE. It also lets a failed
+// conjunction report exactly WHICH conjunct fails, with that conjunct's own counterexample.
+func vcConjuncts(f vcFormula) []vcFormula {
+	switch ff := f.(type) {
+	case vcTrue:
+		return nil
+	case vcAnd:
+		return append(vcConjuncts(ff.L), vcConjuncts(ff.R)...)
+	}
+	return []vcFormula{f}
+}
+
 // emitVCFormula renders a formula as SMT-LIB. For the propositional nodes it emits exactly what the
 // direct translation would; atoms emit their stored string verbatim — so a goal with no foldable
 // constant is byte-identical to the pre-IR path.
@@ -168,7 +193,7 @@ func vcMkNeg(t vcTerm) vcTerm {
 // the result provably does not wrap (WrapBits==0), and applying the algebraic identities that hold at
 // any width (`x+0`, `x-0`, `x*1`, `x*0`). Folding never crosses a wrap: a wrapping op keeps its
 // structure so the `(mod …)` is emitted.
-func vcMkArith(op string, l, r vcTerm, wrapBits int) vcTerm {
+func vcMkArith(op string, l, r vcTerm, wrapBits int, signedWrap bool) vcTerm {
 	li, lIsLit := l.(vcIntLit)
 	ri, rIsLit := r.(vcIntLit)
 	if wrapBits == 0 && lIsLit && rIsLit {
@@ -201,7 +226,7 @@ func vcMkArith(op string, l, r vcTerm, wrapBits int) vcTerm {
 			return l
 		}
 	}
-	return vcArith{Op: op, L: l, R: r, WrapBits: wrapBits}
+	return vcArith{Op: op, L: l, R: r, WrapBits: wrapBits, SignedWrap: signedWrap}
 }
 
 // foldArith evaluates a constant machine op in int64 with overflow detection; on overflow it declines
@@ -234,15 +259,20 @@ func foldArith(op string, a, b int64) (int64, bool) {
 }
 
 // vcMkCompare folds a comparison of two literals and recognizes reflexivity (identical operands) — a
-// `< x x` is false, `<= x x` is true, etc. Operand identity is checked by emitted form, which is sound
-// for the side-effect-free integer terms compared here.
+// `< x x` is false, `<= x x` is true, etc.
+//
+// SOUNDNESS: reflexivity requires the operands to be STRUCTURALLY identical (vcTermsIdentical), not
+// merely emit-equal. A bare `p` (vcVar, the EXIT value, threaded by WP) and `old(p)` (vcOldEntry, the
+// ENTRY value, never threaded) emit the SAME symbol `v_p` yet denote DIFFERENT values once WP runs —
+// folding `p >= old(p)` to `true` here would wrongly prove it after a decrement. Structural identity
+// guarantees both operands transform identically, so the fold stays valid through substitution.
 func vcMkCompare(op lexer.TokenKind, l, r vcTerm) vcFormula {
 	if li, ok := l.(vcIntLit); ok {
 		if ri, ok := r.(vcIntLit); ok {
 			return vcBoolConst(compareInts(op, li.Val, ri.Val))
 		}
 	}
-	if emitVCTerm(l) == emitVCTerm(r) {
+	if vcTermsIdentical(l, r) {
 		switch op {
 		case lexer.TOKEN_GTEQ, lexer.TOKEN_LTEQ:
 			return vcTrue{}
@@ -251,6 +281,34 @@ func vcMkCompare(op lexer.TokenKind, l, r vcTerm) vcFormula {
 		}
 	}
 	return vcCompare{Op: op, L: l, R: r}
+}
+
+// vcTermsIdentical reports whether two terms are the SAME structure — so WP substitution rewrites them
+// identically (the precondition for a sound reflexivity fold). A vcVar and a vcOldEntry that print the
+// same symbol are NOT identical: one is threaded, the other anchored to the entry value.
+func vcTermsIdentical(a, b vcTerm) bool {
+	switch av := a.(type) {
+	case vcIntLit:
+		bv, ok := b.(vcIntLit)
+		return ok && av.Val == bv.Val
+	case vcVar:
+		bv, ok := b.(vcVar)
+		return ok && av.Name == bv.Name
+	case vcOldEntry:
+		bv, ok := b.(vcOldEntry)
+		return ok && av.SMT == bv.SMT
+	case vcOpaque:
+		bv, ok := b.(vcOpaque)
+		return ok && av.SMT == bv.SMT
+	case vcNeg:
+		bv, ok := b.(vcNeg)
+		return ok && vcTermsIdentical(av.Arg, bv.Arg)
+	case vcArith:
+		bv, ok := b.(vcArith)
+		return ok && av.Op == bv.Op && av.WrapBits == bv.WrapBits && av.SignedWrap == bv.SignedWrap &&
+			vcTermsIdentical(av.L, bv.L) && vcTermsIdentical(av.R, bv.R)
+	}
+	return false
 }
 
 func vcBoolConst(b bool) vcFormula {
@@ -282,6 +340,8 @@ func emitVCTerm(t vcTerm) string {
 		return smtInt(tt.Val)
 	case vcOpaque:
 		return tt.SMT
+	case vcOldEntry:
+		return tt.SMT
 	case vcVar:
 		return tt.SMT
 	case vcNeg:
@@ -289,6 +349,9 @@ func emitVCTerm(t vcTerm) string {
 	case vcArith:
 		raw := "(" + tt.Op + " " + emitVCTerm(tt.L) + " " + emitVCTerm(tt.R) + ")"
 		if tt.WrapBits > 0 {
+			if tt.SignedWrap {
+				return smtSignedWrap(raw, tt.WrapBits)
+			}
 			return "(mod " + raw + " " + smtPow2(tt.WrapBits) + ")"
 		}
 		return raw
@@ -297,17 +360,19 @@ func emitVCTerm(t vcTerm) string {
 	}
 }
 
-// arithWrapBits mirrors wrapMachineArith's wrap decision: an unsigned `+`/`-`/`*` result of width 1..64
-// that is not provably in range wraps modulo 2^width; everything else emits clean (0).
-func (tr *smtTranslator) arithWrapBits(n *ast.BinaryExpr) int {
+// arithWrapInfo mirrors wrapMachineArith's wrap decision for the VC IR: a `+`/`-`/`*` result of width
+// 1..64 that is NOT provably in range wraps at that width — unsigned modulo 2^W, signed two's-complement
+// — so the IR models the real machine value rather than the unbounded-ℤ value (which would prove a false
+// `ensure result > 0` over an overflowing signed sum). A provably-in-range result emits clean (0).
+func (tr *smtTranslator) arithWrapInfo(n *ast.BinaryExpr) (int, bool) {
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
-	if !ok || signed || bits <= 0 || bits > 64 {
-		return 0
+	if !ok || bits <= 0 || bits > 64 {
+		return 0, false
 	}
 	if tr.a.provablyNoArithWrap(n, signed, bits) {
-		return 0
+		return 0, false
 	}
-	return bits
+	return bits, signed
 }
 
 // lowerVCTerm lowers an integer Elisa expression into the term IR: literals and the wrapping machine
@@ -317,6 +382,18 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return tr.lowerVCTerm(n.Inner, env)
+	case *ast.CallExpr:
+		// `old(inner)` is the value of `inner` at function ENTRY. Lower it as the ENTRY translation of
+		// `inner` held as an OPAQUE term, so weakest-precondition transport does NOT rewrite it (a bare
+		// `p` in the same clause is the EXIT value and IS threaded). For a param `p` both emit the same
+		// symbol `v_p`, which WP anchors to the entry value — making `ensure p >= old(p)` provable when the
+		// body keeps/raises p and declined when it lowers p (docs: real old() snapshot modeling).
+		if tr.oldAsEntry && ast.IsOldCall(n) && len(n.Args) == 1 {
+			if s, ok := tr.termEnv(n.Args[0], env); ok {
+				return vcOldEntry{SMT: s}, true
+			}
+			return nil, false
+		}
 	case *ast.IntLit:
 		if c, ok := tr.a.constIntValue(n); ok {
 			return vcIntLit{Val: c}, true
@@ -352,7 +429,8 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 		if op != "" {
 			if l, ok := tr.lowerVCTerm(n.Left, env); ok {
 				if r, ok := tr.lowerVCTerm(n.Right, env); ok {
-					return vcMkArith(op, l, r, tr.arithWrapBits(n)), true
+					wrapBits, signedWrap := tr.arithWrapInfo(n)
+					return vcMkArith(op, l, r, wrapBits, signedWrap), true
 				}
 			}
 		}
@@ -448,7 +526,7 @@ func substVCTerm(t vcTerm, name string, repl vcTerm) vcTerm {
 	case vcNeg:
 		return vcMkNeg(substVCTerm(tt.Arg, name, repl))
 	case vcArith:
-		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits)
+		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits, tt.SignedWrap)
 	default:
 		return t
 	}
@@ -475,7 +553,7 @@ func substVCFormula(f vcFormula, name string, repl vcTerm) vcFormula {
 // opaque string might mention the assigned variable in a way substitution would silently miss).
 func vcTermFullyStructural(t vcTerm) bool {
 	switch tt := t.(type) {
-	case vcIntLit, vcVar:
+	case vcIntLit, vcVar, vcOldEntry:
 		return true
 	case vcNeg:
 		return vcTermFullyStructural(tt.Arg)

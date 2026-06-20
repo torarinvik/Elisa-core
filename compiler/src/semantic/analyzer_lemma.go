@@ -71,20 +71,28 @@ func (a *Analyzer) assumeLemmaEnsures(call *ast.CallExpr, args []ast.Expr) bool 
 	}
 	a.lemmaCalls[call] = true
 
-	// Circular-reasoning guard: never assume the ensure of a lemma that is currently being analyzed
-	// (a self- or mutual-recursive call). Assuming the conclusion while trying to prove it would let a
-	// lemma "prove" anything. The call is still erased; it just contributes no fact. (Sound inductive
-	// lemmas — assuming the ensure for a provably-smaller argument — are a future extension.)
-	if a.lemmasInAnalysis[decl] {
-		return true
-	}
-
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
 			continue
 		}
 		subst[param.Name] = args[i]
+	}
+
+	// Circular-reasoning guard vs. SOUND INDUCTION. A self-recursive call to the lemma currently under
+	// analysis (`a.lemmasInAnalysis[decl]`) must NOT, in general, assume the lemma's own conclusion —
+	// that is assuming what we are trying to prove, and would let a lemma "prove" anything. The ONE
+	// sound exception is the inductive hypothesis: if the lemma has a VERIFIED `decreases` measure and
+	// the argument at THIS call is provably strictly smaller than the lemma's own parameters under that
+	// measure, then by well-founded induction the ensure already holds for the smaller argument, so we
+	// may assume it. Soundness rests entirely on the termination gate: a strictly-decreasing,
+	// bounded-below measure makes the recursion well-founded, and well-founded induction lets us assume
+	// the IH for every smaller input. Without a verified decreases we inject NOTHING (status quo guard).
+	if a.lemmasInAnalysis[decl] {
+		if a.inductiveHypothesisAvailable(decl, call) {
+			a.injectLemmaEnsureFacts(decl, call, subst)
+		}
+		return true
 	}
 
 	// SOUNDNESS: the lemma's ensure may be assumed here ONLY if the lemma's `requires` provably hold
@@ -107,21 +115,83 @@ func (a *Analyzer) assumeLemmaEnsures(call *ast.CallExpr, args []ast.Expr) bool 
 		return true
 	}
 
+	a.injectLemmaEnsureFacts(decl, call, subst)
+	return true
+}
+
+// injectLemmaEnsureFacts records each of the lemma's `ensure` clauses, with the lemma's parameters
+// substituted by the call's actual arguments, as a flow fact at the call site. Used both by an
+// ordinary (already-verified) lemma call and by a SOUND inductive-hypothesis self-call (see
+// inductiveHypothesisAvailable). The substitution is complete-or-decline per clause (see
+// substituteLemmaEnsure): a clause that cannot be faithfully rewritten into the caller's terms is
+// dropped, which only forgoes a fact and never records one whose meaning shifts.
+func (a *Analyzer) injectLemmaEnsureFacts(decl *ast.FuncDecl, call *ast.CallExpr, subst map[string]ast.Expr) {
 	for _, clause := range decl.EnsureValues {
 		if clause == nil {
 			continue
 		}
-		// Substitute the lemma's params with the caller's args so the recorded fact is expressed in the
-		// caller's terms. If any sub-term cannot be faithfully rewritten (an unhandled node, or a free
-		// identifier that is neither a parameter nor a literal), the assume is DROPPED — sound, it only
-		// forgoes a fact rather than recording one whose meaning shifts in the caller's scope.
 		rewritten, ok := substituteLemmaEnsure(clause, subst)
 		if !ok {
 			continue
 		}
 		a.recordSMTAssertFact(rewritten)
 	}
-	return true
+}
+
+// inductiveHypothesisAvailable reports whether a self-recursive call to the lemma currently under
+// analysis may soundly assume the lemma's `ensure` (the inductive hypothesis). Two airtight gates:
+//
+//  1. TERMINATION: the lemma must carry a `decreases` measure that is verified to strictly decrease
+//     (and stay bounded below) at EVERY direct self-recursive call. This makes the recursion
+//     well-founded — there is no infinite descent — which is exactly the side condition that licenses
+//     well-founded induction. Without it, the "lemma" could be vacuously self-justifying nonsense
+//     (`circular(x); ensure x != x`), so we refuse to inject anything.
+//
+//  2. THIS CALL DECREASES: the argument at THIS particular call site must itself be provably strictly
+//     smaller than the lemma's parameters under the measure. (Gate 1 already proves every self-call
+//     decreases, so this is implied; we re-check defensively so the IH is tied to the concrete call.)
+//
+// Both checks reuse the exact termination machinery (proveMeasureDecreases / substForSelfCall) run
+// against the live body scope, so the IH can never be stronger than what termination established.
+func (a *Analyzer) inductiveHypothesisAvailable(decl *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || decl == nil || call == nil || len(decl.Decreases) == 0 {
+		return false
+	}
+	if decl != a.currentFuncDecl {
+		return false // only the lemma actively under analysis induces over itself
+	}
+	if !a.lemmaTerminationVerified(decl) {
+		return false
+	}
+	subst := a.substForSelfCall(decl, call)
+	return a.proveMeasureDecreases(decl.Decreases, subst)
+}
+
+// lemmaTerminationVerified eagerly proves (and caches) that the lemma's `decreases` measure strictly
+// decreases at every direct self-recursive call, mirroring checkTermination but WITHOUT emitting
+// diagnostics — it is a precondition query for the inductive hypothesis, run mid-body. The cache keeps
+// it from re-proving per self-call. checkTermination still runs at end-of-body and is the authority
+// that REPORTS an unprovable measure; this read-only mirror only ever gates the IH (a false result
+// just forgoes the IH, never fabricates a proof).
+func (a *Analyzer) lemmaTerminationVerified(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || len(decl.Decreases) == 0 {
+		return false
+	}
+	if a.lemmaTerminationCache == nil {
+		a.lemmaTerminationCache = map[*ast.FuncDecl]bool{}
+	}
+	if v, ok := a.lemmaTerminationCache[decl]; ok {
+		return v
+	}
+	calls := a.collectSelfRecursiveCalls(decl)
+	if len(calls) == 0 {
+		// No self-call ⇒ nothing to induct over; the IH path is irrelevant.
+		a.lemmaTerminationCache[decl] = false
+		return false
+	}
+	ok := a.measureVerifiedForCalls(decl, calls)
+	a.lemmaTerminationCache[decl] = ok
+	return ok
 }
 
 // substituteLemmaEnsure clones a lemma `ensure` expression, replacing each parameter identifier with

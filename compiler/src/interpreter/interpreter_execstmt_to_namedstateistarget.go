@@ -27,6 +27,12 @@ func (i *Interpreter) execStmt(frame *frame, stmt ast.Stmt) (controlSignal, erro
 func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, error) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		// Ghost declarations are verification-only and must be erased at runtime,
+		// matching the LLVM backend's erasure semantics. The analyzer guarantees no
+		// real code reads a ghost variable, so skipping execution is always safe.
+		if n.Ghost {
+			return controlSignal{}, nil
+		}
 		value, err := i.evaluateInitializer(frame, n.Type, n.Value)
 		if err != nil {
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)

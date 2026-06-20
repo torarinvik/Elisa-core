@@ -375,6 +375,13 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 		if value, ok := a.evalConstExpr(expr.Index); ok && value.Kind == ConstInt {
 			return value.Int >= 0 && (!array.HasConstSize || value.Int < array.ConstSize)
 		}
+		// A REFINEMENT-typed index whose proven interval [lo,hi] lies within [0, ConstSize) is in
+		// bounds with no runtime check (e.g. `regs[d.sdst]`, sdst : u32 is InRange[0,127], into [128]).
+		if array.HasConstSize {
+			if lo, hi, ok := a.indexExprRefinementBounds(expr.Index); ok && lo >= 0 && hi < array.ConstSize {
+				return true
+			}
+		}
 	}
 	// A view bound from a constant-bounded slice has a statically-known length;
 	// a constant index within [0, len) is provably in bounds (zero-cost).

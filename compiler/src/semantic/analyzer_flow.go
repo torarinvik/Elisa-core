@@ -8,6 +8,24 @@ import (
 func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		if n.Ghost {
+			// A ghost decl is verification-only: record it for codegen erasure, and analyze its
+			// initializer in a ghost-read-allowed context (a ghost may be defined in terms of another
+			// ghost). The bound symbol is flagged Ghost so any later READ outside a contract is rejected.
+			if a.ghostDecls == nil {
+				a.ghostDecls = map[*ast.VarDeclStmt]bool{}
+			}
+			a.ghostDecls[n] = true
+			a.ghostReadAllowed++
+			defer func() { a.ghostReadAllowed-- }()
+			// SOUNDNESS of erasure: a ghost initializer is dropped from codegen, so it must have no
+			// observable runtime effect. Restrict it to a side-effect-free expression grammar (reads,
+			// arithmetic, field/index access, `old(...)`). A general call could mutate real state, which
+			// erasing would silently change — reject it.
+			if n.Value != nil && !ghostInitIsErasureSafe(n.Value) {
+				a.errorf(n.Value.Pos(), "ghost variable %q initializer must be side-effect-free (it is erased from codegen): use reads, arithmetic, field/index access, or `old(...)`, not a general call or mutation", n.Name)
+			}
+		}
 		var declType Type
 		var valueType Type
 		if n.Type != nil {
@@ -58,7 +76,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// `in <region>:` scope carries that region in its type; escape checks and
 		// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 		bindingType = a.stampContainerRegion(bindingType)
-		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable}
+		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, Ghost: n.Ghost}
 		a.defineLocal(sym, n.Pos())
 		a.recordRefinementChecks(n)
 		if n.Value != nil && isZeroedInitializer(n.Value) {
@@ -400,6 +418,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRangeFactsForTarget(n.Target)
 		a.checkFrameWrite(n.Target)
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
+		a.invalidateWrittenConstForLaunderedRoots(n.Target)
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 		a.invalidateSMTAssertFactsForTarget(n.Target)
 	case *ast.AsRefAssignStmt:
@@ -675,6 +694,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// is analyzed — the body's own mutations (`i <- i + 1`) invalidate the entry facts upward, so
 		// establishment must read the pristine pre-loop scope. Exit facts are seeded after the body.
 		provenInvariants, loopExitFactsSound := a.proveLoopInvariants(n)
+		// Verify a leading `decreases` measure proves the loop terminates (strict decrease + bounded
+		// below on every iteration), on the same pristine pre-loop scope.
+		a.checkLoopTermination(n)
 		// The count-up exit fact `i <= bound` is sound only if `i <= bound` at ENTRY; evaluate on the
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)
@@ -717,7 +739,15 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.analyzeExpr(n.Message)
 	case *ast.ExprStmt:
 		if cond, ok := assertedCondition(n.Expr); ok {
+			// An `assert` is a contract: ghost vars are readable here (it is debug-checked / erased
+			// in release, never observable by real values).
+			a.ghostReadAllowed++
+			a.ghostReadSeen = false
+			defer func() { a.ghostReadAllowed-- }()
 			condType := a.analyzeCondExpr(cond)
+			if a.ghostReadSeen {
+				a.markGhostContract(n.Expr)
+			}
 			if !IsBoolType(condType) {
 				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
 			}
@@ -754,7 +784,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Kind != ast.ContractInvariant {
 			a.errorf(n.Pos(), "`requires`/`ensure` contracts must be the first statements of the function body")
 		} else if n.Cond != nil {
+			a.ghostReadAllowed++
+			a.ghostReadSeen = false
+			defer func() { a.ghostReadAllowed-- }()
 			condType := a.analyzeCondExpr(n.Cond)
+			if a.ghostReadSeen {
+				a.markGhostContract(n.Cond)
+			}
 			if condType != nil && !IsBoolType(condType) {
 				a.errorf(n.Cond.Pos(), "invariant must be bool, got %s", condType)
 			}
@@ -764,6 +800,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.recordSMTAssertFact(n.Cond)
 			}
 		}
+	case *ast.AssertByStmt:
+		a.analyzeAssertBy(n)
 	case *ast.StaticAssertStmt:
 		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 	case *ast.StaticAssertBlockStmt:
@@ -781,6 +819,58 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.errorf(n.Pos(), "error union result must be handled with `try`, `match`, or `catch`; discarding it with `_ =` swallows the error")
 		}
 		a.consumeAffineValueExpr(n.Value, valueType, "discard")
+	}
+}
+
+// ghostInitIsErasureSafe reports whether a ghost variable's initializer is a side-effect-free
+// expression that is safe to erase from codegen. It permits reads (idents, literals), arithmetic and
+// comparisons, parenthesization, field/index access, and the contract pseudo-call `old(...)`. A
+// general call is rejected, since it might mutate real state whose effect erasure would silently
+// drop. This mirrors the "verification code must be pure" property the lemma machinery relies on.
+// markGhostContract flags a contract condition that reads a ghost variable, so codegen erases its
+// runtime check (a ghost has no runtime storage; the obligation is already discharged statically).
+func (a *Analyzer) markGhostContract(cond ast.Expr) {
+	if cond == nil {
+		return
+	}
+	if a.ghostContracts == nil {
+		a.ghostContracts = map[ast.Expr]bool{}
+	}
+	a.ghostContracts[cond] = true
+}
+
+func ghostInitIsErasureSafe(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return true
+	case *ast.Ident, *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.CharLit, *ast.StringLit, *ast.NullLit:
+		return true
+	case *ast.ParenExpr:
+		return ghostInitIsErasureSafe(n.Inner)
+	case *ast.UnaryExpr:
+		return ghostInitIsErasureSafe(n.Operand)
+	case *ast.BinaryExpr:
+		return ghostInitIsErasureSafe(n.Left) && ghostInitIsErasureSafe(n.Right)
+	case *ast.FieldExpr:
+		return ghostInitIsErasureSafe(n.Object)
+	case *ast.IndexExpr:
+		return ghostInitIsErasureSafe(n.Object) && ghostInitIsErasureSafe(n.Index)
+	case *ast.QuantifierExpr:
+		return ghostInitIsErasureSafe(n.Body)
+	case *ast.CallExpr:
+		// Only the contract pseudo-call `old(expr)` is allowed; it has no runtime effect (the backend
+		// snapshots its argument at entry for `ensure`, and it is itself ghost here).
+		if id, ok := n.Func.(*ast.Ident); ok && id.Name == "old" {
+			for _, arg := range n.Args {
+				if !ghostInitIsErasureSafe(arg) {
+					return false
+				}
+			}
+			return true
+		}
+		return false
+	default:
+		return false
 	}
 }
 

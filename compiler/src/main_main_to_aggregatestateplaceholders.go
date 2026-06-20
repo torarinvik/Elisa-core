@@ -145,7 +145,13 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 	if file == nil {
 		return
 	}
-	result := semantic.Analyze(file)
+	// The SMT discharge tier is ON by default (matching real builds), so this inspection/default pass
+	// reports refinement provability the SAME way a build does. Without it, a refinement the build proves
+	// (e.g. a nonlinear `a*b is Bounded[...]`) would surface a spurious "could not be proven statically"
+	// warning here. Kept NON-strict: provability stays a warning (the AST/format still prints) rather than
+	// a hard error. z3 is opened lazily — a file with no hard refinements never spawns it, so formatting
+	// contract-free code costs nothing.
+	result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnableSMT: true})
 	if len(result.Errors()) != 0 {
 		return
 	}
@@ -227,6 +233,7 @@ type cliOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	proofStrict       bool
+	strictExterns     bool
 	explainProofs     bool
 	enableSMT         bool
 	concurrencyStrict bool
@@ -329,6 +336,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Opt out of default-on strict proofs: an unprovable refinement/contract degrades to
 			// a warning + debug runtime check instead of failing the build.
 			options.proofStrict = false
+		case arg == "-strict-externs":
+			// Opt-in extern contract discipline: every extern must declare a `requires`/`ensure`
+			// boundary contract or be `@trusted("reason")`. NOT implied by -strict (see RequireExternContracts).
+			options.strictExterns = true
 		case arg == "--explain" || arg == "-explain":
 			// docs/85 observability: after analysis, print every refinement-discharge decision
 			// (proven / refuted / runtime) so the user can audit what is statically guaranteed.

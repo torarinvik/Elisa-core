@@ -17,17 +17,17 @@ func TestVCTermFoldEmit(t *testing.T) {
 		got  vcTerm
 		want string
 	}{
-		{"fold-add", vcMkArith("+", vcIntLit{2}, vcIntLit{3}, 0), "5"},
-		{"fold-mul", vcMkArith("*", vcIntLit{4}, vcIntLit{5}, 0), "20"},
-		{"add-zero-right", vcMkArith("+", x, vcIntLit{0}, 0), "v_x"},
-		{"add-zero-left", vcMkArith("+", vcIntLit{0}, x, 0), "v_x"},
-		{"sub-zero", vcMkArith("-", x, vcIntLit{0}, 0), "v_x"},
-		{"mul-one", vcMkArith("*", x, vcIntLit{1}, 0), "v_x"},
-		{"mul-zero", vcMkArith("*", x, vcIntLit{0}, 0), "0"},
+		{"fold-add", vcMkArith("+", vcIntLit{2}, vcIntLit{3}, 0, false), "5"},
+		{"fold-mul", vcMkArith("*", vcIntLit{4}, vcIntLit{5}, 0, false), "20"},
+		{"add-zero-right", vcMkArith("+", x, vcIntLit{0}, 0, false), "v_x"},
+		{"add-zero-left", vcMkArith("+", vcIntLit{0}, x, 0, false), "v_x"},
+		{"sub-zero", vcMkArith("-", x, vcIntLit{0}, 0, false), "v_x"},
+		{"mul-one", vcMkArith("*", x, vcIntLit{1}, 0, false), "v_x"},
+		{"mul-zero", vcMkArith("*", x, vcIntLit{0}, 0, false), "0"},
 		{"neg-lit", vcMkNeg(vcIntLit{7}), "(- 7)"},
 		{"double-neg", vcMkNeg(vcMkNeg(x)), "v_x"},
-		{"structural-add", vcMkArith("+", x, vcIntLit{1}, 0), "(+ v_x 1)"},
-		{"wrap-preserved", vcMkArith("+", x, vcIntLit{1}, 64), "(mod (+ v_x 1) 18446744073709551616)"},
+		{"structural-add", vcMkArith("+", x, vcIntLit{1}, 0, false), "(+ v_x 1)"},
+		{"wrap-preserved", vcMkArith("+", x, vcIntLit{1}, 64, false), "(mod (+ v_x 1) 18446744073709551616)"},
 	}
 	for _, tc := range cases {
 		if got := emitVCTerm(tc.got); got != tc.want {

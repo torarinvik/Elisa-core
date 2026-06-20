@@ -125,6 +125,57 @@ def count_up(n: usize) -> usize:
 	}
 }
 
+// TestLoopPreservationObligationFoldsInVCIR demonstrates the migration of the loop-preservation
+// prover onto the central VC IR: a reflexive invariant `i <= i` substitutes under the body
+// `i <- i + 1` to the obligation `i + 1 <= i + 1`, which the VC-IR smart constructor vcMkCompare
+// folds to `true` (structural reflexivity). The obligation is therefore PROVEN with NO solver run —
+// the same fold smtCheckGoal already gets, now reaching the loop path. We assert the invariant is
+// proven preserved by the SMT tier AND that this particular proof did not require a solver call
+// (Proven advances past SolverProven), which is only possible because the obligation reached the IR
+// folder rather than the opaque boolTerm string.
+func TestLoopPreservationObligationFoldsInVCIR(t *testing.T) {
+	src := `
+def count_up(n: usize) -> usize:
+    i: mutable usize = 0
+    while i < n:
+        invariant i <= i
+        i <- i + 1
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_fold_vcir.elisa", src, false)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the reflexive invariant to be proven preserved via the VC IR, got %d: %+v", got, result.ProofReport)
+	}
+	// The reflexive obligation folds to `true` in the IR, so it contributes to Proven without a
+	// SolverProven (a real z3 call). If the loop path were still emitting the opaque boolTerm string,
+	// every preservation goal would hit the solver and Proven would equal SolverProven.
+	if result.SMTProfile.Proven <= result.SMTProfile.SolverProven {
+		t.Fatalf("expected at least one preservation obligation proven by the VC-IR fold (no solver call); profile=%+v", result.SMTProfile)
+	}
+}
+
+// TestLoopPreservationFoldSoundness is the soundness negative for the migrated path: the VC-IR fold
+// must NOT prove a non-inductive invariant. `i + 1 <= i` is structurally distinct (not reflexive),
+// so vcMkCompare leaves it for the solver, which finds it false — the invariant falls back to a
+// runtime check. This guards against the fold ever over-firing on the loop obligation.
+func TestLoopPreservationFoldSoundness(t *testing.T) {
+	src := `
+def count_up(n: usize) -> usize:
+    i: mutable usize = 0
+    while i < n:
+        invariant i + 1 <= i
+        i <- i + 1
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_fold_unsound.elisa", src, false)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 0 {
+		t.Fatalf("the VC-IR fold must not prove a non-inductive invariant preserved: %+v", result.ProofReport)
+	}
+}
+
 func parseFileForTest(t *testing.T, filename, src string) *ast.File {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))

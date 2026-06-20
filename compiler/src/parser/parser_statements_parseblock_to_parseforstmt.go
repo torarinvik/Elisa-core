@@ -19,6 +19,12 @@ func (p *Parser) parseBlock() []ast.Stmt {
 		if stmt != nil {
 			stmts = append(stmts, stmt)
 		}
+		// Drain any statements a desugaring (e.g. the grouped `ghost:` block) buffered, so they land
+		// flat in this block rather than behind a wrapper node.
+		if len(p.pendingStmts) > 0 {
+			stmts = append(stmts, p.pendingStmts...)
+			p.pendingStmts = nil
+		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return stmts
@@ -56,6 +62,13 @@ func (p *Parser) parseContextualStmt() ast.Stmt {
 func (p *Parser) parseStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT {
 		switch p.cur().Text {
+		case "assert":
+			// `assert COND by:` — a Dafny-style proof-carrying assert (the `by:` proof block is
+			// verification-only). Only matched when a top-level `by:` opener is present on this logical
+			// line; a plain `assert(COND)` call has no `by:` and falls through to expression parsing.
+			if p.looksLikeAssertByStmt() {
+				return p.parseAssertByStmt()
+			}
 		case "can":
 			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
 				return p.parseCanStmt()
@@ -133,10 +146,23 @@ func (p *Parser) parseStmt() ast.Stmt {
 			}
 		case "decreases":
 			// `decreases <int-expr>` termination measure (lifted into the decl when leading; docs/86
-			// brick 86-7). Skip if it's actually a variable named `decreases`.
+			// brick 86-7). Also handles `decreases * "reason"` — a Dafny-style wildcard that opts out
+			// of the termination proof obligation (see ast.FuncDecl.DecreasesWild).
+			// Skip if it's actually a variable named `decreases`.
 			if p.looksLikeContractStmt() {
 				pos := p.cur().Pos
 				p.advance()
+				// `decreases *` — wildcard opt-out. The next token must be `*` (TOKEN_STAR).
+				if p.peek() == lexer.TOKEN_STAR {
+					p.advance() // consume `*`
+					var reason string
+					if p.peek() == lexer.TOKEN_STRING_LIT {
+						reason = p.cur().Text
+						p.advance()
+					}
+					p.expectNewline()
+					return &ast.ContractStmt{Position: pos, Kind: ast.ContractDecreasesWild, WildReason: reason}
+				}
 				measure := p.parseExpr()
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractDecreases, Cond: measure}
@@ -172,6 +198,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 		case "lock":
 			if p.looksLikeLockStmt() {
 				return p.parseLockStmt()
+			}
+		case "ghost":
+			if p.looksLikeGhostStmt() {
+				return p.parseGhostStmt()
 			}
 		case "region":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
@@ -249,6 +279,79 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseExprOrAssignStmt()
 	}
 }
+// looksLikeGhostStmt distinguishes the `ghost` verification-var keyword from an ordinary variable
+// that happens to be named `ghost`. The keyword forms are:
+//   - single decl: `ghost <ident> : ...` or `ghost <ident> = ...`
+//   - grouped block: `ghost :` followed by a newline (the indented block of decls)
+// A real variable named `ghost` would be `ghost = ...`, `ghost <- ...`, or `ghost: Type` used as a
+// field-style decl on the same line WITHOUT a following identifier — i.e. `ghost` then COLON then a
+// type. We only treat `ghost` COLON as the keyword when a newline follows (the block form); a
+// `ghost: i32 = 5` ordinary decl keeps working because COLON is followed by a type ident, not a
+// newline. `ghost = ...` (assignment to a var named ghost) never matches.
+func (p *Parser) looksLikeGhostStmt() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	switch next.Kind {
+	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE:
+		// `ghost x ...` / `ghost mutable ...` — but reject `ghost mutable` as a standalone if it is
+		// really `ghost` being assigned (cannot happen: MUTABLE can't follow a value name). Accept.
+		return true
+	case lexer.TOKEN_COLON:
+		// Block form only when a newline (then indent) follows the colon.
+		if p.pos+2 < len(p.tokens) {
+			return p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// parseGhostStmt parses a `ghost` verification-only local declaration (single or grouped block) and
+// stamps every produced var decl with Ghost=true. The grouped block's extra decls are buffered in
+// p.pendingStmts; parseBlock drains them so they land flat in the enclosing block.
+func (p *Parser) parseGhostStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("ghost")
+
+	// Grouped block: `ghost:` then an indented run of `name: T = expr` decls.
+	if p.peek() == lexer.TOKEN_COLON {
+		p.advance()
+		p.expectNewline()
+		body := p.parseBlock()
+		var first ast.Stmt
+		for _, st := range body {
+			vd, ok := st.(*ast.VarDeclStmt)
+			if !ok {
+				p.errorf("a `ghost:` block may contain only ghost variable declarations")
+				continue
+			}
+			vd.Ghost = true
+			if first == nil {
+				first = vd
+			} else {
+				p.pendingStmts = append(p.pendingStmts, vd)
+			}
+		}
+		if first == nil {
+			return &ast.PassStmt{Position: pos}
+		}
+		return first
+	}
+
+	// Single decl: reuse the ordinary var-decl parser, then stamp it ghost.
+	stmt := p.parseExprOrAssignStmt()
+	vd, ok := stmt.(*ast.VarDeclStmt)
+	if !ok {
+		p.errorf("`ghost` must be followed by a variable declaration (`ghost x: T = expr`)")
+		return stmt
+	}
+	vd.Ghost = true
+	return vd
+}
+
 func (p *Parser) parseEmitStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("emit")
@@ -322,6 +425,51 @@ func (p *Parser) looksLikePoolStmt() bool {
 	}
 	return false
 }
+// looksLikeAssertByStmt reports whether the current `assert` begins a proof-carrying
+// `assert COND by:` form, by scanning the logical line for a top-level `by` identifier immediately
+// followed by `:`. A plain `assert(COND)` call has no such opener, so it falls through to ordinary
+// expression-statement parsing. Bracket depth is tracked so a `by:` buried inside a nested call/index
+// (where it cannot be the proof opener) is ignored.
+func (p *Parser) looksLikeAssertByStmt() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_IDENT:
+			if depth == 0 && tok.Text == "by" && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_COLON {
+				return true
+			}
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+// parseAssertByStmt parses `assert COND by:` + an indented proof block. The proof block is a normal
+// statement block (it may hold lemma calls and nested asserts); it is verification-only and erased
+// from codegen.
+func (p *Parser) parseAssertByStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.advance() // `assert`
+	cond := p.parseExpr()
+	if !(p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by") {
+		p.errorf("expected `by:` proof block after assert condition")
+		return &ast.AssertByStmt{Position: pos, Cond: cond}
+	}
+	p.advance() // `by`
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	proof := p.parseBlock()
+	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof}
+}
+
 func (p *Parser) looksLikeGuardStmt() bool {
 	depth := 0
 	for i := p.pos + 1; i < len(p.tokens); i++ {

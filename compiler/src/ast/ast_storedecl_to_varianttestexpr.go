@@ -147,7 +147,13 @@ type FuncDecl struct {
 	// (docs/86 brick 86-7). Multiple components form a lexicographic tuple. When present, every
 	// self-recursive call must provably decrease the measure (and keep it bounded below), proving
 	// termination at compile time. Empty = no termination obligation (status quo).
-	Decreases    []Expr
+	Decreases []Expr
+	// DecreasesWild is non-empty when the function carries a `decreases * "reason"` opt-out clause
+	// (Dafny-style wildcard). The reason string is mandatory — a missing reason is a compile error.
+	// This suppresses the "cannot prove termination" diagnostic but does NOT grant verifiedTerminating
+	// status: defining-equation axiomatization remains disabled (soundness-critical: non-termination
+	// implies no fixed point, so assuming the equation would be unsound).
+	DecreasesWild string
 	Params       []ParamDecl
 	ReturnType   TypeExpr
 	Body         []Stmt

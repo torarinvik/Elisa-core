@@ -337,7 +337,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 	// `ensure <bool-expr>`), then lifted out into the decl here. They are NOT post-signature
 	// clauses: `-> T requires ...` is ambiguous with the region-prefix type grammar (`<region> T&`),
 	// where `T requires` reads as region label `T` + type `requires`.
-	requires, ensures2, decreases, body := liftLeadingContracts(body)
+	requires, ensures2, decreases, decreasesWild, body := liftLeadingContracts(body)
 	if !isStatic {
 		// Static functions are evaluated at compile time and have no runtime region; never
 		// wrap them in an auto region (it would break static darray construction).
@@ -345,37 +345,51 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, EnsureValues: ensures2, Decreases: decreases, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, EnsureValues: ensures2, Decreases: decreases, DecreasesWild: decreasesWild, Params: params, ReturnType: retType, Body: body}
 }
 
 // liftLeadingContracts pulls leading `requires`/`ensure` value-contract statements (parsed as
 // ContractStmt) off the front of a function body into precondition/postcondition lists, returning
 // the remaining body. Only the leading run is honoured; a later stray ContractStmt is left in place
 // so the analyzer reports the misplacement rather than silently dropping it.
-func liftLeadingContracts(body []ast.Stmt) ([]ast.Expr, []ast.Expr, []ast.Expr, []ast.Stmt) {
-	var requires, ensures, decreases []ast.Expr
+func liftLeadingContracts(body []ast.Stmt) (requires []ast.Expr, ensures []ast.Expr, decreases []ast.Expr, decreasesWild string, rest []ast.Stmt) {
 	i := 0
 	for i < len(body) {
 		cs, ok := body[i].(*ast.ContractStmt)
 		if !ok {
 			break
 		}
-		if cs.Cond != nil {
-			switch cs.Kind {
-			case ast.ContractRequire:
+		switch cs.Kind {
+		case ast.ContractRequire:
+			if cs.Cond != nil {
 				requires = append(requires, cs.Cond)
-			case ast.ContractEnsure:
+			}
+		case ast.ContractEnsure:
+			if cs.Cond != nil {
 				ensures = append(ensures, cs.Cond)
-			case ast.ContractDecreases:
+			}
+		case ast.ContractDecreases:
+			if cs.Cond != nil {
 				decreases = append(decreases, cs.Cond)
 			}
+		case ast.ContractDecreasesWild:
+			decreases = nil // wildcard replaces any prior measure clauses
+			if cs.WildReason != "" {
+				decreasesWild = cs.WildReason
+			} else {
+				// Missing reason: use the sentinel "*" so the analyzer can diagnose the error
+				// while still knowing the wildcard clause was present. Non-empty = clause seen.
+				decreasesWild = "*"
+			}
+		default:
+			break
 		}
 		i++
 	}
 	if i == 0 {
-		return nil, nil, nil, body
+		return nil, nil, nil, "", body
 	}
-	return requires, ensures, decreases, body[i:]
+	return requires, ensures, decreases, decreasesWild, body[i:]
 }
 
 func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {

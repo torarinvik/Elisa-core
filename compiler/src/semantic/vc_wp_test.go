@@ -21,6 +21,7 @@ func TestWPProvesMutableReassignment(t *testing.T) {
 	src := `
 def f(x: i64) -> i64:
     requires x > 0
+    requires x < 1000
     ensure result > 2
     y: mutable i64 = x
     y <- y + 1

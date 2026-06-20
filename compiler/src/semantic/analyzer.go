@@ -90,6 +90,11 @@ type Analyzer struct {
 	// deferredAliasRefinements holds alias refinements whose predicate validation is postponed until
 	// after law symbols are collected (aliases are resolved long before functions/laws exist).
 	deferredAliasRefinements []deferredAliasRefinement
+	// finalizingRefinements is true during the post-law validation pass: a refinement predicate whose
+	// law is still missing is then a hard error. During EAGER resolution (e.g. a struct field type
+	// resolved before laws are registered) a missing law instead DEFERS to that pass — laws can have
+	// struct subjects and structs refined fields, so the two cannot be ordered, only re-checked later.
+	finalizingRefinements bool
 	staticInterfaces         map[string]*StaticInterface
 	staticImpls              map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism
@@ -357,6 +362,7 @@ type Analyzer struct {
 	enforceStrictConcurrency    bool
 	enforcePerfLints            bool
 	enforceStrictProofs         bool
+	requireExternContracts      bool
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
@@ -365,6 +371,12 @@ type Analyzer struct {
 	smtSolver                        smtSolverHandle
 	smtUnavailable                   bool
 	smtStats                         SMTStats
+	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
+	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
+	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
+	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
+	// cross-function key collision means a byte-identical proof).
+	smtQueryCache map[string]smtQueryResult
 	proofReport                      []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
@@ -376,14 +388,38 @@ type Analyzer struct {
 	// (so `return p` records "returns param i") without affecting any other analysis.
 	inReturnBorrowCapture            bool
 	returnBorrowedOwnerLocalProgress map[*Symbol]bool
-	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
+	// functionValueResolveInProgress guards functionValueTypeForExpr against a self-referential /
+	// cyclic value binding (e.g. `x = x`, where the symbol's value expr resolves back to itself):
+	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
+	// recursing until the goroutine stack overflows.
+	functionValueResolveInProgress map[*Symbol]bool
+	sinkParamInferenceInProgress   map[*ast.FuncDecl]bool
 	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
 	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
 	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
 	lemmaCalls                       map[*ast.CallExpr]bool
+	ghostDecls                       map[*ast.VarDeclStmt]bool
+	ghostContracts                   map[ast.Expr]bool
+	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
+	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
+	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
+	ghostReadAllowed int
+	// ghostReadSeen records that a ghost variable was read since it was last reset — used to flag a
+	// contract condition (invariant/assert) that mentions a ghost so codegen erases its check.
+	ghostReadSeen bool
 	lemmasInAnalysis                 map[*ast.FuncDecl]bool
+	// lemmaTerminationCache memoizes whether a lemma's `decreases` measure is verified to strictly
+	// decrease at every self-recursive call (read-only mirror of checkTermination, no diagnostics). It
+	// gates the inductive hypothesis: only a provably-terminating lemma may assume its own ensure for a
+	// strictly-smaller argument. A false entry only forgoes the IH; it never fabricates a proof.
+	lemmaTerminationCache map[*ast.FuncDecl]bool
+	// definingEquationCache / ...InProgress memoize whether a PURE, TOTAL function's defining equation
+	// (`f(args) == body[params:=args]`) may be soundly asserted to the SMT tier. InProgress breaks
+	// self/mutual-recursive purity checks. A false verdict only forgoes the equation; it is never unsound.
+	definingEquationCache      map[*ast.FuncDecl]bool
+	definingEquationInProgress map[*ast.FuncDecl]bool
 	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
 	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
 	// Cleared at the start of each refinement discharge to avoid surfacing a stale one.
@@ -569,6 +605,12 @@ type AnalyzeOptions struct {
 	SMTSolverBinary string
 	TargetTriple    string
 	TargetDebug     bool
+	// RequireExternContracts enforces extern contract DISCIPLINE: every extern function must carry a
+	// `requires`/`ensure` boundary contract OR an explicit `@trusted("reason")` annotation. An extern
+	// that is neither is an error. Opt-in (the `-strict-externs` channel) and deliberately NOT implied
+	// by -strict: -strict is on by default, and most real programs link uncontracted libc/host externs,
+	// so blanket enforcement would break them. This makes "is this native boundary specified?" auditable.
+	RequireExternContracts bool
 	// RecordDeathTimeCohorts records the docs/91 G0 inferred death cohorts on Result.DeathTimeCohorts
 	// (programmatic access, e.g. the tightness-validation harness) without needing the
 	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
@@ -674,6 +716,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
+		requireExternContracts:            options.RequireExternContracts,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
 		recordDeathCohortsOpt:             options.RecordDeathTimeCohorts,
@@ -801,6 +844,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
 		LemmaCalls:              a.lemmaCalls,
+		GhostDecls:              a.ghostDecls,
+		GhostContracts:          a.ghostContracts,
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,

@@ -110,6 +110,8 @@ func registerBundleTypes() {
 		gob.Register(&ast.ErrorUnionTypeExpr{})
 		gob.Register(&ast.OptionalTypeExpr{})
 		gob.Register(&ast.TupleTypeExpr{})
+		gob.Register(&ast.RefinementTypeExpr{})
+		gob.Register(&ast.AssertByStmt{})
 
 		// Expressions.
 		gob.Register(&ast.Ident{})

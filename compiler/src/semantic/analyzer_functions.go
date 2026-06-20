@@ -138,6 +138,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
@@ -345,6 +346,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
@@ -514,6 +516,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
@@ -639,7 +642,8 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 	a.currentScope = scope
 	a.inEnsureContext = true
-	defer func() { a.inEnsureContext = false }()
+	a.ghostReadAllowed++ // `ensure` is a contract: ghost body locals are readable here.
+	defer func() { a.inEnsureContext = false; a.ghostReadAllowed-- }()
 	for _, e := range fn.EnsureValues {
 		if e == nil {
 			continue

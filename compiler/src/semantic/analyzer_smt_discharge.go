@@ -40,6 +40,7 @@ type SMTStats struct {
 	Proven       int           // unsat → proven
 	Declined     int           // sat/unknown → fell back to runtime
 	SolverProven int           // == Proven, kept for clarity in the report
+	CacheHits    int           // obligations answered from the query cache (no solver round-trip)
 	SpawnTime    time.Duration // one-time solver process start
 	SolverTime   time.Duration // wall time inside the solver across all queries
 	Slowest      time.Duration // slowest single query
@@ -51,8 +52,8 @@ func (p SMTStats) String() string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"SMT tier: %d obligations, %d proven, %d declined; solver %.1fms (spawn %.1fms, slowest %.1fms)",
-		p.Attempts, p.Proven, p.Declined,
+		"SMT tier: %d obligations, %d proven, %d declined, %d cached; solver %.1fms (spawn %.1fms, slowest %.1fms)",
+		p.Attempts, p.Proven, p.Declined, p.CacheHits,
 		float64(p.SolverTime.Microseconds())/1000.0,
 		float64(p.SpawnTime.Microseconds())/1000.0,
 		float64(p.Slowest.Microseconds())/1000.0,
@@ -215,26 +216,75 @@ func (a *Analyzer) counterexampleSuffix(ce string) string {
 // counterexample. `factPreamble()` is emitted LAST — after the hypothesis builders and the caller's
 // `obligation`/`extraHyps` have populated the translator's declarations — so all symbols are declared.
 func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr)
-	return a.smtCheckQuery(tr, hyps+extraHyps, obligation)
+	return a.smtCheckVCMulti(tr, []string{obligation}, extraHyps)
 }
 
-// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it. A goal that
-// constant-folds to `true` is valid under ANY hypotheses, so it concludes with NO solver call;
-// everything else is emitted from the IR and run through smtCheckVC. The third return reports whether
-// the goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
+// smtCheckVCMulti discharges SEVERAL obligations that share ONE hypothesis context — multi-goal
+// batching (VC IR brick 4). The standard hypothesis block is built ONCE from `tr` and reused for every
+// obligation, rather than re-derived per goal; this is the win when a conjunctive postcondition is
+// split into its independent conjuncts (vcConjuncts), each a smaller, separately-decidable query. The
+// batch holds only if EVERY obligation proves (each negation `unsat`); the first that fails short-
+// circuits and returns its counterexample, so a failed conjunction is pinned to the exact conjunct
+// that broke. With a single obligation this is byte-identical to the old smtCheckVC, so non-
+// conjunctive goals stay behavior-preserving. factPreamble() is emitted inside each smtCheckQuery from
+// the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
+// so every query is self-contained.
+func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	for _, obligation := range obligations {
+		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
+			return false, ce
+		}
+	}
+	return true, ""
+}
+
+// smtDischargeFormula discharges a lowered VC-IR formula, splitting a top-level conjunction into
+// independent sub-goals (vcConjuncts) batched over a shared hypothesis context (brick 4). A formula
+// that folds entirely to `true` is valid under any hypotheses and concludes with NO solver call.
+func (a *Analyzer) smtDischargeFormula(tr *smtTranslator, goal vcFormula, extraHyps string) (bool, string) {
+	conjuncts := vcConjuncts(goal)
+	if len(conjuncts) == 0 { // the whole obligation folded to true
+		a.smtStats.Attempts++
+		a.smtStats.Proven++
+		return true, ""
+	}
+	obligations := make([]string, len(conjuncts))
+	for i, c := range conjuncts {
+		obligations[i] = emitVCFormula(c)
+	}
+	return a.smtCheckVCMulti(tr, obligations, extraHyps)
+}
+
+// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it via the brick-4
+// splitter: a conjunctive goal is proven conjunct-by-conjunct against a shared hypothesis context, and a
+// goal that constant-folds to `true` concludes with NO solver call. The third return reports whether the
+// goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
 func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) (proven bool, counterexample string, lowered bool) {
 	goal, ok := tr.lowerVCFormula(goalExpr, env)
 	if !ok {
 		return false, "", false
 	}
+	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
+	return p, ce, true
+}
+
+// smtDischargeFormulaWithHyps discharges a lowered VC-IR formula against a CALLER-SUPPLIED hypothesis
+// block (already built from `tr`), rather than the analyzer's standard set. It is the loop-preservation
+// prover's bridge into the central VC IR: that prover deliberately assumes ONLY the loop condition +
+// invariants (loop variables free, no ambient assert/flow facts), so it cannot route through smtCheckVC
+// (which layers the standard block). Routing through the IR gains the smart-constructor folder — a
+// goal that constant-folds to `true` is valid under ANY hypotheses and concludes with NO solver call,
+// and structural comparisons/arithmetic are normalized — while keeping emission byte-identical for
+// every atom (opaque leaves emit their already-translated string verbatim), so the proof verdict is
+// preserved for goals the folder does not touch.
+func (a *Analyzer) smtDischargeFormulaWithHyps(tr *smtTranslator, goal vcFormula, hyps string) (bool, string) {
 	if isVCTrue(goal) {
 		a.smtStats.Attempts++
 		a.smtStats.Proven++
-		return true, "", true
+		return true, ""
 	}
-	p, ce := a.smtCheckVC(tr, emitVCFormula(goal), extraHyps)
-	return p, ce, true
+	return a.smtCheckQuery(tr, hyps, emitVCFormula(goal))
 }
 
 // smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
@@ -251,17 +301,50 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	}
 	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
+	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
+	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
+	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
+	// solver run", so a cached proof does NOT bump it.
+	if hit, ok := a.smtQueryCache[query]; ok {
+		a.smtStats.CacheHits++
+		if hit.proven {
+			a.smtStats.Proven++
+		} else {
+			a.smtStats.Declined++
+		}
+		return hit.proven, hit.ce
+	}
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
+		a.cacheSMTQuery(query, smtQueryResult{proven: true})
 		return true, ""
 	}
 	a.smtStats.Declined++
 	if res == smt.Sat {
-		return false, tr.counterexample(model)
+		ce := tr.counterexample(model)
+		a.cacheSMTQuery(query, smtQueryResult{proven: false, ce: ce})
+		return false, ce
 	}
+	// `unknown` (timeout / incompleteness) is NOT cached: it is not a stable verdict — a later identical
+	// query is free to try again (e.g. the solver's internal state differs), and caching it would lock in
+	// a decline that a retry might resolve. Only the definitive unsat/sat answers memoize.
 	return false, ""
+}
+
+// smtQueryResult is a memoized solver verdict: whether the obligation was proven, plus the
+// counterexample text rendered on a `sat` decline (empty otherwise).
+type smtQueryResult struct {
+	proven bool
+	ce     string
+}
+
+func (a *Analyzer) cacheSMTQuery(query string, result smtQueryResult) {
+	if a.smtQueryCache == nil {
+		a.smtQueryCache = map[string]smtQueryResult{}
+	}
+	a.smtQueryCache[query] = result
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
@@ -402,11 +485,70 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		if req == nil {
 			continue
 		}
+		// SOUNDNESS: a `requires` constrains a parameter's ENTRY value. For an immutable variable that
+		// stays true everywhere, so it is asserted directly here. But a clause over a MUTABLE root (a
+		// mutable param/local, or a field reachable through a `mutable T&` param) is only valid until that
+		// root is mutated — re-asserting it unconditionally after `m <- 0` would prove a false postcondition
+		// about the new value. Such clauses are seeded as flow assert-facts at function entry
+		// (seedRequiresAsAssertFacts) and ride the standard mutation-invalidation instead, so they are
+		// skipped here to avoid the stale unconditional copy.
+		if a.requiresReferencesMutableRoot(req) {
+			continue
+		}
 		if h, ok := tr.boolTerm(req, nil); ok {
 			b.WriteString("(assert " + h + ")\n")
 		}
 	}
 	return b.String()
+}
+
+// requiresReferencesMutableRoot reports whether a `requires`/contract clause reads any variable whose
+// symbol is MUTABLE (a mutable param/local, or — for a field path like `b.v` — a root bound to a
+// `mutable T&` param). Such a clause's entry-value guarantee can be invalidated by a body mutation, so
+// it is tracked through the invalidation-aware assert-fact channel rather than asserted unconditionally.
+func (a *Analyzer) requiresReferencesMutableRoot(clause ast.Expr) bool {
+	if a == nil || a.currentScope == nil || clause == nil {
+		return false
+	}
+	for root := range smtFactDeps(clause) {
+		if sym, ok := a.currentScope.Lookup(root); ok && symbolRootMutable(sym) {
+			return true
+		}
+	}
+	return false
+}
+
+// symbolRootMutable reports whether a symbol's value (or the place it points at) can be changed by a
+// body mutation. A by-value mutable local/param qualifies (sym.Mutable). So does a MUTABLE-REFERENCE
+// parameter (`s: mutable S&`): paramIsMutable leaves sym.Mutable FALSE there (the `mutable` only allows
+// rebinding the ref), but the POINTEE is writable — `s.x <- …` / `bump(&s.x)` change what a `requires`
+// over that place reads — so its entry-value guarantee is mutable and must ride the invalidation channel.
+func symbolRootMutable(sym *Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if sym.Mutable {
+		return true
+	}
+	if rt, ok := sym.Type.(*RefType); ok && rt != nil && rt.Mutable {
+		return true
+	}
+	return false
+}
+
+// seedRequiresAsAssertFacts records every `requires` clause over a MUTABLE root as a flow assert-fact in
+// the current (function body) scope, so it is assumed while the root holds its entry value and DROPPED
+// by the standard mutation invalidation the moment the root is written — the exact lifetime a precondition
+// has. Immutable-root clauses are left to smtRequiresHypotheses (always valid, no invalidation needed).
+func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
+	if a == nil || fn == nil || a.currentScope == nil {
+		return
+	}
+	for _, req := range fn.Requires {
+		if req != nil && a.requiresReferencesMutableRoot(req) {
+			a.recordSMTAssertFact(req)
+		}
+	}
 }
 
 // smtFlowFactHypotheses asserts the scope's flow range-facts — branch-derived bounds on
@@ -422,11 +564,20 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 	var b strings.Builder
 	seen := map[string]bool{}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for name, r := range sc.rangeFacts {
+		// Emit in sorted name order: rangeFacts is a map, and its iteration order would otherwise make
+		// the hypothesis text (and thus the cache key — brick 5) nondeterministic, so two logically
+		// identical obligations could differ byte-for-byte and miss the cache.
+		names := make([]string, 0, len(sc.rangeFacts))
+		for name := range sc.rangeFacts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
 			if seen[name] {
 				continue // a closer scope's fact shadows an outer one
 			}
 			seen[name] = true
+			r := sc.rangeFacts[name]
 			if !r.loKnown && !r.hiKnown {
 				continue
 			}
@@ -507,10 +658,16 @@ func (a *Analyzer) clearSMTAssertFacts() {
 }
 
 func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
-	name, ok := rootIdentName(target)
-	if !ok || name == "" {
+	// Drop facts depending on the target's structural root OR any place it aliases (a borrow local
+	// mutated through writes the underlying place — audit cluster C). No identifiable root ⇒ clear all.
+	roots := a.mutationRootsForTarget(target)
+	if len(roots) == 0 {
 		a.clearSMTAssertFacts()
 		return
+	}
+	rootSet := make(map[string]bool, len(roots))
+	for _, r := range roots {
+		rootSet[r] = true
 	}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		if len(sc.smtAssertFacts) == 0 {
@@ -518,13 +675,23 @@ func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
 		}
 		out := sc.smtAssertFacts[:0]
 		for _, fact := range sc.smtAssertFacts {
-			if fact.Deps != nil && fact.Deps[name] {
+			if fact.Deps != nil && depsIntersect(fact.Deps, rootSet) {
 				continue
 			}
 			out = append(out, fact)
 		}
 		sc.smtAssertFacts = out
 	}
+}
+
+// depsIntersect reports whether any dependency root is in the given set.
+func depsIntersect(deps map[string]bool, set map[string]bool) bool {
+	for dep := range deps {
+		if set[dep] {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
@@ -671,7 +838,15 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	var b strings.Builder
 	seen := map[string]bool{}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for name, sym := range sc.Symbols {
+		// Sorted name order so the hypothesis text (and the brick-5 cache key) is deterministic — Symbols
+		// is a map, and its iteration order would otherwise vary the query string between identical goals.
+		names := make([]string, 0, len(sc.Symbols))
+		for name := range sc.Symbols {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			sym := sc.Symbols[name]
 			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
 				continue
 			}
@@ -768,6 +943,24 @@ type smtTranslator struct {
 	auxDecls []string // declaration + sound-constraint lines, in mint order
 	auxVars  []string // the fresh symbols, for the Sat counterexample query
 	auxSeq   int      // monotonic counter → deterministic fresh names
+	// oldAsEntry enables `old(expr)` -> the ENTRY-value term (vcOldEntry) in the VC IR. Set ONLY by the
+	// WP discharge paths, which thread the bare (exit) value so entry/exit diverge; everywhere else
+	// old() must stay a fresh opaque symbol or it would collapse onto the un-threaded bare value.
+	oldAsEntry bool
+	// callCanon canonicalizes a PURE, TOTAL function call to a single SMT symbol keyed by callee +
+	// syntactic args, so two occurrences of `g(n-1)` share one symbol (a function is deterministic, so
+	// equal inputs give equal outputs — sound). It is what lets the recursive-function defining
+	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
+	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
+	callCanon map[string]string
+	// callEqInFlight guards the recursive instantiation of the defining equation: while emitting the
+	// body equation for `g(...)` we mark `g` so a self-call inside its body does not recurse forever.
+	// Re-entry just yields the canonical symbol with no further equation — a sound bounded unroll.
+	callEqInFlight map[*ast.FuncDecl]int
+	// callEqMaxUnroll bounds how deep the defining equation is instantiated (default 1). A finite depth
+	// keeps the emitted axiom set finite; soundness does not depend on the depth (only on purity +
+	// termination), so this is purely a completeness knob.
+	callEqMaxUnroll int
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -782,9 +975,12 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		lenDecls:     map[string]bool{},
 		nonNegDecls:  map[string]bool{},
 		unsignedBits: map[string]int{},
-		signedBits:   map[string]int{},
-		boolDecls:    map[string]bool{},
-		paramConsts:  paramConsts,
+		signedBits:      map[string]int{},
+		boolDecls:       map[string]bool{},
+		paramConsts:     paramConsts,
+		callCanon:       map[string]string{},
+		callEqInFlight:  map[*ast.FuncDecl]int{},
+		callEqMaxUnroll: 1,
 	}
 }
 
@@ -1023,6 +1219,15 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 				return "(div " + l + " " + r + ")", true
 			}
+			// SOUNDNESS: signed `INT_MIN / -1` (and `INT_MIN % -1`) OVERFLOWS — the true result -INT_MIN is
+			// not representable. On the arm64 target it wraps to INT_MIN (no hardware trap), so the exact
+			// unbounded-ℤ model (smtTruncDiv gives -INT_MIN, positive) would prove a false `result >= 0`.
+			// Unless that overflow is provably impossible (divisor cannot be -1, or dividend cannot be
+			// INT_MIN), abstract the result as a fresh under-constrained symbol — sound (states nothing
+			// false), at worst declines the proof (audit cluster F).
+			if !tr.signedDivCannotOverflow(n.Left, n.Right) {
+				return tr.freshAux(tr.a.provablyNonNeg(n.Left)), true
+			}
 			if n.Op == lexer.TOKEN_PERCENT {
 				q := smtTruncDiv(l, r)
 				return "(- " + l + " (* " + r + " " + q + "))", true
@@ -1064,20 +1269,32 @@ func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) st
 	if !ok || bits <= 0 || bits > 64 {
 		return raw
 	}
-	if signed {
-		// Signed overflow TRAPS in debug builds (where contracts are checked), so reaching a return
-		// without trapping implies no overflow — the prover may soundly assume the ℤ value. Release
-		// wraps for perf, but contracts are off there, so nothing relies on the wrap. Hence: no wrap
-		// modeling for signed; the debug trap backs the assumption (see codegen signed-overflow check).
+	if tr.a.provablyNoArithWrap(n, signed, bits) {
+		// Provably in range: the ℤ value equals the machine value — emit it clean (keeps divisibility /
+		// alignment goals tractable and lets bounded arithmetic prove).
 		return raw
 	}
-	if tr.a.provablyNoArithWrap(n, signed, bits) {
-		return raw
+	if signed {
+		// SOUNDNESS: signed `+`/`-`/`*` that can overflow WRAPS two's-complement at runtime — there is no
+		// codegen trap backing the old "assume no overflow" stance, so on the target `i64max + 1` becomes
+		// i64min, and the clean ℤ value would prove a false `ensure result > 0`. Model the exact wrapped
+		// value: recenter into [0, 2^W), take the unsigned wrap, then shift back into the signed range —
+		// `((raw + 2^(W-1)) mod 2^W) - 2^(W-1)`. The prover only concludes on `unsat`, so this can only
+		// decline an unprovable goal, never fabricate one.
+		return smtSignedWrap(raw, bits)
 	}
 	// Unsigned wraps modulo 2^W with well-defined two's-complement semantics (and is frequently an
 	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
 	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
 	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// smtSignedWrap renders the two's-complement wrap of a `bits`-wide signed result: the machine value of
+// `raw` is `((raw + 2^(W-1)) mod 2^W) - 2^(W-1)`, which maps any ℤ value into [-2^(W-1), 2^(W-1)).
+func smtSignedWrap(raw string, bits int) string {
+	half := smtPow2(bits - 1)
+	full := smtPow2(bits)
+	return "(- (mod (+ " + raw + " " + half + ") " + full + ") " + half + ")"
 }
 
 // bitwiseTerm models a fixed-width bitwise/shift operator (`&`, `|`, `^`, `<<`, `>>`) by bridging the
@@ -1158,6 +1375,36 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
 }
 
+// signedDivCannotOverflow reports whether signed `left / right` (or `%`) provably avoids the one
+// overflowing case INT_MIN / -1. Safe when the divisor cannot be -1 (a constant other than -1, or
+// provably non-negative) OR the dividend cannot be INT_MIN (provably non-negative, or a known lower
+// bound above the type minimum). An unsigned operand has no -1 and never overflows. When neither can be
+// shown, the caller abstracts the result so the exact (overflowing) model is never trusted.
+func (tr *smtTranslator) signedDivCannotOverflow(left, right ast.Expr) bool {
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[left])
+	if ok && !signed {
+		return true // unsigned: no -1 divisor, cannot overflow
+	}
+	if c, isConst := tr.a.constIntValue(right); isConst && c != -1 {
+		return true // divisor is a constant other than -1
+	}
+	if tr.a.provablyNonNeg(right) {
+		return true // divisor >= 0 (and nonzero is already required) ⇒ != -1
+	}
+	if tr.a.provablyNonNeg(left) {
+		return true // dividend >= 0 ⇒ != INT_MIN
+	}
+	if ok && signed && bits > 0 && bits <= 64 {
+		minVal := -(int64(1) << (bits - 1))
+		if f, aok := tr.a.affineOf(left, tr.a.currentScope); aok {
+			if rng := tr.a.boundAffine(f, tr.a.currentScope); rng.loKnown && rng.lo > minVal {
+				return true // dividend's lower bound is above the type minimum ⇒ != INT_MIN
+			}
+		}
+	}
+	return false
+}
+
 // provablyNoArithWrap reports whether `n` (an int `+`/`-`/`*`) cannot wrap — its true result is within
 // the representable range of its width. It recognizes the no-underflow subtraction shapes (unsigned)
 // and, for any width/signedness, an affine result whose interval lies inside [min, max]. Type-level
@@ -1168,11 +1415,12 @@ func (a *Analyzer) provablyNoArithWrap(n *ast.BinaryExpr, signed bool, bits int)
 	if n.Op == lexer.TOKEN_MINUS && !signed && a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
 		return true
 	}
-	// The affine interval prover computes in int64, so a 64-bit type's range (or a wide intermediate
-	// sum) can overflow it. Restrict the interval-based in-range gate to widths ≤ 32, where the bounds
-	// and any sum/product of them sit comfortably inside int64 with no overflow risk. 64-bit results
-	// that are not a no-underflow subtraction take the (sound, exact) wrap path.
-	if bits > 32 {
+	// The affine interval prover now computes in OVERFLOW-CHECKED int64 (boundAffine via
+	// mulInt64Checked/addInt64Checked, audit cluster E): a computation that would overflow int64 yields
+	// an UNKNOWN (open) bound rather than a wrong one, so the in-range gate below is sound up to 64-bit
+	// SIGNED — any int64-representable interval lies within [i64min, i64max]. UNSIGNED 64-bit stays on the
+	// exact wrap path: its upper bound 2^64-1 is not int64-representable.
+	if bits > 64 || (!signed && bits >= 64) {
 		return false
 	}
 	f, ok := a.affineOf(n, a.currentScope)
@@ -1603,11 +1851,30 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	if !isSMTExactAssignmentType(resultType) || IsBoolType(resultType) {
 		return "", false
 	}
+	// CANONICALIZATION: a function is deterministic, so two calls with syntactically-equal arguments
+	// denote the same value and must share one SMT symbol. Without this, `g(n-1)` in a hypothesis and
+	// `g(n-1)` in the obligation would be unrelated fresh symbols and nothing about a recursive function
+	// could be transported between them. The key is the callee identity plus the canonical SMT terms of
+	// the arguments (so `g(n - 1)` and `g(n-1)` match, and `g(x)` vs `g(y)` do not). If any argument is
+	// outside the integer fragment we cannot form a stable key, so we fall back to a fresh aux (sound:
+	// just less sharing). Only DIRECT calls to a known decl are canonicalized.
+	args := proofCallArgs(call)
+	var canonKey string
+	if direct && decl != nil {
+		if key, ok := tr.callCanonKey(decl, args); ok {
+			if sym, seen := tr.callCanon[key]; seen {
+				return sym, true
+			}
+			canonKey = key
+		}
+	}
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
-	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
+	if canonKey != "" {
+		tr.callCanon[canonKey] = ret
+	}
+	if !direct || decl == nil {
 		return ret, true
 	}
-	args := proofCallArgs(call)
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
@@ -1620,6 +1887,8 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 		return ret, true
 	}
 	env["result"] = ret
+	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
+	// contract-sound postcondition holds for the actual arguments.
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
@@ -1628,7 +1897,83 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
 		}
 	}
+	// (2) DEFINING EQUATION for a PURE, TOTAL function: assert `f(args) == body[params:=args]`, so the
+	// prover can reason THROUGH the function (and, for a terminating recursive function, perform
+	// induction — the body's own recursive sub-call canonicalizes to a symbol the IH/equation can
+	// constrain). SOUNDNESS GATES (tr.callEquationEligible): the function must be pure (a single
+	// integer-returning `return <pure-expr>` over integer params, no mutation/loops/effects) AND, if it
+	// is recursive, have a VERIFIED `decreases` measure. A non-terminating function's equation is
+	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
+	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
+	// finite.
+	tr.emitDefiningEquation(call, decl, ret, subst)
 	return ret, true
+}
+
+// callCanonKey builds the canonicalization key for a direct call: the callee's identity plus the
+// canonical SMT term of each argument. Returns ok=false if any argument is outside the integer term
+// fragment (so no stable key exists and the caller mints a fresh aux instead).
+func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (string, bool) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%p|", decl)
+	for _, arg := range args {
+		if arg == nil {
+			return "", false
+		}
+		t, ok := tr.term(arg)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(t)
+		b.WriteByte('|')
+	}
+	return b.String(), true
+}
+
+// emitDefiningEquation asserts `ret == body[params:=args]` for a pure, total function, with the body's
+// own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
+// purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
+// to an integer term.
+func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr) {
+	if tr == nil || decl == nil {
+		return
+	}
+	if tr.callEqInFlight[decl] >= tr.callEqMaxUnroll {
+		return // bounded unroll reached: leave the symbol opaque (still sound)
+	}
+	if !tr.callEquationEligible(decl) {
+		return
+	}
+	body, ok := pureReturnBody(decl)
+	if !ok {
+		return
+	}
+	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return
+	}
+	tr.callEqInFlight[decl]++
+	defer func() { tr.callEqInFlight[decl]-- }()
+	bodyTerm, ok := tr.termEnv(body, env)
+	if !ok {
+		return
+	}
+	tr.auxDecls = append(tr.auxDecls, "(assert (= "+ret+" "+bodyTerm+"))\n")
+}
+
+// callEquationEligible reports whether a function's defining equation may be soundly assumed:
+//   - PURE: a single `return <pure-expr>` body (after leading contracts) over integer params, with an
+//     integer return. Such a body has no mutation, loops, or effects, so `f(args)` equals the body
+//     evaluated at the arguments — a true mathematical equation.
+//   - TOTAL: if the function makes ANY direct self-recursive call it MUST carry a VERIFIED `decreases`
+//     measure. A non-terminating recursive function does not denote a value, and assuming its
+//     "equation" can be inconsistent (`f(n) == 1 + f(n)`), which would prove anything. The termination
+//     gate makes the recursion well-founded, so the equation has a unique fixed point and is sound.
+//
+// A non-recursive pure function needs no measure (it is trivially total). Eligibility is cached via the
+// analyzer's defining-equation cache to avoid re-deriving purity per call.
+func (tr *smtTranslator) callEquationEligible(decl *ast.FuncDecl) bool {
+	return tr.a.functionDefiningEquationEligible(decl)
 }
 
 // factPreamble emits the declarations for every free variable the translation touched, plus the

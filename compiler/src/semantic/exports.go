@@ -15,7 +15,12 @@ type deferredAliasRefinement struct {
 // validateAliasRefinements runs the postponed predicate checks for refinement-typed aliases, in
 // declaration order (deterministic diagnostics), once law symbols are in scope (docs/86 86-2).
 func (a *Analyzer) validateAliasRefinements() {
-	for _, d := range a.deferredAliasRefinements {
+	// Post-law pass: a still-missing law is now a real error. Iterate by index since the eager-deferred
+	// struct-field entries are appended earlier; finalizingRefinements stops re-appending during the pass.
+	a.finalizingRefinements = true
+	defer func() { a.finalizingRefinements = false }()
+	for i := 0; i < len(a.deferredAliasRefinements); i++ {
+		d := a.deferredAliasRefinements[i]
 		a.withResolutionContext(d.namespace, d.usings, func() {
 			a.validateRefinementPreds(d.rt, d.base)
 		})

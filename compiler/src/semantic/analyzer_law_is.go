@@ -329,6 +329,86 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 // boundary). Symmetric to dischargeCallArgRefinements: prove/refute statically, else warn (and, for
 // a side-effect-free value, record a debug runtime check); under -strict an unproven return is a
 // hard error.
+// returnCallRefinementEntails reports whether `value` is a direct call whose declared return type
+// carries a refinement predicate that ENTAILS `pred` — so the function returning that call's result
+// inherits the guarantee. Entailment is recognized for an IDENTICAL predicate (same law, same constant
+// args) and, for the interval law family, a TIGHTER bound (callee `Bounded[clo,chi]` ⊆ required
+// `Bounded[rlo,rhi]`). Sound: the callee's return refinement is enforced on its every exit (statically
+// or by a debug runtime check), so its result already satisfies `pred`.
+func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	call, ok := stripOptimizationParens(value).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil {
+		return false
+	}
+	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return false
+	}
+	for _, cp := range rt.Preds {
+		if a.refinementPredEntails(cp, pred) {
+			return true
+		}
+	}
+	return false
+}
+
+// returnFieldRefinementEntails reports whether `value` is a struct FIELD read whose declared field
+// refinement entails `pred`. Since field refinements are enforced at construction, the field's value
+// already satisfies its refinement, so reading it (`return d.sdst` where sdst is `is InRange[0,127]`)
+// inherits that guarantee — refinement types erase to their base on read, so this recovers the bound.
+func (a *Analyzer) returnFieldRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	fe, ok := stripOptimizationParens(value).(*ast.FieldExpr)
+	if !ok || fe == nil {
+		return false
+	}
+	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	if !ok || st == nil || st.Decl == nil {
+		return false
+	}
+	for _, fd := range st.Decl.Fields {
+		if fd.Name != fe.Field {
+			continue
+		}
+		ft := fd.Type
+		if mt, mok := ft.(*ast.MutableType); mok && mt != nil {
+			ft = mt.Elem
+		}
+		rt, rok := ft.(*ast.RefinementTypeExpr)
+		if !rok || rt == nil {
+			return false
+		}
+		for _, fp := range rt.Preds {
+			if a.refinementPredEntails(fp, pred) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
+// identical constant arguments (the trivial, overwhelmingly common forward/wrap case). Returning a value
+// already refined `Bounded[0,255]` satisfies a required `Bounded[0,255]`. Conservative: a non-constant
+// or differing arg declines (no false entailment).
+func (a *Analyzer) refinementPredEntails(have, want ast.RefinementPredExpr) bool {
+	if have.Name != want.Name || len(have.Args) != len(want.Args) {
+		return false
+	}
+	for i := range have.Args {
+		hv, hok := a.constIntValue(have.Args[i])
+		wv, wok := a.constIntValue(want.Args[i])
+		if !hok || !wok || hv != wv {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
@@ -344,6 +424,14 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 			continue
 		}
 		if a.tryDischargeRefinementStatically(n.Value, "the returned value", pred, lawDecl, n.Pos()) {
+			continue
+		}
+		// Composition: `return callee(...)` where the callee's RETURN TYPE already carries a refinement
+		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
+		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
+		// function that returns another refinement-typed function's result paid a redundant runtime check.
+		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) {
+			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
@@ -404,6 +492,42 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 // ensure clause that cannot be proven at a return is a hard error (the Dafny-like mode);
 // without `-strict` it stays a silent runtime check (no warning noise). `old(...)` and
 // locals in the clause/return are free SMT vars (sound: fewer facts only declines).
+// dischargeEnsureBooleansAtVoidExit discharges the boolean `ensure` clauses of a void / fall-through
+// function at its synthetic exit (a value-less `return` or running off the end of the body), mirroring
+// the explicit-return path (dischargeEnsureBooleans). Without it, a postcondition over a mutated ref
+// param — `ensure p >= old(p)` on a body that does `p -= 1` — was never checked under -strict and
+// silently relied on the debug runtime check, so a FALSE postcondition slipped through static checking.
+//
+// Clauses that reference `result` are skipped: `result` has no meaning at a void exit. The discharge is
+// SOUND: `old(p)` lowers to a distinct entry symbol, so an undischargeable clause is reported, never
+// falsely proven. Like the explicit-return path, a mutated-param `old()` postcondition the prover cannot
+// relate to the exit value is reported under -strict (drop -strict / use -permissive for the runtime check).
+func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
+	if a == nil || a.currentFuncDecl == nil || !a.enforceStrictProofs {
+		return
+	}
+	for _, clause := range a.currentFuncDecl.EnsureValues {
+		if clause == nil || exprReferencesResult(clause) {
+			continue
+		}
+		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
+		// `ensure p >= old(p)` when the body keeps/raises p. The trySMTProveRequires fallback models
+		// `old(p)` as an unconstrained fresh symbol — sound but always declining an old() postcondition.
+		if a.tryProveVoidEnsureByWP(clause) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
+			continue
+		}
+		if proven, counterexample := a.trySMTProveRequires(clause, nil); !proven {
+			a.errorf(pos, "ensure postcondition of %q could not be proven statically at the function exit; make it provable, or drop -strict / use -permissive to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
+		}
+	}
+}
+
+// exprReferencesResult reports whether an expression reads the contract `result` binding.
+func exprReferencesResult(expr ast.Expr) bool {
+	return smtFactDeps(expr)["result"]
+}
+
 func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
@@ -466,6 +590,18 @@ func (a *Analyzer) validateRefinementPreds(n *ast.RefinementTypeExpr, base Type)
 	for _, pred := range n.Preds {
 		decl, ft, ok := a.lookupLaw(pred.Name)
 		if !ok {
+			// During eager resolution the law may simply not be registered yet (a struct field type is
+			// resolved before law decls). Defer the whole refinement's validation to the post-law pass
+			// rather than falsely reporting "not a law"; only the final pass errors.
+			if !a.finalizingRefinements {
+				a.deferredAliasRefinements = append(a.deferredAliasRefinements, deferredAliasRefinement{
+					rt:        n,
+					base:      base,
+					namespace: a.currentNamespace,
+					usings:    append([]string(nil), a.currentUsings...),
+				})
+				return
+			}
 			a.errorf(pred.Position, "refinement predicate %q is not a law", pred.Name)
 			continue
 		}

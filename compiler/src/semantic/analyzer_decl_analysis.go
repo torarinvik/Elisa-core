@@ -842,6 +842,11 @@ func (a *Analyzer) currentFuncParamSymbol(index int) (*Symbol, bool) {
 
 func (a *Analyzer) validateCurrentFuncPoststates() {
 	a.validateCurrentFuncPoststatesForOutcome(false, false)
+	// The synthetic exit (value-less return / fall-through) also discharges boolean `ensure` clauses
+	// over params — the explicit-return path handles those via dischargeEnsureBooleans.
+	if a.currentFuncDecl != nil {
+		a.dischargeEnsureBooleansAtVoidExit(a.currentFuncDecl.Pos())
+	}
 }
 
 func funcPoststatesHaveConditional(poststates []FuncPoststate) bool {
