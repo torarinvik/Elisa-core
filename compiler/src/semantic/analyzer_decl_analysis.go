@@ -901,6 +901,10 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 	case FuncPoststateKindPreserve:
 		for _, widening := range a.currentConservativeCallWidenings[sym] {
 			if poststatePathsOverlap(widening.Path, poststate.Path) {
+				if poststate.Implicit {
+					a.errorf(poststate.Position, implicitPreserveWidenedMessage(targetName, a.currentFuncDecl.Name, widening.Source))
+					return
+				}
 				a.errorf(poststate.Position, ensurePreserveWidenedMessage(targetName, a.currentFuncDecl.Name, widening.Source))
 				return
 			}
@@ -911,6 +915,10 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 			return
 		}
 		if !SameType(currentTarget, originalTarget) {
+			if poststate.Implicit {
+				a.errorf(poststate.Position, implicitPreserveMismatchMessage(targetName, a.currentFuncDecl.Name, originalTarget.String(), currentTarget.String()))
+				return
+			}
 			a.errorf(poststate.Position, ensurePreserveMismatchMessage(targetName, a.currentFuncDecl.Name, currentTarget.String()))
 		}
 	case FuncPoststateKindNamedState:

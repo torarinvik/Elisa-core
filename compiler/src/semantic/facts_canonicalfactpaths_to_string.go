@@ -102,6 +102,22 @@ func ensureIncomingTargetUnresolvedMessage(targetName string, funcName string) s
 func ensurePreserveMismatchMessage(targetName string, funcName string, current string) string {
 	return "cannot prove ensures " + targetName + " => preserve on function " + quoteFactTarget(funcName) + ": current tracked facts are " + current
 }
+
+// implicitPreserveMismatchMessage explains a STRICT-PROTOCOL-BALANCE failure: a borrowed `mutable
+// T[S]&` parameter was left in a different state than it was declared with, and the function did not
+// declare the transition. Either restore the state or add an explicit `ensures` for the new state.
+func implicitPreserveMismatchMessage(targetName string, funcName string, declared string, current string) string {
+	return "parameter " + targetName + " must be left in its declared state " + declared + " before " + quoteFactTarget(funcName) + " returns, but it is " + current + "; a borrowed `mutable T[S]&` resource must be handed back in the state it was lent in — restore it, or declare the transition with `ensures " + targetName + " => <state>`"
+}
+
+func implicitPreserveWidenedMessage(targetName string, funcName string, source string) string {
+	message := "parameter " + targetName + " must be left in its declared state before " + quoteFactTarget(funcName) + " returns, but its state was " + FactTransformWiden.String() + "ed by a call"
+	if source != "" {
+		message += " at " + quoteFactTarget(source)
+	}
+	message += "; restore it or declare the transition with `ensures " + targetName + " => <state>`"
+	return message
+}
 func ensureNamedStateTargetMessage(targetName string, funcName string) string {
 	return "cannot prove ensures " + targetName + " on function " + quoteFactTarget(funcName) + ": target is not currently a named-state fact-bearing value"
 }

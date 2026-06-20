@@ -297,7 +297,12 @@ def fold(node: Expr) -> i32:
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsConservativeCallWidening(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "call_widening_fact_transform.elisa", `struct Player[state Alive | Dead]:
+	// `use` calls an unknown extern with no `ensures`, so player is conservatively widened, and then
+	// leaves player in that widened state without declaring it — a strict-protocol-balance error. The
+	// widening fact transform must still be recorded (it happens during flow analysis regardless), and
+	// the strict-balance diagnostic must fire. (The implicit preserve itself is not surfaced as a fact
+	// transform — it is a synthesized obligation, not a source-level contract.)
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "call_widening_fact_transform.elisa", `struct Player[state Alive | Dead]:
 	health: mutable int
 
 	derive state:
@@ -309,6 +314,9 @@ extern unknown_update(mutable player: Player[Alive]&) -> void
 def use(mutable player: Player[Alive]&) -> void:
 	unknown_update(player)
 `)
+	if !contains(allDiagnostics(result), "must be left in its declared state") {
+		t.Fatalf("expected the strict-protocol-balance error for the widened player, got: %s", allDiagnostics(result))
+	}
 	analysis, ok := result.FunctionAnalysisByName("use")
 	if !ok || analysis == nil {
 		t.Fatal("expected analysis for use")
@@ -346,7 +354,7 @@ func TestAnalyzeFunctionAnalysisRecordsConsumeAndRecomputeTransforms(t *testing.
 
 extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
-def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]:
+def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join] ensures player => Alive | Dead:
 	player.health <- player.health + 1
 	return join(move thread)
 `)

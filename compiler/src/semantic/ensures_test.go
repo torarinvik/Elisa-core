@@ -253,7 +253,7 @@ def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures
 	job.stage <- 2
 	return false
 
-def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Ready | Failed:
 	if finish(job, ok):
 		expect_ready(job)
 	else:
@@ -280,7 +280,7 @@ def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures
 	job.stage <- 2
 	return false
 
-def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort]:
+def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Pending | Ready | Failed:
 	finish(job, ok)
 	expect_done(job)
 `)
@@ -308,7 +308,7 @@ def maybe_update(mutable player: Player[Alive]&, ok: bool) -> bool can[Abort] en
 	player.health <- 0
 	return false
 
-def use(mutable player: Player[Alive]&, ok: bool) -> void can[Abort]:
+def use(mutable player: Player[Alive]&, ok: bool) -> void can[Abort] ensures player => Alive | Dead:
 	if maybe_update(player, ok):
 		expect_alive(player)
 	else:

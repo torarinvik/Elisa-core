@@ -496,6 +496,11 @@ type FuncPoststate struct {
 	Kind       FuncPoststateKind
 	StateCases []string
 	RefState   RefState
+	// Implicit marks a poststate the analyzer synthesized rather than one the user wrote. It is set on
+	// the implicit `preserve` given to a `mutable T[S]&` parameter with a single declared state and no
+	// explicit `ensures` (strict protocol balance): a borrowed stateful resource must be handed back in
+	// the state it was lent in unless the signature says otherwise. Drives a tailored diagnostic.
+	Implicit bool
 }
 
 // RefinementEnsure is a function postcondition of the form `ensures <param> is <BareLaw>`
