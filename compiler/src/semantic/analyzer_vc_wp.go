@@ -34,6 +34,17 @@ type wpAssign struct {
 type wpStep struct {
 	assign *wpAssign
 	cond   *wpConditional
+	call   *wpCallBinding
+}
+
+// wpCallBinding is `name := f(args)` where f's declared return type carries a CONSTANT refinement. WP
+// does not thread the (non-arithmetic) call result; instead `name` stays a free variable and f's return
+// refinement is asserted as a hypothesis — sound because the callee enforces its return contract on
+// every exit, so the result already satisfies it.
+type wpCallBinding struct {
+	name    string
+	lawDecl *ast.FuncDecl
+	args    []ast.Expr
 }
 
 // wpConditional is an `if cond: then [else: els]` whose branches are straight-line scalar assignments.
@@ -136,6 +147,74 @@ func (a *Analyzer) captureScalarAssigns(stmts []ast.Stmt) ([]wpAssign, bool) {
 	return out, true
 }
 
+// captureRefinedCallBinding recognizes `name := f(args)` whose callee declares a return refinement with
+// CONSTANT arguments (e.g. `-> i64 is Bounded[0,255]`). Returns the binding so WP can assume the result
+// satisfies that refinement. Declines on a non-call RHS, an unresolved callee, no return refinement, or
+// non-constant refinement args (a dependent bound is not assumed here).
+func (a *Analyzer) captureRefinedCallBinding(stmt ast.Stmt) (*wpCallBinding, bool) {
+	vd, ok := stmt.(*ast.VarDeclStmt)
+	if !ok || vd == nil || vd.Value == nil {
+		return nil, false
+	}
+	call, ok := stripOptimizationParens(vd.Value).(*ast.CallExpr)
+	if !ok || call == nil {
+		return nil, false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil {
+		return nil, false
+	}
+	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil || len(rt.Preds) == 0 {
+		return nil, false
+	}
+	pred := rt.Preds[0]
+	lawDecl, _, ok := a.lookupLaw(pred.Name)
+	if !ok || lawDecl == nil {
+		return nil, false
+	}
+	for _, arg := range pred.Args {
+		if _, ok := a.constIntValue(arg); !ok {
+			return nil, false
+		}
+	}
+	return &wpCallBinding{name: vd.Name, lawDecl: lawDecl, args: pred.Args}, true
+}
+
+// wpCallHyps asserts, for each refined-call binding, the callee's return refinement instantiated on the
+// bound local: the law body with `self` -> the local and the law's bracket params -> the constant args.
+func (a *Analyzer) wpCallHyps(tr *smtTranslator, steps []wpStep) string {
+	var b strings.Builder
+	for _, step := range steps {
+		if step.call == nil || step.call.lawDecl == nil {
+			continue
+		}
+		body, ok := a.lawBodyExpr(step.call.lawDecl)
+		if !ok {
+			continue
+		}
+		params := step.call.lawDecl.Params
+		if len(params) == 0 {
+			continue
+		}
+		subst := map[string]ast.Expr{params[0].Name: &ast.Ident{Position: params[0].Position, Name: step.call.name}}
+		for i, arg := range step.call.args {
+			if i+1 < len(params) {
+				subst[params[i+1].Name] = arg
+			}
+		}
+		bound, ok := substituteLemmaEnsure(body, subst)
+		if !ok {
+			continue
+		}
+		tr.decls[step.call.name] = true
+		if h, ok := tr.boolTerm(bound, nil); ok {
+			b.WriteString("(assert " + h + ")\n")
+		}
+	}
+	return b.String()
+}
+
 // captureWPStepsToEnd captures the whole body as WP steps for a VOID / fall-through function (no return
 // value). It threads PARAM mutations (`p -= 1`, `p += k`) so a postcondition over the param's EXIT value
 // can be related to its entry value via `old(p)`. Declines on any statement WP cannot account for.
@@ -166,6 +245,10 @@ func (a *Analyzer) captureWPStepsToEnd() ([]wpStep, bool) {
 			}
 			out = append(out, wpStep{cond: &wpConditional{cond: n.Cond, then: thenA, els: elseA}})
 		default:
+			if cb, ok := a.captureRefinedCallBinding(s); ok {
+				out = append(out, wpStep{call: cb})
+				break
+			}
 			asg, ok := a.captureScalarAssign(s)
 			if !ok {
 				return nil, false
@@ -206,7 +289,7 @@ func (a *Analyzer) tryProveVoidEnsureByWP(clause ast.Expr) bool {
 	if isVCFalse(goal) {
 		return false
 	}
-	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr))
+	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr)+a.wpCallHyps(tr, steps))
 	return proven
 }
 
@@ -263,6 +346,10 @@ func (a *Analyzer) captureWPSteps(ret *ast.ReturnStmt) ([]wpStep, bool) {
 			}
 			out = append(out, wpStep{cond: &wpConditional{cond: n.Cond, then: thenA, els: elseA}})
 		default:
+			if cb, ok := a.captureRefinedCallBinding(s); ok {
+				out = append(out, wpStep{call: cb})
+				break
+			}
 			asg, ok := a.captureScalarAssign(s)
 			if !ok {
 				return nil, false
@@ -296,6 +383,8 @@ func (a *Analyzer) wpTransport(tr *smtTranslator, steps []wpStep, goal vcFormula
 	for i := len(steps) - 1; i >= 0; i-- {
 		step := steps[i]
 		switch {
+		case step.call != nil:
+			// The call result stays a free variable; its refinement is asserted by wpCallHyps.
 		case step.assign != nil:
 			rhsTerm, ok := tr.lowerVCTerm(step.assign.rhs, nil)
 			if !ok || !vcTermFullyStructural(rhsTerm) {
@@ -360,6 +449,6 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 	}
 	// Discharge through the brick-4 splitter: a WP-transported conjunctive postcondition splits into
 	// independent conjuncts over the shared `requires` hypotheses.
-	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr))
+	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr)+a.wpCallHyps(tr, steps))
 	return proven
 }
