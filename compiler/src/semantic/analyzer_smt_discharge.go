@@ -168,6 +168,32 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	return proven
 }
 
+// fieldReadResolvedType resolves the type of a struct-field read `obj.field` from the object's type,
+// for synthetic/cloned FieldExpr nodes whose per-node exprTypes entry was never populated. It tries
+// the object's recorded type, then a scope lookup for a bare identifier, then recurses for a nested
+// field path. lookupResolvedFieldType peels refs/aggregates internally.
+func (a *Analyzer) fieldReadResolvedType(n *ast.FieldExpr) (Type, bool) {
+	if n == nil || n.Object == nil {
+		return nil, false
+	}
+	if t := a.exprTypes[n.Object]; t != nil {
+		return a.lookupResolvedFieldType(peelNamedStateRefs(t), n.Field)
+	}
+	switch obj := n.Object.(type) {
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(obj.Name); ok && sym != nil && sym.Type != nil {
+				return a.lookupResolvedFieldType(peelNamedStateRefs(sym.Type), n.Field)
+			}
+		}
+	case *ast.FieldExpr:
+		if it, ok := a.fieldReadResolvedType(obj); ok {
+			return a.lookupResolvedFieldType(peelNamedStateRefs(it), n.Field)
+		}
+	}
+	return nil, false
+}
+
 // counterexampleSuffix formats a satisfying-model string as a trailing diagnostic hint, or "" when
 // there is none (e.g. the solver returned unknown/timeout rather than a concrete model).
 func (a *Analyzer) counterexampleSuffix(ce string) string {
@@ -870,7 +896,16 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			tr.lenDecls[lenSym] = true
 			return lenSym, true
 		}
-		if t, ok := smtNumericValueType(tr.a.exprTypes[n]); ok && !IsFloatType(t) {
+		// Field type from exprTypes (set once analyzed) OR resolved from the object's struct type when
+		// the node is synthetic/cloned (e.g. a substituted derived-state condition, whose field reads
+		// were never analyzed so their per-node type is unset).
+		fieldType := tr.a.exprTypes[n]
+		if fieldType == nil {
+			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+				fieldType = resolved
+			}
+		}
+		if t, ok := smtNumericValueType(fieldType); ok && !IsFloatType(t) {
 			// Numeric struct-field reads are modeled as fresh-ish projection symbols keyed by
 			// their syntactic path (`self.total`, `area.size`). We assert only facts guaranteed
 			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other
