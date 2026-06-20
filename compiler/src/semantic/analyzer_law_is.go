@@ -329,6 +329,51 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 // boundary). Symmetric to dischargeCallArgRefinements: prove/refute statically, else warn (and, for
 // a side-effect-free value, record a debug runtime check); under -strict an unproven return is a
 // hard error.
+// returnCallRefinementEntails reports whether `value` is a direct call whose declared return type
+// carries a refinement predicate that ENTAILS `pred` — so the function returning that call's result
+// inherits the guarantee. Entailment is recognized for an IDENTICAL predicate (same law, same constant
+// args) and, for the interval law family, a TIGHTER bound (callee `Bounded[clo,chi]` ⊆ required
+// `Bounded[rlo,rhi]`). Sound: the callee's return refinement is enforced on its every exit (statically
+// or by a debug runtime check), so its result already satisfies `pred`.
+func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	call, ok := stripOptimizationParens(value).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil {
+		return false
+	}
+	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return false
+	}
+	for _, cp := range rt.Preds {
+		if a.refinementPredEntails(cp, pred) {
+			return true
+		}
+	}
+	return false
+}
+
+// refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
+// identical constant arguments (the trivial, overwhelmingly common forward/wrap case). Returning a value
+// already refined `Bounded[0,255]` satisfies a required `Bounded[0,255]`. Conservative: a non-constant
+// or differing arg declines (no false entailment).
+func (a *Analyzer) refinementPredEntails(have, want ast.RefinementPredExpr) bool {
+	if have.Name != want.Name || len(have.Args) != len(want.Args) {
+		return false
+	}
+	for i := range have.Args {
+		hv, hok := a.constIntValue(have.Args[i])
+		wv, wok := a.constIntValue(want.Args[i])
+		if !hok || !wok || hv != wv {
+			return false
+		}
+	}
+	return true
+}
+
 func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
@@ -344,6 +389,14 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 			continue
 		}
 		if a.tryDischargeRefinementStatically(n.Value, "the returned value", pred, lawDecl, n.Pos()) {
+			continue
+		}
+		// Composition: `return callee(...)` where the callee's RETURN TYPE already carries a refinement
+		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
+		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
+		// function that returns another refinement-typed function's result paid a redundant runtime check.
+		if a.returnCallRefinementEntails(n.Value, pred) {
+			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
