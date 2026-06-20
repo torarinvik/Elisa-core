@@ -99,6 +99,30 @@ func (a *Analyzer) applyCountUpWhileExitFacts(stmt *ast.WhileStmt) {
 	a.currentScope.rangeFacts[name] = a.currentScope.rangeFacts[name].intersect(numRange{hiKnown: true, hi: bound})
 }
 
+// countUpExitFactSound reports whether `applyCountUpWhileExitFacts` may soundly record `i <= bound`
+// after `while i < bound: i++`. The exit fact is true ONLY when `i <= bound` at ENTRY: a count that
+// starts at or below bound reaches exactly bound (the +1 step never overshoots), but a count that
+// starts ABOVE bound never runs and keeps its too-large value. MUST be evaluated on the pristine
+// pre-loop scope (before the body's own `i <- i + 1` mutates the tracked entry value).
+func (a *Analyzer) countUpExitFactSound(stmt *ast.WhileStmt) bool {
+	if a == nil || a.currentScope == nil || stmt == nil {
+		return false
+	}
+	name, bound, ok := a.countUpLoopUpperBound(stmt.Cond)
+	if !ok || !bodyHasOnlyUnitIncrement(stmt.Body, name) {
+		return false
+	}
+	if r, found := a.lookupRangeFact(name); found && r.hiKnown && r.hi <= bound {
+		return true
+	}
+	if c, known := a.lookupWrittenConst(name); known {
+		if v, ok := a.constIntValue(c); ok && v <= bound {
+			return true
+		}
+	}
+	return false
+}
+
 func (a *Analyzer) countUpLoopUpperBound(expr ast.Expr) (string, int64, bool) {
 	switch n := stripOptimizationParens(expr).(type) {
 	case *ast.BinaryExpr:

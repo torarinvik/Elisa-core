@@ -152,40 +152,45 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if !ok {
 		return false
 	}
-	obligation, ok := tr.boolTerm(body, env)
+	// Lower the law body to the VC IR and discharge against the standard hypothesis set (which assumes
+	// the enclosing function's preconditions — docs/90 brick 90-6 — so a `requires forall k: 0<=k<n
+	// implies xs[k] >= 0` instantiates to prove `return xs[0] is NonNeg`). Contract-sound: the callee may
+	// assume its preconditions and an SMT-proven VALUE fact never drives bounds-check elision. On a failed
+	// proof, stash z3's satisfying assignment so the refinement diagnostic can show a counterexample.
+	proven, counterexample, ok := a.smtCheckGoal(tr, body, env, "")
 	if !ok {
 		return false
 	}
-	// Assume the enclosing function's preconditions (docs/90 brick 90-6). A `requires forall k:
-	// 0<=k<n implies xs[k] >= 0` becomes a hypothesis, so `return xs[0] is NonNeg` discharges by
-	// quantifier instantiation. Contract-sound: the callee may assume its preconditions (callers must
-	// establish them), and an SMT-proven VALUE fact never drives bounds-check elision, so a violated
-	// precondition is garbage-in-garbage-out, not memory unsafety. Translated with the SAME translator
-	// so param/array symbols unify with the obligation. (factPreamble is built AFTER, once all decls
-	// are collected.)
-	hyps := a.smtRequiresHypotheses(tr)
-	// docs/85 gap #2: assert the defining equality of every immutable integer local in
-	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
-	// treating them as free variables. Must run before factPreamble so the locals and the
-	// variables of their defining expressions are declared.
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true
+	if !proven {
+		a.lastSMTCounterexample = counterexample
 	}
-	// On a SAT (failed) proof, stash z3's satisfying assignment so the refinement diagnostic can show
-	// a concrete counterexample (the input that violates the predicate). Empty when no model/unknown.
-	if res == smt.Sat {
-		a.lastSMTCounterexample = tr.counterexample(model)
+	return proven
+}
+
+// fieldReadResolvedType resolves the type of a struct-field read `obj.field` from the object's type,
+// for synthetic/cloned FieldExpr nodes whose per-node exprTypes entry was never populated. It tries
+// the object's recorded type, then a scope lookup for a bare identifier, then recurses for a nested
+// field path. lookupResolvedFieldType peels refs/aggregates internally.
+func (a *Analyzer) fieldReadResolvedType(n *ast.FieldExpr) (Type, bool) {
+	if n == nil || n.Object == nil {
+		return nil, false
 	}
-	a.smtStats.Declined++
-	return false
+	if t := a.exprTypes[n.Object]; t != nil {
+		return a.lookupResolvedFieldType(peelNamedStateRefs(t), n.Field)
+	}
+	switch obj := n.Object.(type) {
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(obj.Name); ok && sym != nil && sym.Type != nil {
+				return a.lookupResolvedFieldType(peelNamedStateRefs(sym.Type), n.Field)
+			}
+		}
+	case *ast.FieldExpr:
+		if it, ok := a.fieldReadResolvedType(obj); ok {
+			return a.lookupResolvedFieldType(peelNamedStateRefs(it), n.Field)
+		}
+	}
+	return nil, false
 }
 
 // counterexampleSuffix formats a satisfying-model string as a trailing diagnostic hint, or "" when
@@ -195,6 +200,68 @@ func (a *Analyzer) counterexampleSuffix(ce string) string {
 		return ""
 	}
 	return " — it can fail when " + ce
+}
+
+// smtCheckVC is the central verification-condition chokepoint. Every SMT-tier obligation that is
+// discharged against the analyzer's STANDARD hypothesis set flows through here, so the negate-and-check
+// protocol, query layout, solver stats, and counterexample extraction live in exactly one place — add
+// a new hypothesis source or change the proof protocol once and every site benefits.
+//
+// The standard hypothesis block is: the enclosing function's `requires`, the defining equalities of
+// immutable integer locals (so the prover reasons THROUGH `rem = value % alignment`), the accumulated
+// flow assert-facts (branch guards, proven invariants), and the scope's range facts. `extraHyps` are
+// site-specific assertions already built from `tr` (e.g. a callee's poststates). The obligation is
+// negated; only `unsat` concludes (a sound proof). On `sat` the model is rendered as a concrete
+// counterexample. `factPreamble()` is emitted LAST — after the hypothesis builders and the caller's
+// `obligation`/`extraHyps` have populated the translator's declarations — so all symbols are declared.
+func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps string) (bool, string) {
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr)
+	return a.smtCheckQuery(tr, hyps+extraHyps, obligation)
+}
+
+// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it. A goal that
+// constant-folds to `true` is valid under ANY hypotheses, so it concludes with NO solver call;
+// everything else is emitted from the IR and run through smtCheckVC. The third return reports whether
+// the goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
+func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) (proven bool, counterexample string, lowered bool) {
+	goal, ok := tr.lowerVCFormula(goalExpr, env)
+	if !ok {
+		return false, "", false
+	}
+	if isVCTrue(goal) {
+		a.smtStats.Attempts++
+		a.smtStats.Proven++
+		return true, "", true
+	}
+	p, ce := a.smtCheckVC(tr, emitVCFormula(goal), extraHyps)
+	return p, ce, true
+}
+
+// smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
+// from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, asks
+// the solver, updates the stats, and returns proven (only on `unsat`) plus a counterexample on `sat`.
+// smtCheckVC layers the standard hypothesis set on top; the loop-preservation prover uses this directly
+// with its OWN hypothesis set (loop variables free, no ambient facts) — so the check protocol itself is
+// shared while each site keeps control of which facts it assumes. `factPreamble()` is emitted last so
+// every symbol the hypotheses and obligation introduced is declared.
+func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation string) (bool, string) {
+	solver := a.openSMT()
+	if solver == nil || tr == nil {
+		return false, ""
+	}
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	a.smtStats.Attempts++
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		return true, ""
+	}
+	a.smtStats.Declined++
+	if res == smt.Sat {
+		return false, tr.counterexample(model)
+	}
+	return false, ""
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
@@ -226,38 +293,15 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if !ok {
 		return false, ""
 	}
-	obligation, ok := tr.boolTerm(clause, env)
+	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
+	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
+	// assert-facts, and range facts). On sat the returned model is an input permitted by the caller's
+	// known facts that violates the precondition — a concrete witness for the diagnostic.
+	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, "")
 	if !ok {
 		return false, ""
 	}
-	// Assume the ENCLOSING (caller) function's own preconditions as hypotheses (docs/90 brick 90-13).
-	// This is the dual of brick 90-6 (which lets a callee assume its requires in its body): here a
-	// caller that itself carries `requires forall k: 0<=k<n implies data[k] >= 0` can discharge a
-	// callee's identical-or-weaker quantified array precondition, because both clauses translate
-	// against the SAME array symbol (the caller arg `data` and the caller requires both resolve to
-	// smtVar("data")). Contract-sound: the caller's callers must establish the caller's requires, and
-	// an SMT-proven precondition never drives bounds-check elision. A caller clause outside the
-	// fragment is silently skipped (fewer assumptions is conservative).
-	hyps := a.smtRequiresHypotheses(tr)
-	// docs/85 gap #2: assert the defining equality of every immutable integer local in
-	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
-	// treating them as free variables. Must run before factPreamble so the locals and the
-	// variables of their defining expressions are declared.
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true, ""
-	}
-	a.smtStats.Declined++
-	// On sat, the model is an input permitted by the caller's known facts that violates the
-	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
-	return false, tr.counterexample(model)
+	return proven, counterexample
 }
 
 func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
@@ -303,20 +347,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	if calleeHyps.Len() == 0 {
 		return false
 	}
-	hyps := a.smtRequiresHypotheses(tr)
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + calleeHyps.String() + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, _ := solver.Check(query)
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true
-	}
-	a.smtStats.Declined++
-	return false
+	// The called function's poststates (`calleeHyps`) are the site-specific extra hypotheses on top of
+	// the standard set. Discharge through the central chokepoint (the counterexample is unused here).
+	proven, _ := a.smtCheckVC(tr, obligation, calleeHyps.String())
+	return proven
 }
 
 func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
@@ -436,15 +470,27 @@ func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
 }
 
 func (a *Analyzer) recordSMTAssertFact(expr ast.Expr) {
-	if a == nil || a.currentScope == nil || expr == nil {
+	if a == nil {
+		return
+	}
+	a.recordSMTAssertFactInScope(a.currentScope, expr)
+}
+
+// recordSMTAssertFactInScope records an assumed fact into a SPECIFIC scope, not necessarily the current
+// one. This matters for a branch-condition fact: it must live in the BRANCH's scope (so it is gone at
+// the fall-through), but it is recorded while `currentScope` is still the parent (the branch scope is
+// not made current until the block body is analyzed). Recording into `currentScope` there would leak
+// the condition (e.g. `x > 10`) past the `if`, contradicting the negation the fall-through applies.
+func (a *Analyzer) recordSMTAssertFactInScope(scope *Scope, expr ast.Expr) {
+	if a == nil || scope == nil || expr == nil {
 		return
 	}
 	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
-		a.recordSMTAssertFact(bin.Left)
-		a.recordSMTAssertFact(bin.Right)
+		a.recordSMTAssertFactInScope(scope, bin.Left)
+		a.recordSMTAssertFactInScope(scope, bin.Right)
 		return
 	}
-	a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
 }
 
 func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
@@ -518,6 +564,17 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 	valueType := a.exprTypes[value]
 	if !isSMTExactAssignmentType(targetType) || !isSMTExactAssignmentType(valueType) {
 		return
+	}
+	// SOUNDNESS: the fact `target == value` models target's NEW value with a single SMT symbol. If
+	// `value` reads `target` itself (`y <- y - 1`), the symbol stands for both the old and the new value,
+	// so the fact is self-referential and (for any non-identity update) CONTRADICTORY — a contradictory
+	// hypothesis set proves every obligation. A reassignment whose RHS reads its own target cannot be
+	// captured by an equality over one symbol (that is what weakest-precondition transport is for), so
+	// record no fact; the prior `invalidateSMTAssertFactsForTarget` already dropped the stale ones.
+	if name, ok := rootIdentName(target); ok && name != "" {
+		if smtFactDeps(value)[name] {
+			return
+		}
 	}
 	a.recordSMTAssertFact(&ast.BinaryExpr{
 		Position: target.Pos(),
@@ -744,7 +801,17 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 				return bound, true
 			}
 		}
-		if tr.isArrayLike(tr.a.exprTypes[n]) {
+		// Resolve the array's element type from exprTypes (set once the node is analyzed) OR, when that
+		// is not yet populated — e.g. loop-invariant proving runs BEFORE the body is type-analyzed — from
+		// the symbol's declared type via scope lookup. The declared type is authoritative for a param or
+		// local, so this is sound and is what lets `arr[k]` in a quantified loop invariant translate.
+		t := tr.a.exprTypes[n]
+		if t == nil && tr.a.currentScope != nil {
+			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
+				t = sym.Type
+			}
+		}
+		if tr.isArrayLike(t) {
 			tr.arrayDecls[n.Name] = true
 			return smtVar(n.Name), true
 		}
@@ -869,7 +936,16 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			tr.lenDecls[lenSym] = true
 			return lenSym, true
 		}
-		if t, ok := smtNumericValueType(tr.a.exprTypes[n]); ok && !IsFloatType(t) {
+		// Field type from exprTypes (set once analyzed) OR resolved from the object's struct type when
+		// the node is synthetic/cloned (e.g. a substituted derived-state condition, whose field reads
+		// were never analyzed so their per-node type is unset).
+		fieldType := tr.a.exprTypes[n]
+		if fieldType == nil {
+			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+				fieldType = resolved
+			}
+		}
+		if t, ok := smtNumericValueType(fieldType); ok && !IsFloatType(t) {
 			// Numeric struct-field reads are modeled as fresh-ish projection symbols keyed by
 			// their syntactic path (`self.total`, `area.size`). We assert only facts guaranteed
 			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other

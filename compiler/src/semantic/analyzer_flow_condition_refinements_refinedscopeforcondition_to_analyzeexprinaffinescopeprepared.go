@@ -381,10 +381,17 @@ func (a *Analyzer) applyPostIfFallthroughRefinement(stmt *ast.IfStmt) {
 		return
 	}
 	if blockDefinitelyExits(stmt.Then) {
+		// The then-branch returns, so reaching here means the condition was FALSE. Apply the negated
+		// refinements AND record the negated condition as an assumable SMT fact — this is the legitimate
+		// fall-through guard (`if a == 0: return` ⟹ `a != 0` afterward; `if p == null: return` ⟹
+		// `p != null`). Without recording it, the only condition fact was the truthy one from the branch,
+		// so an SMT guard proof had to rely on a stale/contradictory leak (now fixed).
 		a.applyConditionRefinements(a.currentScope, stmt.Cond, false)
+		a.recordSMTAssertFact(smtFactExprForCondition(stmt.Cond, false))
 	}
 	if len(stmt.Else) > 0 && blockDefinitelyExits(stmt.Else) {
 		a.applyConditionRefinements(a.currentScope, stmt.Cond, true)
+		a.recordSMTAssertFact(smtFactExprForCondition(stmt.Cond, true))
 	}
 }
 func blockDefinitelyExits(stmts []ast.Stmt) bool {

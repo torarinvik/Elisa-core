@@ -428,6 +428,13 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 				continue
 			}
 		}
+		// Weakest-precondition transport: a straight-line scalar body with mutable reassignments has no
+		// immutable-local equality for the prover, so thread the postcondition backward through the
+		// assignments (VC IR brick 3) and discharge the result over the parameters.
+		if a.tryProveEnsureByWP(clause, n) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
+			continue
+		}
 		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
 	}
 }

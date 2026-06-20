@@ -63,8 +63,8 @@ func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 	for _, want := range []string{
 		"contract: version=fact-trace-v2 order=kind,target,class,reason,source summary=mode=eq:summary json=format=eq:json matchers=contains|eq|regex filters=alias|class|detail|effect|format|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb",
 		"func fact_core_rules",
-		"summary: transforms=25",
-		"kinds=[consume:1, invalidate:6, produce:4, rebase:1, recompute:7, refine:5, widen:1]",
+		"summary: transforms=26",
+		"kinds=[consume:1, ensure:1, invalidate:6, produce:4, rebase:1, recompute:7, refine:5, widen:1]",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected fact trace contract snapshot to contain %q, got:\n%s", want, output)

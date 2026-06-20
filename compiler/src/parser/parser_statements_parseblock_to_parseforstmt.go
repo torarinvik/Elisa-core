@@ -118,11 +118,16 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond}
 			}
 		case "invariant":
-			// `invariant <bool-expr>` in-body assertion, checked in place (debug builds only).
+			// `invariant <bool-expr>` in-body assertion, checked in place (debug builds only). Quantifiers
+			// are enabled so a loop invariant can range over an array's contents (`invariant forall k:
+			// 0<=k<i implies arr[k] == 0`), proven inductively via the SMT array-store model.
 			if p.looksLikeContractStmt() {
 				pos := p.cur().Pos
 				p.advance()
+				saved := p.allowQuantifiers
+				p.allowQuantifiers = true
 				cond := p.parseExpr()
+				p.allowQuantifiers = saved
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractInvariant, Cond: cond}
 			}

@@ -586,7 +586,11 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
 		a.applyIndexBoundsFactsForCondition(cond, truthy)
 		a.applyViewStaticLenForCondition(cond, truthy)
-		a.recordSMTAssertFact(smtFactExprForCondition(cond, truthy))
+		// Record the branch-condition fact into the BRANCH scope, not the current (parent) scope —
+		// currentScope is not switched to `scope` until the body is analyzed below, so using it here would
+		// leak the condition past the branch (a then-branch `x > 10` reaching the fall-through, where it
+		// contradicts the applied negation `x <= 10` and proves any postcondition).
+		a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(cond, truthy))
 	})
 }
 

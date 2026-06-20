@@ -49,7 +49,7 @@ func (a *Analyzer) updateNamedStateTypeAtPath(root *Symbol, current Type, struct
 		} else if namedStateAssignmentAffectsDerivedState(base, steps) {
 			state := fullNamedStateType(base)
 			if !unknown && len(steps) == 1 && steps[0].Field != "" {
-				if inferredState, ok := a.inferDirectFieldAssignedNamedState(pos, root, structSteps, base, steps[0].Field, value); ok {
+				if inferredState, ok := a.inferDirectFieldAssignedNamedState(pos, root, structSteps, base, steps[0].Field, value, current); ok {
 					state = inferredState
 				}
 			}

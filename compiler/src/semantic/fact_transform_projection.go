@@ -230,6 +230,12 @@ func factTransformsFromPoststates(fnType *FuncType) []FactTransform {
 	}
 	transforms := make([]FactTransform, 0, len(fnType.Poststates))
 	for _, poststate := range fnType.Poststates {
+		// An IMPLICIT preserve (strict protocol balance) is synthesized by the analyzer, not written by
+		// the user; it is an internal verification obligation, not a declared signature effect, so it is
+		// not surfaced as a fact transform (which mirror the source-level contract).
+		if poststate.Implicit {
+			continue
+		}
 		target := functionPoststateTargetName(fnType, poststate)
 		if target == "" {
 			continue

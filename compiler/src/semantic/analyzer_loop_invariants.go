@@ -5,7 +5,6 @@ import (
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
-	"elisacore/src/smt"
 )
 
 // checkLoopInvariants verifies `invariant` clauses that lead a `while` body as INDUCTIVE loop
@@ -43,7 +42,7 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// cannot fully account for (calls, non-arithmetic writes, address-taking, control flow) declines
 	// capture — establishment still runs (it needs no body model), but preservation cannot, and no
 	// exit fact is exported.
-	subst, captured := a.captureLoopBodyEffect(stmt.Body)
+	subst, arrayStores, captured := a.captureLoopBodyEffect(stmt.Body)
 
 	allProven := true
 	for _, inv := range invs {
@@ -67,7 +66,7 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		// what makes it sound: a child scope cannot mask the outer loop-variable facts (range-fact
 		// lookup intersects the whole chain), so reusing the ambient fact set would let a false
 		// invariant like `i < 5` "prove" preserved off the entry value `i == 0`.
-		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst); !preserved {
+		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst, arrayStores); !preserved {
 			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofRuntime)
 			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(counterexample))
 			allProven = false
@@ -285,7 +284,7 @@ func loopIntIdentName(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 //
 // The invariants may be assumed as hypotheses because establishment (checked separately) covers the
 // base case, so at the top of an arbitrary iteration every invariant holds.
-func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr) (bool, string) {
+func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr, arrayStores []loopArrayStore) (bool, string) {
 	solver := a.openSMT()
 	if solver == nil || target == nil {
 		return false, ""
@@ -296,6 +295,26 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	env, ok := a.smtEnvForSubst(tr, subst)
 	if !ok {
 		return false, ""
+	}
+	// Array-element stores extend the environment with the post-body array value `(store arr idx val)`.
+	// The index/value are translated with the FREE (pre-body) environment — consistent with the
+	// hypotheses below and with capture's guarantee that they reference only pre-body values — so the
+	// invariant's `arr[k]` becomes `(select (store arr idx val) k)` after substitution, and z3's array
+	// theory proves the inductive step (the just-written cell plus the IH on the rest).
+	for _, st := range arrayStores {
+		arrTerm, ok := tr.arrayTermEnv(st.array, nil)
+		if !ok {
+			return false, ""
+		}
+		idxTerm, ok := tr.termEnv(st.index, nil)
+		if !ok {
+			return false, ""
+		}
+		valTerm, ok := tr.termEnv(st.value, nil)
+		if !ok {
+			return false, ""
+		}
+		env[st.arrayName] = "(store " + arrTerm + " " + idxTerm + " " + valTerm + ")"
 	}
 	obligation, ok := tr.boolTerm(target, env)
 	if !ok {
@@ -324,76 +343,108 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 			return false, ""
 		}
 	}
-	// Enclosing preconditions are safe to assume and may bound a param the invariant mentions. Gathered
-	// before factPreamble so its declarations are included.
+	// Hypotheses are ONLY the enclosing preconditions plus the chosen cond/invariant clauses (hypSB) —
+	// deliberately NOT the ambient assert/flow facts the standard set carries, so the loop variables stay
+	// free constants (the inductive hypothesis). Discharge through the shared check primitive; on a SAT
+	// result the counterexample is a loop state satisfying cond + the invariants but VIOLATING the
+	// invariant after one body step — a concrete witness to non-preservation.
 	reqHyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + reqHyps + hypSB.String() + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true, ""
-	}
-	a.smtStats.Declined++
-	// On a SAT result the model is a loop state satisfying cond + the invariants but VIOLATING the
-	// invariant after one body step — i.e. a concrete witness to non-preservation.
-	if res == smt.Sat {
-		return false, tr.counterexample(model)
-	}
-	return false, ""
+	return a.smtCheckQuery(tr, reqHyps+hypSB.String(), obligation)
 }
 
-// captureLoopBodyEffect models a straight-line loop body as a simultaneous substitution from each
-// assigned loop variable to its new value. It returns ok=false for any body it cannot fully account
-// for — a non-identifier assignment target, a variable written more than once, a side-effecting or
-// non-arithmetic right-hand side, or any non-assignment statement. This conservatism is what makes
-// the substitution sound: a captured body provably touches the loop variables only through these
-// pure arithmetic assignments and contains no control flow.
-func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, bool) {
+// loopArrayStore is a captured array-element assignment `array[index] <- value` in a loop body. The
+// preservation prover models it as the SMT array-store `(store array index value)`, which is what lets
+// a QUANTIFIED invariant over the array's contents (`forall k: 0<=k<i implies arr[k] == 0`) be proven
+// inductive across the mutation that fills the array.
+type loopArrayStore struct {
+	arrayName string
+	array     ast.Expr
+	index     ast.Expr
+	value     ast.Expr
+}
+
+// captureLoopBodyEffect models a straight-line loop body as a simultaneous substitution: each assigned
+// scalar loop variable maps to its new value, and each array-element store `arr[i] <- v` is recorded
+// as a loopArrayStore. It returns ok=false for any body it cannot fully account for — a side-effecting
+// or non-arithmetic right-hand side, a doubly-written target, or any non-assignment statement. This
+// conservatism is what makes the substitution sound: a captured body provably touches state only
+// through these pure assignments and contains no control flow.
+func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, []loopArrayStore, bool) {
 	subst := map[string]ast.Expr{}
 	assigned := map[string]bool{}
 	var order []string
+	var stores []loopArrayStore
+	storedArrays := map[string]bool{}
 	for _, s := range body {
 		switch n := s.(type) {
 		case *ast.ContractStmt:
 			if n.Kind != ast.ContractInvariant {
-				return nil, false
+				return nil, nil, false
 			}
 		case *ast.AssignStmt:
-			id, ok := n.Target.(*ast.Ident)
-			if !ok || id == nil {
-				return nil, false // non-ident target (e.g. `arr[i] <- …`)
+			switch target := n.Target.(type) {
+			case *ast.Ident:
+				if target == nil {
+					return nil, nil, false
+				}
+				if assigned[target.Name] || storedArrays[target.Name] {
+					return nil, nil, false // multiple writes: simultaneous substitution would be wrong
+				}
+				if !exprIsPureArith(n.Value) {
+					return nil, nil, false // calls / address-of / non-arithmetic: possible side effects
+				}
+				subst[target.Name] = n.Value
+				assigned[target.Name] = true
+				order = append(order, target.Name)
+			case *ast.IndexExpr:
+				// Array-element store `arr[idx] <- val`, modeled as `(store arr idx val)`. Sound only when
+				// arr is a bare array variable; idx and val are pure arithmetic; and idx/val reference only
+				// PRE-body values (no variable assigned EARLIER in this body — else the store would observe
+				// a post-assignment value, breaking the simultaneous-substitution model). The array is
+				// element-stored at most once and never also whole-reassigned.
+				arrIdent, ok := target.Object.(*ast.Ident)
+				if !ok || arrIdent == nil {
+					return nil, nil, false
+				}
+				if storedArrays[arrIdent.Name] || assigned[arrIdent.Name] {
+					return nil, nil, false
+				}
+				if !exprIsPureArith(target.Index) || !exprIsPureArith(n.Value) {
+					return nil, nil, false
+				}
+				refs := map[string]bool{}
+				collectArithIdents(target.Index, refs)
+				collectArithIdents(n.Value, refs)
+				for r := range refs {
+					if assigned[r] {
+						return nil, nil, false
+					}
+				}
+				stores = append(stores, loopArrayStore{arrayName: arrIdent.Name, array: target.Object, index: target.Index, value: n.Value})
+				storedArrays[arrIdent.Name] = true
+			default:
+				return nil, nil, false
 			}
-			if assigned[id.Name] {
-				return nil, false // multiple writes: simultaneous substitution would be wrong
-			}
-			if !exprIsPureArith(n.Value) {
-				return nil, false // calls / address-of / non-arithmetic: possible side effects
-			}
-			subst[id.Name] = n.Value
-			assigned[id.Name] = true
-			order = append(order, id.Name)
 		default:
-			return nil, false // any other statement form
+			return nil, nil, false // any other statement form
 		}
 	}
-	if len(order) == 0 {
-		return nil, false
+	if len(order) == 0 && len(stores) == 0 {
+		return nil, nil, false
 	}
-	// Disjoint-RHS rule: each right-hand side may reference an assigned variable only when it IS the
-	// assigned variable (`i <- i + 1`). Otherwise simultaneous substitution would diverge from the
+	// Disjoint-RHS rule: each scalar right-hand side may reference an assigned variable only when it IS
+	// the assigned variable (`i <- i + 1`). Otherwise simultaneous substitution would diverge from the
 	// body's sequential semantics (`i <- i + 1; j <- i`).
 	for _, name := range order {
 		refs := map[string]bool{}
 		collectArithIdents(subst[name], refs)
 		for r := range refs {
 			if r != name && assigned[r] {
-				return nil, false
+				return nil, nil, false
 			}
 		}
 	}
-	return subst, true
+	return subst, stores, true
 }
 
 // exprIsPureArith reports whether expr is a side-effect-free integer arithmetic expression over

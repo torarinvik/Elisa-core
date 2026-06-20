@@ -8,14 +8,21 @@ import (
 )
 
 func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
-	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic)
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic, false)
+}
+
+// funcTypeFromExternDecl builds the signature of an `extern` function. It is identical to
+// funcTypeFromDecl except that no implicit `preserve` poststates are synthesized: the native body is
+// unverifiable, so callers must keep widening a borrowed stateful argument across the call.
+func (a *Analyzer) funcTypeFromExternDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic, true)
 }
 
 // funcTypeFromDeclWithFrame is funcTypeFromDecl plus the callee's frame clauses (docs/87 87-3), so
 // the resulting FuncType carries an effective-frame summary call sites use to refine mutable-ref
 // arguments. `changes` and `fulfills` are the only clauses that BOUND writes; `preserves` is a
 // blacklist that does not, so it is not threaded here.
-func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool, isExtern bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for _, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamErrorSet {
@@ -77,7 +84,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		})
 	})
 	frameWrites, frameBounded := a.resolveFrameSummary(allParams, changes, fulfills)
-	return &FuncType{
+	ft := &FuncType{
 		Name:                      name,
 		FrameWrites:               frameWrites,
 		FrameBounded:              frameBounded,
@@ -106,6 +113,13 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		Variadic:                  variadic,
 		OwnedParams:               ownedParamFlags(allParams),
 	}
+	// Strict protocol balance (body-bearing functions only — never externs, whose native body cannot be
+	// verified to preserve a borrowed state). Synthesized at signature-build time so every caller, in any
+	// order, sees the preserve and stops widening across the call.
+	if !isExtern {
+		a.appendImplicitPreservePoststates(ft, allParams, ptypes)
+	}
+	return ft
 }
 
 // ownedParamFlags records which parameters are declared `owned <store>` so call
@@ -249,9 +263,6 @@ func (a *Analyzer) projectFuncPoststateTargetType(current Type, step borrowRetur
 }
 
 func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, paramTypes []Type, returnType Type, ensures []ast.EnsuresClause) []FuncPoststate {
-	if len(ensures) == 0 {
-		return nil
-	}
 	resolved := make([]FuncPoststate, 0, len(ensures))
 	type seenPoststateTarget struct {
 		Condition FuncPoststateCondition
@@ -366,6 +377,71 @@ func (a *Analyzer) resolveFuncPoststates(name string, params []ast.ParamDecl, pa
 		resolved = append(resolved, poststate)
 	}
 	return resolved
+}
+
+// appendImplicitPreservePoststates implements STRICT PROTOCOL BALANCE: a `mutable T[S]&` parameter
+// whose declared state is a single specific state, and which no explicit `ensures` already governs,
+// gets an IMPLICIT `preserve` poststate. The resource must be handed back in the state it was lent in;
+// a function that changes it must declare the new state (`ensures p => NewState`). This removes the
+// `=> preserve` boilerplate for the common no-op-on-state case AND catches undeclared state mutations,
+// and lets callers stop widening across such calls so protocol chains compose without annotation.
+//
+// It runs at BODY analysis (only body-bearing functions reach it), never for externs: an extern's
+// native body is unverifiable, so assuming it preserves a borrowed state would be unsound — callers
+// must keep widening across externs. Idempotent (re-analysis won't duplicate the synthesized clauses).
+func (a *Analyzer) appendImplicitPreservePoststates(fnType *FuncType, params []ast.ParamDecl, paramTypes []Type) {
+	if fnType == nil {
+		return
+	}
+	covered := make(map[int]bool, len(fnType.Poststates))
+	for _, ps := range fnType.Poststates {
+		covered[ps.ParamIndex] = true
+	}
+	for i := range params {
+		if i >= len(paramTypes) || covered[i] {
+			continue
+		}
+		if !paramIsMutableRefToSingleNamedState(params[i], paramTypes[i]) {
+			continue
+		}
+		fnType.Poststates = append(fnType.Poststates, FuncPoststate{
+			Position:   params[i].Position,
+			Condition:  FuncPoststateCondition{Kind: FuncPoststateConditionAlways},
+			ParamIndex: i,
+			Kind:       FuncPoststateKindPreserve,
+			Implicit:   true,
+		})
+	}
+}
+
+// paramIsMutableRefToSingleNamedState reports whether a parameter is a MUTABLE reference to a
+// named-state-bearing value whose state is pinned to exactly ONE case (e.g. `mutable File[Open]&`).
+// Only this shape gets the implicit `preserve`: a by-value or immutable param can't have the caller's
+// state mutated, and a multi-state declaration (`File[Open | Closed]&`) deliberately says "either
+// state is fine", so pinning it to preserve would be a false constraint. Mutability may sit in the ref
+// type (canonical `p: mutable T&`, RefType.Mutable) or on the ParamDecl (legacy `mutable p: T&`).
+func paramIsMutableRefToSingleNamedState(param ast.ParamDecl, t Type) bool {
+	ref, ok := poststateRefTargetType(t)
+	if !ok || ref == nil {
+		return false
+	}
+	if !ref.Mutable && !param.Mutable {
+		return false
+	}
+	elem := ref.Elem
+	for {
+		agg, isAgg := elem.(*AggregateStateType)
+		if !isAgg || agg == nil {
+			break
+		}
+		elem = agg.Base
+	}
+	stateArg, ok := namedStateCurrentArg(elem)
+	if !ok || stateArg == nil {
+		return false
+	}
+	cases, _, ok := namedStateTypeCases(stateArg)
+	return ok && len(cases) == 1
 }
 
 // resolveRefinementEnsures resolves `ensures <param> is <BareLaw>` postconditions (docs/85, mutable
