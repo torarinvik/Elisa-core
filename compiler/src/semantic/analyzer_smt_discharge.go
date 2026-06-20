@@ -156,36 +156,16 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if !ok {
 		return false
 	}
-	// Assume the enclosing function's preconditions (docs/90 brick 90-6). A `requires forall k:
-	// 0<=k<n implies xs[k] >= 0` becomes a hypothesis, so `return xs[0] is NonNeg` discharges by
-	// quantifier instantiation. Contract-sound: the callee may assume its preconditions (callers must
-	// establish them), and an SMT-proven VALUE fact never drives bounds-check elision, so a violated
-	// precondition is garbage-in-garbage-out, not memory unsafety. Translated with the SAME translator
-	// so param/array symbols unify with the obligation. (factPreamble is built AFTER, once all decls
-	// are collected.)
-	hyps := a.smtRequiresHypotheses(tr)
-	// docs/85 gap #2: assert the defining equality of every immutable integer local in
-	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
-	// treating them as free variables. Must run before factPreamble so the locals and the
-	// variables of their defining expressions are declared.
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true
+	// Discharge against the standard hypothesis set (which assumes the enclosing function's preconditions
+	// — docs/90 brick 90-6 — so a `requires forall k: 0<=k<n implies xs[k] >= 0` instantiates to prove
+	// `return xs[0] is NonNeg`). Contract-sound: the callee may assume its preconditions (callers must
+	// establish them) and an SMT-proven VALUE fact never drives bounds-check elision. On a failed proof,
+	// stash z3's satisfying assignment so the refinement diagnostic can show a concrete counterexample.
+	proven, counterexample := a.smtCheckVC(tr, obligation, "")
+	if !proven {
+		a.lastSMTCounterexample = counterexample
 	}
-	// On a SAT (failed) proof, stash z3's satisfying assignment so the refinement diagnostic can show
-	// a concrete counterexample (the input that violates the predicate). Empty when no model/unknown.
-	if res == smt.Sat {
-		a.lastSMTCounterexample = tr.counterexample(model)
-	}
-	a.smtStats.Declined++
-	return false
+	return proven
 }
 
 // counterexampleSuffix formats a satisfying-model string as a trailing diagnostic hint, or "" when
@@ -195,6 +175,50 @@ func (a *Analyzer) counterexampleSuffix(ce string) string {
 		return ""
 	}
 	return " — it can fail when " + ce
+}
+
+// smtCheckVC is the central verification-condition chokepoint. Every SMT-tier obligation that is
+// discharged against the analyzer's STANDARD hypothesis set flows through here, so the negate-and-check
+// protocol, query layout, solver stats, and counterexample extraction live in exactly one place — add
+// a new hypothesis source or change the proof protocol once and every site benefits.
+//
+// The standard hypothesis block is: the enclosing function's `requires`, the defining equalities of
+// immutable integer locals (so the prover reasons THROUGH `rem = value % alignment`), the accumulated
+// flow assert-facts (branch guards, proven invariants), and the scope's range facts. `extraHyps` are
+// site-specific assertions already built from `tr` (e.g. a callee's poststates). The obligation is
+// negated; only `unsat` concludes (a sound proof). On `sat` the model is rendered as a concrete
+// counterexample. `factPreamble()` is emitted LAST — after the hypothesis builders and the caller's
+// `obligation`/`extraHyps` have populated the translator's declarations — so all symbols are declared.
+func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps string) (bool, string) {
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr)
+	return a.smtCheckQuery(tr, hyps+extraHyps, obligation)
+}
+
+// smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
+// from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, asks
+// the solver, updates the stats, and returns proven (only on `unsat`) plus a counterexample on `sat`.
+// smtCheckVC layers the standard hypothesis set on top; the loop-preservation prover uses this directly
+// with its OWN hypothesis set (loop variables free, no ambient facts) — so the check protocol itself is
+// shared while each site keeps control of which facts it assumes. `factPreamble()` is emitted last so
+// every symbol the hypotheses and obligation introduced is declared.
+func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation string) (bool, string) {
+	solver := a.openSMT()
+	if solver == nil || tr == nil {
+		return false, ""
+	}
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	a.smtStats.Attempts++
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		return true, ""
+	}
+	a.smtStats.Declined++
+	if res == smt.Sat {
+		return false, tr.counterexample(model)
+	}
+	return false, ""
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
@@ -230,34 +254,11 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if !ok {
 		return false, ""
 	}
-	// Assume the ENCLOSING (caller) function's own preconditions as hypotheses (docs/90 brick 90-13).
-	// This is the dual of brick 90-6 (which lets a callee assume its requires in its body): here a
-	// caller that itself carries `requires forall k: 0<=k<n implies data[k] >= 0` can discharge a
-	// callee's identical-or-weaker quantified array precondition, because both clauses translate
-	// against the SAME array symbol (the caller arg `data` and the caller requires both resolve to
-	// smtVar("data")). Contract-sound: the caller's callers must establish the caller's requires, and
-	// an SMT-proven precondition never drives bounds-check elision. A caller clause outside the
-	// fragment is silently skipped (fewer assumptions is conservative).
-	hyps := a.smtRequiresHypotheses(tr)
-	// docs/85 gap #2: assert the defining equality of every immutable integer local in
-	// scope, so the prover reasons THROUGH locals (`rem = value % alignment`) rather than
-	// treating them as free variables. Must run before factPreamble so the locals and the
-	// variables of their defining expressions are declared.
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true, ""
-	}
-	a.smtStats.Declined++
-	// On sat, the model is an input permitted by the caller's known facts that violates the
-	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
-	return false, tr.counterexample(model)
+	// Discharge against the standard hypothesis set (the enclosing function's `requires` — docs/90
+	// brick 90-13 — its immutable-local defining equalities, flow assert-facts, and range facts). On
+	// sat, smtCheckVC returns an input permitted by the caller's known facts that violates the
+	// precondition — a concrete witness for the diagnostic.
+	return a.smtCheckVC(tr, obligation, "")
 }
 
 func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
@@ -303,20 +304,10 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 	if calleeHyps.Len() == 0 {
 		return false
 	}
-	hyps := a.smtRequiresHypotheses(tr)
-	localHyps := a.smtImmutableLocalHypotheses(tr)
-	assertHyps := a.smtAssertHypotheses(tr)
-	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + calleeHyps.String() + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, _ := solver.Check(query)
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true
-	}
-	a.smtStats.Declined++
-	return false
+	// The called function's poststates (`calleeHyps`) are the site-specific extra hypotheses on top of
+	// the standard set. Discharge through the central chokepoint (the counterexample is unused here).
+	proven, _ := a.smtCheckVC(tr, obligation, calleeHyps.String())
+	return proven
 }
 
 func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {

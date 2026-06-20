@@ -5,7 +5,6 @@ import (
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
-	"elisacore/src/smt"
 )
 
 // checkLoopInvariants verifies `invariant` clauses that lead a `while` body as INDUCTIVE loop
@@ -344,24 +343,13 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 			return false, ""
 		}
 	}
-	// Enclosing preconditions are safe to assume and may bound a param the invariant mentions. Gathered
-	// before factPreamble so its declarations are included.
+	// Hypotheses are ONLY the enclosing preconditions plus the chosen cond/invariant clauses (hypSB) —
+	// deliberately NOT the ambient assert/flow facts the standard set carries, so the loop variables stay
+	// free constants (the inductive hypothesis). Discharge through the shared check primitive; on a SAT
+	// result the counterexample is a loop state satisfying cond + the invariants but VIOLATING the
+	// invariant after one body step — a concrete witness to non-preservation.
 	reqHyps := a.smtRequiresHypotheses(tr)
-	query := tr.factPreamble() + reqHyps + hypSB.String() + "(assert (not " + obligation + "))\n"
-	a.smtStats.Attempts++
-	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
-	if res == smt.Unsat {
-		a.smtStats.Proven++
-		a.smtStats.SolverProven++
-		return true, ""
-	}
-	a.smtStats.Declined++
-	// On a SAT result the model is a loop state satisfying cond + the invariants but VIOLATING the
-	// invariant after one body step — i.e. a concrete witness to non-preservation.
-	if res == smt.Sat {
-		return false, tr.counterexample(model)
-	}
-	return false, ""
+	return a.smtCheckQuery(tr, reqHyps+hypSB.String(), obligation)
 }
 
 // loopArrayStore is a captured array-element assignment `array[index] <- value` in a loop body. The
