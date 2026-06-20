@@ -559,8 +559,24 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
 			continue
 		}
+		if a.trySMTProveEnsureFromPureReturnPaths(clause) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "return paths", ProofProvenSMT)
+			continue
+		}
 		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
 	}
+}
+
+func (a *Analyzer) trySMTProveEnsureFromPureReturnPaths(clause ast.Expr) bool {
+	if a == nil || a.currentFuncDecl == nil || clause == nil {
+		return false
+	}
+	body, ok := pureReturnExpr(a.currentFuncDecl)
+	if !ok || body == nil {
+		return false
+	}
+	proven, _ := a.trySMTProveRequires(clause, map[string]ast.Expr{"result": body})
+	return proven
 }
 
 // isSideEffectFreeRefinementArg reports whether a call argument can be safely re-evaluated by a

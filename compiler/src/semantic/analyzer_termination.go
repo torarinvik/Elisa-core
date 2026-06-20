@@ -5,6 +5,17 @@ import (
 	"elisacore/src/lexer"
 )
 
+type pureReturnCase struct {
+	Cond ast.Expr
+	Expr ast.Expr
+}
+
+type recursionEdge struct {
+	Caller *ast.FuncDecl
+	Callee *ast.FuncDecl
+	Call   *ast.CallExpr
+}
+
 // Recursive-function termination via `decreases` (docs/86 brick 86-7).
 //
 // Dafny's termination story: a function annotated with a `decreases <measure>` clause proves it
@@ -47,6 +58,15 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	if len(fn.Decreases) == 0 {
 		return
 	}
+	if len(fn.Decreases) == 1 && a.isStructuralDecreaseMeasure(fn, fn.Decreases[0]) {
+		if a.checkStructuralTermination(fn, fn.Decreases[0]) {
+			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofProvenLinear)
+		} else {
+			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofRefuted)
+			a.errorf(fn.Decreases[0].Pos(), "cannot prove structural `decreases` for %q: recursive calls must pass values bound from a match on the decreasing enum parameter", fn.Name)
+		}
+		return
+	}
 	// Type-check the measure components: each must be an integer (the prover reasons over integers).
 	for _, m := range fn.Decreases {
 		if m == nil {
@@ -59,6 +79,16 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 	calls := a.collectSelfRecursiveCalls(fn)
 	if len(calls) == 0 {
+		edges := a.collectRecursiveSCCEdges(fn)
+		if len(edges) > 0 {
+			if a.mutualRecursionVerified(fn, edges) {
+				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofProvenLinear)
+			} else {
+				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofRefuted)
+				a.errorf(fn.Decreases[0].Pos(), "cannot prove the `decreases` measure strictly decreases across the mutually-recursive cycle containing %q; the cycle may not terminate", fn.Name)
+			}
+			return
+		}
 		// A `decreases` on a non-self-recursive function is harmless but pointless — flag it so the
 		// user knows the clause is doing nothing (and isn't masking a typo'd recursive call).
 		a.warnf(fn.Decreases[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
@@ -73,6 +103,212 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		a.recordProof(call.Pos(), "termination of "+fn.Name, "decreases", ProofRefuted)
 		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate", fn.Name)
 	}
+}
+
+func (a *Analyzer) isStructuralDecreaseMeasure(fn *ast.FuncDecl, measure ast.Expr) bool {
+	if a == nil || fn == nil || measure == nil || len(fn.Decreases) != 1 {
+		return false
+	}
+	id, ok := measure.(*ast.Ident)
+	if !ok || id == nil {
+		return false
+	}
+	if a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil || sym.Kind != SymbolParam {
+		return false
+	}
+	et, ok := stripRefForBounds(sym.Type).(*EnumType)
+	return ok && et != nil && et.RecursivePlain
+}
+
+func (a *Analyzer) checkStructuralTermination(fn *ast.FuncDecl, measure ast.Expr) bool {
+	id, ok := measure.(*ast.Ident)
+	if !ok || id == nil {
+		return false
+	}
+	measureEnum := a.structuralMeasureEnumForFunc(fn, id.Name)
+	if measureEnum == nil {
+		return false
+	}
+	calls := a.collectSelfRecursiveCalls(fn)
+	if len(calls) == 0 {
+		a.warnf(measure.Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
+		return true
+	}
+	allowed := map[*ast.CallExpr]bool{}
+	a.collectStructuralRecursiveCalls(fn.Body, id.Name, measureEnum, map[string]bool{}, allowed)
+	for _, call := range calls {
+		if !allowed[call] {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) structuralMeasureEnum(measureName string) *EnumType {
+	if a == nil || a.currentScope == nil || measureName == "" {
+		return nil
+	}
+	sym, ok := a.currentScope.Lookup(measureName)
+	if !ok || sym == nil {
+		return nil
+	}
+	et, ok := stripRefForBounds(sym.Type).(*EnumType)
+	if !ok || et == nil || !et.RecursivePlain {
+		return nil
+	}
+	return et
+}
+
+func (a *Analyzer) structuralMeasureEnumForFunc(fn *ast.FuncDecl, measureName string) *EnumType {
+	if a == nil || fn == nil || measureName == "" {
+		return nil
+	}
+	sym, ok := a.symbolForFuncDecl(fn)
+	if !ok || sym == nil {
+		return nil
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return nil
+	}
+	for i, param := range fn.Params {
+		if param.Name != measureName || i >= len(fnType.Params) {
+			continue
+		}
+		et, ok := stripRefForBounds(fnType.Params[i]).(*EnumType)
+		if ok && et != nil && et.RecursivePlain {
+			return et
+		}
+	}
+	return nil
+}
+
+func (a *Analyzer) collectStructuralRecursiveCalls(stmts []ast.Stmt, measureName string, measureEnum *EnumType, smaller map[string]bool, allowed map[*ast.CallExpr]bool) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.MatchStmt:
+			next := smaller
+			if id, ok := stripOptimizationParens(n.Value).(*ast.Ident); ok && id.Name == measureName {
+				next = cloneStringBoolMap(smaller)
+				for _, arm := range n.Arms {
+					collectStructuralChildBindNames(arm.Pattern, measureEnum, ast.EnumPayloadRelationNone, measureEnum, next)
+					a.collectStructuralRecursiveCalls(arm.Body, measureName, measureEnum, next, allowed)
+				}
+				continue
+			}
+			for _, arm := range n.Arms {
+				a.collectStructuralRecursiveCalls(arm.Body, measureName, measureEnum, next, allowed)
+			}
+		case *ast.IfStmt:
+			a.collectStructuralRecursiveCalls(n.Then, measureName, measureEnum, smaller, allowed)
+			a.collectStructuralRecursiveCalls(n.Else, measureName, measureEnum, smaller, allowed)
+			for _, elif := range n.Elifs {
+				a.collectStructuralRecursiveCalls(elif.Body, measureName, measureEnum, smaller, allowed)
+			}
+		case *ast.ExprStmt:
+			a.markStructuralCallIfSmaller(n.Expr, smaller, allowed)
+		case *ast.ReturnStmt:
+			a.markStructuralCallIfSmaller(n.Value, smaller, allowed)
+		}
+	}
+}
+
+func (a *Analyzer) markStructuralCallIfSmaller(expr ast.Expr, smaller map[string]bool, allowed map[*ast.CallExpr]bool) {
+	a.walkStaticExpr(expr, func(e ast.Expr) bool {
+		call, ok := e.(*ast.CallExpr)
+		if !ok || call == nil {
+			return false
+		}
+		if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl == a.currentFuncDecl && len(call.Args) > 0 {
+			if id, ok := stripOptimizationParens(call.Args[0]).(*ast.Ident); ok && smaller[id.Name] {
+				allowed[call] = true
+			}
+		}
+		return false
+	})
+}
+
+func collectStructuralChildBindNames(pattern ast.MatchPattern, expected Type, relation ast.EnumPayloadRelation, measureEnum *EnumType, out map[string]bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		if p.Name != "" && isStructuralChildType(expected, measureEnum, relation) {
+			out[p.Name] = true
+		}
+		if p.Binder != "" && isStructuralChildType(expected, measureEnum, relation) {
+			out[p.Binder] = true
+		}
+	case *ast.MatchVariantPattern:
+		enumType, ok := stripRefForBounds(expected).(*EnumType)
+		if !ok || enumType == nil {
+			return
+		}
+		variant, ok := enumType.Variant(p.Variant)
+		if !ok || variant == nil {
+			return
+		}
+		args := p.ResolvedArgs
+		if len(args) == 0 {
+			args = make([]*ast.MatchPatternArg, len(p.Args))
+			for i := range p.Args {
+				args[i] = &p.Args[i]
+			}
+		}
+		for i, arg := range args {
+			if arg == nil || i >= len(variant.Payload) {
+				continue
+			}
+			collectStructuralChildBindNames(arg.Pattern, variant.Payload[i], variant.PayloadRelation(i), measureEnum, out)
+		}
+	case *ast.MatchStructPattern:
+		for _, arg := range p.Args {
+			collectStructuralChildBindNames(arg.Pattern, nil, ast.EnumPayloadRelationNone, measureEnum, out)
+		}
+		for _, arg := range p.ResolvedArgs {
+			if arg != nil {
+				collectStructuralChildBindNames(arg.Pattern, nil, ast.EnumPayloadRelationNone, measureEnum, out)
+			}
+		}
+	case *ast.MatchTuplePattern:
+		for _, elem := range p.Elems {
+			collectStructuralChildBindNames(elem, nil, ast.EnumPayloadRelationNone, measureEnum, out)
+		}
+	case *ast.MatchListPattern:
+		for _, elem := range p.Elems {
+			collectStructuralChildBindNames(elem, nil, ast.EnumPayloadRelationNone, measureEnum, out)
+		}
+	case *ast.MatchOrPattern:
+		for _, option := range p.Options {
+			collectStructuralChildBindNames(option, expected, relation, measureEnum, out)
+		}
+	}
+}
+
+func isStructuralChildType(t Type, measureEnum *EnumType, relation ast.EnumPayloadRelation) bool {
+	if measureEnum == nil || t == nil {
+		return false
+	}
+	et, ok := stripRefForBounds(t).(*EnumType)
+	if !ok || et == nil || et.Name != measureEnum.Name || !et.RecursivePlain {
+		return false
+	}
+	switch relation {
+	case ast.EnumPayloadRelationNone, ast.EnumPayloadRelationChild, ast.EnumPayloadRelationChildren:
+		return true
+	default:
+		return false
+	}
+}
+
+func cloneStringBoolMap(src map[string]bool) map[string]bool {
+	dst := map[string]bool{}
+	for k, v := range src {
+		dst[k] = v
+	}
+	return dst
 }
 
 // collectSelfRecursiveCalls returns every direct call `fn.Name(...)` syntactically inside fn's body.
@@ -173,8 +409,8 @@ func (a *Analyzer) measureDiffIsZero(measure ast.Expr, subst map[string]ast.Expr
 // the obligations are discharged by the same SMT implication used for invariant preservation, with the
 // loop variables FREE and constrained only by the loop condition + invariants:
 //
-//   DECREASE:        cond ∧ invariants ⊢ measure > measure[vars := post-body]
-//   BOUNDED-BELOW:   cond ∧ invariants ⊢ measure >= 0
+//	DECREASE:        cond ∧ invariants ⊢ measure > measure[vars := post-body]
+//	BOUNDED-BELOW:   cond ∧ invariants ⊢ measure >= 0
 //
 // post-body is the measure with each loop variable replaced by its net body effect (captureLoopBodyEffect,
 // the same simultaneous substitution the preservation proof uses). A lexicographic tuple decreases iff
@@ -354,7 +590,7 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	body, ok := pureReturnBody(decl)
+	body, ok := pureReturnExpr(decl)
 	if !ok {
 		return false
 	}
@@ -364,11 +600,14 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	// TOTAL: a function that makes ANY direct self-recursive call must have a VERIFIED `decreases`
 	// measure — otherwise its "equation" may be inconsistent (non-termination ⇒ no fixed point). A
 	// non-recursive pure function is trivially total.
-	calls := a.collectSelfRecursiveCalls(decl)
-	if len(calls) == 0 {
+	edges := a.collectRecursiveSCCEdges(decl)
+	if len(edges) == 0 {
 		return true
 	}
-	return a.measureVerifiedForCalls(decl, calls)
+	if len(edges) == len(a.collectSelfRecursiveCalls(decl)) {
+		return a.measureVerifiedForCalls(decl, a.collectSelfRecursiveCalls(decl))
+	}
+	return a.mutualRecursionVerified(decl, edges)
 }
 
 // measureVerifiedForCalls proves (read-only, no diagnostics) that decl's `decreases` measure strictly
@@ -406,6 +645,328 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.Call
 	return true
 }
 
+func (a *Analyzer) collectDirectFunctionCalls(fn *ast.FuncDecl) []*ast.CallExpr {
+	var calls []*ast.CallExpr
+	if fn == nil {
+		return calls
+	}
+	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+		call, ok := expr.(*ast.CallExpr)
+		if !ok || call == nil {
+			return false
+		}
+		if _, ok := a.resolveDirectCallFuncDecl(call); ok {
+			calls = append(calls, call)
+		}
+		return false
+	})
+	return calls
+}
+
+func (a *Analyzer) collectRecursiveSCCEdges(root *ast.FuncDecl) []recursionEdge {
+	if root == nil {
+		return nil
+	}
+	visited := map[*ast.FuncDecl]bool{}
+	var order []*ast.FuncDecl
+	var walk func(*ast.FuncDecl)
+	walk = func(fn *ast.FuncDecl) {
+		if fn == nil || visited[fn] {
+			return
+		}
+		visited[fn] = true
+		order = append(order, fn)
+		for _, call := range a.collectDirectFunctionCalls(fn) {
+			callee, ok := a.resolveDirectCallFuncDecl(call)
+			if !ok || callee == nil {
+				continue
+			}
+			walk(callee)
+		}
+	}
+	walk(root)
+	if len(order) == 0 {
+		return nil
+	}
+	reachesRoot := map[*ast.FuncDecl]bool{}
+	var reaches func(*ast.FuncDecl, map[*ast.FuncDecl]bool) bool
+	reaches = func(fn *ast.FuncDecl, seen map[*ast.FuncDecl]bool) bool {
+		if fn == root {
+			return true
+		}
+		if seen[fn] {
+			return false
+		}
+		seen[fn] = true
+		for _, call := range a.collectDirectFunctionCalls(fn) {
+			callee, ok := a.resolveDirectCallFuncDecl(call)
+			if ok && callee != nil && visited[callee] && reaches(callee, seen) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, fn := range order {
+		if reaches(fn, map[*ast.FuncDecl]bool{}) {
+			reachesRoot[fn] = true
+		}
+	}
+	var edges []recursionEdge
+	for _, caller := range order {
+		if !reachesRoot[caller] {
+			continue
+		}
+		for _, call := range a.collectDirectFunctionCalls(caller) {
+			callee, ok := a.resolveDirectCallFuncDecl(call)
+			if ok && reachesRoot[callee] {
+				edges = append(edges, recursionEdge{Caller: caller, Callee: callee, Call: call})
+			}
+		}
+	}
+	return edges
+}
+
+func (a *Analyzer) mutualRecursionVerified(root *ast.FuncDecl, edges []recursionEdge) bool {
+	if root == nil || root != a.currentFuncDecl || len(edges) == 0 {
+		return false
+	}
+	members := map[*ast.FuncDecl]bool{}
+	for _, edge := range edges {
+		members[edge.Caller] = true
+		members[edge.Callee] = true
+	}
+	for member := range members {
+		if member.DecreasesWild != "" || len(member.Decreases) == 0 {
+			return false
+		}
+	}
+	for _, edge := range edges {
+		if edge.Caller == edge.Callee {
+			subst := a.substForSelfCall(edge.Caller, edge.Call)
+			if !a.proveMeasureDecreases(edge.Caller.Decreases, subst) {
+				return false
+			}
+			continue
+		}
+		if !a.crossFunctionMeasureDecreases(edge.Caller, edge.Callee, edge.Call) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) crossFunctionMeasureDecreases(caller, callee *ast.FuncDecl, call *ast.CallExpr) bool {
+	if caller == nil || callee == nil || call == nil || len(caller.Decreases) == 0 || len(callee.Decreases) == 0 {
+		return false
+	}
+	if len(caller.Decreases) != len(callee.Decreases) {
+		return false
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range callee.Params {
+		if i < len(args) && args[i] != nil {
+			subst[param.Name] = args[i]
+		}
+	}
+	for k := range caller.Decreases {
+		earlierUnchanged := true
+		for j := 0; j < k; j++ {
+			if !a.crossMeasureDiffIsZero(caller.Decreases[j], callee.Decreases[j], subst) {
+				earlierUnchanged = false
+				break
+			}
+		}
+		if !earlierUnchanged {
+			continue
+		}
+		if syntacticCrossMeasureDecreases(caller, callee, call, k) && a.syntacticCrossMeasureBounded(caller, k) {
+			return true
+		}
+		if a.crossMeasureStrictlyDecreases(caller.Decreases[k], callee.Decreases[k], subst) && a.measureBoundedBelow(caller.Decreases[k]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) syntacticCrossMeasureBounded(caller *ast.FuncDecl, k int) bool {
+	if caller == nil || k >= len(caller.Decreases) {
+		return false
+	}
+	id, ok := caller.Decreases[k].(*ast.Ident)
+	if !ok || id == nil {
+		return false
+	}
+	for i, param := range caller.Params {
+		if param.Name == id.Name && i < len(caller.Params) {
+			if a.currentScope != nil {
+				if sym, ok := a.currentScope.Lookup(id.Name); ok && sym != nil {
+					return indexTypeGuaranteedNonNegative(sym.Type)
+				}
+			}
+		}
+	}
+	return false
+}
+
+func syntacticCrossMeasureDecreases(caller, callee *ast.FuncDecl, call *ast.CallExpr, k int) bool {
+	if caller == nil || callee == nil || call == nil || k >= len(caller.Decreases) || k >= len(callee.Decreases) {
+		return false
+	}
+	callerID, ok := caller.Decreases[k].(*ast.Ident)
+	if !ok || callerID == nil {
+		return false
+	}
+	calleeID, ok := callee.Decreases[k].(*ast.Ident)
+	if !ok || calleeID == nil {
+		return false
+	}
+	calleeParam := -1
+	for i, param := range callee.Params {
+		if param.Name == calleeID.Name {
+			calleeParam = i
+			break
+		}
+	}
+	args := proofCallArgs(call)
+	if calleeParam < 0 || calleeParam >= len(args) {
+		return false
+	}
+	bin, ok := stripOptimizationParens(args[calleeParam]).(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_MINUS {
+		return false
+	}
+	left, ok := stripOptimizationParens(bin.Left).(*ast.Ident)
+	if !ok || left == nil || left.Name != callerID.Name {
+		return false
+	}
+	lit, ok := stripOptimizationParens(bin.Right).(*ast.IntLit)
+	if !ok || lit == nil {
+		return false
+	}
+	v, ok := parsePositiveIntLiteral(lit)
+	if ok && v > 0 {
+		return true
+	}
+	return false
+}
+
+func parsePositiveIntLiteral(lit *ast.IntLit) (int64, bool) {
+	if lit == nil || lit.IsHex || lit.Suffix != "" {
+		return 0, false
+	}
+	var v int64
+	for _, ch := range lit.Value {
+		if ch == '_' {
+			continue
+		}
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		v = v*10 + int64(ch-'0')
+		if v <= 0 {
+			return 0, false
+		}
+	}
+	return v, true
+}
+
+func (a *Analyzer) crossMeasureDiff(callerMeasure, calleeMeasure ast.Expr, subst map[string]ast.Expr) (affineForm, bool) {
+	entry, ok := a.affineOf(callerMeasure, a.currentScope)
+	if !ok {
+		return affineForm{}, false
+	}
+	call, ok := a.substitutedAffine(calleeMeasure, subst)
+	if !ok {
+		return affineForm{}, false
+	}
+	return subtractAffine(entry, call), true
+}
+
+func (a *Analyzer) crossMeasureStrictlyDecreases(callerMeasure, calleeMeasure ast.Expr, subst map[string]ast.Expr) bool {
+	diff, ok := a.crossMeasureDiff(callerMeasure, calleeMeasure, subst)
+	if !ok {
+		return false
+	}
+	r := a.boundAffine(diff, a.currentScope)
+	return r.loKnown && r.lo > 0
+}
+
+func (a *Analyzer) crossMeasureDiffIsZero(callerMeasure, calleeMeasure ast.Expr, subst map[string]ast.Expr) bool {
+	diff, ok := a.crossMeasureDiff(callerMeasure, calleeMeasure, subst)
+	if !ok {
+		return false
+	}
+	r := a.boundAffine(diff, a.currentScope)
+	return r.loKnown && r.hiKnown && r.lo == 0 && r.hi == 0
+}
+
+func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || decl.IsLemma || decl.DecreasesWild != "" {
+		return false
+	}
+	if a.definingEquationInProgress == nil {
+		a.definingEquationInProgress = map[*ast.FuncDecl]bool{}
+	}
+	if a.definingEquationInProgress[decl] {
+		return true
+	}
+	a.definingEquationInProgress[decl] = true
+	defer delete(a.definingEquationInProgress, decl)
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	if fnType.Return == nil || !IsNumericType(fnType.Return) || IsFloatType(fnType.Return) {
+		return false
+	}
+	for _, pt := range fnType.Params {
+		if pt == nil || IsFloatType(pt) {
+			return false
+		}
+	}
+	body, ok := pureReturnExpr(decl)
+	return ok && a.exprIsPureShapeForEquation(body)
+}
+
+func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Inner)
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureShapeForEquation(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Left) && a.exprIsPureShapeForEquation(n.Right)
+	case *ast.CastExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Cond) && a.exprIsPureShapeForEquation(n.Value) && a.exprIsPureShapeForEquation(n.Alt)
+	case *ast.CallExpr:
+		if n == nil {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.exprIsPureShapeForEquation(arg) {
+				return false
+			}
+		}
+		return a.functionPureEquationShape(decl)
+	default:
+		return false
+	}
+}
+
 // exprIsPureForEquation reports whether an expression is a PURE integer expression we may put on the
 // RHS of a defining equation: literals, parameter/immutable identifiers, arithmetic, comparisons,
 // parens, value-preserving casts, and calls to OTHER functions that are THEMSELVES equation-eligible
@@ -423,6 +984,8 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 		return n != nil && a.exprIsPureForEquation(n.Left) && a.exprIsPureForEquation(n.Right)
 	case *ast.CastExpr:
 		return n != nil && a.exprIsPureForEquation(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil && a.exprIsPureForEquation(n.Cond) && a.exprIsPureForEquation(n.Value) && a.exprIsPureForEquation(n.Alt)
 	case *ast.CallExpr:
 		if n == nil {
 			return false
@@ -445,18 +1008,124 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 	}
 }
 
-// pureReturnBody extracts a function's single trailing `return <expr>` body (leading contract
-// statements — requires/ensure/decreases — are erased by the parser into the decl, so a pure function
-// body is exactly one return statement). Returns ok=false for anything more complex.
+// pureReturnBody extracts a function's pure return expression. Kept for callers that only need the
+// expression; it now accepts pure return-path trees (`if`/`elif`/`else`) in addition to a single
+// `return`.
 func pureReturnBody(decl *ast.FuncDecl) (ast.Expr, bool) {
-	if decl == nil || len(decl.Body) != 1 {
+	return pureReturnExpr(decl)
+}
+
+func pureReturnExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
+	cases, ok := pureReturnCases(decl)
+	if !ok || len(cases) == 0 {
 		return nil, false
 	}
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
-	if !ok || ret == nil || ret.Value == nil {
+	return pureCasesToExpr(cases), true
+}
+
+func pureReturnCases(decl *ast.FuncDecl) ([]pureReturnCase, bool) {
+	if decl == nil || len(decl.Body) == 0 {
 		return nil, false
 	}
-	return ret.Value, true
+	return pureReturnCasesFromStmts(decl.Body, nil)
+}
+
+func pureReturnCasesFromStmts(stmts []ast.Stmt, path ast.Expr) ([]pureReturnCase, bool) {
+	if len(stmts) == 0 {
+		return nil, false
+	}
+	if len(stmts) > 1 {
+		first, ok := stmts[0].(*ast.IfStmt)
+		if !ok || first == nil || len(first.Else) != 0 {
+			return nil, false
+		}
+		thenCond := combinePathCond(path, first.Cond)
+		thenCases, ok := pureReturnCasesFromStmts(first.Then, thenCond)
+		if !ok {
+			return nil, false
+		}
+		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: first.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: first.Cond})
+		var out []pureReturnCase
+		out = append(out, thenCases...)
+		for _, elif := range first.Elifs {
+			cond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elif.Cond})
+			cases, ok := pureReturnCasesFromStmts(elif.Body, cond)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, cases...)
+			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elif.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: elif.Cond}}
+		}
+		fallthroughCases, ok := pureReturnCasesFromStmts(stmts[1:], combinePathCond(path, negatedPrior))
+		if !ok {
+			return nil, false
+		}
+		out = append(out, fallthroughCases...)
+		return out, true
+	}
+	switch n := stmts[0].(type) {
+	case *ast.ReturnStmt:
+		if n == nil || n.Value == nil {
+			return nil, false
+		}
+		return []pureReturnCase{{Cond: path, Expr: n.Value}}, true
+	case *ast.IfStmt:
+		if n == nil || n.Cond == nil {
+			return nil, false
+		}
+		var out []pureReturnCase
+		thenCond := combinePathCond(path, n.Cond)
+		thenCases, ok := pureReturnCasesFromStmts(n.Then, thenCond)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, thenCases...)
+		negatedPrior := ast.Expr(&ast.UnaryExpr{Position: n.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: n.Cond})
+		for _, elif := range n.Elifs {
+			if elif.Cond == nil {
+				return nil, false
+			}
+			cond := combinePathCond(path, &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: elif.Cond})
+			cases, ok := pureReturnCasesFromStmts(elif.Body, cond)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, cases...)
+			negatedPrior = &ast.BinaryExpr{Position: elif.Position, Op: lexer.TOKEN_AND, Left: negatedPrior, Right: &ast.UnaryExpr{Position: elif.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: elif.Cond}}
+		}
+		elseCond := combinePathCond(path, negatedPrior)
+		elseCases, ok := pureReturnCasesFromStmts(n.Else, elseCond)
+		if !ok {
+			return nil, false
+		}
+		out = append(out, elseCases...)
+		return out, true
+	default:
+		return nil, false
+	}
+}
+
+func combinePathCond(path, cond ast.Expr) ast.Expr {
+	if path == nil {
+		return cond
+	}
+	return &ast.BinaryExpr{Position: cond.Pos(), Op: lexer.TOKEN_AND, Left: path, Right: cond}
+}
+
+func pureCasesToExpr(cases []pureReturnCase) ast.Expr {
+	if len(cases) == 0 {
+		return nil
+	}
+	fallback := cases[len(cases)-1].Expr
+	for i := len(cases) - 2; i >= 0; i-- {
+		cond := cases[i].Cond
+		if cond == nil {
+			fallback = cases[i].Expr
+			continue
+		}
+		fallback = &ast.TernaryExpr{Position: cases[i].Expr.Pos(), Cond: cond, Value: cases[i].Expr, Alt: fallback}
+	}
+	return fallback
 }
 
 // measureBoundedBelow reports whether the measure cannot fall below 0. An unsigned-typed measure is

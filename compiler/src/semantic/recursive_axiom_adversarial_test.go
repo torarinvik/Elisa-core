@@ -85,8 +85,7 @@ def caller(n: i64) -> i64:
 `
 	r := analyzeContractStrict(t, "true_composed.elisa", src)
 	if errs := r.Errors(); len(errs) != 0 {
-		t.Logf("INCOMPLETENESS (not a soundness bug): composed pure equations should prove result==n+2 but got: %v", errs)
-		t.Skip("incomplete: composed call equations not chained by the prover")
+		t.Fatalf("composed pure equations should prove result==n+2, got: %v", errs)
 	}
 }
 
@@ -355,7 +354,6 @@ def caller(n: i64) -> i64:
 `
 	r := analyzeContractStrict(t, "multilevel_chain_true.elisa", src)
 	if errs := r.Errors(); len(errs) != 0 {
-		t.Logf("INCOMPLETENESS: h(n)==n+3 via 3-level equation chain should prove but got: %v", errs)
-		t.Skip("incomplete: 3-level equation chaining not proven (not a soundness issue)")
+		t.Fatalf("h(n)==n+3 via 3-level equation chain should prove, got: %v", errs)
 	}
 }

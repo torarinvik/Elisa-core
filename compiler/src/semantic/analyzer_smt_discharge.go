@@ -413,18 +413,37 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		}
 		subst[param.Name] = args[i]
 	}
-	calleeEnv, ok := a.smtEnvForSubst(tr, subst)
+	calleeEnv, ok := a.smtEnvForCallSubst(tr, subst)
 	if !ok {
 		return false
 	}
 	calleeEnv["result"] = retTerm
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.boolTerm(req, calleeEnv)
+		if !ok {
+			return false
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
 	var calleeHyps strings.Builder
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
 		}
 		if h, ok := tr.boolTerm(ensure, calleeEnv); ok {
-			calleeHyps.WriteString("(assert " + h + ")\n")
+			if guard == "true" {
+				calleeHyps.WriteString("(assert " + h + ")\n")
+			} else {
+				calleeHyps.WriteString("(assert (=> " + guard + " " + h + "))\n")
+			}
 		}
 	}
 	if calleeHyps.Len() == 0 {
@@ -461,6 +480,45 @@ func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) 
 				return nil, false
 			}
 			env[name] = arr
+			continue
+		}
+		term, ok := tr.term(argExpr)
+		if !ok {
+			return nil, false
+		}
+		env[name] = term
+	}
+	return env, true
+}
+
+func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		if lit, ok := argExpr.(*ast.BoolLit); ok {
+			if lit.Value {
+				env[name] = "true"
+			} else {
+				env[name] = "false"
+			}
+			continue
+		}
+		if IsBoolType(a.exprTypes[argExpr]) {
+			bterm, ok := tr.boolTerm(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = bterm
+			continue
+		}
+		if tr.isArrayLike(a.exprTypes[argExpr]) {
+			arr, ok := tr.arrayTermEnv(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = arr
+			continue
+		}
+		if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
 			continue
 		}
 		term, ok := tr.term(argExpr)
@@ -953,10 +1011,9 @@ type smtTranslator struct {
 	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
 	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
 	callCanon map[string]string
-	// callEqInFlight guards the recursive instantiation of the defining equation: while emitting the
-	// body equation for `g(...)` we mark `g` so a self-call inside its body does not recurse forever.
-	// Re-entry just yields the canonical symbol with no further equation — a sound bounded unroll.
-	callEqInFlight map[*ast.FuncDecl]int
+	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
+	// `g(n-1)` must remain distinct; only re-entering the exact same ground instance consumes fuel.
+	callEqInFlight map[string]int
 	// callEqMaxUnroll bounds how deep the defining equation is instantiated (default 1). A finite depth
 	// keeps the emitted axiom set finite; soundness does not depend on the depth (only on purity +
 	// termination), so this is purely a completeness knob.
@@ -969,17 +1026,17 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:            a,
-		decls:        map[string]bool{},
-		arrayDecls:   map[string]bool{},
-		lenDecls:     map[string]bool{},
-		nonNegDecls:  map[string]bool{},
-		unsignedBits: map[string]int{},
+		a:               a,
+		decls:           map[string]bool{},
+		arrayDecls:      map[string]bool{},
+		lenDecls:        map[string]bool{},
+		nonNegDecls:     map[string]bool{},
+		unsignedBits:    map[string]int{},
 		signedBits:      map[string]int{},
 		boolDecls:       map[string]bool{},
 		paramConsts:     paramConsts,
 		callCanon:       map[string]string{},
-		callEqInFlight:  map[*ast.FuncDecl]int{},
+		callEqInFlight:  map[string]int{},
 		callEqMaxUnroll: 1,
 	}
 }
@@ -1174,6 +1231,20 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return tr.termEnv(n.Operand, env)
 		}
 		return "", false
+	case *ast.TernaryExpr:
+		cond, ok := tr.boolTerm(n.Cond, env)
+		if !ok {
+			return "", false
+		}
+		v, ok := tr.termEnv(n.Value, env)
+		if !ok {
+			return "", false
+		}
+		alt, ok := tr.termEnv(n.Alt, env)
+		if !ok {
+			return "", false
+		}
+		return "(ite " + cond + " " + v + " " + alt + ")", true
 	case *ast.BinaryExpr:
 		var op string
 		switch n.Op {
@@ -1882,19 +1953,48 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 		}
 		subst[param.Name] = args[i]
 	}
-	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	env, ok := tr.a.smtEnvForCallSubst(tr, subst)
 	if !ok {
 		return ret, true
 	}
 	env["result"] = ret
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.boolTerm(req, env)
+		if !ok {
+			return ret, true
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
 	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
 	// contract-sound postcondition holds for the actual arguments.
+	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
+	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {
+		recursiveProofCall = false
+	}
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
 		}
+		if tr.a.isRecursiveProofCall(decl) && !recursiveProofCall {
+			continue
+		}
 		if h, ok := tr.boolTerm(ensure, env); ok {
-			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+			if guard == "true" {
+				tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+			} else {
+				tr.auxDecls = append(tr.auxDecls, "(assert (=> "+guard+" "+h+"))\n")
+			}
+			if recursiveProofCall {
+				tr.a.recordProof(ensure.Pos(), "recursive IH of "+decl.Name, "ensure", ProofProvenContract)
+			}
 		}
 	}
 	// (2) DEFINING EQUATION for a PURE, TOTAL function: assert `f(args) == body[params:=args]`, so the
@@ -1906,7 +2006,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
 	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
 	// finite.
-	tr.emitDefiningEquation(call, decl, ret, subst)
+	tr.emitDefiningEquation(call, decl, ret, subst, canonKey, guard)
 	return ret, true
 }
 
@@ -1934,11 +2034,18 @@ func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (stri
 // own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
 // purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
 // to an integer term.
-func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr) {
+func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string) {
 	if tr == nil || decl == nil {
 		return
 	}
-	if tr.callEqInFlight[decl] >= tr.callEqMaxUnroll {
+	if canonKey == "" {
+		var ok bool
+		canonKey, ok = tr.callCanonKey(decl, proofCallArgs(call))
+		if !ok {
+			return
+		}
+	}
+	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll {
 		return // bounded unroll reached: leave the symbol opaque (still sound)
 	}
 	if !tr.callEquationEligible(decl) {
@@ -1952,13 +2059,55 @@ func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.Func
 	if !ok {
 		return
 	}
-	tr.callEqInFlight[decl]++
-	defer func() { tr.callEqInFlight[decl]-- }()
+	tr.callEqInFlight[canonKey]++
+	defer func() { tr.callEqInFlight[canonKey]-- }()
 	bodyTerm, ok := tr.termEnv(body, env)
 	if !ok {
 		return
 	}
-	tr.auxDecls = append(tr.auxDecls, "(assert (= "+ret+" "+bodyTerm+"))\n")
+	eq := "(= " + ret + " " + bodyTerm + ")"
+	if guard != "" && guard != "true" {
+		eq = "(=> " + guard + " " + eq + ")"
+	}
+	tr.auxDecls = append(tr.auxDecls, "(assert "+eq+")\n")
+	if tr.a.isRecursiveProofCall(decl) {
+		tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name, "definition", ProofProvenContract)
+	} else {
+		tr.a.recordProof(call.Pos(), "defining equation of "+decl.Name, "definition", ProofProvenContract)
+	}
+}
+
+func (a *Analyzer) isRecursiveProofCall(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || a.currentFuncDecl == nil {
+		return false
+	}
+	if decl == a.currentFuncDecl {
+		return true
+	}
+	for _, edge := range a.collectRecursiveSCCEdges(a.currentFuncDecl) {
+		if edge.Caller == decl || edge.Callee == decl {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) recursiveCallHasVerifiedDecrease(callee *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || a.currentFuncDecl == nil || callee == nil || call == nil {
+		return false
+	}
+	caller := a.currentFuncDecl
+	if callee == caller {
+		if len(caller.Decreases) == 1 && a.isStructuralDecreaseMeasure(caller, caller.Decreases[0]) {
+			allowed := map[*ast.CallExpr]bool{}
+			if id, ok := caller.Decreases[0].(*ast.Ident); ok && id != nil {
+				a.collectStructuralRecursiveCalls(caller.Body, id.Name, a.structuralMeasureEnumForFunc(caller, id.Name), map[string]bool{}, allowed)
+			}
+			return allowed[call]
+		}
+		return a.proveMeasureDecreases(caller.Decreases, a.substForSelfCall(caller, call))
+	}
+	return a.crossFunctionMeasureDecreases(caller, callee, call)
 }
 
 // callEquationEligible reports whether a function's defining equation may be soundly assumed:
