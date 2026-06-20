@@ -467,11 +467,70 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		if req == nil {
 			continue
 		}
+		// SOUNDNESS: a `requires` constrains a parameter's ENTRY value. For an immutable variable that
+		// stays true everywhere, so it is asserted directly here. But a clause over a MUTABLE root (a
+		// mutable param/local, or a field reachable through a `mutable T&` param) is only valid until that
+		// root is mutated — re-asserting it unconditionally after `m <- 0` would prove a false postcondition
+		// about the new value. Such clauses are seeded as flow assert-facts at function entry
+		// (seedRequiresAsAssertFacts) and ride the standard mutation-invalidation instead, so they are
+		// skipped here to avoid the stale unconditional copy.
+		if a.requiresReferencesMutableRoot(req) {
+			continue
+		}
 		if h, ok := tr.boolTerm(req, nil); ok {
 			b.WriteString("(assert " + h + ")\n")
 		}
 	}
 	return b.String()
+}
+
+// requiresReferencesMutableRoot reports whether a `requires`/contract clause reads any variable whose
+// symbol is MUTABLE (a mutable param/local, or — for a field path like `b.v` — a root bound to a
+// `mutable T&` param). Such a clause's entry-value guarantee can be invalidated by a body mutation, so
+// it is tracked through the invalidation-aware assert-fact channel rather than asserted unconditionally.
+func (a *Analyzer) requiresReferencesMutableRoot(clause ast.Expr) bool {
+	if a == nil || a.currentScope == nil || clause == nil {
+		return false
+	}
+	for root := range smtFactDeps(clause) {
+		if sym, ok := a.currentScope.Lookup(root); ok && symbolRootMutable(sym) {
+			return true
+		}
+	}
+	return false
+}
+
+// symbolRootMutable reports whether a symbol's value (or the place it points at) can be changed by a
+// body mutation. A by-value mutable local/param qualifies (sym.Mutable). So does a MUTABLE-REFERENCE
+// parameter (`s: mutable S&`): paramIsMutable leaves sym.Mutable FALSE there (the `mutable` only allows
+// rebinding the ref), but the POINTEE is writable — `s.x <- …` / `bump(&s.x)` change what a `requires`
+// over that place reads — so its entry-value guarantee is mutable and must ride the invalidation channel.
+func symbolRootMutable(sym *Symbol) bool {
+	if sym == nil {
+		return false
+	}
+	if sym.Mutable {
+		return true
+	}
+	if rt, ok := sym.Type.(*RefType); ok && rt != nil && rt.Mutable {
+		return true
+	}
+	return false
+}
+
+// seedRequiresAsAssertFacts records every `requires` clause over a MUTABLE root as a flow assert-fact in
+// the current (function body) scope, so it is assumed while the root holds its entry value and DROPPED
+// by the standard mutation invalidation the moment the root is written — the exact lifetime a precondition
+// has. Immutable-root clauses are left to smtRequiresHypotheses (always valid, no invalidation needed).
+func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
+	if a == nil || fn == nil || a.currentScope == nil {
+		return
+	}
+	for _, req := range fn.Requires {
+		if req != nil && a.requiresReferencesMutableRoot(req) {
+			a.recordSMTAssertFact(req)
+		}
+	}
 }
 
 // smtFlowFactHypotheses asserts the scope's flow range-facts — branch-derived bounds on

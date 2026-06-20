@@ -138,6 +138,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.currentImplicitScopes = pushExprBindingScope(savedBodyImplicitScopes, bindings)
 					}
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
@@ -345,6 +346,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")
@@ -514,6 +516,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					}
 					a.defineRegionParamValueSymbols(fn)
 					a.seedParamRefinementFacts(a.expandedFuncDeclParams(fn))
+					a.seedRequiresAsAssertFacts(fn)
 					savedChangesPaths, savedHasChanges := a.currentChangesPaths, a.currentHasChanges
 					savedPreservesPaths, savedHasPreserves := a.currentPreservesPaths, a.currentHasPreserves
 					a.currentChangesPaths = a.resolveFramePaths(fn.Changes, "changes")

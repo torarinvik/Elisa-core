@@ -120,7 +120,91 @@ func (a *Analyzer) countUpExitFactSound(stmt *ast.WhileStmt) bool {
 			return true
 		}
 	}
+	// A LIVE entry `requires name <= K` (or `< K`) with K <= bound also makes the exit fact sound: the
+	// counter starts within the bound and only counts up to it. "Live" means the seeded requires
+	// assert-fact still exists in scope — if `name` was reassigned before the loop, the standard mutation
+	// invalidation already dropped it, so a pre-loop reassignment correctly disqualifies the bound. This
+	// lets `requires i <= 5; while i < 5: i++` prove `result <= 5` SOUNDLY, without re-asserting the entry
+	// precondition for the mutated post-loop value (the requires-as-permanent-axiom hole, audit cluster B).
+	if hi, ok := a.liveRequiresUpperBound(name); ok && hi <= bound {
+		return true
+	}
 	return false
+}
+
+// liveRequiresUpperBound returns the tightest constant K such that a `requires name <= K` (or `< K+1`)
+// clause of the enclosing function is STILL a live assert-fact (not dropped by a mutation of name).
+func (a *Analyzer) liveRequiresUpperBound(name string) (int64, bool) {
+	if a == nil || a.currentFuncDecl == nil || name == "" {
+		return 0, false
+	}
+	best, found := int64(0), false
+	for _, req := range a.currentFuncDecl.Requires {
+		hi, ok := a.requiresClauseUpperBound(req, name)
+		if !ok || !a.assertFactLive(req) {
+			continue
+		}
+		if !found || hi < best {
+			best, found = hi, true
+		}
+	}
+	return best, found
+}
+
+// assertFactLive reports whether `expr` is still present as a flow assert-fact in the active scope
+// chain (seeded and not since invalidated by a mutation of one of its roots).
+func (a *Analyzer) assertFactLive(expr ast.Expr) bool {
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == expr {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// requiresClauseUpperBound extracts a constant upper bound on `name` from a `name <= K` / `name < K`
+// (or the flipped `K >= name` / `K > name`) clause, or ok=false otherwise.
+func (a *Analyzer) requiresClauseUpperBound(expr ast.Expr, name string) (int64, bool) {
+	bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return 0, false
+	}
+	leftIsName := isIdentNamed(bin.Left, name)
+	rightIsName := isIdentNamed(bin.Right, name)
+	switch bin.Op {
+	case lexer.TOKEN_LTEQ: // name <= K  /  K <= name is a lower bound (ignored)
+		if leftIsName {
+			if k, ok := a.constIntValue(bin.Right); ok {
+				return k, true
+			}
+		}
+	case lexer.TOKEN_LT: // name < K  ⇒  name <= K-1
+		if leftIsName {
+			if k, ok := a.constIntValue(bin.Right); ok {
+				return k - 1, true
+			}
+		}
+	case lexer.TOKEN_GTEQ: // K >= name  ⇒  name <= K
+		if rightIsName {
+			if k, ok := a.constIntValue(bin.Left); ok {
+				return k, true
+			}
+		}
+	case lexer.TOKEN_GT: // K > name  ⇒  name <= K-1
+		if rightIsName {
+			if k, ok := a.constIntValue(bin.Left); ok {
+				return k - 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+func isIdentNamed(expr ast.Expr, name string) bool {
+	id, ok := stripOptimizationParens(expr).(*ast.Ident)
+	return ok && id != nil && id.Name == name
 }
 
 func (a *Analyzer) countUpLoopUpperBound(expr ast.Expr) (string, int64, bool) {
@@ -1134,18 +1218,60 @@ func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
 			lo, loK = r.hi, r.hiKnown
 			hi, hiK = r.lo, r.loKnown
 		}
+		// SOUNDNESS: do the interval arithmetic with int64-OVERFLOW detection. A wide product such as a
+		// u32 `a*3000000000` with a in [0, 4e9] computes `3e9 * 4e9 = 1.2e19`, which overflows int64 and
+		// wraps to a small/negative value — making the interval look in-range so provablyNoArithWrap
+		// wrongly skips the wrap model and proves a false `result >= a`. On any overflow the bound becomes
+		// unknown (open), which only declines a proof, never admits an unsound one (audit cluster E).
 		if out.loKnown && loK {
-			out.lo += coeff * lo
+			if p, ok := mulInt64Checked(coeff, lo); ok {
+				if s, ok := addInt64Checked(out.lo, p); ok {
+					out.lo = s
+				} else {
+					out.loKnown = false
+				}
+			} else {
+				out.loKnown = false
+			}
 		} else {
 			out.loKnown = false
 		}
 		if out.hiKnown && hiK {
-			out.hi += coeff * hi
+			if p, ok := mulInt64Checked(coeff, hi); ok {
+				if s, ok := addInt64Checked(out.hi, p); ok {
+					out.hi = s
+				} else {
+					out.hiKnown = false
+				}
+			} else {
+				out.hiKnown = false
+			}
 		} else {
 			out.hiKnown = false
 		}
 	}
 	return out
+}
+
+// mulInt64Checked multiplies with overflow detection (ok=false on overflow).
+func mulInt64Checked(a, b int64) (int64, bool) {
+	if a == 0 || b == 0 {
+		return 0, true
+	}
+	p := a * b
+	if p/b != a {
+		return 0, false
+	}
+	return p, true
+}
+
+// addInt64Checked adds with overflow detection (ok=false on overflow).
+func addInt64Checked(a, b int64) (int64, bool) {
+	s := a + b
+	if (s > a) != (b > 0) {
+		return 0, false
+	}
+	return s, true
 }
 
 // tryProveRefinementByLinear discharges `value is law[args]` when `value` is an affine form over
