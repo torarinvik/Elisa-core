@@ -382,7 +382,12 @@ type Analyzer struct {
 	// (so `return p` records "returns param i") without affecting any other analysis.
 	inReturnBorrowCapture            bool
 	returnBorrowedOwnerLocalProgress map[*Symbol]bool
-	sinkParamInferenceInProgress     map[*ast.FuncDecl]bool
+	// functionValueResolveInProgress guards functionValueTypeForExpr against a self-referential /
+	// cyclic value binding (e.g. `x = x`, where the symbol's value expr resolves back to itself):
+	// re-entering a symbol already on the resolution stack returns "no function-value type" instead of
+	// recursing until the goroutine stack overflows.
+	functionValueResolveInProgress map[*Symbol]bool
+	sinkParamInferenceInProgress   map[*ast.FuncDecl]bool
 	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
 	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
 	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation

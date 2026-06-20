@@ -169,6 +169,27 @@ func (a *Analyzer) ensureFunctionValueTypeSummaries(expr ast.Expr, fnType *FuncT
 	}
 }
 
+// functionValueTypeFollowingBinding resolves the function-value type of a value-bound symbol's
+// initializer, guarding against a self-referential / cyclic value binding (e.g. `x = x`, or a mutual
+// `a = b; b = a`). The symbol is marked for the duration of the follow; re-entering it returns
+// (nil, false) — a cyclic binding has no well-defined function-value identity — which terminates the
+// recursion that would otherwise overflow the goroutine stack.
+func (a *Analyzer) functionValueTypeFollowingBinding(sym *Symbol, valueExpr ast.Expr) (*FuncType, bool) {
+	if sym == nil {
+		return a.functionValueTypeForExpr(valueExpr)
+	}
+	if a.functionValueResolveInProgress == nil {
+		a.functionValueResolveInProgress = map[*Symbol]bool{}
+	}
+	if a.functionValueResolveInProgress[sym] {
+		return nil, false
+	}
+	a.functionValueResolveInProgress[sym] = true
+	ft, ok := a.functionValueTypeForExpr(valueExpr)
+	delete(a.functionValueResolveInProgress, sym)
+	return ft, ok
+}
+
 func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 	if expr == nil {
 		return nil, false
@@ -194,7 +215,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 					return fnType, true
 				}
 				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
-					return a.functionValueTypeForExpr(valueExpr)
+					return a.functionValueTypeFollowingBinding(sym, valueExpr)
 				}
 				if fnType, ok := sym.Type.(*FuncType); ok {
 					a.ensureFunctionValueTypeSummaries(expr, fnType)
@@ -214,7 +235,7 @@ func (a *Analyzer) functionValueTypeForExpr(expr ast.Expr) (*FuncType, bool) {
 		}
 		if sym, _, ok := a.lookupVisibleGlobal(n.Name); ok {
 			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok && valueExpr != nil {
-				return a.functionValueTypeForExpr(valueExpr)
+				return a.functionValueTypeFollowingBinding(sym, valueExpr)
 			}
 			if fnType, ok := sym.Type.(*FuncType); ok {
 				a.ensureFunctionValueTypeSummaries(expr, fnType)
