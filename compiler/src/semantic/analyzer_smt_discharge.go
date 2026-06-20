@@ -1976,6 +1976,18 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
 	// contract-sound postcondition holds for the actual arguments.
 	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
+	var recursiveCert recursiveProofCertificate
+	if recursiveProofCall {
+		var ok bool
+		recursiveCert, ok = tr.a.recursiveCallCertificate(tr.a.currentFuncDecl, decl, call)
+		if !ok {
+			recursiveProofCall = false
+		}
+	}
+	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
+		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
+		recursiveProofCall = false
+	}
 	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {
 		recursiveProofCall = false
 	}
@@ -1993,7 +2005,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 				tr.auxDecls = append(tr.auxDecls, "(assert (=> "+guard+" "+h+"))\n")
 			}
 			if recursiveProofCall {
-				tr.a.recordProof(ensure.Pos(), "recursive IH of "+decl.Name, "ensure", ProofProvenContract)
+				tr.a.recordProof(ensure.Pos(), "recursive IH of "+decl.Name+" ("+recursiveCert.label()+")", "ensure", ProofProvenContract)
 			}
 		}
 	}
@@ -2006,7 +2018,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
 	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
 	// finite.
-	tr.emitDefiningEquation(call, decl, ret, subst, canonKey, guard)
+	tr.emitDefiningEquation(call, decl, ret, subst, canonKey, guard, recursiveProofCall)
 	return ret, true
 }
 
@@ -2034,8 +2046,11 @@ func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (stri
 // own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
 // purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
 // to an integer term.
-func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string) {
+func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string, recursiveCallDomainProven bool) {
 	if tr == nil || decl == nil {
+		return
+	}
+	if tr.a.isRecursiveProofCall(decl) && !recursiveCallDomainProven {
 		return
 	}
 	if canonKey == "" {
@@ -2071,7 +2086,11 @@ func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.Func
 	}
 	tr.auxDecls = append(tr.auxDecls, "(assert "+eq+")\n")
 	if tr.a.isRecursiveProofCall(decl) {
-		tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name, "definition", ProofProvenContract)
+		if cert, ok := tr.a.recursiveEquationCertificate(decl); ok {
+			tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name+" ("+cert.label()+")", "definition", ProofProvenContract)
+		} else {
+			tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name+" (verified termination)", "definition", ProofProvenContract)
+		}
 	} else {
 		tr.a.recordProof(call.Pos(), "defining equation of "+decl.Name, "definition", ProofProvenContract)
 	}
@@ -2097,17 +2116,42 @@ func (a *Analyzer) recursiveCallHasVerifiedDecrease(callee *ast.FuncDecl, call *
 		return false
 	}
 	caller := a.currentFuncDecl
-	if callee == caller {
-		if len(caller.Decreases) == 1 && a.isStructuralDecreaseMeasure(caller, caller.Decreases[0]) {
-			allowed := map[*ast.CallExpr]bool{}
-			if id, ok := caller.Decreases[0].(*ast.Ident); ok && id != nil {
-				a.collectStructuralRecursiveCalls(caller.Body, id.Name, a.structuralMeasureEnumForFunc(caller, id.Name), map[string]bool{}, allowed)
-			}
-			return allowed[call]
-		}
-		return a.proveMeasureDecreases(caller.Decreases, a.substForSelfCall(caller, call))
+	_, ok := a.recursiveCallCertificate(caller, callee, call)
+	return ok
+}
+
+func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || callee == nil || call == nil {
+		return false
 	}
-	return a.crossFunctionMeasureDecreases(caller, callee, call)
+	if len(callee.Requires) == 0 {
+		return true
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range callee.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	for _, req := range callee.Requires {
+		if req == nil {
+			continue
+		}
+		switch a.proveRequiresClause(req, subst) {
+		case requiresProven:
+			continue
+		case requiresRefuted:
+			return false
+		default:
+			proven, _ := a.trySMTProveRequires(req, subst)
+			if !proven {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // callEquationEligible reports whether a function's defining equation may be soundly assumed:

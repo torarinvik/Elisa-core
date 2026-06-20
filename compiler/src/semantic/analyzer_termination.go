@@ -95,12 +95,12 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		return
 	}
 	for _, call := range calls {
-		subst := a.substForSelfCall(fn, call)
-		if a.proveMeasureDecreases(fn.Decreases, subst) {
-			a.recordProof(call.Pos(), "termination of "+fn.Name, "decreases", ProofProvenLinear)
+		cert, ok := a.directNumericTerminationCertificate(fn, call)
+		if ok {
+			a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", cert.Outcome)
 			continue
 		}
-		a.recordProof(call.Pos(), "termination of "+fn.Name, "decreases", ProofRefuted)
+		a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", ProofRefuted)
 		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate", fn.Name)
 	}
 }
@@ -138,10 +138,8 @@ func (a *Analyzer) checkStructuralTermination(fn *ast.FuncDecl, measure ast.Expr
 		a.warnf(measure.Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
 		return true
 	}
-	allowed := map[*ast.CallExpr]bool{}
-	a.collectStructuralRecursiveCalls(fn.Body, id.Name, measureEnum, map[string]bool{}, allowed)
 	for _, call := range calls {
-		if !allowed[call] {
+		if _, ok := a.structuralTerminationCertificate(fn, call); !ok {
 			return false
 		}
 	}
@@ -741,14 +739,7 @@ func (a *Analyzer) mutualRecursionVerified(root *ast.FuncDecl, edges []recursion
 		}
 	}
 	for _, edge := range edges {
-		if edge.Caller == edge.Callee {
-			subst := a.substForSelfCall(edge.Caller, edge.Call)
-			if !a.proveMeasureDecreases(edge.Caller.Decreases, subst) {
-				return false
-			}
-			continue
-		}
-		if !a.crossFunctionMeasureDecreases(edge.Caller, edge.Callee, edge.Call) {
+		if _, ok := a.recursiveCallCertificate(edge.Caller, edge.Callee, edge.Call); !ok {
 			return false
 		}
 	}

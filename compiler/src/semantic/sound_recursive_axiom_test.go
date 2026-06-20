@@ -7,6 +7,15 @@ import (
 	"testing"
 )
 
+func proofReportContainsSubject(report []ProofFact, want string) bool {
+	for _, fact := range report {
+		if strings.Contains(fact.Subject, want) {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRecursiveEquationFallthroughReturnPaths(t *testing.T) {
 	src := `
 def inc(n: i64) -> i64:
@@ -25,6 +34,12 @@ def caller(n: i64) -> i64:
 	r := analyzeContractStrict(t, "recursive_fallthrough.elisa", src)
 	if errs := r.Errors(); len(errs) != 0 {
 		t.Fatalf("fallthrough return-path equation should prove inc(n)==n+1, got: %v", errs)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive equation of inc (direct numeric)") {
+		t.Fatalf("expected direct numeric recursive equation certificate in proof report, got: %+v", r.ProofReport)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive IH of inc (direct numeric)") {
+		t.Fatalf("expected direct numeric recursive IH certificate in proof report, got: %+v", r.ProofReport)
 	}
 }
 
@@ -74,6 +89,12 @@ def caller(n: usize) -> i64:
 	r := analyzeContractStrict(t, "mutual_even_bound.elisa", src)
 	if errs := r.Errors(); len(errs) != 0 {
 		t.Fatalf("verified mutual recursion should expose bounded ensure facts, got: %v", errs)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "mutual termination of is_even") {
+		t.Fatalf("expected mutual termination certificate in proof report, got: %+v", r.ProofReport)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive IH of is_odd (mutual numeric)") {
+		t.Fatalf("expected mutual numeric recursive IH certificate in proof report, got: %+v", r.ProofReport)
 	}
 }
 
@@ -145,6 +166,12 @@ def size(t: Tree) -> i64:
 	r := analyzeContractStrict(t, "structural_tree_size.elisa", src)
 	if errs := r.Errors(); len(errs) != 0 {
 		t.Fatalf("structural recursion over match-bound children should verify, got: %v", errs)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "structural termination of size") {
+		t.Fatalf("expected structural termination certificate in proof report, got: %+v", r.ProofReport)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive IH of size (structural enum)") {
+		t.Fatalf("expected structural recursive IH certificate in proof report, got: %+v", r.ProofReport)
 	}
 }
 
@@ -242,6 +269,25 @@ def caller(n: i64) -> i64:
 	r := analyzeContractStrict(t, "recursive_requires_guard_no_leak.elisa", src)
 	if len(r.Errors()) == 0 {
 		t.Fatalf("guarded callee ensure must not prove caller facts outside the callee requires domain")
+	}
+}
+
+func TestRecursiveIHDeclinesWhenCalleeRequiresNotProven(t *testing.T) {
+	src := `
+def bad_count(n: i64) -> i64:
+    requires n >= 0
+    ensure result >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return bad_count(n - 2) + 1
+`
+	r := analyzeContractStrict(t, "recursive_ih_requires_not_proven.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("recursive call outside callee requires domain must be rejected")
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive proof declined for bad_count") {
+		t.Fatalf("expected recursive proof declined diagnostic in proof report, got: %+v", r.ProofReport)
 	}
 }
 
