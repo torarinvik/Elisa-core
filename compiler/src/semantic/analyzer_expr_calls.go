@@ -57,6 +57,11 @@ func (a *Analyzer) maybeEmitDirectCallDeprecation(expr *ast.CallExpr) {
 
 func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
 	defer a.invalidateSMTAssertFactsForCall(expr)
+	// A mutating BUILTIN collection method (`xs.clear()`, `d.put(...)`, `s.add(...)`) is modeled with a
+	// VALUE receiver, not a `T&` ref, so it slips past the ref-arg fact invalidation below — leaving a
+	// stale predicate/range/written-const fact (e.g. `NonEmpty` surviving `xs.clear()`). Drop the
+	// receiver's facts here so the mutation is honored on every channel.
+	defer a.invalidateFactsForMutatingBuiltinMethod(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.

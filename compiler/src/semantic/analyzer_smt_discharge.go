@@ -487,11 +487,20 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 	var b strings.Builder
 	seen := map[string]bool{}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for name, r := range sc.rangeFacts {
+		// Emit in sorted name order: rangeFacts is a map, and its iteration order would otherwise make
+		// the hypothesis text (and thus the cache key — brick 5) nondeterministic, so two logically
+		// identical obligations could differ byte-for-byte and miss the cache.
+		names := make([]string, 0, len(sc.rangeFacts))
+		for name := range sc.rangeFacts {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
 			if seen[name] {
 				continue // a closer scope's fact shadows an outer one
 			}
 			seen[name] = true
+			r := sc.rangeFacts[name]
 			if !r.loKnown && !r.hiKnown {
 				continue
 			}
@@ -736,7 +745,15 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	var b strings.Builder
 	seen := map[string]bool{}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for name, sym := range sc.Symbols {
+		// Sorted name order so the hypothesis text (and the brick-5 cache key) is deterministic — Symbols
+		// is a map, and its iteration order would otherwise vary the query string between identical goals.
+		names := make([]string, 0, len(sc.Symbols))
+		for name := range sc.Symbols {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			sym := sc.Symbols[name]
 			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
 				continue
 			}

@@ -117,6 +117,53 @@ func containsString(items []string, target string) bool {
 	return false
 }
 
+// mutatingBuiltinCollectionMethods are the builtin darray/dict/set methods that change a container's
+// contents or layout. Unlike a user method with a `mutable T&` self (whose RefType param drives the
+// ref-arg fact invalidation), these are modeled with a VALUE receiver, so a mutation through them
+// would otherwise leave a stale flow fact about the receiver. Pure reads (count/get/contains/rows/
+// valid/entry) are intentionally excluded: they cannot break a fact, so dropping for them would only
+// cost completeness. A stdlib method like `pop` carries a real `T&` self and is already handled.
+var mutatingBuiltinCollectionMethods = map[string]bool{
+	"push": true, "extend": true, "reserve": true, "resize": true, "clear": true,
+	"truncate": true, "insert": true, "remove": true, "set": true, "put": true,
+	"add": true, "get_or_insert": true,
+}
+
+// invalidateFactsForMutatingBuiltinMethod drops every flow fact about the receiver of a mutating
+// builtin collection method, closing the hole where such a value-receiver method slipped past the
+// ref-arg invalidation (e.g. a `NonEmpty` fact surviving `xs.clear()`). It mirrors the per-channel
+// drops the ref-arg path performs (predicate, range, written-const, and SMT assert facts). Gated to a
+// collection-typed receiver so an unrelated user method of the same name keeps its facts; the drop is
+// otherwise conservative, and over-dropping only adds runtime checks.
+func (a *Analyzer) invalidateFactsForMutatingBuiltinMethod(expr *ast.CallExpr) {
+	if a == nil || expr == nil {
+		return
+	}
+	field, ok := stripParenExpr(expr.Func).(*ast.FieldExpr)
+	if !ok || field == nil || field.Object == nil || !mutatingBuiltinCollectionMethods[field.Field] {
+		return
+	}
+	if !a.receiverIsBuiltinCollection(field.Object) {
+		return
+	}
+	a.invalidatePredFactsForTarget(field.Object)
+	a.invalidateRangeFactsForTarget(field.Object)
+	a.invalidateWrittenConst(rootIdentNameOrEmpty(field.Object))
+	a.invalidateSMTAssertFactsForTarget(field.Object)
+}
+
+// receiverIsBuiltinCollection reports whether an expression's resolved type is a builtin darray/dict/
+// set (peeling a ref) — the carriers whose builtin mutating methods this audit covers. An unknown type
+// (nil) returns false: the name-set gate alone is then the only filter, which stays sound because the
+// fact channels are only consulted for variables that were narrowed in the first place.
+func (a *Analyzer) receiverIsBuiltinCollection(obj ast.Expr) bool {
+	switch stripRefForBounds(a.exprTypes[obj]).(type) {
+	case *DArrayType, *DictType, *SetType:
+		return true
+	}
+	return false
+}
+
 // invalidatePredFactsForTarget drops predicate facts about the root variable of a mutation target
 // expression (an identifier, or a field/index path rooted at one). Conservative: any write under a
 // root invalidates the root's facts.
