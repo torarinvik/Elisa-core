@@ -1986,6 +1986,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	}
 	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
 		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
+		tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
 		recursiveProofCall = false
 	}
 	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {

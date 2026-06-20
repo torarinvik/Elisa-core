@@ -148,6 +148,57 @@ def bad_b(n: usize, fuel: usize) -> i64:
 	}
 }
 
+func TestMutualRecursiveMissingDecreasesRejected(t *testing.T) {
+	src := `
+def bad_even(n: usize) -> i64:
+    ensure result >= 0
+    decreases n
+    if n == 0:
+        return 1
+    return bad_odd(n - 1)
+
+def bad_odd(n: usize) -> i64:
+    ensure result >= 0
+    if n == 0:
+        return 0
+    return bad_even(n - 1)
+`
+	r := analyzeContractStrict(t, "mutual_missing_decreases.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("mutual recursion must reject an SCC member missing decreases")
+	}
+	if !proofReportContainsSubject(r.ProofReport, "mutual termination of bad_even") {
+		t.Fatalf("expected mutual termination proof report entry, got: %+v", r.ProofReport)
+	}
+}
+
+func TestMutualRecursiveRequiresGuardRejected(t *testing.T) {
+	src := `
+def bad_a(n: i64) -> i64:
+    requires n >= 0
+    ensure result >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return bad_b(n - 1)
+
+def bad_b(n: i64) -> i64:
+    requires n > 0
+    ensure result >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return bad_a(n - 1)
+`
+	r := analyzeContractStrict(t, "mutual_requires_guard_bad.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("mutual recursive IH/equation must reject calls outside callee requires domain")
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive proof declined for bad_b") {
+		t.Fatalf("expected recursive proof declined report for guarded mutual callee, got: %+v", r.ProofReport)
+	}
+}
+
 func TestStructuralRecursiveEnumDecreasesAllowsChildCalls(t *testing.T) {
 	src := `
 enum Tree:
@@ -172,6 +223,34 @@ def size(t: Tree) -> i64:
 	}
 	if !proofReportContainsSubject(r.ProofReport, "recursive IH of size (structural enum)") {
 		t.Fatalf("expected structural recursive IH certificate in proof report, got: %+v", r.ProofReport)
+	}
+}
+
+func TestStructuralRecursiveEnumNestedGrandchildCallAllowed(t *testing.T) {
+	src := `
+enum Tree:
+    Leaf(value: i64)
+    Node(child: Tree)
+
+def size_deep(t: Tree) -> i64:
+    ensure result >= 1
+    decreases t
+    match t:
+        Tree.Leaf(value: v):
+            return 1
+        Tree.Node(child: c):
+            match c:
+                Tree.Leaf(value: v):
+                    return 1
+                Tree.Node(child: gc):
+                    return size_deep(gc)
+`
+	r := analyzeContractStrict(t, "structural_tree_grandchild.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("structural recursion over a match-bound grandchild should verify, got: %v", errs)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "recursive IH of size_deep (structural enum)") {
+		t.Fatalf("expected structural grandchild IH certificate, got: %+v", r.ProofReport)
 	}
 }
 
@@ -288,6 +367,9 @@ def bad_count(n: i64) -> i64:
 	}
 	if !proofReportContainsSubject(r.ProofReport, "recursive proof declined for bad_count") {
 		t.Fatalf("expected recursive proof declined diagnostic in proof report, got: %+v", r.ProofReport)
+	}
+	if !strings.Contains(strings.Join(r.Errors(), "\n"), "recursive proof declined: callee requires") {
+		t.Fatalf("expected recursive proof declined diagnostic, got: %v", r.Errors())
 	}
 }
 
