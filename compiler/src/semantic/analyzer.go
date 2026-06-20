@@ -90,6 +90,11 @@ type Analyzer struct {
 	// deferredAliasRefinements holds alias refinements whose predicate validation is postponed until
 	// after law symbols are collected (aliases are resolved long before functions/laws exist).
 	deferredAliasRefinements []deferredAliasRefinement
+	// finalizingRefinements is true during the post-law validation pass: a refinement predicate whose
+	// law is still missing is then a hard error. During EAGER resolution (e.g. a struct field type
+	// resolved before laws are registered) a missing law instead DEFERS to that pass — laws can have
+	// struct subjects and structs refined fields, so the two cannot be ordered, only re-checked later.
+	finalizingRefinements bool
 	staticInterfaces         map[string]*StaticInterface
 	staticImpls              map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism

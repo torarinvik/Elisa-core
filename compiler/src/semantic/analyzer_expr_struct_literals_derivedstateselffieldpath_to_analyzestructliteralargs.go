@@ -60,6 +60,41 @@ func allocOwnerPos(expr *ast.AllocExpr) lexer.Pos {
 	}
 	return lexer.Pos{}
 }
+
+// dischargeStructFieldRefinement enforces a struct field's refinement (`op: u32 is UB[0,127]`) against
+// the value supplied at construction — the field invariant must hold or downstream code that trusts the
+// field type (a same-refinement param, a bounded index) would be unsound. Mirrors param/return
+// discharge: prove statically, else proofLint (a hard error under the default -strict). A non-refined
+// field is a no-op.
+func (a *Analyzer) dischargeStructFieldRefinement(field ast.FieldDecl, arg ast.Expr) {
+	if arg == nil || field.Type == nil {
+		return
+	}
+	ft := field.Type
+	if mt, ok := ft.(*ast.MutableType); ok && mt != nil {
+		ft = mt.Elem
+	}
+	rt, ok := ft.(*ast.RefinementTypeExpr)
+	if !ok || rt == nil {
+		return
+	}
+	for _, pred := range rt.Preds {
+		lawDecl, _, ok := a.lookupLaw(pred.Name)
+		if !ok {
+			continue
+		}
+		if a.tryDischargeRefinementStatically(arg, "the struct field value", pred, lawDecl, arg.Pos()) {
+			continue
+		}
+		// Composition: the value is a call whose return refinement entails the field's (the decoder
+		// pattern — `Sop2(sop2_op(inst))` where sop2_op returns the same Bounded). The callee enforces it.
+		if a.returnCallRefinementEntails(arg, pred) {
+			continue
+		}
+		a.proofLint(arg.Pos(), "refinement %q on field %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, field.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
+	}
+}
+
 func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *StructType, bindings map[string]Type, regionBindings map[string]string) {
 	if base == nil || base.Decl == nil {
 		for _, spread := range expr.Spreads {
@@ -114,6 +149,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 			}
 			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
+			a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
 			if prev, exists := seen[index]; exists {
 				a.errorf(expr.Args[i].Pos(), "struct literal %q field %q is specified more than once (first at %s:%d:%d)", expr.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
 				ok = false
@@ -217,6 +253,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			a.errorf(expr.Args[i].Pos(), "struct literal field %q expects %s, got %s", fieldDecl.Name, expected, actual)
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
+		a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
 	}
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])

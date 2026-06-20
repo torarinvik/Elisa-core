@@ -555,6 +555,18 @@ func (a *Analyzer) validateRefinementPreds(n *ast.RefinementTypeExpr, base Type)
 	for _, pred := range n.Preds {
 		decl, ft, ok := a.lookupLaw(pred.Name)
 		if !ok {
+			// During eager resolution the law may simply not be registered yet (a struct field type is
+			// resolved before law decls). Defer the whole refinement's validation to the post-law pass
+			// rather than falsely reporting "not a law"; only the final pass errors.
+			if !a.finalizingRefinements {
+				a.deferredAliasRefinements = append(a.deferredAliasRefinements, deferredAliasRefinement{
+					rt:        n,
+					base:      base,
+					namespace: a.currentNamespace,
+					usings:    append([]string(nil), a.currentUsings...),
+				})
+				return
+			}
 			a.errorf(pred.Position, "refinement predicate %q is not a law", pred.Name)
 			continue
 		}
