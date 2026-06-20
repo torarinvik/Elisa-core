@@ -53,8 +53,11 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 100]:
 	if smtProven != 1 {
 		t.Fatalf("expected the nonlinear return to be proven by SMT, got %d: %+v", smtProven, result.ProofReport)
 	}
-	if !result.SMTProfile.Enabled || result.SMTProfile.Proven != 1 {
-		t.Fatalf("expected SMT profile to record 1 proven, got %+v", result.SMTProfile)
+	// The `Bounded` law body `self >= lo and self <= hi` is conjunctive, so multi-goal batching (VC IR
+	// brick 4) splits it into two independent sub-goals — both prove, so the solver records 2 proven
+	// queries for this one refinement obligation (the per-obligation ProofReport above is still 1).
+	if !result.SMTProfile.Enabled || result.SMTProfile.Proven != 2 {
+		t.Fatalf("expected SMT profile to record 2 proven (two batched conjuncts), got %+v", result.SMTProfile)
 	}
 }
 
@@ -75,7 +78,10 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 50]:
 			t.Fatalf("SMT must not prove a false bound (a*b can reach 100 > 50): %+v", result.ProofReport)
 		}
 	}
-	if result.SMTProfile.Proven != 0 || result.SMTProfile.Declined < 1 {
+	// With brick-4 batching the conjunctive `Bounded[4, 50]` body splits: `self >= 4` proves but
+	// `self <= 50` declines (a*b reaches 100). The overall refinement is therefore NOT proven (the
+	// ProofReport check above is the soundness gate); the solver legitimately records >=1 declined.
+	if result.SMTProfile.Declined < 1 {
 		t.Fatalf("expected SMT to attempt and decline the false bound, got %+v", result.SMTProfile)
 	}
 }

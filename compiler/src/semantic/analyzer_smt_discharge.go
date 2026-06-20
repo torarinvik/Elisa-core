@@ -215,25 +215,56 @@ func (a *Analyzer) counterexampleSuffix(ce string) string {
 // counterexample. `factPreamble()` is emitted LAST — after the hypothesis builders and the caller's
 // `obligation`/`extraHyps` have populated the translator's declarations — so all symbols are declared.
 func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr)
-	return a.smtCheckQuery(tr, hyps+extraHyps, obligation)
+	return a.smtCheckVCMulti(tr, []string{obligation}, extraHyps)
 }
 
-// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it. A goal that
-// constant-folds to `true` is valid under ANY hypotheses, so it concludes with NO solver call;
-// everything else is emitted from the IR and run through smtCheckVC. The third return reports whether
-// the goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
+// smtCheckVCMulti discharges SEVERAL obligations that share ONE hypothesis context — multi-goal
+// batching (VC IR brick 4). The standard hypothesis block is built ONCE from `tr` and reused for every
+// obligation, rather than re-derived per goal; this is the win when a conjunctive postcondition is
+// split into its independent conjuncts (vcConjuncts), each a smaller, separately-decidable query. The
+// batch holds only if EVERY obligation proves (each negation `unsat`); the first that fails short-
+// circuits and returns its counterexample, so a failed conjunction is pinned to the exact conjunct
+// that broke. With a single obligation this is byte-identical to the old smtCheckVC, so non-
+// conjunctive goals stay behavior-preserving. factPreamble() is emitted inside each smtCheckQuery from
+// the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
+// so every query is self-contained.
+func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	for _, obligation := range obligations {
+		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
+			return false, ce
+		}
+	}
+	return true, ""
+}
+
+// smtDischargeFormula discharges a lowered VC-IR formula, splitting a top-level conjunction into
+// independent sub-goals (vcConjuncts) batched over a shared hypothesis context (brick 4). A formula
+// that folds entirely to `true` is valid under any hypotheses and concludes with NO solver call.
+func (a *Analyzer) smtDischargeFormula(tr *smtTranslator, goal vcFormula, extraHyps string) (bool, string) {
+	conjuncts := vcConjuncts(goal)
+	if len(conjuncts) == 0 { // the whole obligation folded to true
+		a.smtStats.Attempts++
+		a.smtStats.Proven++
+		return true, ""
+	}
+	obligations := make([]string, len(conjuncts))
+	for i, c := range conjuncts {
+		obligations[i] = emitVCFormula(c)
+	}
+	return a.smtCheckVCMulti(tr, obligations, extraHyps)
+}
+
+// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it via the brick-4
+// splitter: a conjunctive goal is proven conjunct-by-conjunct against a shared hypothesis context, and a
+// goal that constant-folds to `true` concludes with NO solver call. The third return reports whether the
+// goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
 func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) (proven bool, counterexample string, lowered bool) {
 	goal, ok := tr.lowerVCFormula(goalExpr, env)
 	if !ok {
 		return false, "", false
 	}
-	if isVCTrue(goal) {
-		a.smtStats.Attempts++
-		a.smtStats.Proven++
-		return true, "", true
-	}
-	p, ce := a.smtCheckVC(tr, emitVCFormula(goal), extraHyps)
+	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
 	return p, ce, true
 }
 

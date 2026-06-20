@@ -88,6 +88,8 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 	if isVCFalse(goal) {
 		return false
 	}
-	proven, _ := a.smtCheckVC(tr, emitVCFormula(goal), "")
+	// Discharge through the brick-4 splitter: a WP-transported conjunctive postcondition splits into
+	// independent conjuncts over the shared `requires` hypotheses.
+	proven, _ := a.smtDischargeFormula(tr, goal, "")
 	return proven
 }

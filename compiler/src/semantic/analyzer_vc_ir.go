@@ -129,6 +129,23 @@ func vcMkOr(l, r vcFormula) vcFormula {
 func isVCTrue(f vcFormula) bool  { _, ok := f.(vcTrue); return ok }
 func isVCFalse(f vcFormula) bool { _, ok := f.(vcFalse); return ok }
 
+// vcConjuncts flattens a formula's top-level conjunction into independent sub-goals, dropping the
+// trivially-true ones — `A ∧ (B ∧ C)` → [A, B, C]. A non-conjunction returns itself; a `vcTrue`
+// returns the empty slice (nothing to prove). This is the splitter behind multi-goal batching (brick
+// 4): proving every returned sub-goal proves the original conjunction, so the split is SOUND, and
+// because each sub-goal is a strictly smaller query the solver decides them where it might time out
+// (return `unknown`) on the whole conjunction — splitting only ever proves MORE. It also lets a failed
+// conjunction report exactly WHICH conjunct fails, with that conjunct's own counterexample.
+func vcConjuncts(f vcFormula) []vcFormula {
+	switch ff := f.(type) {
+	case vcTrue:
+		return nil
+	case vcAnd:
+		return append(vcConjuncts(ff.L), vcConjuncts(ff.R)...)
+	}
+	return []vcFormula{f}
+}
+
 // emitVCFormula renders a formula as SMT-LIB. For the propositional nodes it emits exactly what the
 // direct translation would; atoms emit their stored string verbatim — so a goal with no foldable
 // constant is byte-identical to the pre-IR path.
