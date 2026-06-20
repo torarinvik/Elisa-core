@@ -63,7 +63,7 @@ func augAssignBaseOp(op lexer.TokenKind) (lexer.TokenKind, bool) {
 // captureScalarAssign turns a single statement into a scalar assignment `name := rhs`, expanding an
 // aug-assignment `x OP= e` into `x := x OP e`. Returns ok=false for any other statement shape or a
 // non-identifier target / impure RHS.
-func captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
+func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
 		if n.Value == nil || !exprIsPureArith(n.Value) {
@@ -87,24 +87,46 @@ func captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		}
 		// `x OP= e`  ≡  `x := x OP e`. The synthesized RHS reads its own target, exactly the case WP
 		// backward substitution exists to handle (it is NOT recorded as a one-symbol equality fact).
+		leftIdent := &ast.Ident{Position: n.Target.Pos(), Name: id.Name}
 		rhs := &ast.BinaryExpr{
 			Position: n.Pos(),
-			Left:     &ast.Ident{Position: n.Target.Pos(), Name: id.Name},
+			Left:     leftIdent,
 			Op:       baseOp,
 			Right:    n.Value,
+		}
+		// SOUNDNESS: stamp the synthetic nodes with the target's resolved type. Without it
+		// a.exprTypes[rhs] is nil, so arithWrapBits/wrapMachineArith cannot recover the width and emit a
+		// CLEAN `(+ y 100)` with no `(mod 2^W)` — proving false `>=` postconditions on a wrapping unsigned
+		// type (`u8` y += 100 wraps 200->44 but the engine accepted `result >= x`). With the type present
+		// the wrap model engages and the obligation correctly declines.
+		if t := a.augAssignTargetType(n.Target, id.Name); t != nil {
+			a.exprTypes[rhs] = t
+			a.exprTypes[leftIdent] = t
 		}
 		return wpAssign{name: id.Name, rhs: rhs}, true
 	}
 	return wpAssign{}, false
 }
 
+// augAssignTargetType resolves the type of an aug-assignment target. The target is an lvalue, so its
+// per-node exprTypes entry is often unset; the symbol's declared type (via scope lookup) is the
+// authoritative width for the synthetic `x OP e` node's wrap modeling, with exprTypes as a fallback.
+func (a *Analyzer) augAssignTargetType(target ast.Expr, name string) Type {
+	if a.currentScope != nil {
+		if sym, ok := a.currentScope.Lookup(name); ok && sym != nil && sym.Type != nil {
+			return sym.Type
+		}
+	}
+	return a.exprTypes[target]
+}
+
 // captureScalarAssigns captures a flat block of scalar assignments (a conditional branch). Returns
 // ok=false if the block holds anything other than scalar (incl. aug) assignments — no nested control
 // flow, calls, or returns.
-func captureScalarAssigns(stmts []ast.Stmt) ([]wpAssign, bool) {
+func (a *Analyzer) captureScalarAssigns(stmts []ast.Stmt) ([]wpAssign, bool) {
 	out := make([]wpAssign, 0, len(stmts))
 	for _, s := range stmts {
-		asg, ok := captureScalarAssign(s)
+		asg, ok := a.captureScalarAssign(s)
 		if !ok {
 			return nil, false
 		}
@@ -134,17 +156,17 @@ func (a *Analyzer) captureWPSteps(ret *ast.ReturnStmt) ([]wpStep, bool) {
 			if len(n.Elifs) != 0 {
 				return nil, false
 			}
-			thenA, ok := captureScalarAssigns(n.Then)
+			thenA, ok := a.captureScalarAssigns(n.Then)
 			if !ok {
 				return nil, false
 			}
-			elseA, ok := captureScalarAssigns(n.Else)
+			elseA, ok := a.captureScalarAssigns(n.Else)
 			if !ok {
 				return nil, false
 			}
 			out = append(out, wpStep{cond: &wpConditional{cond: n.Cond, then: thenA, els: elseA}})
 		default:
-			asg, ok := captureScalarAssign(s)
+			asg, ok := a.captureScalarAssign(s)
 			if !ok {
 				return nil, false
 			}

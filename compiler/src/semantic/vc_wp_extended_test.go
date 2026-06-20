@@ -98,3 +98,40 @@ def f(x: i64) -> i64:
 		t.Fatalf("then: y=1+2=3>=1, else: y=1>=1; the merge should prove, got: %v", errs)
 	}
 }
+
+// SOUNDNESS (audit, cluster A): WP transport of an aug-assignment must MODEL unsigned wraparound. The
+// synthetic `x := x OP e` node has no exprTypes entry, so the wrap width was lost and `y += 100` on a u8
+// (200 -> 44) wrongly proved `result >= x`. The fix stamps the target's type onto the synthetic node so
+// the `(mod 2^W)` wrap model engages and the false postcondition correctly declines.
+func TestWPAugAssignModelsUnsignedWrap(t *testing.T) {
+	for _, tc := range []struct{ name, body string }{
+		{"add", "    y: mutable u8 = x\n    y += 100\n    return y"},
+		{"mul", "    y: mutable u8 = x\n    y *= 2\n    return y"},
+		{"ifmerge", "    y: mutable u8 = x\n    if x >= 200:\n        y += 100\n    else:\n        y += 0\n    return y"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "def f(x: u8) -> u8:\n    requires x >= 200\n    ensure result >= x\n" + tc.body + "\n"
+			errs := strings.Join(analyzeContractStrict(t, "wp_wrap_"+tc.name+".elisa", src).Errors(), "\n")
+			if !strings.Contains(errs, "could not be proven statically") {
+				t.Fatalf("u8 %s wraps (200->small), so `result >= x` is false and must NOT prove; got: %v", tc.name, errs)
+			}
+		})
+	}
+}
+
+// The non-wrapping counterpart still proves: a WIDE accumulator that provably cannot overflow keeps the
+// legitimate WP aug-assign proof (the fix only adds the wrap model, it does not blanket-decline).
+func TestWPAugAssignNonWrappingStillProves(t *testing.T) {
+	src := `
+def f(x: i64) -> i64:
+    requires x > 0
+    requires x < 1000
+    ensure result >= x
+    y: mutable i64 = x
+    y += 5
+    return y
+`
+	if errs := analyzeContractStrict(t, "wp_nowrap.elisa", src).Errors(); len(errs) != 0 {
+		t.Fatalf("a bounded i64 `y += 5` cannot overflow; `result >= x` should still prove, got: %v", errs)
+	}
+}
