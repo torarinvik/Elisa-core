@@ -404,6 +404,35 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 // ensure clause that cannot be proven at a return is a hard error (the Dafny-like mode);
 // without `-strict` it stays a silent runtime check (no warning noise). `old(...)` and
 // locals in the clause/return are free SMT vars (sound: fewer facts only declines).
+// dischargeEnsureBooleansAtVoidExit discharges the boolean `ensure` clauses of a void / fall-through
+// function at its synthetic exit (a value-less `return` or running off the end of the body), mirroring
+// the explicit-return path (dischargeEnsureBooleans). Without it, a postcondition over a mutated ref
+// param — `ensure p >= old(p)` on a body that does `p -= 1` — was never checked under -strict and
+// silently relied on the debug runtime check, so a FALSE postcondition slipped through static checking.
+//
+// Clauses that reference `result` are skipped: `result` has no meaning at a void exit. The discharge is
+// SOUND: `old(p)` lowers to a distinct entry symbol, so an undischargeable clause is reported, never
+// falsely proven. Like the explicit-return path, a mutated-param `old()` postcondition the prover cannot
+// relate to the exit value is reported under -strict (drop -strict / use -permissive for the runtime check).
+func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
+	if a == nil || a.currentFuncDecl == nil || !a.enforceStrictProofs {
+		return
+	}
+	for _, clause := range a.currentFuncDecl.EnsureValues {
+		if clause == nil || exprReferencesResult(clause) {
+			continue
+		}
+		if proven, counterexample := a.trySMTProveRequires(clause, nil); !proven {
+			a.errorf(pos, "ensure postcondition of %q could not be proven statically at the function exit; make it provable, or drop -strict / use -permissive to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
+		}
+	}
+}
+
+// exprReferencesResult reports whether an expression reads the contract `result` binding.
+func exprReferencesResult(expr ast.Expr) bool {
+	return smtFactDeps(expr)["result"]
+}
+
 func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
