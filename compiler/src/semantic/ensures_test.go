@@ -365,6 +365,8 @@ def bad(player: Player[Alive]&) -> void can[Abort] ensures return true => player
 func TestEnsureBooleanStaticallyDischargedUnderStrict(t *testing.T) {
 	provable := `
 def add10(x: i64) -> i64:
+    requires x >= 0
+    requires x < 1000
     ensure result > x
     return x + 10
 `

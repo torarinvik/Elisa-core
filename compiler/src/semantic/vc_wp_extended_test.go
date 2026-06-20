@@ -14,13 +14,14 @@ func TestWPProvesThroughAugAssign(t *testing.T) {
 	src := `
 def f(x: i64) -> i64:
     requires x > 0
+    requires x < 1000
     ensure result >= 2
     y: mutable i64 = x
     y += 1
     return y
 `
 	if errs := analyzeContractStrict(t, "wp_augassign.elisa", src).Errors(); len(errs) != 0 {
-		t.Fatalf("`y += 1` with x>0 gives y=x+1>=2; WP should prove it, got: %v", errs)
+		t.Fatalf("`y += 1` with 0<x<1000 gives y=x+1>=2; WP should prove it, got: %v", errs)
 	}
 }
 

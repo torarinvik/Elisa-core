@@ -10,11 +10,13 @@ import "testing"
 func TestLemmaVerifiesAndErasesCall(t *testing.T) {
 	src := `
 lemma nonneg_square(x: i64):
+    requires x > 0 - 2000000000
+    requires x < 2000000000
     ensure x * x >= 0
     pass
 
-def use(n: i64):
-    nonneg_square(n)
+def use():
+    nonneg_square(5)
 `
 	result := analyzeWithSMT(t, "lemma_valid.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

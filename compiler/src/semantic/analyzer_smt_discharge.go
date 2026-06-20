@@ -1230,20 +1230,32 @@ func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) st
 	if !ok || bits <= 0 || bits > 64 {
 		return raw
 	}
-	if signed {
-		// Signed overflow TRAPS in debug builds (where contracts are checked), so reaching a return
-		// without trapping implies no overflow — the prover may soundly assume the ℤ value. Release
-		// wraps for perf, but contracts are off there, so nothing relies on the wrap. Hence: no wrap
-		// modeling for signed; the debug trap backs the assumption (see codegen signed-overflow check).
+	if tr.a.provablyNoArithWrap(n, signed, bits) {
+		// Provably in range: the ℤ value equals the machine value — emit it clean (keeps divisibility /
+		// alignment goals tractable and lets bounded arithmetic prove).
 		return raw
 	}
-	if tr.a.provablyNoArithWrap(n, signed, bits) {
-		return raw
+	if signed {
+		// SOUNDNESS: signed `+`/`-`/`*` that can overflow WRAPS two's-complement at runtime — there is no
+		// codegen trap backing the old "assume no overflow" stance, so on the target `i64max + 1` becomes
+		// i64min, and the clean ℤ value would prove a false `ensure result > 0`. Model the exact wrapped
+		// value: recenter into [0, 2^W), take the unsigned wrap, then shift back into the signed range —
+		// `((raw + 2^(W-1)) mod 2^W) - 2^(W-1)`. The prover only concludes on `unsat`, so this can only
+		// decline an unprovable goal, never fabricate one.
+		return smtSignedWrap(raw, bits)
 	}
 	// Unsigned wraps modulo 2^W with well-defined two's-complement semantics (and is frequently an
 	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
 	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
 	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// smtSignedWrap renders the two's-complement wrap of a `bits`-wide signed result: the machine value of
+// `raw` is `((raw + 2^(W-1)) mod 2^W) - 2^(W-1)`, which maps any ℤ value into [-2^(W-1), 2^(W-1)).
+func smtSignedWrap(raw string, bits int) string {
+	half := smtPow2(bits - 1)
+	full := smtPow2(bits)
+	return "(- (mod (+ " + raw + " " + half + ") " + full + ") " + half + ")"
 }
 
 // bitwiseTerm models a fixed-width bitwise/shift operator (`&`, `|`, `^`, `<<`, `>>`) by bridging the
@@ -1364,11 +1376,12 @@ func (a *Analyzer) provablyNoArithWrap(n *ast.BinaryExpr, signed bool, bits int)
 	if n.Op == lexer.TOKEN_MINUS && !signed && a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
 		return true
 	}
-	// The affine interval prover computes in int64, so a 64-bit type's range (or a wide intermediate
-	// sum) can overflow it. Restrict the interval-based in-range gate to widths ≤ 32, where the bounds
-	// and any sum/product of them sit comfortably inside int64 with no overflow risk. 64-bit results
-	// that are not a no-underflow subtraction take the (sound, exact) wrap path.
-	if bits > 32 {
+	// The affine interval prover now computes in OVERFLOW-CHECKED int64 (boundAffine via
+	// mulInt64Checked/addInt64Checked, audit cluster E): a computation that would overflow int64 yields
+	// an UNKNOWN (open) bound rather than a wrong one, so the in-range gate below is sound up to 64-bit
+	// SIGNED — any int64-representable interval lies within [i64min, i64max]. UNSIGNED 64-bit stays on the
+	// exact wrap path: its upper bound 2^64-1 is not int64-representable.
+	if bits > 64 || (!signed && bits >= 64) {
 		return false
 	}
 	f, ok := a.affineOf(n, a.currentScope)

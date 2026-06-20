@@ -61,12 +61,14 @@ type (
 	// precondition transport (brick 3) replaces it with an assigned term; it emits its SMT symbol.
 	vcVar struct{ Name, SMT string }
 	vcNeg struct{ Arg vcTerm }
-	// vcArith is a machine `+`/`-`/`*`. WrapBits>0 reproduces wrapMachineArith's unsigned wraparound
-	// `(mod (op l r) 2^WrapBits)`; 0 means the result is provably in range (emit the clean operation).
+	// vcArith is a machine `+`/`-`/`*`. WrapBits>0 reproduces wrapMachineArith's wraparound at that width;
+	// 0 means the result is provably in range (emit the clean operation). SignedWrap selects the
+	// two's-complement recentered wrap `((raw+2^(W-1)) mod 2^W) - 2^(W-1)` over the unsigned `mod 2^W`.
 	vcArith struct {
-		Op       string
-		L, R     vcTerm
-		WrapBits int
+		Op         string
+		L, R       vcTerm
+		WrapBits   int
+		SignedWrap bool
 	}
 )
 
@@ -185,7 +187,7 @@ func vcMkNeg(t vcTerm) vcTerm {
 // the result provably does not wrap (WrapBits==0), and applying the algebraic identities that hold at
 // any width (`x+0`, `x-0`, `x*1`, `x*0`). Folding never crosses a wrap: a wrapping op keeps its
 // structure so the `(mod …)` is emitted.
-func vcMkArith(op string, l, r vcTerm, wrapBits int) vcTerm {
+func vcMkArith(op string, l, r vcTerm, wrapBits int, signedWrap bool) vcTerm {
 	li, lIsLit := l.(vcIntLit)
 	ri, rIsLit := r.(vcIntLit)
 	if wrapBits == 0 && lIsLit && rIsLit {
@@ -218,7 +220,7 @@ func vcMkArith(op string, l, r vcTerm, wrapBits int) vcTerm {
 			return l
 		}
 	}
-	return vcArith{Op: op, L: l, R: r, WrapBits: wrapBits}
+	return vcArith{Op: op, L: l, R: r, WrapBits: wrapBits, SignedWrap: signedWrap}
 }
 
 // foldArith evaluates a constant machine op in int64 with overflow detection; on overflow it declines
@@ -306,6 +308,9 @@ func emitVCTerm(t vcTerm) string {
 	case vcArith:
 		raw := "(" + tt.Op + " " + emitVCTerm(tt.L) + " " + emitVCTerm(tt.R) + ")"
 		if tt.WrapBits > 0 {
+			if tt.SignedWrap {
+				return smtSignedWrap(raw, tt.WrapBits)
+			}
 			return "(mod " + raw + " " + smtPow2(tt.WrapBits) + ")"
 		}
 		return raw
@@ -314,17 +319,19 @@ func emitVCTerm(t vcTerm) string {
 	}
 }
 
-// arithWrapBits mirrors wrapMachineArith's wrap decision: an unsigned `+`/`-`/`*` result of width 1..64
-// that is not provably in range wraps modulo 2^width; everything else emits clean (0).
-func (tr *smtTranslator) arithWrapBits(n *ast.BinaryExpr) int {
+// arithWrapInfo mirrors wrapMachineArith's wrap decision for the VC IR: a `+`/`-`/`*` result of width
+// 1..64 that is NOT provably in range wraps at that width — unsigned modulo 2^W, signed two's-complement
+// — so the IR models the real machine value rather than the unbounded-ℤ value (which would prove a false
+// `ensure result > 0` over an overflowing signed sum). A provably-in-range result emits clean (0).
+func (tr *smtTranslator) arithWrapInfo(n *ast.BinaryExpr) (int, bool) {
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
-	if !ok || signed || bits <= 0 || bits > 64 {
-		return 0
+	if !ok || bits <= 0 || bits > 64 {
+		return 0, false
 	}
 	if tr.a.provablyNoArithWrap(n, signed, bits) {
-		return 0
+		return 0, false
 	}
-	return bits
+	return bits, signed
 }
 
 // lowerVCTerm lowers an integer Elisa expression into the term IR: literals and the wrapping machine
@@ -369,7 +376,8 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 		if op != "" {
 			if l, ok := tr.lowerVCTerm(n.Left, env); ok {
 				if r, ok := tr.lowerVCTerm(n.Right, env); ok {
-					return vcMkArith(op, l, r, tr.arithWrapBits(n)), true
+					wrapBits, signedWrap := tr.arithWrapInfo(n)
+					return vcMkArith(op, l, r, wrapBits, signedWrap), true
 				}
 			}
 		}
@@ -465,7 +473,7 @@ func substVCTerm(t vcTerm, name string, repl vcTerm) vcTerm {
 	case vcNeg:
 		return vcMkNeg(substVCTerm(tt.Arg, name, repl))
 	case vcArith:
-		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits)
+		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits, tt.SignedWrap)
 	default:
 		return t
 	}
