@@ -465,6 +465,17 @@ type StaticAssertStmt struct {
 	Message  Expr
 }
 
+// AssertByStmt is a Dafny-style proof-carrying assert: `assert COND by:` followed by an indented
+// proof block. The block holds verification-only statements (lemma calls, nested asserts) that
+// establish intermediate facts used ONLY to prove COND. After the assert, ONLY COND is exported as a
+// fact (the block's facts are scoped out). The whole proof block is erased from codegen; COND itself
+// lowers to an ordinary (debug-gated) assertion check.
+type AssertByStmt struct {
+	Position lexer.Pos
+	Cond     Expr
+	Proof    []Stmt
+}
+
 // ContractKind distinguishes value-contract clauses.
 type ContractKind int
 

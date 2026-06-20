@@ -167,6 +167,7 @@ func (n *ExprStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *StaticIfStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos              { return n.Position }
 func (n *StaticAssertStmt) Pos() lexer.Pos             { return n.Position }
+func (n *AssertByStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *ContractStmt) Pos() lexer.Pos { return n.Position }
 func (n *StaticAssertBlockStmt) Pos() lexer.Pos        { return n.Position }
 func (n *StaticBlockStmt) Pos() lexer.Pos              { return n.Position }
@@ -364,6 +365,7 @@ func (*ExprStmt) nodeTag()                             {}
 func (*StaticIfStmt) nodeTag()                         {}
 func (*StaticErrorStmt) nodeTag()                      {}
 func (*StaticAssertStmt) nodeTag()                     {}
+func (*AssertByStmt) nodeTag()                         {}
 func (*ContractStmt) nodeTag() {}
 func (*StaticAssertBlockStmt) nodeTag()                {}
 func (*StaticBlockStmt) nodeTag()                      {}
@@ -562,6 +564,7 @@ func (*ExprStmt) stmtTag()                             {}
 func (*StaticIfStmt) stmtTag()                         {}
 func (*StaticErrorStmt) stmtTag()                      {}
 func (*StaticAssertStmt) stmtTag()                     {}
+func (*AssertByStmt) stmtTag()                         {}
 func (*ContractStmt) stmtTag() {}
 func (*StaticAssertBlockStmt) stmtTag()                {}
 func (*StaticBlockStmt) stmtTag()                      {}

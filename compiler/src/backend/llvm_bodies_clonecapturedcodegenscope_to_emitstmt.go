@@ -1026,6 +1026,17 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		// block exits (docs/90 brick 90-14).
 		s.registerActiveInvariant(n.Cond)
 		return nil
+	case *ast.AssertByStmt:
+		// The `by:` proof block is verification-only (already consumed by the analyzer) and is ERASED:
+		// nothing from it is lowered. COND itself was statically proven; emit it as a debug-gated
+		// assertion check, consistent with an ordinary assert (and a no-op at higher opt levels).
+		if n.Cond == nil {
+			return nil
+		}
+		if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
+			return nil
+		}
+		return s.emitContractCheck(n.Cond, "assertion failed")
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
 	case *ast.StaticAssertBlockStmt:

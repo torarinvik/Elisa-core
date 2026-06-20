@@ -800,6 +800,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.recordSMTAssertFact(n.Cond)
 			}
 		}
+	case *ast.AssertByStmt:
+		a.analyzeAssertBy(n)
 	case *ast.StaticAssertStmt:
 		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 	case *ast.StaticAssertBlockStmt:
