@@ -584,11 +584,15 @@ def widen(x: i64) -> i64:
 
 // docs/85 gap #3: a fall-through after an early-return guard establishes the negated condition as a
 // flow fact for the static provers (`if x < 0: return 0` ⟹ `x >= 0` afterwards; `if a == 0: return`
-// ⟹ `a >= 1` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the
-// real align_up postcondition `result >= value` discharges fully under -strict.
+// ⟹ `a != 0` for unsigned). Combined with local-definition facts (#2) and SMT modulo reasoning, the
+// align_up postcondition `result >= value` discharges under -strict. The 32-bit bounds are REQUIRED:
+// `value + (alignment - rem)` can wrap for unbounded u64 (e.g. value=2^64-1, alignment=2 ⟹ result=0),
+// so the unbounded postcondition is genuinely false — it discharges only with no-overflow preconditions.
 func TestFallThroughGuardFactsDischargeAlignUp(t *testing.T) {
 	src := `
 def align_up(value: u64, alignment: u64) -> u64:
+    requires value < 4294967296
+    requires alignment < 4294967296
     ensure result >= value
     if alignment == 0:
         return value

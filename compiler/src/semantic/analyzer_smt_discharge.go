@@ -470,15 +470,27 @@ func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
 }
 
 func (a *Analyzer) recordSMTAssertFact(expr ast.Expr) {
-	if a == nil || a.currentScope == nil || expr == nil {
+	if a == nil {
+		return
+	}
+	a.recordSMTAssertFactInScope(a.currentScope, expr)
+}
+
+// recordSMTAssertFactInScope records an assumed fact into a SPECIFIC scope, not necessarily the current
+// one. This matters for a branch-condition fact: it must live in the BRANCH's scope (so it is gone at
+// the fall-through), but it is recorded while `currentScope` is still the parent (the branch scope is
+// not made current until the block body is analyzed). Recording into `currentScope` there would leak
+// the condition (e.g. `x > 10`) past the `if`, contradicting the negation the fall-through applies.
+func (a *Analyzer) recordSMTAssertFactInScope(scope *Scope, expr ast.Expr) {
+	if a == nil || scope == nil || expr == nil {
 		return
 	}
 	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
-		a.recordSMTAssertFact(bin.Left)
-		a.recordSMTAssertFact(bin.Right)
+		a.recordSMTAssertFactInScope(scope, bin.Left)
+		a.recordSMTAssertFactInScope(scope, bin.Right)
 		return
 	}
-	a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+	scope.smtAssertFacts = append(scope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
 }
 
 func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
@@ -552,6 +564,17 @@ func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
 	valueType := a.exprTypes[value]
 	if !isSMTExactAssignmentType(targetType) || !isSMTExactAssignmentType(valueType) {
 		return
+	}
+	// SOUNDNESS: the fact `target == value` models target's NEW value with a single SMT symbol. If
+	// `value` reads `target` itself (`y <- y - 1`), the symbol stands for both the old and the new value,
+	// so the fact is self-referential and (for any non-identity update) CONTRADICTORY — a contradictory
+	// hypothesis set proves every obligation. A reassignment whose RHS reads its own target cannot be
+	// captured by an equality over one symbol (that is what weakest-precondition transport is for), so
+	// record no fact; the prior `invalidateSMTAssertFactsForTarget` already dropped the stale ones.
+	if name, ok := rootIdentName(target); ok && name != "" {
+		if smtFactDeps(value)[name] {
+			return
+		}
 	}
 	a.recordSMTAssertFact(&ast.BinaryExpr{
 		Position: target.Pos(),
