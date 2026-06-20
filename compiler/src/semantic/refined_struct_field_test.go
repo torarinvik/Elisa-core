@@ -50,3 +50,29 @@ struct S:
 		t.Fatalf("a struct field refinement naming a non-law must still error")
 	}
 }
+
+// Reading a refined field and returning it as the same refinement discharges by composition (the field
+// invariant is enforced at construction). `return d.sdst` where sdst is `is UB[0,127]` and the return
+// requires `UB[0,127]` proves with no check; a WIDER field returned as a narrower refinement declines.
+func TestReturnRefinedFieldComposes(t *testing.T) {
+	ok := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+struct Sop2:
+    sdst: mutable u32 is UB[0, 127]
+def dest(d: Sop2&) -> u32 is UB[0, 127]:
+    return d.sdst
+`
+	if errs := analyzeContractStrict(t, "fld_ok.elisa", ok).Errors(); len(errs) != 0 {
+		t.Fatalf("returning a UB[0,127] field as a UB[0,127] return should prove, got: %v", errs)
+	}
+	bad := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+struct S:
+    w: mutable u32 is UB[0, 1000]
+def narrow(s: S&) -> u32 is UB[0, 255]:
+    return s.w
+`
+	if !strings.Contains(strings.Join(analyzeContractStrict(t, "fld_bad.elisa", bad).Errors(), "\n"), "could not be proven") {
+		t.Fatalf("a UB[0,1000] field does not entail a UB[0,255] return; must decline")
+	}
+}

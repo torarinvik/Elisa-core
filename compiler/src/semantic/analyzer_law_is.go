@@ -356,6 +356,41 @@ func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.Refineme
 	return false
 }
 
+// returnFieldRefinementEntails reports whether `value` is a struct FIELD read whose declared field
+// refinement entails `pred`. Since field refinements are enforced at construction, the field's value
+// already satisfies its refinement, so reading it (`return d.sdst` where sdst is `is InRange[0,127]`)
+// inherits that guarantee — refinement types erase to their base on read, so this recovers the bound.
+func (a *Analyzer) returnFieldRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	fe, ok := stripOptimizationParens(value).(*ast.FieldExpr)
+	if !ok || fe == nil {
+		return false
+	}
+	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	if !ok || st == nil || st.Decl == nil {
+		return false
+	}
+	for _, fd := range st.Decl.Fields {
+		if fd.Name != fe.Field {
+			continue
+		}
+		ft := fd.Type
+		if mt, mok := ft.(*ast.MutableType); mok && mt != nil {
+			ft = mt.Elem
+		}
+		rt, rok := ft.(*ast.RefinementTypeExpr)
+		if !rok || rt == nil {
+			return false
+		}
+		for _, fp := range rt.Preds {
+			if a.refinementPredEntails(fp, pred) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
 // refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
 // identical constant arguments (the trivial, overwhelmingly common forward/wrap case). Returning a value
 // already refined `Bounded[0,255]` satisfies a required `Bounded[0,255]`. Conservative: a non-constant
@@ -395,7 +430,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
 		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
 		// function that returns another refinement-typed function's result paid a redundant runtime check.
-		if a.returnCallRefinementEntails(n.Value, pred) {
+		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) {
 			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}
