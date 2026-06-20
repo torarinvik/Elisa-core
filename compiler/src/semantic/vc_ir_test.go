@@ -2,7 +2,61 @@
 
 package semantic
 
-import "testing"
+import (
+	"testing"
+
+	"elisacore/src/lexer"
+)
+
+// The term IR folds constants, applies the at-any-width algebraic identities, and PRESERVES the
+// machine-wrap `(mod …)` so a lowered arithmetic term is byte-identical to the direct translation.
+func TestVCTermFoldEmit(t *testing.T) {
+	x := vcOpaque{SMT: "v_x"}
+	cases := []struct {
+		name string
+		got  vcTerm
+		want string
+	}{
+		{"fold-add", vcMkArith("+", vcIntLit{2}, vcIntLit{3}, 0), "5"},
+		{"fold-mul", vcMkArith("*", vcIntLit{4}, vcIntLit{5}, 0), "20"},
+		{"add-zero-right", vcMkArith("+", x, vcIntLit{0}, 0), "v_x"},
+		{"add-zero-left", vcMkArith("+", vcIntLit{0}, x, 0), "v_x"},
+		{"sub-zero", vcMkArith("-", x, vcIntLit{0}, 0), "v_x"},
+		{"mul-one", vcMkArith("*", x, vcIntLit{1}, 0), "v_x"},
+		{"mul-zero", vcMkArith("*", x, vcIntLit{0}, 0), "0"},
+		{"neg-lit", vcMkNeg(vcIntLit{7}), "(- 7)"},
+		{"double-neg", vcMkNeg(vcMkNeg(x)), "v_x"},
+		{"structural-add", vcMkArith("+", x, vcIntLit{1}, 0), "(+ v_x 1)"},
+		{"wrap-preserved", vcMkArith("+", x, vcIntLit{1}, 64), "(mod (+ v_x 1) 18446744073709551616)"},
+	}
+	for _, tc := range cases {
+		if got := emitVCTerm(tc.got); got != tc.want {
+			t.Errorf("%s: emit = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// Comparison folding: literal comparisons reduce to a boolean constant, and a comparison of identical
+// operands folds by reflexivity (`< x x` false, `<= x x` true).
+func TestVCCompareFold(t *testing.T) {
+	x := vcOpaque{SMT: "v_x"}
+	if !isVCTrue(vcMkCompare(lexer.TOKEN_GT, vcIntLit{5}, vcIntLit{3})) {
+		t.Fatal("5 > 3 must fold to true")
+	}
+	if !isVCFalse(vcMkCompare(lexer.TOKEN_LT, vcIntLit{5}, vcIntLit{3})) {
+		t.Fatal("5 < 3 must fold to false")
+	}
+	if !isVCFalse(vcMkCompare(lexer.TOKEN_LT, x, x)) {
+		t.Fatal("x < x must fold to false")
+	}
+	if !isVCTrue(vcMkCompare(lexer.TOKEN_LTEQ, x, x)) {
+		t.Fatal("x <= x must fold to true")
+	}
+	// A genuine comparison stays structural and emits via smtCompare.
+	if got := emitVCFormula(vcMkCompare(lexer.TOKEN_GT, x, vcIntLit{0})); got != "(> v_x 0)" {
+		t.Fatalf("structural compare emit = %q", got)
+	}
+}
 
 // The VC IR's smart constructors fold the boolean constants and emit SMT-LIB identical to the direct
 // translation for the non-constant structure — the property that makes wiring the IR into the discharge
@@ -56,5 +110,20 @@ def always_ok(x: i64) -> i64:
 		AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("a goal that folds to `true` must discharge cleanly, got: %v", errs)
+	}
+}
+
+// End-to-end through the term IR: `result + 0 >= result` folds to `result >= result` (the x+0 identity)
+// then to `true` by reflexivity — discharged with no solver call.
+func TestVCTermIdentityShortCircuits(t *testing.T) {
+	src := `
+def stable(x: i64) -> i64:
+    ensure result + 0 >= result
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "vc_identity.elisa", src,
+		AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`result + 0 >= result` must fold to true and discharge, got: %v", errs)
 	}
 }
