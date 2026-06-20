@@ -152,16 +152,15 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if !ok {
 		return false
 	}
-	obligation, ok := tr.boolTerm(body, env)
+	// Lower the law body to the VC IR and discharge against the standard hypothesis set (which assumes
+	// the enclosing function's preconditions — docs/90 brick 90-6 — so a `requires forall k: 0<=k<n
+	// implies xs[k] >= 0` instantiates to prove `return xs[0] is NonNeg`). Contract-sound: the callee may
+	// assume its preconditions and an SMT-proven VALUE fact never drives bounds-check elision. On a failed
+	// proof, stash z3's satisfying assignment so the refinement diagnostic can show a counterexample.
+	proven, counterexample, ok := a.smtCheckGoal(tr, body, env, "")
 	if !ok {
 		return false
 	}
-	// Discharge against the standard hypothesis set (which assumes the enclosing function's preconditions
-	// — docs/90 brick 90-6 — so a `requires forall k: 0<=k<n implies xs[k] >= 0` instantiates to prove
-	// `return xs[0] is NonNeg`). Contract-sound: the callee may assume its preconditions (callers must
-	// establish them) and an SMT-proven VALUE fact never drives bounds-check elision. On a failed proof,
-	// stash z3's satisfying assignment so the refinement diagnostic can show a concrete counterexample.
-	proven, counterexample := a.smtCheckVC(tr, obligation, "")
 	if !proven {
 		a.lastSMTCounterexample = counterexample
 	}
@@ -220,6 +219,24 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 	return a.smtCheckQuery(tr, hyps+extraHyps, obligation)
 }
 
+// smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it. A goal that
+// constant-folds to `true` is valid under ANY hypotheses, so it concludes with NO solver call;
+// everything else is emitted from the IR and run through smtCheckVC. The third return reports whether
+// the goal could be lowered/translated at all (false ⇒ outside the fragment, the caller declines).
+func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) (proven bool, counterexample string, lowered bool) {
+	goal, ok := tr.lowerVCFormula(goalExpr, env)
+	if !ok {
+		return false, "", false
+	}
+	if isVCTrue(goal) {
+		a.smtStats.Attempts++
+		a.smtStats.Proven++
+		return true, "", true
+	}
+	p, ce := a.smtCheckVC(tr, emitVCFormula(goal), extraHyps)
+	return p, ce, true
+}
+
 // smtCheckQuery is the innermost discharge primitive: given the full hypothesis block (already built
 // from `tr`) and an `obligation`, it lays out `factPreamble + hyps + (assert (not obligation))`, asks
 // the solver, updates the stats, and returns proven (only on `unsat`) plus a counterexample on `sat`.
@@ -276,15 +293,15 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if !ok {
 		return false, ""
 	}
-	obligation, ok := tr.boolTerm(clause, env)
+	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
+	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
+	// assert-facts, and range facts). On sat the returned model is an input permitted by the caller's
+	// known facts that violates the precondition — a concrete witness for the diagnostic.
+	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, "")
 	if !ok {
 		return false, ""
 	}
-	// Discharge against the standard hypothesis set (the enclosing function's `requires` — docs/90
-	// brick 90-13 — its immutable-local defining equalities, flow assert-facts, and range facts). On
-	// sat, smtCheckVC returns an input permitted by the caller's known facts that violates the
-	// precondition — a concrete witness for the diagnostic.
-	return a.smtCheckVC(tr, obligation, "")
+	return proven, counterexample
 }
 
 func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
