@@ -276,6 +276,167 @@ func leadingDecreases(body []ast.Stmt) []*ast.ContractStmt {
 	return out
 }
 
+// PURE / TOTAL function defining-equation eligibility (feat/recursive-axiom-b).
+//
+// To let the SMT tier reason THROUGH a `def` (and perform induction over a recursive one), we may
+// assert its defining equation `f(args) == body[params:=args]`. This is sound ONLY when the function
+// is a true mathematical function: PURE (its result depends only on its arguments, with no effects)
+// and TOTAL (it terminates on all inputs the equation is instantiated for). The eligibility predicate
+// below is the single soundness gate; emitDefiningEquation consults it before emitting anything.
+
+// functionDefiningEquationEligible reports (and caches) whether a function's defining equation may be
+// soundly assumed by the SMT tier. Conservative by construction: anything it is unsure about is
+// ineligible, which only forgoes completeness, never soundness.
+func (a *Analyzer) functionDefiningEquationEligible(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil {
+		return false
+	}
+	if a.definingEquationCache == nil {
+		a.definingEquationCache = map[*ast.FuncDecl]bool{}
+	}
+	if v, ok := a.definingEquationCache[decl]; ok {
+		return v
+	}
+	// Compute under a guard so a self-recursive purity check (body references the function) does not
+	// recurse forever; assume eligible-so-far while deciding, which is safe because the final verdict is
+	// the conjunction of all gates and a false gate overrides.
+	if a.definingEquationInProgress == nil {
+		a.definingEquationInProgress = map[*ast.FuncDecl]bool{}
+	}
+	if a.definingEquationInProgress[decl] {
+		return true
+	}
+	a.definingEquationInProgress[decl] = true
+	defer delete(a.definingEquationInProgress, decl)
+	ok := a.computeDefiningEquationEligible(decl)
+	a.definingEquationCache[decl] = ok
+	return ok
+}
+
+func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
+	// A lemma is ghost code with no value-returning body; its IH is handled separately. Never treat it
+	// as a value-producing pure function here.
+	if decl.IsLemma {
+		return false
+	}
+	// PURE shape: integer params, integer return, and a single `return <pure-expr>` body. A pure return
+	// expression has no statements that could mutate state, loop, or perform effects.
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	if fnType.Return == nil || !IsNumericType(fnType.Return) || IsFloatType(fnType.Return) {
+		return false
+	}
+	for _, pt := range fnType.Params {
+		// A reference/aggregate param could alias mutable state, so only plain integer params qualify.
+		if pt == nil || !IsNumericType(pt) || IsFloatType(pt) {
+			return false
+		}
+	}
+	body, ok := pureReturnBody(decl)
+	if !ok {
+		return false
+	}
+	if !a.exprIsPureForEquation(body) {
+		return false
+	}
+	// TOTAL: a function that makes ANY direct self-recursive call must have a VERIFIED `decreases`
+	// measure — otherwise its "equation" may be inconsistent (non-termination ⇒ no fixed point). A
+	// non-recursive pure function is trivially total.
+	calls := a.collectSelfRecursiveCalls(decl)
+	if len(calls) == 0 {
+		return true
+	}
+	return a.measureVerifiedForCalls(decl, calls)
+}
+
+// measureVerifiedForCalls proves (read-only, no diagnostics) that decl's `decreases` measure strictly
+// decreases at every supplied self-recursive call. Shared by lemma-IH and function-equation gating.
+func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.CallExpr) bool {
+	if len(decl.Decreases) == 0 {
+		return false
+	}
+	for _, m := range decl.Decreases {
+		if m == nil {
+			return false
+		}
+		if t := a.exprTypes[m]; t != nil && (!IsNumericType(t) || IsFloatType(t)) {
+			return false
+		}
+	}
+	// The measure prover reads the function's parameters from a.currentScope. It is only sound to use
+	// the live scope when we are analyzing decl itself; for a foreign callee whose params are not in
+	// scope, decline (conservative — forgoes the equation, never fabricates it).
+	if decl != a.currentFuncDecl {
+		return false
+	}
+	for _, c := range calls {
+		subst := a.substForSelfCall(decl, c)
+		if !a.proveMeasureDecreases(decl.Decreases, subst) {
+			return false
+		}
+	}
+	return true
+}
+
+// exprIsPureForEquation reports whether an expression is a PURE integer expression we may put on the
+// RHS of a defining equation: literals, parameter/immutable identifiers, arithmetic, comparisons,
+// parens, value-preserving casts, and calls to OTHER functions that are THEMSELVES equation-eligible
+// (so purity is transitive and a mutating/effectful helper poisons the whole body). Anything else —
+// an address-of, a field/index into mutable state, an unknown call — makes the body impure ⇒ decline.
+func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.exprIsPureForEquation(n.Inner)
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureForEquation(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && a.exprIsPureForEquation(n.Left) && a.exprIsPureForEquation(n.Right)
+	case *ast.CastExpr:
+		return n != nil && a.exprIsPureForEquation(n.Operand)
+	case *ast.CallExpr:
+		if n == nil {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.exprIsPureForEquation(arg) {
+				return false
+			}
+		}
+		// Transitive purity: a callee must itself be a pure equation-eligible function. The in-progress
+		// guard in functionDefiningEquationEligible breaks self/mutual recursion (returns true for the
+		// node currently being decided), so this terminates.
+		return a.functionDefiningEquationEligible(decl)
+	default:
+		return false
+	}
+}
+
+// pureReturnBody extracts a function's single trailing `return <expr>` body (leading contract
+// statements — requires/ensure/decreases — are erased by the parser into the decl, so a pure function
+// body is exactly one return statement). Returns ok=false for anything more complex.
+func pureReturnBody(decl *ast.FuncDecl) (ast.Expr, bool) {
+	if decl == nil || len(decl.Body) != 1 {
+		return nil, false
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok || ret == nil || ret.Value == nil {
+		return nil, false
+	}
+	return ret.Value, true
+}
+
 // measureBoundedBelow reports whether the measure cannot fall below 0. An unsigned-typed measure is
 // non-negative by construction (the common, zero-friction case: `decreases n` with `n: usize`).
 // Otherwise the measure's affine form must bound to a non-negative lower value under the current

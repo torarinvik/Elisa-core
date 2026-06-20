@@ -947,6 +947,20 @@ type smtTranslator struct {
 	// WP discharge paths, which thread the bare (exit) value so entry/exit diverge; everywhere else
 	// old() must stay a fresh opaque symbol or it would collapse onto the un-threaded bare value.
 	oldAsEntry bool
+	// callCanon canonicalizes a PURE, TOTAL function call to a single SMT symbol keyed by callee +
+	// syntactic args, so two occurrences of `g(n-1)` share one symbol (a function is deterministic, so
+	// equal inputs give equal outputs — sound). It is what lets the recursive-function defining
+	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
+	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
+	callCanon map[string]string
+	// callEqInFlight guards the recursive instantiation of the defining equation: while emitting the
+	// body equation for `g(...)` we mark `g` so a self-call inside its body does not recurse forever.
+	// Re-entry just yields the canonical symbol with no further equation — a sound bounded unroll.
+	callEqInFlight map[*ast.FuncDecl]int
+	// callEqMaxUnroll bounds how deep the defining equation is instantiated (default 1). A finite depth
+	// keeps the emitted axiom set finite; soundness does not depend on the depth (only on purity +
+	// termination), so this is purely a completeness knob.
+	callEqMaxUnroll int
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -961,9 +975,12 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		lenDecls:     map[string]bool{},
 		nonNegDecls:  map[string]bool{},
 		unsignedBits: map[string]int{},
-		signedBits:   map[string]int{},
-		boolDecls:    map[string]bool{},
-		paramConsts:  paramConsts,
+		signedBits:      map[string]int{},
+		boolDecls:       map[string]bool{},
+		paramConsts:     paramConsts,
+		callCanon:       map[string]string{},
+		callEqInFlight:  map[*ast.FuncDecl]int{},
+		callEqMaxUnroll: 1,
 	}
 }
 
@@ -1834,11 +1851,30 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	if !isSMTExactAssignmentType(resultType) || IsBoolType(resultType) {
 		return "", false
 	}
+	// CANONICALIZATION: a function is deterministic, so two calls with syntactically-equal arguments
+	// denote the same value and must share one SMT symbol. Without this, `g(n-1)` in a hypothesis and
+	// `g(n-1)` in the obligation would be unrelated fresh symbols and nothing about a recursive function
+	// could be transported between them. The key is the callee identity plus the canonical SMT terms of
+	// the arguments (so `g(n - 1)` and `g(n-1)` match, and `g(x)` vs `g(y)` do not). If any argument is
+	// outside the integer fragment we cannot form a stable key, so we fall back to a fresh aux (sound:
+	// just less sharing). Only DIRECT calls to a known decl are canonicalized.
+	args := proofCallArgs(call)
+	var canonKey string
+	if direct && decl != nil {
+		if key, ok := tr.callCanonKey(decl, args); ok {
+			if sym, seen := tr.callCanon[key]; seen {
+				return sym, true
+			}
+			canonKey = key
+		}
+	}
 	ret := tr.freshAux(smtTypeNonNegative(resultType))
-	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
+	if canonKey != "" {
+		tr.callCanon[canonKey] = ret
+	}
+	if !direct || decl == nil {
 		return ret, true
 	}
-	args := proofCallArgs(call)
 	subst := map[string]ast.Expr{}
 	for i, param := range decl.Params {
 		if i >= len(args) || args[i] == nil {
@@ -1851,6 +1887,8 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 		return ret, true
 	}
 	env["result"] = ret
+	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
+	// contract-sound postcondition holds for the actual arguments.
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
@@ -1859,7 +1897,83 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
 		}
 	}
+	// (2) DEFINING EQUATION for a PURE, TOTAL function: assert `f(args) == body[params:=args]`, so the
+	// prover can reason THROUGH the function (and, for a terminating recursive function, perform
+	// induction — the body's own recursive sub-call canonicalizes to a symbol the IH/equation can
+	// constrain). SOUNDNESS GATES (tr.callEquationEligible): the function must be pure (a single
+	// integer-returning `return <pure-expr>` over integer params, no mutation/loops/effects) AND, if it
+	// is recursive, have a VERIFIED `decreases` measure. A non-terminating function's equation is
+	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
+	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
+	// finite.
+	tr.emitDefiningEquation(call, decl, ret, subst)
 	return ret, true
+}
+
+// callCanonKey builds the canonicalization key for a direct call: the callee's identity plus the
+// canonical SMT term of each argument. Returns ok=false if any argument is outside the integer term
+// fragment (so no stable key exists and the caller mints a fresh aux instead).
+func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (string, bool) {
+	var b strings.Builder
+	fmt.Fprintf(&b, "%p|", decl)
+	for _, arg := range args {
+		if arg == nil {
+			return "", false
+		}
+		t, ok := tr.term(arg)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(t)
+		b.WriteByte('|')
+	}
+	return b.String(), true
+}
+
+// emitDefiningEquation asserts `ret == body[params:=args]` for a pure, total function, with the body's
+// own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
+// purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
+// to an integer term.
+func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr) {
+	if tr == nil || decl == nil {
+		return
+	}
+	if tr.callEqInFlight[decl] >= tr.callEqMaxUnroll {
+		return // bounded unroll reached: leave the symbol opaque (still sound)
+	}
+	if !tr.callEquationEligible(decl) {
+		return
+	}
+	body, ok := pureReturnBody(decl)
+	if !ok {
+		return
+	}
+	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return
+	}
+	tr.callEqInFlight[decl]++
+	defer func() { tr.callEqInFlight[decl]-- }()
+	bodyTerm, ok := tr.termEnv(body, env)
+	if !ok {
+		return
+	}
+	tr.auxDecls = append(tr.auxDecls, "(assert (= "+ret+" "+bodyTerm+"))\n")
+}
+
+// callEquationEligible reports whether a function's defining equation may be soundly assumed:
+//   - PURE: a single `return <pure-expr>` body (after leading contracts) over integer params, with an
+//     integer return. Such a body has no mutation, loops, or effects, so `f(args)` equals the body
+//     evaluated at the arguments — a true mathematical equation.
+//   - TOTAL: if the function makes ANY direct self-recursive call it MUST carry a VERIFIED `decreases`
+//     measure. A non-terminating recursive function does not denote a value, and assuming its
+//     "equation" can be inconsistent (`f(n) == 1 + f(n)`), which would prove anything. The termination
+//     gate makes the recursion well-founded, so the equation has a unique fixed point and is sound.
+//
+// A non-recursive pure function needs no measure (it is trivially total). Eligibility is cached via the
+// analyzer's defining-equation cache to avoid re-deriving purity per call.
+func (tr *smtTranslator) callEquationEligible(decl *ast.FuncDecl) bool {
+	return tr.a.functionDefiningEquationEligible(decl)
 }
 
 // factPreamble emits the declarations for every free variable the translation touched, plus the

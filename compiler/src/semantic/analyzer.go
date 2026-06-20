@@ -410,6 +410,16 @@ type Analyzer struct {
 	// contract condition (invariant/assert) that mentions a ghost so codegen erases its check.
 	ghostReadSeen bool
 	lemmasInAnalysis                 map[*ast.FuncDecl]bool
+	// lemmaTerminationCache memoizes whether a lemma's `decreases` measure is verified to strictly
+	// decrease at every self-recursive call (read-only mirror of checkTermination, no diagnostics). It
+	// gates the inductive hypothesis: only a provably-terminating lemma may assume its own ensure for a
+	// strictly-smaller argument. A false entry only forgoes the IH; it never fabricates a proof.
+	lemmaTerminationCache map[*ast.FuncDecl]bool
+	// definingEquationCache / ...InProgress memoize whether a PURE, TOTAL function's defining equation
+	// (`f(args) == body[params:=args]`) may be soundly asserted to the SMT tier. InProgress breaks
+	// self/mutual-recursive purity checks. A false verdict only forgoes the equation; it is never unsound.
+	definingEquationCache      map[*ast.FuncDecl]bool
+	definingEquationInProgress map[*ast.FuncDecl]bool
 	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
 	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
 	// Cleared at the start of each refinement discharge to avoid surfacing a stale one.
