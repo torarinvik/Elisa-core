@@ -669,3 +669,70 @@ def f(r: mutable Render&) -> bool:
 		t.Fatalf("using a frame law with value `is` must error, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// AUDIT (frame channel): a mutating BUILTIN method on a ref-param container field is a write to that
+// field, so it must obey the `changes` set — `b.items.push(v)` outside `changes b.other` is a
+// violation. (The receiver is a value, not a `mutable T&` arg, so it bypassed checkFrameMutableRefArg.)
+func TestChangesBuiltinMethodOutOfSetErrors(t *testing.T) {
+	src := `
+struct Buf:
+    items: mutable darray[i64]
+    other: mutable darray[i64]
+
+def bad(b: mutable Buf&) changes b.other:
+    b.items.push(7)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "frame_method_out.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("`b.items.push` outside `changes b.other` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// The same call INSIDE the declared set is clean — the fix enforces the frame, it does not forbid the
+// write outright.
+func TestChangesBuiltinMethodInSetIsClean(t *testing.T) {
+	src := `
+struct Buf:
+    items: mutable darray[i64]
+    other: mutable darray[i64]
+
+def good(b: mutable Buf&) changes b.items:
+    b.items.push(7)
+`
+	result := analyzeTreeTestSource(t, "frame_method_in.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`b.items.push` within `changes b.items` should be clean, got: %v", errs)
+	}
+}
+
+// A mutating builtin method on a `preserves`d field is a violation (the write touches preserved state).
+func TestPreservesBuiltinMethodErrors(t *testing.T) {
+	src := `
+struct Buf:
+    items: mutable darray[i64]
+    other: mutable darray[i64]
+
+def bad(b: mutable Buf&) changes b preserves b.items:
+    b.items.push(7)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "frame_method_pres.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "preserves") {
+		t.Fatalf("`b.items.push` on a preserved field must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Sibling carrier: the same rule covers dict mutators (`d.put`) on a ref-param field.
+func TestChangesDictMethodOutOfSetErrors(t *testing.T) {
+	src := `
+struct Tab:
+    a: mutable dict[i64, i64]
+    b: mutable dict[i64, i64]
+
+def bad(t: mutable Tab&) changes t.b:
+    t.a.put(1, 2)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "frame_dict_out.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("`t.a.put` outside `changes t.b` must error, got:\n%s", allDiagnostics(result))
+	}
+}

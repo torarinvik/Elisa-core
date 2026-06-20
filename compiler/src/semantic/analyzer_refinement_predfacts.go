@@ -129,27 +129,40 @@ var mutatingBuiltinCollectionMethods = map[string]bool{
 	"add": true, "get_or_insert": true,
 }
 
-// invalidateFactsForMutatingBuiltinMethod drops every flow fact about the receiver of a mutating
-// builtin collection method, closing the hole where such a value-receiver method slipped past the
-// ref-arg invalidation (e.g. a `NonEmpty` fact surviving `xs.clear()`). It mirrors the per-channel
-// drops the ref-arg path performs (predicate, range, written-const, and SMT assert facts). Gated to a
-// collection-typed receiver so an unrelated user method of the same name keeps its facts; the drop is
-// otherwise conservative, and over-dropping only adds runtime checks.
-func (a *Analyzer) invalidateFactsForMutatingBuiltinMethod(expr *ast.CallExpr) {
+// mutatingBuiltinMethodReceiver returns the receiver PLACE of a mutating builtin collection method
+// call (`xs.clear()` → xs, `b.items.push(v)` → b.items), or ok=false. A mutating builtin is modeled
+// with a value receiver, so a call through it is invisible to the ref-arg machinery — both the
+// fact-invalidation and the frame-enforcement hooks treat it as a write to this place. Gated to a
+// collection-typed receiver so an unrelated user method of the same name is untouched (a real mutable
+// `T&` self is already handled by the ref-arg paths).
+func (a *Analyzer) mutatingBuiltinMethodReceiver(expr *ast.CallExpr) (ast.Expr, bool) {
 	if a == nil || expr == nil {
-		return
+		return nil, false
 	}
 	field, ok := stripParenExpr(expr.Func).(*ast.FieldExpr)
 	if !ok || field == nil || field.Object == nil || !mutatingBuiltinCollectionMethods[field.Field] {
-		return
+		return nil, false
 	}
 	if !a.receiverIsBuiltinCollection(field.Object) {
+		return nil, false
+	}
+	return field.Object, true
+}
+
+// invalidateFactsForMutatingBuiltinMethod drops every flow fact about the receiver of a mutating
+// builtin collection method, closing the hole where such a value-receiver method slipped past the
+// ref-arg invalidation (e.g. a `NonEmpty` fact surviving `xs.clear()`). It mirrors the per-channel
+// drops the ref-arg path performs (predicate, range, written-const, and SMT assert facts). Over-
+// dropping only adds runtime checks, so the conservative drop stays sound.
+func (a *Analyzer) invalidateFactsForMutatingBuiltinMethod(expr *ast.CallExpr) {
+	recv, ok := a.mutatingBuiltinMethodReceiver(expr)
+	if !ok {
 		return
 	}
-	a.invalidatePredFactsForTarget(field.Object)
-	a.invalidateRangeFactsForTarget(field.Object)
-	a.invalidateWrittenConst(rootIdentNameOrEmpty(field.Object))
-	a.invalidateSMTAssertFactsForTarget(field.Object)
+	a.invalidatePredFactsForTarget(recv)
+	a.invalidateRangeFactsForTarget(recv)
+	a.invalidateWrittenConst(rootIdentNameOrEmpty(recv))
+	a.invalidateSMTAssertFactsForTarget(recv)
 }
 
 // receiverIsBuiltinCollection reports whether an expression's resolved type is a builtin darray/dict/

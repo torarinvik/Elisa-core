@@ -62,6 +62,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// stale predicate/range/written-const fact (e.g. `NonEmpty` surviving `xs.clear()`). Drop the
 	// receiver's facts here so the mutation is honored on every channel.
 	defer a.invalidateFactsForMutatingBuiltinMethod(expr)
+	// …and the same value-receiver write must be enforced against the function's `changes`/`preserves`
+	// frame — `b.items.push(v)` writes b.items just as `b.items <- …` does.
+	defer a.checkFrameForMutatingBuiltinMethod(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.

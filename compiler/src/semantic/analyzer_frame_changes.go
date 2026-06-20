@@ -446,6 +446,20 @@ func calleeFrameSuffixesForParam(ft *FuncType, i int) [][]string {
 	return suffixes
 }
 
+// checkFrameForMutatingBuiltinMethod enforces the active frame clauses at a mutating builtin method
+// call: `b.items.push(v)` writes b.items, so — exactly like the direct assignment `b.items <- …` — it
+// must lie inside the `changes` set and must not overlap a `preserves` place. The receiver of such a
+// builtin is a VALUE, not a `mutable T&` arg, so checkFrameMutableRefArg never sees it; this closes the
+// frame-channel analogue of the predFact builtin-method hole.
+func (a *Analyzer) checkFrameForMutatingBuiltinMethod(expr *ast.CallExpr) {
+	if !a.currentHasChanges && !a.currentHasPreserves {
+		return
+	}
+	if recv, ok := a.mutatingBuiltinMethodReceiver(expr); ok {
+		a.checkFramePlace(recv, "writes to")
+	}
+}
+
 func (a *Analyzer) checkFramePlace(place ast.Expr, verb string) {
 	root, fields, ok := frameWritePath(place)
 	if !ok {
