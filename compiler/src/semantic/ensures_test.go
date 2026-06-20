@@ -414,3 +414,246 @@ def round_down(value: u64, alignment: u64) -> u64:
 		t.Fatalf("guarded/requires-bounded modulo postconditions should discharge under -strict, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestEnsureUsesOnlyProvenInvariantFacts(t *testing.T) {
+	src := `
+def bad(x: u64) -> u64:
+    ensure result > x
+    y: mutable u64 = 0
+    invariant y > x
+    return y
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_unproven_invariant.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	diags := allDiagnostics(r)
+	if !contains(diags, "invariant could not be proven statically") {
+		t.Fatalf("unproven invariant should be reported as runtime-only, got:\n%s", diags)
+	}
+	if !contains(diags, "ensure postcondition") {
+		t.Fatalf("unproven invariant must not discharge a strict ensure, got:\n%s", diags)
+	}
+}
+
+func TestEnsureDischargesFromProvenInvariantAndAssignmentFacts(t *testing.T) {
+	src := `
+def contains_out(addr: u64, start_out: mutable u64&, end_out: mutable u64&) -> bool:
+    ensure not result or (start_out <= addr and addr < end_out)
+    lo: u64 = 10
+    hi: u64 = 20
+    if addr >= lo and addr < hi:
+        start_out <- lo
+        end_out <- hi
+        invariant start_out <= addr and addr < end_out
+        return true
+    return false
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_proven_invariant_out.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("proven invariant plus exact assignment facts should discharge strict ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestEnsureDischargesFromCountUpWhileExitFact(t *testing.T) {
+	src := `
+const MAX_NAME: usize = 32
+
+def capped_count(flag: bool) -> usize:
+    ensure result <= MAX_NAME
+    n: mutable usize = 0
+    while n < MAX_NAME and flag:
+        invariant n <= MAX_NAME
+        n <- n + 1
+    invariant n <= MAX_NAME
+    return n
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_countup_exit.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("count-up loop exit fact should discharge strict cap ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestEnsureDischargesFromReturnedCallPostcondition(t *testing.T) {
+	// A SOUND postcondition (`n % 8 < 8` holds for all unsigned n — no wraparound) propagated through a
+	// returned direct call, including the extern-arg and Pascal-cased variants.
+	src := `
+def cap8(n: usize) -> usize:
+    ensure result < 8
+    return n % 8
+
+def low_bits(extra: usize) -> usize:
+    ensure result < 8
+    return cap8(extra + 1)
+
+extern strlen_like(name: static u8&) -> usize
+
+def low_bits_from_call(name: static u8&) -> usize:
+    ensure result < 8
+    extra: usize = strlen_like(name)
+    return cap8(extra + 1)
+
+def Cap8(n: usize) -> usize:
+    ensure result < 8
+    return n % 8
+
+def LowBitsPascal(name: static u8&) -> usize:
+    ensure result < 8
+    extra: usize = strlen_like(name)
+    return Cap8(extra + 1)
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_returned_call.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("callee postcondition on a returned direct call should discharge caller ensure, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// TestEnsureRequiresRelationalNoUnderflow: a `requires` relational bound (`requires b <= a`, etc.)
+// establishes that unsigned `a - b` cannot underflow, so `ensure result <= a` discharges. Each of the
+// four equivalent relational forms works; the wrong-direction precondition and the unguarded case must
+// still be rejected (soundness floor — a precondition that does NOT imply `a >= b` proves nothing).
+func TestEnsureRequiresRelationalNoUnderflow(t *testing.T) {
+	provable := []string{"b <= a", "a >= b", "b < a", "a > b"}
+	for _, form := range provable {
+		t.Run("proves_"+form, func(t *testing.T) {
+			src := "def t(a: u64, b: u64) -> u64:\n    requires " + form + "\n    ensure result <= a\n    return a - b\n"
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "req_noundf.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) != 0 {
+				t.Fatalf("`requires %s` should discharge `ensure result <= a; return a - b`, got:\n%s", form, strings.Join(errs, "\n"))
+			}
+		})
+	}
+	rejected := []struct{ name, req string }{
+		{"wrong_direction", "a <= b"},
+		{"unrelated", "b >= 1"},
+	}
+	for _, tc := range rejected {
+		t.Run("rejects_"+tc.name, func(t *testing.T) {
+			src := "def t(a: u64, b: u64) -> u64:\n    requires " + tc.req + "\n    ensure result <= a\n    return a - b\n"
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "req_bad.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) == 0 {
+				t.Fatalf("`requires %s` does NOT establish a>=b, so unsigned a-b<=a must be rejected (unsound otherwise)", tc.req)
+			}
+		})
+	}
+}
+
+// TestEnsureDischargesNewProverShapes covers three prover-power additions: a `.count` length read
+// through a reference, a boolean-valued equality postcondition, and a pointer-null disjunction. Each
+// has a paired negative case that must still be rejected (soundness floor).
+func TestEnsureDischargesNewProverShapes(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		ok   bool
+	}{
+		{"count_through_ref", `
+struct Reader:
+    data: darray[u8]
+def remaining(r: Reader&) -> u64:
+    ensure result <= r.data.count
+    return r.data.count
+`, true},
+		{"count_through_ref_guarded_sub", `
+struct Reader:
+    data: darray[u8]
+def left(r: Reader&, used: u64) -> u64:
+    requires used <= r.data.count
+    ensure result <= r.data.count
+    return r.data.count - used
+`, true},
+		{"bool_modulo_equality", `
+def is_aligned(x: u64, m: u64) -> bool:
+    requires m >= 1
+    ensure result == ((x % m) == 0)
+    return (x % m) == 0
+`, true},
+		{"bool_modulo_equality_wrong", `
+def bad(x: u64, m: u64) -> bool:
+    requires m >= 1
+    ensure result == ((x % m) == 1)
+    return (x % m) == 0
+`, false},
+		{"free_bool_xor", `
+def neq(p: bool, q: bool) -> bool:
+    ensure result == (p != q)
+    return p != q
+`, true},
+		{"pointer_null_disjunction", `
+def write_out(out_ptr: void&?, val: i64) -> bool:
+    ensure (out_ptr != null) or (result == false)
+    if out_ptr == null:
+        return false
+    return true
+`, true},
+		{"pointer_null_disjunction_wrong", `
+def bad(out_ptr: void&?, val: i64) -> bool:
+    ensure (out_ptr != null) or (result == false)
+    return true
+`, false},
+		{"struct_result_field", `
+struct Pair:
+    a: i64
+    b: i64
+def mk() -> Pair:
+    ensure result.a == 1
+    ensure result.b == 2
+    return Pair(1, 2)
+`, true},
+		{"struct_result_field_wrong", `
+struct Pair:
+    a: i64
+    b: i64
+def bad() -> Pair:
+    ensure result.a == 9
+    return Pair(1, 2)
+`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", tc.src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			errs := r.Errors()
+			if tc.ok && len(errs) != 0 {
+				t.Fatalf("expected discharge, got:\n%s", strings.Join(errs, "\n"))
+			}
+			if !tc.ok && len(errs) == 0 {
+				t.Fatalf("expected rejection (unsound otherwise), but it discharged")
+			}
+		})
+	}
+}
+
+// TestEnsureRejectsUnsignedWraparoundPostconditions pins the soundness fix: a postcondition that holds
+// only in unbounded ℤ but is FALSE on the wrapping machine must NOT discharge under -strict. Unsigned
+// `a - b` underflows when b > a, and `n + k` overflows near the type max, so neither `result <= a` nor
+// `result >= n` is a valid postcondition without a bound or guard.
+func TestEnsureRejectsUnsignedWraparoundPostconditions(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+	}{
+		{"sub_underflow", `
+def f(a: u64, b: u64) -> u64:
+    ensure result <= a
+    return a - b
+`},
+		{"sub_underflow_field", `
+struct Mgr:
+    total: u64
+    usage: u64
+def avail(self: Mgr&) -> u64:
+    ensure result <= self.total
+    return self.total - self.usage
+`},
+		{"add_overflow", `
+def g(n: usize) -> usize:
+    ensure result >= n
+    return n + 8
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, tc.name+".elisa", tc.src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+			if errs := r.Errors(); len(errs) == 0 {
+				t.Fatalf("unsigned wraparound postcondition must NOT discharge under -strict (unsound), but it was accepted")
+			}
+		})
+	}
+}

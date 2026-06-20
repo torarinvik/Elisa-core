@@ -80,9 +80,9 @@ const (
 )
 
 type Analyzer struct {
-	file             *ast.File
-	diagnostics      []Diagnostic
-	namedTypes       map[string]Type
+	file        *ast.File
+	diagnostics []Diagnostic
+	namedTypes  map[string]Type
 	// aliasRefinements keeps a type alias's REFINEMENT target expr (`type TileX = i32 is Bounded[..]`)
 	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
 	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).
@@ -90,8 +90,8 @@ type Analyzer struct {
 	// deferredAliasRefinements holds alias refinements whose predicate validation is postponed until
 	// after law symbols are collected (aliases are resolved long before functions/laws exist).
 	deferredAliasRefinements []deferredAliasRefinement
-	staticInterfaces map[string]*StaticInterface
-	staticImpls      map[string]*StaticImpl
+	staticInterfaces         map[string]*StaticInterface
+	staticImpls              map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
@@ -99,7 +99,7 @@ type Analyzer struct {
 	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet
-	capabilityAliases            map[string][]ast.PermissionRef
+	capabilityAliases       map[string][]ast.PermissionRef
 	globalScope             *Scope
 	functionTypes           map[string]*FuncType
 	externLinkNames         map[string]externLinkNameSignature
@@ -133,7 +133,13 @@ type Analyzer struct {
 	// runtime because they are the operand of `get` / `if let` (the safe
 	// bounded-view forms). Codegen emits a bounds test at slice creation for
 	// these, taking the recovery / else path when out of range.
-	checkedSliceExprs            map[*ast.SliceExpr]bool
+	checkedSliceExprs map[*ast.SliceExpr]bool
+	// callFrameContexts caches, per resolved call expression, the callee's applied FuncType and the
+	// position-aligned argument expressions, so the deferred SMT-fact invalidation can consult the
+	// callee's `changes`/`preserves` frame and let provably-untouched facts survive the call (docs/87
+	// frame-aware fact survival). Populated in analyzeResolvedCallExprWithExpected, consumed (and
+	// cleared) by invalidateSMTAssertFactsForCall.
+	callFrameContexts            map[*ast.CallExpr]callFrameCtx
 	storageViewStaleUses         map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs             map[ast.Expr]bool
 	unsafeAliasStmts             map[ast.Stmt]bool
@@ -151,41 +157,41 @@ type Analyzer struct {
 	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
 	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
 	// surfaced on Result).
-	deathTimeCohorts      map[string][]DeathTimeCohort
-	deathEscapeStats      map[string]DeathTimeEscapeStats
-	paramRetained         map[*ast.FuncDecl][]bool
-	paramStoreTargets     map[*ast.FuncDecl][]map[int]bool
-	recordDeathCohortsOpt bool
-	exprDenseNodeKeys            map[ast.Expr]DenseNodeKeyInfo
-	exprNodeTables               map[ast.Expr]NodeTableInfo
-	deferInfo                    map[*ast.DeferStmt]*DeferInfo
-	foldInfo                     map[*ast.FoldExpr]*FoldInfo
-	lambdaInfo                   map[*ast.LambdaExpr]*LambdaInfo
-	symbolFacts                  map[*Symbol]OptimizationFacts
-	funcDeclSymbols              map[*ast.FuncDecl]*Symbol
-	declVisibility               map[ast.Decl]string
-	privateTypeNames             map[string]bool
-	castHooksByName              map[string]map[castHookSignature]*Symbol
-	initHooksByName              map[string]map[initHookSignature]*Symbol
-	typeParamScopes              []map[string]Type
-	typeParamInterfaceScopes     []map[string]*StaticInterface
-	interfaceAssocTypeScopes     []map[string]Type
-	constParamScopes             []map[string]Type
-	constEvalScopes              []map[string]ConstValue
-	staticContextDepth           int
-	staticCallDepth              int
-	shapeParamScopes             []map[string]Shape
-	regionParamScopes            []map[string]bool
-	permissionParamScopes        []map[string]bool
-	errorSetParamScopes          []map[string]bool
-	freshShapeCounter            int
-	returnFreshShapeStatus       map[string]freshReturnStatus
-	annotatedFuncs               []*AnnotatedFunc
-	exportedTypes                []*ExportedType
-	exportedFuncs                []*ExportedFunc
-	exportedGlobals              []*ExportedGlobal
-	currentScope                 *Scope
-	currentReturn                Type
+	deathTimeCohorts         map[string][]DeathTimeCohort
+	deathEscapeStats         map[string]DeathTimeEscapeStats
+	paramRetained            map[*ast.FuncDecl][]bool
+	paramStoreTargets        map[*ast.FuncDecl][]map[int]bool
+	recordDeathCohortsOpt    bool
+	exprDenseNodeKeys        map[ast.Expr]DenseNodeKeyInfo
+	exprNodeTables           map[ast.Expr]NodeTableInfo
+	deferInfo                map[*ast.DeferStmt]*DeferInfo
+	foldInfo                 map[*ast.FoldExpr]*FoldInfo
+	lambdaInfo               map[*ast.LambdaExpr]*LambdaInfo
+	symbolFacts              map[*Symbol]OptimizationFacts
+	funcDeclSymbols          map[*ast.FuncDecl]*Symbol
+	declVisibility           map[ast.Decl]string
+	privateTypeNames         map[string]bool
+	castHooksByName          map[string]map[castHookSignature]*Symbol
+	initHooksByName          map[string]map[initHookSignature]*Symbol
+	typeParamScopes          []map[string]Type
+	typeParamInterfaceScopes []map[string]*StaticInterface
+	interfaceAssocTypeScopes []map[string]Type
+	constParamScopes         []map[string]Type
+	constEvalScopes          []map[string]ConstValue
+	staticContextDepth       int
+	staticCallDepth          int
+	shapeParamScopes         []map[string]Shape
+	regionParamScopes        []map[string]bool
+	permissionParamScopes    []map[string]bool
+	errorSetParamScopes      []map[string]bool
+	freshShapeCounter        int
+	returnFreshShapeStatus   map[string]freshReturnStatus
+	annotatedFuncs           []*AnnotatedFunc
+	exportedTypes            []*ExportedType
+	exportedFuncs            []*ExportedFunc
+	exportedGlobals          []*ExportedGlobal
+	currentScope             *Scope
+	currentReturn            Type
 	// lambdaErrorAccumulate is true while analyzing the body of a bare expr-lambda with no annotated
 	// or contextual error-union return (docs/64 Phase 5b). In that mode `try`-without-else and `raise`
 	// UNION their operand's error set into lambdaErrorAccum instead of checking it against
@@ -255,9 +261,9 @@ type Analyzer struct {
 	// relocating mutation (push/extend/reserve/clear/truncate) of such a container would
 	// move its buffer out from under the live iteration — the iterator-invalidation gap —
 	// so it is rejected at invalidateStorageViewsForSource, the universal mutation chokepoint.
-	currentIteratedSources        map[string]lexer.Pos
-	currentAliasAccesses          map[string]aliasAccessState
-	currentAliasBindings          map[*Symbol]aliasAccessBinding
+	currentIteratedSources map[string]lexer.Pos
+	currentAliasAccesses   map[string]aliasAccessState
+	currentAliasBindings   map[*Symbol]aliasAccessBinding
 	// callAlignedAliasArgs records, per call, the argument expressions aligned 1:1 to the
 	// callee's parameters (receiver + reordered named args + implicits) — the same alignment
 	// validateCallArgAliasAccess uses. It lets a ref bound from a reference-returning call map
@@ -294,10 +300,10 @@ type Analyzer struct {
 	// assignment target, where naming a `zeroed`-uninitialized local is not a
 	// value read (it is being filled / had its address taken), so the
 	// definite-assignment read check must not fire.
-	suppressUninitReadCheck           int
-	suppressGlobalReadCheck           int
-	currentPoolScopes                 []poolScopeState
-	currentIndexBounds                map[string]indexBoundFact
+	suppressUninitReadCheck int
+	suppressGlobalReadCheck int
+	currentPoolScopes       []poolScopeState
+	currentIndexBounds      map[string]indexBoundFact
 	// currentBoundEqual is a flow-sensitive equivalence relation over upper-bound EXPRESSION STRINGS
 	// (the same canonical form as indexBoundFact.Upper / indexableUpperBoundString): a symmetric
 	// adjacency set recording that two length-ish expressions are provably equal — `n == xs.count`
@@ -318,7 +324,7 @@ type Analyzer struct {
 	// measure law, docs/89 Stage 5). It opts the function's range loops into the existing autovec
 	// verifier: each ForStmt is tagged AutovecExpected, so the post-optimization pass warns (verify-
 	// only, never build-gating) if the loop did not vectorize. Saved/restored per function.
-	currentFunctionExpectsVectorize bool
+	currentFunctionExpectsVectorize   bool
 	currentProgressSummary            *FunctionProgressSummary
 	loopDepth                         int
 	currentTrustedNonProgressDepth    int
@@ -329,7 +335,7 @@ type Analyzer struct {
 	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the
 	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
 	// auditable through the capability system rather than invisibly suppressed.
-	currentGrantedStaleRefDepth int
+	currentGrantedStaleRefDepth       int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening
@@ -345,21 +351,21 @@ type Analyzer struct {
 	// `count field in fields(T) where field.name != "x"`). Such a predicate is evaluated at
 	// compile time over interned literals, so a raw-u8&-`==`/`!=` there is not a runtime
 	// address-compare footgun and must not be flagged by the C-string comparison lint.
-	inCompileTimeQueryPredicate      bool
-	enforceUnsafePermissions         bool
-	enforceProgressSafety            bool
-	enforceStrictConcurrency         bool
-	enforcePerfLints                 bool
-	enforceStrictProofs              bool
+	inCompileTimeQueryPredicate bool
+	enforceUnsafePermissions    bool
+	enforceProgressSafety       bool
+	enforceStrictConcurrency    bool
+	enforcePerfLints            bool
+	enforceStrictProofs         bool
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
-	smtEnabled     bool
-	smtBinary      string
-	smtSolver      smtSolverHandle
-	smtUnavailable bool
-	smtStats       SMTStats
-	proofReport    []ProofFact
+	smtEnabled                       bool
+	smtBinary                        string
+	smtSolver                        smtSolverHandle
+	smtUnavailable                   bool
+	smtStats                         SMTStats
+	proofReport                      []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -376,20 +382,26 @@ type Analyzer struct {
 	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
-	refinementChecks                 map[*ast.VarDeclStmt][]*ast.CallExpr
-	callArgRefinementChecks          map[*ast.CallExpr][]*ast.CallExpr
-	returnRefinementChecks           map[*ast.ReturnStmt][]*ast.CallExpr
-	hotDisjointKernelCandidates      []hotDisjointKernelCandidate
-	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
-	reassignedParamCache             map[*ast.FuncDecl]map[string]bool
-	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
-	currentNamespace                 string
-	currentUsings                    []string
-	importAliases                    map[string]string
-	resolvedTypeNames                map[ast.TypeExpr]string
-	resolvedValueNames               map[*ast.Ident]string
-	currentImplicitScopes            []map[string]ast.Expr
-	semanticLimitDiagnostics         map[string]bool
+	lemmaCalls                       map[*ast.CallExpr]bool
+	lemmasInAnalysis                 map[*ast.FuncDecl]bool
+	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
+	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
+	// Cleared at the start of each refinement discharge to avoid surfacing a stale one.
+	lastSMTCounterexample       string
+	refinementChecks            map[*ast.VarDeclStmt][]*ast.CallExpr
+	callArgRefinementChecks     map[*ast.CallExpr][]*ast.CallExpr
+	returnRefinementChecks      map[*ast.ReturnStmt][]*ast.CallExpr
+	hotDisjointKernelCandidates []hotDisjointKernelCandidate
+	privateFreshDArrayCache     map[*ast.FuncDecl]map[string]bool
+	reassignedParamCache        map[*ast.FuncDecl]map[string]bool
+	functionAnalyses            map[*ast.FuncDecl]*FunctionAnalysis
+	currentNamespace            string
+	currentUsings               []string
+	importAliases               map[string]string
+	resolvedTypeNames           map[ast.TypeExpr]string
+	resolvedValueNames          map[*ast.Ident]string
+	currentImplicitScopes       []map[string]ast.Expr
+	semanticLimitDiagnostics    map[string]bool
 }
 
 type castHookSignature struct {
@@ -553,10 +565,10 @@ type AnalyzeOptions struct {
 	// by default — it spawns a solver subprocess and is only worth it for code the linear tier can't
 	// reach. SMTSolverBinary overrides the solver (default "z3"). The tier is sound regardless: an
 	// `unsat` of the negated obligation proves it; sat/unknown/missing-solver decline to runtime.
-	EnableSMT        bool
-	SMTSolverBinary  string
-	TargetTriple     string
-	TargetDebug      bool
+	EnableSMT       bool
+	SMTSolverBinary string
+	TargetTriple    string
+	TargetDebug     bool
 	// RecordDeathTimeCohorts records the docs/91 G0 inferred death cohorts on Result.DeathTimeCohorts
 	// (programmatic access, e.g. the tightness-validation harness) without needing the
 	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
@@ -608,7 +620,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		aliasRefinements:                  map[string]*ast.RefinementTypeExpr{},
-		capabilityAliases:                      map[string][]ast.PermissionRef{},
+		capabilityAliases:                 map[string][]ast.PermissionRef{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},
 		externLinkNames:                   map[string]externLinkNameSignature{},
@@ -650,8 +662,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		disjointCallSites:                 map[*ast.FuncDecl][]callDisjointObservation{},
 		lawIsCalls:                        map[*ast.BinaryExpr]*ast.CallExpr{},
 		refinementChecks:                  map[*ast.VarDeclStmt][]*ast.CallExpr{},
-		callArgRefinementChecks:            map[*ast.CallExpr][]*ast.CallExpr{},
-		returnRefinementChecks:             map[*ast.ReturnStmt][]*ast.CallExpr{},
+		callArgRefinementChecks:           map[*ast.CallExpr][]*ast.CallExpr{},
+		returnRefinementChecks:            map[*ast.ReturnStmt][]*ast.CallExpr{},
 		symbolFacts:                       map[*Symbol]OptimizationFacts{},
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		declVisibility:                    activeFile.DeclVisibility,
@@ -788,6 +800,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		CallArgDisjoint:         a.callArgDisjoint,
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
+		LemmaCalls:              a.lemmaCalls,
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,

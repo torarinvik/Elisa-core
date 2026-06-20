@@ -57,19 +57,23 @@ type Result struct {
 	// requested (read-only observability of the global death-time model).
 	DeathTimeCohorts     map[string][]DeathTimeCohort
 	DeathTimeEscapeStats map[string]DeathTimeEscapeStats
-	ResolvedTypeNames       map[ast.TypeExpr]string
-	ResolvedValueNames      map[*ast.Ident]string
-	DenseNodeKeys           map[ast.Expr]DenseNodeKeyInfo
-	NodeTables              map[ast.Expr]NodeTableInfo
-	PackedLowering          PackedLoweringMetadata
-	ParallelFor             map[*ast.ParallelForStmt]*ParallelForInfo
-	CallArgDisjoint         map[*ast.CallExpr]*CallArgDisjointInfo
-	FuncDisjointParams      map[*ast.FuncDecl]*FuncDisjointParamInfo
+	ResolvedTypeNames    map[ast.TypeExpr]string
+	ResolvedValueNames   map[*ast.Ident]string
+	DenseNodeKeys        map[ast.Expr]DenseNodeKeyInfo
+	NodeTables           map[ast.Expr]NodeTableInfo
+	PackedLowering       PackedLoweringMetadata
+	ParallelFor          map[*ast.ParallelForStmt]*ParallelForInfo
+	CallArgDisjoint      map[*ast.CallExpr]*CallArgDisjointInfo
+	FuncDisjointParams   map[*ast.FuncDecl]*FuncDisjointParamInfo
 	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
 	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and
 	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)
 	// single-target form for now.
 	LawIsCalls map[*ast.BinaryExpr]*ast.CallExpr
+	// LemmaCalls marks statement-position calls that target a `lemma` (ghost code). They are
+	// verification-only — the analyzer has already discharged the lemma's requires and injected its
+	// (separately-proven) ensures as facts — so codegen must emit NOTHING for them.
+	LemmaCalls map[*ast.CallExpr]bool
 	// RefinementChecks holds the discharge obligations for a refinement-typed var decl (docs/85
 	// Stage 1c-2): the predicate calls `P(x)` that must hold for the bound value. Codegen emits
 	// them as a debug boundary check (trap on violation), elided in release — "debug verifies what
@@ -96,18 +100,18 @@ type Result struct {
 	// user" observability layer). The CLI prints it under --explain so the user can audit exactly
 	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —
 	// one entry per refinement obligation).
-	ProofReport []ProofFact
-	Defer                   map[*ast.DeferStmt]*DeferInfo
-	Fold                    map[*ast.FoldExpr]*FoldInfo
-	Lambdas                 map[*ast.LambdaExpr]*LambdaInfo
-	FunctionAnalyses        map[*ast.FuncDecl]*FunctionAnalysis
-	ProgressSummaries       map[*ast.FuncDecl]*FunctionProgressSummary
-	AnnotatedFuncs          []*AnnotatedFunc
-	ExportedTypes           []*ExportedType
-	ExportedFuncs           []*ExportedFunc
-	ExportedGlobals         []*ExportedGlobal
-	EASMModules             []*easm.Module
-	Diagnostics             []Diagnostic
+	ProofReport       []ProofFact
+	Defer             map[*ast.DeferStmt]*DeferInfo
+	Fold              map[*ast.FoldExpr]*FoldInfo
+	Lambdas           map[*ast.LambdaExpr]*LambdaInfo
+	FunctionAnalyses  map[*ast.FuncDecl]*FunctionAnalysis
+	ProgressSummaries map[*ast.FuncDecl]*FunctionProgressSummary
+	AnnotatedFuncs    []*AnnotatedFunc
+	ExportedTypes     []*ExportedType
+	ExportedFuncs     []*ExportedFunc
+	ExportedGlobals   []*ExportedGlobal
+	EASMModules       []*easm.Module
+	Diagnostics       []Diagnostic
 }
 
 func (r *Result) ActiveFile() *ast.File {
@@ -417,6 +421,10 @@ type Scope struct {
 	// every mutation site alongside predFacts, so it can never go stale; const-only RHS (no mutable
 	// reference) keeps re-evaluation stable.
 	writtenConst map[string]ast.Expr
+	// smtAssertFacts holds scoped proof facts known to hold after a branch, proven assertion,
+	// invariant, or exact assignment. They are consumed only by the SMT tier and invalidated when a
+	// later mutation touches one of their dependency roots; calls still clear them conservatively.
+	smtAssertFacts []smtFact
 }
 
 func NewScope(parent *Scope) *Scope {

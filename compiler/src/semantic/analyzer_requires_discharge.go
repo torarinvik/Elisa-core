@@ -31,6 +31,12 @@ import (
 // preconditions in the bounded-linear fragment.
 func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil && len(decl.Requires) > 0 {
+		if decl.IsLemma {
+			// A lemma's preconditions are handled by assumeLemmaEnsures with hard-error semantics (a
+			// lemma is erased, so an unmet `requires` has no runtime check and cannot be tolerated as a
+			// lint). Don't run the ordinary lint/strict path for it.
+			return
+		}
 		a.checkCalleeRequires(call, decl.Name, decl.Requires, decl.Params, args)
 		return
 	}

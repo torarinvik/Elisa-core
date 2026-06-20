@@ -489,7 +489,7 @@ func assertedCondition(expr ast.Expr) (ast.Expr, bool) {
 		return nil, false
 	}
 	ident, ok := call.Func.(*ast.Ident)
-	if !ok || ident.Name != "assert" {
+	if !ok || (ident.Name != "assert" && ident.Name != "ASSERT") {
 		return nil, false
 	}
 	return call.Args[0], true

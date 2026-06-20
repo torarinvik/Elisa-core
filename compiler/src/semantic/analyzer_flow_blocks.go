@@ -586,6 +586,7 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
 		a.applyIndexBoundsFactsForCondition(cond, truthy)
 		a.applyViewStaticLenForCondition(cond, truthy)
+		a.recordSMTAssertFact(smtFactExprForCondition(cond, truthy))
 	})
 }
 

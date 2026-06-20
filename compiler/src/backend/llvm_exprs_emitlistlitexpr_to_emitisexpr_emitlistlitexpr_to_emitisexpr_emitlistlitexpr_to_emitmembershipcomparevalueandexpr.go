@@ -997,6 +997,24 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 		return s.emitEnumCompareExpr(expr.Op, enumType, left, right, resultType)
 	}
 
+	// In contracts-live builds (debug / -O0 / forced contracts), signed `+`/`-`/`*` TRAP on
+	// two's-complement overflow. This backs the static verifier's assumption that signed arithmetic
+	// does not overflow (chosen semantics: trap in debug, wrap in release), so a statically-discharged
+	// `ensure result > x` for `return x + k` can never be silently violated where contracts are
+	// enforced. Release builds keep the plain wrapping op for performance.
+	if (s.g.optLevel == OptimizationLevel0 || s.g.forceContracts) && isSignedIntegerType(operandType) &&
+		(expr.Op == lexer.TOKEN_PLUS || expr.Op == lexer.TOKEN_MINUS || expr.Op == lexer.TOKEN_STAR) {
+		llvmOperandType, err := s.g.lowerType(operandType)
+		if err != nil {
+			return nil, nil, err
+		}
+		value, err := s.emitCheckedSignedBinary(expr.Op, left, right, llvmOperandType, "signed.arith")
+		if err != nil {
+			return nil, nil, err
+		}
+		return value, resultType, nil
+	}
+
 	switch expr.Op {
 	case lexer.TOKEN_PLUS:
 		if isFloatType(operandType) {

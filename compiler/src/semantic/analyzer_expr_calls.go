@@ -56,6 +56,7 @@ func (a *Analyzer) maybeEmitDirectCallDeprecation(expr *ast.CallExpr) {
 }
 
 func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
+	defer a.invalidateSMTAssertFactsForCall(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.
@@ -513,6 +514,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.recordCallArgDisjoint(expr, appliedType.Params, callAliasArgs)
 	a.dischargeCallArgRefinements(expr, callAliasArgs)
 	a.dischargeCallRequires(expr, callAliasArgs)
+	a.assumeLemmaEnsures(expr, callAliasArgs)
 	originalTrackedByRoot := map[*Symbol]Type{}
 	loweredArgs := append([]ast.Expr(nil), orderedArgs...)
 	loweredArgs = append(loweredArgs, expr.ResolvedImplicitArgs...)
@@ -575,6 +577,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 		}
 	}
+	// Hand the deferred SMT-fact invalidation (analyzeCallExprWithExpected) the resolved callee frame
+	// and position-aligned arguments, so facts about places this call provably does not write survive.
+	a.cacheCallFrameContext(expr, appliedType, loweredArgs)
 	a.rememberConditionalCallPoststates(expr, appliedType, originalTrackedByRoot)
 	switch ft.Name {
 	case "pool_shutdown":

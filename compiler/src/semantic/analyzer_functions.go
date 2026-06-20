@@ -77,6 +77,17 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
+	if fn != nil && fn.IsLemma {
+		// Track the lemma while its body is analyzed so a self/mutual-recursive lemma call inside it
+		// does NOT inject this lemma's own (not-yet-proven) ensure as a fact — that would be circular
+		// reasoning (assuming what we are trying to prove). Inductive lemmas are a future extension
+		// gated on a verified `decreases` measure.
+		if a.lemmasInAnalysis == nil {
+			a.lemmasInAnalysis = map[*ast.FuncDecl]bool{}
+		}
+		a.lemmasInAnalysis[fn] = true
+		defer delete(a.lemmasInAnalysis, fn)
+	}
 	savedSawPlainValueReturn := a.currentFuncSawPlainValueReturn
 	a.currentFuncSawPlainValueReturn = false
 	defer func() { a.currentFuncSawPlainValueReturn = savedSawPlainValueReturn }()
@@ -145,6 +156,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					for _, stmt := range fn.Body {
 						a.analyzeStmt(stmt)
 					}
+					a.verifyLemmaEnsures(fn)
 					a.currentImplicitScopes = savedBodyImplicitScopes
 				})
 			})

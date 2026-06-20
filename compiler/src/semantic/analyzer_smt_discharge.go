@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"fmt"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
@@ -106,19 +107,29 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	if solver == nil || decl == nil || len(decl.Params) == 0 {
 		return false
 	}
-	// Bind the law's static params to constant bracket args (same as the linear tier).
-	paramConsts := map[string]int64{}
+	tr := a.newSMTTranslator(nil)
+	// Bind the law's static params to the bracket args. A compile-time-constant arg folds to its value
+	// (`Bounded[0, 500]`); a VALUE-DEPENDENT arg (`Index[cap]`, `Bounded[0, n]`, `Aligned[page]`) binds
+	// the law param to the argument's SMT term, so the law body proves RELATIONALLY against the runtime
+	// value (docs — dependent refinements). An arg outside the SMT fragment declines the whole proof.
+	// Sound: the arg term is the same faithful translation used for the subject and hypotheses, so the
+	// obligation is exactly the law body evaluated at the actual argument values.
+	varParamEnv := map[string]string{}
 	for i, arg := range predArgs {
 		if i+1 >= len(decl.Params) {
 			break
 		}
-		c, ok := a.constIntValue(arg)
+		pname := decl.Params[i+1].Name
+		if c, ok := a.constIntValue(arg); ok {
+			tr.paramConsts[pname] = c
+			continue
+		}
+		term, ok := tr.term(arg)
 		if !ok {
 			return false
 		}
-		paramConsts[decl.Params[i+1].Name] = c
+		varParamEnv[pname] = term
 	}
-	tr := a.newSMTTranslator(paramConsts)
 	// Bind the law's `self` to the subject. An array/darray subject is modeled as an SMT array (so the
 	// law body's `self[i]` becomes a select); any other subject is an integer term.
 	self := decl.Params[0].Name
@@ -133,6 +144,9 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 		return false
 	}
 	env := map[string]string{self: subjectTerm}
+	for k, v := range varParamEnv {
+		env[k] = v
+	}
 	// The law body as an SMT boolean, with `self` replaced by the subject term.
 	body, ok := a.lawBodyExpr(decl)
 	if !ok {
@@ -155,17 +169,32 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
 	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
-	res, _ := solver.Check(query)
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
 		return true
 	}
+	// On a SAT (failed) proof, stash z3's satisfying assignment so the refinement diagnostic can show
+	// a concrete counterexample (the input that violates the predicate). Empty when no model/unknown.
+	if res == smt.Sat {
+		a.lastSMTCounterexample = tr.counterexample(model)
+	}
 	a.smtStats.Declined++
 	return false
+}
+
+// counterexampleSuffix formats a satisfying-model string as a trailing diagnostic hint, or "" when
+// there is none (e.g. the solver returned unknown/timeout rather than a concrete model).
+func (a *Analyzer) counterexampleSuffix(ce string) string {
+	if ce == "" {
+		return ""
+	}
+	return " — it can fail when " + ce
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover
@@ -178,25 +207,24 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
-	// Translate each substituted argument to a term FIRST, so the caller's free variables are
-	// collected before the fact preamble is emitted. An ARRAY-valued argument is mapped through the
-	// array env (docs/90 brick 90-13) so a quantified array precondition (`forall k: xs[k] >= 0`) can
-	// reference the caller's array symbol; a scalar argument is an integer term.
-	env := map[string]string{}
-	for name, argExpr := range subst {
-		if tr.isArrayLike(a.exprTypes[argExpr]) {
-			arr, ok := tr.arrayTermEnv(argExpr, nil)
-			if !ok {
-				return false, ""
+	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
+	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
+	// read to that field's construction argument — so `ensure result.a == 1` discharges.
+	substForEnv := subst
+	if res, ok := subst["result"]; ok {
+		if sl, ok := stripOptimizationParens(res).(*ast.StructLitExpr); ok {
+			tr.resultFields = a.structLitFieldMap(sl)
+			substForEnv = map[string]ast.Expr{}
+			for k, v := range subst {
+				if k != "result" {
+					substForEnv[k] = v
+				}
 			}
-			env[name] = arr
-			continue
 		}
-		term, ok := tr.term(argExpr)
-		if !ok {
-			return false, "" // an argument outside the fragment → decline
-		}
-		env[name] = term
+	}
+	env, ok := a.smtEnvForSubst(tr, substForEnv)
+	if !ok {
+		return false, ""
 	}
 	obligation, ok := tr.boolTerm(clause, env)
 	if !ok {
@@ -216,8 +244,9 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// treating them as free variables. Must run before factPreamble so the locals and the
 	// variables of their defining expressions are declared.
 	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
 	flowHyps := a.smtFlowFactHypotheses(tr)
-	query := tr.factPreamble() + hyps + localHyps + flowHyps + "(assert (not " + obligation + "))\n"
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
@@ -229,6 +258,101 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// On sat, the model is an input permitted by the caller's known facts that violates the
 	// precondition — a concrete witness for the diagnostic (a hint, since our facts are a subset).
 	return false, tr.counterexample(model)
+}
+
+func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
+	solver := a.openSMT()
+	if solver == nil || clause == nil || call == nil {
+		return false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil || len(decl.EnsureValues) == 0 {
+		return false
+	}
+	tr := a.newSMTTranslator(nil)
+	retSym := "__return_call_result"
+	retTerm := smtVar(retSym)
+	tr.decls[retSym] = true
+	callerEnv := map[string]string{"result": retTerm}
+	obligation, ok := tr.boolTerm(clause, callerEnv)
+	if !ok {
+		return false
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	calleeEnv, ok := a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return false
+	}
+	calleeEnv["result"] = retTerm
+	var calleeHyps strings.Builder
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(ensure, calleeEnv); ok {
+			calleeHyps.WriteString("(assert " + h + ")\n")
+		}
+	}
+	if calleeHyps.Len() == 0 {
+		return false
+	}
+	hyps := a.smtRequiresHypotheses(tr)
+	localHyps := a.smtImmutableLocalHypotheses(tr)
+	assertHyps := a.smtAssertHypotheses(tr)
+	flowHyps := a.smtFlowFactHypotheses(tr)
+	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + calleeHyps.String() + "(assert (not " + obligation + "))\n"
+	a.smtStats.Attempts++
+	res, _ := solver.Check(query)
+	if res == smt.Unsat {
+		a.smtStats.Proven++
+		a.smtStats.SolverProven++
+		return true
+	}
+	a.smtStats.Declined++
+	return false
+}
+
+func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		if lit, ok := argExpr.(*ast.BoolLit); ok {
+			if lit.Value {
+				env[name] = "true"
+			} else {
+				env[name] = "false"
+			}
+			continue
+		}
+		if IsBoolType(a.exprTypes[argExpr]) {
+			bterm, ok := tr.boolTerm(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = bterm
+			continue
+		}
+		if tr.isArrayLike(a.exprTypes[argExpr]) {
+			arr, ok := tr.arrayTermEnv(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = arr
+			continue
+		}
+		term, ok := tr.term(argExpr)
+		if !ok {
+			return nil, false
+		}
+		env[name] = term
+	}
+	return env, true
 }
 
 // smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
@@ -285,6 +409,198 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 	return b.String()
 }
 
+type smtFact struct {
+	Expr ast.Expr
+	Deps map[string]bool
+}
+
+// smtAssertHypotheses translates flow-local proof facts into SMT assumptions. A fact may come from a
+// branch guard, a proven invariant/assertion, or an exact assignment equality. Facts carry dependency
+// roots and are invalidated on mutation of any root; calls still clear them conservatively.
+func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == nil {
+				continue
+			}
+			if h, ok := tr.boolTerm(fact.Expr, nil); ok {
+				b.WriteString("(assert " + h + ")\n")
+			}
+		}
+	}
+	return b.String()
+}
+
+func (a *Analyzer) recordSMTAssertFact(expr ast.Expr) {
+	if a == nil || a.currentScope == nil || expr == nil {
+		return
+	}
+	if bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
+		a.recordSMTAssertFact(bin.Left)
+		a.recordSMTAssertFact(bin.Right)
+		return
+	}
+	a.currentScope.smtAssertFacts = append(a.currentScope.smtAssertFacts, smtFact{Expr: expr, Deps: smtFactDeps(expr)})
+}
+
+func smtFactExprForCondition(expr ast.Expr, truthy bool) ast.Expr {
+	if truthy || expr == nil {
+		return expr
+	}
+	return &ast.UnaryExpr{Position: expr.Pos(), Op: lexer.TOKEN_NOT, Operand: expr}
+}
+
+func (a *Analyzer) clearSMTAssertFacts() {
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		sc.smtAssertFacts = nil
+	}
+}
+
+func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
+	name, ok := rootIdentName(target)
+	if !ok || name == "" {
+		a.clearSMTAssertFacts()
+		return
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		if len(sc.smtAssertFacts) == 0 {
+			continue
+		}
+		out := sc.smtAssertFacts[:0]
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Deps != nil && fact.Deps[name] {
+				continue
+			}
+			out = append(out, fact)
+		}
+		sc.smtAssertFacts = out
+	}
+}
+
+func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {
+	if a == nil || expr == nil {
+		return
+	}
+	// A resolved call carries its callee frame: drop only the facts the callee can actually falsify,
+	// letting facts about provably-untouched places survive (docs/87 frame-aware fact survival).
+	if ctx, ok := a.callFrameContexts[expr]; ok {
+		delete(a.callFrameContexts, expr)
+		a.invalidateSMTAssertFactsFramed(ctx.ft, ctx.args)
+		return
+	}
+	// Unresolved/builtin call: conservative whole-argument invalidation.
+	for _, arg := range expr.Args {
+		if arg == nil {
+			continue
+		}
+		if rt, ok := a.exprTypes[arg].(*RefType); ok && rt != nil && rt.Mutable {
+			a.invalidateSMTAssertFactsForTarget(arg)
+		}
+	}
+}
+
+func (a *Analyzer) recordSMTAssignmentFact(target ast.Expr, value ast.Expr) {
+	if a == nil || target == nil || value == nil {
+		return
+	}
+	targetType := a.exprTypes[target]
+	if targetType == nil {
+		if name, ok := rootIdentName(target); ok && a.currentScope != nil {
+			if sym, found := a.currentScope.Lookup(name); found && sym != nil {
+				targetType = sym.Type
+			}
+		}
+	}
+	valueType := a.exprTypes[value]
+	if !isSMTExactAssignmentType(targetType) || !isSMTExactAssignmentType(valueType) {
+		return
+	}
+	a.recordSMTAssertFact(&ast.BinaryExpr{
+		Position: target.Pos(),
+		Left:     target,
+		Op:       lexer.TOKEN_EQEQ,
+		Right:    value,
+	})
+}
+
+func isSMTExactAssignmentType(t Type) bool {
+	t = stripRefForBounds(t)
+	return t != nil && (IsNumericType(t) || IsBoolType(t)) && !IsFloatType(t)
+}
+
+func smtFactDeps(expr ast.Expr) map[string]bool {
+	deps := map[string]bool{}
+	collectSMTFactDeps(expr, deps)
+	if len(deps) == 0 {
+		return nil
+	}
+	return deps
+}
+
+func collectSMTFactDeps(expr ast.Expr, out map[string]bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n != nil {
+			out[n.Name] = true
+		}
+	case *ast.ParenExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Inner, out)
+		}
+	case *ast.UnaryExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	case *ast.BinaryExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Left, out)
+			collectSMTFactDeps(n.Right, out)
+		}
+	case *ast.FieldExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Object, out)
+		}
+	case *ast.IndexExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Object, out)
+			collectSMTFactDeps(n.Index, out)
+		}
+	case *ast.CallExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Func, out)
+			for _, arg := range n.Args {
+				collectSMTFactDeps(arg, out)
+			}
+		}
+	case *ast.CastExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	case *ast.AddrOfExpr:
+		if n != nil {
+			collectSMTFactDeps(n.Operand, out)
+		}
+	}
+}
+
+func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
+	if expr == nil {
+		return false
+	}
+	if a.proveRequiresClause(expr, nil) == requiresProven {
+		return true
+	}
+	if proven, _ := a.trySMTProveRequires(expr, nil); proven {
+		return true
+	}
+	a.proofLint(expr.Pos(), "invariant could not be proven statically at this point; keeping the debug runtime check but not using it as a release proof fact")
+	return false
+}
+
 // smtImmutableLocalHypotheses asserts the defining equality of every immutable integer
 // local in scope (`rem: u64 = value % alignment` -> `(assert (= rem (mod value alignment)))`),
 // so the prover can reason THROUGH locals instead of treating them as unconstrained free
@@ -313,6 +629,13 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 			}
 			tr.decls[name] = true
 			b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
+			if bin, ok := stripOptimizationParens(vd.Value).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_PERCENT {
+				rterm, rok := tr.termEnv(bin.Right, nil)
+				if rok && a.provablyPositive(bin.Right) {
+					b.WriteString("(assert (>= " + smtVar(name) + " 0))\n")
+					b.WriteString("(assert (< " + smtVar(name) + " " + rterm + "))\n")
+				}
+			}
 		}
 	}
 	return b.String()
@@ -322,6 +645,7 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 // conversion check, including the pointer-width aliases BitIntInfo does not parse (usize/uintptr
 // are unsigned 64-bit, isize/int are signed 64-bit on the targets we emit).
 func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
+	t = stripRefForBounds(t)
 	if s, b, k := BitIntInfo(t); k {
 		return s, b, true
 	}
@@ -334,6 +658,19 @@ func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
 		}
 	}
 	return false, 0, false
+}
+
+func smtNumericValueType(t Type) (Type, bool) {
+	t = stripRefForBounds(t)
+	if t == nil || !IsNumericType(t) || IsFloatType(t) {
+		return nil, false
+	}
+	return t, true
+}
+
+func smtTypeNonNegative(t Type) bool {
+	signed, _, ok := smtIntWidthSign(t)
+	return ok && !signed
 }
 
 // lawBodyExpr extracts a law's single `return <bool-expr>` body (the decidable shape).
@@ -352,10 +689,20 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
 	a           *Analyzer
-	decls       map[string]bool  // Elisa ident -> declared as an SMT Int const
-	arrayDecls  map[string]bool  // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
-	lenDecls    map[string]bool  // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
-	paramConsts map[string]int64 // law static params bound to constants
+	decls       map[string]bool // Elisa ident -> declared as an SMT Int const
+	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
+	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
+	// unsignedBits / signedBits record the bit-width of each free var known to be unsigned / signed, so
+	// factPreamble can assert the true type bound (`[0, 2^w)` unsigned, `[-2^(w-1), 2^(w-1))` signed).
+	// This is what makes the wraparound model (wrapMachineArith) PRECISE rather than merely sound: with
+	// operands pinned to their representable range an in-range computation does not actually wrap, so
+	// divisibility/alignment proofs through `value - value%alignment` survive.
+	unsignedBits map[string]int
+	signedBits   map[string]int
+	boolDecls    map[string]bool     // free bool-typed idents declared as SMT Bool consts
+	resultFields map[string]ast.Expr // when `result` is a struct literal, its field -> arg expr
+	paramConsts  map[string]int64    // law static params bound to constants
 	// auxDecls holds pre-formatted declare/assert lines for fresh under-constrained symbols minted
 	// for sub-terms we cannot model precisely yet soundly (e.g. `x % y` with a not-provably-nonzero
 	// divisor). Each is a free integer constrained only by what is provably true (never a false
@@ -372,11 +719,15 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:           a,
-		decls:       map[string]bool{},
-		arrayDecls:  map[string]bool{},
-		lenDecls:    map[string]bool{},
-		paramConsts: paramConsts,
+		a:            a,
+		decls:        map[string]bool{},
+		arrayDecls:   map[string]bool{},
+		lenDecls:     map[string]bool{},
+		nonNegDecls:  map[string]bool{},
+		unsignedBits: map[string]int{},
+		signedBits:   map[string]int{},
+		boolDecls:    map[string]bool{},
+		paramConsts:  paramConsts,
 	}
 }
 
@@ -396,6 +747,17 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		if tr.isArrayLike(tr.a.exprTypes[n]) {
 			tr.arrayDecls[n.Name] = true
 			return smtVar(n.Name), true
+		}
+		return "", false
+	case *ast.FieldExpr:
+		// An array-valued struct field, possibly through a reference (`r.data`, `self.buf`). Model it
+		// as a stable array symbol keyed by its syntactic path, so two reads of the same path share the
+		// symbol (and thus its `.count`/`.len`). This is what lets `ensure result <= r.data.count;
+		// return r.data.count` discharge — both sides resolve to the same length symbol.
+		if tr.isArrayLike(tr.a.exprTypes[n]) {
+			name := smtProjectionName(n)
+			tr.arrayDecls[name] = true
+			return smtVar(name), true
 		}
 		return "", false
 	default:
@@ -448,7 +810,29 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if _, ok := immutableIntIdentName(tr.a, tr.a.currentScope, n); ok {
 			name := smtVar(n.Name)
 			tr.decls[n.Name] = true
+			// Emit the identifier's true type bounds (unsigned `[0, 2^w)`, signed `[-2^(w-1), 2^(w-1))`).
+			// Without these an immutable unsigned param is an unconstrained Int, so a goal like
+			// `a - b <= a` (which needs `b >= 0`) cannot discharge. The bounds are guaranteed by the type
+			// and therefore always sound (asserting more true facts only ever proves more, never less).
+			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
+				tr.markIntVar(n.Name, sym.Type)
+			}
 			return name, true
+		}
+		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && (sym.Kind == SymbolLocal || sym.Kind == SymbolParam) {
+			if t, ok := smtNumericValueType(sym.Type); ok {
+				name := smtVar(n.Name)
+				tr.decls[n.Name] = true
+				tr.markIntVar(n.Name, t)
+				return name, true
+			}
+		}
+		return "", false
+	case *ast.CallExpr:
+		return tr.callResultTerm(n)
+	case *ast.StructLitExpr:
+		if call, ok := tr.a.proofCallExpr(n); ok {
+			return tr.callResultTerm(call)
 		}
 		return "", false
 	case *ast.IndexExpr:
@@ -465,6 +849,15 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "(select " + arr + " " + idx + ")", true
 	case *ast.FieldExpr:
+		// `result.field` where `result` is bound to a struct literal → that field's construction
+		// argument, so `ensure result.a == 1` for `return Pair(1, 2)` proves.
+		if tr.resultFields != nil {
+			if id, ok := stripOptimizationParens(n.Object).(*ast.Ident); ok && id.Name == "result" {
+				if arg, ok := tr.resultFields[n.Field]; ok {
+					return tr.termEnv(arg, env)
+				}
+			}
+		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
 		if n.Field == "count" || n.Field == "len" {
@@ -475,6 +868,17 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			lenSym := arr + "_len"
 			tr.lenDecls[lenSym] = true
 			return lenSym, true
+		}
+		if t, ok := smtNumericValueType(tr.a.exprTypes[n]); ok && !IsFloatType(t) {
+			// Numeric struct-field reads are modeled as fresh-ish projection symbols keyed by
+			// their syntactic path (`self.total`, `area.size`). We assert only facts guaranteed
+			// by the field type (e.g. unsigned >= 0 in factPreamble), not any relation to other
+			// fields or heap state. That is sound and is enough for practical contracts like
+			// `ensure result <= self.total` on unsigned storage.
+			name := smtProjectionName(n)
+			tr.decls[name] = true
+			tr.markIntVar(name, t)
+			return smtVar(name), true
 		}
 		return "", false
 	case *ast.UnaryExpr:
@@ -548,6 +952,10 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return "(- " + l + " (* " + r + " " + q + "))", true
 			}
 			return smtTruncDiv(l, r), true
+		case lexer.TOKEN_AMPERSAND, lexer.TOKEN_PIPE, lexer.TOKEN_CARET,
+			lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+			// Bitwise/shift ops are modeled exactly via the SMT bitvector theory (see bitwiseTerm).
+			return tr.bitwiseTerm(n, env)
 		default:
 			return "", false
 		}
@@ -559,9 +967,265 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if !ok {
 			return "", false
 		}
-		return "(" + op + " " + l + " " + r + ")", true
+		return tr.wrapMachineArith(n, op, l, r), true
 	default:
 		return "", false
+	}
+}
+
+// wrapMachineArith models the machine semantics of `+`/`-`/`*` on a fixed-width integer result, which
+// WRAP modulo 2^width (two's complement for signed). Modeling them as unbounded-ℤ operations is
+// UNSOUND for postconditions a wrap can violate — e.g. `ensure result <= a` for unsigned `a - b` holds
+// in ℤ (b ≥ 0) but is FALSE when b > a (underflow), and `ensure result >= a` for signed `a + b` holds
+// in ℤ (b ≥ 0) but is FALSE on signed overflow. When the result is PROVABLY in range (affine interval
+// within the type, or a no-underflow subtraction) the ℤ term equals the machine value, so we emit it
+// clean — keeping divisibility/alignment goals tractable. Otherwise we emit the exact wrapped value:
+// `(mod raw 2^W)` for unsigned (Euclidean mod == unsigned wrap), and a recentered mod for signed. The
+// prover only ever concludes on `unsat`, so a wrap can never fabricate a proof — at worst it declines.
+func (tr *smtTranslator) wrapMachineArith(n *ast.BinaryExpr, op, l, r string) string {
+	raw := "(" + op + " " + l + " " + r + ")"
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	if !ok || bits <= 0 || bits > 64 {
+		return raw
+	}
+	if signed {
+		// Signed overflow TRAPS in debug builds (where contracts are checked), so reaching a return
+		// without trapping implies no overflow — the prover may soundly assume the ℤ value. Release
+		// wraps for perf, but contracts are off there, so nothing relies on the wrap. Hence: no wrap
+		// modeling for signed; the debug trap backs the assumption (see codegen signed-overflow check).
+		return raw
+	}
+	if tr.a.provablyNoArithWrap(n, signed, bits) {
+		return raw
+	}
+	// Unsigned wraps modulo 2^W with well-defined two's-complement semantics (and is frequently an
+	// intentional idiom), so it is modeled exactly: `(mod raw 2^W)` is the wrapped value. This is what
+	// keeps `ensure result <= total; return total - usage` honest (declines without a guard).
+	return "(mod " + raw + " " + smtPow2(bits) + ")"
+}
+
+// bitwiseTerm models a fixed-width bitwise/shift operator (`&`, `|`, `^`, `<<`, `>>`) by bridging the
+// unbounded-Int operand terms into SMT bitvectors at the result's machine width, applying the matching
+// bitvector operator, and reading the result back as an unsigned integer. `(_ int2bv W)` reduces each
+// operand modulo 2^W — exactly the machine bit pattern (two's complement for any sign) — and `bv2nat`
+// reads the result in [0, 2^W), exactly the unsigned machine value. The produced Int term therefore
+// EQUALS the machine result, so it composes soundly with further Int reasoning (a mask `x & 0xFFF` is
+// provably `< 0x1000`, a shift `x >> 12` provably `< 2^(W-12)`, etc.).
+//
+// Soundness gates — anything outside them declines (returns ok=false), which only forgoes a proof,
+// never fabricates one:
+//   - Result must be UNSIGNED, width 1..64 (the `bv2nat` read is the unsigned value; a signed result
+//     would need the signed read and is left for a follow-up).
+//   - Operands must share the result width (Elisa bitwise is same-type), so int2bv at W is the exact
+//     bit pattern with no narrowing/sign surprise.
+//   - Shift amounts must be a compile-time constant in [0, W): the machine leaves shifts ≥ width
+//     undefined (LLVM poison), so assuming the bitvector "shift past width ⇒ 0" rule would be unsound.
+//
+// Bridging the Int and BV theories can be costly for the solver on relational goals; the per-query
+// timeout turns any hard case into Unknown → runtime fallback, so soundness holds regardless of cost.
+func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (string, bool) {
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
+	if !ok || signed || bits <= 0 || bits > 64 {
+		return "", false
+	}
+	width := strconv.Itoa(bits)
+	// An operand is bit-faithful at the result width when it is a same-width integer (Elisa bitwise is
+	// same-type) or a compile-time constant (`int2bv` reduces it modulo 2^W exactly).
+	sameWidthOrConst := func(e ast.Expr) bool {
+		if _, ebits, ok := smtIntWidthSign(tr.a.exprTypes[e]); ok && ebits == bits {
+			return true
+		}
+		_, isConst := tr.a.constIntValue(e)
+		return isConst
+	}
+	if !sameWidthOrConst(n.Left) {
+		return "", false
+	}
+	var bvop, rbv string
+	switch n.Op {
+	case lexer.TOKEN_AMPERSAND:
+		bvop = "bvand"
+	case lexer.TOKEN_PIPE:
+		bvop = "bvor"
+	case lexer.TOKEN_CARET:
+		bvop = "bvxor"
+	case lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		c, isConst := tr.a.constIntValue(n.Right)
+		if !isConst || c < 0 || c >= int64(bits) {
+			return "", false
+		}
+		rbv = "((_ int2bv " + width + ") " + strconv.FormatInt(c, 10) + ")"
+		if n.Op == lexer.TOKEN_LSHIFT {
+			bvop = "bvshl"
+		} else {
+			bvop = "bvlshr" // unsigned result ⇒ logical right shift
+		}
+	default:
+		return "", false
+	}
+	l, ok := tr.termEnv(n.Left, env)
+	if !ok {
+		return "", false
+	}
+	lbv := "((_ int2bv " + width + ") " + l + ")"
+	if rbv == "" {
+		// Binary bitwise: the right operand must also be a same-width integer (or a constant).
+		if !sameWidthOrConst(n.Right) {
+			return "", false
+		}
+		r, ok := tr.termEnv(n.Right, env)
+		if !ok {
+			return "", false
+		}
+		rbv = "((_ int2bv " + width + ") " + r + ")"
+	}
+	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
+}
+
+// provablyNoArithWrap reports whether `n` (an int `+`/`-`/`*`) cannot wrap — its true result is within
+// the representable range of its width. It recognizes the no-underflow subtraction shapes (unsigned)
+// and, for any width/signedness, an affine result whose interval lies inside [min, max]. Type-level
+// reasoning alone is NOT sufficient (a wrapped result is still type-valid), so this is a VALUE check.
+func (a *Analyzer) provablyNoArithWrap(n *ast.BinaryExpr, signed bool, bits int) bool {
+	// No-underflow subtraction (e.g. `X - X%m`) is exact at any width and is the shape alignment math
+	// relies on; it does not depend on the int64 interval prover, so it is safe for 64-bit too.
+	if n.Op == lexer.TOKEN_MINUS && !signed && a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
+		return true
+	}
+	// The affine interval prover computes in int64, so a 64-bit type's range (or a wide intermediate
+	// sum) can overflow it. Restrict the interval-based in-range gate to widths ≤ 32, where the bounds
+	// and any sum/product of them sit comfortably inside int64 with no overflow risk. 64-bit results
+	// that are not a no-underflow subtraction take the (sound, exact) wrap path.
+	if bits > 32 {
+		return false
+	}
+	f, ok := a.affineOf(n, a.currentScope)
+	if !ok {
+		return false
+	}
+	r := a.boundAffine(f, a.currentScope)
+	if !r.loKnown || !r.hiKnown {
+		return false
+	}
+	var lo, hi int64
+	if signed {
+		lo, hi = -(int64(1) << (bits - 1)), (int64(1)<<(bits-1))-1
+	} else {
+		lo, hi = 0, (int64(1)<<bits)-1
+	}
+	return r.lo >= lo && r.hi <= hi
+}
+
+// provablyNoUnsignedUnderflow reports whether `left - right` cannot underflow, i.e. `right <= left`
+// holds for all admissible values. It recognizes the canonical alignment shape `X - (X % m)` (a
+// remainder is always ≤ its nonnegative dividend) and, more generally, an affine difference whose
+// interval lower bound is ≥ 0. Type-level non-negativity is NOT sufficient (an underflowed unsigned
+// result is still nonnegative), so this is deliberately a VALUE-level check.
+func (a *Analyzer) provablyNoUnsignedUnderflow(left, right ast.Expr) bool {
+	l := stripOptimizationParens(left)
+	if rem, ok := stripOptimizationParens(right).(*ast.BinaryExpr); ok && rem.Op == lexer.TOKEN_PERCENT {
+		// `X - (X % m)`: the remainder of a non-negative dividend is ≤ the dividend.
+		if a.provablyNonNeg(rem.Left) && exprsSyntacticallyEqual(l, stripOptimizationParens(rem.Left)) {
+			return true
+		}
+	}
+	diff := &ast.BinaryExpr{Position: left.Pos(), Left: left, Op: lexer.TOKEN_MINUS, Right: right}
+	if f, ok := a.affineOf(diff, a.currentScope); ok {
+		if r := a.boundAffine(f, a.currentScope); r.loKnown && r.lo >= 0 {
+			return true
+		}
+	}
+	// A `requires`-supplied relational bound (`requires b <= a`, `requires a >= b`, …) establishes
+	// `left >= right` symbolically, which the constant-interval prover above cannot see (it relates two
+	// variables, not a variable to a constant). Recognizing it here emits the CLEAN `left - right` term
+	// — which the solver discharges trivially — instead of the wrapped `(mod … 2^W)` form that z3 stalls
+	// on. This is what lets the natural precondition pattern prove `ensure result <= a; return a - b`.
+	if a.knownRequiresGE(left, right) {
+		return true
+	}
+	return false
+}
+
+// knownRequiresGE reports whether the enclosing function's `requires` clauses imply `left >= right`.
+// Only IMMUTABLE integer identifiers qualify: a `requires` constrains a parameter's ENTRY value, so it
+// stays valid for a later subtraction only if neither operand has been reassigned since entry. A clause
+// is read as a conjunction; any conjunct of the form `left >= right`, `left > right`, `right <= left`,
+// or `right < left` suffices (each implies `left - right` cannot underflow for unsigned operands).
+func (a *Analyzer) knownRequiresGE(left, right ast.Expr) bool {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil {
+		return false
+	}
+	ln, lok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(left))
+	rn, rok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(right))
+	if !lok || !rok {
+		return false
+	}
+	for _, req := range a.currentFuncDecl.Requires {
+		if requiresConjunctImpliesGE(req, ln, rn) {
+			return true
+		}
+	}
+	return false
+}
+
+func requiresConjunctImpliesGE(e ast.Expr, geName, leName string) bool {
+	bin, ok := stripOptimizationParens(e).(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	if bin.Op == lexer.TOKEN_AND {
+		return requiresConjunctImpliesGE(bin.Left, geName, leName) || requiresConjunctImpliesGE(bin.Right, geName, leName)
+	}
+	li, lok := stripOptimizationParens(bin.Left).(*ast.Ident)
+	ri, rok := stripOptimizationParens(bin.Right).(*ast.Ident)
+	if !lok || !rok || li == nil || ri == nil {
+		return false
+	}
+	switch bin.Op {
+	case lexer.TOKEN_GTEQ, lexer.TOKEN_GT: // geName >= leName  /  geName > leName
+		return li.Name == geName && ri.Name == leName
+	case lexer.TOKEN_LTEQ, lexer.TOKEN_LT: // leName <= geName  /  leName < geName
+		return li.Name == leName && ri.Name == geName
+	}
+	return false
+}
+
+// exprsSyntacticallyEqual reports whether two expressions are the same lvalue path (ident or nested
+// field access). It is intentionally conservative — only the shapes the underflow check needs — and
+// uses the SMT projection name (already path-stable for idents/fields) for the comparison.
+func exprsSyntacticallyEqual(x, y ast.Expr) bool {
+	switch x.(type) {
+	case *ast.Ident, *ast.FieldExpr, *ast.ParenExpr:
+		switch y.(type) {
+		case *ast.Ident, *ast.FieldExpr, *ast.ParenExpr:
+			return smtProjectionName(x) == smtProjectionName(y)
+		}
+	}
+	return false
+}
+
+// smtPow2 returns 2^bits as a decimal literal (bits in [1, 64]).
+func smtPow2(bits int) string {
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits)).String()
+}
+
+// markIntVar records a free var's integer type so factPreamble can assert its true representable
+// range — `[0, 2^width)` for unsigned, `[-2^(width-1), 2^(width-1))` for signed. These bounds are
+// guaranteed by the type and therefore always sound; they make the wraparound model precise.
+func (tr *smtTranslator) markIntVar(name string, t Type) {
+	signed, bits, ok := smtIntWidthSign(t)
+	if !ok || bits <= 0 || bits > 64 {
+		// Width unknown (e.g. an abstract numeric) — fall back to the non-negativity flag alone.
+		if smtTypeNonNegative(t) {
+			tr.nonNegDecls[name] = true
+		}
+		return
+	}
+	if signed {
+		tr.signedBits[name] = bits
+	} else {
+		tr.nonNegDecls[name] = true
+		tr.unsignedBits[name] = bits
 	}
 }
 
@@ -659,11 +1323,38 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return "true", true
 		}
 		return "false", true
+	case *ast.Ident:
+		if env != nil {
+			if bound, ok := env[n.Name]; ok {
+				return bound, true
+			}
+		}
+		if c, ok := tr.a.evalConstBoolExpr(n); ok {
+			if c {
+				return "true", true
+			}
+			return "false", true
+		}
+		// A free IMMUTABLE bool-typed identifier (a bool param/immutable local) → a stable SMT Bool
+		// const, so a boolean postcondition over it (`ensure result == (p != q)`) can discharge. Only
+		// immutable bindings qualify (a reassigned bool would make the const stale).
+		if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil && !sym.Mutable && IsBoolType(sym.Type) {
+			name := smtBoolVar(n.Name)
+			tr.boolDecls[name] = true
+			return name, true
+		}
+		return "", false
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			inner, ok := tr.boolTerm(n.Operand, env)
 			if !ok {
 				return "", false
+			}
+			if inner == "true" {
+				return "false", true
+			}
+			if inner == "false" {
+				return "true", true
 			}
 			return "(not " + inner + ")", true
 		}
@@ -675,16 +1366,38 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if !ok {
 				return "", false
 			}
+			if n.Op == lexer.TOKEN_OR && l == "true" {
+				return "true", true
+			}
+			if n.Op == lexer.TOKEN_AND && l == "false" {
+				return "false", true
+			}
 			r, ok := tr.boolTerm(n.Right, env)
 			if !ok {
 				return "", false
+			}
+			if n.Op == lexer.TOKEN_OR {
+				if r == "true" {
+					return "true", true
+				}
+				if l == "false" {
+					return r, true
+				}
+			}
+			if n.Op == lexer.TOKEN_AND {
+				if r == "false" {
+					return "false", true
+				}
+				if l == "true" {
+					return r, true
+				}
 			}
 			conn := "and"
 			if n.Op == lexer.TOKEN_OR {
 				conn = "or"
 			}
 			return "(" + conn + " " + l + " " + r + ")", true
-		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
 				return "", false
@@ -694,6 +1407,37 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				return "", false
 			}
 			return smtCompare(n.Op, l, r), true
+		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+			// Pointer-null test (`p == null` / `p != null`). Model null-ness as a Bool predicate keyed by
+			// the pointer's syntactic path, so the same pointer's null-ness is consistent between a branch
+			// guard and the obligation. This lets `ensure (p != null) or (result == false)` discharge: the
+			// fall-through guard `p != null` and the disjunct refer to the same predicate.
+			if ptr := nullComparePointer(n); ptr != nil {
+				pred := "isnull_" + smtProjectionName(stripOptimizationParens(ptr))
+				tr.boolDecls[pred] = true
+				if n.Op == lexer.TOKEN_EQEQ {
+					return pred, true
+				}
+				return "(not " + pred + ")", true
+			}
+			// Numeric equality is the common case; try integer terms first.
+			if l, lok := tr.termEnv(n.Left, env); lok {
+				if r, rok := tr.termEnv(n.Right, env); rok {
+					return smtCompare(n.Op, l, r), true
+				}
+			}
+			// Boolean equality: both sides are bool-valued (e.g. `result == ((x % m) == 0)`). SMT `=`
+			// is polymorphic, so equate the two Bool terms directly (negated for `!=`).
+			if bl, blok := tr.boolTerm(n.Left, env); blok {
+				if br, brok := tr.boolTerm(n.Right, env); brok {
+					eq := "(= " + bl + " " + br + ")"
+					if n.Op == lexer.TOKEN_BANGEQ {
+						return "(not " + eq + ")", true
+					}
+					return eq, true
+				}
+			}
+			return "", false
 		default:
 			return "", false
 		}
@@ -767,6 +1511,50 @@ func (tr *smtTranslator) freshAux(nonNeg bool) string {
 	return v
 }
 
+func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	resultType := tr.a.exprTypes[call]
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	if resultType == nil && direct && decl != nil {
+		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
+			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+				resultType = fnType.Return
+			}
+		}
+	}
+	if !isSMTExactAssignmentType(resultType) || IsBoolType(resultType) {
+		return "", false
+	}
+	ret := tr.freshAux(smtTypeNonNegative(resultType))
+	if !direct || decl == nil || len(decl.EnsureValues) == 0 {
+		return ret, true
+	}
+	args := proofCallArgs(call)
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return ret, true
+	}
+	env["result"] = ret
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(ensure, env); ok {
+			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+		}
+	}
+	return ret, true
+}
+
 // factPreamble emits the declarations for every free variable the translation touched, plus the
 // integer flow facts known about them (range bounds, written-constant equalities) as hypotheses. The
 // facts are a SOUND SUBSET of what holds, which is why only an `unsat` result concludes a proof.
@@ -793,6 +1581,21 @@ func (tr *smtTranslator) factPreamble() string {
 		if c, ok := tr.a.writtenConstInt(name); ok {
 			b.WriteString("(assert (= " + v + " " + smtInt(c) + "))\n")
 		}
+		if tr.nonNegDecls[name] {
+			b.WriteString("(assert (>= " + v + " 0))\n")
+		}
+		if bits, ok := tr.unsignedBits[name]; ok && bits > 0 && bits <= 64 {
+			// True type bound: an unsigned value lives in [0, 2^width). Pinning the upper bound makes
+			// the wraparound model exact for in-range computations (so divisibility through
+			// `value - value%alignment` proves) and still sound (it can only remove counterexamples).
+			b.WriteString("(assert (< " + v + " " + smtPow2(bits) + "))\n")
+		}
+		if bits, ok := tr.signedBits[name]; ok && bits > 0 && bits <= 64 {
+			// True type bound: a signed value lives in [-2^(width-1), 2^(width-1)).
+			bias := smtPow2(bits - 1)
+			b.WriteString("(assert (>= " + v + " (- " + bias + ")))\n")
+			b.WriteString("(assert (< " + v + " " + bias + "))\n")
+		}
 	}
 	// Array declarations (docs/90 brick 90-5): each integer-element array/darray modeled as an SMT
 	// (Array Int Int). Deterministic order.
@@ -803,6 +1606,15 @@ func (tr *smtTranslator) factPreamble() string {
 	sort.Strings(arrays)
 	for _, name := range arrays {
 		b.WriteString("(declare-const " + smtVar(name) + " (Array Int Int))\n")
+	}
+	// Free bool consts (bool params/locals appearing in a boolean postcondition). Deterministic order.
+	bools := make([]string, 0, len(tr.boolDecls))
+	for name := range tr.boolDecls {
+		bools = append(bools, name)
+	}
+	sort.Strings(bools)
+	for _, name := range bools {
+		b.WriteString("(declare-const " + name + " Bool)\n")
 	}
 	// Length symbols (`arr.count`/`.len`), each a non-negative Int.
 	lens := make([]string, 0, len(tr.lenDecls))
@@ -902,4 +1714,80 @@ func smtTruncDiv(left, right string) string {
 // smtVar maps an Elisa identifier to a collision-free SMT symbol.
 func smtVar(name string) string {
 	return "v_" + name
+}
+
+// smtBoolVar names an SMT Bool const for a free bool identifier — a distinct namespace from the
+// integer `v_` consts so an int and a bool of the same Elisa name never collide.
+func smtBoolVar(name string) string {
+	return "b_" + name
+}
+
+// structLitFieldMap maps each field name of a struct literal to its construction argument, handling
+// both named args and positional args (resolved against the struct declaration's field order). Returns
+// nil if the field order cannot be resolved.
+func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr {
+	if sl == nil {
+		return nil
+	}
+	args := sl.LoweredArgs()
+	var ordered []string
+	if st, ok := stripRefForBounds(a.exprTypes[sl]).(*StructType); ok && st != nil && st.Decl != nil {
+		for _, fd := range st.Decl.Fields {
+			ordered = append(ordered, fd.Name)
+		}
+	}
+	out := map[string]ast.Expr{}
+	for i, arg := range args {
+		name := sl.ArgName(i)
+		if name == "" {
+			if i >= len(ordered) {
+				continue
+			}
+			name = ordered[i]
+		}
+		if name != "" && arg != nil {
+			out[name] = arg
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// nullComparePointer returns the non-null operand of a `p == null` / `p != null` comparison, or nil if
+// neither operand is the null literal.
+func nullComparePointer(n *ast.BinaryExpr) ast.Expr {
+	if _, ok := stripOptimizationParens(n.Right).(*ast.NullLit); ok {
+		return n.Left
+	}
+	if _, ok := stripOptimizationParens(n.Left).(*ast.NullLit); ok {
+		return n.Right
+	}
+	return nil
+}
+
+func smtProjectionName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		return n.Name
+	case *ast.FieldExpr:
+		return smtProjectionName(n.Object) + "__field__" + n.Field
+	case *ast.ParenExpr:
+		return smtProjectionName(n.Inner)
+	default:
+		return "expr__" + smtSanitize(fmt.Sprintf("%T_%s", expr, expr.Pos().String()))
+	}
+}
+
+func smtSanitize(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }

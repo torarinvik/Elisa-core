@@ -168,7 +168,7 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		// was not achieved here (docs/85: the fallback must be KNOWN). Warning by default; hard error
 		// under -strict (prove-it-or-fail, the Dafny-like mode).
 		a.recordProof(n.Pos(), "\""+n.Name+"\"", pred.Name, ProofRuntime)
-		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check", pred.Name, n.Name)
+		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check%s", pred.Name, n.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
@@ -196,6 +196,9 @@ func (a *Analyzer) tryDischargeRefinementStatically(value ast.Expr, valueName st
 // (var decl, return, ensures) allow them; a cross-function call-argument boundary does not, since a
 // dependent key names variables in the callee's scope (see tryProveRefinementByFactSet).
 func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName string, pred ast.RefinementPredExpr, lawDecl *ast.FuncDecl, pos lexer.Pos, allowDependentFacts bool) bool {
+	// Reset any counterexample left over from a previous obligation; the SMT tier below re-populates it
+	// on a failed proof, so the diagnostics that follow only ever show a witness for THIS obligation.
+	a.lastSMTCounterexample = ""
 	if a.tryProveRefinementByFlow(value, lawDecl, pred.Args) {
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
@@ -249,7 +252,7 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 	// check (which would generate broken code for a quantifier).
 	if a.lawBodyContainsQuantifier(lawDecl) {
 		a.recordProof(pos, valueName, pred.Name, ProofRuntime)
-		a.proofLint(pos, "quantified refinement %q on %s could not be proven statically (it has no runtime check); enable -smt or strengthen the facts", pred.Name, valueName)
+		a.proofLint(pos, "quantified refinement %q on %s could not be proven statically (it has no runtime check); enable -smt or strengthen the facts%s", pred.Name, valueName, a.counterexampleSuffix(a.lastSMTCounterexample))
 		return true
 	}
 	return false
@@ -300,7 +303,7 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 				continue
 			}
 			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
-			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check", pred.Name, name, decl.Name)
+			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, name, decl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
 			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
 			// double evaluation would change behavior), so the runtime tier stays sound.
@@ -344,7 +347,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 			continue
 		}
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
-		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check", pred.Name, a.currentFuncDecl.Name)
+		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check%s", pred.Name, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 		if !a.isSideEffectFreeRefinementArg(n.Value) {
 			continue
 		}
@@ -388,7 +391,7 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 			continue
 		}
 		a.recordProof(n.Pos(), valueName, re.LawName, ProofRuntime)
-		a.proofLint(n.Pos(), "postcondition %q on parameter %q of %q could not be proven statically; it is checked at runtime (debug) — make it provable or accept the runtime check", re.LawName, paramName, a.currentFuncDecl.Name)
+		a.proofLint(n.Pos(), "postcondition %q on parameter %q of %q could not be proven statically; it is checked at runtime (debug) — make it provable or accept the runtime check%s", re.LawName, paramName, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 	}
 }
 
@@ -413,10 +416,19 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		if clause == nil {
 			continue
 		}
-		if proven, _ := a.trySMTProveRequires(clause, subst); proven {
+		proven, counterexample := a.trySMTProveRequires(clause, subst)
+		if proven {
 			continue
 		}
-		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check", a.currentFuncDecl.Name)
+		if call, ok := a.proofCallExpr(n.Value); ok {
+			if a.tryProveEnsureByReturnCallRange(clause, call) {
+				continue
+			}
+			if a.trySMTProveEnsureFromReturnCall(clause, call) {
+				continue
+			}
+		}
+		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
 	}
 }
 
