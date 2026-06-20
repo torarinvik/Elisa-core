@@ -54,6 +54,33 @@ def read_reg(idx: mutable u32 is InRange[0, 127], regs: array[u32, 128]&) -> u32
 	}
 }
 
+// AFFINE: a register-PAIR read indexes both `sgprs[idx]` and `sgprs[idx+1]`. With idx : InRange[0,126]
+// the shifted interval [1,127] still fits array[u32,128], so neither access needs a runtime check —
+// the canonical GCN 64-bit-SGPR-pair pattern. `idx*2` and `base+1` likewise propagate.
+func TestAffineRefinedIndexProvesBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "affine_index.elisa", `law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def read_pair(idx: u32 is InRange[0, 126], sgprs: array[u32, 128]&) -> u32:
+    return sgprs[idx] + sgprs[idx + 1]
+def read_scaled(i: u32 is InRange[0, 63], xs: array[u32, 128]&) -> u32:
+    return xs[i * 2]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if all := strings.Join(result.Warnings(), "\n"); strings.Contains(all, "unchecked index requires") {
+		t.Fatalf("affine indices over a refined value within extent must prove, got:\n%s", all)
+	}
+}
+
+// SOUNDNESS: an affine shift that can leave the extent must NOT prove. idx : InRange[0,126] means
+// idx+2 can be 128 — out of bounds for array[u32,128]; the check must remain.
+func TestAffineRefinedIndexOverShiftDeclines(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "over_shift.elisa", `law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def read_far(idx: u32 is InRange[0, 126], sgprs: array[u32, 128]&) -> u32:
+    return sgprs[idx + 2]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "unchecked index requires") {
+		t.Fatalf("idx+2 with idx<=126 can reach 128; the bounds check must remain, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // SOUNDNESS: a non-range law (here parity, not an interval) yields no numeric interval, so it cannot
 // discharge an index bound even though the value is refined.
 func TestNonRangeLawIndexDeclines(t *testing.T) {

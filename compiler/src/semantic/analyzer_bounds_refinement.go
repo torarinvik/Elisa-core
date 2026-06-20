@@ -133,14 +133,68 @@ func (a *Analyzer) rangeOperandConst(operand ast.Expr, paramConst map[string]int
 	return a.constIntValue(operand)
 }
 
-// indexExprRefinementBounds returns the closed interval an index EXPRESSION is known to satisfy by a
-// refinement it carries. Three construction/contract-backed sources are honored (none depend on
-// invalidatable local flow facts):
+// indexExprRefinementBounds returns the closed interval an index EXPRESSION is known to satisfy. The
+// base case is a value that directly carries a refinement; an AFFINE expression over such a value
+// (`idx + 1`, `idx * 2`, `base + 1`) is propagated by monotone interval arithmetic. This is what
+// multi-dword / register-PAIR GCN accesses need: `sgprs[idx]` and `sgprs[idx+1]` where idx is
+// InRange[0,126] both prove in bounds for an array[u32,128].
+//
+// Affine propagation is sound because the array-bounds caller requires the RESULT interval to fit
+// `[0, ConstSize)` (a small N): a shift/scale that would overflow the machine width produces a hi far
+// outside [0,N) and the access simply declines — the value never actually wraps within the proven range.
+func (a *Analyzer) indexExprRefinementBounds(idx ast.Expr) (lo int64, hi int64, ok bool) {
+	switch n := stripOptimizationParens(idx).(type) {
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_PLUS:
+			if c, cok := a.constIntValue(n.Right); cok {
+				return a.shiftInterval(n.Left, c)
+			}
+			if c, cok := a.constIntValue(n.Left); cok {
+				return a.shiftInterval(n.Right, c)
+			}
+		case lexer.TOKEN_MINUS:
+			if c, cok := a.constIntValue(n.Right); cok {
+				return a.shiftInterval(n.Left, -c)
+			}
+		case lexer.TOKEN_STAR:
+			if c, cok := a.constIntValue(n.Right); cok && c > 0 {
+				return a.scaleInterval(n.Left, c)
+			}
+			if c, cok := a.constIntValue(n.Left); cok && c > 0 {
+				return a.scaleInterval(n.Right, c)
+			}
+		}
+		return 0, 0, false
+	}
+	return a.refinementCarriedInterval(idx)
+}
+
+// shiftInterval offsets a sub-expression's proven interval by a constant (`expr + delta`).
+func (a *Analyzer) shiftInterval(expr ast.Expr, delta int64) (int64, int64, bool) {
+	lo, hi, ok := a.indexExprRefinementBounds(expr)
+	if !ok {
+		return 0, 0, false
+	}
+	return lo + delta, hi + delta, true
+}
+
+// scaleInterval multiplies a sub-expression's proven interval by a positive constant (`expr * k`).
+func (a *Analyzer) scaleInterval(expr ast.Expr, k int64) (int64, int64, bool) {
+	lo, hi, ok := a.indexExprRefinementBounds(expr)
+	if !ok {
+		return 0, 0, false
+	}
+	return lo * k, hi * k, true
+}
+
+// refinementCarriedInterval returns the interval a value directly carries via a refinement it holds.
+// Three construction/contract-backed sources are honored (none depend on invalidatable local flow facts):
 //   - a refined struct-field read `d.sdst` (enforced at construction),
 //   - a direct call whose return type is refined `f(..) -> u32 is InRange[..]` (enforced on every exit),
 //   - an IMMUTABLE refined parameter `idx: u32 is InRange[..]` (enforced at the call boundary; immutable
 //     so it cannot drift out of range inside the body).
-func (a *Analyzer) indexExprRefinementBounds(idx ast.Expr) (lo int64, hi int64, ok bool) {
+func (a *Analyzer) refinementCarriedInterval(idx ast.Expr) (lo int64, hi int64, ok bool) {
 	preds := a.refinementPredsForIndexExpr(idx)
 	for _, pred := range preds {
 		lawDecl, _, lok := a.lookupLaw(pred.Name)
