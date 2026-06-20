@@ -1180,6 +1180,15 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				}
 				return "(div " + l + " " + r + ")", true
 			}
+			// SOUNDNESS: signed `INT_MIN / -1` (and `INT_MIN % -1`) OVERFLOWS — the true result -INT_MIN is
+			// not representable. On the arm64 target it wraps to INT_MIN (no hardware trap), so the exact
+			// unbounded-ℤ model (smtTruncDiv gives -INT_MIN, positive) would prove a false `result >= 0`.
+			// Unless that overflow is provably impossible (divisor cannot be -1, or dividend cannot be
+			// INT_MIN), abstract the result as a fresh under-constrained symbol — sound (states nothing
+			// false), at worst declines the proof (audit cluster F).
+			if !tr.signedDivCannotOverflow(n.Left, n.Right) {
+				return tr.freshAux(tr.a.provablyNonNeg(n.Left)), true
+			}
 			if n.Op == lexer.TOKEN_PERCENT {
 				q := smtTruncDiv(l, r)
 				return "(- " + l + " (* " + r + " " + q + "))", true
@@ -1313,6 +1322,36 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 		rbv = "((_ int2bv " + width + ") " + r + ")"
 	}
 	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
+}
+
+// signedDivCannotOverflow reports whether signed `left / right` (or `%`) provably avoids the one
+// overflowing case INT_MIN / -1. Safe when the divisor cannot be -1 (a constant other than -1, or
+// provably non-negative) OR the dividend cannot be INT_MIN (provably non-negative, or a known lower
+// bound above the type minimum). An unsigned operand has no -1 and never overflows. When neither can be
+// shown, the caller abstracts the result so the exact (overflowing) model is never trusted.
+func (tr *smtTranslator) signedDivCannotOverflow(left, right ast.Expr) bool {
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[left])
+	if ok && !signed {
+		return true // unsigned: no -1 divisor, cannot overflow
+	}
+	if c, isConst := tr.a.constIntValue(right); isConst && c != -1 {
+		return true // divisor is a constant other than -1
+	}
+	if tr.a.provablyNonNeg(right) {
+		return true // divisor >= 0 (and nonzero is already required) ⇒ != -1
+	}
+	if tr.a.provablyNonNeg(left) {
+		return true // dividend >= 0 ⇒ != INT_MIN
+	}
+	if ok && signed && bits > 0 && bits <= 64 {
+		minVal := -(int64(1) << (bits - 1))
+		if f, aok := tr.a.affineOf(left, tr.a.currentScope); aok {
+			if rng := tr.a.boundAffine(f, tr.a.currentScope); rng.loKnown && rng.lo > minVal {
+				return true // dividend's lower bound is above the type minimum ⇒ != INT_MIN
+			}
+		}
+	}
+	return false
 }
 
 // provablyNoArithWrap reports whether `n` (an int `+`/`-`/`*`) cannot wrap — its true result is within
