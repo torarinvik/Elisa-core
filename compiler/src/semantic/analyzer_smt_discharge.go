@@ -640,10 +640,16 @@ func (a *Analyzer) clearSMTAssertFacts() {
 }
 
 func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
-	name, ok := rootIdentName(target)
-	if !ok || name == "" {
+	// Drop facts depending on the target's structural root OR any place it aliases (a borrow local
+	// mutated through writes the underlying place — audit cluster C). No identifiable root ⇒ clear all.
+	roots := a.mutationRootsForTarget(target)
+	if len(roots) == 0 {
 		a.clearSMTAssertFacts()
 		return
+	}
+	rootSet := make(map[string]bool, len(roots))
+	for _, r := range roots {
+		rootSet[r] = true
 	}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
 		if len(sc.smtAssertFacts) == 0 {
@@ -651,13 +657,23 @@ func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
 		}
 		out := sc.smtAssertFacts[:0]
 		for _, fact := range sc.smtAssertFacts {
-			if fact.Deps != nil && fact.Deps[name] {
+			if fact.Deps != nil && depsIntersect(fact.Deps, rootSet) {
 				continue
 			}
 			out = append(out, fact)
 		}
 		sc.smtAssertFacts = out
 	}
+}
+
+// depsIntersect reports whether any dependency root is in the given set.
+func depsIntersect(deps map[string]bool, set map[string]bool) bool {
+	for dep := range deps {
+		if set[dep] {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) invalidateSMTAssertFactsForCall(expr *ast.CallExpr) {

@@ -181,9 +181,62 @@ func (a *Analyzer) receiverIsBuiltinCollection(obj ast.Expr) bool {
 // expression (an identifier, or a field/index path rooted at one). Conservative: any write under a
 // root invalidates the root's facts.
 func (a *Analyzer) invalidatePredFactsForTarget(target ast.Expr) {
-	if name, ok := rootIdentName(target); ok {
+	for _, name := range a.mutationRootsForTarget(target) {
 		a.invalidatePredFacts(name)
 	}
+}
+
+// mutationRootsForTarget returns every root variable a write to `target` mutates: its structural root
+// PLUS any place it ALIASES. A borrow local (`r: mutable T& = &x`) mutated through — `r <- …`,
+// `bump(r)`, `r.clear()` — writes the underlying place x, so fact invalidation must drop facts for x
+// too; otherwise a fact narrowed on x survives a mutation laundered through r (audit cluster C). Roots
+// are deduped; an empty result means the target had no identifiable root (callers treat that as
+// "invalidate conservatively").
+func (a *Analyzer) mutationRootsForTarget(target ast.Expr) []string {
+	seen := map[string]bool{}
+	var roots []string
+	add := func(name string) {
+		if name != "" && !seen[name] {
+			seen[name] = true
+			roots = append(roots, name)
+		}
+	}
+	if name, ok := rootIdentName(target); ok {
+		add(name)
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			add(r)
+		}
+	}
+	return roots
+}
+
+// borrowLaunderedRoots returns the underlying place root(s) that a LOCAL borrow alias points at, read
+// from its recorded alias binding (`r: mutable T& = &x` → [x]; transitively through chained borrows).
+// Restricted to a SymbolLocal: the broad aliasRootsForExpr also relates ref PARAMETERS (e.g. distinct
+// `mutable u64&` out-params) and struct carriers, which would over-invalidate unrelated places. `seen`
+// guards against a cyclic binding.
+func (a *Analyzer) borrowLaunderedRoots(name string, seen map[string]bool) []string {
+	if a.currentScope == nil || name == "" || seen[name] {
+		return nil
+	}
+	seen[name] = true
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || sym.Kind != SymbolLocal {
+		return nil
+	}
+	binding, ok := a.currentAliasBindings[sym]
+	if !ok || len(binding.Roots) == 0 {
+		return nil
+	}
+	var out []string
+	for _, root := range binding.Roots {
+		if root == name {
+			continue
+		}
+		out = append(out, root)
+		out = append(out, a.borrowLaunderedRoots(root, seen)...)
+	}
+	return out
 }
 
 // rootIdentName walks a field/index path down to its root identifier name.

@@ -460,7 +460,7 @@ func (a *Analyzer) invalidateRangeFacts(name string) {
 // invalidateRangeFactsForTarget drops the range fact about the root variable of a mutation target
 // expression (an identifier, or a field/index path rooted at one), mirroring invalidatePredFactsForTarget.
 func (a *Analyzer) invalidateRangeFactsForTarget(target ast.Expr) {
-	if name, ok := rootIdentName(target); ok {
+	for _, name := range a.mutationRootsForTarget(target) {
 		a.invalidateRangeFacts(name)
 	}
 }
