@@ -642,7 +642,8 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 	a.currentScope = scope
 	a.inEnsureContext = true
-	defer func() { a.inEnsureContext = false }()
+	a.ghostReadAllowed++ // `ensure` is a contract: ghost body locals are readable here.
+	defer func() { a.inEnsureContext = false; a.ghostReadAllowed-- }()
 	for _, e := range fn.EnsureValues {
 		if e == nil {
 			continue

@@ -19,6 +19,12 @@ func (p *Parser) parseBlock() []ast.Stmt {
 		if stmt != nil {
 			stmts = append(stmts, stmt)
 		}
+		// Drain any statements a desugaring (e.g. the grouped `ghost:` block) buffered, so they land
+		// flat in this block rather than behind a wrapper node.
+		if len(p.pendingStmts) > 0 {
+			stmts = append(stmts, p.pendingStmts...)
+			p.pendingStmts = nil
+		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return stmts
@@ -173,6 +179,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeLockStmt() {
 				return p.parseLockStmt()
 			}
+		case "ghost":
+			if p.looksLikeGhostStmt() {
+				return p.parseGhostStmt()
+			}
 		case "region":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseRegion()
@@ -249,6 +259,79 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseExprOrAssignStmt()
 	}
 }
+// looksLikeGhostStmt distinguishes the `ghost` verification-var keyword from an ordinary variable
+// that happens to be named `ghost`. The keyword forms are:
+//   - single decl: `ghost <ident> : ...` or `ghost <ident> = ...`
+//   - grouped block: `ghost :` followed by a newline (the indented block of decls)
+// A real variable named `ghost` would be `ghost = ...`, `ghost <- ...`, or `ghost: Type` used as a
+// field-style decl on the same line WITHOUT a following identifier — i.e. `ghost` then COLON then a
+// type. We only treat `ghost` COLON as the keyword when a newline follows (the block form); a
+// `ghost: i32 = 5` ordinary decl keeps working because COLON is followed by a type ident, not a
+// newline. `ghost = ...` (assignment to a var named ghost) never matches.
+func (p *Parser) looksLikeGhostStmt() bool {
+	if p.pos+1 >= len(p.tokens) {
+		return false
+	}
+	next := p.tokens[p.pos+1]
+	switch next.Kind {
+	case lexer.TOKEN_IDENT, lexer.TOKEN_MUTABLE:
+		// `ghost x ...` / `ghost mutable ...` — but reject `ghost mutable` as a standalone if it is
+		// really `ghost` being assigned (cannot happen: MUTABLE can't follow a value name). Accept.
+		return true
+	case lexer.TOKEN_COLON:
+		// Block form only when a newline (then indent) follows the colon.
+		if p.pos+2 < len(p.tokens) {
+			return p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// parseGhostStmt parses a `ghost` verification-only local declaration (single or grouped block) and
+// stamps every produced var decl with Ghost=true. The grouped block's extra decls are buffered in
+// p.pendingStmts; parseBlock drains them so they land flat in the enclosing block.
+func (p *Parser) parseGhostStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.expectIdentText("ghost")
+
+	// Grouped block: `ghost:` then an indented run of `name: T = expr` decls.
+	if p.peek() == lexer.TOKEN_COLON {
+		p.advance()
+		p.expectNewline()
+		body := p.parseBlock()
+		var first ast.Stmt
+		for _, st := range body {
+			vd, ok := st.(*ast.VarDeclStmt)
+			if !ok {
+				p.errorf("a `ghost:` block may contain only ghost variable declarations")
+				continue
+			}
+			vd.Ghost = true
+			if first == nil {
+				first = vd
+			} else {
+				p.pendingStmts = append(p.pendingStmts, vd)
+			}
+		}
+		if first == nil {
+			return &ast.PassStmt{Position: pos}
+		}
+		return first
+	}
+
+	// Single decl: reuse the ordinary var-decl parser, then stamp it ghost.
+	stmt := p.parseExprOrAssignStmt()
+	vd, ok := stmt.(*ast.VarDeclStmt)
+	if !ok {
+		p.errorf("`ghost` must be followed by a variable declaration (`ghost x: T = expr`)")
+		return stmt
+	}
+	vd.Ghost = true
+	return vd
+}
+
 func (p *Parser) parseEmitStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("emit")

@@ -26,6 +26,11 @@ type Parser struct {
 	allowQuantifiers     bool
 	disallowIsComparison bool
 	staticFunctionDepth  int
+	// pendingStmts buffers extra statements produced by a single parseStmt call that desugars to
+	// MORE than one statement (the grouped `ghost:` block). parseBlock drains this buffer after each
+	// parseStmt so the children land flat in the enclosing block — keeping the AST free of any
+	// wrapper node and letting every existing walker see plain `VarDeclStmt`s.
+	pendingStmts []ast.Stmt
 }
 
 func New(tokens []lexer.Token) *Parser {

@@ -28,6 +28,18 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 						a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Position))
 					}
 				}
+				if sym.Ghost {
+					a.ghostReadSeen = true
+				}
+				if sym.Ghost && a.ghostReadAllowed == 0 {
+					// SOUNDNESS: a ghost var is verification-only and erased from codegen. Real runtime
+					// code may never read it (the value does not exist at runtime), and no real value may
+					// be assigned from it. Ghost reads are permitted ONLY inside a contract clause
+					// (requires/ensure/invariant/assert) or another ghost var's initializer — contexts
+					// that raise a.ghostReadAllowed.
+					a.errorf(n.Pos(), "ghost variable %q is verification-only and cannot be read by real code: it is erased from codegen, so it may appear only in contracts (requires/ensure/invariant/assert) or another `ghost` declaration", n.Name)
+					return
+				}
 				if sym.Kind == SymbolRegionMark {
 					a.errorf(n.Pos(), "checkpoint %q can only be used in restore <region> from %q", n.Name, n.Name)
 					return

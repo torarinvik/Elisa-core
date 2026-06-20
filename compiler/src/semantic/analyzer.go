@@ -400,6 +400,15 @@ type Analyzer struct {
 	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
 	lemmaCalls                       map[*ast.CallExpr]bool
+	ghostDecls                       map[*ast.VarDeclStmt]bool
+	ghostContracts                   map[ast.Expr]bool
+	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
+	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
+	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
+	ghostReadAllowed int
+	// ghostReadSeen records that a ghost variable was read since it was last reset — used to flag a
+	// contract condition (invariant/assert) that mentions a ghost so codegen erases its check.
+	ghostReadSeen bool
 	lemmasInAnalysis                 map[*ast.FuncDecl]bool
 	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
 	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
@@ -825,6 +834,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		FuncDisjointParams:      a.funcDisjointParams,
 		LawIsCalls:              a.lawIsCalls,
 		LemmaCalls:              a.lemmaCalls,
+		GhostDecls:              a.ghostDecls,
+		GhostContracts:          a.ghostContracts,
 		RefinementChecks:        a.refinementChecks,
 		CallArgRefinementChecks: a.callArgRefinementChecks,
 		ReturnRefinementChecks:  a.returnRefinementChecks,

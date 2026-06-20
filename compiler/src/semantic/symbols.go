@@ -74,6 +74,15 @@ type Result struct {
 	// verification-only — the analyzer has already discharged the lemma's requires and injected its
 	// (separately-proven) ensures as facts — so codegen must emit NOTHING for them.
 	LemmaCalls map[*ast.CallExpr]bool
+	// GhostDecls marks `ghost x: T = expr` verification-only local declarations. Like a lemma call,
+	// a ghost var exists solely for the prover (it may appear in requires/ensure/invariant/assert);
+	// codegen must emit NOTHING for it. The analyzer has already proven that no real value depends on
+	// a ghost var, so erasing it cannot change runtime behavior.
+	GhostDecls map[*ast.VarDeclStmt]bool
+	// GhostContracts marks in-body contract conditions (`invariant`/`assert`) that READ a ghost
+	// variable. They are verification-only — already discharged statically — so codegen must NOT emit
+	// a runtime check for them (the ghost they read is erased and has no runtime storage).
+	GhostContracts map[ast.Expr]bool
 	// RefinementChecks holds the discharge obligations for a refinement-typed var decl (docs/85
 	// Stage 1c-2): the predicate calls `P(x)` that must hold for the bound value. Codegen emits
 	// them as a debug boundary check (trap on violation), elided in release — "debug verifies what
@@ -379,6 +388,10 @@ type Symbol struct {
 	ParamIndex int
 	Mutable    bool
 	Private    bool
+	// Ghost marks a verification-only local introduced by `ghost x: T = expr`. It may be read in
+	// contracts (requires/ensure/invariant/assert) but NEVER by real runtime code, and no real
+	// value may be assigned from it. Enforced in analyzer_ghost.go; the decl is erased in codegen.
+	Ghost bool
 	// Deprecated, when non-empty, is the `@deprecated("...")` message; calling this
 	// function emits a deprecation diagnostic at the use site.
 	Deprecated string

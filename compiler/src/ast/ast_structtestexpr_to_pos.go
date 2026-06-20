@@ -268,6 +268,11 @@ type VarDeclStmt struct {
 	Type     TypeExpr
 	Value    Expr
 	Owner    Expr
+	// Ghost marks a verification-only local (`ghost x: T = expr`). It exists solely to give the
+	// prover a value to reason about (usable in requires/ensure/invariant/assert) and is fully
+	// ERASED from codegen. SOUNDNESS: no real variable/return/field/effect may depend on a ghost
+	// value (enforced in the analyzer), and the backend emits nothing for a ghost decl.
+	Ghost bool
 }
 type LetDestructureStmt struct {
 	Position lexer.Pos
