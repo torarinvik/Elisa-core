@@ -422,6 +422,13 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		if clause == nil || exprReferencesResult(clause) {
 			continue
 		}
+		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
+		// `ensure p >= old(p)` when the body keeps/raises p. The trySMTProveRequires fallback models
+		// `old(p)` as an unconstrained fresh symbol — sound but always declining an old() postcondition.
+		if a.tryProveVoidEnsureByWP(clause) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "wp", ProofProvenSMT)
+			continue
+		}
 		if proven, counterexample := a.trySMTProveRequires(clause, nil); !proven {
 			a.errorf(pos, "ensure postcondition of %q could not be proven statically at the function exit; make it provable, or drop -strict / use -permissive to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
 		}

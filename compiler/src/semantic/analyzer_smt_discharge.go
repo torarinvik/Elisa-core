@@ -925,6 +925,10 @@ type smtTranslator struct {
 	auxDecls []string // declaration + sound-constraint lines, in mint order
 	auxVars  []string // the fresh symbols, for the Sat counterexample query
 	auxSeq   int      // monotonic counter → deterministic fresh names
+	// oldAsEntry enables `old(expr)` -> the ENTRY-value term (vcOldEntry) in the VC IR. Set ONLY by the
+	// WP discharge paths, which thread the bare (exit) value so entry/exit diverge; everywhere else
+	// old() must stay a fresh opaque symbol or it would collapse onto the un-threaded bare value.
+	oldAsEntry bool
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.

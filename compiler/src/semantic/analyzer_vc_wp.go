@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"strings"
 )
 
 // Weakest-precondition transport over a straight-line scalar body (VC IR brick 3), extended to
@@ -135,6 +136,102 @@ func (a *Analyzer) captureScalarAssigns(stmts []ast.Stmt) ([]wpAssign, bool) {
 	return out, true
 }
 
+// captureWPStepsToEnd captures the whole body as WP steps for a VOID / fall-through function (no return
+// value). It threads PARAM mutations (`p -= 1`, `p += k`) so a postcondition over the param's EXIT value
+// can be related to its entry value via `old(p)`. Declines on any statement WP cannot account for.
+func (a *Analyzer) captureWPStepsToEnd() ([]wpStep, bool) {
+	if a.currentFuncDecl == nil {
+		return nil, false
+	}
+	var out []wpStep
+	for _, s := range a.currentFuncDecl.Body {
+		switch n := s.(type) {
+		case *ast.ContractStmt:
+			// Leading contracts are lifted to the decl.
+		case *ast.ReturnStmt:
+			if n.Value != nil {
+				return nil, false // a value return belongs to the explicit-return WP path
+			}
+		case *ast.IfStmt:
+			if len(n.Elifs) != 0 {
+				return nil, false
+			}
+			thenA, ok := a.captureScalarAssigns(n.Then)
+			if !ok {
+				return nil, false
+			}
+			elseA, ok := a.captureScalarAssigns(n.Else)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, wpStep{cond: &wpConditional{cond: n.Cond, then: thenA, els: elseA}})
+		default:
+			asg, ok := a.captureScalarAssign(s)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, wpStep{assign: &asg})
+		}
+	}
+	return out, true
+}
+
+// tryProveVoidEnsureByWP discharges a boolean `ensure` clause of a void / fall-through function (one that
+// references params and `old(...)`, not `result`) by weakest precondition. It lowers the clause — a bare
+// param `p` becomes the substitutable EXIT value, `old(p)` the fixed ENTRY value (vcOldEntry) — then
+// threads each param mutation backward, so `ensure p >= old(p)` PROVES when the body keeps or raises p
+// and correctly DECLINES when it lowers p. Sound: `old(p)` is anchored to the entry symbol and never
+// rewritten; any sub-step outside the structural fragment declines (WP only ever adds proofs).
+func (a *Analyzer) tryProveVoidEnsureByWP(clause ast.Expr) bool {
+	if clause == nil {
+		return false
+	}
+	steps, ok := a.captureWPStepsToEnd()
+	if !ok {
+		return false
+	}
+	tr := a.newSMTTranslator(nil)
+	tr.oldAsEntry = true
+	goal, ok := tr.lowerVCFormula(clause, nil)
+	if !ok || !vcFormulaFullyStructural(goal) {
+		return false
+	}
+	goal, ok = a.wpTransport(tr, steps, goal)
+	if !ok {
+		return false
+	}
+	if isVCTrue(goal) {
+		return true
+	}
+	if isVCFalse(goal) {
+		return false
+	}
+	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr))
+	return proven
+}
+
+// wpEntryRequiresHyps emits the enclosing function's `requires` clauses as SMT hypotheses for a WP
+// discharge. A WP goal reasons over ENTRY values (the bare param threaded to its exit, `old(p)` and the
+// param symbol both anchored to entry), so every `requires` — which constrains entry values — holds and
+// is asserted here. This is what the standard hypothesis set omits for a MUTABLE-root requires (cluster
+// B drops it once the param is mutated, sound for the CURRENT value but discarding the entry bound the
+// WP goal legitimately needs, e.g. `requires p < 1000; p += 5; ensure p >= old(p)`).
+func (a *Analyzer) wpEntryRequiresHyps(tr *smtTranslator) string {
+	if a.currentFuncDecl == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, req := range a.currentFuncDecl.Requires {
+		if req == nil {
+			continue
+		}
+		if h, ok := tr.boolTerm(req, nil); ok {
+			b.WriteString("(assert " + h + ")\n")
+		}
+	}
+	return b.String()
+}
+
 // captureWPSteps returns the ordered steps leading up to (and excluding) the return, or ok=false if the
 // body holds anything WP cannot account for: a call, a non-scalar statement, a loop, or an `if` with
 // elif clauses / non-straight-line branches. The return must be the final statement (so the captured
@@ -246,6 +343,7 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 		return false
 	}
 	tr := a.newSMTTranslator(nil)
+	tr.oldAsEntry = true
 	goal, ok := tr.lowerVCFormula(substituted, nil)
 	if !ok || !vcFormulaFullyStructural(goal) {
 		return false
@@ -262,6 +360,6 @@ func (a *Analyzer) tryProveEnsureByWP(clause ast.Expr, ret *ast.ReturnStmt) bool
 	}
 	// Discharge through the brick-4 splitter: a WP-transported conjunctive postcondition splits into
 	// independent conjuncts over the shared `requires` hypotheses.
-	proven, _ := a.smtDischargeFormula(tr, goal, "")
+	proven, _ := a.smtDischargeFormula(tr, goal, a.wpEntryRequiresHyps(tr))
 	return proven
 }
