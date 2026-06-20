@@ -239,6 +239,16 @@ func (a *Analyzer) borrowLaunderedRoots(name string, seen map[string]bool) []str
 	return out
 }
 
+// invalidateWrittenConstForLaunderedRoots drops the written-const fact of every place a write to
+// `target` reaches THROUGH a borrow-local alias (not the target's own root, which its callers handle).
+func (a *Analyzer) invalidateWrittenConstForLaunderedRoots(target ast.Expr) {
+	if name, ok := rootIdentName(target); ok {
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			a.invalidateWrittenConst(r)
+		}
+	}
+}
+
 // rootIdentName walks a field/index path down to its root identifier name.
 func rootIdentName(expr ast.Expr) (string, bool) {
 	switch n := expr.(type) {
@@ -285,6 +295,10 @@ func rootIdentName(expr ast.Expr) (string, bool) {
 // mutation, `mutable T&` pointees are non-aliased, and the stored RHS references only literals /
 // immutable consts (evalConstExpr never resolves a mutable local) so re-evaluation is stable.
 func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
+	// A write laundered through a borrow-local alias (`r := &y; r <- 9`) mutates the underlying place, so
+	// its written-const fact (`y == 5`) must drop too — the per-target handling below only touches the
+	// alias's own root (audit: writtenConst alias channel, sibling of cluster C).
+	a.invalidateWrittenConstForLaunderedRoots(target)
 	name, ok := target.(*ast.Ident)
 	if !ok || name == nil {
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(target))

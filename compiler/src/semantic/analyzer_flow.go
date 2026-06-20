@@ -400,6 +400,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRangeFactsForTarget(n.Target)
 		a.checkFrameWrite(n.Target)
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
+		a.invalidateWrittenConstForLaunderedRoots(n.Target)
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 		a.invalidateSMTAssertFactsForTarget(n.Target)
 	case *ast.AsRefAssignStmt:
