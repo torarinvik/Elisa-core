@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // Recursive-function termination via `decreases` (docs/86 brick 86-7).
@@ -148,6 +149,131 @@ func (a *Analyzer) measureDiffIsZero(measure ast.Expr, subst map[string]ast.Expr
 	}
 	r := a.boundAffine(diff, a.currentScope)
 	return r.loKnown && r.hiKnown && r.lo == 0 && r.hi == 0
+}
+
+// checkLoopTermination verifies a `decreases` measure leading a `while` body strictly decreases on
+// every iteration and is bounded below — so the loop runs finitely. Unlike function termination
+// (immutable params, affine measure), a loop's variables are MUTABLE, so the measure is not affine;
+// the obligations are discharged by the same SMT implication used for invariant preservation, with the
+// loop variables FREE and constrained only by the loop condition + invariants:
+//
+//   DECREASE:        cond ∧ invariants ⊢ measure > measure[vars := post-body]
+//   BOUNDED-BELOW:   cond ∧ invariants ⊢ measure >= 0
+//
+// post-body is the measure with each loop variable replaced by its net body effect (captureLoopBodyEffect,
+// the same simultaneous substitution the preservation proof uses). A lexicographic tuple decreases iff
+// some component strictly drops while every earlier component is provably unchanged across the body.
+//
+// Opt-in and additive (mirrors function `decreases`): checked ONLY when a `decreases` clause leads the
+// loop body. An unprovable measure is a hard error — it is an explicit termination claim with no runtime
+// fallback. Called on the pristine pre-loop scope (before the body mutates the loop variables).
+func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
+	if a == nil || stmt == nil {
+		return
+	}
+	decs := leadingDecreases(stmt.Body)
+	if len(decs) == 0 {
+		return
+	}
+	for _, m := range decs {
+		if m.Cond == nil {
+			continue
+		}
+		t := a.analyzeExpr(m.Cond)
+		if t != nil && (!IsNumericType(t) || IsFloatType(t)) {
+			a.errorf(m.Cond.Pos(), "loop `decreases` measure must be an integer, got %s", t)
+		}
+	}
+	subst, _, captured := a.captureLoopBodyEffect(stmt.Body)
+	if !captured {
+		a.errorf(decs[0].Pos(), "cannot prove the loop `decreases` measure terminates: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow)")
+		return
+	}
+	invs := leadingInvariants(stmt.Body)
+	measures := make([]ast.Expr, 0, len(decs))
+	for _, d := range decs {
+		if d.Cond != nil {
+			measures = append(measures, d.Cond)
+		}
+	}
+	if a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst) {
+		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
+		return
+	}
+	a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRefuted)
+	a.errorf(decs[0].Pos(), "cannot prove the `decreases` measure strictly decreases (and stays >= 0) on every iteration; the loop may not terminate")
+}
+
+// proveLoopMeasureDecreases proves the lexicographic measure tuple strictly decreases across one loop
+// iteration under `cond ∧ invariants`, with the loop variables free and the body effect substituted.
+func (a *Analyzer) proveLoopMeasureDecreases(cond ast.Expr, invs []*ast.ContractStmt, measures []ast.Expr, subst map[string]ast.Expr) bool {
+	for k, measure := range measures {
+		earlierUnchanged := true
+		for j := 0; j < k; j++ {
+			if !a.proveLoopMeasureUnchanged(cond, invs, measures[j], subst) {
+				earlierUnchanged = false
+				break
+			}
+		}
+		if !earlierUnchanged {
+			continue
+		}
+		if a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst) {
+			return true
+		}
+	}
+	return false
+}
+
+// proveLoopMeasureComponentDecreases proves `cond ∧ invs ⊢ measure > measure[body]` AND
+// `cond ∧ invs ⊢ measure >= 0` — one component strictly decreasing and bounded below.
+func (a *Analyzer) proveLoopMeasureComponentDecreases(cond ast.Expr, invs []*ast.ContractStmt, measure ast.Expr, subst map[string]ast.Expr) bool {
+	post, ok := substituteLemmaEnsure(measure, subst)
+	if !ok {
+		return false
+	}
+	decrease := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GT, Left: measure, Right: post}
+	bounded := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GTEQ, Left: measure, Right: &ast.IntLit{Position: measure.Pos(), Value: "0"}}
+	empty := map[string]ast.Expr{}
+	if dec, _ := a.proveLoopPreservationSMT(cond, invs, decrease, empty, nil); !dec {
+		return false
+	}
+	bnd, _ := a.proveLoopPreservationSMT(cond, invs, bounded, empty, nil)
+	return bnd
+}
+
+// proveLoopMeasureUnchanged proves an earlier lexicographic component is invariant across the body:
+// `cond ∧ invs ⊢ measure == measure[body]`.
+func (a *Analyzer) proveLoopMeasureUnchanged(cond ast.Expr, invs []*ast.ContractStmt, measure ast.Expr, subst map[string]ast.Expr) bool {
+	post, ok := substituteLemmaEnsure(measure, subst)
+	if !ok {
+		return false
+	}
+	eq := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_EQEQ, Left: measure, Right: post}
+	same, _ := a.proveLoopPreservationSMT(cond, invs, eq, map[string]ast.Expr{}, nil)
+	return same
+}
+
+// leadingDecreases returns the `decreases` contract statements that lead a loop body (mirrors
+// leadingInvariants). Only leading clauses are the loop's termination measure.
+func leadingDecreases(body []ast.Stmt) []*ast.ContractStmt {
+	var out []*ast.ContractStmt
+	for _, s := range body {
+		cs, ok := s.(*ast.ContractStmt)
+		if !ok {
+			break
+		}
+		if cs.Kind == ast.ContractInvariant {
+			continue // invariants may interleave with the leading clause group
+		}
+		if cs.Kind != ast.ContractDecreases {
+			break
+		}
+		if cs.Cond != nil {
+			out = append(out, cs)
+		}
+	}
+	return out
 }
 
 // measureBoundedBelow reports whether the measure cannot fall below 0. An unsigned-typed measure is

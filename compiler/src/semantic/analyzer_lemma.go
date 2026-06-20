@@ -74,7 +74,8 @@ func (a *Analyzer) assumeLemmaEnsures(call *ast.CallExpr, args []ast.Expr) bool 
 	// Circular-reasoning guard: never assume the ensure of a lemma that is currently being analyzed
 	// (a self- or mutual-recursive call). Assuming the conclusion while trying to prove it would let a
 	// lemma "prove" anything. The call is still erased; it just contributes no fact. (Sound inductive
-	// lemmas — assuming the ensure for a provably-smaller argument — are a future extension.)
+	// lemmas — assuming the ensure for a provably-smaller argument — are a future extension gated on
+	// recursive-function axiomatization, without which even an inductive lemma's base case is opaque.)
 	if a.lemmasInAnalysis[decl] {
 		return true
 	}

@@ -378,7 +378,8 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 	for _, s := range body {
 		switch n := s.(type) {
 		case *ast.ContractStmt:
-			if n.Kind != ast.ContractInvariant {
+			// Leading `invariant` / `decreases` clauses are specifications, not body effects — skip them.
+			if n.Kind != ast.ContractInvariant && n.Kind != ast.ContractDecreases {
 				return nil, nil, false
 			}
 		case *ast.AssignStmt:
