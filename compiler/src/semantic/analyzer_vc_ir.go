@@ -57,7 +57,10 @@ type vcTerm interface{ isVCTerm() }
 type (
 	vcIntLit struct{ Val int64 }
 	vcOpaque struct{ SMT string }
-	vcNeg    struct{ Arg vcTerm }
+	// vcVar is a substitutable integer variable (its Elisa name plus its SMT symbol). Weakest-
+	// precondition transport (brick 3) replaces it with an assigned term; it emits its SMT symbol.
+	vcVar struct{ Name, SMT string }
+	vcNeg struct{ Arg vcTerm }
 	// vcArith is a machine `+`/`-`/`*`. WrapBits>0 reproduces wrapMachineArith's unsigned wraparound
 	// `(mod (op l r) 2^WrapBits)`; 0 means the result is provably in range (emit the clean operation).
 	vcArith struct {
@@ -69,6 +72,7 @@ type (
 
 func (vcIntLit) isVCTerm() {}
 func (vcOpaque) isVCTerm() {}
+func (vcVar) isVCTerm()    {}
 func (vcNeg) isVCTerm()    {}
 func (vcArith) isVCTerm()  {}
 
@@ -278,6 +282,8 @@ func emitVCTerm(t vcTerm) string {
 		return smtInt(tt.Val)
 	case vcOpaque:
 		return tt.SMT
+	case vcVar:
+		return tt.SMT
 	case vcNeg:
 		return "(- " + emitVCTerm(tt.Arg) + ")"
 	case vcArith:
@@ -315,6 +321,18 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 		if c, ok := tr.a.constIntValue(n); ok {
 			return vcIntLit{Val: c}, true
 		}
+	case *ast.Ident:
+		// A plain free integer variable (mutable locals, params) becomes a substitutable vcVar — the WP
+		// transport target. termEnv returns exactly smtVar(name) for that form; env-bound or const-folded
+		// idents return a different string and stay opaque.
+		s, ok := tr.termEnv(n, env)
+		if !ok {
+			return nil, false
+		}
+		if s == smtVar(n.Name) {
+			return vcVar{Name: n.Name, SMT: s}, true
+		}
+		return vcOpaque{SMT: s}, true
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_MINUS {
 			if inner, ok := tr.lowerVCTerm(n.Operand, env); ok {
@@ -408,4 +426,82 @@ func (tr *smtTranslator) lowerVCFormula(expr ast.Expr, env map[string]string) (v
 		return nil, false
 	}
 	return vcMkAtom(s), true
+}
+
+// --- Weakest-precondition transport (brick 3) -------------------------------------------------------
+//
+// WP over a straight-line scalar block computes the precondition of a postcondition Q by backward
+// substitution: wp(x := e; rest, Q) = wp(rest, Q[x := e]). The substitution is single-pass per
+// assignment (the replacement term's own variables are resolved by EARLIER assignments, processed in a
+// later step), so processing the assignments in reverse threads each value back to the function's
+// inputs. The smart constructors re-run on every rewrite, so the result is folded/normalized as it is
+// built — `((x+1)*2) > 2` collapses toward a goal over the parameters alone.
+
+// substVCTerm replaces every vcVar named `name` with `repl` (single pass — `repl` is not re-substituted).
+func substVCTerm(t vcTerm, name string, repl vcTerm) vcTerm {
+	switch tt := t.(type) {
+	case vcVar:
+		if tt.Name == name {
+			return repl
+		}
+		return tt
+	case vcNeg:
+		return vcMkNeg(substVCTerm(tt.Arg, name, repl))
+	case vcArith:
+		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits)
+	default:
+		return t
+	}
+}
+
+// substVCFormula pushes a substitution through the propositional structure and the comparison terms.
+func substVCFormula(f vcFormula, name string, repl vcTerm) vcFormula {
+	switch ff := f.(type) {
+	case vcNot:
+		return vcMkNot(substVCFormula(ff.Arg, name, repl))
+	case vcAnd:
+		return vcMkAnd(substVCFormula(ff.L, name, repl), substVCFormula(ff.R, name, repl))
+	case vcOr:
+		return vcMkOr(substVCFormula(ff.L, name, repl), substVCFormula(ff.R, name, repl))
+	case vcCompare:
+		return vcMkCompare(ff.Op, substVCTerm(ff.L, name, repl), substVCTerm(ff.R, name, repl))
+	default:
+		return f
+	}
+}
+
+// vcTermFullyStructural reports whether a term contains NO opaque leaf — every part is a literal, a
+// substitutable variable, or arithmetic over those. Only such terms can be soundly WP-substituted (an
+// opaque string might mention the assigned variable in a way substitution would silently miss).
+func vcTermFullyStructural(t vcTerm) bool {
+	switch tt := t.(type) {
+	case vcIntLit, vcVar:
+		return true
+	case vcNeg:
+		return vcTermFullyStructural(tt.Arg)
+	case vcArith:
+		return vcTermFullyStructural(tt.L) && vcTermFullyStructural(tt.R)
+	default:
+		return false // vcOpaque (or unknown)
+	}
+}
+
+// vcFormulaFullyStructural reports whether a formula is built only from boolean constants, conjunction,
+// disjunction, negation, and comparisons of fully-structural terms — no opaque atom. Required before WP
+// substitution is trusted.
+func vcFormulaFullyStructural(f vcFormula) bool {
+	switch ff := f.(type) {
+	case vcTrue, vcFalse:
+		return true
+	case vcNot:
+		return vcFormulaFullyStructural(ff.Arg)
+	case vcAnd:
+		return vcFormulaFullyStructural(ff.L) && vcFormulaFullyStructural(ff.R)
+	case vcOr:
+		return vcFormulaFullyStructural(ff.L) && vcFormulaFullyStructural(ff.R)
+	case vcCompare:
+		return vcTermFullyStructural(ff.L) && vcTermFullyStructural(ff.R)
+	default:
+		return false // vcAtom (or unknown)
+	}
 }
