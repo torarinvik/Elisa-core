@@ -40,6 +40,7 @@ type SMTStats struct {
 	Proven       int           // unsat → proven
 	Declined     int           // sat/unknown → fell back to runtime
 	SolverProven int           // == Proven, kept for clarity in the report
+	CacheHits    int           // obligations answered from the query cache (no solver round-trip)
 	SpawnTime    time.Duration // one-time solver process start
 	SolverTime   time.Duration // wall time inside the solver across all queries
 	Slowest      time.Duration // slowest single query
@@ -51,8 +52,8 @@ func (p SMTStats) String() string {
 		return ""
 	}
 	return fmt.Sprintf(
-		"SMT tier: %d obligations, %d proven, %d declined; solver %.1fms (spawn %.1fms, slowest %.1fms)",
-		p.Attempts, p.Proven, p.Declined,
+		"SMT tier: %d obligations, %d proven, %d declined, %d cached; solver %.1fms (spawn %.1fms, slowest %.1fms)",
+		p.Attempts, p.Proven, p.Declined, p.CacheHits,
 		float64(p.SolverTime.Microseconds())/1000.0,
 		float64(p.SpawnTime.Microseconds())/1000.0,
 		float64(p.Slowest.Microseconds())/1000.0,
@@ -282,17 +283,50 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	}
 	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
+	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
+	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
+	// time accrues — the cache hit is the whole point. SolverProven is left to mean "proven by an actual
+	// solver run", so a cached proof does NOT bump it.
+	if hit, ok := a.smtQueryCache[query]; ok {
+		a.smtStats.CacheHits++
+		if hit.proven {
+			a.smtStats.Proven++
+		} else {
+			a.smtStats.Declined++
+		}
+		return hit.proven, hit.ce
+	}
 	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
+		a.cacheSMTQuery(query, smtQueryResult{proven: true})
 		return true, ""
 	}
 	a.smtStats.Declined++
 	if res == smt.Sat {
-		return false, tr.counterexample(model)
+		ce := tr.counterexample(model)
+		a.cacheSMTQuery(query, smtQueryResult{proven: false, ce: ce})
+		return false, ce
 	}
+	// `unknown` (timeout / incompleteness) is NOT cached: it is not a stable verdict — a later identical
+	// query is free to try again (e.g. the solver's internal state differs), and caching it would lock in
+	// a decline that a retry might resolve. Only the definitive unsat/sat answers memoize.
 	return false, ""
+}
+
+// smtQueryResult is a memoized solver verdict: whether the obligation was proven, plus the
+// counterexample text rendered on a `sat` decline (empty otherwise).
+type smtQueryResult struct {
+	proven bool
+	ce     string
+}
+
+func (a *Analyzer) cacheSMTQuery(query string, result smtQueryResult) {
+	if a.smtQueryCache == nil {
+		a.smtQueryCache = map[string]smtQueryResult{}
+	}
+	a.smtQueryCache[query] = result
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover

@@ -365,6 +365,12 @@ type Analyzer struct {
 	smtSolver                        smtSolverHandle
 	smtUnavailable                   bool
 	smtStats                         SMTStats
+	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
+	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
+	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
+	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
+	// cross-function key collision means a byte-identical proof).
+	smtQueryCache map[string]smtQueryResult
 	proofReport                      []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
