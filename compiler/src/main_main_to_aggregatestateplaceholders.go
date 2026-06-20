@@ -145,7 +145,13 @@ func emitSemanticWarningsIfNoErrors(file *ast.File, stderr io.Writer) {
 	if file == nil {
 		return
 	}
-	result := semantic.Analyze(file)
+	// The SMT discharge tier is ON by default (matching real builds), so this inspection/default pass
+	// reports refinement provability the SAME way a build does. Without it, a refinement the build proves
+	// (e.g. a nonlinear `a*b is Bounded[...]`) would surface a spurious "could not be proven statically"
+	// warning here. Kept NON-strict: provability stays a warning (the AST/format still prints) rather than
+	// a hard error. z3 is opened lazily — a file with no hard refinements never spawns it, so formatting
+	// contract-free code costs nothing.
+	result := semantic.AnalyzeWithOptions(file, semantic.AnalyzeOptions{EnableSMT: true})
 	if len(result.Errors()) != 0 {
 		return
 	}
