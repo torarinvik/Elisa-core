@@ -460,11 +460,44 @@ func (a *Analyzer) checkFrameForMutatingBuiltinMethod(expr *ast.CallExpr) {
 	}
 }
 
+// resolveFrameAliasPath rewrites a write path rooted at a borrow LOCAL to the underlying place it
+// borrows: `h := &r.health` makes a write to `h` (or `h.sub`) a write to `r.health` (or `r.health.sub`).
+// Only an immutable local bound to an address-of expression is followed (a by-value copy does not alias
+// the source); chained borrows resolve transitively, with `seen` guarding a cycle. A non-borrow root is
+// returned unchanged.
+func (a *Analyzer) resolveFrameAliasPath(root string, fields []string, seen map[string]bool) (string, []string) {
+	if a.currentScope == nil || root == "" || seen[root] {
+		return root, fields
+	}
+	seen[root] = true
+	sym, ok := a.currentScope.Lookup(root)
+	if !ok || sym == nil || sym.Kind != SymbolLocal {
+		return root, fields
+	}
+	value, ok := a.immutableValueExprForSymbol(sym)
+	if !ok || value == nil {
+		return root, fields
+	}
+	if _, isAddr := stripOptimizationParens(value).(*ast.AddrOfExpr); !isAddr {
+		return root, fields // a by-value binding does not alias the source place
+	}
+	uroot, ufields, ok := frameWritePath(value)
+	if !ok || uroot == root {
+		return root, fields
+	}
+	combined := append(append([]string(nil), ufields...), fields...)
+	return a.resolveFrameAliasPath(uroot, combined, seen)
+}
+
 func (a *Analyzer) checkFramePlace(place ast.Expr, verb string) {
 	root, fields, ok := frameWritePath(place)
 	if !ok {
 		return
 	}
+	// A write laundered through a borrow LOCAL (`h := &r.health; h <- 999`) writes the underlying place,
+	// so resolve the local to the place it borrows before checking the frame — otherwise the write looks
+	// like a harmless local write and slips past `changes`/`preserves` (audit cluster C, frame channel).
+	root, fields = a.resolveFrameAliasPath(root, fields, map[string]bool{})
 	a.checkFrameResolvedPlace(place, root, fields, verb)
 }
 

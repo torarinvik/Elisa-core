@@ -181,6 +181,19 @@ func (a *Analyzer) namedStateMutationTargetPathDepth(expr ast.Expr, depth int) (
 					}
 				}
 			}
+			// A MUTABLE ref alias bound by `q := p` (a bare ref, not `&p`) is not recorded in
+			// currentValueBindings, but the alias-binding table carries its whole-root target. Resolve
+			// through it so a named-state mutation `q.health <- …` transitions the borrowed root p — without
+			// it the false `ensures p => Alive` slipped through (audit cluster C, typestate channel). A bare
+			// ref-to-ref binding is always a whole-root alias (no field path to lose); the `&r.field` form is
+			// already handled above via currentValueBindings.
+			if sym.Kind == SymbolLocal {
+				if binding, ok := a.currentAliasBindings[sym]; ok && len(binding.Roots) == 1 && binding.Roots[0] != n.Name {
+					if rootSym, ok := a.currentScope.Lookup(binding.Roots[0]); ok && rootSym != nil {
+						return rootSym, nil, true
+					}
+				}
+			}
 		}
 		return sym, nil, true
 	case *ast.FieldExpr:

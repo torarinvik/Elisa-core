@@ -736,3 +736,41 @@ def bad(t: mutable Tab&) changes t.b:
 		t.Fatalf("`t.a.put` outside `changes t.b` must error, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// AUDIT (cluster C, frame channel): a write laundered through a borrow-local alias to a place OUTSIDE
+// the `changes` set is a frame violation — `h := &r.health; h <- 999` in a function declared
+// `changes r.px` writes r.health. The frame check now resolves the local to the place it borrows.
+func TestChangesBorrowLocalAliasOutOfSetErrors(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def bad(r: mutable Render&) changes r.px:
+    h = &r.health
+    h <- 999
+    r.px <- 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "frame_alias_out.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the `changes` set") {
+		t.Fatalf("`h <- 999` (h = &r.health) outside `changes r.px` must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// The same alias write to an IN-SET field stays clean — the resolution is exact (path-level), not a
+// blanket rejection of all alias writes.
+func TestChangesBorrowLocalAliasInSetIsClean(t *testing.T) {
+	src := `
+struct Render:
+    px: mutable i32
+    health: mutable i32
+
+def good(r: mutable Render&) changes r.px:
+    h = &r.px
+    h <- 7
+`
+	result := analyzeTreeTestSource(t, "frame_alias_in.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a write through an alias to the in-set field r.px should be clean, got: %v", errs)
+	}
+}
