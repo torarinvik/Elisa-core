@@ -92,3 +92,31 @@ def f(x: i64) -> i64:
 		t.Fatalf("`result >= 0` follows from x>0 via WP; got: %v", errs)
 	}
 }
+
+// SOUNDNESS: the count-up loop exit fact `i <= bound` after `while i < bound: i++` is true ONLY when i
+// starts at or below bound. With an UNBOUNDED entry counter, i may start above bound (the loop never
+// runs and i keeps its too-large value), so `ensure result <= bound` must NOT be proven.
+func TestCountUpExitFactRequiresEntryBound(t *testing.T) {
+	bad := `
+def f(i: mutable i64) -> i64:
+    ensure result <= 5
+    while i < 5:
+        i <- i + 1
+    return i
+`
+	if !strings.Contains(strings.Join(analyzeContractStrict(t, "countup_bad.elisa", bad).Errors(), "\n"), "could not be proven statically") {
+		t.Fatalf("an unbounded count-up counter may start above the bound; `result <= 5` must not be proven")
+	}
+	// With a proven entry bound, the count reaches exactly the bound and the exit fact is sound.
+	good := `
+def f(i: mutable i64) -> i64:
+    requires i <= 5
+    ensure result <= 5
+    while i < 5:
+        i <- i + 1
+    return i
+`
+	if errs := analyzeContractStrict(t, "countup_good.elisa", good).Errors(); len(errs) != 0 {
+		t.Fatalf("a count-up with a proven entry bound `i <= 5` discharges `result <= 5`; got: %v", errs)
+	}
+}
