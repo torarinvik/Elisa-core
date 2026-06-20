@@ -173,14 +173,28 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	flowHyps := a.smtFlowFactHypotheses(tr)
 	query := tr.factPreamble() + hyps + localHyps + assertHyps + flowHyps + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
-	res, _ := solver.Check(query)
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
 		return true
 	}
+	// On a SAT (failed) proof, stash z3's satisfying assignment so the refinement diagnostic can show
+	// a concrete counterexample (the input that violates the predicate). Empty when no model/unknown.
+	if res == smt.Sat {
+		a.lastSMTCounterexample = tr.counterexample(model)
+	}
 	a.smtStats.Declined++
 	return false
+}
+
+// counterexampleSuffix formats a satisfying-model string as a trailing diagnostic hint, or "" when
+// there is none (e.g. the solver returned unknown/timeout rather than a concrete model).
+func (a *Analyzer) counterexampleSuffix(ce string) string {
+	if ce == "" {
+		return ""
+	}
+	return " — it can fail when " + ce
 }
 
 // trySMTProveRequires discharges a precondition clause with the solver after the linear clause prover

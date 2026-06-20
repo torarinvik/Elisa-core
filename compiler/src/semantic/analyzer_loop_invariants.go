@@ -67,9 +67,9 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		// what makes it sound: a child scope cannot mask the outer loop-variable facts (range-fact
 		// lookup intersects the whole chain), so reusing the ambient fact set would let a false
 		// invariant like `i < 5` "prove" preserved off the entry value `i == 0`.
-		if !a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst) {
+		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst); !preserved {
 			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofRuntime)
-			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime")
+			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(counterexample))
 			allProven = false
 			continue
 		}
@@ -285,21 +285,21 @@ func loopIntIdentName(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 //
 // The invariants may be assumed as hypotheses because establishment (checked separately) covers the
 // base case, so at the top of an arbitrary iteration every invariant holds.
-func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr) bool {
+func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr) (bool, string) {
 	solver := a.openSMT()
 	if solver == nil || target == nil {
-		return false
+		return false, ""
 	}
 	tr := a.newSMTTranslator(nil)
 	// The obligation: the invariant after the body's substitution. smtEnvForSubst maps each loop
 	// variable to its post-body term (declaring the free variables of those terms).
 	env, ok := a.smtEnvForSubst(tr, subst)
 	if !ok {
-		return false
+		return false, ""
 	}
 	obligation, ok := tr.boolTerm(target, env)
 	if !ok {
-		return false
+		return false, ""
 	}
 	// Hypotheses are translated with an identity environment, so a loop variable `i` in a hypothesis
 	// and the `i` inside a substituted term (`i + 1`) resolve to the SAME free SMT constant.
@@ -317,11 +317,11 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		return true
 	}
 	if !addHyp(cond) {
-		return false
+		return false, ""
 	}
 	for _, inv := range invs {
 		if !addHyp(inv.Cond) {
-			return false
+			return false, ""
 		}
 	}
 	// Enclosing preconditions are safe to assume and may bound a param the invariant mentions. Gathered
@@ -329,14 +329,19 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	reqHyps := a.smtRequiresHypotheses(tr)
 	query := tr.factPreamble() + reqHyps + hypSB.String() + "(assert (not " + obligation + "))\n"
 	a.smtStats.Attempts++
-	res, _, _ := solver.CheckValues(query, tr.declaredSMTVars())
+	res, model, _ := solver.CheckValues(query, tr.declaredSMTVars())
 	if res == smt.Unsat {
 		a.smtStats.Proven++
 		a.smtStats.SolverProven++
-		return true
+		return true, ""
 	}
 	a.smtStats.Declined++
-	return false
+	// On a SAT result the model is a loop state satisfying cond + the invariants but VIOLATING the
+	// invariant after one body step — i.e. a concrete witness to non-preservation.
+	if res == smt.Sat {
+		return false, tr.counterexample(model)
+	}
+	return false, ""
 }
 
 // captureLoopBodyEffect models a straight-line loop body as a simultaneous substitution from each

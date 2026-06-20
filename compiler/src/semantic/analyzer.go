@@ -384,20 +384,24 @@ type Analyzer struct {
 	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
 	lemmaCalls                       map[*ast.CallExpr]bool
 	lemmasInAnalysis                 map[*ast.FuncDecl]bool
-	refinementChecks                 map[*ast.VarDeclStmt][]*ast.CallExpr
-	callArgRefinementChecks          map[*ast.CallExpr][]*ast.CallExpr
-	returnRefinementChecks           map[*ast.ReturnStmt][]*ast.CallExpr
-	hotDisjointKernelCandidates      []hotDisjointKernelCandidate
-	privateFreshDArrayCache          map[*ast.FuncDecl]map[string]bool
-	reassignedParamCache             map[*ast.FuncDecl]map[string]bool
-	functionAnalyses                 map[*ast.FuncDecl]*FunctionAnalysis
-	currentNamespace                 string
-	currentUsings                    []string
-	importAliases                    map[string]string
-	resolvedTypeNames                map[ast.TypeExpr]string
-	resolvedValueNames               map[*ast.Ident]string
-	currentImplicitScopes            []map[string]ast.Expr
-	semanticLimitDiagnostics         map[string]bool
+	// lastSMTCounterexample holds the satisfying model (as a readable "x=5, n=0" string) from the most
+	// recent FAILED refinement SMT proof, so the diagnostic that follows can show a concrete witness.
+	// Cleared at the start of each refinement discharge to avoid surfacing a stale one.
+	lastSMTCounterexample       string
+	refinementChecks            map[*ast.VarDeclStmt][]*ast.CallExpr
+	callArgRefinementChecks     map[*ast.CallExpr][]*ast.CallExpr
+	returnRefinementChecks      map[*ast.ReturnStmt][]*ast.CallExpr
+	hotDisjointKernelCandidates []hotDisjointKernelCandidate
+	privateFreshDArrayCache     map[*ast.FuncDecl]map[string]bool
+	reassignedParamCache        map[*ast.FuncDecl]map[string]bool
+	functionAnalyses            map[*ast.FuncDecl]*FunctionAnalysis
+	currentNamespace            string
+	currentUsings               []string
+	importAliases               map[string]string
+	resolvedTypeNames           map[ast.TypeExpr]string
+	resolvedValueNames          map[*ast.Ident]string
+	currentImplicitScopes       []map[string]ast.Expr
+	semanticLimitDiagnostics    map[string]bool
 }
 
 type castHookSignature struct {

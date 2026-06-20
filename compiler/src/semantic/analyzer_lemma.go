@@ -45,11 +45,12 @@ func (a *Analyzer) verifyLemmaEnsures(fn *ast.FuncDecl) {
 		}
 		// trySMTProveRequires assumes the function's own `requires` as hypotheses and adds the current
 		// scope's assert/flow facts, then proves the clause (only `unsat` of its negation concludes).
-		if proven, _ := a.trySMTProveRequires(clause, nil); proven {
+		proven, counterexample := a.trySMTProveRequires(clause, nil)
+		if proven {
 			a.recordProof(clause.Pos(), "lemma "+fn.Name, "ensure", ProofProvenSMT)
 			continue
 		}
-		a.errorf(clause.Pos(), "lemma %q does not prove its `ensure`: a lemma is erased from code, so every postcondition must follow statically from its `requires` and body (add intermediate `assert`s, call a helper lemma, or strengthen `requires`)", fn.Name)
+		a.errorf(clause.Pos(), "lemma %q does not prove its `ensure`: a lemma is erased from code, so every postcondition must follow statically from its `requires` and body (add intermediate `assert`s, call a helper lemma, or strengthen `requires`)%s", fn.Name, a.counterexampleSuffix(counterexample))
 	}
 }
 
