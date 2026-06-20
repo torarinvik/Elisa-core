@@ -111,3 +111,58 @@ def loop_forever(n: usize) -> usize:
 		t.Fatalf("recursion without decreases must not be a termination error, got: %v", errs)
 	}
 }
+
+// ---- decreases * (wildcard opt-out) tests ----
+
+// `decreases * "reason"` suppresses the termination proof obligation — the function compiles
+// without a "cannot prove termination" error even though the measure is not provable.
+func TestDecreasesStarWithReasonSuppressesError(t *testing.T) {
+	src := `
+def spin(n: usize) -> usize:
+    decreases * "this is a known diverging helper; callers never use its result"
+    return spin(n)
+`
+	result := analyzeTreeTestSource(t, "term_star_reason.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("decreases * with a reason must suppress the termination error, got: %v", errs)
+	}
+}
+
+// `decreases *` WITHOUT a reason is always a compile error, independent of any flag.
+// Trust must never be silent.
+func TestDecreasesStarWithoutReasonIsError(t *testing.T) {
+	src := `
+def spin(n: usize) -> usize:
+    decreases *
+    return spin(n)
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_star_noreason.elisa", src)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "requires a non-empty reason string") {
+		t.Fatalf("expected a missing-reason error for decreases * without string, got:\n%s", errText)
+	}
+}
+
+// Soundness negative: a function with `decreases * "reason"` does NOT become verifiedTerminating,
+// so its defining equation is NOT axiomatized — a claim that relies on it is still rejected.
+func TestDecreasesStarDoesNotEnableAxiom(t *testing.T) {
+	src := `
+def spin(n: usize) -> usize:
+    decreases * "diverges intentionally"
+    return spin(n)
+
+def caller(n: usize) -> usize:
+    requires n == spin(n)
+    return n
+`
+	// The axiom spin(n) == spin(n) is trivially true but spin(n) == body is NOT asserted —
+	// what we want to verify is that the function is NOT treated as equation-eligible.
+	// A direct way: demand a property that would only hold if spin had a fixed-point equation.
+	// Here we just check the above compiles but the proof report has NO defining-equation entry for spin.
+	result := analyzeTreeTestSource(t, "term_star_no_axiom.elisa", src)
+	for _, f := range result.ProofReport {
+		if strings.Contains(f.Subject, "defining equation") && strings.Contains(f.Subject, "spin") {
+			t.Fatalf("decreases * must NOT enable the defining-equation axiom, but got proof entry: %+v", f)
+		}
+	}
+}

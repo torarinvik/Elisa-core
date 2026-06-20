@@ -480,19 +480,21 @@ type AssertByStmt struct {
 type ContractKind int
 
 const (
-	ContractRequire   ContractKind = iota // precondition: `requires <bool-expr>` at function start
-	ContractEnsure                         // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
-	ContractInvariant                      // in-body assertion: `invariant <bool-expr>`, checked in place
-	ContractDecreases                      // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
+	ContractRequire      ContractKind = iota // precondition: `requires <bool-expr>` at function start
+	ContractEnsure                            // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
+	ContractInvariant                         // in-body assertion: `invariant <bool-expr>`, checked in place
+	ContractDecreases                         // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
+	ContractDecreasesWild                     // termination opt-out: `decreases * "reason"` (Dafny-style wildcard)
 )
 
 // ContractStmt is a value-contract clause written as a leading body statement. The parser produces
 // it for `requires <bool-expr>`; the function-decl parser lifts leading ones into FuncDecl.Requires
 // (so it normally never reaches the statement analyzer/backend — see liftLeadingRequires).
 type ContractStmt struct {
-	Position lexer.Pos
-	Kind     ContractKind
-	Cond     Expr
+	Position   lexer.Pos
+	Kind       ContractKind
+	Cond       Expr
+	WildReason string // non-empty iff Kind == ContractDecreasesWild; the mandatory reason string
 }
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos

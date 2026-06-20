@@ -146,10 +146,23 @@ func (p *Parser) parseStmt() ast.Stmt {
 			}
 		case "decreases":
 			// `decreases <int-expr>` termination measure (lifted into the decl when leading; docs/86
-			// brick 86-7). Skip if it's actually a variable named `decreases`.
+			// brick 86-7). Also handles `decreases * "reason"` — a Dafny-style wildcard that opts out
+			// of the termination proof obligation (see ast.FuncDecl.DecreasesWild).
+			// Skip if it's actually a variable named `decreases`.
 			if p.looksLikeContractStmt() {
 				pos := p.cur().Pos
 				p.advance()
+				// `decreases *` — wildcard opt-out. The next token must be `*` (TOKEN_STAR).
+				if p.peek() == lexer.TOKEN_STAR {
+					p.advance() // consume `*`
+					var reason string
+					if p.peek() == lexer.TOKEN_STRING_LIT {
+						reason = p.cur().Text
+						p.advance()
+					}
+					p.expectNewline()
+					return &ast.ContractStmt{Position: pos, Kind: ast.ContractDecreasesWild, WildReason: reason}
+				}
 				measure := p.parseExpr()
 				p.expectNewline()
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractDecreases, Cond: measure}

@@ -28,7 +28,23 @@ import (
 // checkTermination verifies the `decreases` measure of a function decreases at every direct
 // self-recursive call. Called with the function's parameters in scope (after analyzeRequiresClauses).
 func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
-	if fn == nil || len(fn.Decreases) == 0 {
+	if fn == nil {
+		return
+	}
+	// `decreases * "reason"` — explicit opt-out: suppresses the termination obligation entirely.
+	// A missing reason string is always a compile error (trust must never be silent).
+	// Soundness: DecreasesWild does NOT set verifiedTerminating, so defining-equation axiomatization
+	// is NOT enabled — an inconsistency (via non-termination) cannot be introduced.
+	if fn.DecreasesWild != "" {
+		if fn.DecreasesWild == "*" {
+			// Sentinel: `decreases *` was present but no reason string was supplied.
+			a.errorf(fn.Pos(), "`decreases *` on %q requires a non-empty reason string: write `decreases * \"reason\"`", fn.Name)
+		}
+		// Reason present (or error already reported): suppress the termination proof
+		// but do NOT mark verifiedTerminating — soundness-critical.
+		return
+	}
+	if len(fn.Decreases) == 0 {
 		return
 	}
 	// Type-check the measure components: each must be an integer (the prover reasons over integers).
@@ -358,6 +374,12 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 // measureVerifiedForCalls proves (read-only, no diagnostics) that decl's `decreases` measure strictly
 // decreases at every supplied self-recursive call. Shared by lemma-IH and function-equation gating.
 func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.CallExpr) bool {
+	// A `decreases *` wildcard suppresses the termination proof obligation — but it does NOT make
+	// the function verifiedTerminating. Axiom/defining-equation eligibility requires a PROVEN
+	// termination measure; a mere opt-out cannot grant it (soundness-critical).
+	if decl.DecreasesWild != "" {
+		return false
+	}
 	if len(decl.Decreases) == 0 {
 		return false
 	}
