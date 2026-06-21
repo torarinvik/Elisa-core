@@ -1227,8 +1227,28 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// and decline here (sound: a declined term only forgoes a proof).
 		ssign, sbits, sok := smtIntWidthSign(tr.a.exprTypes[n.Operand])
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
-		if sok && dok && ssign == dsign && dbits >= sbits {
+		if !sok || !dok {
+			return "", false
+		}
+		if ssign == dsign && dbits >= sbits {
 			return tr.termEnv(n.Operand, env)
+		}
+		// Unsigned -> strictly wider signed (`(u8 b).i32()`): the source is non-negative and fits the
+		// wider signed range, so the conversion is the identity on the value.
+		if !ssign && dsign && dbits > sbits {
+			return tr.termEnv(n.Operand, env)
+		}
+		// Same-width sign reinterpretation (`(u32 field).i32()`): a bitcast — the bit pattern is
+		// unchanged, only the interpretation flips. Model the destination as the signed/unsigned read
+		// of the operand's bits (exact, so a field cast then sign-extended proves its range). Soundness:
+		// it is the precise two's-complement relationship, not an approximation.
+		if sbits == dbits {
+			inner, ok := tr.termEnv(n.Operand, env)
+			if !ok {
+				return "", false
+			}
+			bv := "((_ int2bv " + strconv.Itoa(dbits) + ") " + inner + ")"
+			return smtBitvectorRead(bv, dsign, dbits), true
 		}
 		return "", false
 	case *ast.TernaryExpr:
@@ -1378,8 +1398,9 @@ func smtSignedWrap(raw string, bits int) string {
 //
 // Soundness gates — anything outside them declines (returns ok=false), which only forgoes a proof,
 // never fabricates one:
-//   - Result must be UNSIGNED, width 1..64 (the `bv2nat` read is the unsigned value; a signed result
-//     would need the signed read and is left for a follow-up).
+//   - Result width 1..64. An unsigned result reads back via `bv2nat`; a signed result reads back via
+//     the exact two's-complement value (smtBitvectorRead), and a signed `>>` uses `bvashr` (arithmetic)
+//     to match the LLVM AShr codegen — so sign-extension idioms `(v << k) >> k` prove their signed range.
 //   - Operands must share the result width (Elisa bitwise is same-type), so int2bv at W is the exact
 //     bit pattern with no narrowing/sign surprise.
 //   - Shift amounts must be a compile-time constant in [0, W): the machine leaves shifts ≥ width
@@ -1389,7 +1410,7 @@ func smtSignedWrap(raw string, bits int) string {
 // timeout turns any hard case into Unknown → runtime fallback, so soundness holds regardless of cost.
 func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (string, bool) {
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
-	if !ok || signed || bits <= 0 || bits > 64 {
+	if !ok || bits <= 0 || bits > 64 {
 		return "", false
 	}
 	width := strconv.Itoa(bits)
@@ -1421,6 +1442,8 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 		rbv = "((_ int2bv " + width + ") " + strconv.FormatInt(c, 10) + ")"
 		if n.Op == lexer.TOKEN_LSHIFT {
 			bvop = "bvshl"
+		} else if signed {
+			bvop = "bvashr" // signed result ⇒ arithmetic right shift (matches LLVM AShr codegen)
 		} else {
 			bvop = "bvlshr" // unsigned result ⇒ logical right shift
 		}
@@ -1429,6 +1452,14 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 	}
 	l, ok := tr.termEnv(n.Left, env)
 	if !ok {
+		// Operand-independent mask bound (see maskBoundAux): `X & C` ∈ [0, C] for a non-negative
+		// constant C, regardless of X — so a masked extraction proves even when X (e.g.
+		// `word >> runtime_shift`) is outside the modelable bitvector fragment.
+		if n.Op == lexer.TOKEN_AMPERSAND {
+			if c, isC := tr.a.constIntValue(n.Right); isC && c >= 0 {
+				return tr.maskBoundAux(c), true
+			}
+		}
 		return "", false
 	}
 	lbv := "((_ int2bv " + width + ") " + l + ")"
@@ -1439,11 +1470,17 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 		}
 		r, ok := tr.termEnv(n.Right, env)
 		if !ok {
+			// Symmetric mask bound: `C & X` ∈ [0, C] for a non-negative constant C, regardless of X.
+			if n.Op == lexer.TOKEN_AMPERSAND {
+				if c, isC := tr.a.constIntValue(n.Left); isC && c >= 0 {
+					return tr.maskBoundAux(c), true
+				}
+			}
 			return "", false
 		}
 		rbv = "((_ int2bv " + width + ") " + r + ")"
 	}
-	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
+	return smtBitvectorRead("("+bvop+" "+lbv+" "+rbv+")", signed, bits), true
 }
 
 // signedDivCannotOverflow reports whether signed `left / right` (or `%`) provably avoids the one
@@ -1904,6 +1941,37 @@ func (tr *smtTranslator) freshAux(nonNeg bool) string {
 		tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
 	}
 	return v
+}
+
+// maskBoundAux models `X & C` for a non-negative constant C when X's exact bitvector term is
+// unavailable (e.g. X = `word >> runtime_shift`, outside the const-shift fragment). The result is
+// ALWAYS in [0, C] regardless of X — its set bits are a subset of C's — so a fresh integer bounded
+// to [0, C] is a sound OVER-approximation of the exact value. Soundness: the prover concludes only
+// on `unsat` of the negated goal; widening the value's feasible region to all of [0, C] can only
+// make that unsat harder to reach (decline), never fabricate one. This lets a masked extraction
+// like `(word >> sh) & 0xF` prove `< 16` even though the runtime shift is unmodelable.
+func (tr *smtTranslator) maskBoundAux(c int64) string {
+	tr.auxSeq++
+	v := "aux_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (<= "+v+" "+smtInt(c)+"))\n")
+	return v
+}
+
+// smtBitvectorRead reads a W-bit bitvector result back as its machine integer value. For an unsigned
+// result that is `bv2nat(b)` ∈ [0, 2^W). For a signed result it is the exact two's-complement value
+// `bv2nat(b) - 2^W * topbit(b)` ∈ [-2^(W-1), 2^(W-1)) — so the produced Int EQUALS the machine value
+// and composes soundly with further Int reasoning (e.g. a sign-extension `(v << k) >> k` proves its
+// signed range). The top bit is read via a 1-bit extract.
+func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
+	if !signed {
+		return "(bv2nat " + bvExpr + ")"
+	}
+	hi := strconv.Itoa(bits - 1)
+	signBit := "(bv2nat ((_ extract " + hi + " " + hi + ") " + bvExpr + "))"
+	return "(- (bv2nat " + bvExpr + ") (* " + smtPow2(bits) + " " + signBit + "))"
 }
 
 func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {

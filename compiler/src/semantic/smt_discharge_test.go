@@ -86,6 +86,137 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 50]:
 	}
 }
 
+// Operand-independent mask bound: `(word >> sh) & C` for a non-negative constant C is in [0, C]
+// regardless of the RUNTIME shift `sh`, so a masked field extraction proves its width bound even
+// though the variable shift puts the masked operand outside the modelable bitvector fragment. This
+// is the emulator decode-firewall payoff for variable bit positions.
+func TestSMTProvesRuntimeShiftMaskBound(t *testing.T) {
+	src := `
+law lt16(self: u32) = self < 16
+
+def extract(word: u32, sh: u32) -> u32 is lt16:
+    return (word >> sh) & 0xF
+`
+	result := analyzeWithSMT(t, "smt_mask_runtime_shift.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var smtProven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			smtProven++
+		}
+	}
+	if smtProven != 1 {
+		t.Fatalf("expected the runtime-shift mask bound proven by SMT, got %d: %+v", smtProven, result.ProofReport)
+	}
+}
+
+// Soundness: the mask bound is an over-approximation to [0, C] — it must NOT prove a tighter range
+// than the mask guarantees. `& 0xF` only bounds the result to [0, 15]; claiming `< 8` is false
+// (e.g. `0xF >> 0 == 15`), so the prover must decline rather than fabricate a proof.
+func TestSMTDeclinesTooTightMaskBound(t *testing.T) {
+	src := `
+law lt8(self: u32) = self < 8
+
+def extract(word: u32, sh: u32) -> u32 is lt8:
+    return (word >> sh) & 0xF
+`
+	result := analyzeWithSMT(t, "smt_mask_too_tight.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("SMT must not prove `<8` from a `& 0xF` mask (the value reaches 15): %+v", result.ProofReport)
+		}
+	}
+}
+
+// Signed bitwise: the sign-extension idiom `(field << k) >> k` (arithmetic right shift on a signed
+// result) sign-extends a low-bit field to the full width. For a 12-bit field this yields the exact
+// signed range [-2048, 2047]. The SMT tier models the signed read-back and `bvashr`, so the bound proves.
+func TestSMTProvesSignExtensionRange(t *testing.T) {
+	src := `
+law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
+
+def sign_extend12(field: i32) -> i32 is SBounded[-2048, 2047]:
+    requires field >= 0 and field <= 4095
+    return (field << 20) >> 20
+`
+	result := analyzeWithSMT(t, "smt_sign_extend.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var smtProven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			smtProven++
+		}
+	}
+	if smtProven != 1 {
+		t.Fatalf("expected the sign-extension signed range proven by SMT, got %d: %+v", smtProven, result.ProofReport)
+	}
+}
+
+// Soundness: sign-extension produces a value that CAN be negative (the high field bit becomes the sign),
+// so a non-negative claim must NOT be proven. `(field << 20) >> 20` for field in [0,4095] reaches -2048.
+func TestSMTDeclinesNonNegativeSignExtension(t *testing.T) {
+	src := `
+law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
+
+def sign_extend12(field: i32) -> i32 is SBounded[0, 2047]:
+    requires field >= 0 and field <= 4095
+    return (field << 20) >> 20
+`
+	result := analyzeWithSMT(t, "smt_sign_extend_bad.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("SMT must not prove a non-negative range for a sign-extension that reaches -2048: %+v", result.ProofReport)
+		}
+	}
+}
+
+// A same-width sign-reinterpret cast (`(u32 field).i32()`) is modeled exactly (the bitcast relating
+// the unsigned and signed views), so a field extracted as unsigned and then sign-extended proves its
+// signed range end to end — the emulator immediate-decode pattern.
+func TestSMTProvesMaskedFieldSignExtension(t *testing.T) {
+	src := `
+law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
+
+def imm(word: u32) -> i32 is SBounded[-2048, 2047]:
+    return ((((word >> 20) & 0xFFF).i32()) << 20) >> 20
+`
+	result := analyzeWithSMT(t, "smt_masked_signext.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var smtProven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			smtProven++
+		}
+	}
+	if smtProven != 1 {
+		t.Fatalf("expected the masked sign-extension proven by SMT, got %d: %+v", smtProven, result.ProofReport)
+	}
+}
+
+// Soundness: a same-width unsigned->signed reinterpret is the EXACT two's-complement bitcast, not a
+// value-preserving widening. A u32 that can exceed i32-max becomes negative as i32, so a non-negative
+// claim must NOT prove (modeling the cast as identity here would be unsound).
+func TestSMTDeclinesWrappingReinterpret(t *testing.T) {
+	src := `
+law NonNeg(self: i32) = self >= 0
+
+def reinterpret(big: u32) -> i32 is NonNeg:
+    return big.i32()
+`
+	result := analyzeWithSMT(t, "smt_wrapping_reinterpret.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("SMT must not prove `>= 0` for a u32->i32 reinterpret that can wrap negative: %+v", result.ProofReport)
+		}
+	}
+}
+
 // Division (docs/90 brick 3): `n / 2` for an unsigned n in [0,100] is in [0,50]. SMT-LIB `div` is
 // Euclidean, which equals Elisa truncating division here because n >= 0 and the divisor is > 0.
 func TestSMTProvesDivision(t *testing.T) {
