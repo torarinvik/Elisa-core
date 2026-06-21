@@ -947,7 +947,9 @@ func (a *Analyzer) validateCurrentFuncPoststate(poststate FuncPoststate) {
 		actualState, ok := namedStateCurrentArg(actualTarget)
 		if desired == nil || !ok || actualState == nil || !namedStateTypeAssignable(desired, actualState) {
 			a.errorf(poststate.Position, ensureNamedStateMismatchMessage(targetName, strings.Join(poststate.StateCases, " | "), a.currentFuncDecl.Name, actualTarget.String()))
+			return
 		}
+		a.recordProofWithClass(poststate.Position, targetName, "=> "+strings.Join(poststate.StateCases, " | "), ProofProvenContract, ProofClassTypestate, nil, "")
 	case FuncPoststateKindRefState:
 		actualRef, ok := poststateRefTargetType(currentTarget)
 		if !ok || actualRef == nil {

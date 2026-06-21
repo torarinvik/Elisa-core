@@ -32,6 +32,53 @@ func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
 		t.Fatalf("expected filtered fact trace to omit consume transforms, got:\n%s", output)
 	}
 }
+
+func TestRunCLIExplainProofReportShowsClassesAndClosedWorld(t *testing.T) {
+	if _, err := exec.LookPath("z3"); err != nil {
+		t.Skip("z3 not on PATH; explain proof report test skipped")
+	}
+	fixture := filepath.Join(t.TempDir(), "explain_report.elisa")
+	src := `typestate Socket:
+	fd: mutable i64
+	states: Closed, Open
+	transition open_it: Closed -> Open
+	transition close_it: Open -> Closed
+
+def round_trip(s: mutable Socket[Closed]&) ensures s => Closed:
+	open_it(s)
+	close_it(s)
+
+def scoped_decline(n: i64):
+	requires n >= 0
+	assert n >= 5 by scoped:
+		assert(n >= 0)
+`
+	if err := os.WriteFile(fixture, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-permissive", "--explain", "--explain-hole", "-emit", "semantic", fixture}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstdout:\n%s\nstderr:\n%s", exitCode, stdout.String(), stderr.String())
+	}
+	output := stderr.String()
+	for _, want := range []string{
+		"proven (contract) (typestate)",
+		"runtime (scoped)",
+		"goal:",
+		"known facts:",
+		"closed world:",
+		"- n >= 0",
+		"missing:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected explain proof report to contain %q, got:\n%s", want, output)
+		}
+	}
+}
+
 func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")

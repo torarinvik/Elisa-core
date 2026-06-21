@@ -230,7 +230,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		return 1
 	}
 	if options.explainProofs {
-		printProofReport(stderr, result.ProofReport)
+		printProofReport(stderr, result.ProofReport, options.explainHole)
 		if line := result.SMTProfile.String(); line != "" {
 			fmt.Fprintf(stderr, "  %s\n", line)
 		}
@@ -550,7 +550,7 @@ func writeOutputFile(path string, data []byte) error {
 // one line per obligation showing where it is, the subject and law, and how it was discharged
 // (proven statically, refuted, or deferred to a runtime check). A trailing summary makes the
 // static-vs-runtime split scannable.
-func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
+func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole bool) {
 	fmt.Fprintln(stderr, "── refinement proof report (--explain) ──")
 	if len(report) == 0 {
 		fmt.Fprintln(stderr, "  (no refinement obligations)")
@@ -558,7 +558,31 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
 	}
 	var proven, refuted, runtime, measured int
 	for _, f := range report {
-		fmt.Fprintf(stderr, "  %s: %s is %s — %s\n", f.Pos, f.Subject, f.Predicate, f.Outcome)
+		class := f.Class
+		if class == "" {
+			class = proofReportClass(f.Outcome)
+		}
+		fmt.Fprintf(stderr, "  %s: %s is %s — %s (%s)\n", f.Pos, f.Subject, f.Predicate, f.Outcome, class)
+		if explainHole {
+			fmt.Fprintf(stderr, "      goal: %s is %s\n", f.Subject, f.Predicate)
+			fmt.Fprintln(stderr, "      known facts:")
+			if len(f.KnownFacts) == 0 {
+				fmt.Fprintln(stderr, "        - (none)")
+			} else {
+				for _, fact := range f.KnownFacts {
+					fmt.Fprintf(stderr, "        - %s\n", fact)
+				}
+			}
+		}
+		if len(f.ClosedWorldFacts) > 0 {
+			fmt.Fprintln(stderr, "      closed world:")
+			for _, fact := range f.ClosedWorldFacts {
+				fmt.Fprintf(stderr, "        - %s\n", fact)
+			}
+		}
+		if f.Missing != "" {
+			fmt.Fprintf(stderr, "      missing: %s\n", f.Missing)
+		}
 		switch f.Outcome {
 		case semantic.ProofProvenFlow, semantic.ProofProvenLinear, semantic.ProofProvenConst, semantic.ProofProvenContract, semantic.ProofProvenSMT:
 			proven++
@@ -571,6 +595,25 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact) {
 		}
 	}
 	fmt.Fprintf(stderr, "  %d proven statically, %d runtime-checked, %d measured, %d refuted\n", proven, runtime, measured, refuted)
+}
+
+func proofReportClass(outcome semantic.ProofOutcome) semantic.ProofDischargeClass {
+	switch outcome {
+	case semantic.ProofProvenFlow:
+		return semantic.ProofClassFlow
+	case semantic.ProofProvenLinear:
+		return semantic.ProofClassLinear
+	case semantic.ProofProvenConst:
+		return semantic.ProofClassConst
+	case semantic.ProofProvenSMT:
+		return semantic.ProofClassSMT
+	case semantic.ProofProvenContract:
+		return semantic.ProofClassContract
+	case semantic.ProofMeasured:
+		return semantic.ProofClassMeasured
+	default:
+		return semantic.ProofClassRuntime
+	}
 }
 
 // printPerfWarnings surfaces the backend's post-optimization performance-friction warnings (the
