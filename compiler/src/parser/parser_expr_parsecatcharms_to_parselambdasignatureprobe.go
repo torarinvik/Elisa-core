@@ -124,7 +124,7 @@ func (p *Parser) parseLambdaParams() ([]ast.ParamDecl, bool) {
 		params := make([]ast.ParamDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
-				params = append(params, p.parseParam(false))
+				params = append(params, p.parseLambdaParam())
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}
@@ -138,6 +138,22 @@ func (p *Parser) parseLambdaParams() ([]ast.ParamDecl, bool) {
 		params = append(params, ast.ParamDecl{Position: p.cur().Pos, Name: p.expect(lexer.TOKEN_IDENT).Text})
 	}
 	return params, true
+}
+
+// parseLambdaParam parses one parenthesized lambda parameter. Unlike a
+// declaration parameter, the type annotation is OPTIONAL: `lambda(n) => ...`
+// leaves the param untyped so its type is inferred from the expected callback
+// signature at the call site (the same inference that drives the bare-shorthand
+// `lambda n => ...` form). `lambda(n: i64) => ...` keeps the explicit type.
+func (p *Parser) parseLambdaParam() ast.ParamDecl {
+	pos := p.cur().Pos
+	mutable := p.match(lexer.TOKEN_MUTABLE)
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	if !p.match(lexer.TOKEN_COLON) {
+		return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable}
+	}
+	typ := p.parseTypeExpr()
+	return ast.ParamDecl{Position: pos, Name: name, Mutable: mutable, Type: typ}
 }
 func (p *Parser) parseQualifiedTargetName() (string, lexer.Pos) {
 	pos := p.cur().Pos
@@ -400,10 +416,11 @@ func (p *Parser) parseLambdaSignatureProbe() bool {
 					return false
 				}
 				p.advance()
-				if !p.match(lexer.TOKEN_COLON) {
-					return false
+				// The type annotation is optional: `lambda(n) => ...` infers the
+				// param type from context. Only consume a type when a colon follows.
+				if p.match(lexer.TOKEN_COLON) {
+					_ = p.parseTypeExpr()
 				}
-				_ = p.parseTypeExpr()
 				if !p.match(lexer.TOKEN_COMMA) {
 					break
 				}

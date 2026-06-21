@@ -220,6 +220,66 @@ def use() -> i64 error[IoErr]:
 	}
 }
 
+// CLOSED GAP (parenthesized untyped lambda params + empty-set instantiation):
+// `lambda(n) => n + 1` parses (the param type is inferred from the callback
+// signature), raises nothing, so the `[errorset R]` combinator binds R := ∅ and
+// the whole call is non-raising — `use` declares no error union and type-checks.
+func TestErrorSetParamInlineLambdaEmptySet(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "inline_lambda_empty.elisa", `
+def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
+    return try f(x)
+
+def use() -> i64:
+    return applyOne(lambda(n) => n + 1, 3)
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("infallible inline lambda should bind R := empty and compose as non-raising, got:\n%s", all)
+	}
+}
+
+// A parenthesized inline lambda that raises infers its error set, binds R, and
+// the combinator's `error[R]` return is catchable end to end.
+func TestErrorSetParamInlineLambdaRaiseInfersR(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "inline_lambda_raise.elisa", `
+error IoErr:
+    Bad
+
+def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
+    return try f(x)
+
+def use() -> i64:
+    catch applyOne(lambda(n) => raise IoErr.Bad, 3):
+        v:
+            return v
+        IoErr.Bad:
+            return 99
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
+		t.Fatalf("raising inline lambda should infer error[IoErr] and bind R, got:\n%s", all)
+	}
+}
+
+// An inline lambda whose inferred error set the combinator's concrete R cannot
+// absorb is still rejected — inference does not launder an incompatible set.
+func TestErrorSetParamInlineLambdaMismatchRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "inline_lambda_mismatch.elisa", `
+error IoErr:
+    Bad
+
+error NetErr:
+    Down
+
+def wantsIo(f: func(i64) -> i64 error[IoErr], x: i64) -> i64 error[IoErr]:
+    return try f(x)
+
+def use() -> i64 error[IoErr]:
+    return wantsIo(lambda(n) => raise NetErr.Down, 3)
+`)
+	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
+		t.Fatalf("an inline lambda raising error[NetErr] must not satisfy func -> i64 error[IoErr]")
+	}
+}
+
 // A bare lambda that propagates a DIFFERENT error than the caller's R can absorb is
 // still caught at the call site — inference does not launder an incompatible set.
 func TestBareLambdaInferredMismatchRejected(t *testing.T) {

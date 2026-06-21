@@ -139,7 +139,12 @@ func formatLambdaExpr(expr *ast.LambdaExpr) string {
 			if param.Mutable {
 				part += "mutable "
 			}
-			part += param.Name + ": " + formatTypeExpr(param.Type)
+			part += param.Name
+			// A parenthesized lambda param may omit its type (`lambda(n) => ...`),
+			// inferring it from the contextual callback signature.
+			if param.Type != nil {
+				part += ": " + formatTypeExpr(param.Type)
+			}
 			params = append(params, part)
 		}
 	}
