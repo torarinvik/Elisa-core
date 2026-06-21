@@ -3,6 +3,8 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"strings"
+
+	"elisacore/src/unparse"
 )
 
 type scopedProofCitation struct {
@@ -108,14 +110,21 @@ func (a *Analyzer) proveAssertByCond(n *ast.AssertByStmt) {
 	if n.Cond == nil {
 		return
 	}
+	class := ProofClassLinear
+	if n.Scoped {
+		class = ProofClassScoped
+	}
 	if a.proveRequiresClause(n.Cond, nil) == requiresProven {
-		a.recordProof(n.Cond.Pos(), "assert by", "assert", ProofProvenLinear)
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofProvenLinear, class, nil, "")
 		return
 	}
 	proven, counterexample := a.trySMTProveRequires(n.Cond, nil)
 	if proven {
-		a.recordProof(n.Cond.Pos(), "assert by", "assert", ProofProvenSMT)
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofProvenSMT, class, nil, "")
 		return
+	}
+	if n.Scoped {
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofRuntime, ProofClassScoped, a.closedWorldProofFacts(), "nothing establishes the scoped goal")
 	}
 	msg := "`assert … by:` condition could not be proven from its proof block; the block's facts plus the caller's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
 	if a.enforceStrictProofs {
@@ -212,6 +221,33 @@ func (a *Analyzer) scopedProofCitationForStmt(stmt ast.Stmt) *scopedProofCitatio
 		return nil
 	}
 	return &scopedProofCitation{Name: proofCitationName(call)}
+}
+
+func (a *Analyzer) closedWorldProofFacts() []string {
+	if a == nil || a.currentScope == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == nil {
+				continue
+			}
+			add(unparse.FormatExpr(fact.Expr))
+		}
+		if sc.closedWorld {
+			break
+		}
+	}
+	return out
 }
 
 func (a *Analyzer) reportLoadBearingScopedCitations(n *ast.AssertByStmt, scope *Scope, citations []*scopedProofCitation) {

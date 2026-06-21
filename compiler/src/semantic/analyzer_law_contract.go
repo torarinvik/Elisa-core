@@ -103,18 +103,72 @@ const (
 	ProofRuntime        ProofOutcome = "runtime"           // unprovable — debug runtime check / -strict error
 )
 
+type ProofDischargeClass string
+
+const (
+	ProofClassFlow      ProofDischargeClass = "flow"
+	ProofClassLinear    ProofDischargeClass = "linear"
+	ProofClassConst     ProofDischargeClass = "const"
+	ProofClassSMT       ProofDischargeClass = "smt"
+	ProofClassContract  ProofDischargeClass = "contract"
+	ProofClassScoped    ProofDischargeClass = "scoped"
+	ProofClassTypestate ProofDischargeClass = "typestate"
+	ProofClassRuntime   ProofDischargeClass = "runtime"
+	ProofClassMeasured  ProofDischargeClass = "measured"
+)
+
 // ProofFact is one entry in the --explain proof report: where a refinement was discharged, on what
 // subject, by which law, and with what outcome.
 type ProofFact struct {
-	Pos       lexer.Pos
-	Subject   string
-	Predicate string
-	Outcome   ProofOutcome
+	Pos              lexer.Pos
+	Subject          string
+	Predicate        string
+	Outcome          ProofOutcome
+	Class            ProofDischargeClass
+	KnownFacts       []string
+	ClosedWorldFacts []string
+	Missing          string
 }
 
 // recordProof appends one discharge decision to the proof report (docs/85 observability).
 func (a *Analyzer) recordProof(pos lexer.Pos, subject, predicate string, outcome ProofOutcome) {
-	a.proofReport = append(a.proofReport, ProofFact{Pos: pos, Subject: subject, Predicate: predicate, Outcome: outcome})
+	a.recordProofWithClass(pos, subject, predicate, outcome, defaultProofClass(outcome), nil, "")
+}
+
+func (a *Analyzer) recordProofWithClass(pos lexer.Pos, subject, predicate string, outcome ProofOutcome, class ProofDischargeClass, closedWorldFacts []string, missing string) {
+	var known []string
+	if a != nil {
+		known = append([]string(nil), a.inScopeKnownFacts()...)
+	}
+	a.proofReport = append(a.proofReport, ProofFact{
+		Pos:              pos,
+		Subject:          subject,
+		Predicate:        predicate,
+		Outcome:          outcome,
+		Class:            class,
+		KnownFacts:       known,
+		ClosedWorldFacts: append([]string(nil), closedWorldFacts...),
+		Missing:          missing,
+	})
+}
+
+func defaultProofClass(outcome ProofOutcome) ProofDischargeClass {
+	switch outcome {
+	case ProofProvenFlow:
+		return ProofClassFlow
+	case ProofProvenLinear:
+		return ProofClassLinear
+	case ProofProvenConst:
+		return ProofClassConst
+	case ProofProvenSMT:
+		return ProofClassSMT
+	case ProofProvenContract:
+		return ProofClassContract
+	case ProofMeasured:
+		return ProofClassMeasured
+	default:
+		return ProofClassRuntime
+	}
 }
 
 // proofLint reports that a refinement obligation was not statically discharged. It is a WARNING by
