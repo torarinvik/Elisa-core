@@ -304,6 +304,51 @@ func (a *Analyzer) specializeInterfaceMethodSignature(signature *FuncType, recei
 	return specialized
 }
 
+// typePathNameForReceiver reverse-resolves a concrete receiver type back to a visible
+// type-path name (e.g. the struct's qualified name), so a `value.method()` UFCS call can be
+// rewritten to the qualified `TypeName.method(value, …)` form that resolveInterfaceMethodExprType
+// (analysis) and resolveStaticInterfaceMethod (backend, via NamedTypes) both understand.
+func (a *Analyzer) typePathNameForReceiver(receiver Type) (string, bool) {
+	if a == nil || receiver == nil {
+		return "", false
+	}
+	for name, t := range a.namedTypes {
+		if t != nil && SameType(t, receiver) {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// staticImplMethodForReceiver finds the protocol-impl (or synthesized default-method) impl that
+// provides a method named methodName for a concrete receiver type. It returns the matched impl so
+// a UFCS call can be dispatched. Ambiguity across multiple conforming protocols is reported.
+func (a *Analyzer) staticImplMethodForReceiver(receiver Type, methodName string, pos ast.Node) (*StaticImpl, bool) {
+	if a == nil || receiver == nil || methodName == "" {
+		return nil, false
+	}
+	var matched *StaticImpl
+	for _, impl := range a.staticImplsForReceiver(receiver) {
+		if impl == nil {
+			continue
+		}
+		if sym, ok := impl.Methods[methodName]; !ok || sym == nil {
+			continue
+		}
+		if matched != nil {
+			if pos != nil {
+				a.errorf(pos.Pos(), "method %q on %s is ambiguous across multiple protocol impls", methodName, receiver.String())
+			}
+			return nil, false
+		}
+		matched = impl
+	}
+	if matched == nil {
+		return nil, false
+	}
+	return matched, true
+}
+
 func (a *Analyzer) staticImplsForReceiver(receiver Type) []*StaticImpl {
 	if a == nil || receiver == nil || len(a.staticImpls) == 0 {
 		return nil
