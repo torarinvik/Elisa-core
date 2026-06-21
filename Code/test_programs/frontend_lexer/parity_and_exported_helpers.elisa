@@ -300,6 +300,8 @@ def frontend_count_tokens_with_len(a: mutable Arena&, filename: u8&, source: u8&
             match kind:
                 FrontendTokenKind.Eof:
                     return count
+                _:
+                    pass
 
         return count
 

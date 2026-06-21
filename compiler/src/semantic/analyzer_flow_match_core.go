@@ -259,6 +259,7 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
+		a.reportNonExhaustiveMatch(stmt.Pos(), enumType, covered, hasWildcard)
 		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine

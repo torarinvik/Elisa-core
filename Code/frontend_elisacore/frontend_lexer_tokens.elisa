@@ -428,5 +428,7 @@ def frontend_tokenize_with_len(a: mutable Arena&, filename: u8&, source: u8&, so
                 match token.kind:
                     FrontendTokenKind.Eof:
                         return tokens
+                    _:
+                        pass
 
             return tokens
