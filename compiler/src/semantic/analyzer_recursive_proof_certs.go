@@ -21,6 +21,7 @@ type recursiveProofCertificate struct {
 	Call    *ast.CallExpr
 	Measure ast.Expr
 	Reason  string
+	Witness string // advisory entry→call transition naming the failing lexicographic component
 	Outcome ProofOutcome
 }
 
@@ -60,6 +61,7 @@ func (a *Analyzer) directNumericTerminationCertificate(fn *ast.FuncDecl, call *a
 			Call:    call,
 			Measure: fn.Decreases[0],
 			Reason:  "numeric measure did not strictly decrease",
+			Witness: a.lexicographicDecreaseDiagnostic(fn.Decreases, subst),
 			Outcome: ProofRefuted,
 		}, false
 	}

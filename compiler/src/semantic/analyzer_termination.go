@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/unparse"
 )
 
 type recursionEdge struct {
@@ -100,7 +101,11 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 			continue
 		}
 		a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", ProofRefuted)
-		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate", fn.Name)
+		witness := ""
+		if cert.Witness != "" {
+			witness = " — " + cert.Witness
+		}
+		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate%s", fn.Name, witness)
 	}
 }
 
@@ -274,7 +279,50 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 		return
 	}
 	a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
-	a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven to strictly decrease and stay >= 0 on every iteration; falling back to the runtime loop-progress check")
+	witness := a.loopLexicographicDecreaseDiagnostic(stmt.Cond, invs, measures, subst)
+	if witness != "" {
+		witness = " — " + witness
+	}
+	a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven to strictly decrease and stay >= 0 on every iteration; falling back to the runtime loop-progress check%s", witness)
+}
+
+// loopLexicographicDecreaseDiagnostic mirrors proveLoopMeasureDecreases to name the deciding
+// lexicographic component (the first whose strictly-earlier components are all provably unchanged) that
+// the prover could not show strictly decreases across one iteration, rendering its measure→body-effect
+// transition as the witness. Advisory only — it never re-decides the proof.
+func (a *Analyzer) loopLexicographicDecreaseDiagnostic(cond ast.Expr, invs []*ast.ContractStmt, measures []ast.Expr, subst map[string]ast.Expr) string {
+	if len(measures) == 0 {
+		return ""
+	}
+	for k, measure := range measures {
+		earlierUnchanged := true
+		for j := 0; j < k; j++ {
+			if !a.proveLoopMeasureUnchanged(cond, invs, measures[j], subst) {
+				earlierUnchanged = false
+				break
+			}
+		}
+		if !earlierUnchanged {
+			continue
+		}
+		isLast := k == len(measures)-1
+		if !isLast && a.proveLoopMeasureUnchanged(cond, invs, measure, subst) {
+			continue
+		}
+		if a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst) {
+			continue
+		}
+		comp := unparse.FormatExpr(measure)
+		call := comp
+		if post, ok := substituteLemmaEnsure(measure, subst); ok {
+			call = unparse.FormatExpr(post)
+		}
+		if len(measures) == 1 {
+			return "measure `" + comp + "` not proven to strictly decrease across the loop body: " + comp + " -> " + call
+		}
+		return "lexicographic decreases: component `" + comp + "` not proven to strictly decrease across the loop body: " + comp + " -> " + call
+	}
+	return ""
 }
 
 // proveLoopMeasureDecreases proves the lexicographic measure tuple strictly decreases across one loop
