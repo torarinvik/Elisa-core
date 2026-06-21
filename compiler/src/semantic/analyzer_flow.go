@@ -786,6 +786,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.ContractStmt:
 		// In-body `invariant` is analyzed + checked in place; a `requires`/`ensure` reaching here
 		// (not lifted) was not at the function start, which is the only place they're honoured.
+		if n.Kind == ast.ContractDecreases {
+			return
+		}
 		if n.Kind != ast.ContractInvariant {
 			a.errorf(n.Pos(), "`requires`/`ensure` contracts must be the first statements of the function body")
 		} else if n.Cond != nil {

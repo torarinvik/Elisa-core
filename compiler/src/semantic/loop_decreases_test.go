@@ -7,20 +7,35 @@ import (
 	"testing"
 )
 
+func countLoopTerminationProof(result *Result, outcome ProofOutcome) int {
+	n := 0
+	for _, f := range result.ProofReport {
+		if f.Subject == "termination of loop" && f.Predicate == "decreases" && f.Outcome == outcome {
+			n++
+		}
+	}
+	return n
+}
+
 // A leading `decreases` measure that strictly drops and stays >= 0 each iteration proves the loop
 // terminates — no error. `decreases i` for `while i > 0: i <- i - 1` is the canonical countdown.
 func TestLoopDecreasesCountdownTerminates(t *testing.T) {
-	src := `def countdown(n: i64):
-    requires n >= 0
-    i: mutable i64 = n
+	src := `def count_down(n: usize) -> usize:
+    i: mutable usize = n
     while i > 0:
+        invariant i <= n
         decreases i
         i <- i - 1
+    return i
 `
-	for _, e := range analyzeContractStrict(t, "countdown.elisa", src).Errors() {
+	result := analyzeContractStrict(t, "countdown.elisa", src)
+	for _, e := range result.Errors() {
 		if strings.Contains(e, "terminate") || strings.Contains(e, "decreases") {
 			t.Fatalf("a strictly-decreasing bounded measure must prove termination, got: %v", e)
 		}
+	}
+	if got := countLoopTerminationProof(result, ProofProvenSMT); got != 1 {
+		t.Fatalf("expected loop termination to be proven by SMT, got %d: %+v", got, result.ProofReport)
 	}
 }
 
@@ -52,9 +67,16 @@ func TestLoopDecreasesIncreasingMeasureRejected(t *testing.T) {
         decreases i
         i <- i + 1
 `
-	errs := strings.Join(analyzeContractStrict(t, "bad_loop.elisa", src).Errors(), "\n")
-	if !strings.Contains(errs, "may not terminate") {
-		t.Fatalf("an increasing `decreases` measure must be rejected, got: %v", errs)
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "bad_loop.elisa", src, AnalyzeOptions{EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("an increasing `decreases` measure should decline without changing acceptance, got: %v", errs)
+	}
+	if got := countLoopTerminationProof(result, ProofRuntime); got != 1 {
+		t.Fatalf("expected non-decreasing loop measure to fall back to runtime, got %d: %+v", got, result.ProofReport)
+	}
+	warnings := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warnings, "falling back to the runtime loop-progress check") {
+		t.Fatalf("expected runtime-backstop warning, got:\n%s", warnings)
 	}
 }
 
@@ -68,9 +90,12 @@ func TestLoopDecreasesUnboundedMeasureRejected(t *testing.T) {
         decreases n - i
         i <- i + 1
 `
-	errs := strings.Join(analyzeContractStrict(t, "unbounded_loop.elisa", src).Errors(), "\n")
-	if !strings.Contains(errs, "may not terminate") {
-		t.Fatalf("an unbounded signed measure must be rejected (overflow), got: %v", errs)
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unbounded_loop.elisa", src, AnalyzeOptions{EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("an unbounded signed measure should decline without changing acceptance, got: %v", errs)
+	}
+	if got := countLoopTerminationProof(result, ProofRuntime); got != 1 {
+		t.Fatalf("expected unbounded loop measure to fall back to runtime, got %d: %+v", got, result.ProofReport)
 	}
 }
 
@@ -88,8 +113,11 @@ def loop(n: i64):
         sink(i)
         i <- i - 1
 `
-	errs := strings.Join(analyzeContractStrict(t, "unmodelable_loop.elisa", src).Errors(), "\n")
-	if !strings.Contains(errs, "cannot model") && !strings.Contains(errs, "may not terminate") {
-		t.Fatalf("an unmodelable loop body must not silently pass its `decreases` claim, got: %v", errs)
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unmodelable_loop.elisa", src, AnalyzeOptions{EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("an unmodelable loop body should decline without changing acceptance, got: %v", errs)
+	}
+	if got := countLoopTerminationProof(result, ProofRuntime); got != 1 {
+		t.Fatalf("expected unmodelable loop body to fall back to runtime, got %d: %+v", got, result.ProofReport)
 	}
 }

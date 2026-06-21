@@ -206,8 +206,10 @@ func (a *Analyzer) measureDiffIsZero(measure ast.Expr, subst map[string]ast.Expr
 // some component strictly drops while every earlier component is provably unchanged across the body.
 //
 // Opt-in and additive (mirrors function `decreases`): checked ONLY when a `decreases` clause leads the
-// loop body. An unprovable measure is a hard error — it is an explicit termination claim with no runtime
-// fallback. Called on the pristine pre-loop scope (before the body mutates the loop variables).
+// loop body. An unprovable measure declines to the existing runtime/progress backstop: the proof report
+// records ProofRuntime and strict-proof mode may escalate the advisory lint, but acceptance never rests
+// on trusting an unproved termination claim. Called on the pristine pre-loop scope (before the body
+// mutates the loop variables).
 func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	if a == nil || stmt == nil {
 		return
@@ -227,7 +229,8 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	}
 	subst, _, captured := a.captureLoopBodyEffect(stmt.Body)
 	if !captured {
-		a.errorf(decs[0].Pos(), "cannot prove the loop `decreases` measure terminates: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow)")
+		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
+		a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow); falling back to the runtime loop-progress check")
 		return
 	}
 	invs := leadingInvariants(stmt.Body)
@@ -241,8 +244,8 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
 		return
 	}
-	a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRefuted)
-	a.errorf(decs[0].Pos(), "cannot prove the `decreases` measure strictly decreases (and stays >= 0) on every iteration; the loop may not terminate")
+	a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
+	a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven to strictly decrease and stay >= 0 on every iteration; falling back to the runtime loop-progress check")
 }
 
 // proveLoopMeasureDecreases proves the lexicographic measure tuple strictly decreases across one loop
