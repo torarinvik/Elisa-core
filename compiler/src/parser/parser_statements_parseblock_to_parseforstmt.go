@@ -442,8 +442,15 @@ func (p *Parser) looksLikeAssertByStmt() bool {
 				depth--
 			}
 		case lexer.TOKEN_IDENT:
-			if depth == 0 && tok.Text == "by" && i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_COLON {
-				return true
+			if depth == 0 && tok.Text == "by" && i+1 < len(p.tokens) {
+				// `by:` or the closed-world `by scoped:` (docs/99) both open a proof block.
+				if p.tokens[i+1].Kind == lexer.TOKEN_COLON {
+					return true
+				}
+				if p.tokens[i+1].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Text == "scoped" &&
+					i+2 < len(p.tokens) && p.tokens[i+2].Kind == lexer.TOKEN_COLON {
+					return true
+				}
 			}
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			return false
@@ -464,10 +471,15 @@ func (p *Parser) parseAssertByStmt() ast.Stmt {
 		return &ast.AssertByStmt{Position: pos, Cond: cond}
 	}
 	p.advance() // `by`
+	scoped := false
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "scoped" {
+		scoped = true // `by scoped:` opens a CLOSED-WORLD proof block (docs/99).
+		p.advance()
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	proof := p.parseBlock()
-	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof}
+	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof, Scoped: scoped}
 }
 
 func (p *Parser) looksLikeGuardStmt() bool {

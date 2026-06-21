@@ -474,6 +474,12 @@ type AssertByStmt struct {
 	Position lexer.Pos
 	Cond     Expr
 	Proof    []Stmt
+	// Scoped marks a CLOSED-WORLD proof block (docs/99): written `assert COND by scoped:`. The block is
+	// discharged using ONLY the facts cited inside it (lemma `use`-calls, nested asserts) — ambient flow
+	// and assert facts from the enclosing scope are walled out. This makes the proof STABLE: its verdict
+	// depends only on the cited facts, not on unrelated surrounding code that might otherwise perturb the
+	// solver's hypothesis set. A non-scoped `by:` block keeps the original open-world behavior.
+	Scoped bool
 }
 
 // ContractKind distinguishes value-contract clauses.

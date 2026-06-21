@@ -538,6 +538,9 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 	if a.currentFuncDecl == nil {
 		return ""
 	}
+	if a.inClosedWorldProof {
+		return "" // docs/99: the enclosing `requires` is an ambient fact, walled out of a scoped proof.
+	}
 	var b strings.Builder
 	for _, req := range a.currentFuncDecl.Requires {
 		if req == nil {
@@ -622,6 +625,7 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 	var b strings.Builder
 	seen := map[string]bool{}
 	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		closedHere := sc.closedWorld // docs/99: include this scope's facts, then stop ascending.
 		// Emit in sorted name order: rangeFacts is a map, and its iteration order would otherwise make
 		// the hypothesis text (and thus the cache key — brick 5) nondeterministic, so two logically
 		// identical obligations could differ byte-for-byte and miss the cache.
@@ -648,6 +652,9 @@ func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
 				b.WriteString("(assert (<= " + v + " " + smtInt(r.hi) + "))\n")
 			}
 		}
+		if closedHere {
+			break
+		}
 	}
 	return b.String()
 }
@@ -673,6 +680,9 @@ func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
 			if h, ok := tr.boolTerm(fact.Expr, nil); ok {
 				b.WriteString("(assert " + h + ")\n")
 			}
+		}
+		if sc.closedWorld { // docs/99: this scope is a wall — its facts count, the parent's do not.
+			break
 		}
 	}
 	return b.String()
@@ -892,6 +902,9 @@ func (a *Analyzer) canAssumeContractFact(expr ast.Expr) bool {
 func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 	if a == nil || a.currentScope == nil || tr == nil {
 		return ""
+	}
+	if a.inClosedWorldProof {
+		return "" // docs/99: immutable-local defining equalities are ambient; walled out of a scoped proof.
 	}
 	var b strings.Builder
 	seen := map[string]bool{}

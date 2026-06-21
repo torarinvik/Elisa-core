@@ -438,6 +438,16 @@ type Scope struct {
 	// invariant, or exact assignment. They are consumed only by the SMT tier and invalidated when a
 	// later mutation touches one of their dependency roots; calls still clear them conservatively.
 	smtAssertFacts []smtFact
+	// closedWorld marks this scope as a proof WALL (docs/99 scoped proof automation). When a fact-
+	// gathering chain walk reaches a closed-world scope it includes that scope's own facts and then
+	// STOPS — it does not ascend to the parent. The effect: a `proof:`/`assert … by scoped:` block runs
+	// in a closed world over only the facts cited INSIDE the block (lemma ensures recorded here), so the
+	// proof is STABLE — unrelated ambient flow/assert facts in enclosing scopes cannot reach the solver,
+	// hence cannot change the verdict. Symbol/refinement LOOKUP still ascends past the wall (so lemma and
+	// type names resolve); only fact gathering is walled. Soundness is preserved because a wall only
+	// REMOVES hypotheses: a goal proven from a strict subset of the available facts is a fortiori proven
+	// from all of them, and an omitted necessary fact makes the goal correctly DECLINE.
+	closedWorld bool
 }
 
 func NewScope(parent *Scope) *Scope {

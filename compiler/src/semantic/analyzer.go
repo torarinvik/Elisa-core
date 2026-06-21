@@ -363,6 +363,12 @@ type Analyzer struct {
 	enforcePerfLints            bool
 	enforceStrictProofs         bool
 	requireExternContracts      bool
+	// inClosedWorldProof is set while discharging a `by scoped:` proof block (docs/99). Under it, the
+	// ambient hypothesis sources that are NOT scope-walled — the enclosing function's `requires` and the
+	// defining equalities of immutable locals — are suppressed, so the closed world holds ONLY the facts
+	// cited inside the block (which ride the scope-walled assert/flow/range fact channels). This is what
+	// makes a scoped proof's verdict depend solely on its citations.
+	inClosedWorldProof          bool
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
