@@ -205,3 +205,80 @@ def read[T: Str](value: T) -> cstr can[Memory.Allocate, Console.Format, Abort.Pa
 		t.Fatalf("unexpected semantic errors: %v", result.Errors())
 	}
 }
+
+// TestAnalyzeAssociatedTypeBindingConformsAndResolves covers the canonical
+// associated-type story: a protocol declares `type Elem`, its method signatures
+// reference Elem, and a conforming impl binds Elem to a concrete type. The impl
+// must conform (its `get`/`size` signatures must match `Elem`->i64) and a call
+// site through the type-param bound must resolve `-> Elem` to the impl's binding.
+func TestAnalyzeAssociatedTypeBindingConformsAndResolves(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "assoc_container.elisa", `
+struct IntBuf:
+    n: i64
+
+protocol Container:
+    type Elem
+    def get(self: Self, i: i64) -> Elem
+    def size(self: Self) -> i64
+
+impl Container for IntBuf:
+    type Elem = i64
+
+    def get(self: IntBuf, i: i64) -> i64:
+        return self.n
+
+    def size(self: IntBuf) -> i64:
+        return self.n
+
+def first[C: Container](c: C) -> C.Elem:
+    return C.get(c, 0)
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", result.Errors())
+	}
+}
+
+// TestAnalyzeAssociatedTypeMissingBindingErrors verifies that an impl which omits
+// a binding for one of the protocol's associated types is a conformance error.
+func TestAnalyzeAssociatedTypeMissingBindingErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "assoc_missing.elisa", `
+struct IntBuf:
+    n: i64
+
+protocol Container:
+    type Elem
+    def size(self: Self) -> i64
+
+impl Container for IntBuf:
+    def size(self: IntBuf) -> i64:
+        return self.n
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "missing associated type \"Elem\"") {
+		t.Fatalf("expected missing-associated-type diagnostic, got:\n%s", joined)
+	}
+}
+
+// TestAnalyzeAssociatedTypeSignatureMismatchErrors verifies that the protocol's
+// `-> Elem` resolves to the impl's binding (i64) for conformance checking: an impl
+// method whose return type disagrees with the resolved associated type is rejected.
+func TestAnalyzeAssociatedTypeSignatureMismatchErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "assoc_mismatch.elisa", `
+struct IntBuf:
+    n: i64
+
+protocol Container:
+    type Elem
+    def get(self: Self, i: i64) -> Elem
+
+impl Container for IntBuf:
+    type Elem = i64
+
+    def get(self: IntBuf, i: i64) -> bool:
+        return true
+`)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "expects") || !strings.Contains(joined, "get") {
+		t.Fatalf("expected signature-mismatch diagnostic for resolved associated type, got:\n%s", joined)
+	}
+}
