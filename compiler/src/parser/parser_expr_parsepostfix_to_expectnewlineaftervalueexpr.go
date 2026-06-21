@@ -773,6 +773,12 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 	if _, ok := expr.(*ast.CatchExpr); ok {
 		return
 	}
+	// A `match` used in expression position likewise ends with its arm block
+	// (COLON NEWLINE INDENT … DEDENT); the trailing newline was consumed inside the
+	// final arm, so there is none left here — same as ExprBlock / CatchExpr.
+	if _, ok := expr.(*ast.MatchExpr); ok {
+		return
+	}
 	if exprHasBlockRecovery(expr) {
 		return
 	}
