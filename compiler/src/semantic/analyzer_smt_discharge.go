@@ -266,7 +266,40 @@ func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[st
 		return false, "", false
 	}
 	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
+	if !p {
+		if qce := a.smtQuantifierCounterexample(tr, goalExpr, env, extraHyps); qce != "" {
+			ce = qce
+		}
+	}
 	return p, ce, true
+}
+
+func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.Expr, env map[string]string, extraHyps string) string {
+	q, ok := stripOptimizationParens(goalExpr).(*ast.QuantifierExpr)
+	if !ok || q == nil || q.Exists || q.In != nil || len(q.Vars) == 0 {
+		return ""
+	}
+	qenv := make(map[string]string, len(env)+len(q.Vars))
+	for k, v := range env {
+		qenv[k] = v
+	}
+	for _, v := range q.Vars {
+		sym := "q_" + v
+		qenv[v] = sym
+		tr.auxDecls = append(tr.auxDecls, "(declare-const "+sym+" Int)\n")
+		tr.ceExprs[v] = sym
+	}
+	tr.collectQuantifierWitnessSelects(q.Body, qenv)
+	body, ok := tr.boolTerm(q.Body, qenv)
+	if !ok {
+		return ""
+	}
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	proven, ce := a.smtCheckQuery(tr, hyps, body)
+	if proven {
+		return ""
+	}
+	return ce
 }
 
 // smtDischargeFormulaWithHyps discharges a lowered VC-IR formula against a CALLER-SUPPLIED hypothesis
@@ -299,7 +332,7 @@ func (a *Analyzer) smtCheckQuery(tr *smtTranslator, hyps string, obligation stri
 	if solver == nil || tr == nil {
 		return false, ""
 	}
-	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n"
+	query := tr.factPreamble() + hyps + "(assert (not " + obligation + "))\n" + tr.counterexampleExprDefinitions()
 	a.smtStats.Attempts++
 	// Query cache (brick 5): an identical query has the same deterministic verdict, so serve it without a
 	// solver call. Attempts and Proven/Declined still count (the obligation was discharged), but no solver
@@ -1015,6 +1048,9 @@ type smtTranslator struct {
 	auxDecls []string // declaration + sound-constraint lines, in mint order
 	auxVars  []string // the fresh symbols, for the Sat counterexample query
 	auxSeq   int      // monotonic counter → deterministic fresh names
+	// ceExprs are diagnostic-only SMT terms worth reading back from a Sat model. Quantified forall
+	// failures use these to name the binder and array element/select that falsified the goal.
+	ceExprs map[string]string // rendered label -> SMT term
 	// oldAsEntry enables `old(expr)` -> the ENTRY-value term (vcOldEntry) in the VC IR. Set ONLY by the
 	// WP discharge paths, which thread the bare (exit) value so entry/exit diverge; everywhere else
 	// old() must stay a fresh opaque symbol or it would collapse onto the un-threaded bare value.
@@ -1050,6 +1086,7 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		signedBits:      map[string]int{},
 		boolDecls:       map[string]bool{},
 		paramConsts:     paramConsts,
+		ceExprs:         map[string]string{},
 		callCanon:       map[string]string{},
 		callEqInFlight:  map[string]int{},
 		callEqMaxUnroll: 1,
@@ -1972,6 +2009,99 @@ func (tr *smtTranslator) collectSelectTriggers(body ast.Expr, qenv map[string]st
 	return triggers
 }
 
+func (tr *smtTranslator) collectQuantifierWitnessSelects(body ast.Expr, qenv map[string]string) {
+	var walk func(ast.Expr)
+	walk = func(e ast.Expr) {
+		switch n := e.(type) {
+		case *ast.ParenExpr:
+			walk(n.Inner)
+		case *ast.UnaryExpr:
+			walk(n.Operand)
+		case *ast.BinaryExpr:
+			walk(n.Left)
+			walk(n.Right)
+		case *ast.TernaryExpr:
+			walk(n.Cond)
+			walk(n.Value)
+			walk(n.Alt)
+		case *ast.QuantifierExpr:
+			return
+		case *ast.IndexExpr:
+			if term, ok := tr.termEnv(n, qenv); ok {
+				if label := tr.witnessSelectLabel(n, qenv); label != "" {
+					tr.ceExprs[label] = term
+				}
+			}
+			walk(n.Object)
+			walk(n.Index)
+		}
+	}
+	walk(body)
+}
+
+func (tr *smtTranslator) witnessSelectLabel(n *ast.IndexExpr, env map[string]string) string {
+	if n == nil {
+		return ""
+	}
+	obj := tr.witnessExprLabel(n.Object, env)
+	idx := tr.witnessExprLabel(n.Index, env)
+	if obj == "" || idx == "" {
+		return ""
+	}
+	return obj + "[" + idx + "]"
+}
+
+func (tr *smtTranslator) witnessExprLabel(expr ast.Expr, env map[string]string) string {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.Ident:
+		if env != nil {
+			if bound, ok := env[n.Name]; ok {
+				if label := tr.counterexampleLabelForTerm(bound); label != "" {
+					return label
+				}
+			}
+		}
+		return n.Name
+	case *ast.IntLit:
+		if c, ok := tr.a.constIntValue(n); ok {
+			return strconv.FormatInt(c, 10)
+		}
+	case *ast.FieldExpr:
+		base := tr.witnessExprLabel(n.Object, env)
+		if base == "" {
+			return ""
+		}
+		return base + "." + n.Field
+	case *ast.BinaryExpr:
+		l := tr.witnessExprLabel(n.Left, env)
+		r := tr.witnessExprLabel(n.Right, env)
+		if l == "" || r == "" {
+			return ""
+		}
+		switch n.Op {
+		case lexer.TOKEN_PLUS:
+			return l + "+" + r
+		case lexer.TOKEN_MINUS:
+			return l + "-" + r
+		}
+	}
+	return ""
+}
+
+func (tr *smtTranslator) counterexampleLabelForTerm(term string) string {
+	for name := range tr.arrayDecls {
+		if smtVar(name) == term {
+			return name
+		}
+	}
+	for name := range tr.decls {
+		if smtVar(name) == term {
+			return name
+		}
+	}
+	return ""
+}
+
 // termMentionsAnyBinder reports whether an SMT term string contains any of the bound `q_*` symbols as
 // a whole token (so `q_i` does not spuriously match `q_index`).
 func termMentionsAnyBinder(term string, bound map[string]bool) bool {
@@ -2385,7 +2515,35 @@ func (tr *smtTranslator) declaredSMTVars() []string {
 	}
 	sort.Strings(out)
 	out = append(out, tr.auxVars...)
+	labels := make([]string, 0, len(tr.ceExprs))
+	for label := range tr.ceExprs {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		out = append(out, smtCounterexampleExprVar(label))
+	}
 	return out
+}
+
+func (tr *smtTranslator) counterexampleExprDefinitions() string {
+	if len(tr.ceExprs) == 0 {
+		return ""
+	}
+	labels := make([]string, 0, len(tr.ceExprs))
+	for label := range tr.ceExprs {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	var b strings.Builder
+	for _, label := range labels {
+		b.WriteString("(define-fun ")
+		b.WriteString(smtCounterexampleExprVar(label))
+		b.WriteString(" () Int ")
+		b.WriteString(tr.ceExprs[label])
+		b.WriteString(")\n")
+	}
+	return b.String()
 }
 
 // counterexample renders a model (SMT-var → value) as a readable "a=5, b=20" hint using the original
@@ -2405,10 +2563,34 @@ func (tr *smtTranslator) counterexample(model map[string]string) string {
 			parts = append(parts, name+"="+v)
 		}
 	}
+	labels := make([]string, 0, len(tr.ceExprs))
+	for label := range tr.ceExprs {
+		labels = append(labels, label)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		if v, ok := model[smtCounterexampleExprVar(label)]; ok {
+			parts = append(parts, label+"="+v)
+		}
+	}
 	if len(parts) == 0 {
 		return ""
 	}
 	return strings.Join(parts, ", ")
+}
+
+func smtCounterexampleExprVar(label string) string {
+	var b strings.Builder
+	b.WriteString("ce_")
+	for _, r := range label {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		default:
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 func smtCompare(op lexer.TokenKind, l, r string) string {

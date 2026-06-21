@@ -88,3 +88,41 @@ def count_up(n: usize) -> usize:
 		t.Fatalf("expected the loop-invariant counterexample to name the counter `i`, got: %s", diags)
 	}
 }
+
+func TestFailedForallRefinementShowsBinderAndSelectCounterexample(t *testing.T) {
+	requireZ3(t)
+	src := `
+law AllPositive(self: darray[i64]) = forall i in self.indices: self[i] > 0
+
+def check(xs: darray[i64]) -> void:
+    requires xs.count == 3
+    y: darray[i64] is AllPositive = xs
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ce_forall_refinement.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	diags := allDiagnostics(result)
+	if !contains(diags, "it can fail when") {
+		t.Fatalf("expected failed forall refinement to include a counterexample hint, got: %s", diags)
+	}
+	if !strings.Contains(diags, "i=") || !strings.Contains(diags, "xs[i]=") {
+		t.Fatalf("expected failed forall refinement to name binder and selected element, got: %s", diags)
+	}
+}
+
+func TestProvableForallRefinementStaysSilent(t *testing.T) {
+	requireZ3(t)
+	src := `
+law AllPositive(self: darray[i64]) = forall i in self.indices: self[i] > 0
+
+def check(xs: darray[i64]) -> void:
+    requires xs.count == 3
+    requires forall i in xs.indices: xs[i] > 0
+    y: darray[i64] is AllPositive = xs
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ce_forall_refinement_proven.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	diags := allDiagnostics(result)
+	if strings.Contains(diags, "it can fail when") || strings.Contains(diags, "proof hole: assertion could not be proven") {
+		t.Fatalf("provable forall refinement should not report a counterexample/proof hole, got: %s", diags)
+	}
+}
