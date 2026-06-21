@@ -400,6 +400,9 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		if fnDecl, ok := decl.(*ast.FuncDecl); ok && fnDecl.IsLemma {
 			return nil // verification-only; never declared or defined in LLVM
 		}
+		if fnDecl, ok := decl.(*ast.FuncDecl); ok && fnDecl.IsGhost {
+			return nil // verification-only spec function; never declared or defined in LLVM
+		}
 		if fnDecl, ok := decl.(*ast.FuncDecl); ok && fnDecl.IsContract {
 			return nil // docs/97: a named-contract bundle is verification-only, never emitted
 		}
@@ -588,6 +591,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 			// A lemma is verification-only (ghost code) and its call sites are erased, so nothing
 			// references its body — never emit it. (Laws DO get emitted: `x is Law` desugars to a real
 			// `Law(x)` call, so the law body must exist.)
+			return nil
+		}
+		if n.IsGhost {
 			return nil
 		}
 		if n.IsContract {

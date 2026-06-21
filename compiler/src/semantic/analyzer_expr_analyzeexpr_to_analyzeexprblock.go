@@ -646,11 +646,40 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		// A spec-only bound quantifier (docs/90 brick 90-4). Binders range over the integers; the body
 		// must be bool. Type-checked in a child scope so the binders are in scope for the body and gone
 		// after. Never compiled to a runtime check (suppressed at discharge) — provable only by SMT.
+		var sourceType Type
+		if n.In != nil {
+			sourceType = a.analyzeExpr(n.In)
+		}
 		saved := a.currentScope
 		scope := NewScope(saved)
 		intType := a.namedTypes["i64"]
-		for _, v := range n.Vars {
-			scope.Define(&Symbol{Name: v, Kind: SymbolLocal, Type: intType})
+		binderTypes := make([]Type, len(n.Vars))
+		for i := range binderTypes {
+			binderTypes[i] = intType
+		}
+		if n.In != nil {
+			switch ct := stripRefForBounds(sourceType).(type) {
+			case *ArrayType:
+				if len(n.Vars) == 1 {
+					binderTypes[0] = ct.Elem
+				}
+			case *DArrayType:
+				if len(n.Vars) == 1 {
+					binderTypes[0] = ct.Elem
+				}
+			case *SetType:
+				if len(n.Vars) == 1 {
+					binderTypes[0] = ct.Elem
+				}
+			case *DictType:
+				if len(n.Vars) == 2 {
+					binderTypes[0] = ct.Key
+					binderTypes[1] = ct.Value
+				}
+			}
+		}
+		for i, v := range n.Vars {
+			scope.Define(&Symbol{Name: v, Kind: SymbolLocal, Type: binderTypes[i]})
 		}
 		a.currentScope = scope
 		bodyType := a.analyzeExpr(n.Body)

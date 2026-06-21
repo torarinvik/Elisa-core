@@ -61,6 +61,9 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				} else {
 					a.analyzeFunc(n)
 				}
+				if n.IsGhost {
+					a.validateGhostFuncDecl(n)
+				}
 			case *ast.StaticAssertDecl:
 				a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 			case *ast.StaticAssertBlockDecl:

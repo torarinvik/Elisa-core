@@ -28,12 +28,39 @@ func (a *Analyzer) expandUsesContracts(decls []scopedDecl) {
 	for _, sd := range decls {
 		fn, ok := sd.Decl.(*ast.FuncDecl)
 		if !ok || fn == nil || len(fn.Uses) == 0 || fn.IsContract {
+			if ext, extOK := sd.Decl.(*ast.ExternFuncDecl); extOK && ext != nil && len(ext.Uses) > 0 {
+				a.expandExternUsesContracts(ext, contracts)
+			}
 			continue
 		}
 		for _, use := range fn.Uses {
 			a.expandOneUse(fn, use, contracts)
 		}
 	}
+}
+
+func (a *Analyzer) expandExternUsesContracts(ext *ast.ExternFuncDecl, contracts map[string]*ast.FuncDecl) {
+	fn := &ast.FuncDecl{
+		Position:         ext.Position,
+		Annotations:      append([]ast.Annotation(nil), ext.Annotations...),
+		Override:         ext.Override,
+		Name:             ext.Name,
+		TypeParams:       append([]string(nil), ext.TypeParams...),
+		RegionParams:     append([]string(nil), ext.RegionParams...),
+		PermissionParams: append([]string(nil), ext.PermissionParams...),
+		GenericParams:    append([]ast.GenericParam(nil), ext.GenericParams...),
+		Permissions:      append([]ast.PermissionRef(nil), ext.Permissions...),
+		Requires:         append([]ast.Expr(nil), ext.Requires...),
+		EnsureValues:     append([]ast.Expr(nil), ext.EnsureValues...),
+		Uses:             append([]*ast.ContractStmt(nil), ext.Uses...),
+		Params:           append([]ast.ParamDecl(nil), ext.Params...),
+		ReturnType:       ext.ReturnType,
+	}
+	for _, use := range ext.Uses {
+		a.expandOneUse(fn, use, contracts)
+	}
+	ext.Requires = append([]ast.Expr(nil), fn.Requires...)
+	ext.EnsureValues = append([]ast.Expr(nil), fn.EnsureValues...)
 }
 
 // validateContractDecl checks a `contract` declaration is well-formed: it must bundle at least one

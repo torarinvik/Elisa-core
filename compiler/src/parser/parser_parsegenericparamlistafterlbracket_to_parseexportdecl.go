@@ -525,6 +525,7 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	}
 	// Boundary preconditions: `extern f(...) -> T requires <bool>[, <bool>]` — checked at calls.
 	var requires []ast.Expr
+	var uses []*ast.ContractStmt
 	if p.matchIdentText("requires") {
 		saved := p.allowQuantifiers
 		p.allowQuantifiers = true
@@ -534,13 +535,54 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 		}
 		p.allowQuantifiers = saved
 	}
+	for p.matchIdentText("uses") {
+		uses = append(uses, p.parseUsesContractAfterKeyword())
+	}
+	var ensureValues []ast.Expr
+	if p.matchIdentText("ensure") {
+		saved := p.allowQuantifiers
+		p.allowQuantifiers = true
+		ensureValues = append(ensureValues, p.parseExpr())
+		for p.match(lexer.TOKEN_COMMA) {
+			ensureValues = append(ensureValues, p.parseExpr())
+		}
+		p.allowQuantifiers = saved
+	}
 	var ensures []ast.EnsuresClause
 	if p.matchIdentText("ensures") {
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 	p.expectNewline()
 
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Requires: requires, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, TypeParams: typeParams, PermissionParams: permissionParams, GenericParams: genericParams, RegionParams: regionParams, Permissions: permissions, Requires: requires, EnsureValues: ensureValues, Uses: uses, Ensures: ensures, Params: params, ReturnType: retType, Variadic: variadic}
+}
+
+func (p *Parser) parseUsesContractAfterKeyword() *ast.ContractStmt {
+	pos := p.cur().Pos
+	cname := p.expect(lexer.TOKEN_IDENT).Text
+	var typeArgs []ast.TypeExpr
+	if p.match(lexer.TOKEN_LBRACKET) {
+		typeArgs = make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+		for {
+			typeArgs = append(typeArgs, p.parseGenericTypeArgExpr())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RBRACKET)
+	}
+	p.expect(lexer.TOKEN_LPAREN)
+	var args []ast.Expr
+	if p.peek() != lexer.TOKEN_RPAREN {
+		for {
+			args = append(args, p.parseExpr())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesTypeArgs: typeArgs, UsesArgs: args}
 }
 func (p *Parser) parseExportDecl() ast.Decl {
 	pos := p.cur().Pos

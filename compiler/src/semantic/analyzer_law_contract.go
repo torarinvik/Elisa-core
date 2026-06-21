@@ -98,6 +98,7 @@ const (
 	ProofProvenConst    ProofOutcome = "proven (const)"    // entailed by constant evaluation
 	ProofProvenSMT      ProofOutcome = "proven (smt)"      // entailed by an SMT solver — nonlinear / rich-boolean (docs/90)
 	ProofProvenContract ProofOutcome = "proven (contract)" // a function-level law (effect/shape/composite) discharged by analysis (docs/89)
+	ProofAssumedExtern  ProofOutcome = "assumed (extern boundary)"
 	ProofMeasured       ProofOutcome = "measured (-Wperf)" // a measure law verified post-codegen, surfaced as a warning (docs/89 Stage 5)
 	ProofRefuted        ProofOutcome = "refuted"           // provably violated — a compile error
 	ProofRuntime        ProofOutcome = "runtime"           // unprovable — debug runtime check / -strict error
@@ -111,6 +112,7 @@ const (
 	ProofClassConst     ProofDischargeClass = "const"
 	ProofClassSMT       ProofDischargeClass = "smt"
 	ProofClassContract  ProofDischargeClass = "contract"
+	ProofClassBoundary  ProofDischargeClass = "boundary"
 	ProofClassScoped    ProofDischargeClass = "scoped"
 	ProofClassTypestate ProofDischargeClass = "typestate"
 	ProofClassRuntime   ProofDischargeClass = "runtime"
@@ -164,6 +166,8 @@ func defaultProofClass(outcome ProofOutcome) ProofDischargeClass {
 		return ProofClassSMT
 	case ProofProvenContract:
 		return ProofClassContract
+	case ProofAssumedExtern:
+		return ProofClassBoundary
 	case ProofMeasured:
 		return ProofClassMeasured
 	default:

@@ -330,6 +330,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("lemma") && p.looksLikeLemmaDecl() {
 		return p.parseLemmaDecl()
 	}
+	if p.peekIdentText("ghost") && p.looksLikeGhostFuncDecl() {
+		return p.parseGhostFuncDecl()
+	}
 	if p.peekIdentText("contract") && p.looksLikeContractDecl() {
 		return p.parseContractDecl()
 	}
@@ -518,6 +521,19 @@ func (p *Parser) parseLemmaDecl() ast.Decl {
 	if fn != nil {
 		fn.IsLemma = true
 	}
+	return fn
+}
+
+func (p *Parser) looksLikeGhostFuncDecl() bool {
+	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_DEF
+}
+
+func (p *Parser) parseGhostFuncDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("ghost")
+	p.expect(lexer.TOKEN_DEF)
+	fn := p.parseFuncDeclRest(pos, nil, false)
+	fn.IsGhost = true
 	return fn
 }
 
@@ -867,6 +883,7 @@ func substituteLawIdents(expr ast.Expr, subst map[string]ast.Expr, bound map[str
 			}
 		}
 		return &ast.QuantifierExpr{Position: n.Position, Exists: n.Exists, Vars: n.Vars,
+			In:   substituteLawIdents(n.In, subst, bound),
 			Body: substituteLawIdents(n.Body, subst, inner)}
 	default:
 		return n

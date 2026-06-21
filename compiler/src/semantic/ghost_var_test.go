@@ -170,3 +170,54 @@ def f() -> i64:
 		t.Fatalf("a variable named `ghost` must not be treated as a ghost decl, got %d", len(result.GhostDecls))
 	}
 }
+
+func TestGhostFunctionUsableInEnsureProves(t *testing.T) {
+	src := `
+ghost def abs(x: i64) -> i64:
+    if x < 0:
+        return -x
+    return x
+
+def distance(a: i64, b: i64) -> i64:
+    requires a >= -1000 and a <= 1000
+    requires b >= -1000 and b <= 1000
+    ensure result == abs(a - b)
+    ensure result >= 0
+    if a >= b:
+        return a - b
+    return b - a
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ghost_fn_ensure.elisa", src, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected ghost function in ensure to prove cleanly, got: %v", errs)
+	}
+}
+
+func TestGhostFunctionRuntimeCallRejected(t *testing.T) {
+	src := `
+ghost def abs(x: i64) -> i64:
+    if x < 0:
+        return -x
+    return x
+
+def runtime_caller(x: i64) -> i64:
+    return abs(x)
+`
+	result := analyzeWithSMT(t, "ghost_fn_runtime_call.elisa", src)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "ghost function") {
+		t.Fatalf("expected runtime ghost function call to be rejected, got: %v", result.Errors())
+	}
+}
+
+func TestGhostFunctionImpureBodyRejected(t *testing.T) {
+	src := `
+extern bump() -> i64
+
+ghost def bad() -> i64:
+    return bump()
+`
+	result := analyzeWithSMT(t, "ghost_fn_impure.elisa", src)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "pure and total") {
+		t.Fatalf("expected impure ghost function body to be rejected, got: %v", result.Errors())
+	}
+}

@@ -297,6 +297,12 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	if expr == nil || ft == nil {
 		return invalidType
 	}
+	if decl, ok := a.resolveDirectCallFuncDecl(expr); ok && decl != nil && decl.IsGhost {
+		a.ghostReadSeen = true
+		if a.ghostReadAllowed == 0 {
+			a.errorf(expr.Pos(), "ghost function %q is verification-only and cannot be called by runtime code: it is erased from codegen, so call it only from specs (requires/ensure/invariant/law/assert)", decl.Name)
+		}
+	}
 	if ft.Static && a.staticContextDepth == 0 {
 		a.errorf(expr.Pos(), "static function %q can only be called from a static context", ft.Name)
 		return invalidType
@@ -522,6 +528,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.recordCallArgDisjoint(expr, appliedType.Params, callAliasArgs)
 	a.dischargeCallArgRefinements(expr, callAliasArgs)
 	a.dischargeCallRequires(expr, callAliasArgs)
+	a.assumeExternEnsures(expr, callAliasArgs)
 	a.assumeLemmaEnsures(expr, callAliasArgs)
 	originalTrackedByRoot := map[*Symbol]Type{}
 	loweredArgs := append([]ast.Expr(nil), orderedArgs...)

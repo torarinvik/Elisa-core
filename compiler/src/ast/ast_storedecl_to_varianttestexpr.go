@@ -215,6 +215,10 @@ type FuncDecl struct {
 	// codegen (no body emitted, no call emitted) — it exists purely to give the prover a manually
 	// supplied, separately-verified fact it could not derive automatically.
 	IsLemma bool
+	// IsGhost marks a `ghost def`: a pure, total, verification-only value function. It may be called
+	// from spec positions (requires/ensure/invariant/law/assert) and its defining equation may be used
+	// by SMT, but it is erased from interpreter/codegen and cannot be called by runtime code.
+	IsGhost bool
 }
 type ParamDecl struct {
 	Position     lexer.Pos
@@ -237,10 +241,15 @@ type ExternFuncDecl struct {
 	// Requires holds value-contract preconditions on the boundary (`requires <bool-expr>`),
 	// checked/discharged at every call site so the caller cannot pass the native function an
 	// argument outside its specified domain. The native body is trusted to honour its `ensures`.
-	Requires   []Expr
-	Params     []ParamDecl
-	ReturnType TypeExpr
-	Variadic   bool
+	Requires []Expr
+	// EnsureValues holds trusted value-contract postconditions on the native boundary
+	// (`ensure <bool-expr>`). They are never proven by Elisa; callers may assume them after the
+	// extern preconditions have been discharged.
+	EnsureValues []Expr
+	Uses         []*ContractStmt
+	Params       []ParamDecl
+	ReturnType   TypeExpr
+	Variadic     bool
 }
 type ExternVarDecl struct {
 	Position    lexer.Pos
@@ -771,6 +780,7 @@ type QuantifierExpr struct {
 	Position lexer.Pos
 	Exists   bool // false = forall
 	Vars     []string
+	In       Expr // optional collection source for `forall x in xs: ...`
 	Body     Expr
 }
 type AddrOfExpr struct {

@@ -442,7 +442,7 @@ func (a *Analyzer) checkExternContractDiscipline(fn *ast.ExternFuncDecl) {
 	if a == nil || fn == nil || !a.requireExternContracts {
 		return
 	}
-	if len(fn.Requires) > 0 || len(fn.Ensures) > 0 || externHasTrustedAnnotation(fn) {
+	if len(fn.Requires) > 0 || len(fn.EnsureValues) > 0 || len(fn.Ensures) > 0 || externHasTrustedAnnotation(fn) {
 		return
 	}
 	a.errorf(fn.Pos(), "extern function %q has no contract: under -strict-externs every extern must declare a `requires`/`ensure` boundary contract or be annotated `@trusted(\"reason\")` to document why the unverified native body is trusted", fn.Name)

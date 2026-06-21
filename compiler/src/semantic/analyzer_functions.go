@@ -77,6 +77,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 	a.currentFuncDecl = fn
 	a.currentFuncType = fnType
+	if fn != nil && (fn.IsGhost || fn.IsLaw) {
+		a.ghostReadAllowed++
+		defer func() { a.ghostReadAllowed-- }()
+	}
 	if fn != nil && fn.IsLemma {
 		// Track the lemma while its body is analyzed so a self/mutual-recursive lemma call inside it
 		// does NOT inject this lemma's own (not-yet-proven) ensure as a fact — that would be circular
@@ -587,6 +591,8 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 	// from one function body into the next. This is the single per-function entry hook (called
 	// unconditionally before each body, and nowhere else).
 	a.currentBoundEqual = nil
+	a.ghostReadAllowed++ // `requires` is a spec position: ghost vars/functions are readable here.
+	defer func() { a.ghostReadAllowed-- }()
 	for i, req := range fn.Requires {
 		if req == nil {
 			continue

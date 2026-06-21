@@ -158,7 +158,7 @@ func (p *Parser) parseExpr() ast.Expr {
 // quantifierStartsHere confirms a `forall`/`exists` keyword is followed by a binder identifier (so a
 // variable literally named `forall` used in expression position is not misparsed as a quantifier).
 func (p *Parser) quantifierStartsHere() bool {
-	return p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
+	return p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LPAREN)
 }
 
 // parseQuantifier parses `forall i, j: <body>` / `exists i: <body>` (docs/90 brick 90-4). Binders are
@@ -169,23 +169,35 @@ func (p *Parser) parseQuantifier() ast.Expr {
 	exists := p.cur().Text == "exists"
 	p.advance() // forall / exists
 	var vars []string
-	for {
-		vars = append(vars, p.expect(lexer.TOKEN_IDENT).Text)
-		if !p.match(lexer.TOKEN_COMMA) {
-			break
+	if p.match(lexer.TOKEN_LPAREN) {
+		for {
+			vars = append(vars, p.expect(lexer.TOKEN_IDENT).Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	} else {
+		for {
+			vars = append(vars, p.expect(lexer.TOKEN_IDENT).Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
 		}
 	}
 	// Concept-sugar range binder (docs/100): `forall i in <range>: P`. Pure desugaring to the canonical
 	// guarded form `forall i: (lo <= i and i < hi) implies P`. The range source is either an explicit
 	// half-open range `lo ..< hi` or the index sugar `a.indices` (≡ `0 ..< a.count`). Single binder only.
 	if p.peek() == lexer.TOKEN_IN {
-		if len(vars) != 1 {
-			p.errorAt(pos, "`forall i in <range>:` binds exactly one index variable")
-		}
 		p.advance() // in
-		lo, hi := p.parseQuantifierRange()
+		source, lo, hi, isIndexRange := p.parseQuantifierInSource()
 		p.expect(lexer.TOKEN_COLON)
 		body := p.parseExpr()
+		if !isIndexRange {
+			return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, In: source, Body: body}
+		} else if len(vars) != 1 {
+			p.errorAt(pos, "`forall i in <range>:` binds exactly one index variable")
+		}
 		ident := &ast.Ident{Position: pos, Name: vars[0]}
 		guard := &ast.BinaryExpr{
 			Position: pos,
@@ -218,23 +230,21 @@ func (p *Parser) parseQuantifier() ast.Expr {
 	return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: body}
 }
 
-// parseQuantifierRange parses the source of a `forall i in <range>:` binder and returns its half-open
-// [lo, hi) integer bounds (docs/100). Forms: `<lo> ..< <hi>` (explicit) or `<expr>.indices` (sugar for
-// `0 ..< <expr>.count`).
-func (p *Parser) parseQuantifierRange() (lo ast.Expr, hi ast.Expr) {
+// parseQuantifierInSource parses the source of a `forall i in <source>:` binder. Range forms return
+// their half-open [lo, hi) bounds. Any other expression is a value-binding collection source.
+func (p *Parser) parseQuantifierInSource() (source ast.Expr, lo ast.Expr, hi ast.Expr, isIndexRange bool) {
 	pos := p.cur().Pos
 	first := p.parseOr()
 	if p.match(lexer.TOKEN_RANGE_LT) {
-		return first, p.parseOr()
+		return first, first, p.parseOr(), true
 	}
 	// `a.indices` → 0 ..< a.count
 	if fe, ok := first.(*ast.FieldExpr); ok && fe.Field == "indices" {
 		zero := &ast.IntLit{Position: pos, Value: "0"}
 		count := &ast.FieldExpr{Position: pos, Object: fe.Object, Field: "count"}
-		return zero, count
+		return fe.Object, zero, count, true
 	}
-	p.errorAt(pos, "`forall i in <range>:` expects `lo ..< hi` or `<container>.indices`")
-	return first, first
+	return first, nil, nil, false
 }
 
 func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {

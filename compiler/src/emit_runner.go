@@ -556,7 +556,7 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole
 		fmt.Fprintln(stderr, "  (no refinement obligations)")
 		return
 	}
-	var proven, refuted, runtime, measured int
+	var proven, assumed, refuted, runtime, measured int
 	for _, f := range report {
 		class := f.Class
 		if class == "" {
@@ -586,6 +586,8 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole
 		switch f.Outcome {
 		case semantic.ProofProvenFlow, semantic.ProofProvenLinear, semantic.ProofProvenConst, semantic.ProofProvenContract, semantic.ProofProvenSMT:
 			proven++
+		case semantic.ProofAssumedExtern:
+			assumed++
 		case semantic.ProofRefuted:
 			refuted++
 		case semantic.ProofRuntime:
@@ -594,7 +596,7 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole
 			measured++
 		}
 	}
-	fmt.Fprintf(stderr, "  %d proven statically, %d runtime-checked, %d measured, %d refuted\n", proven, runtime, measured, refuted)
+	fmt.Fprintf(stderr, "  %d proven statically, %d assumed, %d runtime-checked, %d measured, %d refuted\n", proven, assumed, runtime, measured, refuted)
 }
 
 func proofReportClass(outcome semantic.ProofOutcome) semantic.ProofDischargeClass {
@@ -609,6 +611,8 @@ func proofReportClass(outcome semantic.ProofOutcome) semantic.ProofDischargeClas
 		return semantic.ProofClassSMT
 	case semantic.ProofProvenContract:
 		return semantic.ProofClassContract
+	case semantic.ProofAssumedExtern:
+		return semantic.ProofClassBoundary
 	case semantic.ProofMeasured:
 		return semantic.ProofClassMeasured
 	default:

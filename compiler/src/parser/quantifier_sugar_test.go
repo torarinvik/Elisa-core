@@ -118,3 +118,47 @@ func TestExistsIndicesSugarDesugarsToGuardedConjunction(t *testing.T) {
 		t.Fatalf("expected exists with guarded conjunction, got q=%+v body=%T", q, q.Body)
 	}
 }
+
+func TestQuantifierValueBindingDesugarsToIndexSelect(t *testing.T) {
+	src := "law AllPositive(self: darray[i64]) = forall x in self: x > 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	if q.Exists || len(q.Vars) != 1 || q.Vars[0] != "x" {
+		t.Fatalf("expected value forall binder, got %+v", q)
+	}
+	if _, ok := q.In.(*ast.Ident); !ok {
+		t.Fatalf("expected collection source recorded, got %T %+v", q.In, q.In)
+	}
+	cmp, ok := q.Body.(*ast.BinaryExpr)
+	if !ok || cmp.Op != lexer.TOKEN_GT {
+		t.Fatalf("expected predicate comparison, got %T %+v", q.Body, q.Body)
+	}
+	id, ok := cmp.Left.(*ast.Ident)
+	if !ok || id.Name != "x" {
+		t.Fatalf("expected x preserved for typed lowering, got %T %+v", cmp.Left, cmp.Left)
+	}
+}
+
+func TestQuantifierDictPairBindingParsesSpecOnly(t *testing.T) {
+	src := "law DictKeysNonZero(self: dict[i64, i64]) = forall (k, v) in self: k != 0 and v != 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	if q.Exists || len(q.Vars) != 2 || q.Vars[0] != "k" || q.Vars[1] != "v" {
+		t.Fatalf("expected pair binders preserved as spec-only quantifier, got %+v", q)
+	}
+	if _, ok := q.In.(*ast.Ident); !ok {
+		t.Fatalf("expected dict collection source recorded, got %T %+v", q.In, q.In)
+	}
+}

@@ -367,6 +367,9 @@ func (i *Interpreter) bootstrap() error {
 			switch sym.Kind {
 			case semantic.SymbolFunc:
 				if decl, ok := sym.Node.(*ast.FuncDecl); ok && decl != nil {
+					if decl.IsGhost {
+						continue
+					}
 					i.functions[name] = decl
 				}
 			case semantic.SymbolStruct:

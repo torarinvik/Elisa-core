@@ -1748,6 +1748,32 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 	case *ast.ParenExpr:
 		return tr.boolTerm(n.Inner, env)
 	case *ast.QuantifierExpr:
+		if n.In != nil {
+			if len(n.Vars) != 1 {
+				return "", false
+			}
+			arr, ok := tr.arrayTermEnv(n.In, env)
+			if !ok {
+				return "", false
+			}
+			idxSym := "q_" + n.Vars[0] + "_idx"
+			qenv := make(map[string]string, len(env)+1)
+			for k, v := range env {
+				qenv[k] = v
+			}
+			qenv[n.Vars[0]] = "(select " + arr + " " + idxSym + ")"
+			body, ok := tr.boolTerm(n.Body, qenv)
+			if !ok {
+				return "", false
+			}
+			lenSym := arr + "_len"
+			tr.lenDecls[lenSym] = true
+			guard := "(and (<= 0 " + idxSym + ") (< " + idxSym + " " + lenSym + "))"
+			if n.Exists {
+				return "(exists ((" + idxSym + " Int)) (and " + guard + " " + body + "))", true
+			}
+			return "(forall ((" + idxSym + " Int)) (or (not " + guard + ") " + body + "))", true
+		}
 		// Bind each quantifier variable to a fresh SMT Int symbol (prefix "q_" so it never collides
 		// with a free variable's "v_" symbol), then translate the body under the extended environment.
 		qenv := make(map[string]string, len(env)+len(n.Vars))

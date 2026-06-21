@@ -960,3 +960,46 @@ def has_zero(xs: array[i64, 8]) -> bool:
 		t.Fatalf("bounded exists surface should analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+func TestSMTProvesArrayValueBindingQuantifierLowerBound(t *testing.T) {
+	src := `
+law AllPositive(self: darray[i64]) = forall x in self: x > 0
+
+def first_is_lower_bound(xs: darray[i64], j: i64) -> void:
+    requires xs.count > 0 and j >= 0 and j < xs.count
+    requires forall x in xs: x >= xs[0]
+    assert xs[j] >= xs[0]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_value_binding_lower_bound.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("value-binding quantifier should prove indexed lower-bound assertion, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestSMTDeclinesFalseArrayValueBindingQuantifierClaim(t *testing.T) {
+	src := `
+law AllEqualFirst(self: darray[i64]) = forall x in self: x == self[0]
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is AllEqualFirst = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_value_binding_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("false value-binding array claim must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+func TestQuantifierSetAndDictBindingsAreSpecOnly(t *testing.T) {
+	src := `
+law NoZeros(self: set[i64]) = forall x in self: x != 0
+law DictNoZeros(self: dict[i64, i64]) = forall (k, v) in self: k != 0 and v != 0
+law HasNonZero(self: set[i64]) = exists x in self: x != 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_set_dict_quantifier_surface.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("set/dict quantifier surface should analyze as spec-only, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

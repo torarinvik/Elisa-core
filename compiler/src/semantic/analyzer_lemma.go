@@ -141,6 +141,56 @@ func (a *Analyzer) injectLemmaEnsureFacts(decl *ast.FuncDecl, call *ast.CallExpr
 	}
 }
 
+func (a *Analyzer) assumeExternEnsures(call *ast.CallExpr, args []ast.Expr) {
+	if a == nil || call == nil {
+		return
+	}
+	ext, ok := a.resolveDirectCallExternFuncDecl(call)
+	if !ok || ext == nil || len(ext.EnsureValues) == 0 {
+		return
+	}
+	subst := map[string]ast.Expr{"result": call}
+	for i, param := range ext.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	if !a.externRequiresProven(ext, subst) {
+		return
+	}
+	for _, clause := range ext.EnsureValues {
+		if clause == nil {
+			continue
+		}
+		rewritten, ok := substituteLemmaEnsure(clause, subst)
+		if !ok {
+			continue
+		}
+		a.recordSMTAssertFact(rewritten)
+		a.recordProofWithClass(call.Pos(), "postcondition of extern "+ext.Name, "ensure", ProofAssumedExtern, ProofClassBoundary, nil, "")
+	}
+}
+
+func (a *Analyzer) externRequiresProven(ext *ast.ExternFuncDecl, subst map[string]ast.Expr) bool {
+	if ext == nil {
+		return false
+	}
+	for _, req := range ext.Requires {
+		if req == nil {
+			continue
+		}
+		if a.proveRequiresClause(req, subst) == requiresProven {
+			continue
+		}
+		if proven, _ := a.trySMTProveRequires(req, subst); proven {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // inductiveHypothesisAvailable reports whether a self-recursive call to the lemma currently under
 // analysis may soundly assume the lemma's `ensure` (the inductive hypothesis). Two airtight gates:
 //

@@ -359,7 +359,8 @@ func (a *Analyzer) functionDefiningEquationEligible(decl *ast.FuncDecl) bool {
 
 func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	// A lemma is ghost code with no value-returning body; its IH is handled separately. Never treat it
-	// as a value-producing pure function here.
+	// as a value-producing pure function here. A ghost def, unlike a lemma, is intentionally a
+	// value-producing spec function, so it stays eligible when it passes the same purity/totality gates.
 	if decl.IsLemma {
 		return false
 	}
