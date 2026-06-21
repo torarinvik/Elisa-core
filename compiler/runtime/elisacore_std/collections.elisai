@@ -102,6 +102,12 @@ extern arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&
 
 extern arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&
 
+extern arena_used_slots(a: mutable Arena&) -> usize
+
+extern arena_used_bytes(a: mutable Arena&) -> usize
+
+extern arena_region_count(a: mutable Arena&) -> usize
+
 extern arena_strlen(s: u8&) -> usize
 
 extern arena_memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
