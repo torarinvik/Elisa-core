@@ -98,6 +98,8 @@ def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[R
         TokenKind.Eof:
             destroy parse
             return false
+        _:
+            pass
 
     first_kind: TokenKind = parser_advance(parser.cast[mutable ParserState&])
     try arena_dict_reserve__Symbol(parse_arena, &root.symbols, 16)

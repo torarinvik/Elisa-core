@@ -299,6 +299,7 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(constEnumType, covered, hasWildcard) {
+		a.reportNonExhaustiveMatch(stmt.Pos(), constEnumType, covered, hasWildcard)
 		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
@@ -376,6 +377,7 @@ func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type,
 		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(errorSetType, covered, hasWildcard) {
+		a.reportNonExhaustiveMatch(stmt.Pos(), errorSetType, covered, hasWildcard)
 		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine
