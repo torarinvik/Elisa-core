@@ -31,7 +31,22 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 
 	saved := a.currentScope
 	child := NewScope(saved)
+	// docs/99: a `by scoped:` block is a CLOSED WORLD. The child scope is marked as a proof wall, so the
+	// fact-gathering chain walks (SMT assert/flow facts, range facts) include only facts established
+	// INSIDE this block (cited lemma ensures, nested asserts) and stop before the enclosing scope. Symbol
+	// and refinement LOOKUP still ascend (lemma/type names resolve), so only ambient PROOF FACTS are
+	// walled. This guarantees stability: the verdict depends solely on the cited facts, never on unrelated
+	// surrounding code that would otherwise perturb the solver's hypothesis set.
+	child.closedWorld = n.Scoped
 	a.currentScope = child
+
+	// While a scoped block is analyzed and its COND discharged, suppress the ambient (non-scope-walled)
+	// hypothesis sources so the closed world holds ONLY the block's citations. Restored on the way out.
+	savedClosed := a.inClosedWorldProof
+	if n.Scoped {
+		a.inClosedWorldProof = true
+	}
+	defer func() { a.inClosedWorldProof = savedClosed }()
 
 	// 1. Analyze the proof block in the child scope, enforcing the no-side-effects whitelist. Each
 	//    permitted statement is analyzed through the normal flow machinery, so a lemma call discharges

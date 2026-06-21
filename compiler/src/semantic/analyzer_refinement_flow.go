@@ -437,6 +437,9 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 				found = true
 			}
 		}
+		if scope.closedWorld { // docs/99: stop at a proof wall — outer range facts are out of scope.
+			break
+		}
 	}
 	return acc, found
 }
