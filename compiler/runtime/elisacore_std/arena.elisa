@@ -486,6 +486,37 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         return newptr
 
 # ------------------------------------------------------------
+# Arena introspection (used by region-backing assertions/tests)
+# ------------------------------------------------------------
+
+# Total committed (used) slots across the whole region chain, counted in uintptr
+# slots. Walks every region from `begin` regardless of the chained/owner topology,
+# so it covers regions split off for packed/SoA store columns too. Read-only — does
+# not allocate. Multiply by size_of(uintptr) for a byte figure.
+def arena_used_slots(a: mutable Arena&) -> usize:
+    total: mutable usize = 0
+    cursor: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while cursor != null:
+            total <- total + cursor.count
+            cursor <- cursor.next
+    return total
+
+# Total committed (used) bytes across the whole region chain.
+def arena_used_bytes(a: mutable Arena&) -> usize:
+    return arena_used_slots(a) * size_of(uintptr)
+
+# Number of regions (blocks) currently chained into the arena.
+def arena_region_count(a: mutable Arena&) -> usize:
+    n: mutable usize = 0
+    cursor: mutable heap Region&? = a.begin
+    trusted Unsafe.AssumeProgress:
+        while cursor != null:
+            n <- n + 1
+            cursor <- cursor.next
+    return n
+
+# ------------------------------------------------------------
 # Memory/string helpers
 # ------------------------------------------------------------
 
