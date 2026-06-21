@@ -123,7 +123,13 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	returnType := Type(nil)
 	if expr.ReturnType != nil {
 		returnType = a.resolveType(expr.ReturnType)
-	} else if expectedFunc != nil && expectedFunc.Return != nil && len(expr.Body) != 0 {
+	} else if expectedFunc != nil && expectedFunc.Return != nil && (len(expr.Body) != 0 || expr.BodyExpr != nil) {
+		// Contextual return typing: an untyped lambda checked against a known
+		// function type adopts that type's return as the contextual expected type
+		// for its body. This lets a bare numeric-literal body (`lambda(n) => 5`
+		// against `func(i64) -> i64`) infer `i64` rather than the abstract `int`.
+		// A wrong-typed body is still caught by the body-vs-return assignability
+		// check below (matchReturnType pins the contextual return).
 		returnType = a.cloneTrackedValueType(expectedFunc.Return)
 	} else if len(expr.Body) != 0 {
 		a.errorf(expr.Pos(), "block lambda requires an explicit return type or contextual function type")
@@ -286,7 +292,16 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		}
 		a.lambdaErrorAccumulate = savedAccumulate
 		a.lambdaErrorAccum = savedAccum
-		if returnType == nil || IsInvalidType(returnType) {
+		// Adopt the inferred body type as the lambda return when there is no
+		// annotated/contextual return to check against (returnType nil), OR when
+		// error inference grew the body into an error union while the contextual
+		// return was only a plain value type (`func(i64) -> i64` with a body that
+		// `try`s/`raise`s): the inferred `i64 error[...]` must drive the return so
+		// the propagated error set is preserved rather than rejected as a mismatch.
+		_, ctxReturnIsUnion := returnType.(*ErrorUnionType)
+		_, bodyIsUnion := bodyType.(*ErrorUnionType)
+		adoptInferredErrorUnion := inferErrorReturn && bodyIsUnion && !ctxReturnIsUnion
+		if returnType == nil || IsInvalidType(returnType) || adoptInferredErrorUnion {
 			returnType = bodyType
 			fnType.Return = bodyType
 			a.currentReturn = bodyType
