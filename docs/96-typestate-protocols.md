@@ -64,9 +64,11 @@ well-formed) — to:
    fields plus a synthetic discriminant `__typestate: mutable i64`;
 2. a `derive state:` block mapping each state to its discriminant value
    (`Si when self.__typestate == i`);
-3. one **transition function** per `transition`, a free function
+3. a synthesized initial-state constructor, called as `Name.new(...)`, which accepts the
+   declared data fields and returns `Name[S0]`;
+4. one **transition function** per `transition`, a free function
    `def t(self: mutable Name[From]&) ensures self => To:` whose body assigns the discriminant
-   to `To`'s index.
+   to `To`'s index. Existing UFCS/member-call rewriting makes this callable as `value.t()`.
 
 ### Worked example — `Socket` (Closed → Connecting → Connected → Closed)
 
@@ -105,9 +107,12 @@ Now the named-state machinery does all the work:
 
 ```elisa
 def use(s: mutable Socket[Closed]&) ensures s => Closed:
-    connect(s)        # s : Socket[Closed]      -> Socket[Connecting]   OK
-    established(s)    # s : Socket[Connecting]  -> Socket[Connected]    OK
-    close(s)          # s : Socket[Connected]   -> Socket[Closed]       OK
+    s.connect()        # s : Socket[Closed]      -> Socket[Connecting]   OK
+    s.established()    # s : Socket[Connecting]  -> Socket[Connected]    OK
+    s.close()          # s : Socket[Connected]   -> Socket[Closed]       OK
+
+def build() -> Socket[Closed]:
+    return Socket.new(fd: 7) # user code never writes __typestate
 ```
 
 …and illegal sequences are rejected exactly as a type mismatch on the `From` parameter:
@@ -161,12 +166,17 @@ Landed:
 - **Parser** (`compiler/src/parser/parser_typestate_protocol.go`): the `typestate`
   declaration, validation (≥2 states, known transition endpoints), and the
   generate-source-and-re-parse desugaring. `pendingDecls` on the `Parser` (drained by
-  `ParseFile`) lets one declaration expand to a struct + N transition functions at file
-  scope.
+  `ParseFile`) lets one declaration expand to a struct + constructor + N transition
+  functions at file scope.
 - **Dispatch**: `parseDecl` routes the `typestate` keyword (`parser_parser_to_parseparamdeclblock.go`).
+- **Tier 1 ergonomics**: transition functions are callable with member syntax (`s.connect()`)
+  through existing UFCS rewriting; `Name.new(...)` rewrites to the synthesized constructor;
+  `linear typestate` / `affine typestate` lower to the existing affine struct checks, so
+  consume-once bindings use the same move/drop diagnostics as linear structs.
 - **Tests**: parser desugaring + unknown-state rejection
-  (`parser_typestate_protocol_test.go`); semantic end-to-end — legal sequence compiles,
-  illegal transition / double-close are hard errors, File protocol round-trips
+  (`parser_typestate_protocol_test.go`); semantic end-to-end — legal method-call sequence
+  compiles, constructor compiles, linear binding leaks are rejected, illegal transition /
+  double-close are hard errors, File protocol round-trips
   (`semantic/typestate_protocol_runtime_test.go`).
 
 Deliberately reused (not rebuilt): named-state typing, `derive state`, strict protocol
@@ -174,16 +184,11 @@ balance, `ensures p => State` poststates, `is` narrowing.
 
 ## 6. Next increments
 
-1. **Affine "consume exactly once"**: mark a `typestate` `linear` so a value that reaches a
-   terminal state (or is dropped) is a must-consume obligation — gives builder-consumed-once
-   and forbids leaking a half-open socket.
-2. **Method sugar**: allow `transition` bodies and `s.connect()` UFCS call form, and let a
-   transition carry extra params / a return value.
-3. **Initial-state constructor**: synthesize `Socket.new()` landing in the first declared
-   state, so user code never touches `__typestate`.
-4. **Terminal / required-transition checks**: flag a state with no outgoing transition that
+1. **Transition bodies and richer signatures**: let a transition carry extra params / a
+   return value without hand-writing the lowered function.
+2. **Terminal / required-transition checks**: flag a state with no outgoing transition that
    is reached on a non-terminal path (resource-leak lint).
-5. **Conditional transitions**: `transition recv: Connected -> Connected | Closed` (on a bool
+3. **Conditional transitions**: `transition recv: Connected -> Connected | Closed` (on a bool
    return), lowering onto the existing conditional-poststate machinery.
-6. **`--explain` integration**: surface protocol facts in the proof report under a `typestate`
+4. **`--explain` integration**: surface protocol facts in the proof report under a `typestate`
    class label.

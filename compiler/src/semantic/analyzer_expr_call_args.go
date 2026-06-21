@@ -327,6 +327,9 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 		}
 		return &ast.SpecializeExpr{Position: fieldExpr.Position, Operand: fn, TypeArgs: callTypeArgs}
 	}
+	if a.rewriteTypestateConstructorCall(expr, fieldExpr) {
+		return extensionMethodCallRewriteApplied
+	}
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
 		return extensionMethodCallRewriteNone
 	}
@@ -449,6 +452,22 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	}
 	expr.Func = withCallTypeArgs(&ast.Ident{Position: fieldExpr.Position, Name: method.Symbol.Name})
 	return extensionMethodCallRewriteApplied
+}
+
+func (a *Analyzer) rewriteTypestateConstructorCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr) bool {
+	if a == nil || expr == nil || fieldExpr == nil || fieldExpr.Field != "new" {
+		return false
+	}
+	typeName, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || typeName == nil || typeName.Name == "" || !a.exprResolvesToTypePath(fieldExpr.Object) {
+		return false
+	}
+	hiddenName := "__typestate_" + typeName.Name + "_new"
+	if _, _, found := a.lookupVisibleGlobal(hiddenName); !found {
+		return false
+	}
+	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: hiddenName}
+	return true
 }
 
 func proofCarryingViewReceiverHelper(name string) bool {

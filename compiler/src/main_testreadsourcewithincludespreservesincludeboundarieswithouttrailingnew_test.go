@@ -570,6 +570,19 @@ func TestParseArgsEnablesSMTByDefault(t *testing.T) {
 	}
 }
 
+func TestParseArgsExplainHoleEnablesProofHoleHints(t *testing.T) {
+	options, err := parseArgs([]string{"--explain-hole", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if !options.explainHole {
+		t.Fatal("expected --explain-hole to be recorded in CLI options")
+	}
+	if !semanticOptionsForCLI(options).EmitProofHoleHints {
+		t.Fatal("expected --explain-hole to enable semantic proof-hole hints")
+	}
+}
+
 func TestRunCLIConcurrencyStrictPromotesRawAtomicDeprecation(t *testing.T) {
 	prevSuppress, hadSuppress := os.LookupEnv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")
 	_ = os.Unsetenv("ELISACORE_SUPPRESS_DEPRECATED_WARNINGS")

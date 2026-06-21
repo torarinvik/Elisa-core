@@ -151,6 +151,8 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)
 		}
 		return controlSignal{}, nil
+	case *ast.AssertHoleStmt:
+		return controlSignal{}, nil
 	case *ast.DiscardStmt:
 		_, err := i.evalExpr(frame, n.Value)
 		if err != nil {

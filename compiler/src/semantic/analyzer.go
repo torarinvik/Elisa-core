@@ -95,8 +95,8 @@ type Analyzer struct {
 	// resolved before laws are registered) a missing law instead DEFERS to that pass — laws can have
 	// struct subjects and structs refined fields, so the two cannot be ordered, only re-checked later.
 	finalizingRefinements bool
-	staticInterfaces         map[string]*StaticInterface
-	staticImpls              map[string]*StaticImpl
+	staticInterfaces      map[string]*StaticInterface
+	staticImpls           map[string]*StaticImpl
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
@@ -145,6 +145,7 @@ type Analyzer struct {
 	// frame-aware fact survival). Populated in analyzeResolvedCallExprWithExpected, consumed (and
 	// cleared) by invalidateSMTAssertFactsForCall.
 	callFrameContexts            map[*ast.CallExpr]callFrameCtx
+	currentProofCitation         *scopedProofCitation
 	storageViewStaleUses         map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs             map[ast.Expr]bool
 	unsafeAliasStmts             map[ast.Stmt]bool
@@ -369,21 +370,21 @@ type Analyzer struct {
 	// defining equalities of immutable locals — are suppressed, so the closed world holds ONLY the facts
 	// cited inside the block (which ride the scope-walled assert/flow/range fact channels). This is what
 	// makes a scoped proof's verdict depend solely on its citations.
-	inClosedWorldProof          bool
+	inClosedWorldProof bool
 	// SMT discharge tier (docs/90). The solver is opened LAZILY on the first obligation that needs it
 	// (so a compile with no hard obligations never spawns a process) and closed at the end of
 	// analysis. smtUnavailable latches once Open fails, so we don't retry a missing solver per query.
-	smtEnabled                       bool
-	smtBinary                        string
-	smtSolver                        smtSolverHandle
-	smtUnavailable                   bool
-	smtStats                         SMTStats
+	smtEnabled     bool
+	smtBinary      string
+	smtSolver      smtSolverHandle
+	smtUnavailable bool
+	smtStats       SMTStats
 	// smtQueryCache memoizes solver verdicts keyed on the FULL query string (VC IR brick 5). z3 is
 	// deterministic for a given query + timeout, so an identical query — same preamble, hypotheses, and
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
 	// cross-function key collision means a byte-identical proof).
-	smtQueryCache map[string]smtQueryResult
+	smtQueryCache                    map[string]smtQueryResult
 	proofReport                      []ProofFact
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
@@ -401,22 +402,22 @@ type Analyzer struct {
 	// recursing until the goroutine stack overflows.
 	functionValueResolveInProgress map[*Symbol]bool
 	sinkParamInferenceInProgress   map[*ast.FuncDecl]bool
-	parallelForInfo                  map[*ast.ParallelForStmt]*ParallelForInfo
-	callArgDisjoint                  map[*ast.CallExpr]*CallArgDisjointInfo
-	disjointCallSites                map[*ast.FuncDecl][]callDisjointObservation
-	funcDisjointParams               map[*ast.FuncDecl]*FuncDisjointParamInfo
-	lawIsCalls                       map[*ast.BinaryExpr]*ast.CallExpr
-	lemmaCalls                       map[*ast.CallExpr]bool
-	ghostDecls                       map[*ast.VarDeclStmt]bool
-	ghostContracts                   map[ast.Expr]bool
+	parallelForInfo                map[*ast.ParallelForStmt]*ParallelForInfo
+	callArgDisjoint                map[*ast.CallExpr]*CallArgDisjointInfo
+	disjointCallSites              map[*ast.FuncDecl][]callDisjointObservation
+	funcDisjointParams             map[*ast.FuncDecl]*FuncDisjointParamInfo
+	lawIsCalls                     map[*ast.BinaryExpr]*ast.CallExpr
+	lemmaCalls                     map[*ast.CallExpr]bool
+	ghostDecls                     map[*ast.VarDeclStmt]bool
+	ghostContracts                 map[ast.Expr]bool
 	// ghostReadAllowed, when > 0, permits reading a `ghost` variable (the analyzer is inside a
 	// contract clause or another ghost initializer). Outside these contexts a ghost read is a hard
 	// error — that is the ghost-to-real flow barrier that keeps erasure sound.
 	ghostReadAllowed int
 	// ghostReadSeen records that a ghost variable was read since it was last reset — used to flag a
 	// contract condition (invariant/assert) that mentions a ghost so codegen erases its check.
-	ghostReadSeen bool
-	lemmasInAnalysis                 map[*ast.FuncDecl]bool
+	ghostReadSeen    bool
+	lemmasInAnalysis map[*ast.FuncDecl]bool
 	// lemmaTerminationCache memoizes whether a lemma's `decreases` measure is verified to strictly
 	// decrease at every self-recursive call (read-only mirror of checkTermination, no diagnostics). It
 	// gates the inductive hypothesis: only a provably-terminating lemma may assume its own ensure for a

@@ -63,11 +63,18 @@ func (p *Parser) parseStmt() ast.Stmt {
 	if p.peek() == lexer.TOKEN_IDENT {
 		switch p.cur().Text {
 		case "assert":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_QUESTION {
+				return p.parseAssertHoleStmt()
+			}
 			// `assert COND by:` — a Dafny-style proof-carrying assert (the `by:` proof block is
 			// verification-only). Only matched when a top-level `by:` opener is present on this logical
 			// line; a plain `assert(COND)` call has no `by:` and falls through to expression parsing.
 			if p.looksLikeAssertByStmt() {
 				return p.parseAssertByStmt()
+			}
+		case "use":
+			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+				return p.parseProofUseStmt()
 			}
 		case "can":
 			if p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACKET) {
@@ -301,10 +308,12 @@ func (p *Parser) parseStmt() ast.Stmt {
 		return p.parseExprOrAssignStmt()
 	}
 }
+
 // looksLikeGhostStmt distinguishes the `ghost` verification-var keyword from an ordinary variable
 // that happens to be named `ghost`. The keyword forms are:
 //   - single decl: `ghost <ident> : ...` or `ghost <ident> = ...`
 //   - grouped block: `ghost :` followed by a newline (the indented block of decls)
+//
 // A real variable named `ghost` would be `ghost = ...`, `ghost <- ...`, or `ghost: Type` used as a
 // field-style decl on the same line WITHOUT a following identifier — i.e. `ghost` then COLON then a
 // type. We only treat `ghost` COLON as the keyword when a newline follows (the block form); a
@@ -447,6 +456,15 @@ func (p *Parser) looksLikePoolStmt() bool {
 	}
 	return false
 }
+
+func (p *Parser) parseAssertHoleStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.advance() // `assert`
+	p.expect(lexer.TOKEN_QUESTION)
+	p.expectNewline()
+	return &ast.AssertHoleStmt{Position: pos}
+}
+
 // looksLikeAssertByStmt reports whether the current `assert` begins a proof-carrying
 // `assert COND by:` form, by scanning the logical line for a top-level `by` identifier immediately
 // followed by `:`. A plain `assert(COND)` call has no such opener, so it falls through to ordinary
@@ -502,6 +520,17 @@ func (p *Parser) parseAssertByStmt() ast.Stmt {
 	p.expectNewline()
 	proof := p.parseBlock()
 	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof, Scoped: scoped}
+}
+
+func (p *Parser) parseProofUseStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.advance() // `use`
+	citations := []ast.Expr{p.parseExpr()}
+	for p.match(lexer.TOKEN_COMMA) {
+		citations = append(citations, p.parseExpr())
+	}
+	p.expectNewline()
+	return &ast.ProofUseStmt{Position: pos, Citations: citations}
 }
 
 func (p *Parser) looksLikeGuardStmt() bool {

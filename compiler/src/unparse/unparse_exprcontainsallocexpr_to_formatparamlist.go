@@ -349,6 +349,14 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Proof {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.AssertHoleStmt:
+		f.writeLine(level, "assert ?")
+	case *ast.ProofUseStmt:
+		parts := make([]string, 0, len(n.Citations))
+		for _, citation := range n.Citations {
+			parts = append(parts, formatExpr(citation))
+		}
+		f.writeLine(level, "use "+strings.Join(parts, ", "))
 	case *ast.StaticAssertBlockStmt:
 		f.writeLine(level, "static assert:")
 		for _, item := range n.Assertions {

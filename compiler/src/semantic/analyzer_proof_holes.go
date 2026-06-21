@@ -45,6 +45,31 @@ func (a *Analyzer) proofHoleReport(header string, goal ast.Expr) string {
 	return b.String()
 }
 
+func (a *Analyzer) proofHolePlaceholderReport(header string) string {
+	var b strings.Builder
+	b.WriteString(header)
+	b.WriteString("\n  goal:        ?")
+
+	facts := a.inScopeKnownFacts()
+	b.WriteString("\n  known facts:")
+	if len(facts) == 0 {
+		b.WriteString(" (none in scope)")
+	} else {
+		for _, f := range facts {
+			b.WriteString("\n    - ")
+			b.WriteString(f)
+		}
+	}
+	return b.String()
+}
+
+func (a *Analyzer) emitAssertHole(pos lexer.Pos) {
+	if a == nil {
+		return
+	}
+	a.warnf(pos, "%s", a.proofHolePlaceholderReport("proof hole: explicit assertion hole"))
+}
+
 // inScopeKnownFacts collects the analyzer's current hypothesis set as readable strings: each known
 // interval bound from `rangeFacts` (closer scopes shadow outer) plus each boolean `smtAssertFacts`
 // entry. De-duplicated and sorted for determinism.

@@ -180,6 +180,7 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Message)
 	case *ast.ExprStmt:
 		c.countExpr(n.Expr)
+	case *ast.AssertHoleStmt:
 	case *ast.StaticIfStmt:
 		c.countExpr(n.Cond)
 		c.countStmts(n.Then)

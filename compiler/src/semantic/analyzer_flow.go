@@ -807,6 +807,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.AssertByStmt:
 		a.analyzeAssertBy(n)
+	case *ast.AssertHoleStmt:
+		a.emitAssertHole(n.Pos())
+	case *ast.ProofUseStmt:
+		a.errorf(n.Pos(), "`use` citations are only allowed inside an `assert … by:` proof block")
 	case *ast.StaticAssertStmt:
 		a.analyzeStaticAssert(n.Pos(), n.Cond, n.Message)
 	case *ast.StaticAssertBlockStmt:

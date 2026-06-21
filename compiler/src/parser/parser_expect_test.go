@@ -318,3 +318,19 @@ func TestParseAssertBareConditionStatement(t *testing.T) {
 		t.Fatalf("expected assert condition to parse as != binary expr, got %#v", call.Args[0])
 	}
 }
+
+func TestParseAssertHoleStatement(t *testing.T) {
+	file, errs := parseSourceFile(t, `def check() -> void:
+    assert ?
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	if _, ok := decl.Body[0].(*ast.AssertHoleStmt); !ok {
+		t.Fatalf("expected assert hole statement, got %T", decl.Body[0])
+	}
+	if got := unparse.FormatStmt(decl.Body[0]); got != "assert ?" {
+		t.Fatalf("expected assert hole to format round-trip, got %q", got)
+	}
+}

@@ -2,7 +2,13 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"strings"
 )
+
+type scopedProofCitation struct {
+	Name  string
+	Facts []ast.Expr
+}
 
 // analyzeAssertBy handles a proof-carrying `assert COND by:` statement (Dafny-style proof blocks).
 //
@@ -52,9 +58,22 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 	//    permitted statement is analyzed through the normal flow machinery, so a lemma call discharges
 	//    its requires and injects its ensures as child-scope facts, a nested assert seeds its condition,
 	//    etc.
+	citations := []*scopedProofCitation{}
 	for _, stmt := range n.Proof {
 		if !a.assertProofStmtAllowed(stmt) {
 			a.errorf(stmt.Pos(), "an `assert … by:` proof block may contain only verification-only statements (lemma calls, nested `assert`s, `invariant`s); a statement with real effects is not allowed because the block is erased from code")
+			continue
+		}
+		if use, ok := stmt.(*ast.ProofUseStmt); ok {
+			citations = append(citations, a.analyzeProofUseStmt(use)...)
+			continue
+		}
+		if citation := a.scopedProofCitationForStmt(stmt); citation != nil {
+			savedCitation := a.currentProofCitation
+			a.currentProofCitation = citation
+			a.analyzeStmt(stmt)
+			a.currentProofCitation = savedCitation
+			citations = append(citations, citation)
 			continue
 		}
 		a.analyzeStmt(stmt)
@@ -67,6 +86,9 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 		a.errorf(n.Cond.Pos(), "assert condition must be bool, got %s", condType)
 	}
 	a.proveAssertByCond(n)
+	if n.Scoped {
+		a.reportLoadBearingScopedCitations(n, child, citations)
+	}
 
 	// 3. Pop back to the caller scope. The child scope (and ALL block facts) is dropped here — only COND
 	//    survives, recorded below into the caller scope.
@@ -112,6 +134,10 @@ func (a *Analyzer) assertProofStmtAllowed(stmt ast.Stmt) bool {
 	switch n := stmt.(type) {
 	case *ast.AssertByStmt:
 		return true
+	case *ast.AssertHoleStmt:
+		return true
+	case *ast.ProofUseStmt:
+		return true
 	case *ast.StaticAssertStmt, *ast.StaticAssertBlockStmt, *ast.StaticBlockStmt:
 		return true
 	case *ast.PassStmt:
@@ -130,4 +156,102 @@ func (a *Analyzer) assertProofStmtAllowed(stmt ast.Stmt) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) analyzeProofUseStmt(stmt *ast.ProofUseStmt) []*scopedProofCitation {
+	if a == nil || stmt == nil {
+		return nil
+	}
+	out := make([]*scopedProofCitation, 0, len(stmt.Citations))
+	for _, citationExpr := range stmt.Citations {
+		call := proofCitationCall(citationExpr)
+		if call == nil {
+			a.errorf(citationExpr.Pos(), "`use` citations in an `assert … by:` proof block must name a lemma or call a lemma")
+			continue
+		}
+		citation := &scopedProofCitation{Name: proofCitationName(call)}
+		savedCitation := a.currentProofCitation
+		a.currentProofCitation = citation
+		a.analyzeExpr(call)
+		a.currentProofCitation = savedCitation
+		out = append(out, citation)
+	}
+	return out
+}
+
+func proofCitationCall(expr ast.Expr) *ast.CallExpr {
+	switch n := expr.(type) {
+	case *ast.CallExpr:
+		return n
+	case *ast.Ident:
+		return &ast.CallExpr{Position: n.Position, Func: n}
+	case *ast.ParenExpr:
+		return proofCitationCall(n.Inner)
+	default:
+		return nil
+	}
+}
+
+func proofCitationName(call *ast.CallExpr) string {
+	if call == nil {
+		return "<unknown>"
+	}
+	if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && ident.Name != "" {
+		return ident.Name
+	}
+	return "<call>"
+}
+
+func (a *Analyzer) scopedProofCitationForStmt(stmt ast.Stmt) *scopedProofCitation {
+	exprStmt, ok := stmt.(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return nil
+	}
+	call, ok := exprStmt.Expr.(*ast.CallExpr)
+	if !ok || call == nil || !a.callTargetsLemma(call) {
+		return nil
+	}
+	return &scopedProofCitation{Name: proofCitationName(call)}
+}
+
+func (a *Analyzer) reportLoadBearingScopedCitations(n *ast.AssertByStmt, scope *Scope, citations []*scopedProofCitation) {
+	if a == nil || n == nil || scope == nil || len(citations) == 0 {
+		return
+	}
+	loadBearing := []string{}
+	for _, citation := range citations {
+		if citation == nil || len(citation.Facts) == 0 {
+			continue
+		}
+		removed := map[ast.Expr]bool{}
+		for _, fact := range citation.Facts {
+			removed[fact] = true
+		}
+		savedFacts := scope.smtAssertFacts
+		scope.smtAssertFacts = filterSMTAssertFacts(savedFacts, removed)
+		if a.proveRequiresClause(n.Cond, nil) != requiresProven {
+			if proven, _ := a.trySMTProveRequires(n.Cond, nil); !proven {
+				loadBearing = append(loadBearing, citation.Name)
+			}
+		}
+		scope.smtAssertFacts = savedFacts
+	}
+	if len(loadBearing) == 0 {
+		return
+	}
+	a.warnf(n.Cond.Pos(), "`assert … by scoped:` load-bearing citations: %s", strings.Join(loadBearing, ", "))
+}
+
+func filterSMTAssertFacts(facts []smtFact, removed map[ast.Expr]bool) []smtFact {
+	if len(facts) == 0 || len(removed) == 0 {
+		return facts
+	}
+	out := make([]smtFact, 0, len(facts))
+	for _, fact := range facts {
+		if removed[fact.Expr] {
+			continue
+		}
+		out = append(out, fact)
+	}
+	return out
 }

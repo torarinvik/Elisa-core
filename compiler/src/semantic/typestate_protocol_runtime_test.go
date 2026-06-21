@@ -3,6 +3,7 @@
 package semantic
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -37,6 +38,51 @@ func TestTypestateLegalSequenceCompiles(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "typestate_socket_ok.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("a legal typestate sequence must compile, got: %v", errs)
+	}
+}
+
+func TestTypestateMethodCallTransitionsCompile(t *testing.T) {
+	src := typestateSocketProtocol + `def use(s: mutable Socket[Closed]&) ensures s => Closed:
+	s.connect()
+	s.established()
+	s.close()
+`
+	result := analyzeFunctionAnalysisTestSource(t, "typestate_socket_methods_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("method-call typestate transitions must compile, got: %v", errs)
+	}
+}
+
+func TestTypestateInitialConstructorCompiles(t *testing.T) {
+	src := typestateSocketProtocol + `def build() -> Socket[Closed]:
+	return Socket.new(fd: 7)
+`
+	result := analyzeFunctionAnalysisTestSource(t, "typestate_socket_new_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("typestate initial constructor must compile, got: %v", errs)
+	}
+}
+
+func TestLinearTypestateBindingMustBeConsumed(t *testing.T) {
+	src := `linear typestate Ticket:
+	id: i64
+	states: Fresh, Used
+	transition use_it: Fresh -> Used
+
+def consume_ticket(t: Ticket[Fresh]) -> void:
+	pass
+
+def ok() -> void:
+	t = Ticket.new(id: 1)
+	consume_ticket(move t)
+
+def leak() -> void:
+	t = Ticket.new(id: 2)
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "typestate_linear_consume.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "must be consumed before scope exit") {
+		t.Fatalf("linear typestate binding must be consumed exactly once, got:\n%s", all)
 	}
 }
 

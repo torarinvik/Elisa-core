@@ -92,3 +92,55 @@ def use(n: i64):
 		t.Fatalf("expected the open-world `by:` block to prove from the ambient requires, got: %v", errs)
 	}
 }
+
+func TestScopedProofUseCitationSugarAndLoadBearingDiagnostic(t *testing.T) {
+	src := `
+def marker(x: i64) -> i64:
+    return x
+
+lemma weaken(x: i64):
+    ensure marker(x) >= 0
+    assert(marker(x) >= 0)
+
+lemma irrelevant(x: i64):
+    ensure x == x
+    pass
+
+def use(n: i64):
+    assert marker(n) >= 0 by scoped:
+        use weaken(n), irrelevant(n)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "scoped_proof_use_citations.elisa", src,
+		AnalyzeOptions{EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected `use A, B` citation sugar to prove cleanly, got: %v", errs)
+	}
+	joinedWarnings := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(joinedWarnings, "load-bearing citations: weaken") {
+		t.Fatalf("expected load-bearing citation diagnostic to name weaken, got warnings: %v", result.Warnings())
+	}
+	if strings.Contains(joinedWarnings, "load-bearing citations: weaken, irrelevant") ||
+		strings.Contains(joinedWarnings, "load-bearing citations: irrelevant") {
+		t.Fatalf("irrelevant citation should not be reported as load-bearing, got warnings: %v", result.Warnings())
+	}
+	if len(result.LemmaCalls) != 2 {
+		t.Fatalf("expected cited lemmas to be registered for erasure, got %d", len(result.LemmaCalls))
+	}
+}
+
+func TestProofUseRejectedOutsideAssertBy(t *testing.T) {
+	src := `
+lemma done():
+    ensure true
+    pass
+
+def use():
+    use done
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "proof_use_outside_assert_by.elisa", src,
+		AnalyzeOptions{EnableSMT: true})
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "only allowed inside an `assert") {
+		t.Fatalf("expected `use` outside a proof block to be rejected, got: %v", result.Errors())
+	}
+}

@@ -30,7 +30,15 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 	}
 	objType = StripAggregateStateType(objType)
 	if fieldName == "count" {
+		if _, ok := objType.(*ArrayType); ok {
+			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
+		}
 		if storeType, _, ok := builtinStoreReceiverType(objType); ok && storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
+			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
+		}
+	}
+	if fieldName == "len" {
+		if _, ok := objType.(*ArrayType); ok {
 			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
 		}
 	}

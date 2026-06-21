@@ -123,3 +123,82 @@ def f(x: i64) -> i64:
 		t.Fatalf("arity mismatch must error, got:\n%s", allDiagnostics(result))
 	}
 }
+
+func TestNamedContractAcceptsMatchedFormalTypes(t *testing.T) {
+	src := `
+contract Flagged(ok: bool, value: i64):
+    requires ok
+    ensure result >= value
+
+def f(ok: bool, x: i64) -> i64:
+    uses Flagged(ok, x)
+    return x
+`
+	result := analyzeContractStrict(t, "named_contract_formals_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("uses arguments matching contract formal types should analyze cleanly, got: %v", errs)
+	}
+}
+
+func TestNamedContractRejectsMismatchedFormalTypes(t *testing.T) {
+	src := `
+contract NeedsBool(ok: bool):
+    requires ok
+
+def f(x: i64) -> i64:
+    uses NeedsBool(x)
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "named_contract_formals_bad.elisa", src, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "contract `NeedsBool` argument 1 (ok) expects bool, got i64") {
+		t.Fatalf("uses argument whose type mismatches the contract formal must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// Integration: value-law refinement, scoped proof automation, named-contract expansion, and
+// typestate ensures all meet on one function. The value proof may discharge value obligations, but it
+// must not launder a false named-state postcondition across the docs/85 discharge-class boundary.
+func TestNamedContractValueLawScopedProofDoesNotLaunderTypestate(t *testing.T) {
+	src := `
+law NonNeg(x: i64) = x >= 0
+
+lemma nonneg_implies_ge_zero(x: i64):
+    requires x is NonNeg
+    ensure x >= 0
+    pass
+
+contract EnergyResult(energy: i64):
+    requires energy is NonNeg
+    ensure result >= energy
+
+struct Player[state Alive | Dead]:
+    health: mutable i64
+    score: mutable i64
+
+    derive state:
+        Alive when self.health > 0
+        Dead when self.health <= 0
+
+def reward_ok(p: mutable Player[Alive]&, energy: i64 is NonNeg) -> i64 ensures p => Alive:
+    uses EnergyResult(energy)
+    assert energy >= 0 by scoped:
+        nonneg_implies_ge_zero(energy)
+    p.score <- p.score + 1
+    return energy
+
+def reward_bad(p: mutable Player[Alive]&, energy: i64 is NonNeg) -> i64 ensures p => Alive:
+    uses EnergyResult(energy)
+    assert energy >= 0 by scoped:
+        nonneg_implies_ge_zero(energy)
+    p.health <- 0
+    return energy
+`
+	result := analyzeContractStrict(t, "named_contract_typestate_discharge_class.elisa", src)
+	diags := allDiagnostics(result)
+	if !strings.Contains(diags, "cannot prove ensures p => Alive") {
+		t.Fatalf("value-law + named-contract proofs must not discharge a false typestate ensure, got:\n%s", diags)
+	}
+	if strings.Contains(diags, "reward_ok") {
+		t.Fatalf("the preserving function should satisfy all combined obligations; got:\n%s", diags)
+	}
+}

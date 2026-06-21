@@ -135,6 +135,9 @@ func (a *Analyzer) injectLemmaEnsureFacts(decl *ast.FuncDecl, call *ast.CallExpr
 			continue
 		}
 		a.recordSMTAssertFact(rewritten)
+		if a.currentProofCitation != nil {
+			a.currentProofCitation.Facts = append(a.currentProofCitation.Facts, rewritten)
+		}
 	}
 }
 

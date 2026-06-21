@@ -482,11 +482,24 @@ type AssertByStmt struct {
 	Scoped bool
 }
 
+// AssertHoleStmt is the explicit docs/98 proof-hole query: `assert ?`. It asks the analyzer to print
+// the in-scope goal/fact report at this position and is erased from execution/codegen.
+type AssertHoleStmt struct {
+	Position lexer.Pos
+}
+
+// ProofUseStmt cites lemmas inside an `assert ... by:` proof block:
+// `use LemmaA, LemmaB(args)`. It is verification-only sugar over statement-position lemma calls.
+type ProofUseStmt struct {
+	Position  lexer.Pos
+	Citations []Expr
+}
+
 // ContractKind distinguishes value-contract clauses.
 type ContractKind int
 
 const (
-	ContractRequire      ContractKind = iota // precondition: `requires <bool-expr>` at function start
+	ContractRequire       ContractKind = iota // precondition: `requires <bool-expr>` at function start
 	ContractEnsure                            // postcondition: `ensure <bool-expr>` (may use `result`/`old(...)`)
 	ContractInvariant                         // in-body assertion: `invariant <bool-expr>`, checked in place
 	ContractDecreases                         // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
@@ -630,7 +643,7 @@ func (n *ConstEnumMemberDecl) Pos() lexer.Pos {
 }
 func (n *ErrorDecl) Pos() lexer.Pos      { return n.Position }
 func (n *PermissionDecl) Pos() lexer.Pos { return n.Position }
-func (n *AliasDecl) Pos() lexer.Pos { return n.Position }
+func (n *AliasDecl) Pos() lexer.Pos      { return n.Position }
 func (n *NamespaceDecl) Pos() lexer.Pos  { return n.Position }
 func (n *UsingDecl) Pos() lexer.Pos      { return n.Position }
 func (n *ImportDecl) Pos() lexer.Pos     { return n.Position }

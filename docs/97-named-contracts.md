@@ -57,9 +57,8 @@ Rules:
 
 * The parameter list names the contract's **formals**. The first parameter is conventionally the
   *subject*, but the contract may take any number of parameters (so `SortedMerge` can name the
-  output and both inputs). Parameter *types* are written for readability and future checking; the
-  current increment matches application arguments **positionally** and does not yet re-type-check
-  them against the formals (see §6, stubbed).
+  output and both inputs). Application arguments are matched **positionally** and type-checked
+  against the corresponding formal before the contract clauses are substituted (see §6).
 * A contract body is exactly a sequence of `requires` / `ensure` / `changes` / `preserves`
   clauses. No executable statements, no `decreases` (a measure is a per-function property, never a
   shared bundle — see the discharge-class rule in §5).
@@ -159,13 +158,14 @@ Landed (parser + semantic):
   the contract's clauses into the applying function's own slices, so the *existing* requires
   discharge, ensure proof, and frame checker see them with no further changes — meaning a `uses`d
   precondition is automatically checked at every call site of the applying function.
-* Diagnostics: unknown contract name, arity mismatch, `decreases` inside a contract, and `uses` of
-  a non-contract are hard errors.
+* Tier 1 formal type soundness: before substitution, each `uses` argument is analyzed in the
+  applying function's parameter scope and checked for assignability to the corresponding contract
+  formal type.
+* Diagnostics: unknown contract name, arity mismatch, formal type mismatch, `decreases` inside a
+  contract, and `uses` of a non-contract are hard errors.
 
 Stubbed / next increments:
 
-* Parameter **type checking** of `uses` arguments against contract formals (currently positional
-  only).
 * `contract … includes Law, …` to fold effect/shape member laws into `Fulfills` (effect/shape
   discharge-class composition).
 * Generic contracts (`contract Foo[T](...)`) — parsed but not yet specialised per application.

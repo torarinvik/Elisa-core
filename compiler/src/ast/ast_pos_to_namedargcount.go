@@ -168,7 +168,9 @@ func (n *StaticIfStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *StaticErrorStmt) Pos() lexer.Pos              { return n.Position }
 func (n *StaticAssertStmt) Pos() lexer.Pos             { return n.Position }
 func (n *AssertByStmt) Pos() lexer.Pos                 { return n.Position }
-func (n *ContractStmt) Pos() lexer.Pos { return n.Position }
+func (n *AssertHoleStmt) Pos() lexer.Pos               { return n.Position }
+func (n *ProofUseStmt) Pos() lexer.Pos                 { return n.Position }
+func (n *ContractStmt) Pos() lexer.Pos                 { return n.Position }
 func (n *StaticAssertBlockStmt) Pos() lexer.Pos        { return n.Position }
 func (n *StaticBlockStmt) Pos() lexer.Pos              { return n.Position }
 func (n *DiscardStmt) Pos() lexer.Pos                  { return n.Position }
@@ -191,7 +193,7 @@ func (*ConstEnumDecl) nodeTag()                        {}
 func (*ConstEnumMemberDecl) nodeTag()                  {}
 func (*ErrorDecl) nodeTag()                            {}
 func (*PermissionDecl) nodeTag()                       {}
-func (*AliasDecl) nodeTag()                       {}
+func (*AliasDecl) nodeTag()                            {}
 func (*NamespaceDecl) nodeTag()                        {}
 func (*UsingDecl) nodeTag()                            {}
 func (*ImportDecl) nodeTag()                           {}
@@ -366,7 +368,9 @@ func (*StaticIfStmt) nodeTag()                         {}
 func (*StaticErrorStmt) nodeTag()                      {}
 func (*StaticAssertStmt) nodeTag()                     {}
 func (*AssertByStmt) nodeTag()                         {}
-func (*ContractStmt) nodeTag() {}
+func (*AssertHoleStmt) nodeTag()                       {}
+func (*ProofUseStmt) nodeTag()                         {}
+func (*ContractStmt) nodeTag()                         {}
 func (*StaticAssertBlockStmt) nodeTag()                {}
 func (*StaticBlockStmt) nodeTag()                      {}
 func (*DiscardStmt) nodeTag()                          {}
@@ -386,7 +390,7 @@ func (*KeywordMapDecl) declTag()                       {}
 func (*ConstEnumDecl) declTag()                        {}
 func (*ErrorDecl) declTag()                            {}
 func (*PermissionDecl) declTag()                       {}
-func (*AliasDecl) declTag()                       {}
+func (*AliasDecl) declTag()                            {}
 func (*NamespaceDecl) declTag()                        {}
 func (*UsingDecl) declTag()                            {}
 func (*ImportDecl) declTag()                           {}
@@ -565,7 +569,9 @@ func (*StaticIfStmt) stmtTag()                         {}
 func (*StaticErrorStmt) stmtTag()                      {}
 func (*StaticAssertStmt) stmtTag()                     {}
 func (*AssertByStmt) stmtTag()                         {}
-func (*ContractStmt) stmtTag() {}
+func (*AssertHoleStmt) stmtTag()                       {}
+func (*ProofUseStmt) stmtTag()                         {}
+func (*ContractStmt) stmtTag()                         {}
 func (*StaticAssertBlockStmt) stmtTag()                {}
 func (*StaticBlockStmt) stmtTag()                      {}
 func (*DiscardStmt) stmtTag()                          {}

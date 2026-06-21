@@ -26,24 +26,41 @@ suite_scripts=(
 pids=()
 logs=()
 statuses=()
+running_indices=()
 
-echo "Launching frontend suites in parallel"
+max_parallel=${ELISACORE_FRONTEND_SUITE_PARALLELISM:-2}
+if ! [[ "$max_parallel" =~ ^[0-9]+$ ]] || [[ "$max_parallel" -lt 1 ]]; then
+	echo "ELISACORE_FRONTEND_SUITE_PARALLELISM must be a positive integer, got: $max_parallel" >&2
+	exit 2
+fi
+
+reap_one_suite() {
+	local idx="$1"
+	if wait "${pids[idx]}"; then
+		statuses[idx]=0
+	else
+		statuses[idx]=$?
+		overall_status=1
+	fi
+}
+
+echo "Launching frontend suites with parallelism=${max_parallel}"
+overall_status=0
 for i in "${!suite_names[@]}"; do
 	log_file="$TMP_DIR/$(printf '%02d' "$i")_frontend.log"
 	logs[i]="$log_file"
 	statuses[i]=0
 	bash "${suite_scripts[i]}" >"$log_file" 2>&1 &
 	pids[i]=$!
+	running_indices+=("$i")
+	if [[ "${#running_indices[@]}" -ge "$max_parallel" ]]; then
+		reap_one_suite "${running_indices[0]}"
+		running_indices=("${running_indices[@]:1}")
+	fi
 done
 
-overall_status=0
-for i in "${!suite_names[@]}"; do
-	if wait "${pids[i]}"; then
-		statuses[i]=0
-	else
-		statuses[i]=$?
-		overall_status=1
-	fi
+for i in "${running_indices[@]}"; do
+	reap_one_suite "$i"
 done
 
 for i in "${!suite_names[@]}"; do

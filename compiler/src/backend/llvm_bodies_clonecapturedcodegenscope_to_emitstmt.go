@@ -1037,6 +1037,8 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			return nil
 		}
 		return s.emitContractCheck(n.Cond, "assertion failed")
+	case *ast.AssertHoleStmt:
+		return nil
 	case *ast.StaticAssertStmt:
 		return s.emitStaticAssert(n)
 	case *ast.StaticAssertBlockStmt:

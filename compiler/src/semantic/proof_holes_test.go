@@ -29,6 +29,21 @@ func analyzeProofHole(t *testing.T, filename, src string) *Result {
 	return AnalyzeWithOptions(file, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true, EmitProofHoleHints: true})
 }
 
+func analyzeProofHoleWithOptions(t *testing.T, filename, src string, options AnalyzeOptions) *Result {
+	t.Helper()
+	l := lexer.New(filename, []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lexer errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile(filename)
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return AnalyzeWithOptions(file, options)
+}
+
 // docs/98 — proof holes. A strict `assert(i < n)` is unprovable: nothing in scope bounds `i` above
 // relative to `n`. The diagnostic must be CONSTRUCTIVE rather than a raw counterexample — it surfaces
 // the GOAL, at least one KNOWN FACT in scope (here `i >= 0`, seeded by the `requires`), and a SUGGESTED
@@ -73,5 +88,46 @@ def ok(i: i64):
 	joined := strings.Join(append(append([]string{}, result.Errors()...), result.Warnings()...), "\n")
 	if strings.Contains(joined, "proof hole") {
 		t.Fatalf("a provable assert (i > 1 from i >= 3) must not raise a proof hole, got: %v", joined)
+	}
+}
+
+func TestAssertHoleStmtEmitsExplicitHoleReport(t *testing.T) {
+	src := `
+def ask(i: i64):
+    requires i >= 0
+    assert ?
+`
+	result := analyzeProofHoleWithOptions(t, "assert_hole.elisa", src, AnalyzeOptions{})
+	joined := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(joined, "proof hole: explicit assertion hole") {
+		t.Fatalf("expected explicit proof-hole report, got: %v", result.Warnings())
+	}
+	if !strings.Contains(joined, "goal:        ?") {
+		t.Fatalf("expected placeholder goal, got: %v", result.Warnings())
+	}
+	if !strings.Contains(joined, "i >= 0") {
+		t.Fatalf("expected in-scope known fact, got: %v", result.Warnings())
+	}
+}
+
+func TestPlainAssertProofHoleHintsRequireOptIn(t *testing.T) {
+	if _, err := exec.LookPath("z3"); err != nil {
+		t.Skip("z3 not on PATH; proof-hole test skipped")
+	}
+	src := `
+def get(i: i64, n: i64):
+    requires i >= 0
+    assert(i < n)
+`
+	base := AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true}
+	quiet := analyzeProofHoleWithOptions(t, "plain_assert_quiet.elisa", src, base)
+	if joined := strings.Join(quiet.Warnings(), "\n"); strings.Contains(joined, "proof hole") {
+		t.Fatalf("plain assert proof-hole hints must be opt-in, got: %v", quiet.Warnings())
+	}
+
+	base.EmitProofHoleHints = true
+	noisy := analyzeProofHoleWithOptions(t, "plain_assert_explain.elisa", src, base)
+	if joined := strings.Join(noisy.Warnings(), "\n"); !strings.Contains(joined, "proof hole: assertion could not be proven") {
+		t.Fatalf("expected opt-in proof-hole hint, got: %v", noisy.Warnings())
 	}
 }

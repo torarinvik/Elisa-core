@@ -59,6 +59,9 @@ func (a *Analyzer) expandOneUse(fn *ast.FuncDecl, use *ast.ContractStmt, contrac
 		a.errorf(use.Position, "contract `%s` takes %d argument(s), but `uses` supplied %d", use.UsesName, len(c.Params), len(use.UsesArgs))
 		return
 	}
+	if !a.validateUsesContractArgumentTypes(fn, use, c) {
+		return
+	}
 	// Bind each contract formal to its application argument.
 	subst := make(map[string]ast.Expr, len(c.Params))
 	rootRebind := make(map[string]string, len(c.Params))
@@ -98,6 +101,70 @@ func (a *Analyzer) expandOneUse(fn *ast.FuncDecl, use *ast.ContractStmt, contrac
 			a.errorf(use.Position, "cannot apply `preserves %s` of contract `%s`: argument is not a place expression", path.Root, use.UsesName)
 		}
 	}
+}
+
+// validateUsesContractArgumentTypes enforces docs/97 §6's Tier 1 soundness check: a `uses C(args)`
+// application must type-check each actual argument against C's corresponding formal before the
+// formals are substituted into value/frame clauses.
+func (a *Analyzer) validateUsesContractArgumentTypes(fn *ast.FuncDecl, use *ast.ContractStmt, c *ast.FuncDecl) bool {
+	if a == nil || fn == nil || use == nil || c == nil {
+		return false
+	}
+	cft := a.funcTypeFromDecl("contract "+c.Name, c.TypeParams, c.GenericParams, c.RegionParams, c.PermissionParams, c.Permissions, nil, c.Params, nil, false)
+	if cft == nil {
+		return false
+	}
+	scope := a.usesContractApplicationScope(fn)
+	ok := true
+	limit := len(use.UsesArgs)
+	if len(cft.Params) < limit {
+		limit = len(cft.Params)
+	}
+	for i := 0; i < limit; i++ {
+		expected := cft.Params[i]
+		actual := a.analyzeValueExprInScope(use.UsesArgs[i], expected, scope)
+		if IsInvalidType(expected) || IsInvalidType(actual) {
+			ok = false
+			continue
+		}
+		if !AssignableTo(expected, actual) {
+			formalName := c.Params[i].Name
+			if formalName != "" {
+				a.errorf(use.UsesArgs[i].Pos(), "contract `%s` argument %d (%s) expects %s, got %s", use.UsesName, i+1, formalName, expected, actual)
+			} else {
+				a.errorf(use.UsesArgs[i].Pos(), "contract `%s` argument %d expects %s, got %s", use.UsesName, i+1, expected, actual)
+			}
+			ok = false
+		}
+	}
+	return ok
+}
+
+func (a *Analyzer) usesContractApplicationScope(fn *ast.FuncDecl) *Scope {
+	scope := NewScope(a.globalScope)
+	sym, ok := a.symbolForFuncDecl(fn)
+	if !ok || sym == nil {
+		return scope
+	}
+	ft, _ := sym.Type.(*FuncType)
+	if ft == nil {
+		return scope
+	}
+	params := a.expandedFuncDeclParams(fn)
+	for i, param := range params {
+		var ptype Type = invalidType
+		if i < len(ft.Params) {
+			ptype = ft.Params[i]
+		}
+		symType := ptype
+		if ref, ok := ptype.(*RefType); ok && !ref.Mutable && isLegacyOutParamName(param.Name) {
+			cloned := cloneRefType(ref)
+			cloned.Mutable = true
+			symType = cloned
+		}
+		scope.Define(&Symbol{Name: param.Name, Kind: SymbolParam, Type: symType, Node: fn, ParamIndex: i, Mutable: a.paramIsMutable(param)})
+	}
+	return scope
 }
 
 // frameArgRoot returns the root identifier name of a place expression used as a `uses` argument that

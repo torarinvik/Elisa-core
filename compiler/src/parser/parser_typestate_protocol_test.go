@@ -14,8 +14,8 @@ const typestateSocketSrc = `typestate Socket:
 	transition close: Connected -> Closed
 `
 
-// The `typestate` sugar desugars to a state-bearing struct plus one transition function per
-// `transition`, all landing flat at file scope.
+// The `typestate` sugar desugars to a state-bearing struct, one initial-state constructor, and one
+// transition function per `transition`, all landing flat at file scope.
 func TestParseTypestateDesugarsToStructAndTransitions(t *testing.T) {
 	file, errs := parseSourceFile(t, typestateSocketSrc)
 	if len(errs) != 0 {
@@ -43,20 +43,38 @@ func TestParseTypestateDesugarsToStructAndTransitions(t *testing.T) {
 	if len(st.DerivedStates) != 3 {
 		t.Fatalf("expected 3 derive-state clauses, got %d", len(st.DerivedStates))
 	}
-	if len(fns) != 3 {
-		t.Fatalf("expected 3 transition functions, got %d", len(fns))
+	if len(fns) != 4 {
+		t.Fatalf("expected constructor plus 3 transition functions, got %d", len(fns))
 	}
 	names := map[string]bool{}
 	for _, fn := range fns {
 		names[fn.Name] = true
-		if len(fn.Ensures) != 1 {
+		if fn.Name != "__typestate_Socket_new" && len(fn.Ensures) != 1 {
 			t.Fatalf("transition %q must carry exactly one ensures-poststate, got %d", fn.Name, len(fn.Ensures))
 		}
 	}
-	for _, want := range []string{"connect", "established", "close"} {
+	for _, want := range []string{"__typestate_Socket_new", "connect", "established", "close"} {
 		if !names[want] {
-			t.Fatalf("missing transition function %q (got %v)", want, names)
+			t.Fatalf("missing synthesized function %q (got %v)", want, names)
 		}
+	}
+}
+
+func TestParseLinearTypestateDesugarsToLinearStruct(t *testing.T) {
+	file, errs := parseSourceFile(t, `linear typestate Ticket:
+	id: i64
+	states: Fresh, Used
+	transition use_it: Fresh -> Used
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	st, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected synthesized StructDecl, got %T", file.Decls[0])
+	}
+	if !st.Affine || st.Droppable {
+		t.Fatalf("linear typestate should lower to non-droppable affine struct, got affine=%v droppable=%v", st.Affine, st.Droppable)
 	}
 }
 
@@ -68,5 +86,43 @@ func TestParseTypestateUnknownStateIsError(t *testing.T) {
 `)
 	if len(errs) == 0 {
 		t.Fatalf("a transition into an undeclared state must be a parse error")
+	}
+}
+
+func TestParseTypestateAndContractDeclDispatchRemainDistinct(t *testing.T) {
+	file, errs := parseSourceFile(t, `typestate Socket:
+	fd: mutable i64
+	states: Closed, Open
+	transition open: Closed -> Open
+
+contract NonNegValue(value: i64):
+	requires value >= 0
+	ensure result >= value
+
+def keep(value: i64) -> i64:
+	uses NonNegValue(value)
+	return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	var sawSocket, sawTransition, sawContract, sawKeep bool
+	for _, decl := range file.Decls {
+		fn, isFn := decl.(*ast.FuncDecl)
+		if st, ok := decl.(*ast.StructDecl); ok && st.Name == "Socket" {
+			sawSocket = true
+		}
+		if isFn && fn.Name == "open" {
+			sawTransition = true
+		}
+		if isFn && fn.Name == "NonNegValue" && fn.IsContract {
+			sawContract = true
+		}
+		if isFn && fn.Name == "keep" && len(fn.Uses) == 1 {
+			sawKeep = true
+		}
+	}
+	if !sawSocket || !sawTransition || !sawContract || !sawKeep {
+		t.Fatalf("expected typestate sugar and named contract decls to dispatch distinctly, got %#v", file.Decls)
 	}
 }

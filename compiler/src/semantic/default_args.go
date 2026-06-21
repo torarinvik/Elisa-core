@@ -294,6 +294,8 @@ func cloneDefaultArgStmt(stmt ast.Stmt) ast.Stmt {
 			return nil
 		}
 		return &ast.ExprStmt{Position: n.Position, Expr: expr}
+	case *ast.AssertHoleStmt:
+		return n
 	case *ast.VarDeclStmt:
 		value := cloneDefaultArgExpr(n.Value)
 		if n.Value != nil && value == nil {

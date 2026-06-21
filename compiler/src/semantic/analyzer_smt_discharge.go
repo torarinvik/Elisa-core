@@ -995,6 +995,7 @@ type smtTranslator struct {
 	decls       map[string]bool // Elisa ident -> declared as an SMT Int const
 	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
+	lenConsts   map[string]int64
 	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
 	// unsignedBits / signedBits record the bit-width of each free var known to be unsigned / signed, so
 	// factPreamble can assert the true type bound (`[0, 2^w)` unsigned, `[-2^(w-1), 2^(w-1))` signed).
@@ -1043,6 +1044,7 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		decls:           map[string]bool{},
 		arrayDecls:      map[string]bool{},
 		lenDecls:        map[string]bool{},
+		lenConsts:       map[string]int64{},
 		nonNegDecls:     map[string]bool{},
 		unsignedBits:    map[string]int{},
 		signedBits:      map[string]int{},
@@ -1079,7 +1081,9 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		}
 		if tr.isArrayLike(t) {
 			tr.arrayDecls[n.Name] = true
-			return smtVar(n.Name), true
+			arr := smtVar(n.Name)
+			tr.recordFixedArrayLen(arr, t)
+			return arr, true
 		}
 		return "", false
 	case *ast.FieldExpr:
@@ -1090,12 +1094,22 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		if tr.isArrayLike(tr.a.exprTypes[n]) {
 			name := smtProjectionName(n)
 			tr.arrayDecls[name] = true
-			return smtVar(name), true
+			arr := smtVar(name)
+			tr.recordFixedArrayLen(arr, tr.a.exprTypes[n])
+			return arr, true
 		}
 		return "", false
 	default:
 		return "", false
 	}
+}
+
+func (tr *smtTranslator) recordFixedArrayLen(arr string, t Type) {
+	at, ok := stripRefForBounds(t).(*ArrayType)
+	if !ok || at == nil || !at.HasConstSize {
+		return
+	}
+	tr.lenConsts[arr+"_len"] = at.ConstSize
 }
 
 // isArrayLike reports whether a type is an integer-element array/darray we can model as (Array Int
@@ -1199,6 +1213,9 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 				return "", false
 			}
 			lenSym := arr + "_len"
+			if c, ok := tr.lenConsts[lenSym]; ok {
+				return smtInt(c), true
+			}
 			tr.lenDecls[lenSym] = true
 			return lenSym, true
 		}

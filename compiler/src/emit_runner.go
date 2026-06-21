@@ -524,6 +524,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		EnforceStrictProofs:      options.proofStrict,
 		RequireExternContracts:   options.strictExterns,
 		EnableSMT:                options.enableSMT,
+		EmitProofHoleHints:       options.explainHole,
 	}
 }
 

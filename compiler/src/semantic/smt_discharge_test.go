@@ -470,6 +470,68 @@ def check(xs: darray[i64]) -> i64:
 	}
 }
 
+func TestSMTProvesFixedArrayCountAndIndexQuantifier(t *testing.T) {
+	src := `
+law FixedSortedFirstMin(self: array[i64, 4]) = (forall i: (0 <= i and i < self.count - 1) implies self[i] <= self[i + 1]) implies (forall j: (0 <= j and j < self.count) implies self[0] <= self[j])
+
+def check(xs: array[i64, 4]) -> i64:
+    y: array[i64, 4] is FixedSortedFirstMin = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_fixed_array_quant.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected fixed-array quantifier law to analyze cleanly, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected fixed-array count/index quantifier theorem proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+func TestSMTFixedArrayCountIsExact(t *testing.T) {
+	src := `
+law CountIsFour(self: array[i64, 4]) = self.count == 4
+
+def check(xs: array[i64, 4]) -> i64:
+    y: array[i64, 4] is CountIsFour = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_fixed_array_count.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected fixed-array count law to analyze cleanly, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected fixed-array count to be exact in SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+func TestSMTDeclinesFalseFixedArrayQuantifier(t *testing.T) {
+	src := `
+law AllEqualFirst(self: array[i64, 4]) = forall i: (0 <= i and i < self.count) implies self[i] == self[0]
+
+def check(xs: array[i64, 4]) -> i64:
+    y: array[i64, 4] is AllEqualFirst = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_fixed_array_quant_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("a false fixed-array quantifier claim must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
 // THE PAYOFF (docs/90 brick 90-6): a quantified PRECONDITION is assumed in the body and discharges a
 // real indexed-value refinement. `requires forall k: 0<=k<n implies xs[k] >= 0` + `requires n > 0`
 // prove `return xs[0]` satisfies `is NonNeg` — by quantifier instantiation at k=0.

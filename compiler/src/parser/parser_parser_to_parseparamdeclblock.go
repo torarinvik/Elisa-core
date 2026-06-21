@@ -290,6 +290,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("typestate") {
 		return p.parseTypestateDecl()
 	}
+	if (p.peekIdentText("linear") || p.peekIdentText("affine")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "typestate" {
+		return p.parseTypestateDecl()
+	}
 	if p.peek() == lexer.TOKEN_STATIC && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "interface" {
 		p.errorf("`static interface` has been removed; use `protocol`")
 		p.skipRejectedDecl()
