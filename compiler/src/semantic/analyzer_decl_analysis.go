@@ -46,6 +46,12 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					}
 				}
 			case *ast.FuncDecl:
+				// A `contract` decl (docs/97) is a named bundle of clauses, not an executable function:
+				// it has no body and is consumed by expandUsesContracts. Skip function analysis/codegen.
+				if n.IsContract {
+					a.validateContractDecl(n)
+					return
+				}
 				a.analyzeFunctionAnnotations(n)
 				if n.Static {
 					a.staticContextDepth++

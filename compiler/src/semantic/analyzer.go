@@ -786,6 +786,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// (purely structural; no exprTypes dependency) so checkInterprocStoreEscape can consult them
 	// at call sites while the interior-taint side-table is live.
 	a.paramStoreTargets = a.computeParamStoreTargets(collectRegionPolyCandidateFuncs(activeDecls))
+	// docs/97: fold leading `uses Name(args)` named-contract applications into each function's own
+	// Requires/EnsureValues/Changes/Preserves BEFORE body analysis, so contract discharge + the frame
+	// checker see the unfolded clauses and a `uses`d precondition is checked at every call site.
+	a.expandUsesContracts(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {
