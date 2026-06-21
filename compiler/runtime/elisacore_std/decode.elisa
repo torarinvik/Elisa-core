@@ -36,6 +36,8 @@ def bits7(word: u32, sh: u32) -> u32 is InRange[0, 127]:
     return (word >> sh) & 0x7F
 def bits8(word: u32, sh: u32) -> u32 is InRange[0, 255]:
     return (word >> sh) & 0xFF
+def bits9(word: u32, sh: u32) -> u32 is InRange[0, 511]:
+    return (word >> sh) & 0x1FF
 def bits12(word: u32, sh: u32) -> u32 is InRange[0, 4095]:
     return (word >> sh) & 0xFFF
 def bits16(word: u32, sh: u32) -> u32 is InRange[0, 65535]:
