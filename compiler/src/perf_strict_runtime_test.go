@@ -12,6 +12,7 @@ import (
 // (prototyping stays fluid, the build succeeds) but `-Wperf` promotes them to hard errors
 // so shipped code can ban the anti-pattern outright.
 func TestRunCLIPerfStrictPromotesLintsToErrors(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		src    string

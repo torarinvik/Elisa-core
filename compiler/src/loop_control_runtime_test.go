@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunCLIBreakAndContinueRuntime(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "loop_control_fixture.elisa")

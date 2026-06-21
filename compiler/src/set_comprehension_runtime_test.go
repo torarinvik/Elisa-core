@@ -11,6 +11,7 @@ import (
 // ListComprehensionExpr), type-checks to set[V], lowers to a fused loop of `s.add(v)`, and runs.
 // Covers iterable dedup, range+filter, and a mapped body.
 func TestRunCLISetComprehensionRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "set_comprehension_smoke.elisa")
 

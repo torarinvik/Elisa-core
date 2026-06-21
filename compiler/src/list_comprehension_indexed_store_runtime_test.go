@@ -12,6 +12,7 @@ import (
 // VALUE semantics of that fast path — order, exact contents, head bindings, the f64 (vectorizable)
 // case, the filter push-fallback, and an empty source.
 func TestRunCLIListComprehensionIndexedStoreRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "list_comprehension_indexed_store_smoke.elisa")
 

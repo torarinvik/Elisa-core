@@ -13,6 +13,7 @@ import (
 // parallel map over the disjoint bands (one per worker) is race-free (every element
 // transformed exactly once).
 func TestRunCLIStdSliceRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_slice_smoke.elisa")
 

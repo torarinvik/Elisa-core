@@ -14,6 +14,7 @@ import (
 // the same program, and both the ok-path and the raised-error path round-trip
 // correctly through it at runtime.
 func TestRunCLIErrorSetPolymorphismMonomorphizesPerCallbackSet(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -11,6 +11,7 @@ import (
 const unreservedFillWarning = "without a matching immediately preceding reserve"
 
 func TestRunCLIUnreservedCountingFillLintAllowsSemanticAutoReserve(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "unreserved_counting_fill.elisa", `def builds(n: usize) -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -25,6 +26,7 @@ func TestRunCLIUnreservedCountingFillLintAllowsSemanticAutoReserve(t *testing.T)
 }
 
 func TestRunCLIUnreservedCountingFillLintAllowsAutoReserve(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "auto_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -38,6 +40,7 @@ func TestRunCLIUnreservedCountingFillLintAllowsAutoReserve(t *testing.T) {
 }
 
 func TestRunCLIUnreservedCountingFillLintAllowsMatchingExplicitReserve(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "explicit_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -53,6 +56,7 @@ func TestRunCLIUnreservedCountingFillLintAllowsMatchingExplicitReserve(t *testin
 }
 
 func TestRunCLIUnreservedCountingFillLintAllowsSufficientExplicitReserve(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "sufficient_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -67,6 +71,7 @@ func TestRunCLIUnreservedCountingFillLintAllowsSufficientExplicitReserve(t *test
 }
 
 func TestRunCLIUnreservedCountingFillLintAllowsMultiTargetSemanticAutoReserve(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "multi_auto_reserved_counting_fill.elisa", `def builds(n: usize) -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -82,6 +87,7 @@ func TestRunCLIUnreservedCountingFillLintAllowsMultiTargetSemanticAutoReserve(t 
 }
 
 func TestRunCLIUnreservedCountingFillPerfStrictErrors(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "unreserved_counting_fill_strict.elisa")
 	src := `def builds(src: darray[darray[i64]]&) -> usize:

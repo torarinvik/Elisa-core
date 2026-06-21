@@ -15,6 +15,7 @@ import (
 // 1000 elements holds correct data and the program runs clean — no explicit region
 // declaration, block, or `@r` annotation needed.
 func TestRunCLIInferredRegionSynthesizesScopedRegion(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

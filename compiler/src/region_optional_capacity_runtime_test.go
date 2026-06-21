@@ -13,6 +13,7 @@ import (
 // chained backing that grows as needed, so you never have to guess a number. This
 // pushes well past the default initial block to prove it grows rather than just fits.
 func TestRunCLIRegionWithoutCapacityGrows(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

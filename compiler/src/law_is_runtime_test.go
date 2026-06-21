@@ -15,6 +15,7 @@ import (
 // end-to-end (docs/85 Stage 1b): a predicate law used in `if … is Law` and as a returned bool
 // produces the expected runtime results.
 func TestLawIsRuntime(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

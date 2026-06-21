@@ -16,6 +16,7 @@ import (
 // covers IR emission; this one proves the compiled binary computes the value and
 // does not abort.
 func TestRunCLIRefParamMethodCallDoesNotTrap(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

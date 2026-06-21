@@ -17,7 +17,7 @@ func runEnumHierarchyProgram(t *testing.T, fixture string, src string) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -427,10 +427,11 @@ def bt() -> void:
 // wrap — a u8 store caps at 255 nodes (index 255 is the null sentinel), so allocating 300 leaves
 // must abort the program.
 func TestNarrowHandleOverflowTraps(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -544,7 +545,8 @@ def bt() -> void:
 // parameter (the handle is the record address — reads are self-contained), while a function that
 // CONSTRUCTS still threads the region + store. This is the ABI simplification the ptr dial buys.
 func TestPtrHandleReaderHasNoImplicitStoreParam(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -648,7 +650,8 @@ def bt() -> void:
 // value with no store, no region threading, and no allocation. This pins the property in IR:
 // the consumer takes the enum BY VALUE (no store param) and the program calls no arena helper.
 func TestValueHierarchyIsStoreFreeInIR(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -750,7 +753,8 @@ def bt() -> void:
 // IR pin for the niche: the Node payload is two bare handles ({ i32, i32 }, no i1 presence
 // flag) and the absent marker is a select against the width's sentinel (-1 at u32).
 func TestOptionalEnumChildNicheIR(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -801,7 +805,8 @@ def main() -> i64:
 // payload-array alignment pad — and 24 at u64, where 8-byte slots fill the machine word so the union
 // is two 8-byte edges and there is no padding to reclaim.
 func TestHandleDialShrinksRecordRows(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -862,7 +867,7 @@ def main() -> i64:
 // expectEnumProgramError builds a fixture and asserts compilation fails mentioning `want`.
 func expectEnumProgramError(t *testing.T, fixture string, src string, want string) {
 	t.Helper()
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -885,7 +890,8 @@ func expectEnumProgramError(t *testing.T, fixture string, src string, want strin
 // The legacy `(index: uN)` enum-layout spelling is hard-removed: a parse error pointing at the
 // canonical `(handle: uN)` form (docs/82).
 func TestLegacyIndexSpellingRejected(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -916,6 +922,7 @@ def main() -> i64:
 // docs/77: common(...) is a ROOT-level fact; a sub-category declaring its own is rejected at the
 // declaration (previously it passed analysis and failed deep in codegen offset lookup).
 func TestSubCategoryCommonFieldsRejected(t *testing.T) {
+	t.Parallel()
 	expectEnumProgramError(t, "subcat_common.elisa", `
 enum Node:
     common(span: i64)
@@ -934,7 +941,8 @@ def main() -> i64:
 // default-width root draws a -Wperf suggestion to narrow the handle; an already-narrowed
 // enum (or an unbounded builder via calls) stays silent.
 func TestNarrowHandleWidthLint(t *testing.T) {
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	t.Parallel()
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -989,6 +997,7 @@ enum Tree layout(handle: u8):
 // docs/82: ptr handles require stable addresses — SoA columns relocate, so the combination is
 // rejected at declaration.
 func TestPtrHandleRejectsSoA(t *testing.T) {
+	t.Parallel()
 	expectEnumProgramError(t, "ptr_soa.elisa", `
 enum Tree layout soa(handle: ptr):
     Node(left: Tree, right: Tree)
@@ -1001,6 +1010,7 @@ def main() -> i64:
 
 // docs/82: a non-recursive (inline value) enum has no store record to point at.
 func TestPtrHandleRejectsValueEnum(t *testing.T) {
+	t.Parallel()
 	expectEnumProgramError(t, "ptr_value.elisa", `
 enum Color layout(handle: ptr):
     Red
@@ -1013,6 +1023,7 @@ def main() -> i64:
 
 // docs/82: pointer handles are not position-independent → freeze is a compile error naming the fix.
 func TestPtrHandleRejectsFreeze(t *testing.T) {
+	t.Parallel()
 	expectEnumProgramError(t, "ptr_freeze.elisa", `
 enum Tree layout(handle: ptr):
     Node(left: Tree, right: Tree)

@@ -12,6 +12,7 @@ import (
 // (no shared accumulator). The asserts (counter, sum=500500, max=1000) confirm correctness
 // and race-freedom.
 func TestRunCLIStdParallelRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_parallel_smoke.elisa")
 

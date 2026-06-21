@@ -13,6 +13,7 @@ import (
 // refutable analog of the retired `if let value = v`), composes with an `and`
 // guard, and coexists with the existing variant/type `is` tests.
 func TestRunCLIIsOptionalBindingExecutes(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -57,6 +58,7 @@ def is_optional_binding_test() -> void:
 // (the match can never fail); it is rejected with a message naming the `is`
 // form the author wrote, not the internal `let condition`.
 func TestRunCLIIsBindingOnNonOptionalRejected(t *testing.T) {
+	t.Parallel()
 	fixturePath := filepath.Join(t.TempDir(), "is_irrefutable_fixture.elisa")
 	src := `def foo(x: i64) -> i64:
     if x is value:

@@ -11,6 +11,7 @@ import (
 // the body parse (Bindings on ListComprehensionExpr), are analyzed as per-element lets in the
 // loop scope (in scope for body + filter), lower into the fused loop body, and run.
 func TestRunCLIComprehensionHeadBindingsRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "comprehension_head_bindings_smoke.elisa")
 

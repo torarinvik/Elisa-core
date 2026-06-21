@@ -32,6 +32,7 @@ import (
 //
 // Bit-identical checksums across both kernels and both flag states is the proof.
 func TestDisjointParamVectorizationBitIdentical(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

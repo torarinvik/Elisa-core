@@ -14,6 +14,7 @@ import (
 // plain `T`, and the SAME combinator still works for a fallible callback in the
 // same program (distinct monomorphizations: scalar return vs union return).
 func TestRunCLIErrorSetParamEmptySet(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

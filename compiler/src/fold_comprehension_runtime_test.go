@@ -12,6 +12,7 @@ import (
 // Covers sum, a typed-accumulator order-sensitive weighted checksum over a range, a filtered
 // fold, product, and a conditional-body running max.
 func TestRunCLIFoldComprehensionRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "fold_comprehension_smoke.elisa")
 

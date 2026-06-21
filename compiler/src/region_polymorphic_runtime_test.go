@@ -18,7 +18,7 @@ func TestRegionBackedPackedEnumSingleFunction(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -88,7 +88,7 @@ func TestPlainRecursiveEnumPromotedRuns(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -156,7 +156,7 @@ func TestAoSNarrowedSlotPayloadsRunClean(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -238,7 +238,7 @@ func TestEnumColumnScanSumsCommonField(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -297,7 +297,7 @@ func TestRegionBackedPackedTreeRecursiveBuildAndEval(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -365,7 +365,7 @@ func TestRegionOwningFunctionCreatesPerRegionStores(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -439,7 +439,7 @@ func TestMutuallyRecursivePlainEnumsRun(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -522,7 +522,7 @@ func TestRegionPolymorphicRecursiveBuildThreadsCallerRegion(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}
@@ -636,7 +636,7 @@ func TestGenericProtocolDispatchThreadsRegionAndPackedStore(t *testing.T) {
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
-	std, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	std, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil || func() bool { _, e := os.Stat(std); return e != nil }() {
 		t.Skip("std runtime not found")
 	}

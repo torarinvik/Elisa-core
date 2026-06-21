@@ -16,6 +16,7 @@ import (
 // the pair shape), and binding joins across arguments so a narrower-set
 // callback may come first. All monomorphize and round-trip at runtime.
 func TestRunCLIErrorSetParamUnions(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -156,6 +157,7 @@ def error_set_union_test() -> void:
 // binds the callee's error-set param R, and round-trips at runtime — both the ok and
 // the error paths. No annotation on the lambda.
 func TestRunCLIBareLambdaErrorInference(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

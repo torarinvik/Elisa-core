@@ -15,6 +15,7 @@ import (
 // across worker counts prove race-freedom; completion without a timeout proves no
 // deadlock in the queue / shutdown-join path.
 func TestRunCLIStdPoolStressRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_pool_stress_smoke.elisa")
 

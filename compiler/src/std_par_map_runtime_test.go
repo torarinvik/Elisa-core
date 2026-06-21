@@ -11,6 +11,7 @@ import (
 // transform(src[i]) over disjoint bands in parallel. This compiles + runs the fixture natively and
 // asserts the parallel result is bit-identical to the sequential map (race-free by band disjointness).
 func TestRunCLIStdParMapRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_par_map_smoke.elisa")
 

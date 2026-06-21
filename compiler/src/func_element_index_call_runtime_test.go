@@ -14,6 +14,7 @@ import (
 // and route it back to index-then-call. Covers literal index, variable index, and a
 // struct-field container.
 func TestRunCLIIndexedFuncElementCall(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

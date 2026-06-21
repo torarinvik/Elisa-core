@@ -46,6 +46,7 @@ func compileSuffixFree(t *testing.T, prog string) (bool, string) {
 }
 
 func TestSuffixFreeLargeLiteralUnsignedGlobalCompiles(t *testing.T) {
+	t.Parallel()
 	for _, prog := range []string{
 		"global FNV: u64 = 0xcbf29ce484222325\ndef main() -> int can[Console.Write]:\n    return FNV.i32()\n",
 		"const X: u64 = 0xcbf29ce484222325\ndef main() -> int can[Console.Write]:\n    return X.i32()\n",
@@ -60,6 +61,7 @@ func TestSuffixFreeLargeLiteralUnsignedGlobalCompiles(t *testing.T) {
 // Soundness: the relaxation is gated on an UNSIGNED 64-bit target. A signed const/global whose value
 // exceeds i64 max must still be rejected (overflow stays an error), not silently wrapped.
 func TestSuffixFreeLargeLiteralSignedStillRejected(t *testing.T) {
+	t.Parallel()
 	for _, prog := range []string{
 		"const X: i64 = 0xffffffffffffffff\ndef main() -> int can[Console.Write]:\n    return X.i32()\n",
 		"global X: i64 = 0xffffffffffffffff\ndef main() -> int can[Console.Write]:\n    return X.i32()\n",

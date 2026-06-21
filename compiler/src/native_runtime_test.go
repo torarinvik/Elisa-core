@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunCLIProvidesDefaultNativeRuntimeHelpersForSelectedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -90,6 +91,7 @@ def string_view_empty_slice_test() -> void:
 }
 
 func TestRunCLIDebugRefereeRuntimeChecksAndTrace(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -167,6 +169,7 @@ def debug_referee_records_poison_and_noncanonical() -> void:
 }
 
 func TestRunCLIPostfixSviewCastEnablesStringContentEquality(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -221,6 +224,7 @@ def sview_cast_string_equality_test() -> void:
 }
 
 func TestRunCLIPostfixShorthandCallsPascalCaseUFCSMethod(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -297,6 +301,7 @@ def postfix_pascalcase_ufcs_test() -> void:
 }
 
 func TestRunCLIUniformCallSyntaxOverloadResolvesByArgumentType(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -363,6 +368,7 @@ def uniform_call_overload_test() -> void:
 }
 
 func TestRunCLIOverloadResolutionByArityAndMostConcrete(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -460,6 +466,7 @@ def overload_arity_concrete_test() -> void:
 }
 
 func TestRunCLIZeroParamFreeFunctionOverloadsWithReceiverMethod(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -524,6 +531,7 @@ def zero_param_overload_test() -> void:
 }
 
 func TestRunCLIExplicitTypeArgsOverloadResolvesByReceiverType(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -594,6 +602,7 @@ def explicit_typeargs_overload_test() -> void:
 }
 
 func TestRunCLILocalParamShadowsSameNamedGlobalFunction(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -664,6 +673,7 @@ def param_shadows_global_fn_test() -> void:
 }
 
 func TestRunCLISelectiveImportBringsNamedModuleMemberIntoScope(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -725,6 +735,7 @@ def selective_import_test() -> void:
 }
 
 func TestRunCLINamespacedTypeResolvesAtCodegen(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -786,6 +797,7 @@ def namespaced_type_codegen_test() -> void:
 }
 
 func TestRunCLINamespacedGenericMonomorphizes(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -847,6 +859,7 @@ def namespaced_generic_test() -> void:
 }
 
 func TestRunCLIDotNotationAcceptsExplicitTypeArgs(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -906,6 +919,7 @@ def dot_type_args_test() -> void:
 }
 
 func TestRunCLIAutoRefCoercesValuesToReferenceParams(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -970,6 +984,7 @@ def autoref_value_to_reference_param_test() -> void:
 }
 
 func TestRunCLIAutoRefRejectsImmutableValueForMutableReferenceParam(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "autoref_immutable_reject_fixture.elisa")
 	// Passing an immutable place where a `mutable T&` parameter is expected must
@@ -1004,6 +1019,7 @@ def autoref_immutable_reject_test() -> void:
 }
 
 func TestRunCLIDebugTraceTapeFingerprint(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -1074,6 +1090,7 @@ def debug_trace_value_divergence_changes_fingerprint() -> void:
 }
 
 func TestRunCLINativeRuntimeConcatShortStringRegression(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -10,6 +10,7 @@ const joinHotLoopWarning = "joins a thread on every iteration"
 const waitAllHotLoopWarning = "waits for a task group on every iteration"
 
 func TestRunCLIAwaitHotLoopLintFlagsPoolAwaitInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "await_hot_loop.elisa", `def pool_await(task: i64) -> i64:
     return task
 
@@ -25,6 +26,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintFlagsAwaitSugarInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "await_sugar_hot_loop.elisa", `struct Task:
     value: i64
 
@@ -44,6 +46,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintAllowsSingleAwait(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "await_once.elisa", `def pool_await(task: i64) -> i64:
     return task
 
@@ -56,6 +59,7 @@ def once() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintFlagsJoinInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "join_hot_loop.elisa", `def spawn1(f: i64, arg: i64) -> Thread[i64, Joinable]:
     _ = f
     return Thread[i64, Joinable](arg, 0)
@@ -77,6 +81,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintDoesNotFlagNonThreadJoin(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "non_thread_join_loop.elisa", `struct Span:
     value: i64
 
@@ -95,6 +100,7 @@ def ok() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintFlagsWaitAllInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "wait_all_hot_loop.elisa", `def task_group_wait_all(group: i64):
     _ = group
 
@@ -111,6 +117,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAwaitHotLoopLintFlagsWaitAllSugarInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "wait_all_sugar_hot_loop.elisa", `struct TaskGroup:
     value: i64
 

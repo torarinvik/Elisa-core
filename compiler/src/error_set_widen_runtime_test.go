@@ -15,6 +15,7 @@ import (
 // combined set's code space AND the active tag's payload is relocated into the
 // combined set's struct layout, so the payload survives the widen.
 func TestRunCLIErrorSetWidenWithPayload(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -14,6 +14,7 @@ import (
 // region exit. End-to-end: the program still computes correctly (the early free is idempotent with
 // the region-exit cleanup, and the object is genuinely dead at the free point).
 func TestRunCLIEarlyFreeReclaimsDeadObject(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

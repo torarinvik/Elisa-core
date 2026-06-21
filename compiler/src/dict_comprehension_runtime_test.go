@@ -11,6 +11,7 @@ import (
 // ListComprehensionExpr), type-checks to dict[K,V], lowers to a fused loop of `d.put(k, v)`, and
 // runs. Covers range, filtered, and iterable sources.
 func TestRunCLIDictComprehensionRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "dict_comprehension_smoke.elisa")
 

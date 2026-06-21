@@ -30,6 +30,7 @@ func runPropertyProgram(t *testing.T, name, body string) (int, string, string) {
 }
 
 func TestPropertyHarnessHoldingPropertiesPass(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property
 def add_commutes(a: i32, b: i32) -> bool:
@@ -61,6 +62,7 @@ def abs_nonneg(x: i64) -> bool:
 }
 
 func TestPropertyHarnessCounterexampleFails(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property
 def bogus_always_small(x: i32) -> bool:
@@ -84,6 +86,7 @@ def add_commutes(a: i32, b: i32) -> bool:
 }
 
 func TestPropertyHarnessReportsFailingInputs(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property
 def bogus(a: i32, flag: bool) -> bool:
@@ -104,6 +107,7 @@ def bogus(a: i32, flag: bool) -> bool:
 }
 
 func TestPropertyHarnessShrinksCounterexample(t *testing.T) {
+	t.Parallel()
 	// `ignored` plays no role in the predicate, so the shrinker should drive it to 0.
 	const body = `
 @property
@@ -121,6 +125,7 @@ def shrinks(a: i32, ignored: i32) -> bool:
 }
 
 func TestPropertyHarnessGeneratesFloats(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property
 def f64_add_commutes(a: f64, b: f64) -> bool:
@@ -150,6 +155,7 @@ def f64_bogus(x: f64) -> bool:
 }
 
 func TestPropertyHarnessConfigurableCaseCount(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property(1000)
 def big_run(a: i32) -> bool:
@@ -169,6 +175,7 @@ def small_bogus(x: i32) -> bool:
 }
 
 func TestPropertyHarnessRejectsBadCaseCount(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, body, want string }{
 		{"zero", "@property(0)\ndef z(a: i32) -> bool:\n    return true\n", "positive integer case count"},
 		{"nonint", "@property(foo)\ndef z(a: i32) -> bool:\n    return true\n", "positive integer case count"},
@@ -186,6 +193,7 @@ func TestPropertyHarnessRejectsBadCaseCount(t *testing.T) {
 }
 
 func TestPropertyHarnessRejectsUnsupportedSignatures(t *testing.T) {
+	t.Parallel()
 	const body = `
 @property
 def bad_return(x: i32) -> i32:

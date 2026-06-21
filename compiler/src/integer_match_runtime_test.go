@@ -51,6 +51,7 @@ def integer_match_dispatch() -> void:
 `
 
 func TestIntegerMatchDispatch(t *testing.T) {
+	t.Parallel()
 	exit, stdout, stderr := runStressProgram(t, "integer_match", integerMatchBody)
 	assertAllPassed(t, exit, stdout, stderr, "integer_match_dispatch")
 }

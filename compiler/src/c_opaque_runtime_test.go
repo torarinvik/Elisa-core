@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunCLIGeneratesCOpaqueRuntimeShim(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "c_opaque_alloc_smoke.elisa")
 

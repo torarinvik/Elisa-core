@@ -236,7 +236,7 @@ func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) 
 }
 
 func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
-	sourcePath := filepath.Join("..", "..", "Code", "test_programs", "region_owned_structs.elisa")
+	sourcePath := filepath.Join(repoRootFromMainTest(t), "Code", "test_programs", "region_owned_structs.elisa")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "llvm", sourcePath}, &stdout, &stderr)

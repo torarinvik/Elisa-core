@@ -14,6 +14,7 @@ import (
 // bytes) after the splice, the child's storage is freed with the parent (not
 // twice), and the program runs clean.
 func TestRunCLIAdoptSplicesChildRegionIntoParent(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

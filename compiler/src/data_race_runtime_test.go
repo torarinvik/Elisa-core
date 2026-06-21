@@ -37,6 +37,7 @@ func compileConcurrencyFixture(t *testing.T, name, body string) string {
 // referent across threads (closures capture by value, so the captured pointer still aliases
 // the original) — a data race. It is rejected, both inline and when bound to a local.
 func TestRunCLISpawnRejectsClosureCapturingMutableRef(t *testing.T) {
+	t.Parallel()
 	inline := compileConcurrencyFixture(t, "race_inline.elisa", `@test
 def race() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
@@ -68,6 +69,7 @@ def race() -> void:
 // A spawned closure that captures only plain VALUES is safe — value-capture snapshots the
 // data, so there is no sharing. It must not be flagged.
 func TestRunCLISpawnAllowsValueCapturingClosure(t *testing.T) {
+	t.Parallel()
 	out := compileConcurrencyFixture(t, "value_capture.elisa", `@test
 def ok() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:

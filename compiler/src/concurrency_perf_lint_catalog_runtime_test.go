@@ -6,6 +6,7 @@ import (
 )
 
 func TestRunCLIConcurrencyPerfLintCatalog(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "concurrency_perf_catalog.elisa", `def pool_new(workers: i64) -> i64:
     return workers
 

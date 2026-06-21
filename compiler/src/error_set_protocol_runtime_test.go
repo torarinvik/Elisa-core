@@ -13,6 +13,7 @@ import (
 // an interface-bounded generic dispatches to each impl with R monomorphized per
 // call site — two impls x two error sets, ok and raise paths.
 func TestRunCLIErrorSetParamProtocolDispatch(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

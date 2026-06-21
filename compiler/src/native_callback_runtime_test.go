@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunCLIGeneratesNativeCallbackRuntimeShim(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "callback_ptr_smoke.elisa")
 
