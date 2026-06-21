@@ -360,6 +360,62 @@ func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr
 	return extensionMethodCallRewriteApplied
 }
 
+// rewriteConcreteImplMethodCall handles `value.method(args...)` where `value` has a concrete
+// type that conforms to a protocol (via `impl Proto for T`) declaring `method` — including
+// protocol default methods, which are synthesized into impls as ordinary `__impl__…` symbols.
+// It rewrites the call in place to the qualified static interface-method form
+// `T.method(value, args...)`, prepending the receiver value as the first argument and pointing
+// the callee at a FieldExpr whose object is the receiver's type-path name (which
+// resolveInterfaceMethodExprType resolves and records as an InterfaceMethodRef for dispatch).
+// Returns extensionMethodCallRewriteNone when the receiver type has no conforming impl method,
+// leaving normal resolution (extension methods / UFCS free functions) untouched.
+func (a *Analyzer) rewriteConcreteImplMethodCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr, receiverType Type, callTypeArgs []ast.TypeExpr) extensionMethodCallRewriteStatus {
+	if receiverType == nil || IsInvalidType(receiverType) {
+		return extensionMethodCallRewriteNone
+	}
+	impl, ok := a.staticImplMethodForReceiver(receiverType, fieldExpr.Field, expr)
+	if !ok || impl == nil {
+		return extensionMethodCallRewriteNone
+	}
+	typeName, ok := a.typePathNameForReceiver(receiverType)
+	if !ok || typeName == "" {
+		return extensionMethodCallRewriteNone
+	}
+	typePathObject := &ast.Ident{Position: fieldExpr.Object.Pos(), Name: typeName}
+	callee := ast.Expr(&ast.FieldExpr{Position: fieldExpr.Position, Object: typePathObject, Field: fieldExpr.Field})
+	if len(callTypeArgs) != 0 {
+		callee = &ast.SpecializeExpr{Position: fieldExpr.Position, Operand: callee, TypeArgs: callTypeArgs}
+	}
+
+	prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+	prependedArgs = append(prependedArgs, fieldExpr.Object)
+	prependedArgs = append(prependedArgs, expr.Args...)
+	expr.Args = prependedArgs
+	if len(expr.ArgNames) != 0 {
+		prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+		prependedNames = append(prependedNames, "")
+		prependedNames = append(prependedNames, expr.ArgNames...)
+		expr.ArgNames = prependedNames
+	}
+	if len(expr.ArgShorthand) != 0 {
+		prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+		prependedShorthand = append(prependedShorthand, false)
+		prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+		expr.ArgShorthand = prependedShorthand
+	}
+	if len(expr.ArgItemOrder) != 0 {
+		prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+		prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+		for _, item := range expr.ArgItemOrder {
+			item.ArgIndex++
+			prependedItems = append(prependedItems, item)
+		}
+		expr.ArgItemOrder = prependedItems
+	}
+	expr.Func = callee
+	return extensionMethodCallRewriteApplied
+}
+
 func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMethodCallRewriteStatus {
 	if a == nil || expr == nil {
 		return extensionMethodCallRewriteNone
@@ -457,6 +513,12 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 			return extensionMethodCallRewriteInvalid
 		}
 		if !ufcsOK || ufcsSym == nil {
+			// No extension method or free UFCS function matched: fall back to protocol-impl
+			// UFCS dispatch (`value.method(args)` where the receiver's concrete type conforms
+			// to a protocol — incl. default methods — declaring `method`).
+			if status := a.rewriteConcreteImplMethodCall(expr, fieldExpr, receiverType, callTypeArgs); status != extensionMethodCallRewriteNone {
+				return status
+			}
 			return extensionMethodCallRewriteNone
 		}
 		if ufcsSym.Deprecated != "" {
