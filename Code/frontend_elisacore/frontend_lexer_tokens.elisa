@@ -163,6 +163,8 @@ def frontend_next_token_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind
                     return FrontendTokenKind.RangeLt
                 if frontend_match_char(lexer, FRONTEND_CH_GT):
                     return FrontendTokenKind.RangeGt
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return FrontendTokenKind.RangeLe
                 return FrontendTokenKind.Range
             return FrontendTokenKind.Dot
 

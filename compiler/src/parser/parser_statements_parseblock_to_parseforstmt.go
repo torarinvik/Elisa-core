@@ -971,7 +971,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		reverse = true
 		startOrSource = iterSource
 	}
-	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
 		namePattern, ok := pattern.(*ast.MoveBindNamePattern)
 		if !ok {
 			p.errorf("range for loop requires a simple loop name")
@@ -982,6 +982,12 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		}
 		op := p.advance()
 		end := p.parseForHeaderExpr()
+		if op.Kind == lexer.TOKEN_RANGE_LE {
+			// Inclusive `lo ..= hi` desugars to the half-open `lo ..< (hi + 1)`, so everything
+			// downstream (step, `by par`, the ForStmt lowering) treats it as the existing `..<` form.
+			end = &ast.BinaryExpr{Position: op.Pos, Op: lexer.TOKEN_PLUS, Left: end, Right: &ast.IntLit{Position: op.Pos, Value: "1"}}
+			op.Kind = lexer.TOKEN_RANGE_LT
+		}
 		var step ast.Expr
 		if p.match(lexer.TOKEN_RANGE) {
 			step = p.parseForHeaderExpr()

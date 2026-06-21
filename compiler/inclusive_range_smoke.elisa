@@ -1,0 +1,21 @@
+@test
+def inclusive_range_smoke() -> void:
+    can Abort.Panic:
+        # Inclusive `lo ..= hi` iterates hi as well: 1+2+3+4 = 10.
+        total: mutable i64 = 0
+        for i in 1 ..= 4:
+            total <- total + i
+        if total != 10:
+            panic("inclusive ..= must sum 1+2+3+4 = 10")
+        # Half-open `lo ..< hi` is unchanged: 1+2+3 = 6.
+        ho: mutable i64 = 0
+        for i in 1 ..< 4:
+            ho <- ho + i
+        if ho != 6:
+            panic("half-open ..< must remain exclusive (1+2+3 = 6)")
+        # Single-element inclusive range `n ..= n` runs exactly once.
+        once: mutable i64 = 0
+        for i in 5 ..= 5:
+            once <- once + 1
+        if once != 1:
+            panic("inclusive n ..= n must iterate exactly once")

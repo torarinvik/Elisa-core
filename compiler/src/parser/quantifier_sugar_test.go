@@ -72,6 +72,42 @@ func TestQuantifierExplicitRangeSugarDesugars(t *testing.T) {
 	}
 }
 
+// Inclusive `lo ..= hi` desugars to the half-open form with the upper bound `hi + 1`, so the guard
+// `k < hi+1` (i.e. `k <= hi` for integers) covers the inclusive endpoint. The rest of the guarded-range
+// machinery is reused verbatim.
+func TestQuantifierInclusiveRangeSugarDesugars(t *testing.T) {
+	src := "law InRange(self: array[i64, 8], n: i64) = forall k in 0 ..= n: self[k] >= 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	// Body is `(not guard) or P`; guard is `lo <= k and k < hi`; for `..=` the hi must be `n + 1`.
+	or, ok := q.Body.(*ast.BinaryExpr)
+	if !ok || or.Op != lexer.TOKEN_OR {
+		t.Fatalf("expected top-level `or`, got %T", q.Body)
+	}
+	not, ok := or.Left.(*ast.UnaryExpr)
+	if !ok {
+		t.Fatalf("expected guard negation, got %T", or.Left)
+	}
+	guard, ok := not.Operand.(*ast.BinaryExpr)
+	if !ok || guard.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected `lo <= k and k < hi` guard, got %T", not.Operand)
+	}
+	hiCmp, ok := guard.Right.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected `k < hi`, got %T", guard.Right)
+	}
+	hi, ok := hiCmp.Right.(*ast.BinaryExpr)
+	if !ok || hi.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("inclusive `..= n` upper bound must desugar to `n + 1`, got %T %+v", hiCmp.Right, hiCmp.Right)
+	}
+}
+
 func TestExistsExplicitRangeSugarDesugarsToGuardedConjunction(t *testing.T) {
 	src := "law HasZero(self: array[i64, 8]) = exists i in 0 ..< self.count: self[i] == 0\n"
 	file, errs := parseSourceFile(t, src)

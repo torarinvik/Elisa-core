@@ -155,6 +155,8 @@ def frontend_token_kind_code(kind: FrontendTokenKind) -> u64:
             return 59
         FrontendTokenKind.RangeGt:
             return 60
+        FrontendTokenKind.RangeLe:
+            return 109
         FrontendTokenKind.Comma:
             return 61
         FrontendTokenKind.LParen:

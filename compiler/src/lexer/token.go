@@ -130,6 +130,9 @@ const (
 	TOKEN_RBRACE    // }
 	TOKEN_PIPEGT    // |>
 	TOKEN_SEMICOLON // ;
+	// Appended at the END of the enum on purpose: the dogfooded Elisa frontend lexer's parity checksum
+	// keys on token-kind ordinals, so a new token must not shift any existing ordinal. New tokens go here.
+	TOKEN_RANGE_LE // ..= (inclusive range)
 )
 
 var tokenNames = map[TokenKind]string{
@@ -200,6 +203,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_RANGE:     "..",
 	TOKEN_RANGE_LT:  "..<",
 	TOKEN_RANGE_GT:  "..>",
+	TOKEN_RANGE_LE:  "..=",
 	TOKEN_COMMA:     ",",
 	TOKEN_LPAREN:    "(",
 	TOKEN_RPAREN:    ")",

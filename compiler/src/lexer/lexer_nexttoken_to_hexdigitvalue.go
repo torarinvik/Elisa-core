@@ -232,6 +232,9 @@ func (l *Lexer) NextToken() Token {
 			if l.match('>') {
 				return l.finishToken(Token{Kind: TOKEN_RANGE_GT, Text: "..>", Pos: p})
 			}
+			if l.match('=') {
+				return l.finishToken(Token{Kind: TOKEN_RANGE_LE, Text: "..=", Pos: p})
+			}
 			return l.finishToken(Token{Kind: TOKEN_RANGE, Text: "..", Pos: p})
 		}
 		return l.finishToken(Token{Kind: TOKEN_DOT, Text: ".", Pos: p})

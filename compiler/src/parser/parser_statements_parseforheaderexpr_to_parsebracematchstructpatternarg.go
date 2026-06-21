@@ -22,7 +22,7 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 			if depth > 0 {
 				depth--
 			}
-		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_IF, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE, lexer.TOKEN_IF, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			if depth == 0 {
 				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
 				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
@@ -842,6 +842,7 @@ func isRegionlessContainerType(typ ast.TypeExpr) bool {
 	}
 	return false
 }
+
 // desugarDStrStringLiteralInit rewrites `s: dstr = "abc"` into `s: dstr = [97, 98, 99]` — the
 // byte-list literal a user would otherwise hand-write (`['a'.u8(), ...]`). `dstr` is the u8
 // specialization of darray, so a bare string literal (otherwise a static `cstr`) does not assign to
