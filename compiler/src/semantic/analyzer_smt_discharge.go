@@ -267,7 +267,7 @@ func (a *Analyzer) smtCheckGoal(tr *smtTranslator, goalExpr ast.Expr, env map[st
 	}
 	p, ce := a.smtDischargeFormula(tr, goal, extraHyps)
 	if !p {
-		if qce := a.smtQuantifierCounterexample(tr, goalExpr, env, extraHyps); qce != "" {
+		if qce := a.quantifierCounterexampleAny(tr, goalExpr, env, extraHyps); qce != "" {
 			ce = qce
 		}
 	}
