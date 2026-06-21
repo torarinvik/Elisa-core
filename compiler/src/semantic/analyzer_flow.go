@@ -751,6 +751,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if !IsBoolType(condType) {
 				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
 			}
+			// docs/98 — proof holes: under strict proofs a plain `assert` is held to the same
+			// prove-it-or-fail bar as `assert … by:`. Discharge BEFORE the cond is recorded as a
+			// downstream fact (else it trivially entails itself); on failure emit the constructive
+			// goal / known-facts / suggested-missing-fact report.
+			a.checkStrictAssertProofHole(n.Pos(), cond)
 			a.applyConditionRefinements(a.currentScope, cond, true)
 			a.applyIndexBoundsFactsForCondition(cond, true)
 			a.recordSMTAssertFact(cond)
