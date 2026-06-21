@@ -51,10 +51,12 @@ law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
 law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
 type RegIndex = u32 is InRange[0, 31]
 
-def decode_rd(word: u32)  -> RegIndex = (word >> 7) & 0x1F            # mask ⇒ InRange[0,31]
+def decode_rd(word: u32) -> RegIndex:                                # mask ⇒ InRange[0,31]
+    return (word >> 7) & 0x1F
 def decode_imm_i(word: u32) -> i32 is SBounded[-2048, 2047]:         # sign-extend ⇒ signed range
     return ((((word >> 20) & 0xFFF).i32()) << 20) >> 20
-def read_reg(regs: array[u64, 32]&, r: RegIndex) -> u64 = regs[r]    # refined index ⇒ no bounds check
+def read_reg(regs: array[u64, 32]&, r: RegIndex) -> u64:             # refined index ⇒ no bounds check
+    return regs[r]
 ```
 
 ## Real-world validation (NES emulator dogfood)
@@ -73,6 +75,15 @@ covers an **immutable** `darray[T]` whose length is pinned by a live `requires <
 precondition: a refinement-typed index proven in `[0, hi]` with `K > hi` indexes it with no runtime
 check. Immutability is the soundness precondition — a `mutable` darray could `pop`/`clear` and shrink
 its count below `K`, so those (and an insufficient or absent `requires`) correctly keep the check.
+
+## Reusable module
+`compiler/runtime/elisacore_std/decode.elisa` packages the primitives as an includable library
+(no runtime dependency): the `InRange`/`SBounded` laws, unsigned field extractors `bits1..bits16`
+(constant mask, runtime position), and sign-extenders `sx8`/`sx12`/`sx16`. A consumer includes it,
+builds its own refinement types from the laws (`type RegIndex = u32 is InRange[0, 31]`), and decodes
+with the primitives — every cross-module refinement (a `bits5` return entailing `RegIndex`, an `sx12`
+signed range, a refined-index elision) discharges under `-strict`. Verified end to end by
+`decode_consumer_demo.elisa` + `decode_module_runtime_test.go`.
 
 ## Soundness summary
 - Gap 1: over-approximating `X & C` to `[0, C]` widens the value's feasible region; a goal unsat over
