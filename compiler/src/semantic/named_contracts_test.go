@@ -67,6 +67,80 @@ def caller() -> i64:
 	}
 }
 
+func TestNamedContractIncludedValueLawRequiresAtCallSite(t *testing.T) {
+	src := `
+law NonNeg(x: i64) = x >= 0
+
+contract NonNegSrc(src: i64):
+    includes NonNeg(src)
+    ensure result >= src
+
+def use_it(s: i64) -> i64:
+    uses NonNegSrc(s)
+    return s
+
+def caller() -> i64:
+    return use_it(0 - 5)
+`
+	result := analyzeContractStrict(t, "named_contract_included_law_callsite.elisa", src)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("included value law must become an inherited requires checked at call sites, got none")
+	}
+}
+
+func TestNamedContractGenericSpecializationProves(t *testing.T) {
+	src := `
+contract Monotonic[T](lo: T, hi: T):
+    requires lo <= hi
+    ensure result >= lo
+
+def clamp_floor(x: i64) -> i64:
+    uses Monotonic[i64](0, 100)
+    requires x >= 0
+    return 100
+`
+	result := analyzeContractStrict(t, "named_contract_generic_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("generic contract specialized at i64 should prove, got: %v", errs)
+	}
+}
+
+func TestNamedContractGenericTypeArgumentMismatchErrors(t *testing.T) {
+	src := `
+contract Monotonic[T](lo: T, hi: T):
+    requires lo <= hi
+    ensure result >= lo
+
+def bad(x: i64) -> i64:
+    uses Monotonic[bool](0, 100)
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "named_contract_generic_bad_typearg.elisa", src, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "contract `Monotonic` argument 1 (lo) expects bool") {
+		t.Fatalf("mismatched explicit contract type argument must error, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestNamedContractIncludedEffectLawStaysEffectObligation(t *testing.T) {
+	src := `
+law NoAlloc forbids Memory.Allocate
+
+contract PureUse(x: i64):
+    includes NoAlloc()
+
+def grow(x: i64) -> i64:
+    uses PureUse(x)
+    can Memory.Allocate, Abort.Panic:
+        xs: mutable darray[i64] = []
+        xs.push(x)
+        return xs[0]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "named_contract_included_effect.elisa", src, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "uses the `Memory.Allocate` effect") {
+		t.Fatalf("included effect law must fold as an effect obligation, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // Frame conditions in a contract propagate: a function that `uses` a contract whose `changes` set is
 // {out} may write that place, but writing a place OUTSIDE it is a frame violation.
 func TestNamedContractFramePropagates(t *testing.T) {
