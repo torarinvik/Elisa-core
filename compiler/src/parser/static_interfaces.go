@@ -21,6 +21,22 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	p.expectIdentText("protocol")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
+
+	// Optional base-protocol list (protocol inheritance): `protocol Ord: Eq, Show:`.
+	// The first colon is consumed above; if it is followed by an identifier (rather than the
+	// block-opening newline) those identifiers are the inherited protocols, terminated by a
+	// second colon that opens the member block.
+	var bases []string
+	if p.peek() == lexer.TOKEN_IDENT {
+		for {
+			bases = append(bases, p.parseQualifiedDeclName())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_COLON)
+	}
+
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 
@@ -49,7 +65,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.InterfaceDecl{Position: pos, Name: name, Members: members}
+	return &ast.InterfaceDecl{Position: pos, Name: name, Bases: bases, Members: members}
 }
 
 func (p *Parser) parseAssociatedTypeDecl() *ast.AssociatedTypeDecl {
@@ -60,7 +76,7 @@ func (p *Parser) parseAssociatedTypeDecl() *ast.AssociatedTypeDecl {
 	return &ast.AssociatedTypeDecl{Position: pos, Name: name}
 }
 
-func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
+func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_DEF)
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -84,6 +100,26 @@ func (p *Parser) parseInterfaceMethodDecl() *ast.ExternFuncDecl {
 	var ensures []ast.EnsuresClause
 	if p.matchIdentText("ensures") {
 		ensures = p.parseEnsuresClausesAfterKeyword()
+	}
+
+	// A trailing `:` introduces a DEFAULT METHOD BODY: the protocol method carries an
+	// implementation that conforming types inherit unless they override it. Represented as a
+	// FuncDecl member (mirroring the impl-method shape) rather than a bodiless ExternFuncDecl.
+	if p.match(lexer.TOKEN_COLON) {
+		body := p.parseFuncBodyAfterColon()
+		return &ast.FuncDecl{
+			Position:         pos,
+			Name:             name,
+			TypeParams:       typeParams,
+			PermissionParams: permissionParams,
+			GenericParams:    genericParams,
+			RegionParams:     regionParams,
+			Permissions:      permissions,
+			Ensures:          ensures,
+			Params:           params,
+			ReturnType:       retType,
+			Body:             body,
+		}
 	}
 
 	p.expectNewline()

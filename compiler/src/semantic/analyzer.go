@@ -786,7 +786,12 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.inheritHierarchyCommonFields(generatedScopedDecls)
 	}
 	a.validatePermissionSubsumption()
+	// Protocol depth: fold base-protocol members into derived protocols (protocol inheritance),
+	// then synthesize inherited default-method bodies into impls that omit them. Both run before
+	// value-symbol collection so the synthesized impl methods flow through the normal impl path.
+	a.foldInterfaceBases(activeDecls)
 	a.synthesizeDerivedImplMembers(activeDecls)
+	a.synthesizeDefaultImplMembers(activeDecls)
 	a.warnOnAvoidableStructPadding(activeDecls)
 	a.collectExportTypeAliases(activeDecls)
 	// docs/75 S2: rewrite zero-annotation grown container ref params into the explicit

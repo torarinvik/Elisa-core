@@ -413,13 +413,23 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeField(level+1, field)
 		}
 	case *ast.InterfaceDecl:
-		f.writeLine(level, "protocol "+n.Name+":")
+		header := "protocol " + n.Name + ":"
+		if len(n.Bases) != 0 {
+			header = "protocol " + n.Name + ": " + strings.Join(n.Bases, ", ") + ":"
+		}
+		f.writeLine(level, header)
 		for _, member := range n.Members {
 			switch m := member.(type) {
 			case *ast.AssociatedTypeDecl:
 				f.writeLine(level+1, "type "+m.Name)
 			case *ast.ExternFuncDecl:
 				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+			case *ast.FuncDecl:
+				// Default method: signature line + body.
+				f.writeLine(level+1, formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false))
+				for _, stmt := range m.Body {
+					f.writeStmt(level+2, stmt)
+				}
 			}
 		}
 	case *ast.ImplDecl:
