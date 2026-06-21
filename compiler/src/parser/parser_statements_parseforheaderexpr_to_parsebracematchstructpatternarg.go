@@ -268,8 +268,59 @@ func (p *Parser) parseMatchExpr() ast.Expr {
 	if p.match(lexer.TOKEN_IN) {
 		store = p.parseExpr()
 	}
-	arms := p.parseMatchArms()
+	arms := p.parseMatchExprArms()
 	return &ast.MatchExpr{Position: pos, Value: value, Store: store, Arms: arms}
+}
+
+// parseMatchExprArms parses the arms of a `match` used in expression position. Each arm is
+// `Pattern: <value>` where <value> is a single inline expression that the arm yields (the whole
+// match evaluates to the joined type of all arm values). For convenience an arm may also use an
+// indented block body whose final statement is an expression — that form parses through the same
+// statement-block machinery so all of statement-match's binding/narrowing semantics are reused. The
+// arm Body is always normalized to a statement list ending in an ExprStmt, which is exactly what
+// the analyzer (analyzeMatchExprArmBody) and backend (emitMatchExpr) already consume.
+func (p *Parser) parseMatchExprArms() []ast.MatchArm {
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	arms := make([]ast.MatchArm, 0)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		arms = append(arms, p.parseMatchExprArm()...)
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return arms
+}
+
+func (p *Parser) parseMatchExprArm() []ast.MatchArm {
+	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "case" &&
+		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {
+		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
+		p.advance()
+	}
+	patterns := p.parseTopLevelMatchPatterns()
+	p.expect(lexer.TOKEN_COLON)
+	var body []ast.Stmt
+	if p.peek() == lexer.TOKEN_NEWLINE {
+		// Indented block-body arm: reuse the statement-block parser; its final statement
+		// supplies the arm value (enforced by the analyzer).
+		p.expectNewline()
+		body = p.parseBlock()
+	} else {
+		// Inline value arm: `Pattern: <expr>`. The value becomes the arm's yielded expression.
+		value := p.parseExpr()
+		p.expectNewline()
+		body = []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
+	}
+	arms := make([]ast.MatchArm, 0, len(patterns))
+	for _, pattern := range patterns {
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body})
+	}
+	return arms
 }
 func (p *Parser) parseMatchHeadExpr() ast.Expr {
 	first := p.withInMembershipDisabled(p.parseExpr)
