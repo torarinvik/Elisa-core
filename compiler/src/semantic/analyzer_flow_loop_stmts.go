@@ -66,14 +66,15 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 // the block's contribution to the function's inferred can[…].
 func (a *Analyzer) analyzeCanCastStmt(stmt *ast.CanStmt, refs []ast.PermissionRef) {
 	target := stmt.As
-	if _, _, ok := a.lookupVisiblePermission(target); !ok {
+	_, _, isPerm := a.lookupVisiblePermission(target)
+	_, isAlias := a.lookupVisibleCapabilityAlias(target)
+	if !isPerm && !isAlias {
 		a.errorf(stmt.Position, "%s", UnknownPermissionMessage(target))
 	} else {
-		covered := map[string]bool{target: true}
-		a.markSubsumedFamilies(target, covered)
+		covered := a.castTargetCoverage(target)
 		for _, x := range refs {
 			if !permissionRefGranted(x, covered) {
-				a.errorf(stmt.Position, "`as %s` is unsound: %q does not subsume %q; declare `permission %s: includes %s` or use `trusted`", target, target, permissionRefKey(x), target, x.Name)
+				a.errorf(stmt.Position, "`as %s` is unsound: %q does not subsume %q; declare `permission %s: includes %s` (or add it to the `alias %s` set) or use `trusted`", target, target, permissionRefKey(x), target, x.Name, target)
 			}
 		}
 	}
@@ -89,7 +90,39 @@ func (a *Analyzer) analyzeCanCastStmt(stmt *ast.CanStmt, refs []ast.PermissionRe
 	a.currentFunctionUsedPermissions = savedUsedPermissions
 	a.currentFunctionUsedPermissionRefs = savedUsedRefs
 	a.recordFunctionPermissionRefs(remainingRefs)
+	// Surface the cast target as the block's inferred requirement. For an alias
+	// this is a bare alias ref, which expands to its member refs wherever the
+	// resulting function's effects are later resolved.
 	a.recordFunctionPermissionRefs([]ast.PermissionRef{{Position: stmt.Position, Name: target}})
+}
+
+// castTargetCoverage returns the set of permission keys subsumed by a checked-cast
+// target `as <target>`. For a permission family the coverage is the family plus its
+// transitive `includes` closure (and, via permissionRefGranted, every member of those
+// families). For a capability `alias` the coverage is the alias's fully expanded
+// member refs plus the include-closure of any whole families among them, so a wider
+// alias soundly subsumes the narrower requirement it is cast over.
+func (a *Analyzer) castTargetCoverage(target string) map[string]bool {
+	covered := map[string]bool{target: true}
+	if _, _, ok := a.lookupVisiblePermission(target); ok {
+		a.markSubsumedFamilies(target, covered)
+		return covered
+	}
+	if aliasRefs, ok := a.lookupVisibleCapabilityAlias(target); ok {
+		for _, ref := range a.expandCapabilityAliases(aliasRefs) {
+			if ref.Name == "" {
+				continue
+			}
+			covered[permissionRefKey(ref)] = true
+			if ref.Member == "" {
+				// A whole-family member of the alias also drags in that family's
+				// include-closure.
+				covered[ref.Name] = true
+				a.markSubsumedFamilies(ref.Name, covered)
+			}
+		}
+	}
+	return covered
 }
 
 func (a *Analyzer) analyzePoolStmt(stmt *ast.PoolStmt) {
