@@ -57,6 +57,23 @@ def decode_imm_i(word: u32) -> i32 is SBounded[-2048, 2047]:         # sign-exte
 def read_reg(regs: array[u64, 32]&, r: RegIndex) -> u64 = regs[r]    # refined index ⇒ no bounds check
 ```
 
+## Real-world validation (NES emulator dogfood)
+The full 1311-line MOS 6502 CPU + PPU + APU (`nes_emulator/elisa/cpu6502.elisa`) compiles under
+`-strict` with **zero** "could not be proven" or bounds diagnostics — every memory access
+(`array[u8, 65536]` indexed by `u16`), cycle-table lookup (`array[u8, 256]` by opcode), and status-flag
+mask is statically proven, no runtime checks, no `Abort` effect threaded through. It also runs
+**11/11** tests green including the bit-exact `nestest_trace` CPU validation against the golden log.
+This both confirms the firewall pattern holds on real code and verifies the Gap 1/3/4 changes regress
+neither static verification nor runtime behaviour. (The 6502 uses fixed `array[T, N]`; the darray
+index-elision below extends the same payoff to length-bounded dynamic arrays.)
+
+## Dynamic-array index elision (immutable darray + length precondition)
+The refined-index → no-bounds-check bridge originally covered only fixed `array[T, N]`. It now also
+covers an **immutable** `darray[T]` whose length is pinned by a live `requires <darray>.count >= K`
+precondition: a refinement-typed index proven in `[0, hi]` with `K > hi` indexes it with no runtime
+check. Immutability is the soundness precondition — a `mutable` darray could `pop`/`clear` and shrink
+its count below `K`, so those (and an insufficient or absent `requires`) correctly keep the check.
+
 ## Soundness summary
 - Gap 1: over-approximating `X & C` to `[0, C]` widens the value's feasible region; a goal unsat over
   the superset is unsat over the actual values (sound). Negative test: `& 0xF` must not prove `< 8`.
