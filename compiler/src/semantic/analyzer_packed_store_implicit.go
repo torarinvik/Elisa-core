@@ -319,7 +319,7 @@ func (a *Analyzer) injectStoreNeeds(fnType *FuncType, needs map[string]*EnumType
 // — possibly several, one per region in a loop (binary-trees builds a fresh tree per iteration) — so
 // it must NOT receive a single threaded store for enums beyond its signature; that would force every
 // per-region tree into one store and defeat region-local allocation.
-func funcOwnsRegion(fn *ast.FuncDecl) bool {
+func (a *Analyzer) funcOwnsRegion(fn *ast.FuncDecl) bool {
 	if fn == nil {
 		return false
 	}
@@ -335,6 +335,17 @@ func funcOwnsRegion(fn *ast.FuncDecl) bool {
 				return
 			}
 			if _, ok := v.Interface().(*ast.RegionStmt); ok {
+				found = true
+				return
+			}
+			// An `in <arena>:` scope is parsed as an InStoreStmt over an Arena value (NOT a RegionStmt),
+			// yet it likewise establishes a region in which the function creates region-backed stores on
+			// demand — e.g. `build_into(a: mutable Arena&)` doing `in a: root = make(N)`. Without treating
+			// it as region ownership the function is judged region-LESS, so the caller hoists+threads the
+			// store and the inner `in a:` can no longer re-home it: the store (and its columns) lands on a
+			// synthesized __auto_ region in the caller instead of `a`. A packed-store `in <store>:` scope
+			// is NOT arena-owning, so we gate on the scope target being an Arena.
+			if in, ok := v.Interface().(*ast.InStoreStmt); ok && in != nil && a.inStoreScopesArena(in.Store, fn) {
 				found = true
 				return
 			}
@@ -355,6 +366,69 @@ func funcOwnsRegion(fn *ast.FuncDecl) bool {
 		}
 	}
 	rec(reflect.ValueOf(fn.Body))
+	return found
+}
+
+// inStoreScopesArena reports whether an `in <store>:` scope targets an ARENA (a region-establishing
+// scope) rather than a packed-store value. It uses the resolved type when available, falling back to a
+// syntactic match against the function's Arena parameters — this classification can run before the
+// body's expression types are populated, and the reported bug case (`in a:` over an Arena& param) must
+// be recognized regardless.
+func (a *Analyzer) inStoreScopesArena(store ast.Expr, fn *ast.FuncDecl) bool {
+	if a == nil || store == nil {
+		return false
+	}
+	s := stripParenExpr(store)
+	if t := a.exprTypes[s]; t != nil {
+		return IsArenaValueOrRefType(t)
+	}
+	if id, ok := s.(*ast.Ident); ok && fn != nil {
+		for _, p := range fn.Params {
+			if p.Name == id.Name {
+				return typeExprNamesArena(p.Type)
+			}
+		}
+	}
+	return false
+}
+
+// typeExprNamesArena reports whether a syntactic type expression names `Arena` anywhere (e.g. through a
+// `mutable Arena&` reference wrapper). Reflection-walked so it is robust to the exact ref/wrapper node.
+func typeExprNamesArena(t ast.TypeExpr) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if nt, ok := v.Interface().(*ast.NamedType); ok {
+				if nt != nil && nt.Name == "Arena" {
+					found = true
+				}
+				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(t))
 	return found
 }
 

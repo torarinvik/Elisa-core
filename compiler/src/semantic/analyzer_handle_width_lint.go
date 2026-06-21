@@ -17,7 +17,7 @@ func (a *Analyzer) checkNarrowableHandleWidths(fn *ast.FuncDecl) {
 	if a == nil || fn == nil || len(fn.Body) == 0 {
 		return
 	}
-	if !funcOwnsRegion(fn) {
+	if !a.funcOwnsRegion(fn) {
 		return // store may outlive / be shared beyond what this function can see
 	}
 	a.findNarrowableHandleLoops(fn.Body)

@@ -148,7 +148,7 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 		// threaded (the data flowing across its boundary), never the transitive callee set. Only
 		// region-LESS functions (pure consumers/builders like sumT/sumF/leaf) receive the full
 		// transitive set, because they have no region in which to create a callee's store themselves.
-		if funcIsRegionStoreEntryPoint(fn) || funcOwnsRegion(fn) {
+		if funcIsRegionStoreEntryPoint(fn) || a.funcOwnsRegion(fn) {
 			a.injectInferredPackedStoreParams(fnType, regionBackedPacked)
 			if needsStoreHost {
 				wrapFuncBodyInLazyAutoRegion(fn)
