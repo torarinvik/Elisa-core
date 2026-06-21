@@ -811,6 +811,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// Requires/EnsureValues/Changes/Preserves BEFORE body analysis, so contract discharge + the frame
 	// checker see the unfolded clauses and a `uses`d precondition is checked at every call site.
 	a.expandUsesContracts(activeDecls)
+	// docs/101: lift higher-order `ensures(f, pred)` clauses off function-typed parameters into
+	// structured ParamContracts (removing them from Requires), so the call-site entailment check and
+	// the callee-body assumption can compose value contracts through first-class functions.
+	a.expandHigherOrderContracts(activeDecls)
 	a.analyzeDecls(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {

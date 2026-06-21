@@ -554,6 +554,11 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			if a.tryProveEnsureByReturnCallRange(clause, call) {
 				continue
 			}
+			// docs/101: `return f(x)` where `f` is a contracted function-typed parameter — assume the
+			// parameter contract's predicate on the call result (discharged at every call site).
+			if a.tryProveEnsureByParamContract(clause, call) {
+				continue
+			}
 			if a.trySMTProveEnsureFromReturnCall(clause, call) {
 				continue
 			}
