@@ -162,10 +162,12 @@ func intToStr(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
-// checkStrictAssertProofHole holds a plain `assert(cond)` to the prove-it-or-fail bar under strict
-// proofs (docs/98). Outside `-strict` an assert is a debug runtime check, so this is a no-op there and
-// the existing behaviour is untouched. The discharge ladder mirrors `assert … by:`: linear tier, then
-// the SMT tier when enabled. On failure it raises the constructive proof-hole diagnostic.
+// checkStrictAssertProofHole offers a constructive proof-hole HINT for a plain `assert(cond)` under
+// strict proofs (docs/98) whose integer-comparison goal the static tiers cannot discharge. Outside
+// `-strict` an assert is a debug runtime check, so this is a no-op there. The discharge ladder mirrors
+// `assert … by:`: linear tier, then the SMT tier when enabled. When neither closes the goal the assert
+// REMAINS a runtime check (ProofRuntime) and the constructive diagnostic is emitted as a non-fatal
+// warning — never a hard error, so it cannot reject previously-valid code.
 //
 // Increment 1 deliberately scopes the trigger to integer-comparison goals (`a < b`, `a >= b`, …): this
 // is the canonical unbounded-index obligation the heuristics target, and it keeps the new error off
@@ -192,8 +194,12 @@ func (a *Analyzer) checkStrictAssertProofHole(pos lexer.Pos, cond ast.Expr) {
 		a.recordProof(pos, "assert", "assert", ProofProvenSMT)
 		return
 	}
-	a.recordProof(pos, "assert", "assert", ProofRuntime)
-	a.errorf(pos, "%s", a.proofHoleReport("proof hole: assertion could not be proven", cond))
+	// A plain `assert` is a leaf/debug runtime check, NOT a load-bearing prove-or-fail obligation
+	// (docs/98; the three-way fallback discussion). So the assert stays a runtime check (ProofRuntime,
+	// recorded above) and the constructive proof-hole report is a NON-FATAL hint, never a hard error —
+	// it must not reject previously-valid code (e.g. stdlib asserts that are genuine runtime invariants).
+	// The hard prove-or-fail bar is reserved for an explicit `assert ?` hole (a later increment).
+	a.warnf(pos, "%s", a.proofHoleReport("proof hole: assertion could not be proven", cond))
 }
 
 // isIntComparisonGoal reports whether `cond` is a top-level integer relational comparison — the goal
