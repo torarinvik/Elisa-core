@@ -126,13 +126,24 @@ func (p *Parser) parseStmt() ast.Stmt {
 				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond}
 			}
 		case "uses":
-			// `uses Name(args)` — apply a named composable contract (docs/97). Lifted into the decl with
+			// `uses Name(args)` / `uses Name[T](args)` — apply a named composable contract (docs/97). Lifted into the decl with
 			// the other leading contracts. Only when it looks like `uses <Ident>(` ; otherwise a variable
 			// named `uses` falls through to expression parsing.
 			if p.looksLikeUsesStmt() {
 				pos := p.cur().Pos
 				p.advance()
 				cname := p.expect(lexer.TOKEN_IDENT).Text
+				var typeArgs []ast.TypeExpr
+				if p.match(lexer.TOKEN_LBRACKET) {
+					typeArgs = make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+					for {
+						typeArgs = append(typeArgs, p.parseGenericTypeArgExpr())
+						if !p.match(lexer.TOKEN_COMMA) {
+							break
+						}
+					}
+					p.expect(lexer.TOKEN_RBRACKET)
+				}
 				p.expect(lexer.TOKEN_LPAREN)
 				var args []ast.Expr
 				if p.peek() != lexer.TOKEN_RPAREN {
@@ -145,7 +156,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				}
 				p.expect(lexer.TOKEN_RPAREN)
 				p.expectNewline()
-				return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesArgs: args}
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesTypeArgs: typeArgs, UsesArgs: args}
 			}
 		case "ensure":
 			// `ensure <bool-expr>` value-contract postcondition (may use `result`/`old(...)`).
@@ -1043,7 +1054,7 @@ func forWhereIdentLooksLikePatternType(name string) bool {
 func (p *Parser) looksLikeUsesStmt() bool {
 	return p.pos+2 < len(p.tokens) &&
 		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN
+		(p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN || p.tokens[p.pos+2].Kind == lexer.TOKEN_LBRACKET)
 }
 
 // looksLikeContractStmt reports whether a leading `requires` is a value-contract precondition

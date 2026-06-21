@@ -110,6 +110,11 @@ type FulfillsClause struct {
 	Param    string
 	Law      string
 }
+type ContractInclude struct {
+	Position lexer.Pos
+	Law      string
+	Args     []Expr
+}
 type EnsuresClause struct {
 	Position   lexer.Pos
 	Condition  EnsuresCondition
@@ -154,9 +159,9 @@ type FuncDecl struct {
 	// status: defining-equation axiomatization remains disabled (soundness-critical: non-termination
 	// implies no fixed point, so assuming the equation would be unsound).
 	DecreasesWild string
-	Params       []ParamDecl
-	ReturnType   TypeExpr
-	Body         []Stmt
+	Params        []ParamDecl
+	ReturnType    TypeExpr
+	Body          []Stmt
 	// Changes holds the frame condition `changes <path>, ...` (docs/87): the upper bound on which
 	// caller-visible places the function may write. Each path is param-rooted (reusing EnsuresPath).
 	// An empty slice means no clause (unconstrained); a present clause is enforced — a write outside
@@ -170,6 +175,10 @@ type FuncDecl struct {
 	// the function by binding the law's subject to the named param. Each expands into the function's
 	// Changes/Preserves sets (the law's paths rebased from `self` to the param).
 	Fulfills []FulfillsClause
+	// ContractIncludes holds `includes Law(args)` clauses inside a named contract (docs/97 §6).
+	// Value-law includes fold into Requires; frame/effect/shape/composite laws fold into their own
+	// discharge class so facts are never laundered across classes.
+	ContractIncludes []ContractInclude
 	// Forbids holds the forbidden effects of an EFFECT law (docs/85 §4, Stage 4):
 	// `law NoAlloc forbids Memory.Allocate, Abort.Panic`. An effect law is the function-level
 	// discharge class — it names effects a conforming function must not use, discharged against the
@@ -750,6 +759,7 @@ type TernaryExpr struct {
 	Cond     Expr
 	Alt      Expr
 }
+
 // QuantifierExpr is a bound quantifier in a spec/law body (docs/90 brick 90-4): `forall i: <body>`
 // or `exists i: <body>`. The binders range over the integers; the body is a boolean expression
 // (typically a guarded implication `(0 <= i and i < n) implies <pred>`). Quantified bodies are

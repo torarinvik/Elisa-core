@@ -8,18 +8,18 @@ import (
 )
 
 type Parser struct {
-	tokens               []lexer.Token
-	pos                  int
-	errors               []string
-	notices              []string
-	poolScopes           []string
-	nurseryGroupByPool   map[string]string
-	nurseryCounter       int
-	declVisibility       map[ast.Decl]string
-	currentVisibility    string
-	allowInMembership    bool
-	allowTernary         bool
-	allowWhereExpr       bool
+	tokens             []lexer.Token
+	pos                int
+	errors             []string
+	notices            []string
+	poolScopes         []string
+	nurseryGroupByPool map[string]string
+	nurseryCounter     int
+	declVisibility     map[ast.Decl]string
+	currentVisibility  string
+	allowInMembership  bool
+	allowTernary       bool
+	allowWhereExpr     bool
 	// allowQuantifiers enables `forall`/`exists` prefix and `implies` infix in expression position.
 	// Set only while parsing law/spec bodies (docs/90 brick 90-4), so ordinary code may keep using
 	// `forall`/`exists`/`implies` as identifiers.
@@ -701,6 +701,7 @@ func (p *Parser) parseContractDecl() ast.Decl {
 	p.expect(lexer.TOKEN_INDENT)
 	var requires, ensures []ast.Expr
 	var changes, preserves []ast.EnsuresPath
+	var includes []ast.ContractInclude
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -727,13 +728,30 @@ func (p *Parser) parseContractDecl() ast.Decl {
 		case p.matchIdentText("preserves"):
 			preserves = append(preserves, p.parseChangesPathsAfterKeyword()...)
 			p.expectNewline()
+		case p.peekIdentText("includes"):
+			incPos := p.cur().Pos
+			p.advance()
+			law := p.expect(lexer.TOKEN_IDENT).Text
+			p.expect(lexer.TOKEN_LPAREN)
+			var args []ast.Expr
+			if p.peek() != lexer.TOKEN_RPAREN {
+				for {
+					args = append(args, p.parseExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+			includes = append(includes, ast.ContractInclude{Position: incPos, Law: law, Args: args})
+			p.expectNewline()
 		case p.peekIdentText("decreases"):
 			p.errorf("a `contract` body may not contain `decreases`: a termination measure is a property of a recursion, not a reusable contract (docs/97 §5)")
 			p.advance()
 			p.parseExpr()
 			p.expectNewline()
 		default:
-			p.errorf("a `contract` body may only contain requires/ensure/changes/preserves clauses, got %s", p.cur())
+			p.errorf("a `contract` body may only contain requires/ensure/changes/preserves/includes clauses, got %s", p.cur())
 			for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 				p.advance()
 			}
@@ -752,6 +770,7 @@ func (p *Parser) parseContractDecl() ast.Decl {
 		EnsureValues:     ensures,
 		Changes:          changes,
 		Preserves:        preserves,
+		ContractIncludes: includes,
 		IsContract:       true,
 	}
 }

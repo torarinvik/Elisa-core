@@ -518,8 +518,9 @@ type ContractStmt struct {
 	// UsesName / UsesArgs hold a named-contract application `uses Name(args)` (Kind == ContractUses,
 	// docs/97). UsesName is the contract's name; UsesArgs are the positional application arguments that
 	// bind to the contract's formal parameters. Both empty for every other Kind.
-	UsesName string
-	UsesArgs []Expr
+	UsesName     string
+	UsesTypeArgs []TypeExpr
+	UsesArgs     []Expr
 }
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos
