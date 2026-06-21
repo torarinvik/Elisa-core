@@ -300,6 +300,66 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 	expr.Args = expr.Args[1:]
 }
 
+// rewriteBoundTypeParamMethodCall handles `value.method(args...)` where `value` has a
+// bare type-parameter type whose generic bound declares `method`. It rewrites the call
+// in place to the static interface-method form `T.method(value, args...)`, prepending
+// the receiver value as the first argument and pointing the callee at a FieldExpr whose
+// object is the type-parameter name (which resolveInterfaceMethodExprType resolves).
+// Returns extensionMethodCallRewriteNone when the receiver is not a bound type param or
+// the bound protocol has no such method, leaving normal resolution untouched.
+func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr, receiverType Type, callTypeArgs []ast.TypeExpr) extensionMethodCallRewriteStatus {
+	tp, ok := receiverType.(*TypeParamType)
+	if !ok || tp == nil || tp.Name == "" {
+		return extensionMethodCallRewriteNone
+	}
+	iface, ok := a.lookupTypeParamInterface(tp.Name)
+	if !ok || iface == nil {
+		return extensionMethodCallRewriteNone
+	}
+	method, ok := iface.Methods[fieldExpr.Field]
+	if !ok || method == nil || method.Signature == nil {
+		return extensionMethodCallRewriteNone
+	}
+	// The protocol method's first parameter is the receiver slot; require at least one
+	// parameter so the receiver value has somewhere to bind.
+	if len(method.Signature.Params) == 0 {
+		return extensionMethodCallRewriteNone
+	}
+	typePathObject := &ast.Ident{Position: fieldExpr.Object.Pos(), Name: tp.Name}
+	callee := ast.Expr(&ast.FieldExpr{Position: fieldExpr.Position, Object: typePathObject, Field: fieldExpr.Field})
+	if len(callTypeArgs) != 0 {
+		callee = &ast.SpecializeExpr{Position: fieldExpr.Position, Operand: callee, TypeArgs: callTypeArgs}
+	}
+
+	prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
+	prependedArgs = append(prependedArgs, fieldExpr.Object)
+	prependedArgs = append(prependedArgs, expr.Args...)
+	expr.Args = prependedArgs
+	if len(expr.ArgNames) != 0 {
+		prependedNames := make([]string, 0, len(expr.ArgNames)+1)
+		prependedNames = append(prependedNames, "")
+		prependedNames = append(prependedNames, expr.ArgNames...)
+		expr.ArgNames = prependedNames
+	}
+	if len(expr.ArgShorthand) != 0 {
+		prependedShorthand := make([]bool, 0, len(expr.ArgShorthand)+1)
+		prependedShorthand = append(prependedShorthand, false)
+		prependedShorthand = append(prependedShorthand, expr.ArgShorthand...)
+		expr.ArgShorthand = prependedShorthand
+	}
+	if len(expr.ArgItemOrder) != 0 {
+		prependedItems := make([]ast.CallArgItem, 0, len(expr.ArgItemOrder)+1)
+		prependedItems = append(prependedItems, ast.CallArgItem{Position: fieldExpr.Object.Pos(), ArgIndex: 0})
+		for _, item := range expr.ArgItemOrder {
+			item.ArgIndex++
+			prependedItems = append(prependedItems, item)
+		}
+		expr.ArgItemOrder = prependedItems
+	}
+	expr.Func = callee
+	return extensionMethodCallRewriteApplied
+}
+
 func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMethodCallRewriteStatus {
 	if a == nil || expr == nil {
 		return extensionMethodCallRewriteNone
@@ -339,6 +399,16 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	}
 	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
 		return extensionMethodCallRewriteNone
+	}
+	// Bounded generic instance-method dispatch: when the receiver has a bare
+	// type-parameter type `T` whose generic bound `T: Protocol` declares a method
+	// named `fieldExpr.Field`, resolve `value.method(args...)` against the bound
+	// protocol by rewriting it to the static interface-method form
+	// `T.method(value, args...)` (the receiver value becomes the first argument).
+	// resolveInterfaceMethodExprType already specializes the protocol signature with
+	// the type-param receiver and records the InterfaceMethodRef for dispatch.
+	if status := a.rewriteBoundTypeParamMethodCall(expr, fieldExpr, receiverType, callTypeArgs); status != extensionMethodCallRewriteNone {
+		return status
 	}
 	if proofCarryingViewReceiverHelper(fieldExpr.Field) {
 		prependedArgs := make([]ast.Expr, 0, len(expr.Args)+1)
