@@ -139,6 +139,113 @@ def build() -> i64:
 	}
 }
 
+// Alias-path subsumption: an `alias` capability set used as a `can` grant satisfies
+// a narrower requirement — a wider capability caller satisfies a narrower callee.
+// `alias IO = Read, Write` (via Cap.*) and `alias FileIO = IO, Seek`; a `can FileIO:`
+// holder may call something requiring only `can[IO]`.
+func TestWiderAliasGrantSatisfiesNarrowerRequirement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "alias_subsumption_ok.elisa", `
+permission Cap:
+    Read
+    Write
+    Seek
+
+alias IO = Cap.Read, Cap.Write
+alias FileIO = IO, Cap.Seek
+
+extern needs_io() -> i64 can[IO]
+
+def caller() -> i64:
+    can FileIO:
+        return needs_io()
+`)
+	all := allDiagnostics(result)
+	if strings.Contains(all, "needs_io") || strings.Contains(all, "explicit local effect grant") || strings.Contains(all, "unknown permission") {
+		t.Fatalf("expected `can FileIO:` (FileIO includes IO) to satisfy a needs_io() requiring can[IO], got:\n%s", all)
+	}
+}
+
+// An insufficient alias capability errors: a `can` holding only part of the
+// requirement does not satisfy a call needing a member it lacks.
+func TestInsufficientAliasGrantErrors(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "alias_subsumption_insufficient.elisa", `
+permission Cap:
+    Read
+    Write
+
+alias ReadOnly = Cap.Read
+
+extern needs_write() -> i64 can[Cap.Write]
+
+def caller() -> i64:
+    can ReadOnly:
+        return needs_write()
+`)
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "needs_write") {
+		t.Fatalf("expected `can ReadOnly:` not to satisfy a Cap.Write requirement, got:\n%s", all)
+	}
+}
+
+// Phase 4 (alias form): a sound `can X as <Alias>:` cast where the alias subsumes X
+// discharges X locally and surfaces the alias as the function's requirement.
+func TestSoundCanCastToSubsumingAlias(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "can_cast_alias_sound.elisa", `
+permission Cap:
+    Read
+    Write
+    Seek
+
+alias IO = Cap.Read, Cap.Write
+alias FileIO = IO, Cap.Seek
+
+extern read_io() -> i64 can[Cap.Read]
+
+def build() -> i64:
+    can Cap.Read as FileIO:
+        return read_io()
+`)
+	all := allDiagnostics(result)
+	if strings.Contains(all, "read_io") || strings.Contains(all, "explicit local effect grant") || strings.Contains(all, "unsound") {
+		t.Fatalf("expected sound `as FileIO` cast to discharge the Cap.Read call, got:\n%s", all)
+	}
+	sym, ok := result.GlobalScope.Lookup("build")
+	if !ok {
+		t.Fatal("expected build symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected build function type, got %T", sym.Type)
+	}
+	if got := PermissionRefsString(fnType.PermissionRefs); got != " can[FileIO]" {
+		t.Fatalf("expected cast to surface FileIO, got %q", got)
+	}
+}
+
+// An `as <Alias>` cast where the alias does NOT subsume X is rejected.
+func TestUnsoundCanCastToAliasIsRejected(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "can_cast_alias_unsound.elisa", `
+permission Cap:
+    Read
+    Write
+
+permission Net:
+    Connect
+
+alias NetOnly = Net.Connect
+
+extern read_io() -> i64 can[Cap.Read]
+
+def build() -> i64:
+    can Cap.Read as NetOnly:
+        return read_io()
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "`as NetOnly` is unsound") {
+		t.Fatalf("expected unsound alias-cast diagnostic, got:\n%s", all)
+	}
+}
+
 // Cyclic `includes` chains are rejected.
 func TestIncludesCycleIsRejected(t *testing.T) {
 	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "includes_cycle.elisa", `
