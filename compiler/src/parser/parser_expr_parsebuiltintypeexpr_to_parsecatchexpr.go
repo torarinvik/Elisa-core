@@ -175,9 +175,56 @@ func (p *Parser) parseQuantifier() ast.Expr {
 			break
 		}
 	}
+	// Concept-sugar range binder (docs/100): `forall i in <range>: P`. Pure desugaring to the canonical
+	// guarded form `forall i: (lo <= i and i < hi) implies P`. The range source is either an explicit
+	// half-open range `lo ..< hi` or the index sugar `a.indices` (≡ `0 ..< a.count`). Single binder only.
+	if p.peek() == lexer.TOKEN_IN {
+		if len(vars) != 1 {
+			p.errorAt(pos, "`forall i in <range>:` binds exactly one index variable")
+		}
+		p.advance() // in
+		lo, hi := p.parseQuantifierRange()
+		p.expect(lexer.TOKEN_COLON)
+		body := p.parseExpr()
+		ident := &ast.Ident{Position: pos, Name: vars[0]}
+		guard := &ast.BinaryExpr{
+			Position: pos,
+			Op:       lexer.TOKEN_AND,
+			Left:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LTEQ, Left: lo, Right: ident},
+			Right:    &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: ident, Right: hi},
+		}
+		// `(0 <= i and i < hi) implies body` desugars (like the `implies` infix) to `(not guard) or body`.
+		guarded := &ast.BinaryExpr{
+			Position: pos,
+			Op:       lexer.TOKEN_OR,
+			Left:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: guard},
+			Right:    body,
+		}
+		return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: guarded}
+	}
+
 	p.expect(lexer.TOKEN_COLON)
 	body := p.parseExpr()
 	return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: body}
+}
+
+// parseQuantifierRange parses the source of a `forall i in <range>:` binder and returns its half-open
+// [lo, hi) integer bounds (docs/100). Forms: `<lo> ..< <hi>` (explicit) or `<expr>.indices` (sugar for
+// `0 ..< <expr>.count`).
+func (p *Parser) parseQuantifierRange() (lo ast.Expr, hi ast.Expr) {
+	pos := p.cur().Pos
+	first := p.parseOr()
+	if p.match(lexer.TOKEN_RANGE_LT) {
+		return first, p.parseOr()
+	}
+	// `a.indices` → 0 ..< a.count
+	if fe, ok := first.(*ast.FieldExpr); ok && fe.Field == "indices" {
+		zero := &ast.IntLit{Position: pos, Value: "0"}
+		count := &ast.FieldExpr{Position: pos, Object: fe.Object, Field: "count"}
+		return zero, count
+	}
+	p.errorAt(pos, "`forall i in <range>:` expects `lo ..< hi` or `<container>.indices`")
+	return first, first
 }
 
 func (p *Parser) parseProjectionQueryExpr(projection ast.Expr) ast.Expr {
