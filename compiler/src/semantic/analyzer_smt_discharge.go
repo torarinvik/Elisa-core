@@ -498,6 +498,20 @@ func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) 
 	return env, true
 }
 
+// isDatatypeValuedType reports whether a type is an enum/struct aggregate value (no scalar SMT term).
+// Used to bind datatype substitutions to a projection token rather than a fabricated integer var.
+func isDatatypeValuedType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	switch stripRefForBounds(t).(type) {
+	case *EnumType, *StructType:
+		return true
+	default:
+		return false
+	}
+}
+
 func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
 	return a.smtEnvForCallSubstEnv(tr, subst, nil)
 }
@@ -539,6 +553,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	}
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
+	}
+	// A datatype value (enum, or a struct not modeled field-wise above) has no scalar SMT term; bind a
+	// recoverable projection token so a bool predicate over it canonicalizes to the SAME opaque symbol
+	// as the un-substituted occurrence (structural induction). Tokens only key opaque predicate symbols;
+	// they never enter a numeric SMT term (the type checker forbids datatype operands in arithmetic).
+	if isDatatypeValuedType(a.exprTypes[argExpr]) {
+		env[name] = dtToken(smtProjectionName(argExpr))
+		return true
 	}
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
 	// body is type-analyzed (e.g. a loop body's `i+1`) has a nil exprTypes entry; falling through to
@@ -586,6 +608,13 @@ func (a *Analyzer) bindSMTStructEnvArg(tr *smtTranslator, env map[string]string,
 	}
 	return true
 }
+
+// dtTokenPrefix marks an env binding as a DATATYPE-projection token (not an SMT term). Only
+// boolPredicateArgToken reads these; arithmetic/comparison lowering never sees a datatype-typed operand
+// (the type checker forbids it), so the marker can never leak into a numeric SMT term.
+const dtTokenPrefix = "__dt__"
+
+func dtToken(projection string) string { return dtTokenPrefix + projection }
 
 // smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
 // (non-negated — they are assumed), using the given translator so free variables and arrays share the
@@ -1048,18 +1077,18 @@ func (a *Analyzer) lawBodyExpr(decl *ast.FuncDecl) (ast.Expr, bool) {
 // smtTranslator lowers the integer/bool expression fragment to SMT-LIB2, collecting the free
 // variables it declares so their flow facts can be asserted as hypotheses.
 type smtTranslator struct {
-	a           *Analyzer
-	decls       map[string]bool // Elisa ident -> declared as an SMT Int const
-	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	a          *Analyzer
+	decls      map[string]bool // Elisa ident -> declared as an SMT Int const
+	arrayDecls map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
 	// setDecls / dictDecls model set[T] / dict[K,V] containers. A set is an (Array <KSort> Bool)
 	// membership function (`p in s` = `(select s p)`). A dict is modeled as TWO arrays keyed by the
 	// same KSort: a `<sym>_keys` (Array <KSort> Bool) membership predicate plus a `<sym>_vals`
 	// (Array <KSort> Int) value map (`k in d` = `(select d_keys k)`, `d[k]` = `(select d_vals k)`).
 	// The map value is the SMT sort string for the key/element ("Int" or "Bool"). Only int/bool key
 	// and int value types are modeled; floats/structs DECLINE (sound: a declined term forgoes a proof).
-	setDecls  map[string]string // set SMT symbol -> key/element SMT sort
-	dictDecls map[string]string // dict SMT base symbol -> key SMT sort
-	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
+	setDecls    map[string]string // set SMT symbol -> key/element SMT sort
+	dictDecls   map[string]string // dict SMT base symbol -> key SMT sort
+	lenDecls    map[string]bool   // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	lenConsts   map[string]int64
 	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
 	// unsignedBits / signedBits record the bit-width of each free var known to be unsigned / signed, so
@@ -1117,20 +1146,20 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:               a,
-		decls:           map[string]bool{},
-		arrayDecls:      map[string]bool{},
-		setDecls:        map[string]string{},
-		dictDecls:       map[string]string{},
-		lenDecls:        map[string]bool{},
-		lenConsts:       map[string]int64{},
-		nonNegDecls:     map[string]bool{},
-		unsignedBits:    map[string]int{},
-		signedBits:      map[string]int{},
-		boolDecls:       map[string]bool{},
-		paramConsts:     paramConsts,
-		ceExprs:         map[string]string{},
-		callCanon:       map[string]string{},
+		a:                  a,
+		decls:              map[string]bool{},
+		arrayDecls:         map[string]bool{},
+		setDecls:           map[string]string{},
+		dictDecls:          map[string]string{},
+		lenDecls:           map[string]bool{},
+		lenConsts:          map[string]int64{},
+		nonNegDecls:        map[string]bool{},
+		unsignedBits:       map[string]int{},
+		signedBits:         map[string]int{},
+		boolDecls:          map[string]bool{},
+		paramConsts:        paramConsts,
+		ceExprs:            map[string]string{},
+		callCanon:          map[string]string{},
 		callEqInFlight:     map[string]int{},
 		callEqMaxUnroll:    1,
 		callEqDeclDepth:    map[*ast.FuncDecl]int{},
@@ -2280,6 +2309,13 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return "", false
 		}
 	case *ast.CallExpr:
+		// Try structural-predicate canonicalization first (a `ghost def ... -> bool` over a recursive
+		// datatype canonicalizes to one opaque Bool symbol + its bounded structural defining equation —
+		// see analyzer_structural_induction.go); fall back to the general ghost bool-call path for
+		// non-predicate bool-returning calls so the docs/101 ghost-beyond-int behavior is preserved.
+		if sym, ok := tr.boolPredicateCallSym(n, env); ok {
+			return sym, true
+		}
 		return tr.callResultBoolTermEnv(n, env)
 	default:
 		return "", false
