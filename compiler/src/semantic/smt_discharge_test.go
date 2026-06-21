@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
@@ -1001,5 +1002,79 @@ law HasNonZero(self: set[i64]) = exists x in self: x != 0
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_set_dict_quantifier_surface.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("set/dict quantifier surface should analyze as spec-only, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// QUANTIFIER-INSTANTIATION STABILITY (feature/quantifier-triggers). The `In`-source quantifier path
+// (`forall x in xs`, `forall i in xs.indices`) now carries a `(select arr idx)` `:pattern` trigger so
+// z3 gets a deterministic E-matching instantiation instead of a bare quantifier. These three tests
+// pin the three behaviours the trigger work must preserve: a heavy proof still discharges, a
+// pathological quantifier DECLINES within the per-query timeout (no hang), and an established law
+// does not regress.
+
+// (a) A quantifier-heavy goal still discharges: a value-binding antecedent (`forall x in xs: x >= xs[0]`,
+// the `In` path with the new select-trigger) combined with an index-quantifier consequence. With the
+// trigger guiding instantiation z3 picks `xs[j]` from the universally-bound element fact and proves the
+// indexed lower bound. The point is that the added `:pattern` does not break instantiation on a real goal.
+func TestSMTQuantifierTriggerHeavyProofDischarges(t *testing.T) {
+	src := `
+law AllAtLeastFirst(self: darray[i64]) = forall x in self: x >= self[0]
+
+def lower_bounded(xs: darray[i64], j: i64) -> void:
+    requires xs.count > 0 and j >= 0 and j < xs.count
+    requires forall x in xs: x >= xs[0]
+    requires forall i in xs.indices: xs[i] >= 0
+    assert xs[j] >= xs[0] and xs[j] >= 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_trigger_heavy.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("trigger-heavy quantifier proof should discharge, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// (b) A contrived HARD quantifier must DECLINE cleanly within the per-query timeout rather than hang.
+// The universal `forall k in 0 ..< n: self * self != k` is FALSE for self=3 (the witness k = 9 lies in
+// the range), and the nonlinear `self * self` keeps the falsifier off the trivial linear path — so z3
+// must search for the instance under MBQI/E-matching. Either it finds the model (sat → decline) or hits
+// the 2s per-query ceiling (unknown → decline); both are sound DECLINES, never a false proof.
+// Soundness: it must NOT be SMT-proven, and the analysis must return well within the timeout budget.
+func TestSMTHardQuantifierDeclinesWithinTimeout(t *testing.T) {
+	src := `
+law HardNonlinear(self: i64, n: i64) = forall k in 0 ..< n: self * self != k
+
+def pick() -> i64:
+    x: i64 is HardNonlinear[1000000] = 3
+    return x
+`
+	start := time.Now()
+	result := analyzeWithSMT(t, "smt_hard_quantifier.elisa", src)
+	elapsed := time.Since(start)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("hard quantifier must not be SMT-proven (it can be false): %+v", result.ProofReport)
+		}
+	}
+	// The per-query timeout is 2s; the whole analysis (spawn + this one query) must finish well within a
+	// generous multiple of it. A wedged solver would blow past this; the assertion is the no-hang gate.
+	if elapsed > 20*time.Second {
+		t.Fatalf("hard quantifier query did not decline within the timeout budget: took %s", elapsed)
+	}
+}
+
+// (c) No regression: an established value-binding quantifier law still proves after the trigger change.
+// `forall x in xs: x > 0` (the `In` path the trigger now annotates) must still discharge the indexed
+// positivity assertion exactly as before.
+func TestSMTQuantifierTriggerNoRegression(t *testing.T) {
+	src := `
+law AllPositive(self: darray[i64]) = forall x in self: x > 0
+
+def index_is_positive(xs: darray[i64], j: i64) -> void:
+    requires j >= 0 and j < xs.count
+    requires forall x in xs: x > 0
+    assert xs[j] > 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_trigger_no_regression.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("established value-binding quantifier law must still prove, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

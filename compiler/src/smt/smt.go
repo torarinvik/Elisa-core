@@ -134,6 +134,11 @@ func Open(opts Options) (Solver, error) {
 	// Print success/error tokens so we can read a deterministic line per command, and keep models
 	// available for counterexample extraction by the caller (cheap; only fetched on Sat).
 	preamble := "(set-option :print-success false)\n(set-option :produce-models true)\n"
+	// Force model-based quantifier instantiation ON (it is z3's default, but make it explicit so an
+	// emitted `:pattern` trigger can never render a genuinely-true quantified goal unprovable). MBQI is
+	// the completeness fallback: when E-matching on a trigger fails to find an instantiation, MBQI still
+	// searches for one, so trigger choice only affects solver SPEED, never which goals are provable.
+	preamble += "(set-option :smt.mbqi true)\n"
 	if opts.PerQueryTimeoutMillis > 0 {
 		preamble += fmt.Sprintf("(set-option :timeout %d)\n", opts.PerQueryTimeoutMillis)
 	}

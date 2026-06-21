@@ -1806,10 +1806,17 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			lenSym := arr + "_len"
 			tr.lenDecls[lenSym] = true
 			guard := "(and (<= 0 " + idxSym + ") (< " + idxSym + " " + lenSym + "))"
+			// E-matching trigger (docs/90 brick 90-16): a `forall x in xs` / `forall i in xs.indices`
+			// quantifier binds the index `idxSym` and models the element as `(select arr idxSym)`. That
+			// select term is the canonical instantiation pattern, so emit it as `:pattern`. Previously this
+			// `In`-source path went out as a BARE quantifier, leaving z3 to auto-pattern infer (or loop on a
+			// bad inferred trigger). Soundness/completeness hold: the trigger only guides E-matching, and
+			// MBQI (preamble-forced on) still completes any goal the trigger alone would miss.
+			elemSel := "(select " + arr + " " + idxSym + ")"
 			if n.Exists {
-				return "(exists ((" + idxSym + " Int)) (and " + guard + " " + body + "))", true
+				return "(exists ((" + idxSym + " Int)) (! (and " + guard + " " + body + ") :pattern (" + elemSel + ")))", true
 			}
-			return "(forall ((" + idxSym + " Int)) (or (not " + guard + ") " + body + "))", true
+			return "(forall ((" + idxSym + " Int)) (! (or (not " + guard + ") " + body + ") :pattern (" + elemSel + ")))", true
 		}
 		// Bind each quantifier variable to a fresh SMT Int symbol (prefix "q_" so it never collides
 		// with a free variable's "v_" symbol), then translate the body under the extended environment.
