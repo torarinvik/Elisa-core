@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // Higher-order verification (docs/101): let value contracts compose through first-class functions.
@@ -150,17 +151,26 @@ func (a *Analyzer) checkHigherOrderParamContracts(call *ast.CallExpr, args []ast
 		if i >= len(args) || args[i] == nil {
 			continue
 		}
-		passed, ok := a.resolvePassedNamedFunc(args[i])
-		if !ok || passed == nil {
-			// Not a concrete named function (lambda / forwarded param / expression): decline soundly.
-			// The contract cannot be relied on for this call; the body's assumption is discharged only by
-			// the call sites that DO pass a named function, so an un-checkable site is conservative — it
-			// simply provides no guarantee, and the callee's own `ensure` still gets the debug runtime check.
+		if passed, ok := a.resolvePassedNamedFunc(args[i]); ok && passed != nil {
+			if !a.passedFuncSatisfiesParamContract(passed, pc) {
+				a.errorf(args[i].Pos(), "function %q passed for parameter %q of %q does not satisfy its contract `ensures(%s, ...)`: its declared `ensure` does not entail the required postcondition", passed.Name, param.Name, decl.Name, param.Name)
+			}
 			continue
 		}
-		if !a.passedFuncSatisfiesParamContract(passed, pc) {
-			a.errorf(args[i].Pos(), "function %q passed for parameter %q of %q does not satisfy its contract `ensures(%s, ...)`: its declared `ensure` does not entail the required postcondition", passed.Name, param.Name, decl.Name, param.Name)
+		if lambda, ok := unwrapLambdaExpr(args[i]); ok && lambda != nil {
+			// A lambda argument: infer the postcondition range from its body and prove it entails the
+			// parameter contract's predicate, exactly as a named function's declared `ensure` would.
+			// If the body's result is outside the decidable fragment, the inference declines (no range)
+			// and we error — fail closed, never a false PROVEN.
+			if !a.lambdaSatisfiesParamContract(lambda, pc) {
+				a.errorf(args[i].Pos(), "lambda passed for parameter %q of %q does not satisfy its contract `ensures(%s, ...)`: its result is not provably within the required postcondition", param.Name, decl.Name, param.Name)
+			}
+			continue
 		}
+		// Not a concrete named function or lambda (forwarded param / arbitrary expression): decline
+		// soundly. The contract cannot be relied on for this call; the body's assumption is discharged
+		// only by call sites that DO pass a checkable function, so an un-checkable site is conservative —
+		// it provides no guarantee, and the callee's own `ensure` still gets the debug runtime check.
 	}
 }
 
@@ -270,6 +280,186 @@ func (a *Analyzer) tryProveEnsureByParamContract(clause ast.Expr, call *ast.Call
 		}
 	}
 	return true
+}
+
+// lambdaSatisfiesParamContract proves that a lambda argument's inferred postcondition (the integer
+// range its result is guaranteed to lie in) entails the parameter contract's predicate. It mirrors
+// passedFuncSatisfiesParamContract for the named-function case, but the "provided" range comes from
+// analyzing the lambda's own body rather than a declared `ensure`. Fail-closed: if the body result is
+// outside the decidable bounded-linear fragment, lambdaResultRange returns ok=false and we decline
+// (which the caller turns into an error), so an unverifiable lambda is never silently accepted.
+func (a *Analyzer) lambdaSatisfiesParamContract(lambda *ast.LambdaExpr, pc ast.ParamContract) bool {
+	if lambda == nil || pc.Pred == nil {
+		return false
+	}
+	required := a.paramContractConstraints(pc)
+	if len(required) == 0 {
+		// Predicate outside the decidable fragment: cannot prove, must decline.
+		return false
+	}
+	provided, ok := a.lambdaResultRange(lambda)
+	if !ok {
+		return false
+	}
+	for _, k := range required {
+		if !rangeEntailsConstraint(provided, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// lambdaResultRange computes the integer interval the lambda's result is guaranteed to lie in, over
+// every execution path. For an expression-body lambda it is the range of the body expression; for a
+// block-body lambda it is the JOIN (union) of the ranges of every `return` value (a path whose value
+// cannot be ranged makes the whole lambda undecidable, since that path could violate the contract).
+// Returns ok=false whenever any contributing value is outside the supported fragment — fail-closed.
+func (a *Analyzer) lambdaResultRange(lambda *ast.LambdaExpr) (numRange, bool) {
+	if lambda == nil {
+		return numRange{}, false
+	}
+	if lambda.BodyExpr != nil {
+		return a.exprResultRange(lambda.BodyExpr, nil)
+	}
+	var returns []ast.Expr
+	collectReturnValues(lambda.Body, &returns)
+	if len(returns) == 0 {
+		return numRange{}, false
+	}
+	var joined numRange
+	for i, rv := range returns {
+		r, ok := a.exprResultRange(rv, nil)
+		if !ok {
+			return numRange{}, false
+		}
+		if i == 0 {
+			joined = r
+		} else {
+			joined = joined.join(r)
+		}
+	}
+	return joined, true
+}
+
+// collectReturnValues gathers the value expressions of every `return EXPR` in a statement block,
+// recursing into the branches of if/else and the bodies of nested blocks. A bare `return` (no value)
+// or any control construct that could yield a value through an unmodeled path is left for the caller's
+// fail-closed handling — an unrecognized statement that produces no return value simply contributes
+// nothing, but the conservative result-range join below still requires EVERY collected return to be
+// rangeable, so a partially-modeled body declines.
+func collectReturnValues(stmts []ast.Stmt, out *[]ast.Expr) {
+	for _, stmt := range stmts {
+		switch s := stmt.(type) {
+		case *ast.ReturnStmt:
+			if s.Value != nil {
+				*out = append(*out, s.Value)
+			}
+		case *ast.IfStmt:
+			collectReturnValues(s.Then, out)
+			for _, elif := range s.Elifs {
+				collectReturnValues(elif.Body, out)
+			}
+			collectReturnValues(s.Else, out)
+		}
+	}
+}
+
+// exprResultRange computes the integer interval an expression evaluates within, given the guard facts
+// in scope (a map of immutable-identifier name -> narrowed range, accumulated from enclosing
+// conditional tests). Supports the bounded fragment: integer literals, guarded identifiers, and
+// conditionals (whose value is the JOIN of the two arms, each evaluated under the guard the test
+// establishes). Returns ok=false for anything outside the fragment — fail-closed.
+func (a *Analyzer) exprResultRange(expr ast.Expr, guards map[string]numRange) (numRange, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.exprResultRange(n.Inner, guards)
+	case *ast.Ident:
+		if guards != nil {
+			if r, ok := guards[n.Name]; ok {
+				return r, true
+			}
+		}
+		return numRange{}, false
+	case *ast.TernaryExpr:
+		// `Value if Cond else Alt`: the Value arm is taken when Cond is truthy (narrow by the positive
+		// guard), the Alt arm when falsy (narrow by the negated guard). The result is the join of both.
+		thenName, thenFact := a.condGuardFact(n.Cond, true)
+		elseName, elseFact := a.condGuardFact(n.Cond, false)
+		thenGuards := mergeGuard(guards, thenName, thenFact)
+		elseGuards := mergeGuard(guards, elseName, elseFact)
+		vr, vok := a.exprResultRange(n.Value, thenGuards)
+		ar, aok := a.exprResultRange(n.Alt, elseGuards)
+		if !vok || !aok {
+			return numRange{}, false
+		}
+		return vr.join(ar), true
+	default:
+		if c, ok := a.constIntValue(expr); ok {
+			return numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+		}
+		return numRange{}, false
+	}
+}
+
+// condGuardFact reduces a single `ident OP const` comparison condition to the (name, range) fact it
+// establishes on its truthy or falsy branch. Returns name="" when the condition is not of that shape.
+func (a *Analyzer) condGuardFact(cond ast.Expr, truthy bool) (string, numRange) {
+	for {
+		paren, ok := cond.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		cond = paren.Inner
+	}
+	bin, ok := cond.(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return "", numRange{}
+	}
+	op := bin.Op
+	var name string
+	var operand ast.Expr
+	if id, isID := bin.Left.(*ast.Ident); isID && id != nil {
+		name, operand = id.Name, bin.Right
+	} else if id, isID := bin.Right.(*ast.Ident); isID && id != nil {
+		name, operand, op = id.Name, bin.Left, flipComparison(op)
+	} else {
+		return "", numRange{}
+	}
+	c, ok := a.constIntValue(operand)
+	if !ok {
+		return "", numRange{}
+	}
+	if !truthy {
+		op = negateComparison(op)
+	}
+	switch op {
+	case lexer.TOKEN_GT:
+		return name, numRange{loKnown: true, lo: c + 1}
+	case lexer.TOKEN_GTEQ:
+		return name, numRange{loKnown: true, lo: c}
+	case lexer.TOKEN_LT:
+		return name, numRange{hiKnown: true, hi: c - 1}
+	case lexer.TOKEN_LTEQ:
+		return name, numRange{hiKnown: true, hi: c}
+	case lexer.TOKEN_EQEQ:
+		return name, numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+	default:
+		return "", numRange{}
+	}
+}
+
+// mergeGuard returns a copy of base with the (name,fact) intersected in. A name="" fact (the condition
+// was not a recognized comparison) leaves the guards unchanged.
+func mergeGuard(base map[string]numRange, name string, fact numRange) map[string]numRange {
+	if name == "" {
+		return base
+	}
+	out := make(map[string]numRange, len(base)+1)
+	for k, v := range base {
+		out[k] = v
+	}
+	out[name] = out[name].intersect(fact)
+	return out
 }
 
 // callTargetParamContract returns the parameter contract for a call whose target is a contracted

@@ -15,6 +15,30 @@ type numRange struct {
 	hi      int64
 }
 
+// join widens a range to cover both itself and another (the union of two branch results): a bound is
+// kept only if BOTH ranges bound that side, taking the looser endpoint. Used to combine the per-branch
+// result ranges of a conditional into the range guaranteed regardless of which branch is taken.
+func (r numRange) join(o numRange) numRange {
+	var out numRange
+	if r.loKnown && o.loKnown {
+		out.loKnown = true
+		if o.lo < r.lo {
+			out.lo = o.lo
+		} else {
+			out.lo = r.lo
+		}
+	}
+	if r.hiKnown && o.hiKnown {
+		out.hiKnown = true
+		if o.hi > r.hi {
+			out.hi = o.hi
+		} else {
+			out.hi = r.hi
+		}
+	}
+	return out
+}
+
 // intersect tightens a range with another fact about the same variable (conjunction of conditions).
 func (r numRange) intersect(o numRange) numRange {
 	out := r
