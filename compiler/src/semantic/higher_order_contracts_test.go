@@ -99,6 +99,82 @@ def use() -> i64:
 	}
 }
 
+// docs/101 closure extension: a LAMBDA passed for a contracted function-typed parameter is verified
+// against the param contract by inferring its body's result range, exactly as a named function's
+// declared `ensure` is. A satisfying lambda proves; a non-satisfying one errors; an undecidable body
+// declines (fail-closed → error).
+
+// Satisfying lambda: `n if n >= 0 else 0` is always >= 0 (the n-arm is guarded n>=0, the else-arm is
+// the literal 0), so it entails `ensures(f, result >= 0)`, and the body assumption discharges `ensure`.
+func TestHigherOrderLambdaSatisfyingProves(t *testing.T) {
+	src := `
+def apply(f: func(i64) -> i64, x: i64) -> i64:
+    requires ensures(f, result >= 0)
+    ensure result >= 0
+    return f(x)
+
+def use() -> i64:
+    return apply(lambda(n) => n if n >= 0 else 0, 3)
+`
+	result := analyzeContractStrict(t, "ho_lambda_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("lambda result is always >= 0 and the body assumption discharges; got: %v", errs)
+	}
+}
+
+// A constant lambda whose result is literally 5 entails `result >= 0`.
+func TestHigherOrderLambdaConstantProves(t *testing.T) {
+	src := `
+def apply(f: func(i64) -> i64, x: i64) -> i64:
+    requires ensures(f, result >= 0)
+    ensure result >= 0
+    return f(x)
+
+def use() -> i64:
+    return apply(lambda(n) -> i64 => 5, 3)
+`
+	result := analyzeContractStrict(t, "ho_lambda_const.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("constant 5 entails result >= 0; got: %v", errs)
+	}
+}
+
+// Non-satisfying lambda: `n - 1` has no provable lower bound, so it does NOT entail `result >= 0`.
+// The call site must error (fail-closed), never silently pass.
+func TestHigherOrderLambdaNonSatisfyingErrors(t *testing.T) {
+	src := `
+def apply(f: func(i64) -> i64, x: i64) -> i64:
+    requires ensures(f, result >= 0)
+    ensure result >= 0
+    return f(x)
+
+def use() -> i64:
+    return apply(lambda(n) => n - 1, 3)
+`
+	result := analyzeContractStrict(t, "ho_lambda_bad.elisa", src)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "does not satisfy its contract") {
+		t.Fatalf("lambda `n - 1` is not provably >= 0; call site must error, got: %v", result.Errors())
+	}
+}
+
+// The body assumption is real for lambdas too: with `ensures(f, result >= 5)` a satisfying lambda
+// (`n if n >= 5 else 5`, always >= 5) lets the downstream `ensure result >= 0` discharge.
+func TestHigherOrderLambdaAssumptionDischarges(t *testing.T) {
+	src := `
+def apply(f: func(i64) -> i64, x: i64) -> i64:
+    requires ensures(f, result >= 5)
+    ensure result >= 0
+    return f(x)
+
+def use() -> i64:
+    return apply(lambda(n) => n if n >= 5 else 5, 0)
+`
+	result := analyzeContractStrict(t, "ho_lambda_assume.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`result >= 5` from the lambda entails `result >= 0`; got: %v", errs)
+	}
+}
+
 // Naming a non-function parameter in ensures(...) is a hard error (the clause is meaningless).
 func TestHigherOrderParamContractNonFuncParamErrors(t *testing.T) {
 	src := `
