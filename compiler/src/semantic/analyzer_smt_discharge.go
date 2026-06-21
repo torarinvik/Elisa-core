@@ -1362,6 +1362,73 @@ func (tr *smtTranslator) dictDeclFor(expr ast.Expr, sym string) (string, string,
 	return sym, ks, true
 }
 
+// dictMethodCall recognizes the SURFACE dict-access methods in spec position and maps them onto the
+// existing two-array dict model (see dictTermEnv). The surface language has no `d[k]` / `k in d`
+// syntax for dicts; membership and lookup are expressed through methods that the analyzer resolves to
+// the stdlib free functions `arena_dict_contains` / `arena_dict_get`:
+//
+//	d.contains(k)  ->  arena_dict_contains(&d, k)  ->  (select <d>_keys <k>)      [Bool: membership]
+//	d.get(k)       ->  arena_dict_get(&d, k)       ->  (select <d>_vals <k>)      [Int : value]
+//
+// Both take the dict as the first (receiver) argument and the key as the second. The dict must be
+// soundly modelable (int/bool key, int value); otherwise we decline so the obligation falls back to a
+// runtime check rather than fabricating a proof.
+//
+// SOUNDNESS of the `d.get(k)` -> value-array mapping: `arena_dict_get` returns an OPTIONAL value
+// (`T?`); for a key not in the dict it is null. Modeling the result as `(select <d>_vals <k>)` (an
+// arbitrary-but-total Int) is only sound for a goal that ALSO carries a membership guard for `k`
+// (typically `requires d.contains(k)`), which constrains `(select <d>_keys <k>)` to true and binds
+// the goal to the in-domain value the quantifier hypothesis ranges over. Without such a guard the
+// value is an unconstrained Int and the goal simply will not discharge — never falsely proven.
+//
+// `kind` is "keys" for the membership method, "vals" for the lookup method. Returns the select term.
+func (tr *smtTranslator) dictMethodCall(call *ast.CallExpr, kind string, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	if !direct || decl == nil {
+		return "", false
+	}
+	var want string
+	switch kind {
+	case "keys":
+		want = "arena_dict_contains"
+	case "vals":
+		want = "arena_dict_get"
+	default:
+		return "", false
+	}
+	if decl.Name != want {
+		return "", false
+	}
+	args := proofCallArgs(call)
+	if len(args) != 2 || args[0] == nil || args[1] == nil {
+		return "", false
+	}
+	// UFCS resolution wraps the receiver in synthetic ref CASTs (`(&d).cast[dict[..]&]`); peel addr-of,
+	// parens, and casts down to the underlying dict expression the model is keyed on.
+	dictArg := args[0]
+	for {
+		next := stripAddrAndParens(dictArg)
+		if c, ok := next.(*ast.CastExpr); ok && c != nil && c.Operand != nil {
+			dictArg = c.Operand
+			continue
+		}
+		dictArg = next
+		break
+	}
+	dsym, ksort, ok := tr.dictTermEnv(dictArg, env)
+	if !ok {
+		return "", false
+	}
+	key, ok := tr.keyTermEnv(args[1], ksort, env)
+	if !ok {
+		return "", false
+	}
+	return "(select " + dsym + "_" + kind + " " + key + ")", true
+}
+
 func (tr *smtTranslator) dictType(expr ast.Expr) (*DictType, bool) {
 	t := tr.a.exprTypes[expr]
 	if t == nil && tr.a.currentScope != nil {
@@ -2309,6 +2376,13 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return "", false
 		}
 	case *ast.CallExpr:
+		// SURFACE dict membership `d.contains(k)` maps to the dict key array. This must run BEFORE the
+		// structural-predicate path, which would otherwise canonicalize `arena_dict_contains` into an
+		// opaque predicate + defining equation, severing it from the dict model (so a `requires
+		// d.contains(k)` guard would no longer constrain the modeled key set).
+		if sel, ok := tr.dictMethodCall(n, "keys", env); ok {
+			return sel, true
+		}
 		// Try structural-predicate canonicalization first (a `ghost def ... -> bool` over a recursive
 		// datatype canonicalizes to one opaque Bool symbol + its bounded structural defining equation —
 		// see analyzer_structural_induction.go); fall back to the general ghost bool-call path for
@@ -2527,6 +2601,11 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	if tr == nil || tr.a == nil || call == nil {
 		return "", false
 	}
+	// SURFACE dict lookup `d.get(k)` (resolved to `arena_dict_get`) maps to the dict value array, so a
+	// goal like `d.get(k) > 0` under a `d.contains(k)` guard reaches the dict quantifier model.
+	if sel, ok := tr.dictMethodCall(call, "vals", argEnv); ok {
+		return sel, true
+	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	if resultType == nil && direct && decl != nil {
@@ -2647,6 +2726,11 @@ func (tr *smtTranslator) callResultBoolTerm(call *ast.CallExpr) (string, bool) {
 func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[string]string) (string, bool) {
 	if tr == nil || tr.a == nil || call == nil {
 		return "", false
+	}
+	// SURFACE dict membership `d.contains(k)` (resolved to `arena_dict_contains`) maps to the dict key
+	// array, so it can serve as the in-domain GUARD for a value-lookup goal.
+	if sel, ok := tr.dictMethodCall(call, "keys", argEnv); ok {
+		return sel, true
 	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
