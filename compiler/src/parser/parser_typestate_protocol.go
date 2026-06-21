@@ -46,9 +46,10 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 	p.expect(lexer.TOKEN_INDENT)
 
 	type transitionDecl struct {
-		name string
-		from string
-		to   string
+		name      string
+		from      string
+		to        string
+		otherwise string
 	}
 
 	var states []string
@@ -85,8 +86,12 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 			from := p.expect(lexer.TOKEN_IDENT).Text
 			p.expect(lexer.TOKEN_ARROW)
 			to := p.expect(lexer.TOKEN_IDENT).Text
+			otherwise := ""
+			if p.match(lexer.TOKEN_PIPE) {
+				otherwise = p.expect(lexer.TOKEN_IDENT).Text
+			}
 			p.expectNewline()
-			transitions = append(transitions, transitionDecl{name: tname, from: from, to: to})
+			transitions = append(transitions, transitionDecl{name: tname, from: from, to: to, otherwise: otherwise})
 		default:
 			// An ordinary data field: `name: type`. Reconstruct the source line from token texts up to
 			// the end-of-line so the desugared struct carries the field verbatim.
@@ -115,6 +120,11 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 		}
 		if _, ok := stateIndex[tr.to]; !ok {
 			p.errorf("typestate %q transition %q has unknown target state %q", name, tr.name, tr.to)
+		}
+		if tr.otherwise != "" {
+			if _, ok := stateIndex[tr.otherwise]; !ok {
+				p.errorf("typestate %q transition %q has unknown target state %q", name, tr.name, tr.otherwise)
+			}
 		}
 	}
 
@@ -147,8 +157,14 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 	}
 	b.WriteString("__typestate: 0}\n\n")
 	for _, tr := range transitions {
-		fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&) ensures self => %s:\n", tr.name, name, tr.from, tr.to)
-		fmt.Fprintf(&b, "\tself.__typestate <- %d\n\n", stateIndex[tr.to])
+		if tr.otherwise == "" {
+			fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&) ensures self => %s:\n", tr.name, name, tr.from, tr.to)
+			fmt.Fprintf(&b, "\tself.__typestate <- %d\n\n", stateIndex[tr.to])
+			continue
+		}
+		fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&) -> bool ensures return true => self => %s, return false => self => %s:\n", tr.name, name, tr.from, tr.to, tr.otherwise)
+		fmt.Fprintf(&b, "\tself.__typestate <- %d\n", stateIndex[tr.to])
+		b.WriteString("\treturn true\n\n")
 	}
 
 	decls := p.reparseDesugaredDecls(name, b.String(), pos)
