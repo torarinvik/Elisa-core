@@ -22,7 +22,7 @@ func (a *Analyzer) validateGhostFuncDecl(fn *ast.FuncDecl) {
 		a.errorf(fn.Pos(), "ghost function %q body must be a pure total return tree (`return` or exhaustive `if`/`else` returns), with no mutation, loops, or effectful statements", fn.Name)
 		return
 	}
-	if !a.functionDefiningEquationEligible(fn) {
+	if !a.functionPureEquationShape(fn) {
 		a.errorf(fn.Pos(), "ghost function %q must be pure and total so its defining equation can be used by the prover", fn.Name)
 	}
 }
