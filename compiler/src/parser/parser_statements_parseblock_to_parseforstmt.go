@@ -986,6 +986,32 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		if p.match(lexer.TOKEN_RANGE) {
 			step = p.parseForHeaderExpr()
 		}
+		// Optional `by par` data-parallel marker on a range for-loop: lowers to the runtime
+		// `for_indices_par` combinator (disjoint index bands over a structured nursery). `by simd`
+		// is rejected -- recognized loop shapes vectorize by default (the -Wperf verifier checks).
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+			byPos := p.cur().Pos
+			p.advance()
+			mode := p.expect(lexer.TOKEN_IDENT).Text
+			switch mode {
+			case "par":
+				if reverse {
+					p.errorAt(byPos, "`by par` is not supported on a reverse range loop")
+				}
+				if step != nil {
+					p.errorAt(byPos, "`by par` is not supported on a stepped range loop")
+				}
+				if op.Kind != lexer.TOKEN_RANGE_LT {
+					p.errorAt(byPos, "`by par` requires a half-open `..<` range loop")
+				}
+				body := p.parseForStmtBody()
+				return p.buildParallelIndexFor(pos, namePattern.Name, startOrSource, end, body)
+			case "simd":
+				p.errorAt(byPos, "`by simd` was removed; recognized loop shapes vectorize by default (a non-vectorizable shape warns under -Wperf)")
+			default:
+				p.errorAt(byPos, "expected `par` after `by`, got %q", mode)
+			}
+		}
 		body := p.parseForStmtBody()
 		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
 	}
@@ -1051,6 +1077,48 @@ func (p *Parser) peekForWhereSubjectPattern(pattern ast.MoveBindPattern) (string
 		}
 	}
 	return "", false
+}
+
+// buildParallelIndexFor lowers `for <name> in <start> ..< <end> by par: <body>` into a call to the
+// runtime `for_indices_par(count, lambda(idx) => { ...; 0 })` combinator, which partitions [0,count)
+// into disjoint index bands on a structured nursery. Race-safety is the same as the Slice-band path:
+// each global index is visited exactly once, so writing one's own `out[i]` slot cannot collide.
+// Sharing a non-thread-shareable value (e.g. a darray) into the body is still rejected at the
+// lambda/nursery transfer boundary. When the range starts at integer 0 the loop name binds the band
+// index directly; otherwise the name is rebound to `start + idx` inside the body.
+func (p *Parser) buildParallelIndexFor(pos lexer.Pos, name string, start ast.Expr, end ast.Expr, body []ast.Stmt) ast.Stmt {
+	startIsZero := false
+	if lit, ok := start.(*ast.IntLit); ok && lit.Value == "0" {
+		startIsZero = true
+	}
+	usizeT := &ast.NamedType{Position: pos, Name: "usize"}
+	idxName := name
+	var lambdaBody []ast.Stmt
+	if !startIsZero {
+		idxName = "__by_par_off"
+		// name: usize = start + __by_par_off
+		lambdaBody = append(lambdaBody, &ast.VarDeclStmt{
+			Position: pos, Name: name, Type: usizeT,
+			Value: &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS,
+				Left: start, Right: &ast.Ident{Position: pos, Name: idxName}},
+		})
+	}
+	lambdaBody = append(lambdaBody, body...)
+	lambdaBody = append(lambdaBody, &ast.ReturnStmt{Position: pos, Value: &ast.IntLit{Position: pos, Value: "0"}})
+	lambda := &ast.LambdaExpr{
+		Position: pos, Keyword: "lambda", ParallelBody: true,
+		Params:     []ast.ParamDecl{{Position: pos, Name: idxName, Type: usizeT}},
+		ReturnType: &ast.NamedType{Position: pos, Name: "i64"},
+		Body:       lambdaBody,
+	}
+	var count ast.Expr = end
+	if !startIsZero {
+		count = &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: end, Right: start}
+	}
+	call := &ast.CallExpr{Position: pos,
+		Func: &ast.Ident{Position: pos, Name: "for_indices_par"},
+		Args: []ast.Expr{count, lambda}}
+	return &ast.ExprStmt{Position: pos, Expr: call}
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {
