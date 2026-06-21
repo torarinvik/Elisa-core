@@ -1051,6 +1051,14 @@ type smtTranslator struct {
 	a           *Analyzer
 	decls       map[string]bool // Elisa ident -> declared as an SMT Int const
 	arrayDecls  map[string]bool // Elisa ident -> declared as an SMT (Array Int Int) (docs/90 brick 90-5)
+	// setDecls / dictDecls model set[T] / dict[K,V] containers. A set is an (Array <KSort> Bool)
+	// membership function (`p in s` = `(select s p)`). A dict is modeled as TWO arrays keyed by the
+	// same KSort: a `<sym>_keys` (Array <KSort> Bool) membership predicate plus a `<sym>_vals`
+	// (Array <KSort> Int) value map (`k in d` = `(select d_keys k)`, `d[k]` = `(select d_vals k)`).
+	// The map value is the SMT sort string for the key/element ("Int" or "Bool"). Only int/bool key
+	// and int value types are modeled; floats/structs DECLINE (sound: a declined term forgoes a proof).
+	setDecls  map[string]string // set SMT symbol -> key/element SMT sort
+	dictDecls map[string]string // dict SMT base symbol -> key SMT sort
 	lenDecls    map[string]bool // Elisa ident -> declared length Int (its `.count`/`.len`), asserted >= 0
 	lenConsts   map[string]int64
 	nonNegDecls map[string]bool // SMT Int consts known non-negative by type (e.g. unsigned field projections)
@@ -1112,6 +1120,8 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		a:               a,
 		decls:           map[string]bool{},
 		arrayDecls:      map[string]bool{},
+		setDecls:        map[string]string{},
+		dictDecls:       map[string]string{},
 		lenDecls:        map[string]bool{},
 		lenConsts:       map[string]int64{},
 		nonNegDecls:     map[string]bool{},
@@ -1196,6 +1206,148 @@ func (tr *smtTranslator) isArrayLike(t Type) bool {
 	return false
 }
 
+// smtKeySort returns the SMT sort string for a set element / dict key type, and whether it is
+// soundly modelable. Integer (non-float numeric) -> "Int"; bool -> "Bool". Floats, structs, enums,
+// strings, and everything else DECLINE (return ok=false) — modeling them would require theories we
+// do not emit, so we forgo the proof rather than risk unsoundness.
+func smtKeySort(t Type) (string, bool) {
+	t = stripRefForBounds(t)
+	if IsBoolType(t) {
+		return "Bool", true
+	}
+	if IsNumericType(t) && !IsFloatType(t) {
+		return "Int", true
+	}
+	return "", false
+}
+
+// setTermEnv lowers a set-valued expression to its SMT membership-array symbol (an `(Array <KSort>
+// Bool)`), returning the symbol, its key sort, and ok. It resolves a law's `self` / quantifier
+// binder through `env`, an identifier/field through its set type. Non-set or non-modelable element
+// types decline (sound).
+func (tr *smtTranslator) setTermEnv(expr ast.Expr, env map[string]string) (sym string, ksort string, ok bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return tr.setTermEnv(n.Inner, env)
+	case *ast.Ident:
+		if env != nil {
+			if bound, bok := env[n.Name]; bok {
+				if ks, kok := tr.setDecls[bound]; kok {
+					return bound, ks, true
+				}
+			}
+		}
+		st, kok := tr.setElemType(n)
+		if !kok {
+			return "", "", false
+		}
+		ks, sok := smtKeySort(st)
+		if !sok {
+			return "", "", false
+		}
+		sym = smtVar(n.Name)
+		tr.setDecls[sym] = ks
+		return sym, ks, true
+	case *ast.FieldExpr:
+		st, kok := tr.setElemType(n)
+		if !kok {
+			return "", "", false
+		}
+		ks, sok := smtKeySort(st)
+		if !sok {
+			return "", "", false
+		}
+		sym = smtVar(smtProjectionName(n))
+		tr.setDecls[sym] = ks
+		return sym, ks, true
+	}
+	return "", "", false
+}
+
+// keyTermEnv lowers a set-element / dict-key expression to a term of the container's key sort:
+// an integer term for sort "Int", a boolean term for sort "Bool". This keeps the `(select <arr>
+// <key>)` index well-sorted.
+func (tr *smtTranslator) keyTermEnv(expr ast.Expr, ksort string, env map[string]string) (string, bool) {
+	if ksort == "Bool" {
+		return tr.boolTerm(expr, env)
+	}
+	return tr.termEnv(expr, env)
+}
+
+// setElemType resolves the element type of a set-typed expression (from exprTypes, or the symbol's
+// declared type when the node predates body analysis — e.g. precondition/law proving).
+func (tr *smtTranslator) setElemType(expr ast.Expr) (Type, bool) {
+	t := tr.a.exprTypes[expr]
+	if t == nil && tr.a.currentScope != nil {
+		if id, ok := expr.(*ast.Ident); ok {
+			if sym, ok := tr.a.currentScope.Lookup(id.Name); ok && sym != nil {
+				t = sym.Type
+			}
+		}
+	}
+	if st, ok := stripRefForBounds(t).(*SetType); ok && st != nil {
+		return st.Elem, true
+	}
+	return nil, false
+}
+
+// dictTermEnv lowers a dict-valued expression to its SMT base symbol plus the key sort and (modeled)
+// value type. The dict is realized as two arrays in factPreamble: `<sym>_keys` (membership) and
+// `<sym>_vals` (value map). Only int/bool keys and int values are modeled; otherwise decline.
+func (tr *smtTranslator) dictTermEnv(expr ast.Expr, env map[string]string) (sym string, ksort string, ok bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return tr.dictTermEnv(n.Inner, env)
+	case *ast.Ident:
+		if env != nil {
+			if bound, bok := env[n.Name]; bok {
+				if ks, kok := tr.dictDecls[bound]; kok {
+					return bound, ks, true
+				}
+			}
+		}
+		return tr.dictDeclFor(n, smtVar(n.Name))
+	case *ast.FieldExpr:
+		return tr.dictDeclFor(n, smtVar(smtProjectionName(n)))
+	}
+	return "", "", false
+}
+
+// dictDeclFor resolves a dict-typed expression's key/value types and records the base symbol when
+// both key and value are soundly modelable (int/bool key, int value).
+func (tr *smtTranslator) dictDeclFor(expr ast.Expr, sym string) (string, string, bool) {
+	dt, ok := tr.dictType(expr)
+	if !ok {
+		return "", "", false
+	}
+	ks, kok := smtKeySort(dt.Key)
+	if !kok {
+		return "", "", false
+	}
+	// Value must be an integer (non-float numeric) — that is the only value theory we model. Bool
+	// values are not yet supported (the value array is fixed to (Array <KSort> Int)).
+	if !IsNumericType(dt.Value) || IsFloatType(dt.Value) {
+		return "", "", false
+	}
+	tr.dictDecls[sym] = ks
+	return sym, ks, true
+}
+
+func (tr *smtTranslator) dictType(expr ast.Expr) (*DictType, bool) {
+	t := tr.a.exprTypes[expr]
+	if t == nil && tr.a.currentScope != nil {
+		if id, ok := expr.(*ast.Ident); ok {
+			if sym, ok := tr.a.currentScope.Lookup(id.Name); ok && sym != nil {
+				t = sym.Type
+			}
+		}
+	}
+	if dt, ok := stripRefForBounds(t).(*DictType); ok && dt != nil {
+		return dt, true
+	}
+	return nil, false
+}
+
 // term lowers an integer-valued expression. Supports literals, immutable integer identifiers
 // (declared as SMT Int consts), parenthesization, unary minus, and +/-/* — including the var*var
 // PRODUCT the affine prover cannot handle (the headline reason to call the solver). Division and
@@ -1258,15 +1410,25 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// Array element access `arr[idx]` → `(select <arr> <idx>)` over SMT array theory (docs/90
 		// brick 90-5). The element value is an Int; out-of-range indices are an arbitrary-but-total
 		// value, which a quantifier's range guard constrains away.
-		arr, ok := tr.arrayTermEnv(n.Object, env)
-		if !ok {
-			return "", false
+		if arr, ok := tr.arrayTermEnv(n.Object, env); ok {
+			idx, ok := tr.termEnv(n.Index, env)
+			if !ok {
+				return "", false
+			}
+			return "(select " + arr + " " + idx + ")", true
 		}
-		idx, ok := tr.termEnv(n.Index, env)
-		if !ok {
-			return "", false
+		// Dict lookup `d[k]` -> `(select <d>_vals <k>)` over the dict's value array (docs/90 set/dict
+		// modeling). The key term is modeled in the dict's key sort. Out-of-domain lookups select an
+		// arbitrary-but-total value; a `k in d` guard (asserting `(select d_keys k)`) is what constrains
+		// the proof to in-domain keys, so e.g. `requires k in d; assert d[k] > 0` discharges.
+		if dsym, ksort, ok := tr.dictTermEnv(n.Object, env); ok {
+			key, ok := tr.keyTermEnv(n.Index, ksort, env)
+			if !ok {
+				return "", false
+			}
+			return "(select " + dsym + "_vals " + key + ")", true
 		}
-		return "(select " + arr + " " + idx + ")", true
+		return "", false
 	case *ast.FieldExpr:
 		if env != nil {
 			if bound, ok := env[smtProjectionName(n)]; ok {
@@ -1832,6 +1994,55 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		return tr.boolTerm(n.Inner, env)
 	case *ast.QuantifierExpr:
 		if n.In != nil {
+			// `forall x in s` / `exists x in s` over a SET: bind `x` to a fresh key symbol of the set's
+			// key sort, guard membership with `(select s x)`, and emit a `:pattern` on that select so z3
+			// has a deterministic E-matching trigger (mirrors the array path; MBQI completes the rest).
+			if ssym, ksort, ok := tr.setTermEnv(n.In, env); ok {
+				if len(n.Vars) != 1 {
+					return "", false
+				}
+				kSym := "q_" + n.Vars[0] + "_k"
+				qenv := make(map[string]string, len(env)+1)
+				for k, v := range env {
+					qenv[k] = v
+				}
+				qenv[n.Vars[0]] = kSym
+				body, ok := tr.boolTerm(n.Body, qenv)
+				if !ok {
+					return "", false
+				}
+				mem := "(select " + ssym + " " + kSym + ")"
+				if n.Exists {
+					return "(exists ((" + kSym + " " + ksort + ")) (! (and " + mem + " " + body + ") :pattern (" + mem + ")))", true
+				}
+				return "(forall ((" + kSym + " " + ksort + ")) (! (or (not " + mem + ") " + body + ") :pattern (" + mem + ")))", true
+			}
+			// `forall (key,v) in d` / `forall key in d` over a DICT: bind the key to a fresh key symbol
+			// and (when a value binder is present) the value to `(select d_vals key)`. Membership
+			// `(select d_keys key)` guards the body, and is the `:pattern` trigger.
+			if dsym, ksort, ok := tr.dictTermEnv(n.In, env); ok {
+				if len(n.Vars) != 1 && len(n.Vars) != 2 {
+					return "", false
+				}
+				kSym := "q_" + n.Vars[0] + "_k"
+				qenv := make(map[string]string, len(env)+2)
+				for k, v := range env {
+					qenv[k] = v
+				}
+				qenv[n.Vars[0]] = kSym
+				if len(n.Vars) == 2 {
+					qenv[n.Vars[1]] = "(select " + dsym + "_vals " + kSym + ")"
+				}
+				body, ok := tr.boolTerm(n.Body, qenv)
+				if !ok {
+					return "", false
+				}
+				mem := "(select " + dsym + "_keys " + kSym + ")"
+				if n.Exists {
+					return "(exists ((" + kSym + " " + ksort + ")) (! (and " + mem + " " + body + ") :pattern (" + mem + ")))", true
+				}
+				return "(forall ((" + kSym + " " + ksort + ")) (! (or (not " + mem + ") " + body + ") :pattern (" + mem + ")))", true
+			}
 			if len(n.Vars) != 1 {
 				return "", false
 			}
@@ -1993,6 +2204,25 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				conn = "or"
 			}
 			return "(" + conn + " " + l + " " + r + ")", true
+		case lexer.TOKEN_IN:
+			// Membership `p in s` / `k in d` (docs/90 set/dict modeling). A set is its membership
+			// predicate directly; a dict's membership is its `<d>_keys` array. `not in` already lowers to
+			// `not (x in y)` at parse time, so only the positive form is handled here.
+			if ssym, ksort, ok := tr.setTermEnv(n.Right, env); ok {
+				elem, ok := tr.keyTermEnv(n.Left, ksort, env)
+				if !ok {
+					return "", false
+				}
+				return "(select " + ssym + " " + elem + ")", true
+			}
+			if dsym, ksort, ok := tr.dictTermEnv(n.Right, env); ok {
+				key, ok := tr.keyTermEnv(n.Left, ksort, env)
+				if !ok {
+					return "", false
+				}
+				return "(select " + dsym + "_keys " + key + ")", true
+			}
+			return "", false
 		case lexer.TOKEN_GT, lexer.TOKEN_GTEQ, lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
 			l, ok := tr.termEnv(n.Left, env)
 			if !ok {
@@ -2719,6 +2949,27 @@ func (tr *smtTranslator) factPreamble() string {
 	sort.Strings(arrays)
 	for _, name := range arrays {
 		b.WriteString("(declare-const " + smtVar(name) + " (Array Int Int))\n")
+	}
+	// Set declarations: an `(Array <KSort> Bool)` membership function. Deterministic order.
+	sets := make([]string, 0, len(tr.setDecls))
+	for sym := range tr.setDecls {
+		sets = append(sets, sym)
+	}
+	sort.Strings(sets)
+	for _, sym := range sets {
+		b.WriteString("(declare-const " + sym + " (Array " + tr.setDecls[sym] + " Bool))\n")
+	}
+	// Dict declarations: a `<sym>_keys` membership array plus a `<sym>_vals` value array, sharing the
+	// key sort. The value array is fixed to Int (only integer-valued dicts are modeled). Deterministic.
+	dicts := make([]string, 0, len(tr.dictDecls))
+	for sym := range tr.dictDecls {
+		dicts = append(dicts, sym)
+	}
+	sort.Strings(dicts)
+	for _, sym := range dicts {
+		ks := tr.dictDecls[sym]
+		b.WriteString("(declare-const " + sym + "_keys (Array " + ks + " Bool))\n")
+		b.WriteString("(declare-const " + sym + "_vals (Array " + ks + " Int))\n")
 	}
 	// Free bool consts (bool params/locals appearing in a boolean postcondition). Deterministic order.
 	bools := make([]string, 0, len(tr.boolDecls))
