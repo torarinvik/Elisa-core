@@ -691,6 +691,64 @@ func (a *Analyzer) resolveBareLawIsTarget(target ast.Expr) (string, bool) {
 	return "", false
 }
 
+// gatherLawIsSMTFact records the LAW BODY (instantiated for the subject expression) as an assumable
+// SMT flow fact for an `if EXPR is Law:` branch condition (docs/85: refinement flow-narrowing). Inside
+// the THEN branch the predicate holds, so the body — e.g. `self >= 0` for `law NonNeg(self:i64) = self
+// >= 0`, with `self` replaced by EXPR — becomes a hypothesis available to discharge a downstream
+// obligation such as `assert EXPR >= 0`. In the ELSE branch the NEGATION `not(body)` is recorded ONLY
+// when the law is decidable/total (a quantifier-free, clonable boolean body): a partial/quantified law
+// has no usable runtime negation, so the else records nothing (always sound — fewer facts only declines
+// a proof, never fabricates one). This complements gatherLawIsPredFact (which tracks the `EXPR is Law`
+// fact itself for a later `is`-obligation) by feeding the comparison/arithmetic prover.
+//
+// SOUNDNESS: the substituted body is the law's own definition evaluated at EXPR, recorded only in the
+// branch where the condition's truth value matches. smtFactDeps over the substituted body names EXPR's
+// roots, so the fact is invalidated automatically when EXPR is mutated (the standard fact-drop path).
+func (a *Analyzer) gatherLawIsSMTFact(scope *Scope, n *ast.BinaryExpr, truthy bool) {
+	if a == nil || scope == nil || n == nil || n.Left == nil {
+		return
+	}
+	targets := flattenIsTargetExprs(n.Right)
+	if len(targets) != 1 {
+		return
+	}
+	lawName, lawArgs, ok := a.resolveLawIsTarget(targets[0])
+	if !ok {
+		return
+	}
+	lawDecl, _, ok := a.lookupLaw(lawName)
+	if !ok || lawDecl == nil || len(lawDecl.Params) == 0 {
+		return
+	}
+	body, ok := a.lawBodyExpr(lawDecl)
+	if !ok || body == nil {
+		return
+	}
+	// A quantified body is spec-only (no executable/negatable boolean) — never record it as a flow
+	// hypothesis here; the dedicated refinement-discharge tiers handle quantified laws.
+	if a.lawBodyContainsQuantifier(lawDecl) {
+		return
+	}
+	// Build the subject/param substitution: `self` -> EXPR, each law value-param -> the bracket arg.
+	subst := map[string]ast.Expr{lawDecl.Params[0].Name: n.Left}
+	for i, arg := range lawArgs {
+		if i+1 >= len(lawDecl.Params) || arg == nil {
+			return // arity mismatch or a missing arg ⇒ cannot instantiate soundly
+		}
+		subst[lawDecl.Params[i+1].Name] = arg
+	}
+	instantiated := ast.CloneExprSubst(body, subst)
+	if instantiated == nil {
+		return // body or a substituted arg fell outside the clonable fragment ⇒ decline (sound)
+	}
+	if truthy {
+		a.recordSMTAssertFactInScope(scope, instantiated)
+		return
+	}
+	// ELSE branch: the law is decidable (quantifier-free, clonable), so its negation is a sound fact.
+	a.recordSMTAssertFactInScope(scope, &ast.UnaryExpr{Position: n.Pos(), Op: lexer.TOKEN_NOT, Operand: instantiated})
+}
+
 // bareTargetName extracts a plain name from an `is` target that is a bare identifier or named
 // type (unwrapping parens). Anything compound (generic args, dotted, value args) returns false.
 func bareTargetName(target ast.Expr) (string, bool) {

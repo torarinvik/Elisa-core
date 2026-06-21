@@ -165,6 +165,85 @@ func CloneExpr(expr Expr) Expr {
 	}
 }
 
+// CloneExprSubst is CloneExpr with simultaneous capture-free substitution: any *Ident whose name is a
+// key in `subst` is replaced by a fresh deep clone of the bound replacement expression. It is used to
+// instantiate a law body for a concrete subject (`self` -> EXPR, params -> bracket args) so the body
+// can be recorded as an SMT flow fact. Returns nil under the same "not clonable" contract as CloneExpr;
+// substitution replacements that are themselves not clonable also yield nil (the caller bails out).
+func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
+	if len(subst) == 0 {
+		return CloneExpr(expr)
+	}
+	if id, ok := expr.(*Ident); ok && id != nil {
+		if repl, ok := subst[id.Name]; ok {
+			return CloneExpr(repl)
+		}
+		return &Ident{Position: id.Position, Name: id.Name}
+	}
+	switch n := expr.(type) {
+	case nil:
+		return nil
+	case *ParenExpr:
+		inner := CloneExprSubst(n.Inner, subst)
+		if n.Inner != nil && inner == nil {
+			return nil
+		}
+		return &ParenExpr{Position: n.Position, Inner: inner}
+	case *UnaryExpr:
+		operand := CloneExprSubst(n.Operand, subst)
+		if n.Operand != nil && operand == nil {
+			return nil
+		}
+		return &UnaryExpr{Position: n.Position, Op: n.Op, Operand: operand}
+	case *BinaryExpr:
+		left := CloneExprSubst(n.Left, subst)
+		right := CloneExprSubst(n.Right, subst)
+		if (n.Left != nil && left == nil) || (n.Right != nil && right == nil) {
+			return nil
+		}
+		return &BinaryExpr{Position: n.Position, Op: n.Op, Left: left, Right: right}
+	case *FieldExpr:
+		object := CloneExprSubst(n.Object, subst)
+		if n.Object != nil && object == nil {
+			return nil
+		}
+		return &FieldExpr{Position: n.Position, Object: object, Field: n.Field, Safe: n.Safe}
+	case *IndexExpr:
+		object := CloneExprSubst(n.Object, subst)
+		index := CloneExprSubst(n.Index, subst)
+		fallback := CloneExprSubst(n.Fallback, subst)
+		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Fallback != nil && fallback == nil) {
+			return nil
+		}
+		return &IndexExpr{Position: n.Position, Object: object, Index: index, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
+	case *TernaryExpr:
+		value := CloneExprSubst(n.Value, subst)
+		cond := CloneExprSubst(n.Cond, subst)
+		alt := CloneExprSubst(n.Alt, subst)
+		if (n.Value != nil && value == nil) || (n.Cond != nil && cond == nil) || (n.Alt != nil && alt == nil) {
+			return nil
+		}
+		return &TernaryExpr{Position: n.Position, Value: value, Cond: cond, Alt: alt}
+	case *CallExpr:
+		fn := CloneExprSubst(n.Func, subst)
+		if n.Func != nil && fn == nil {
+			return nil
+		}
+		args := make([]Expr, 0, len(n.Args))
+		for _, arg := range n.Args {
+			next := CloneExprSubst(arg, subst)
+			if arg != nil && next == nil {
+				return nil
+			}
+			args = append(args, next)
+		}
+		return &CallExpr{Position: n.Position, Func: fn, Args: args, ArgNames: append([]string(nil), n.ArgNames...)}
+	default:
+		// Non-substituting fallback for the remaining literal/leaf shapes (no idents to replace).
+		return CloneExpr(expr)
+	}
+}
+
 // ExprContainsCall reports whether an expression contains a function/method call. It gates the
 // AutovecExpected marker (and thus the -Wperf un-vectorized warning): a call in a comprehension/fold
 // body legitimately blocks auto-vectorization (the callee may not inline), so flagging it would be

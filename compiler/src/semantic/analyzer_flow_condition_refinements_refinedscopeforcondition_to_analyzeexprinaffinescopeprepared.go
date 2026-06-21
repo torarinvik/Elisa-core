@@ -48,6 +48,14 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 			// docs/85 (mutable refinement flow): record a predicate fact for `if x is BareLaw:`,
 			// usable to discharge a later obligation on x and invalidated at any mutation of x.
 			a.gatherLawIsPredFact(scope, n, truthy)
+			// docs/85 (refinement flow-narrowing): inject the law's predicate body, instantiated for the
+			// subject, as an assumable SMT flow fact — so a raw comparison/arithmetic obligation inside the
+			// branch (`assert x >= 0` under `if x is NonNeg:`) discharges. The negation is recorded in the
+			// else branch only when the law is decidable/total. Skipped during the throwaway scope pass
+			// (persistTracked=false) so the fact lives in the real branch scope exactly once.
+			if persistTracked {
+				a.gatherLawIsSMTFact(scope, n, truthy)
+			}
 			targetExpr, viewType, ok := a.refinedExprPackedVariantView(n, truthy)
 			if ok {
 				a.bindRefinedExprType(scope, targetExpr, viewType)
