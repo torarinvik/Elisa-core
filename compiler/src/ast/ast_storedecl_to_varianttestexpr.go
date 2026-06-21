@@ -209,6 +209,14 @@ type FuncDecl struct {
 	// resolves each name to a `contract` decl, substitutes formals→args, and folds the contract's
 	// clauses into this function's Requires/EnsureValues/Changes/Preserves before discharge runs.
 	Uses []*ContractStmt
+	// ParamContracts holds higher-order verification contracts attached to function-typed
+	// parameters (docs/101): a leading `requires ensures(f, <pred over result>)` clause names a
+	// function-typed parameter `f` and the postcondition the caller must guarantee `f` satisfies.
+	// At every call site that passes a concrete NAMED function for `f`, the analyzer proves the
+	// passed function's declared `ensure` entails the param contract's predicate; inside the body,
+	// a call `f(...)` may ASSUME the predicate of its result. Populated by expandHigherOrderContracts
+	// from the recognized `ensures(...)` spec-call form, which is then removed from Requires.
+	ParamContracts []ParamContract
 	// IsLemma marks a `lemma` declaration (ghost code): a verification-only function whose `ensure`
 	// postconditions are PROVEN from its `requires` + body, and which is invoked as a statement to
 	// INJECT those (proven) postconditions as assumable facts at the call site. It is erased from
@@ -220,6 +228,17 @@ type FuncDecl struct {
 	// by SMT, but it is erased from interpreter/codegen and cannot be called by runtime code.
 	IsGhost bool
 }
+
+// ParamContract is a higher-order verification contract on a function-typed parameter (docs/101).
+// `Param` is the parameter's name; `Pred` is the postcondition predicate (a bool expression that may
+// mention the `result` keyword) the parameter's function is required to ensure. At a call site that
+// passes a concrete named function, the passed function's declared `ensure` must entail `Pred`.
+type ParamContract struct {
+	Position lexer.Pos
+	Param    string
+	Pred     Expr
+}
+
 type ParamDecl struct {
 	Position     lexer.Pos
 	Name         string

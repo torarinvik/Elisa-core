@@ -528,6 +528,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.recordCallArgDisjoint(expr, appliedType.Params, callAliasArgs)
 	a.dischargeCallArgRefinements(expr, callAliasArgs)
 	a.dischargeCallRequires(expr, callAliasArgs)
+	a.checkHigherOrderParamContracts(expr, callAliasArgs)
 	a.assumeExternEnsures(expr, callAliasArgs)
 	a.assumeLemmaEnsures(expr, callAliasArgs)
 	originalTrackedByRoot := map[*Symbol]Type{}
