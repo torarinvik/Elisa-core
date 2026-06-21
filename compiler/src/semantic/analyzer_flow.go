@@ -755,7 +755,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// prove-it-or-fail bar as `assert … by:`. Discharge BEFORE the cond is recorded as a
 			// downstream fact (else it trivially entails itself); on failure emit the constructive
 			// goal / known-facts / suggested-missing-fact report.
-			a.checkStrictAssertProofHole(n.Pos(), cond)
+			// docs/98/101 — route a plain `assert COND` through the SAME static discharge ladder
+			// `assert … by:` uses (facts/intervals → linear → SMT). On success a proof is recorded; on
+			// decline the assert REMAINS a runtime check (no hard error). The constructive proof-hole hint
+			// (opt-in) is then offered only when the goal was NOT discharged here.
+			proven := a.dischargePlainAssert(n.Pos(), cond)
+			a.checkStrictAssertProofHole(n.Pos(), cond, proven)
 			a.applyConditionRefinements(a.currentScope, cond, true)
 			a.applyIndexBoundsFactsForCondition(cond, true)
 			a.recordSMTAssertFact(cond)

@@ -464,6 +464,38 @@ func intToStr(v int64) string {
 	return strconv.FormatInt(v, 10)
 }
 
+// dischargePlainAssert attempts to STATICALLY discharge a plain `assert COND` through the very same
+// ladder `assert … by:` uses (facts/intervals → linear `proveRequiresClause`, then the SMT tier when
+// enabled). On success it records a proof (ProofProvenLinear / ProofProvenSMT) so a dict / quantifier /
+// contract fact that WOULD prove via `by:` now also discharges as a plain assert. It returns whether
+// the goal was proven.
+//
+// SOUNDNESS: only a successful proof concludes; an `unknown` / declined goal is NOT an error — the
+// assert REMAINS a runtime check (ProofRuntime), exactly mirroring `assert … by:` semantics. This
+// introduces NO new hard errors on previously-accepted code: under `-strict` an undischarged plain
+// assert still falls through to the runtime check / proof-hole hint, never to a hard failure.
+//
+// Gated on BOTH strict proofs and the SMT tier: the SMT path is the only in-tree prover that consumes
+// the analyzer's FULL in-scope hypothesis set, so requiring `-smt` keeps the verdict sound and leaves
+// plain `-strict` (no z3) builds exactly as they were. Caller MUST invoke this BEFORE recording COND as
+// a downstream fact, else it trivially entails itself.
+func (a *Analyzer) dischargePlainAssert(pos lexer.Pos, cond ast.Expr) bool {
+	if a == nil || cond == nil || !a.enforceStrictProofs || !a.smtEnabled {
+		return false
+	}
+	if a.proveRequiresClause(cond, nil) == requiresProven {
+		a.recordProof(pos, "assert", "assert", ProofProvenLinear)
+		return true
+	}
+	if proven, counterexample := a.trySMTProveRequires(cond, nil); proven {
+		a.recordProof(pos, "assert", "assert", ProofProvenSMT)
+		return true
+	} else {
+		a.lastSMTCounterexample = counterexample
+	}
+	return false
+}
+
 // checkStrictAssertProofHole offers a constructive proof-hole HINT for a plain `assert(cond)` under
 // strict proofs (docs/98) whose integer-comparison goal the static tiers cannot discharge. Outside
 // `-strict` an assert is a debug runtime check, so this is a no-op there. The discharge ladder mirrors
@@ -475,7 +507,12 @@ func intToStr(v int64) string {
 // is the canonical unbounded-index obligation the heuristics target, and it keeps the new error off
 // asserts the static tiers were never meant to decide (pointer/bool/struct shapes), so no in-tree
 // strict fixture regresses on an assert the prover legitimately cannot model.
-func (a *Analyzer) checkStrictAssertProofHole(pos lexer.Pos, cond ast.Expr) {
+func (a *Analyzer) checkStrictAssertProofHole(pos lexer.Pos, cond ast.Expr, alreadyProven bool) {
+	// If dischargePlainAssert already proved this goal, there is no hole — and re-proving would only
+	// duplicate the recorded proof and waste an SMT round-trip.
+	if alreadyProven {
+		return
+	}
 	// Gated on BOTH strict proofs and the SMT tier (docs/90/98). The SMT discharge path is the only
 	// in-tree prover that consumes the analyzer's FULL in-scope hypothesis set (flow facts + asserts +
 	// intervals); the linear `proveRequiresClause` tier is built for callee-requires substitution, not
