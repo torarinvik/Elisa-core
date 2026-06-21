@@ -5,7 +5,11 @@ import "elisacore/src/lexer"
 type InterfaceDecl struct {
 	Position lexer.Pos
 	Name     string
-	Members  []InterfaceMember
+	// Bases names the protocols this protocol inherits from (`protocol Ord: Eq, Show:`).
+	// A type conforming to this protocol must also satisfy every base protocol; the base
+	// protocols' members (signatures and defaults) are folded into this protocol's member set.
+	Bases   []string
+	Members []InterfaceMember
 }
 
 type InterfaceMember interface {
@@ -60,6 +64,11 @@ func (*ImplDecl) declTag()      {}
 
 func (*AssociatedTypeDecl) interfaceMemberTag() {}
 func (*ExternFuncDecl) interfaceMemberTag()     {}
+
+// FuncDecl is a valid interface member when it carries a DEFAULT METHOD BODY
+// (`protocol P: ... def m(self: Self) -> T: <body>`). A conforming type that omits m
+// inherits this default; one that provides m overrides it.
+func (*FuncDecl) interfaceMemberTag() {}
 
 func (*ImplAssociatedTypeDecl) implMemberTag() {}
 func (*FuncDecl) implMemberTag()               {}

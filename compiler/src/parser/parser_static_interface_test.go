@@ -45,6 +45,63 @@ func TestParseInterfaceSpellingIsRejected(t *testing.T) {
 	}
 }
 
+// Protocol depth: a protocol may declare base protocols (`protocol Ord: Eq:`) and default-method
+// bodies (`def le(...): <body>`). Bases parse into InterfaceDecl.Bases; a default method parses as a
+// FuncDecl member (carrying a Body) rather than a bodiless ExternFuncDecl.
+func TestParseProtocolBasesAndDefaultMethod(t *testing.T) {
+	file, errs := parseSourceFile(t, `protocol Eq:
+    def eq(self: Self, other: Self) -> bool
+
+protocol Ord: Eq:
+    def lt(self: Self, other: Self) -> bool
+    def le(self: Self, other: Self) -> bool:
+        return Self.lt(self, other) or Self.eq(self, other)
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	var ord *ast.InterfaceDecl
+	for _, decl := range file.Decls {
+		if iface, ok := decl.(*ast.InterfaceDecl); ok && iface.Name == "Ord" {
+			ord = iface
+		}
+	}
+	if ord == nil {
+		t.Fatal("expected protocol Ord to parse")
+	}
+	if len(ord.Bases) != 1 || ord.Bases[0] != "Eq" {
+		t.Fatalf("expected Ord to inherit Eq, got bases %v", ord.Bases)
+	}
+	var sawDefault, sawBodyless bool
+	for _, member := range ord.Members {
+		switch m := member.(type) {
+		case *ast.FuncDecl:
+			if m.Name == "le" && len(m.Body) != 0 {
+				sawDefault = true
+			}
+		case *ast.ExternFuncDecl:
+			if m.Name == "lt" {
+				sawBodyless = true
+			}
+		}
+	}
+	if !sawDefault {
+		t.Fatal("expected le to parse as a default method (FuncDecl with body)")
+	}
+	if !sawBodyless {
+		t.Fatal("expected lt to parse as a bodiless ExternFuncDecl")
+	}
+
+	// Round-trips through the formatter without dropping bases or the default body.
+	formatted := unparse.FormatDecl(ord)
+	if !strings.Contains(formatted, "protocol Ord: Eq:") {
+		t.Fatalf("expected formatted protocol to retain its base list, got:\n%s", formatted)
+	}
+	if !strings.Contains(formatted, "def le(") || !strings.Contains(formatted, "Self.lt(self, other)") {
+		t.Fatalf("expected formatted protocol to retain the default-method body, got:\n%s", formatted)
+	}
+}
+
 // The legacy `sizeof` / `alignof` / `offsetof` spellings are removed; use the `_of` forms.
 func TestParseRejectsLegacyLayoutIntrospectionNames(t *testing.T) {
 	_, errs := parseSourceFile(t, "struct Header layout c:\n    tag: u8\n    count: u32\n\ndef read() -> usize:\n    return sizeof(Header) + alignof(Header) + offsetof(Header, count)\n")

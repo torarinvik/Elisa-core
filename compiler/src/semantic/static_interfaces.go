@@ -21,12 +21,20 @@ type StaticInterface struct {
 	AssociatedTypes map[string]*ast.AssociatedTypeDecl
 	Methods         map[string]*StaticInterfaceMethod
 	Decl            *ast.InterfaceDecl
+	// Bases are the resolved (qualified) names of the protocols this protocol inherits from.
+	// Their members are folded into Methods/AssociatedTypes so a single impl of this protocol
+	// must satisfy the union of own + inherited members.
+	Bases []string
 }
 
 type StaticInterfaceMethod struct {
 	Name      string
 	Signature *FuncType
 	Decl      *ast.ExternFuncDecl
+	// Default, when non-nil, is the default-method body (`def m(...) -> T: <body>`) declared on
+	// the protocol. A conforming impl that omits this method inherits the default; one that
+	// provides it overrides. Decl above is the bodiless signature view used for typechecking.
+	Default *ast.FuncDecl
 }
 
 type StaticImpl struct {
@@ -430,6 +438,7 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 				AssociatedTypes: map[string]*ast.AssociatedTypeDecl{},
 				Methods:         map[string]*StaticInterfaceMethod{},
 				Decl:            decl,
+				Bases:           append([]string(nil), decl.Bases...),
 			}
 			a.staticInterfaces[qualifiedName] = iface
 			assocBindings := map[string]Type{}
@@ -451,16 +460,25 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 			}
 			a.withInterfaceAssocTypes(assocBindings, func() {
 				for _, member := range decl.Members {
-					methodDecl, ok := member.(*ast.ExternFuncDecl)
-					if !ok {
-						continue
+					switch methodDecl := member.(type) {
+					case *ast.ExternFuncDecl:
+						if _, exists := iface.Methods[methodDecl.Name]; exists {
+							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
+							continue
+						}
+						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
+						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
+					case *ast.FuncDecl:
+						// Default method: a protocol method carrying a body. Its signature is
+						// typechecked exactly like a bodiless one; the body is recorded so a
+						// conforming impl that omits the method inherits it (synthesized later).
+						if _, exists := iface.Methods[methodDecl.Name]; exists {
+							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
+							continue
+						}
+						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, false)
+						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: nil, Default: methodDecl}
 					}
-					if _, exists := iface.Methods[methodDecl.Name]; exists {
-						a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
-						continue
-					}
-					signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
-					iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
 				}
 			})
 		})
