@@ -2,14 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"elisacore/src/backend"
 )
+
+const s4NativeRunTimeout = 10 * time.Second
 
 // docs/91 S4 end-to-end: growing a container field of a region-param struct ref param, with the
 // caller's region threaded to the field growth, runs correctly; and the borrow-out use-after-free
@@ -45,7 +49,12 @@ func s4CompileRun(t *testing.T, prog string) (status, output string) {
 	if err != nil {
 		return "BUILD-FAIL", err.Error()
 	}
-	out, runErr := exec.Command(exe).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), s4NativeRunTimeout)
+	defer cancel()
+	out, runErr := exec.CommandContext(ctx, exe).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return "RUN-TIMEOUT", strings.TrimSpace(string(out))
+	}
 	if runErr != nil {
 		return "RUNERR", strings.TrimSpace(string(out)) + " " + runErr.Error()
 	}

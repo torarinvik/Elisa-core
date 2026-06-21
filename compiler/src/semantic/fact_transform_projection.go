@@ -2,9 +2,11 @@ package semantic
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 func (a *Analyzer) currentConservativeCallWideningTransforms() []FactTransform {
@@ -442,11 +444,27 @@ func factTransformDedupeKey(transform FactTransform) string {
 		transform.Target,
 		factClassListKey(transform.Classes),
 		transform.Source,
-		transform.SourcePos.String(),
+		factTransformPosKey(transform.SourcePos),
 		transform.SourceKind.String(),
 		factTransformDetailsKey(transform.Details),
 		transform.Reason,
 	}, "\x00")
+}
+
+func factTransformPosKey(pos lexer.Pos) string {
+	if pos.IsZero() {
+		return ""
+	}
+	parts := []string{
+		pos.File,
+		strconv.Itoa(pos.Line),
+		strconv.Itoa(pos.Col),
+		strconv.Itoa(pos.Offset),
+		strconv.Itoa(pos.EndLine),
+		strconv.Itoa(pos.EndCol),
+		strconv.Itoa(pos.EndOffset),
+	}
+	return strings.Join(parts, ":")
 }
 
 func factTransformDetailsKey(details []FactTransformDetail) string {
