@@ -57,6 +57,44 @@ func TestLoopDecreasesCountupWithInvariant(t *testing.T) {
 	}
 }
 
+func TestLoopDecreasesLexicographicTupleTerminates(t *testing.T) {
+	src := `def nested(a: usize, b: usize) -> usize:
+    i: mutable usize = a
+    total: mutable usize = 0
+    while i > 0:
+        decreases (i, b)
+        i <- i - 1
+    return total
+`
+	result := analyzeContractStrict(t, "lex_loop.elisa", src)
+	for _, e := range result.Errors() {
+		if strings.Contains(e, "terminate") || strings.Contains(e, "decreases") {
+			t.Fatalf("lexicographic loop measure must prove termination, got: %v", e)
+		}
+	}
+	if got := countLoopTerminationProof(result, ProofProvenSMT); got != 1 {
+		t.Fatalf("expected lexicographic loop termination to be proven by SMT, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+func TestLoopDecreasesLexicographicTupleDeclinesWhenNotDecreasing(t *testing.T) {
+	src := `def bad_lex_loop(a: usize, b: usize):
+    i: mutable usize = a
+    j: mutable usize = b
+    while j > 0:
+        decreases (i, j)
+        i <- i + 1
+        j <- j - 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "bad_lex_loop.elisa", src, AnalyzeOptions{EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a non-decreasing lexicographic loop measure should decline without changing acceptance, got: %v", errs)
+	}
+	if got := countLoopTerminationProof(result, ProofRuntime); got != 1 {
+		t.Fatalf("expected non-decreasing lexicographic loop measure to fall back to runtime, got %d: %+v", got, result.ProofReport)
+	}
+}
+
 // SOUNDNESS: a measure that INCREASES (`decreases i` while `i <- i + 1`) must be refuted — the loop
 // may not terminate.
 func TestLoopDecreasesIncreasingMeasureRejected(t *testing.T) {

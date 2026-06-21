@@ -112,7 +112,9 @@ func (a *Analyzer) crossFunctionMeasureDecreases(caller, callee *ast.FuncDecl, c
 	if caller == nil || callee == nil || call == nil || len(caller.Decreases) == 0 || len(callee.Decreases) == 0 {
 		return false
 	}
-	if len(caller.Decreases) != len(callee.Decreases) {
+	callerMeasures := decreaseMeasureComponents(caller.Decreases)
+	calleeMeasures := decreaseMeasureComponents(callee.Decreases)
+	if len(callerMeasures) == 0 || len(callerMeasures) != len(calleeMeasures) {
 		return false
 	}
 	subst := map[string]ast.Expr{}
@@ -122,10 +124,10 @@ func (a *Analyzer) crossFunctionMeasureDecreases(caller, callee *ast.FuncDecl, c
 			subst[param.Name] = args[i]
 		}
 	}
-	for k := range caller.Decreases {
+	for k := range callerMeasures {
 		earlierUnchanged := true
 		for j := 0; j < k; j++ {
-			if !a.crossMeasureDiffIsZero(caller.Decreases[j], callee.Decreases[j], subst) {
+			if !a.crossMeasureDiffIsZero(callerMeasures[j], calleeMeasures[j], subst) {
 				earlierUnchanged = false
 				break
 			}
@@ -136,7 +138,7 @@ func (a *Analyzer) crossFunctionMeasureDecreases(caller, callee *ast.FuncDecl, c
 		if syntacticCrossMeasureDecreases(caller, callee, call, k) && a.syntacticCrossMeasureBounded(caller, k) {
 			return true
 		}
-		if a.crossMeasureStrictlyDecreases(caller.Decreases[k], callee.Decreases[k], subst) && a.measureBoundedBelow(caller.Decreases[k]) {
+		if a.crossMeasureStrictlyDecreases(callerMeasures[k], calleeMeasures[k], subst) && a.measureBoundedBelow(callerMeasures[k]) {
 			return true
 		}
 	}
@@ -144,10 +146,14 @@ func (a *Analyzer) crossFunctionMeasureDecreases(caller, callee *ast.FuncDecl, c
 }
 
 func (a *Analyzer) syntacticCrossMeasureBounded(caller *ast.FuncDecl, k int) bool {
-	if caller == nil || k >= len(caller.Decreases) {
+	if caller == nil {
 		return false
 	}
-	id, ok := caller.Decreases[k].(*ast.Ident)
+	measures := decreaseMeasureComponents(caller.Decreases)
+	if k >= len(measures) {
+		return false
+	}
+	id, ok := measures[k].(*ast.Ident)
 	if !ok || id == nil {
 		return false
 	}
@@ -164,14 +170,19 @@ func (a *Analyzer) syntacticCrossMeasureBounded(caller *ast.FuncDecl, k int) boo
 }
 
 func syntacticCrossMeasureDecreases(caller, callee *ast.FuncDecl, call *ast.CallExpr, k int) bool {
-	if caller == nil || callee == nil || call == nil || k >= len(caller.Decreases) || k >= len(callee.Decreases) {
+	if caller == nil || callee == nil || call == nil {
 		return false
 	}
-	callerID, ok := caller.Decreases[k].(*ast.Ident)
+	callerMeasures := decreaseMeasureComponents(caller.Decreases)
+	calleeMeasures := decreaseMeasureComponents(callee.Decreases)
+	if k >= len(callerMeasures) || k >= len(calleeMeasures) {
+		return false
+	}
+	callerID, ok := callerMeasures[k].(*ast.Ident)
 	if !ok || callerID == nil {
 		return false
 	}
-	calleeID, ok := callee.Decreases[k].(*ast.Ident)
+	calleeID, ok := calleeMeasures[k].(*ast.Ident)
 	if !ok || calleeID == nil {
 		return false
 	}

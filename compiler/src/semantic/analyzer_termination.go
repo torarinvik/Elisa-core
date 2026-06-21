@@ -53,17 +53,21 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	if len(fn.Decreases) == 0 {
 		return
 	}
-	if len(fn.Decreases) == 1 && a.isStructuralDecreaseMeasure(fn, fn.Decreases[0]) {
-		if a.checkStructuralTermination(fn, fn.Decreases[0]) {
-			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofProvenLinear)
+	measures := decreaseMeasureComponents(fn.Decreases)
+	if len(measures) == 0 {
+		return
+	}
+	if len(measures) == 1 && a.isStructuralDecreaseMeasure(fn, measures[0]) {
+		if a.checkStructuralTermination(fn, measures[0]) {
+			a.recordProof(measures[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofProvenLinear)
 		} else {
-			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofRefuted)
-			a.errorf(fn.Decreases[0].Pos(), "cannot prove structural `decreases` for %q: recursive calls must pass values bound from a match on the decreasing enum parameter", fn.Name)
+			a.recordProof(measures[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofRefuted)
+			a.errorf(measures[0].Pos(), "cannot prove structural `decreases` for %q: recursive calls must pass values bound from a match on the decreasing enum parameter", fn.Name)
 		}
 		return
 	}
 	// Type-check the measure components: each must be an integer (the prover reasons over integers).
-	for _, m := range fn.Decreases {
+	for _, m := range measures {
 		if m == nil {
 			continue
 		}
@@ -77,16 +81,16 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		edges := a.collectRecursiveSCCEdges(fn)
 		if len(edges) > 0 {
 			if a.mutualRecursionVerified(fn, edges) {
-				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofProvenLinear)
+				a.recordProof(measures[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofProvenLinear)
 			} else {
-				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofRefuted)
-				a.errorf(fn.Decreases[0].Pos(), "cannot prove the `decreases` measure strictly decreases across the mutually-recursive cycle containing %q; the cycle may not terminate", fn.Name)
+				a.recordProof(measures[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofRefuted)
+				a.errorf(measures[0].Pos(), "cannot prove the `decreases` measure strictly decreases across the mutually-recursive cycle containing %q; the cycle may not terminate", fn.Name)
 			}
 			return
 		}
 		// A `decreases` on a non-self-recursive function is harmless but pointless — flag it so the
 		// user knows the clause is doing nothing (and isn't masking a typo'd recursive call).
-		a.warnf(fn.Decreases[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
+		a.warnf(measures[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
 		return
 	}
 	for _, call := range calls {
@@ -130,12 +134,42 @@ func (a *Analyzer) substForSelfCall(fn *ast.FuncDecl, call *ast.CallExpr) map[st
 	return subst
 }
 
+// decreaseMeasureComponents normalizes both accepted spellings of a lexicographic measure:
+// repeated clauses (`decreases a` / `decreases b`) and tuple syntax (`decreases (a, b)`).
+func decreaseMeasureComponents(measures []ast.Expr) []ast.Expr {
+	out := make([]ast.Expr, 0, len(measures))
+	for _, measure := range measures {
+		appendDecreaseMeasureComponents(&out, measure)
+	}
+	return out
+}
+
+func appendDecreaseMeasureComponents(out *[]ast.Expr, measure ast.Expr) {
+	switch m := measure.(type) {
+	case *ast.ParenExpr:
+		if m != nil {
+			appendDecreaseMeasureComponents(out, m.Inner)
+		}
+	case *ast.TupleExpr:
+		if m != nil {
+			for _, elem := range m.Elems {
+				appendDecreaseMeasureComponents(out, elem)
+			}
+		}
+	default:
+		if measure != nil {
+			*out = append(*out, measure)
+		}
+	}
+}
+
 // proveMeasureDecreases proves the lexicographic measure tuple strictly decreases from entry
 // (parameters symbolic) to a recursive call (parameters substituted by arguments). The tuple
 // decreases iff some component k strictly decreases while every earlier component is provably
 // unchanged. The deciding component must also be bounded below by 0 — otherwise an ever-decreasing
 // measure would never bottom out.
 func (a *Analyzer) proveMeasureDecreases(measures []ast.Expr, subst map[string]ast.Expr) bool {
+	measures = decreaseMeasureComponents(measures)
 	for k, measure := range measures {
 		earlierUnchanged := true
 		for j := 0; j < k; j++ {
@@ -218,13 +252,14 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	if len(decs) == 0 {
 		return
 	}
-	for _, m := range decs {
-		if m.Cond == nil {
-			continue
-		}
-		t := a.analyzeExpr(m.Cond)
+	measures := make([]ast.Expr, 0, len(decs))
+	for _, d := range decs {
+		measures = append(measures, decreaseMeasureComponents([]ast.Expr{d.Cond})...)
+	}
+	for _, m := range measures {
+		t := a.analyzeExpr(m)
 		if t != nil && (!IsNumericType(t) || IsFloatType(t)) {
-			a.errorf(m.Cond.Pos(), "loop `decreases` measure must be an integer, got %s", t)
+			a.errorf(m.Pos(), "loop `decreases` measure must be an integer, got %s", t)
 		}
 	}
 	subst, _, captured := a.captureLoopBodyEffect(stmt.Body)
@@ -234,12 +269,6 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 		return
 	}
 	invs := leadingInvariants(stmt.Body)
-	measures := make([]ast.Expr, 0, len(decs))
-	for _, d := range decs {
-		if d.Cond != nil {
-			measures = append(measures, d.Cond)
-		}
-	}
 	if a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst) {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
 		return

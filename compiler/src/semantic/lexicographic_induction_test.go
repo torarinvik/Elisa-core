@@ -24,8 +24,7 @@ import (
 func TestTerminationProvenAckermann(t *testing.T) {
 	src := `
 def ack(m: usize, n: usize) -> usize:
-    decreases m
-    decreases n
+    decreases (m, n)
     if m == 0:
         return n + 1
     if n == 0:
@@ -52,8 +51,7 @@ def ack(m: usize, n: usize) -> usize:
 func TestTerminationProvenFirstComponentDecreasesSecondGrows(t *testing.T) {
 	src := `
 def step(a: usize, b: usize) -> usize:
-    decreases a
-    decreases b
+    decreases (a, b)
     if a == 0:
         return b
     return step(a - 1, b + 1000)
@@ -69,8 +67,7 @@ def step(a: usize, b: usize) -> usize:
 func TestTerminationRefutedFirstSameSecondIncreases(t *testing.T) {
 	src := `
 def bad(a: usize, b: usize) -> usize:
-    decreases a
-    decreases b
+    decreases (a, b)
     return bad(a, b + 1)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_lex_bad1.elisa", src)
@@ -85,8 +82,7 @@ def bad(a: usize, b: usize) -> usize:
 func TestTerminationRefutedFirstIncreasesSecondDecreases(t *testing.T) {
 	src := `
 def bad2(a: usize, b: usize) -> usize:
-    decreases a
-    decreases b
+    decreases (a, b)
     if b == 0:
         return a
     return bad2(a + 1, b - 1)
@@ -102,8 +98,7 @@ def bad2(a: usize, b: usize) -> usize:
 func TestTerminationRefutedBothUnchanged(t *testing.T) {
 	src := `
 def spin2(a: usize, b: usize) -> usize:
-    decreases a
-    decreases b
+    decreases (a, b)
     return spin2(a, b)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_lex_spin.elisa", src)
@@ -122,8 +117,7 @@ lemma lex_nonneg(a: i64, b: i64):
     requires a >= 0
     requires b >= 0
     ensure a >= 0
-    decreases a
-    decreases b
+    decreases (a, b)
     if b == 0:
         pass
     else:
@@ -144,8 +138,7 @@ lemma lex_bad_ih(a: i64, b: i64):
     requires a >= 0
     requires b >= 0
     ensure a >= 0
-    decreases a
-    decreases b
+    decreases (a, b)
     lex_bad_ih(a, b + 1)
 `
 	result := analyzeWithSMT(t, "lex_ih_bad.elisa", src)
