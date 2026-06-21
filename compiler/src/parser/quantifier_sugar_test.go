@@ -71,3 +71,50 @@ func TestQuantifierExplicitRangeSugarDesugars(t *testing.T) {
 		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
 	}
 }
+
+func TestExistsExplicitRangeSugarDesugarsToGuardedConjunction(t *testing.T) {
+	src := "law HasZero(self: array[i64, 8]) = exists i in 0 ..< self.count: self[i] == 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	if !q.Exists || len(q.Vars) != 1 || q.Vars[0] != "i" {
+		t.Fatalf("expected single exists binder i, got %+v", q)
+	}
+	and, ok := q.Body.(*ast.BinaryExpr)
+	if !ok || and.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected top-level guarded `and`, got %T %v", q.Body, q.Body)
+	}
+	guard, ok := and.Left.(*ast.BinaryExpr)
+	if !ok || guard.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected `lo <= i and i < hi` guard, got %T", and.Left)
+	}
+	hiCmp, ok := guard.Right.(*ast.BinaryExpr)
+	if !ok || hiCmp.Op != lexer.TOKEN_LT {
+		t.Fatalf("expected upper-bound comparison, got %T %+v", guard.Right, guard.Right)
+	}
+	count, ok := hiCmp.Right.(*ast.FieldExpr)
+	if !ok || count.Field != "count" {
+		t.Fatalf("expected hi == self.count, got %T %+v", hiCmp.Right, hiCmp.Right)
+	}
+}
+
+func TestExistsIndicesSugarDesugarsToGuardedConjunction(t *testing.T) {
+	src := "law HasZero(self: array[i64, 8]) = exists i in self.indices: self[i] == 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	and, ok := q.Body.(*ast.BinaryExpr)
+	if !q.Exists || !ok || and.Op != lexer.TOKEN_AND {
+		t.Fatalf("expected exists with guarded conjunction, got q=%+v body=%T", q, q.Body)
+	}
+}

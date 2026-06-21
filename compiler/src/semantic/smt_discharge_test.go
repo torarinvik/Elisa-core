@@ -893,3 +893,70 @@ def check(xs: darray[i64]) -> i64:
 		t.Fatalf("expected the sugar-written sorted theorem proven by SMT, got %d: %+v", proven, result.ProofReport)
 	}
 }
+
+func TestSMTProvesSortedArrayFirstIsMinFromNaturalLaw(t *testing.T) {
+	src := `
+law Sorted(self: array[i64, 8]) = forall i in 0 ..< self.count - 1: self[i] <= self[i + 1]
+
+def first_is_min(xs: array[i64, 8] is Sorted, j: i64) -> void:
+    requires j >= 0 and j < xs.count
+    assert xs[0] <= xs[j]
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_sorted_first_min.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("sorted array should prove first element is <= any in-bounds element, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestSMTDeclinesFalseSortedArrayClaim(t *testing.T) {
+	src := `
+law SortedImpliesAllEqual(self: array[i64, 8]) = (forall i in 0 ..< self.count - 1: self[i] <= self[i + 1]) implies (forall j in 0 ..< self.count: self[0] == self[j])
+
+def check(xs: array[i64, 8]) -> i64:
+    y: array[i64, 8] is SortedImpliesAllEqual = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_sorted_false_claim.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("false sorted-array equality claim must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+func TestSMTQuantifierSlicePrefixRangeSugar(t *testing.T) {
+	src := `
+law PrefixSorted(self: darray[i64], n: i64, k: i64) = ((forall i in 0 ..< n: self[i] <= self[i + 1]) and k <= n) implies (forall i in 0 ..< k: self[i] <= self[i + 1])
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is PrefixSorted[10, 4] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_prefix_forall_sugar.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("slice-prefix range sugar theorem should analyze cleanly, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected prefix theorem to be proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+func TestSMTBoundedExistsNaturalSurface(t *testing.T) {
+	src := `
+law HasZero(self: array[i64, 8]) = exists i in 0 ..< self.count: self[i] == 0
+
+def has_zero(xs: array[i64, 8]) -> bool:
+    requires exists i in 0 ..< xs.count: xs[i] == 0
+    return true
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_bounded_exists.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("bounded exists surface should analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}

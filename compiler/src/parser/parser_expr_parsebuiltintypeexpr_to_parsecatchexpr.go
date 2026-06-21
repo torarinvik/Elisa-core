@@ -193,12 +193,22 @@ func (p *Parser) parseQuantifier() ast.Expr {
 			Left:     &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LTEQ, Left: lo, Right: ident},
 			Right:    &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_LT, Left: ident, Right: hi},
 		}
-		// `(0 <= i and i < hi) implies body` desugars (like the `implies` infix) to `(not guard) or body`.
-		guarded := &ast.BinaryExpr{
-			Position: pos,
-			Op:       lexer.TOKEN_OR,
-			Left:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: guard},
-			Right:    body,
+		var guarded ast.Expr
+		if exists {
+			guarded = &ast.BinaryExpr{
+				Position: pos,
+				Op:       lexer.TOKEN_AND,
+				Left:     guard,
+				Right:    body,
+			}
+		} else {
+			// `(0 <= i and i < hi) implies body` desugars (like the `implies` infix) to `(not guard) or body`.
+			guarded = &ast.BinaryExpr{
+				Position: pos,
+				Op:       lexer.TOKEN_OR,
+				Left:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: guard},
+				Right:    body,
+			}
 		}
 		return &ast.QuantifierExpr{Position: pos, Exists: exists, Vars: vars, Body: guarded}
 	}

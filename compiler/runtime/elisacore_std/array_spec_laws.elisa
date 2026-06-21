@@ -1,0 +1,5 @@
+law Sorted(self: array[i64, 8]) = forall i in 0 ..< self.count - 1: self[i] <= self[i + 1]
+law NoDuplicates(self: array[i64, 8]) = forall i in 0 ..< self.count: forall j in i + 1 ..< self.count: self[i] != self[j]
+
+law SortedDArray(self: darray[i64]) = forall i in 0 ..< self.count - 1: self[i] <= self[i + 1]
+law NoDuplicatesDArray(self: darray[i64]) = forall i in 0 ..< self.count: forall j in i + 1 ..< self.count: self[i] != self[j]
