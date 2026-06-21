@@ -120,9 +120,14 @@ func (a *Analyzer) inScopeKnownFacts() []string {
 	return out
 }
 
-// suggestMissingFact applies the increment-1 heuristics: missing upper bound (the canonical
-// unbounded-index `i < n`), missing lower bound, and missing loop invariant. Advisory only — a wrong
-// guess never affects soundness.
+type proofHoleSuggestion struct {
+	rank int
+	text string
+}
+
+// suggestMissingFact applies proof-hole heuristics: cite a lemma/law whose postcondition has the goal
+// shape, show a two-hop transitive comparison chain, or fall back to the missing-bound increment-1
+// hints. Advisory only — a wrong guess never affects soundness.
 func (a *Analyzer) suggestMissingFact(goal ast.Expr, facts []string) string {
 	bin, ok := stripOptimizationParens(goal).(*ast.BinaryExpr)
 	if !ok {
@@ -131,6 +136,12 @@ func (a *Analyzer) suggestMissingFact(goal ast.Expr, facts []string) string {
 	left := unparse.FormatExpr(bin.Left)
 	right := unparse.FormatExpr(bin.Right)
 
+	var candidates []proofHoleSuggestion
+	candidates = append(candidates, a.lemmaShapedSuggestions(goal)...)
+	if chain := transitiveFactSuggestion(bin, facts); chain != "" {
+		candidates = append(candidates, proofHoleSuggestion{rank: 20, text: chain})
+	}
+
 	switch bin.Op {
 	case lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
 		// Goal `a < b` / `a <= b`: the upper end of `a` is unbounded relative to `b`. If no known
@@ -138,20 +149,186 @@ func (a *Analyzer) suggestMissingFact(goal ast.Expr, facts []string) string {
 		if !factsRelate(facts, left, right) {
 			inv := left + " " + opString(bin.Op) + " " + right
 			if a.loopDepth > 0 {
-				return "no fact bounds `" + left + "` above; add a loop invariant `" + inv +
-					"` or a precondition `requires " + inv + "`"
+				candidates = append(candidates, proofHoleSuggestion{rank: 90, text: "no fact bounds `" + left + "` above; add a loop invariant `" + inv +
+					"` or a precondition `requires " + inv + "`"})
+			} else {
+				candidates = append(candidates, proofHoleSuggestion{rank: 90, text: "no fact bounds `" + left + "` above; add a precondition `requires " + inv + "`"})
 			}
-			return "no fact bounds `" + left + "` above; add a precondition `requires " + inv + "`"
 		}
 	case lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
 		// Goal `a > b` / `a >= b`: missing lower bound on `a`.
 		if !factsRelate(facts, left, right) {
 			inv := left + " " + opString(bin.Op) + " " + right
 			if a.loopDepth > 0 {
-				return "no fact bounds `" + left + "` below; establish `" + inv +
-					"` before the loop or add a precondition `requires " + inv + "`"
+				candidates = append(candidates, proofHoleSuggestion{rank: 90, text: "no fact bounds `" + left + "` below; establish `" + inv +
+					"` before the loop or add a precondition `requires " + inv + "`"})
+			} else {
+				candidates = append(candidates, proofHoleSuggestion{rank: 90, text: "no fact bounds `" + left + "` below; add a precondition `requires " + inv + "`"})
 			}
-			return "no fact bounds `" + left + "` below; add a precondition `requires " + inv + "`"
+		}
+	}
+	if len(candidates) == 0 {
+		return ""
+	}
+	ce := parseSimpleCounterexample(a.lastSMTCounterexample)
+	filtered := candidates[:0]
+	for _, c := range candidates {
+		if !suggestionContradictsCounterexample(c.text, ce) {
+			filtered = append(filtered, c)
+		}
+	}
+	if len(filtered) == 0 {
+		return ""
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		if filtered[i].rank != filtered[j].rank {
+			return filtered[i].rank < filtered[j].rank
+		}
+		return filtered[i].text < filtered[j].text
+	})
+	return filtered[0].text
+}
+
+func (a *Analyzer) lemmaShapedSuggestions(goal ast.Expr) []proofHoleSuggestion {
+	if a == nil || a.globalScope == nil || goal == nil {
+		return nil
+	}
+	goalText := unparse.FormatExpr(goal)
+	var out []proofHoleSuggestion
+	seen := map[string]bool{}
+	for _, decl := range a.lemmaAndLawDecls() {
+		for _, expr := range lemmaSuggestionClauses(decl) {
+			args, ok := matchLemmaShape(expr, goal, decl.Params)
+			if !ok {
+				continue
+			}
+			call := decl.Name + "(" + strings.Join(args, ", ") + ")"
+			text := "goal matches `" + goalText + "` from `" + decl.Name + "`; add citation `" + call + "`"
+			if !seen[text] {
+				seen[text] = true
+				out = append(out, proofHoleSuggestion{rank: 10, text: text})
+			}
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) lemmaAndLawDecls() []*ast.FuncDecl {
+	decls := map[*ast.FuncDecl]bool{}
+	for _, sc := range []*Scope{a.currentScope, a.globalScope} {
+		for ; sc != nil; sc = sc.Parent {
+			for _, sym := range sc.Symbols {
+				for s := sym; s != nil; s = s.AliasOf {
+					if decl, ok := s.Node.(*ast.FuncDecl); ok && decl != nil && (decl.IsLemma || decl.IsLaw) {
+						decls[decl] = true
+					}
+				}
+			}
+		}
+	}
+	out := make([]*ast.FuncDecl, 0, len(decls))
+	for decl := range decls {
+		out = append(out, decl)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+func lemmaSuggestionClauses(decl *ast.FuncDecl) []ast.Expr {
+	if decl == nil {
+		return nil
+	}
+	out := append([]ast.Expr(nil), decl.EnsureValues...)
+	if decl.IsLaw {
+		for _, stmt := range decl.Body {
+			if ret, ok := stmt.(*ast.ReturnStmt); ok && ret.Value != nil {
+				out = append(out, ret.Value)
+			}
+		}
+	}
+	return out
+}
+
+func matchLemmaShape(pattern, goal ast.Expr, params []ast.ParamDecl) ([]string, bool) {
+	bindings := map[string]string{}
+	paramNames := map[string]bool{}
+	for _, p := range params {
+		paramNames[p.Name] = true
+	}
+	if !matchLemmaExpr(pattern, goal, paramNames, bindings) {
+		return nil, false
+	}
+	args := make([]string, len(params))
+	for i, p := range params {
+		arg, ok := bindings[p.Name]
+		if !ok {
+			return nil, false
+		}
+		args[i] = arg
+	}
+	return args, true
+}
+
+func matchLemmaExpr(pattern, goal ast.Expr, params map[string]bool, bindings map[string]string) bool {
+	if id, ok := stripOptimizationParens(pattern).(*ast.Ident); ok && params[id.Name] {
+		value := unparse.FormatExpr(goal)
+		if existing, seen := bindings[id.Name]; seen {
+			return existing == value
+		}
+		bindings[id.Name] = value
+		return true
+	}
+	switch p := stripOptimizationParens(pattern).(type) {
+	case *ast.BinaryExpr:
+		g, ok := stripOptimizationParens(goal).(*ast.BinaryExpr)
+		return ok && p.Op == g.Op &&
+			matchLemmaExpr(p.Left, g.Left, params, bindings) &&
+			matchLemmaExpr(p.Right, g.Right, params, bindings)
+	case *ast.UnaryExpr:
+		g, ok := stripOptimizationParens(goal).(*ast.UnaryExpr)
+		return ok && p.Op == g.Op && matchLemmaExpr(p.Operand, g.Operand, params, bindings)
+	case *ast.CallExpr:
+		g, ok := stripOptimizationParens(goal).(*ast.CallExpr)
+		if !ok || len(p.Args) != len(g.Args) || !matchLemmaExpr(p.Func, g.Func, params, bindings) {
+			return false
+		}
+		for i := range p.Args {
+			if !matchLemmaExpr(p.Args[i], g.Args[i], params, bindings) {
+				return false
+			}
+		}
+		return true
+	default:
+		return unparse.FormatExpr(pattern) == unparse.FormatExpr(goal)
+	}
+}
+
+type comparisonFact struct {
+	left, op, right string
+}
+
+func transitiveFactSuggestion(goal *ast.BinaryExpr, facts []string) string {
+	if goal == nil || !isForwardComparison(goal.Op) {
+		return ""
+	}
+	left := unparse.FormatExpr(goal.Left)
+	right := unparse.FormatExpr(goal.Right)
+	var comps []comparisonFact
+	for _, fact := range facts {
+		if c, ok := parseComparisonFact(fact); ok && isForwardOp(c.op) {
+			comps = append(comps, c)
+		}
+	}
+	for _, first := range comps {
+		if first.left != left {
+			continue
+		}
+		for _, second := range comps {
+			if second.left == first.right && second.right == right {
+				return "chain `" + first.left + " " + first.op + " " + first.right + "`, `" +
+					second.left + " " + second.op + " " + second.right + "` => `" +
+					left + " " + opString(goal.Op) + " " + right + "`"
+			}
 		}
 	}
 	return ""
@@ -167,6 +344,106 @@ func factsRelate(facts []string, left, right string) bool {
 		}
 	}
 	return false
+}
+
+func parseComparisonFact(s string) (comparisonFact, bool) {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "(") && strings.HasSuffix(s, ")") {
+		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "("), ")"))
+	}
+	fields := strings.Fields(s)
+	if len(fields) != 3 || !isForwardOp(fields[1]) {
+		return comparisonFact{}, false
+	}
+	return comparisonFact{left: fields[0], op: fields[1], right: fields[2]}, true
+}
+
+func isForwardComparison(op lexer.TokenKind) bool {
+	return op == lexer.TOKEN_LT || op == lexer.TOKEN_LTEQ
+}
+
+func isForwardOp(op string) bool {
+	return op == "<" || op == "<="
+}
+
+func parseSimpleCounterexample(ce string) map[string]int64 {
+	out := map[string]int64{}
+	for _, part := range strings.Split(ce, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		name, value, ok := strings.Cut(part, "=")
+		if !ok {
+			continue
+		}
+		v, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+		if err != nil {
+			continue
+		}
+		out[strings.TrimSpace(name)] = v
+	}
+	return out
+}
+
+func suggestionContradictsCounterexample(text string, ce map[string]int64) bool {
+	if len(ce) == 0 {
+		return false
+	}
+	start := strings.Index(text, "`")
+	for start >= 0 {
+		rest := text[start+1:]
+		endRel := strings.Index(rest, "`")
+		if endRel < 0 {
+			return false
+		}
+		chunk := rest[:endRel]
+		if cmp, ok := parseComparisonFact(chunk); ok {
+			if contradictsSimpleCounterexample(cmp, ce) {
+				return true
+			}
+		}
+		next := rest[endRel+1:]
+		nextStart := strings.Index(next, "`")
+		if nextStart < 0 {
+			return false
+		}
+		start += endRel + 2 + nextStart
+	}
+	return false
+}
+
+func contradictsSimpleCounterexample(c comparisonFact, ce map[string]int64) bool {
+	left, ok := simpleTermValue(c.left, ce)
+	if !ok {
+		return false
+	}
+	right, ok := simpleTermValue(c.right, ce)
+	if !ok {
+		return false
+	}
+	switch c.op {
+	case "<":
+		return !(left < right)
+	case "<=":
+		return !(left <= right)
+	case ">":
+		return !(left > right)
+	case ">=":
+		return !(left >= right)
+	}
+	return false
+}
+
+func simpleTermValue(term string, ce map[string]int64) (int64, bool) {
+	if v, ok := ce[term]; ok {
+		return v, true
+	}
+	v, err := strconv.ParseInt(term, 10, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
 }
 
 func opString(op lexer.TokenKind) string {
@@ -219,9 +496,11 @@ func (a *Analyzer) checkStrictAssertProofHole(pos lexer.Pos, cond ast.Expr) {
 		a.recordProof(pos, "assert", "assert", ProofProvenLinear)
 		return
 	}
-	if proven, _ := a.trySMTProveRequires(cond, nil); proven {
+	if proven, counterexample := a.trySMTProveRequires(cond, nil); proven {
 		a.recordProof(pos, "assert", "assert", ProofProvenSMT)
 		return
+	} else {
+		a.lastSMTCounterexample = counterexample
 	}
 	// A plain `assert` is a leaf/debug runtime check, NOT a load-bearing prove-or-fail obligation
 	// (docs/98; the three-way fallback discussion). So the assert stays a runtime check (ProofRuntime,

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
 )
@@ -88,6 +89,40 @@ def ok(i: i64):
 	joined := strings.Join(append(append([]string{}, result.Errors()...), result.Warnings()...), "\n")
 	if strings.Contains(joined, "proof hole") {
 		t.Fatalf("a provable assert (i > 1 from i >= 3) must not raise a proof hole, got: %v", joined)
+	}
+}
+
+func TestProofHoleSuggestsLemmaCitationForMatchingEnsure(t *testing.T) {
+	src := `
+lemma double_bounds(x: i64):
+    requires x >= 0
+    ensure x * 2 >= x
+    pass
+
+def f(x: i64):
+    requires x >= 0
+    assert(x * 2 >= x)
+`
+	result := analyzeProofHole(t, "proof_hole_lemma.elisa", src)
+	joined := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(joined, "proof hole: assertion could not be proven") {
+		t.Fatalf("expected proof-hole warning, got: %v", result.Warnings())
+	}
+	if !strings.Contains(joined, "double_bounds") || !strings.Contains(joined, "double_bounds(x)") {
+		t.Fatalf("expected lemma citation suggestion, got:\n%s", joined)
+	}
+}
+
+func TestProofHoleSuggestsTransitiveComparisonChain(t *testing.T) {
+	a := &Analyzer{currentScope: NewScope(nil)}
+	a.currentScope.smtAssertFacts = []smtFact{
+		{Expr: &ast.BinaryExpr{Op: lexer.TOKEN_LTEQ, Left: &ast.Ident{Name: "a"}, Right: &ast.Ident{Name: "b"}}},
+		{Expr: &ast.BinaryExpr{Op: lexer.TOKEN_LTEQ, Left: &ast.Ident{Name: "b"}, Right: &ast.Ident{Name: "c"}}},
+	}
+	goal := &ast.BinaryExpr{Op: lexer.TOKEN_LTEQ, Left: &ast.Ident{Name: "a"}, Right: &ast.Ident{Name: "c"}}
+	joined := a.proofHoleReport("proof hole: assertion could not be proven", goal)
+	if !strings.Contains(joined, "chain") || !strings.Contains(joined, "a <= b") || !strings.Contains(joined, "b <= c") {
+		t.Fatalf("expected transitive chain suggestion, got:\n%s", joined)
 	}
 }
 
