@@ -8,6 +8,7 @@ import (
 const taskGroupChurnWarning = "creates a task group on every iteration"
 
 func TestRunCLITaskGroupChurnLintFlagsTaskGroupNewInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "task_group_churn.elisa", `def task_group_new() -> i64:
     return 1
 
@@ -28,6 +29,7 @@ def churns() -> i64:
 }
 
 func TestRunCLITaskGroupChurnLintAllowsGroupOutsideLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "task_group_once.elisa", `def task_group_new() -> i64:
     return 1
 

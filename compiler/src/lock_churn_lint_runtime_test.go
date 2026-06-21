@@ -8,6 +8,7 @@ import (
 const lockChurnWarning = "acquires a lock on every iteration"
 
 func TestRunCLILockChurnLintFlagsMutexLockInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "lock_churn.elisa", `def mutex_lock(mu: i64) -> i64:
     return mu
 
@@ -28,6 +29,7 @@ def churns() -> i64:
 }
 
 func TestRunCLILockChurnLintFlagsLockStmtInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "lock_stmt_churn.elisa", `struct Mutex:
     value: i64
 
@@ -48,6 +50,7 @@ def churns() -> i64:
 }
 
 func TestRunCLILockChurnLintAllowsSingleMutexLock(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "lock_once.elisa", `def mutex_lock(mu: i64) -> i64:
     return mu
 

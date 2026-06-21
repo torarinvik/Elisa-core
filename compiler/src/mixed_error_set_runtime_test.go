@@ -15,6 +15,7 @@ import (
 // raised directly into that combined set (the value is built in the destination
 // set's layout), and a catch can dispatch across both sets, binding payloads.
 func TestRunCLIMixedErrorSets(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

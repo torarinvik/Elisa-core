@@ -82,6 +82,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // An unproven-but-satisfying call argument passes the debug call-site check and runs normally.
 func TestCallArgRefinementSatisfiedPasses(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(callArgRefinementProgram, "%s", "5", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("satisfying call-arg refinement should run cleanly: %v (out=%q)", err, out)
@@ -93,6 +94,7 @@ func TestCallArgRefinementSatisfiedPasses(t *testing.T) {
 
 // A violating call argument TRAPS at debug — the function-contract boundary is enforced at the call.
 func TestCallArgRefinementViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(callArgRefinementProgram, "%s", "neg()", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("violating call-arg refinement must trap at debug, but program exited 0 (out=%q)", out)
@@ -120,6 +122,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // `if n is Positive:` narrows n so `needs_nat(n)` is statically proven (no runtime check) AND the
 // program runs correctly end-to-end through the narrowed branch.
 func TestLawIsNarrowingRunsEndToEnd(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(lawIsNarrowProgram, "%s", "7", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("narrowed branch should run cleanly: %v (out=%q)", err, out)
@@ -147,6 +150,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // An unproven-but-satisfying return passes the debug return-check and runs normally.
 func TestReturnRefinementSatisfiedPasses(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(returnRefinementProgram, "%s", "5", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("satisfying return refinement should run cleanly: %v (out=%q)", err, out)
@@ -158,6 +162,7 @@ func TestReturnRefinementSatisfiedPasses(t *testing.T) {
 
 // A violating return TRAPS at debug — the return half of the function-contract boundary is enforced.
 func TestReturnRefinementViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(returnRefinementProgram, "%s", "neg()", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("violating return refinement must trap at debug, but program exited 0 (out=%q)", out)
@@ -166,6 +171,7 @@ func TestReturnRefinementViolatedTrapsInDebug(t *testing.T) {
 
 // A satisfying init passes the debug discharge check and runs normally.
 func TestRefinementDischargeSatisfiedPasses(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(refinementProgram, "%s", "5", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("satisfying refinement should run cleanly: %v (out=%q)", err, out)
@@ -177,6 +183,7 @@ func TestRefinementDischargeSatisfiedPasses(t *testing.T) {
 
 // A violating init TRAPS at debug — the refinement is enforced.
 func TestRefinementDischargeViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(refinementProgram, "%s", "neg()", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("violating refinement must trap at debug, but program exited 0 (out=%q)", out)
@@ -187,6 +194,7 @@ func TestRefinementDischargeViolatedTrapsInDebug(t *testing.T) {
 // -fbounds-check (ELISACORE_FORCE_BOUNDS_CHECK) legitimately forces the check even in release, so
 // clear it here to assert the pure-release elision (other tests in the suite may leave it set).
 func TestRefinementDischargeElidedInRelease(t *testing.T) {
+	t.Parallel()
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
 		if prev, had := os.LookupEnv(key); had {
 			_ = os.Unsetenv(key)
@@ -216,6 +224,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // A satisfying `ensures p is Positive` postcondition passes the debug return-check and runs.
 func TestEnsuresRefinementSatisfiedRuns(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(ensuresRefinementProgram, "%s", "1", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("satisfying ensures postcondition should run cleanly: %v (out=%q)", err, out)
@@ -228,6 +237,7 @@ func TestEnsuresRefinementSatisfiedRuns(t *testing.T) {
 // A violated `ensures p is Positive` (the body writes 0) TRAPS at debug — the postcondition is
 // enforced at the callee's return, backing the caller's gained fact.
 func TestEnsuresRefinementViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(ensuresRefinementProgram, "%s", "0", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("violated ensures postcondition must trap at debug, but program exited 0 (out=%q)", out)
@@ -253,6 +263,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // `ensures p == old(p) + 1` holds when the body increments by exactly 1: old(p)==5 (entry), p==6.
 func TestOldEnsureSatisfiedRuns(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(oldEnsureProgram, "%s", "1", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("satisfying `ensures p == old(p) + 1` should run cleanly: %v (out=%q)", err, out)
@@ -265,6 +276,7 @@ func TestOldEnsureSatisfiedRuns(t *testing.T) {
 // Incrementing by 2 violates `ensures p == old(p) + 1` — proves the check reads the ENTRY value of p
 // (a stale-current-value capture would compare p to itself and never trap).
 func TestOldEnsureViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(oldEnsureProgram, "%s", "2", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("`ensures p == old(p) + 1` with +2 must trap at debug, but program exited 0 (out=%q)", out)
@@ -286,6 +298,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // `n` is not mutated, so `result == n - old(n)` holds exactly when the body returns 0.
 func TestOldResultSatisfiedRuns(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(oldResultProgram, "%s", "0", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("`ensure result == n - old(n)` returning 0 should run cleanly: %v (out=%q)", err, out)
@@ -297,6 +310,7 @@ func TestOldResultSatisfiedRuns(t *testing.T) {
 
 // Returning a nonzero value violates `result == n - old(n)` (== 0 here) and traps in debug.
 func TestOldResultViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(oldResultProgram, "%s", "3", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("`ensure result == n - old(n)` returning 3 must trap at debug, but program exited 0 (out=%q)", out)
@@ -326,6 +340,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // start=5, count=3: x goes 5→2, the invariant `x >= 0` holds on every re-check, runs cleanly.
 func TestInvariantRecheckHoldsRuns(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "5, 3", 1), backend.OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("a standing invariant that holds on every mutation should run cleanly: %v (out=%q)", err, out)
@@ -338,6 +353,7 @@ func TestInvariantRecheckHoldsRuns(t *testing.T) {
 // start=1, count=3: x goes 1→0→-1; the re-check after the mutation that drops x to -1 TRAPS. Without
 // brick 90-14 the invariant is only checked once at x==1 and the violation slips through.
 func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
+	t.Parallel()
 	out, err := buildRunRefinement(t, strings.Replace(invariantRecheckProgram, "%s", "1, 3", 1), backend.OptimizationLevel0)
 	if err == nil {
 		t.Fatalf("a standing invariant violated by a later mutation must trap at debug, but program exited 0 (out=%q)", out)
@@ -347,6 +363,7 @@ func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
 // The standing invariant is debug-only: at -O3 the re-checks are elided, so the same violating run
 // does NOT trap (debug verifies what release assumes).
 func TestInvariantRecheckElidedInRelease(t *testing.T) {
+	t.Parallel()
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
 		if prev, had := os.LookupEnv(key); had {
 			_ = os.Unsetenv(key)

@@ -13,6 +13,7 @@ import (
 )
 
 func TestRunCLIStdPrintRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()

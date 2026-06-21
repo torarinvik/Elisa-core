@@ -15,6 +15,7 @@ import (
 // caller's region. Verifies correct byte values (no arena corruption) across
 // multiple capacity growths.
 func TestRunCLIRegionParamContainerPushThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -61,6 +62,7 @@ def region_param_push_test() -> void:
 }
 
 func TestRunCLIDArrayPushArrayLiteralBulkAppend(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -107,6 +109,7 @@ def darray_push_array_literal_test() -> void:
 // generated result darray carries region r, so its synthesized pushes source
 // the caller's arena.
 func TestRunCLIRegionParamListComprehensionThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -155,6 +158,7 @@ def region_param_list_comp_test() -> void:
 }
 
 func TestRunCLIRegionParamEachQueryThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -207,6 +211,7 @@ def region_param_each_query_test() -> void:
 // mirroring the darray push ABI. Verifies the inserted values read back
 // correctly (no arena corruption) across several insertions + a rehash.
 func TestRunCLIRegionParamDictInsertThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -269,6 +274,7 @@ def region_param_dict_test() -> void:
 }
 
 func TestRunCLIRegionParamDictPutThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -329,6 +335,7 @@ def region_param_dict_put_test() -> void:
 }
 
 func TestRunCLIRegionScopeStoreGrowthUsesRegionArena(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -375,6 +382,7 @@ def region_scope_store_growth_test() -> void:
 }
 
 func TestRunCLIRegionParamCloneDArrayUsesHiddenArena(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -419,6 +427,7 @@ def region_param_clone_darray_test() -> void:
 }
 
 func TestRunCLIRegionParamSequenceRewriteUsesHiddenArena(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -472,6 +481,7 @@ def region_param_sequence_rewrite_test() -> void:
 // at -O2/-O3 by deleting the dead spill. (Was the Lua frontend's nested-vararg
 // RETURN_VARARG crash cluster.)
 func TestRunCLISequenceRewriteOverByValueDArrayParamNoStackOverflow(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -528,6 +538,7 @@ def sequence_rewrite_param_overflow_test() -> void can[Abort.Panic, Memory.Alloc
 }
 
 func TestRunCLIInferredRegionBuildersUseActiveRegion(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -575,6 +586,7 @@ def inferred_region_builders_test() -> void:
 // allocator polymorphism (region = lifetime + pluggable backing allocator).
 // Also exercises mark/reset-to-mark reclamation (arena_snapshot/arena_rewind).
 func TestRunCLIAllocatorInterfaceBumpAndMalloc(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -639,6 +651,7 @@ def allocator_interface_test() -> void:
 // {data,len} view; `.as_cstr()` writes a NUL sentinel at items[count] (c_str()
 // semantics) so the result is a valid NUL-terminated C-string. Byte-correct.
 func TestRunCLIDarraySviewAndCstrConversions(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -692,6 +705,7 @@ def darray_views_test() -> void:
 // scope, so NUL-termination must grow through the hidden caller-threaded region
 // arena for r. This guards the region-aware cstr path specifically.
 func TestRunCLIRegionParamDarrayCstrThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -739,6 +753,7 @@ def region_param_darray_cstr_test() -> void:
 }
 
 func TestRunCLIRegionParamDarrayLiteralThreadsArenaViaHiddenParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

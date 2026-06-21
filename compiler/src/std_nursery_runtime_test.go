@@ -12,6 +12,7 @@ import (
 // This compiles + runs the fixture natively and confirms the join guarantee (the assert that
 // the shared counter equals the number of submitted tasks holds right after the nursery).
 func TestRunCLIStdNurseryRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_nursery_smoke.elisa")
 

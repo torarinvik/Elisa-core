@@ -15,6 +15,7 @@ import (
 // during the fill stays valid across the remaining growth (which a chained backing would reject and
 // relocate), with no manual `using reserve_commit`. The reservation is overflow-proof by the bound.
 func TestRunCLIReserveCommitInferenceKeepsInteriorRefStable(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -52,6 +53,7 @@ def reserve_commit_inference_test() -> void:
 }
 
 func TestRunCLIReserveCommitInferenceCountsListPushElements(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -90,6 +92,7 @@ def reserve_commit_list_push_bound_test() -> void:
 }
 
 func TestRunCLIReserveCommitInferenceDoesNotHardBoundResize(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -14,6 +14,7 @@ import (
 // namespaced enum constructors + match arms under `using`, and the
 // public-section re-export inside a `private module`.
 func TestRunCLIModuleQualifiedConstructionAndVisibility(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -87,6 +88,7 @@ def module_visibility_runtime_test() -> void:
 // The private member of a private module stays inaccessible from outside even
 // when a sibling public section exists, and the diagnostic names the privacy.
 func TestRunCLIPrivateModuleMemberDiagnostic(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_private_diag_fixture.elisa")
 	src := `private module Vault:

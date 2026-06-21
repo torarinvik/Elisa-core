@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunCLIStdThreadingRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_threading_smoke.elisa")
 

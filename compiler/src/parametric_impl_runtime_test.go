@@ -14,6 +14,7 @@ import (
 // against the impl's `BoxTag[T]` pattern. This is the prerequisite for the Store/Handle
 // unification (docs/69), where `impl[T] Store for darray[T]` must cover all element types.
 func TestRunCLIParametricImplDispatch(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -64,6 +65,7 @@ def parametric_impl_test() -> void:
 // standalone with an unbound T. This is the form the Store impls need (`store_get -> Elem&`
 // with `Elem = T`).
 func TestRunCLIParametricImplMonomorphizesTReferencingMethod(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

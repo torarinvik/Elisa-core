@@ -1,0 +1,48 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Typed instruction-format firewall (docs/94). Raw u32 instruction words enter at the boundary;
+# after decode, register and immediate fields carry PROVEN refinements, so register-file indexing
+# needs no runtime bounds check and the rest of the emulator manipulates range-safe, format-safe
+# values. Every refinement below discharges statically under -strict (verified by the companion
+# Go test) — this is the verified bit-extraction + sign-extension + refined-index pipeline.
+
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
+
+# A 5-bit register selector. Constructing one anywhere requires a proof it is < 32.
+type RegIndex = u32 is InRange[0, 31]
+
+# Field decoders. A constant mask bounds the result to its field width regardless of the (here
+# constant, but the prover also handles runtime) bit position — `& 0x1F` proves InRange[0, 31].
+def decode_rd(word: u32) -> RegIndex:
+    return (word >> 7) & 0x1F
+def decode_rs1(word: u32) -> RegIndex:
+    return (word >> 15) & 0x1F
+def decode_rs2(word: u32) -> RegIndex:
+    return (word >> 20) & 0x1F
+
+# I-type immediate: a 12-bit field, sign-extended to a value provably in [-2048, 2047]. The
+# `(field << 20) >> 20` idiom is an arithmetic-shift sign-extension; the prover models the signed
+# shifts exactly and proves the range.
+def decode_imm_i(word: u32) -> i32 is SBounded[-2048, 2047]:
+    return ((((word >> 20) & 0xFFF).i32()) << 20) >> 20
+
+# A refined index needs no runtime bounds check into the 32-entry register file: the RegIndex
+# refinement [0, 31] is statically within the array's extent.
+def read_reg(regs: array[u64, 32]&, r: RegIndex) -> u64:
+    return regs[r]
+
+@test
+def decodes_addi_x5_x1_100() -> void:
+    word: u32 = 0x06408293             # ADDI x5, x1, 100
+    regs: array[u64, 32] = zeroed
+    assert(decode_rd(word) == 5)
+    assert(decode_rs1(word) == 1)
+    assert(decode_imm_i(word) == 100)
+    assert(read_reg(&regs, decode_rd(word)) == 0)
+
+@test
+def sign_extends_negative_immediate() -> void:
+    word: u32 = 0xFFF00293             # imm[11:0] all ones -> -1, rd = x5
+    assert(decode_rd(word) == 5)
+    assert(decode_imm_i(word) == -1)

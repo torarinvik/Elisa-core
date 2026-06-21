@@ -14,6 +14,7 @@ import (
 // unconditionally extracted the success payload, which fails for a void union
 // ("error union has no payload").
 func TestRunCLIVoidErrorUnionCatch(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

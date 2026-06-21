@@ -13,6 +13,7 @@ import (
 // lowers to a native LLVM indirect call. It is the general replacement for the
 // old string-keyed, one-C-shim-per-signature native callback path.
 func TestRunCLIExecutesCallAsIndirectCall(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "callas_indirect_smoke.elisa")
 

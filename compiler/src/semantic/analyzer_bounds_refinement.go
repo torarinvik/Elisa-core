@@ -188,6 +188,96 @@ func (a *Analyzer) scaleInterval(expr ast.Expr, k int64) (int64, int64, bool) {
 	return lo * k, hi * k, true
 }
 
+// objectIsImmutableDArrayParam reports whether `obj` is an IMMUTABLE dynamic-array parameter — a
+// plain (readonly) `darray[T]&` / `darray[T]` param, not `mutable`. Immutability is the soundness
+// precondition for trusting a `requires count >= K` length bound at an index site: a `mutable`
+// darray could `pop`/`clear` and shrink its count below K inside the body, but a readonly param's
+// length cannot change (it cannot be reassigned, nor mutably re-borrowed).
+func (a *Analyzer) objectIsImmutableDArrayParam(obj ast.Expr) bool {
+	ident, ok := stripOptimizationParens(obj).(*ast.Ident)
+	if !ok || ident == nil || a.currentFuncDecl == nil {
+		return false
+	}
+	for _, p := range a.currentFuncDecl.Params {
+		if p.Name != ident.Name {
+			continue
+		}
+		if p.Mutable {
+			return false
+		}
+		if _, isMut := p.Type.(*ast.MutableType); isMut {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// liveRequiresCountLowerBound returns the largest constant K such that a live
+// `requires <obj>.count >= K` (or `> K-1`) precondition of the enclosing function is in scope.
+func (a *Analyzer) liveRequiresCountLowerBound(obj ast.Expr) (int64, bool) {
+	if a == nil || a.currentFuncDecl == nil {
+		return 0, false
+	}
+	base := optimizationExprString(obj)
+	if base == "" {
+		return 0, false
+	}
+	target := base + ".count"
+	best, found := int64(0), false
+	for _, req := range a.currentFuncDecl.Requires {
+		// No assertFactLive gate is needed here: the caller (objectIsImmutableDArrayParam) has already
+		// established the darray is immutable, so its count cannot change in the body and the
+		// precondition holds at every access — there is no mutation that could stale this fact.
+		k, ok := a.requiresClauseLowerBound(req, target)
+		if !ok {
+			continue
+		}
+		if !found || k > best {
+			best, found = k, true
+		}
+	}
+	return best, found
+}
+
+// requiresClauseLowerBound extracts a constant lower bound K on the expression whose optimization
+// string is `target`, from `target >= K` / `target > K` (or the flipped `K <= target` / `K < target`).
+func (a *Analyzer) requiresClauseLowerBound(expr ast.Expr, target string) (int64, bool) {
+	bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return 0, false
+	}
+	leftIsTarget := optimizationExprString(bin.Left) == target
+	rightIsTarget := optimizationExprString(bin.Right) == target
+	switch bin.Op {
+	case lexer.TOKEN_GTEQ: // target >= K
+		if leftIsTarget {
+			if k, ok := a.constIntValue(bin.Right); ok {
+				return k, true
+			}
+		}
+	case lexer.TOKEN_GT: // target > K  ⇒  target >= K+1
+		if leftIsTarget {
+			if k, ok := a.constIntValue(bin.Right); ok {
+				return k + 1, true
+			}
+		}
+	case lexer.TOKEN_LTEQ: // K <= target
+		if rightIsTarget {
+			if k, ok := a.constIntValue(bin.Left); ok {
+				return k, true
+			}
+		}
+	case lexer.TOKEN_LT: // K < target  ⇒  target >= K+1
+		if rightIsTarget {
+			if k, ok := a.constIntValue(bin.Left); ok {
+				return k + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
 // refinementCarriedInterval returns the interval a value directly carries via a refinement it holds.
 // Three construction/contract-backed sources are honored (none depend on invalidatable local flow facts):
 //   - a refined struct-field read `d.sdst` (enforced at construction),

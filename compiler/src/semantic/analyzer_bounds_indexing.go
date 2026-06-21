@@ -383,6 +383,21 @@ func (a *Analyzer) indexExprHasBoundsProof(expr *ast.IndexExpr, objType Type) bo
 			}
 		}
 	}
+	// A REFINEMENT-typed index into an IMMUTABLE dynamic array whose length is pinned above the
+	// index's proven maximum by a live `requires <darray>.count >= K` precondition is in bounds with
+	// no runtime check (the darray analogue of the constant-size case above — e.g. `regs[r]`,
+	// r : InRange[0,31], where `requires regs.count >= 32`). Immutability is mandatory: a `mutable`
+	// darray could pop/clear and shrink count below K. Sound: a readonly param's count cannot change
+	// in the body, the index is proven in [0, hi], and the precondition gives count > hi at entry.
+	if _, ok := stripRefForBounds(objType).(*DArrayType); ok {
+		if lo, hi, rok := a.indexExprRefinementBounds(expr.Index); rok && lo >= 0 {
+			if a.objectIsImmutableDArrayParam(expr.Object) {
+				if k, kok := a.liveRequiresCountLowerBound(expr.Object); kok && k > hi {
+					return true
+				}
+			}
+		}
+	}
 	// A view bound from a constant-bounded slice has a statically-known length;
 	// a constant index within [0, len) is provably in bounds (zero-cost).
 	if base, ok := stripOptimizationParens(expr.Object).(*ast.Ident); ok && base != nil {

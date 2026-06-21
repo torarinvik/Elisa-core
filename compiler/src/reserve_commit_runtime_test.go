@@ -20,6 +20,7 @@ import (
 // behavior the stability rule forbids for reserve_commit), e0 would point at the
 // abandoned pre-growth buffer and read the stale value, tripping the panic.
 func TestRunCLIReserveCommitDarrayGrowsInPlace(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

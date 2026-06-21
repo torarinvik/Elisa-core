@@ -21,7 +21,7 @@ import (
 
 func stressStdInclude(t *testing.T) string {
 	t.Helper()
-	abs, err := filepath.Abs(filepath.Join("..", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
+	abs, err := filepath.Abs(filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa"))
 	if err != nil {
 		t.Fatalf("resolve std include: %v", err)
 	}
@@ -139,6 +139,7 @@ def nested_region_churn() -> void:
 // Allocation/region stress: darray realloc, dict at scale, nested-region churn.
 // Run under -fbounds-check so every dynamic index/deref is runtime-guarded.
 func TestMemoryStressAllocation(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("heavy stress test; skipped under -short")
 	}
@@ -222,6 +223,7 @@ def mutex_lock_churn() -> void:
 // Concurrency stress: 800k concurrent atomic increments across 8 threads (atomicity),
 // hundreds of thread spawn/join cycles, a thread pool at scale, and mutex lock churn.
 func TestConcurrencyStress(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("heavy stress test; skipped under -short")
 	}
@@ -231,6 +233,7 @@ func TestConcurrencyStress(t *testing.T) {
 }
 
 func TestConcurrencyStressPerfStrictAcknowledged(t *testing.T) {
+	t.Parallel()
 	exit, stdout, stderr := compileStressProgram(t, "concurrency_stress_perf", concurrencyStressBody, "-Wperf")
 	if exit != 0 {
 		t.Fatalf("expected acknowledged concurrency stress fixture to compile under -Wperf, exit=%d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
@@ -276,6 +279,7 @@ func TestConcurrencyStressUnderASan(t *testing.T) {
 // Meta-test: the stress harness must actually DETECT a failing program (a panic on a
 // path that does execute), otherwise a green run proves nothing.
 func TestStressHarnessDetectsFailure(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("native build; skipped under -short")
 	}
@@ -298,6 +302,7 @@ def deliberately_wrong() -> void:
 // Meta-test: the runtime index/deref watchdog must trap an out-of-bounds access
 // (buffer-overflow detection), not read past the allocation.
 func TestStressBoundsWatchdogTrapsOOB(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("native build; skipped under -short")
 	}

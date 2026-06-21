@@ -88,24 +88,24 @@ const (
 type bodyOp int
 
 const (
-	opAdd bodyOp = iota // a + b
-	opSub               // a - b
-	opMul               // a * b
-	opDiv               // a / b  (b != 0)
-	opMod               // a % b  (b != 0)
-	opIdentA            // a
-	opNegA              // -a  (i64 only; u64 wrapping negation, ~a+1)
+	opAdd    bodyOp = iota // a + b
+	opSub                  // a - b
+	opMul                  // a * b
+	opDiv                  // a / b  (b != 0)
+	opMod                  // a % b  (b != 0)
+	opIdentA               // a
+	opNegA                 // -a  (i64 only; u64 wrapping negation, ~a+1)
 )
 
 type relOp int
 
 const (
 	relEQ relOp = iota // ==
-	relNE               // !=
-	relLT               // <
-	relLE               // <=
-	relGT               // >
-	relGE               // >=
+	relNE              // !=
+	relLT              // <
+	relLE              // <=
+	relGT              // >
+	relGE              // >=
 )
 
 func (r relOp) String() string {
@@ -529,5 +529,53 @@ func TestProverMetamorphicKnownTrue(t *testing.T) {
 				t.Fatalf("prover rejected a known-true ensure: %s\n%s", tc.name, tc.src)
 			}
 		})
+	}
+}
+
+func recursiveAffineRHS(n string, c int) string {
+	if c == 0 {
+		return n
+	}
+	return fmt.Sprintf("%s + %d", n, c)
+}
+
+func TestProverMetamorphicRecursiveAffineSoundness(t *testing.T) {
+	g := newLCG(0x5eedc0ffee)
+	for i := 0; i < 24; i++ {
+		base := g.nextIntn(8)
+		falseBase := base + 1 + g.nextIntn(4)
+		src := fmt.Sprintf(`
+def rec_%d(n: i64) -> i64:
+    requires n >= 0
+    ensure result == %s
+    decreases n
+    if n == 0:
+        return %d
+    return rec_%d(n - 1) + 1
+`, i, recursiveAffineRHS("n", falseBase), base, i)
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, fmt.Sprintf("recursive_affine_false_%d.elisa", i), src,
+			AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+		if len(result.Errors()) == 0 {
+			t.Fatalf("recursive affine prover accepted false generated claim %d:\n%s\nproof report: %+v", i, src, result.ProofReport)
+		}
+	}
+}
+
+func TestProverMetamorphicRecursiveAffineKnownTrue(t *testing.T) {
+	for i, base := range []int{0, 1, 2, 5, 8} {
+		src := fmt.Sprintf(`
+def rec_true_%d(n: i64) -> i64:
+    requires n >= 0
+    ensure result == %s
+    decreases n
+    if n == 0:
+        return %d
+    return rec_true_%d(n - 1) + 1
+`, i, recursiveAffineRHS("n", base), base, i)
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, fmt.Sprintf("recursive_affine_true_%d.elisa", i), src,
+			AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+		if errs := result.Errors(); len(errs) != 0 {
+			t.Fatalf("recursive affine prover rejected true generated claim %d: %v\n%s", i, errs, src)
+		}
 	}
 }

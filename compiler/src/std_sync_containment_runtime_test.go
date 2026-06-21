@@ -15,6 +15,7 @@ import (
 // "missing required effect facts". Guards the frictionless contract for manual-list
 // callers, not just `can Pooled:`/`can Parallel:` alias users.
 func TestRunCLIStdSyncContainmentRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_sync_containment_smoke.elisa")
 

@@ -413,18 +413,37 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 		}
 		subst[param.Name] = args[i]
 	}
-	calleeEnv, ok := a.smtEnvForSubst(tr, subst)
+	calleeEnv, ok := a.smtEnvForCallSubst(tr, subst)
 	if !ok {
 		return false
 	}
 	calleeEnv["result"] = retTerm
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.boolTerm(req, calleeEnv)
+		if !ok {
+			return false
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
 	var calleeHyps strings.Builder
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
 		}
 		if h, ok := tr.boolTerm(ensure, calleeEnv); ok {
-			calleeHyps.WriteString("(assert " + h + ")\n")
+			if guard == "true" {
+				calleeHyps.WriteString("(assert " + h + ")\n")
+			} else {
+				calleeHyps.WriteString("(assert (=> " + guard + " " + h + "))\n")
+			}
 		}
 	}
 	if calleeHyps.Len() == 0 {
@@ -461,6 +480,45 @@ func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) 
 				return nil, false
 			}
 			env[name] = arr
+			continue
+		}
+		term, ok := tr.term(argExpr)
+		if !ok {
+			return nil, false
+		}
+		env[name] = term
+	}
+	return env, true
+}
+
+func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
+	env := map[string]string{}
+	for name, argExpr := range subst {
+		if lit, ok := argExpr.(*ast.BoolLit); ok {
+			if lit.Value {
+				env[name] = "true"
+			} else {
+				env[name] = "false"
+			}
+			continue
+		}
+		if IsBoolType(a.exprTypes[argExpr]) {
+			bterm, ok := tr.boolTerm(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = bterm
+			continue
+		}
+		if tr.isArrayLike(a.exprTypes[argExpr]) {
+			arr, ok := tr.arrayTermEnv(argExpr, nil)
+			if !ok {
+				return nil, false
+			}
+			env[name] = arr
+			continue
+		}
+		if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
 			continue
 		}
 		term, ok := tr.term(argExpr)
@@ -953,10 +1011,9 @@ type smtTranslator struct {
 	// equation, and an inductive hypothesis about `g(n-1)`, actually CONNECT to the obligation's
 	// `g(n)`/`g(n-1)` terms instead of being unrelated fresh aux symbols.
 	callCanon map[string]string
-	// callEqInFlight guards the recursive instantiation of the defining equation: while emitting the
-	// body equation for `g(...)` we mark `g` so a self-call inside its body does not recurse forever.
-	// Re-entry just yields the canonical symbol with no further equation — a sound bounded unroll.
-	callEqInFlight map[*ast.FuncDecl]int
+	// callEqInFlight guards recursive instantiation by CANONICAL CALL KEY, not just callee. `g(n)` and
+	// `g(n-1)` must remain distinct; only re-entering the exact same ground instance consumes fuel.
+	callEqInFlight map[string]int
 	// callEqMaxUnroll bounds how deep the defining equation is instantiated (default 1). A finite depth
 	// keeps the emitted axiom set finite; soundness does not depend on the depth (only on purity +
 	// termination), so this is purely a completeness knob.
@@ -969,17 +1026,17 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts = map[string]int64{}
 	}
 	return &smtTranslator{
-		a:            a,
-		decls:        map[string]bool{},
-		arrayDecls:   map[string]bool{},
-		lenDecls:     map[string]bool{},
-		nonNegDecls:  map[string]bool{},
-		unsignedBits: map[string]int{},
+		a:               a,
+		decls:           map[string]bool{},
+		arrayDecls:      map[string]bool{},
+		lenDecls:        map[string]bool{},
+		nonNegDecls:     map[string]bool{},
+		unsignedBits:    map[string]int{},
 		signedBits:      map[string]int{},
 		boolDecls:       map[string]bool{},
 		paramConsts:     paramConsts,
 		callCanon:       map[string]string{},
-		callEqInFlight:  map[*ast.FuncDecl]int{},
+		callEqInFlight:  map[string]int{},
 		callEqMaxUnroll: 1,
 	}
 }
@@ -1170,10 +1227,44 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// and decline here (sound: a declined term only forgoes a proof).
 		ssign, sbits, sok := smtIntWidthSign(tr.a.exprTypes[n.Operand])
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
-		if sok && dok && ssign == dsign && dbits >= sbits {
+		if !sok || !dok {
+			return "", false
+		}
+		if ssign == dsign && dbits >= sbits {
 			return tr.termEnv(n.Operand, env)
 		}
+		// Unsigned -> strictly wider signed (`(u8 b).i32()`): the source is non-negative and fits the
+		// wider signed range, so the conversion is the identity on the value.
+		if !ssign && dsign && dbits > sbits {
+			return tr.termEnv(n.Operand, env)
+		}
+		// Same-width sign reinterpretation (`(u32 field).i32()`): a bitcast — the bit pattern is
+		// unchanged, only the interpretation flips. Model the destination as the signed/unsigned read
+		// of the operand's bits (exact, so a field cast then sign-extended proves its range). Soundness:
+		// it is the precise two's-complement relationship, not an approximation.
+		if sbits == dbits {
+			inner, ok := tr.termEnv(n.Operand, env)
+			if !ok {
+				return "", false
+			}
+			bv := "((_ int2bv " + strconv.Itoa(dbits) + ") " + inner + ")"
+			return smtBitvectorRead(bv, dsign, dbits), true
+		}
 		return "", false
+	case *ast.TernaryExpr:
+		cond, ok := tr.boolTerm(n.Cond, env)
+		if !ok {
+			return "", false
+		}
+		v, ok := tr.termEnv(n.Value, env)
+		if !ok {
+			return "", false
+		}
+		alt, ok := tr.termEnv(n.Alt, env)
+		if !ok {
+			return "", false
+		}
+		return "(ite " + cond + " " + v + " " + alt + ")", true
 	case *ast.BinaryExpr:
 		var op string
 		switch n.Op {
@@ -1307,8 +1398,9 @@ func smtSignedWrap(raw string, bits int) string {
 //
 // Soundness gates — anything outside them declines (returns ok=false), which only forgoes a proof,
 // never fabricates one:
-//   - Result must be UNSIGNED, width 1..64 (the `bv2nat` read is the unsigned value; a signed result
-//     would need the signed read and is left for a follow-up).
+//   - Result width 1..64. An unsigned result reads back via `bv2nat`; a signed result reads back via
+//     the exact two's-complement value (smtBitvectorRead), and a signed `>>` uses `bvashr` (arithmetic)
+//     to match the LLVM AShr codegen — so sign-extension idioms `(v << k) >> k` prove their signed range.
 //   - Operands must share the result width (Elisa bitwise is same-type), so int2bv at W is the exact
 //     bit pattern with no narrowing/sign surprise.
 //   - Shift amounts must be a compile-time constant in [0, W): the machine leaves shifts ≥ width
@@ -1318,7 +1410,7 @@ func smtSignedWrap(raw string, bits int) string {
 // timeout turns any hard case into Unknown → runtime fallback, so soundness holds regardless of cost.
 func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (string, bool) {
 	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[n])
-	if !ok || signed || bits <= 0 || bits > 64 {
+	if !ok || bits <= 0 || bits > 64 {
 		return "", false
 	}
 	width := strconv.Itoa(bits)
@@ -1350,6 +1442,8 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 		rbv = "((_ int2bv " + width + ") " + strconv.FormatInt(c, 10) + ")"
 		if n.Op == lexer.TOKEN_LSHIFT {
 			bvop = "bvshl"
+		} else if signed {
+			bvop = "bvashr" // signed result ⇒ arithmetic right shift (matches LLVM AShr codegen)
 		} else {
 			bvop = "bvlshr" // unsigned result ⇒ logical right shift
 		}
@@ -1358,6 +1452,14 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 	}
 	l, ok := tr.termEnv(n.Left, env)
 	if !ok {
+		// Operand-independent mask bound (see maskBoundAux): `X & C` ∈ [0, C] for a non-negative
+		// constant C, regardless of X — so a masked extraction proves even when X (e.g.
+		// `word >> runtime_shift`) is outside the modelable bitvector fragment.
+		if n.Op == lexer.TOKEN_AMPERSAND {
+			if c, isC := tr.a.constIntValue(n.Right); isC && c >= 0 {
+				return tr.maskBoundAux(c), true
+			}
+		}
 		return "", false
 	}
 	lbv := "((_ int2bv " + width + ") " + l + ")"
@@ -1368,11 +1470,17 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 		}
 		r, ok := tr.termEnv(n.Right, env)
 		if !ok {
+			// Symmetric mask bound: `C & X` ∈ [0, C] for a non-negative constant C, regardless of X.
+			if n.Op == lexer.TOKEN_AMPERSAND {
+				if c, isC := tr.a.constIntValue(n.Left); isC && c >= 0 {
+					return tr.maskBoundAux(c), true
+				}
+			}
 			return "", false
 		}
 		rbv = "((_ int2bv " + width + ") " + r + ")"
 	}
-	return "(bv2nat (" + bvop + " " + lbv + " " + rbv + "))", true
+	return smtBitvectorRead("("+bvop+" "+lbv+" "+rbv+")", signed, bits), true
 }
 
 // signedDivCannotOverflow reports whether signed `left / right` (or `%`) provably avoids the one
@@ -1835,6 +1943,37 @@ func (tr *smtTranslator) freshAux(nonNeg bool) string {
 	return v
 }
 
+// maskBoundAux models `X & C` for a non-negative constant C when X's exact bitvector term is
+// unavailable (e.g. X = `word >> runtime_shift`, outside the const-shift fragment). The result is
+// ALWAYS in [0, C] regardless of X — its set bits are a subset of C's — so a fresh integer bounded
+// to [0, C] is a sound OVER-approximation of the exact value. Soundness: the prover concludes only
+// on `unsat` of the negated goal; widening the value's feasible region to all of [0, C] can only
+// make that unsat harder to reach (decline), never fabricate one. This lets a masked extraction
+// like `(word >> sh) & 0xF` prove `< 16` even though the runtime shift is unmodelable.
+func (tr *smtTranslator) maskBoundAux(c int64) string {
+	tr.auxSeq++
+	v := "aux_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (<= "+v+" "+smtInt(c)+"))\n")
+	return v
+}
+
+// smtBitvectorRead reads a W-bit bitvector result back as its machine integer value. For an unsigned
+// result that is `bv2nat(b)` ∈ [0, 2^W). For a signed result it is the exact two's-complement value
+// `bv2nat(b) - 2^W * topbit(b)` ∈ [-2^(W-1), 2^(W-1)) — so the produced Int EQUALS the machine value
+// and composes soundly with further Int reasoning (e.g. a sign-extension `(v << k) >> k` proves its
+// signed range). The top bit is read via a 1-bit extract.
+func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
+	if !signed {
+		return "(bv2nat " + bvExpr + ")"
+	}
+	hi := strconv.Itoa(bits - 1)
+	signBit := "(bv2nat ((_ extract " + hi + " " + hi + ") " + bvExpr + "))"
+	return "(- (bv2nat " + bvExpr + ") (* " + smtPow2(bits) + " " + signBit + "))"
+}
+
 func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	if tr == nil || tr.a == nil || call == nil {
 		return "", false
@@ -1882,19 +2021,61 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 		}
 		subst[param.Name] = args[i]
 	}
-	env, ok := tr.a.smtEnvForSubst(tr, subst)
+	env, ok := tr.a.smtEnvForCallSubst(tr, subst)
 	if !ok {
 		return ret, true
 	}
 	env["result"] = ret
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.boolTerm(req, env)
+		if !ok {
+			return ret, true
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
 	// (1) Assume the callee's already-verified `ensure` clauses at the call (existing behavior): a
 	// contract-sound postcondition holds for the actual arguments.
+	recursiveProofCall := tr.a.isRecursiveProofCall(decl)
+	var recursiveCert recursiveProofCertificate
+	if recursiveProofCall {
+		var ok bool
+		recursiveCert, ok = tr.a.recursiveCallCertificate(tr.a.currentFuncDecl, decl, call)
+		if !ok {
+			recursiveProofCall = false
+		}
+	}
+	if recursiveProofCall && !tr.a.recursiveCallRequiresProven(decl, call) {
+		tr.a.recordProof(call.Pos(), "recursive proof declined for "+decl.Name, "callee requires", ProofRuntime)
+		tr.a.proofLint(call.Pos(), "recursive proof declined: callee requires for %q could not be proven at this recursive call", decl.Name)
+		recursiveProofCall = false
+	}
+	if recursiveProofCall && !tr.a.recursiveCallHasVerifiedDecrease(decl, call) {
+		recursiveProofCall = false
+	}
 	for _, ensure := range decl.EnsureValues {
 		if ensure == nil {
 			continue
 		}
+		if tr.a.isRecursiveProofCall(decl) && !recursiveProofCall {
+			continue
+		}
 		if h, ok := tr.boolTerm(ensure, env); ok {
-			tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+			if guard == "true" {
+				tr.auxDecls = append(tr.auxDecls, "(assert "+h+")\n")
+			} else {
+				tr.auxDecls = append(tr.auxDecls, "(assert (=> "+guard+" "+h+"))\n")
+			}
+			if recursiveProofCall {
+				tr.a.recordProof(ensure.Pos(), "recursive IH of "+decl.Name+" ("+recursiveCert.label()+")", "ensure", ProofProvenContract)
+			}
 		}
 	}
 	// (2) DEFINING EQUATION for a PURE, TOTAL function: assert `f(args) == body[params:=args]`, so the
@@ -1906,7 +2087,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
 	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
 	// finite.
-	tr.emitDefiningEquation(call, decl, ret, subst)
+	tr.emitDefiningEquation(call, decl, ret, subst, canonKey, guard, recursiveProofCall)
 	return ret, true
 }
 
@@ -1934,11 +2115,21 @@ func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (stri
 // own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
 // purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
 // to an integer term.
-func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr) {
+func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string, recursiveCallDomainProven bool) {
 	if tr == nil || decl == nil {
 		return
 	}
-	if tr.callEqInFlight[decl] >= tr.callEqMaxUnroll {
+	if tr.a.isRecursiveProofCall(decl) && !recursiveCallDomainProven {
+		return
+	}
+	if canonKey == "" {
+		var ok bool
+		canonKey, ok = tr.callCanonKey(decl, proofCallArgs(call))
+		if !ok {
+			return
+		}
+	}
+	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll {
 		return // bounded unroll reached: leave the symbol opaque (still sound)
 	}
 	if !tr.callEquationEligible(decl) {
@@ -1952,13 +2143,84 @@ func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.Func
 	if !ok {
 		return
 	}
-	tr.callEqInFlight[decl]++
-	defer func() { tr.callEqInFlight[decl]-- }()
+	tr.callEqInFlight[canonKey]++
+	defer func() { tr.callEqInFlight[canonKey]-- }()
 	bodyTerm, ok := tr.termEnv(body, env)
 	if !ok {
 		return
 	}
-	tr.auxDecls = append(tr.auxDecls, "(assert (= "+ret+" "+bodyTerm+"))\n")
+	eq := "(= " + ret + " " + bodyTerm + ")"
+	if guard != "" && guard != "true" {
+		eq = "(=> " + guard + " " + eq + ")"
+	}
+	tr.auxDecls = append(tr.auxDecls, "(assert "+eq+")\n")
+	if tr.a.isRecursiveProofCall(decl) {
+		if cert, ok := tr.a.recursiveEquationCertificate(decl); ok {
+			tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name+" ("+cert.label()+")", "definition", ProofProvenContract)
+		} else {
+			tr.a.recordProof(call.Pos(), "recursive equation of "+decl.Name+" (verified termination)", "definition", ProofProvenContract)
+		}
+	} else {
+		tr.a.recordProof(call.Pos(), "defining equation of "+decl.Name, "definition", ProofProvenContract)
+	}
+}
+
+func (a *Analyzer) isRecursiveProofCall(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || a.currentFuncDecl == nil {
+		return false
+	}
+	if decl == a.currentFuncDecl {
+		return true
+	}
+	for _, edge := range a.collectRecursiveSCCEdges(a.currentFuncDecl) {
+		if edge.Caller == decl || edge.Callee == decl {
+			return true
+		}
+	}
+	return false
+}
+
+func (a *Analyzer) recursiveCallHasVerifiedDecrease(callee *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || a.currentFuncDecl == nil || callee == nil || call == nil {
+		return false
+	}
+	caller := a.currentFuncDecl
+	_, ok := a.recursiveCallCertificate(caller, callee, call)
+	return ok
+}
+
+func (a *Analyzer) recursiveCallRequiresProven(callee *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || callee == nil || call == nil {
+		return false
+	}
+	if len(callee.Requires) == 0 {
+		return true
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range callee.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	for _, req := range callee.Requires {
+		if req == nil {
+			continue
+		}
+		switch a.proveRequiresClause(req, subst) {
+		case requiresProven:
+			continue
+		case requiresRefuted:
+			return false
+		default:
+			proven, _ := a.trySMTProveRequires(req, subst)
+			if !proven {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // callEquationEligible reports whether a function's defining equation may be soundly assumed:

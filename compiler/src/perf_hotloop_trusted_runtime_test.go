@@ -14,6 +14,7 @@ import (
 // declared in lock_churn_lint_runtime_test.go.
 
 func TestRunCLIPerfHotLoopTrustedSuppressesLoopPerfWarning(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "trusted_perf_hot_loop.elisa", `def mutex_lock(mu: i64) -> i64:
     return mu
 
@@ -30,6 +31,7 @@ def acknowledged() -> i64:
 }
 
 func TestRunCLIPerfHotLoopTrustedSuppressesWholeTrustedLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "trusted_perf_hot_loop_outer.elisa", `def mutex_lock(mu: i64) -> i64:
     return mu
 
@@ -46,6 +48,7 @@ def acknowledged() -> i64:
 }
 
 func TestRunCLIPerfHotLoopTrustedAllowsPerfStrictCompile(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "trusted_perf_hot_loop_strict.elisa")
 	src := `def mutex_lock(mu: i64) -> i64:

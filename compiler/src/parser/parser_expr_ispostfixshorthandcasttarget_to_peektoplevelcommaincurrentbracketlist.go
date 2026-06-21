@@ -171,6 +171,7 @@ func (p *Parser) parseRefinementPred() ast.RefinementPredExpr {
 	}
 	return ast.RefinementPredExpr{Position: pos, Name: name, Args: args}
 }
+
 // parseRefinementPredArgs parses the comma-separated bracket arguments of a refinement predicate,
 // shared by `T is Law[...]` types and `ensures x is Law[...]` postconditions. A `..` range is sugar
 // for its two inclusive endpoints (`Bounded[0..500]` → `0, 500`); a `..<` range is exclusive
@@ -955,6 +956,7 @@ func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 	}
 	return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: tag}}
 }
+
 // isPostReturnClauseKeyword reports whether an identifier begins a post-return-type signature clause
 // (`-> RetType <clause> ...`). These must NOT be mistaken for a legacy `<region> T&` prefix on the
 // return type, so an `ident ident` where the second is one of these is the return type followed by a
@@ -986,7 +988,15 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 			// unambiguously a region, so we can reject it. Recover by treating the ident as
 			// the region so the remainder of the type still parses and only this surfaces.
 			name := p.advance().Text
-			p.errorf("region prefix `%s` on a reference is no longer supported; use the `@%s` suffix instead (e.g. `T& @%s`)", name, name, name)
+			// `T NAME` (a type juxtaposed with a bare identifier) is most often a refinement type
+			// written without `is` — e.g. `u32 RegIndex` for `u32 is RegIndex`. Lead the diagnostic
+			// there, since the legacy region prefix this would otherwise be is removed (docs/68 §7).
+			if p.peek() == lexer.TOKEN_IDENT {
+				next := p.cur().Text
+				p.errorf("`%s %s` is not a valid type: for a refinement type write `%s is %s`; the legacy region prefix is removed — for a region use the `@%s` suffix (e.g. `T& @%s`)", name, next, name, next, name, name)
+			} else {
+				p.errorf("region prefix `%s` on a reference is no longer supported; use the `@%s` suffix instead (e.g. `T& @%s`)", name, name, name)
+			}
 			return ast.RefStorageAny, true, name, name
 		}
 		return ast.RefStorageAny, false, "", ""

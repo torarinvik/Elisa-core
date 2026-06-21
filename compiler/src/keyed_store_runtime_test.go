@@ -15,6 +15,7 @@ import (
 // resolves, a missing key returns null. This is the orthogonality the total Store preserves
 // — dict is keyed/partial, not a total handle->element store.
 func TestRunCLIKeyedStoreOverDict(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()

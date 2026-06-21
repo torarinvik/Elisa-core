@@ -14,6 +14,7 @@ import (
 // reallocates. End-to-end: the program compiles and runs with correct length and values, and the
 // reserve is transparent (pure optimization — no observable behavior change).
 func TestRunCLIAutoReserveBoundedFillRunsCorrectly(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

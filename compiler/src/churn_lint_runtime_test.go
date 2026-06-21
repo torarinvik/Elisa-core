@@ -11,6 +11,7 @@ const churnWarning = "boxes a value on every iteration"
 // allocation and is nudged toward batch allocation. (compileAndCaptureStderr lives in
 // pointer_graph_lint_runtime_test.go, same package.)
 func TestRunCLIChurnLintFlagsNewInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "churn_new.elisa", `struct Node:
     v: i64
 
@@ -31,6 +32,7 @@ def churns() -> i64:
 // Accumulation is the intended way to build a collection: pushing into a darray inside a
 // loop is NOT churn and must not be flagged.
 func TestRunCLIChurnLintAllowsPushAccumulation(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "churn_push.elisa", `def builds() -> usize:
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
@@ -45,6 +47,7 @@ func TestRunCLIChurnLintAllowsPushAccumulation(t *testing.T) {
 
 // A single `new` outside any loop is not churn — it allocates once.
 func TestRunCLIChurnLintAllowsSingleAllocation(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "churn_once.elisa", `struct Node:
     v: i64
 

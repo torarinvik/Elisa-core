@@ -5,6 +5,12 @@ import (
 	"elisacore/src/lexer"
 )
 
+type recursionEdge struct {
+	Caller *ast.FuncDecl
+	Callee *ast.FuncDecl
+	Call   *ast.CallExpr
+}
+
 // Recursive-function termination via `decreases` (docs/86 brick 86-7).
 //
 // Dafny's termination story: a function annotated with a `decreases <measure>` clause proves it
@@ -47,6 +53,15 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	if len(fn.Decreases) == 0 {
 		return
 	}
+	if len(fn.Decreases) == 1 && a.isStructuralDecreaseMeasure(fn, fn.Decreases[0]) {
+		if a.checkStructuralTermination(fn, fn.Decreases[0]) {
+			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofProvenLinear)
+		} else {
+			a.recordProof(fn.Decreases[0].Pos(), "structural termination of "+fn.Name, "decreases", ProofRefuted)
+			a.errorf(fn.Decreases[0].Pos(), "cannot prove structural `decreases` for %q: recursive calls must pass values bound from a match on the decreasing enum parameter", fn.Name)
+		}
+		return
+	}
 	// Type-check the measure components: each must be an integer (the prover reasons over integers).
 	for _, m := range fn.Decreases {
 		if m == nil {
@@ -59,18 +74,28 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 	calls := a.collectSelfRecursiveCalls(fn)
 	if len(calls) == 0 {
+		edges := a.collectRecursiveSCCEdges(fn)
+		if len(edges) > 0 {
+			if a.mutualRecursionVerified(fn, edges) {
+				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofProvenLinear)
+			} else {
+				a.recordProof(fn.Decreases[0].Pos(), "mutual termination of "+fn.Name, "decreases", ProofRefuted)
+				a.errorf(fn.Decreases[0].Pos(), "cannot prove the `decreases` measure strictly decreases across the mutually-recursive cycle containing %q; the cycle may not terminate", fn.Name)
+			}
+			return
+		}
 		// A `decreases` on a non-self-recursive function is harmless but pointless — flag it so the
 		// user knows the clause is doing nothing (and isn't masking a typo'd recursive call).
 		a.warnf(fn.Decreases[0].Pos(), "`decreases` on %q, which makes no direct recursive call; the termination clause is unused", fn.Name)
 		return
 	}
 	for _, call := range calls {
-		subst := a.substForSelfCall(fn, call)
-		if a.proveMeasureDecreases(fn.Decreases, subst) {
-			a.recordProof(call.Pos(), "termination of "+fn.Name, "decreases", ProofProvenLinear)
+		cert, ok := a.directNumericTerminationCertificate(fn, call)
+		if ok {
+			a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", cert.Outcome)
 			continue
 		}
-		a.recordProof(call.Pos(), "termination of "+fn.Name, "decreases", ProofRefuted)
+		a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", ProofRefuted)
 		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate", fn.Name)
 	}
 }
@@ -173,8 +198,8 @@ func (a *Analyzer) measureDiffIsZero(measure ast.Expr, subst map[string]ast.Expr
 // the obligations are discharged by the same SMT implication used for invariant preservation, with the
 // loop variables FREE and constrained only by the loop condition + invariants:
 //
-//   DECREASE:        cond ∧ invariants ⊢ measure > measure[vars := post-body]
-//   BOUNDED-BELOW:   cond ∧ invariants ⊢ measure >= 0
+//	DECREASE:        cond ∧ invariants ⊢ measure > measure[vars := post-body]
+//	BOUNDED-BELOW:   cond ∧ invariants ⊢ measure >= 0
 //
 // post-body is the measure with each loop variable replaced by its net body effect (captureLoopBodyEffect,
 // the same simultaneous substitution the preservation proof uses). A lexicographic tuple decreases iff
@@ -354,7 +379,7 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 			return false
 		}
 	}
-	body, ok := pureReturnBody(decl)
+	body, ok := pureReturnExpr(decl)
 	if !ok {
 		return false
 	}
@@ -364,11 +389,14 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	// TOTAL: a function that makes ANY direct self-recursive call must have a VERIFIED `decreases`
 	// measure — otherwise its "equation" may be inconsistent (non-termination ⇒ no fixed point). A
 	// non-recursive pure function is trivially total.
-	calls := a.collectSelfRecursiveCalls(decl)
-	if len(calls) == 0 {
+	edges := a.collectRecursiveSCCEdges(decl)
+	if len(edges) == 0 {
 		return true
 	}
-	return a.measureVerifiedForCalls(decl, calls)
+	if len(edges) == len(a.collectSelfRecursiveCalls(decl)) {
+		return a.measureVerifiedForCalls(decl, a.collectSelfRecursiveCalls(decl))
+	}
+	return a.mutualRecursionVerified(decl, edges)
 }
 
 // measureVerifiedForCalls proves (read-only, no diagnostics) that decl's `decreases` measure strictly
@@ -406,6 +434,71 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.Call
 	return true
 }
 
+func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
+	if a == nil || decl == nil || decl.IsLemma || decl.DecreasesWild != "" {
+		return false
+	}
+	if a.definingEquationInProgress == nil {
+		a.definingEquationInProgress = map[*ast.FuncDecl]bool{}
+	}
+	if a.definingEquationInProgress[decl] {
+		return true
+	}
+	a.definingEquationInProgress[decl] = true
+	defer delete(a.definingEquationInProgress, decl)
+	sym, ok := a.symbolForFuncDecl(decl)
+	if !ok || sym == nil {
+		return false
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok || fnType == nil {
+		return false
+	}
+	if fnType.Return == nil || !IsNumericType(fnType.Return) || IsFloatType(fnType.Return) {
+		return false
+	}
+	for _, pt := range fnType.Params {
+		if pt == nil || IsFloatType(pt) {
+			return false
+		}
+	}
+	body, ok := pureReturnExpr(decl)
+	return ok && a.exprIsPureShapeForEquation(body)
+}
+
+func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Inner)
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.exprIsPureShapeForEquation(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Left) && a.exprIsPureShapeForEquation(n.Right)
+	case *ast.CastExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Cond) && a.exprIsPureShapeForEquation(n.Value) && a.exprIsPureShapeForEquation(n.Alt)
+	case *ast.CallExpr:
+		if n == nil {
+			return false
+		}
+		decl, ok := a.resolveDirectCallFuncDecl(n)
+		if !ok || decl == nil {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.exprIsPureShapeForEquation(arg) {
+				return false
+			}
+		}
+		return a.functionPureEquationShape(decl)
+	default:
+		return false
+	}
+}
+
 // exprIsPureForEquation reports whether an expression is a PURE integer expression we may put on the
 // RHS of a defining equation: literals, parameter/immutable identifiers, arithmetic, comparisons,
 // parens, value-preserving casts, and calls to OTHER functions that are THEMSELVES equation-eligible
@@ -423,6 +516,8 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 		return n != nil && a.exprIsPureForEquation(n.Left) && a.exprIsPureForEquation(n.Right)
 	case *ast.CastExpr:
 		return n != nil && a.exprIsPureForEquation(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil && a.exprIsPureForEquation(n.Cond) && a.exprIsPureForEquation(n.Value) && a.exprIsPureForEquation(n.Alt)
 	case *ast.CallExpr:
 		if n == nil {
 			return false
@@ -443,20 +538,6 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 	default:
 		return false
 	}
-}
-
-// pureReturnBody extracts a function's single trailing `return <expr>` body (leading contract
-// statements — requires/ensure/decreases — are erased by the parser into the decl, so a pure function
-// body is exactly one return statement). Returns ok=false for anything more complex.
-func pureReturnBody(decl *ast.FuncDecl) (ast.Expr, bool) {
-	if decl == nil || len(decl.Body) != 1 {
-		return nil, false
-	}
-	ret, ok := decl.Body[0].(*ast.ReturnStmt)
-	if !ok || ret == nil || ret.Value == nil {
-		return nil, false
-	}
-	return ret.Value, true
 }
 
 // measureBoundedBelow reports whether the measure cannot fall below 0. An unsigned-typed measure is

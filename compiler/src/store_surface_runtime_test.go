@@ -15,6 +15,7 @@ import (
 // program defining the interface itself. This exercises the parametric impl end to end
 // through the real stdlib surface.
 func TestRunCLIStoreSurfaceOverDArray(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -69,6 +70,7 @@ def store_over_darray() -> void:
 // Focused regression: a ref-returning generic static-interface method used INLINE as a
 // binary-comparison operand must auto-deref correctly — same as when bound to a local.
 func TestRunCLIStoreSurfaceOverDequeInline(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -115,6 +117,7 @@ def store_over_deque_inline() -> void:
 // (usize logical index) → element, mapped through the ring's head/wrap. This proves the
 // unification generalizes beyond darray to a structurally different container.
 func TestRunCLIStoreSurfaceOverDeque(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()

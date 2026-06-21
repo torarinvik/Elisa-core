@@ -14,6 +14,7 @@ import (
 // (the region threads in from the caller); the value is correct at runtime, with
 // no `new[auto]` / `in auto:` / explicit region anywhere.
 func TestRunCLIBareNewDefaultsToInferredRegion(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

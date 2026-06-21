@@ -26,6 +26,7 @@ func compileAndCaptureStderr(t *testing.T, name, src string) string {
 // no region provenance — a raw `heap Node&?` or a bare `Node&?` — is the raw linked-node /
 // tree-of-pointers anti-pattern and is warned. Friction lands on the slow/unsafe pattern.
 func TestRunCLIPointerGraphLintFlagsRawSelfRef(t *testing.T) {
+	t.Parallel()
 	heapRef := compileAndCaptureStderr(t, "raw_heap.elisa", `struct Node:
     value: i64
     next: heap Node&?
@@ -52,6 +53,7 @@ def main() -> i64:
 // A region-tracked self-ref (`@owner` in a `[@owner]` struct) is a sound single-region
 // graph whose whole lifetime is one decision — NOT flagged. Friction only on the raw kind.
 func TestRunCLIPointerGraphLintAllowsRegionProvenance(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "region_graph.elisa", `struct SafeNode[@owner]:
     value: i64
     next: SafeNode&? @owner
@@ -67,6 +69,7 @@ def main() -> i64:
 // `@intrusive` is the explicit acknowledgment — friction, but possible. An acknowledged raw
 // node (the form the runtime's free-lists use) is not warned.
 func TestRunCLIPointerGraphLintRespectsIntrusiveAcknowledgment(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "intrusive.elisa", `@intrusive
 struct FreeNode:
     next: heap FreeNode&?

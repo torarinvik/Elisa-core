@@ -1,0 +1,55 @@
+# elisacore_std/decode.elisa — verified instruction-decode primitives (docs/94, docs/95).
+#
+# Include this module to get a "typed instruction-format firewall": raw integer words enter, and the
+# field accessors hand back values carrying PROVEN range refinements, so downstream code (register
+# files, jump tables, immediates) is range- and format-safe with no runtime checks. Every refinement
+# below discharges statically. No runtime dependency — only builtin integer types and operators.
+#
+# Usage (after including this file):
+#   type RegIndex = u32 is InRange[0, 31]
+#   def decode_rs1(word: u32) -> RegIndex:
+#       return bits5(word, 15)          # bits5 -> InRange[0,31] entails RegIndex
+#   def decode_imm(word: u32) -> i32 is SBounded[-2048, 2047]:
+#       return sx12(word, 20)
+
+# Unsigned field bound and signed (sign-extended) value bound.
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+law SBounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi
+
+# --- Unsigned field extractors -----------------------------------------------------------------
+# Extract an n-bit field at a runtime bit position `sh`. A constant mask bounds the result to its
+# field width regardless of the position (docs/94 Gap 1: `(word >> sh) & C` proves [0, C]).
+
+def bits1(word: u32, sh: u32) -> u32 is InRange[0, 1]:
+    return (word >> sh) & 0x1
+def bits2(word: u32, sh: u32) -> u32 is InRange[0, 3]:
+    return (word >> sh) & 0x3
+def bits3(word: u32, sh: u32) -> u32 is InRange[0, 7]:
+    return (word >> sh) & 0x7
+def bits4(word: u32, sh: u32) -> u32 is InRange[0, 15]:
+    return (word >> sh) & 0xF
+def bits5(word: u32, sh: u32) -> u32 is InRange[0, 31]:
+    return (word >> sh) & 0x1F
+def bits6(word: u32, sh: u32) -> u32 is InRange[0, 63]:
+    return (word >> sh) & 0x3F
+def bits7(word: u32, sh: u32) -> u32 is InRange[0, 127]:
+    return (word >> sh) & 0x7F
+def bits8(word: u32, sh: u32) -> u32 is InRange[0, 255]:
+    return (word >> sh) & 0xFF
+def bits9(word: u32, sh: u32) -> u32 is InRange[0, 511]:
+    return (word >> sh) & 0x1FF
+def bits12(word: u32, sh: u32) -> u32 is InRange[0, 4095]:
+    return (word >> sh) & 0xFFF
+def bits16(word: u32, sh: u32) -> u32 is InRange[0, 65535]:
+    return (word >> sh) & 0xFFFF
+
+# --- Sign extenders ----------------------------------------------------------------------------
+# Interpret an n-bit field at runtime position `sh` as a signed value and sign-extend to i32, with a
+# proven signed range (docs/94 Gaps 1+3+4: mask bound -> reinterpret cast -> arithmetic-shift extend).
+
+def sx8(word: u32, sh: u32) -> i32 is SBounded[-128, 127]:
+    return ((((word >> sh) & 0xFF).i32()) << 24) >> 24
+def sx12(word: u32, sh: u32) -> i32 is SBounded[-2048, 2047]:
+    return ((((word >> sh) & 0xFFF).i32()) << 20) >> 20
+def sx16(word: u32, sh: u32) -> i32 is SBounded[-32768, 32767]:
+    return ((((word >> sh) & 0xFFFF).i32()) << 16) >> 16

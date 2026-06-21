@@ -14,6 +14,7 @@ import (
 // tail. End-to-end: both fill correctly under interleaving (which, in a single arena, would force
 // constant relocation), and both arenas free with the region.
 func TestRunCLIMultiStackTwoGrowablesSeparateArenas(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -2,14 +2,18 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"elisacore/src/backend"
 )
+
+const s4NativeRunTimeout = 10 * time.Second
 
 // docs/91 S4 end-to-end: growing a container field of a region-param struct ref param, with the
 // caller's region threaded to the field growth, runs correctly; and the borrow-out use-after-free
@@ -45,7 +49,12 @@ func s4CompileRun(t *testing.T, prog string) (status, output string) {
 	if err != nil {
 		return "BUILD-FAIL", err.Error()
 	}
-	out, runErr := exec.Command(exe).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), s4NativeRunTimeout)
+	defer cancel()
+	out, runErr := exec.CommandContext(ctx, exe).CombinedOutput()
+	if ctx.Err() == context.DeadlineExceeded {
+		return "RUN-TIMEOUT", strings.TrimSpace(string(out))
+	}
 	if runErr != nil {
 		return "RUNERR", strings.TrimSpace(string(out)) + " " + runErr.Error()
 	}
@@ -55,6 +64,7 @@ func s4CompileRun(t *testing.T, prog string) (status, output string) {
 const s4StructHdr = "struct Mod[@owner]:\n    bits: mutable darray[u8]\n"
 
 func TestS4FieldGrowthRunsEndToEnd(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, s4StructHdr+`def fill[@r](m: mutable Mod& @r) -> void can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
     m.bits.push(66)
@@ -73,6 +83,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // S4 Stage 1 end-to-end: ZERO-annotation `def fill(m: mutable Mod&): m.bits.push(..)` over a plain
 // struct runs correctly — the caller's region is threaded to the field growth with no `[@r]` written.
 func TestS4Stage1ZeroAnnotationRunsEndToEnd(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
     m.bits.push(66)
@@ -92,6 +103,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // interior field backing lives in the same (or a longer-lived) region as the container — a death
 // cohort: the modules and the table die together. Runs end-to-end with a PLAIN struct, no annotation.
 func TestS4Stage2ByValueSameRegionCohortRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(8192):
         mods: mutable darray[Mod] = []
@@ -109,6 +121,7 @@ func TestS4Stage2ByValueSameRegionCohortRuns(t *testing.T) {
 // pushed into an outer container, dangles when the inner region dies — must be a COMPILE error, not a
 // segfault. The field-growth taint side-table + the by-value element-store consult close this.
 func TestS4Stage2ByValueInnerToOuterUAFRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region outer(8192):
         mods: mutable darray[Mod] = []
@@ -125,6 +138,7 @@ func TestS4Stage2ByValueInnerToOuterUAFRejected(t *testing.T) {
 
 // Same UAF via dict.put (a different container-mutation handler) is also rejected.
 func TestS4Stage2ByValueDictPutInnerToOuterUAFRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region outer(8192):
         d: mutable dict[i64, Mod] = {}
@@ -143,6 +157,7 @@ func TestS4Stage2ByValueDictPutInnerToOuterUAFRejected(t *testing.T) {
 // S4 Stage 2 SAFETY (return vector): returning a by-VALUE struct whose field was grown in a
 // scope-owned local region dangles once that region frees at block exit — must be a COMPILE error.
 func TestS4Stage2ReturnByValueTaintedStructRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> Mod can[Memory.Allocate, Abort.Panic]:
     region inner(4096):
         m: mutable Mod = Mod(bits: [])
@@ -160,6 +175,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // Same return UAF wrapped in a fresh darray literal (`return [m]`) — the return check descends into
 // fresh producers via returnedAggregateTaintRegion.
 func TestS4Stage2ReturnListOfTaintedStructRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> darray[Mod] can[Memory.Allocate, Abort.Panic]:
     region inner(4096):
         m: mutable Mod = Mod(bits: [])
@@ -178,6 +194,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // so a wrapper forwarding a region-poly struct ref through such a cast threads the caller's region and
 // runs — instead of the cast erasing the region and forcing an explicit `in <region>:`.
 func TestS4Stage3ReborrowCastPreservesRegion(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     self.bits.push(65)
     return
@@ -201,6 +218,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // annotation is set — intermediate struct TYPE descriptors are NOT copied, which previously desynced
 // the backend's struct layout/place resolution and miscompiled (SIGBUS) multi-hop nested growth.
 func TestS4Stage3NestedFieldGrowthSingleHopRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     m.inner.items.push(65)
     return
@@ -218,6 +236,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // The multi-hop nested case is the one that SIGBUS'd before the type-mutation-free fix: the region is
 // threaded through an intermediate forwarding hop AND the grown field is nested.
 func TestS4Stage3NestedFieldGrowthMultiHopRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Inner:\n    items: mutable darray[u8]\nstruct Mod:\n    inner: mutable Inner\n"+`def grow(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     m.inner.items.push(65)
     return
@@ -241,6 +260,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // the perm ambient-binding, cast region-preservation, threading-tolerant arg assignability, and the
 // backend ambient-arena threading together.)
 func TestS4Stage3PermAmbientThreadsAndRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def Grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     self.bits.push(65)
     return
@@ -260,6 +280,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // be a use-after-free the (interprocedural) growth hides from the interior-taint checks — so it is a
 // conservative "cannot infer region parameter" COMPILE error, never a miscompile/segfault.
 func TestS4Stage3ShortAmbientRegionRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def Grow(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     self.bits.push(65)
     return
@@ -282,6 +303,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // a region-less view of the grown field) is still caught — previously the region-erasing cast could
 // have HIDDEN it. The cast region-provenance is a soundness improvement, not just ergonomics.
 func TestS4Stage3ReborrowCastEscapeStillCaught(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak(self: mutable Mod&) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     self.bits.push(65)
     return ((&self).cast[mutable Mod&]).bits[0:1]
@@ -295,6 +317,7 @@ func TestS4Stage3ReborrowCastEscapeStillCaught(t *testing.T) {
 // callee (without growing it itself) is inferred region-poly so the caller's region threads through —
 // it runs end-to-end, and the escape through the wrapper is still caught (see the escape test below).
 func TestRegionPolyForwardingThreadsRegion(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def sink(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -319,6 +342,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // store-target summary, not a segfault. The callee body is locally correct; the escape is a
 // call-site property.
 func TestS4W5InterprocStoreEscapeRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -339,6 +363,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // W5 must NOT over-reject: a SAME-region cohort (struct and target container in one region, dying
 // together) passed to a storing callee runs correctly.
 func TestS4W5InterprocSameRegionCohortRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -357,6 +382,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 
 // W5 must NOT over-reject: passing a tainted by-value struct to a READ-ONLY callee (no store) runs.
 func TestS4W5InterprocReadOnlyPassRuns(t *testing.T) {
+	t.Parallel()
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def peek(v: Mod) -> i64 can[Abort.Panic]:
     return v.bits[0].i64()
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
@@ -376,6 +402,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 // store via a function-pointer arg. Each is REJECTED (the fn-pointer case fail-closed at the boundary:
 // the storing function is region-poly and can't be passed where a region-less func is expected).
 func TestS4W5TransitiveRelayStoreEscapeRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def stash(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -397,6 +424,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 }
 
 func TestS4W5NestedFieldStoreEscapeRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\nstruct Box:\n    items: mutable darray[Mod]\n"+`def stash(b: mutable Box&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     b.items.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -415,6 +443,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 }
 
 func TestS4W5IndirectFnPtrStoreRejected(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def doStore(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
@@ -436,6 +465,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 }
 
 func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> view[u8] can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
     return m.bits[0:1]
@@ -452,6 +482,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 }
 
 func TestS4ReturnRefUAFRejectedNotSegfault(t *testing.T) {
+	t.Parallel()
 	status, _ := s4CompileRun(t, s4StructHdr+`def leak[@r](m: mutable Mod& @r) -> u8& can[Memory.Allocate, Abort.Panic]:
     m.bits.push(65)
     return &m.bits[0]

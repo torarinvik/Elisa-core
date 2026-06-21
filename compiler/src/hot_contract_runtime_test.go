@@ -14,6 +14,7 @@ import (
 // data) still compiles and runs correctly. The allocation that fills the inputs lives in
 // the ordinary (non-@hot) caller, exactly the intended split.
 func TestRunCLIHotKernelRuns(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

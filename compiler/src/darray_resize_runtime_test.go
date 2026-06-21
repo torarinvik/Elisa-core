@@ -14,6 +14,7 @@ import (
 // the runtime-sized fixed-array primitive: the count is a runtime value, allocated once.
 // Region-less (inference-by-default supplies the arena) -- no explicit `in <arena>:` needed.
 func TestRunCLIDarrayResizePresizesAndFillsByIndex(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

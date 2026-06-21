@@ -12,6 +12,7 @@ import (
 // fixture natively and confirms put/get_or_insert/reserve work through the synthetic region-
 // mutation path (semantic dispatch -> backend arena_dict_*_or_panic, panic-on-OOM).
 func TestRunCLIStdDictFrictionlessRuntimeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std_dict_frictionless_smoke.elisa")
 

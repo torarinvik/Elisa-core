@@ -8,6 +8,7 @@ import (
 const poolChurnWarning = "creates a thread pool on every iteration"
 
 func TestRunCLIPoolChurnLintFlagsPoolNewInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "pool_churn.elisa", `def pool_new(workers: i64) -> i64:
     return workers
 
@@ -28,6 +29,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIPoolChurnLintFlagsPoolScopeInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "pool_scope_churn.elisa", `struct ThreadPool:
     value: i64
 
@@ -47,6 +49,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIPoolChurnLintAllowsPoolOutsideLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "pool_once.elisa", `def pool_new(workers: i64) -> i64:
     return workers
 

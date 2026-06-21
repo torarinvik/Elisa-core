@@ -14,6 +14,7 @@ import (
 // wraps the body in a synthesized lazy auto region, and the allocation runs against it.
 // This is the headline ergonomic: you don't have to mention regions to use them.
 func TestRunCLIInfersRegionForBareAllocation(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -48,6 +49,7 @@ def inference_by_default_test() -> void:
 }
 
 func TestRunCLIInfersUntypedEmptyDArrayFromPush(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -85,6 +87,7 @@ def inference_untyped_empty_darray_test() -> void:
 }
 
 func TestRunCLIInfersUntypedDArrayFromVariablePush(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -124,6 +127,7 @@ def inference_untyped_darray_variable_push_test() -> void:
 }
 
 func TestRunCLIInfersUntypedDArrayFromIndexedPush(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -163,6 +167,7 @@ def inference_untyped_darray_indexed_push_test() -> void:
 }
 
 func TestRunCLIInfersUntypedDArrayFromExtendSource(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -201,6 +206,7 @@ def inference_untyped_darray_extend_source_test() -> void:
 }
 
 func TestRunCLIInfersUntypedDArrayFromExtendParam(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -240,6 +246,7 @@ def inference_untyped_darray_extend_param_test() -> void:
 }
 
 func TestRunCLIInfersUntypedNonEmptyDArrayFromUse(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -276,6 +283,7 @@ def inference_untyped_nonempty_darray_test() -> void:
 }
 
 func TestRunCLIInfersRegionForUntypedBuilders(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -319,6 +327,7 @@ def inference_by_default_builders_test() -> void:
 // (Contrast: a value built in an EXPLICIT named local region still escapes, since that region is
 // freed at scope exit and not adopted; verified in the second half.)
 func TestRunCLIBuildLocalReturnInferredRegionAccepted(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "inference_builder_fixture.elisa")
 	src := `def build() -> darray[i64]:

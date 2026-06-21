@@ -8,6 +8,7 @@ import (
 const atomicHotLoopWarning = "performs an atomic read-modify-write/compare-exchange on every iteration"
 
 func TestRunCLIAtomicHotLoopLintFlagsFetchAddInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "atomic_hot_loop.elisa", `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
     return slot + value + order
 
@@ -23,6 +24,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAtomicHotLoopLintFlagsAtomicCellRmwInLoop(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "atomic_cell_hot_loop.elisa", `def atomic_fetch_add_acqrel(slot: i64, value: i64) -> i64:
     return slot + value
 
@@ -38,6 +40,7 @@ def churns() -> i64:
 }
 
 func TestRunCLIAtomicHotLoopLintAllowsSingleRmw(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "atomic_once.elisa", `def fetch_add(slot: i64, value: i64, order: i64) -> i64:
     return slot + value + order
 

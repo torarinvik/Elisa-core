@@ -15,6 +15,7 @@ import (
 // catch must read the payload back. Exercises success, raise-with-payload, and
 // payload binding end to end in a compiled binary.
 func TestRunCLIVoidPayloadedErrorUnion(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

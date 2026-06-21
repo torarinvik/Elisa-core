@@ -19,6 +19,7 @@ import (
 // relocation or rebind were missing, value/xs would still point into the freed scratch
 // region and read garbage (or fault), tripping the panic.
 func TestRunCLIPromoteRelocatesValueIntoLongerLivedRegion(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

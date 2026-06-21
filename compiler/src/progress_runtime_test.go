@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunCLICompilesProgressBudgetRuntimeHelpersToLLVM(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "progress_budget_llvm.elisa")
