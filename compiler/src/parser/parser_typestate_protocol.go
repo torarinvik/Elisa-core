@@ -47,16 +47,20 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 
 	type transitionDecl struct {
 		name      string
+		params    string
 		from      string
 		to        string
 		otherwise string
+		returns   string
 	}
 
 	var states []string
+	var terminalStates []string
 	var fields []string // reconstructed `name: type` field source lines
 	var fieldNames []string
 	var transitions []transitionDecl
 	seenStates := map[string]bool{}
+	seenTerminalStates := map[string]bool{}
 
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
@@ -79,9 +83,28 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 				}
 			}
 			p.expectNewline()
+		case p.peekIdentText("terminal"):
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			for {
+				st := p.expect(lexer.TOKEN_IDENT).Text
+				if seenTerminalStates[st] {
+					p.errorf("typestate %q declares duplicate terminal state %q", name, st)
+				}
+				seenTerminalStates[st] = true
+				terminalStates = append(terminalStates, st)
+				if !p.match(lexer.TOKEN_COMMA) {
+					break
+				}
+			}
+			p.expectNewline()
 		case p.peekIdentText("transition"):
 			p.advance()
 			tname := p.expect(lexer.TOKEN_IDENT).Text
+			params := ""
+			if p.peek() == lexer.TOKEN_LPAREN {
+				params = p.captureBalancedSource(lexer.TOKEN_LPAREN, lexer.TOKEN_RPAREN)
+			}
 			p.expect(lexer.TOKEN_COLON)
 			from := p.expect(lexer.TOKEN_IDENT).Text
 			p.expect(lexer.TOKEN_ARROW)
@@ -90,8 +113,13 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 			if p.match(lexer.TOKEN_PIPE) {
 				otherwise = p.expect(lexer.TOKEN_IDENT).Text
 			}
+			returns := ""
+			if p.peekIdentText("returns") {
+				p.advance()
+				returns = p.captureUntilLineEnd()
+			}
 			p.expectNewline()
-			transitions = append(transitions, transitionDecl{name: tname, from: from, to: to, otherwise: otherwise})
+			transitions = append(transitions, transitionDecl{name: tname, params: params, from: from, to: to, otherwise: otherwise, returns: strings.TrimSpace(returns)})
 		default:
 			// An ordinary data field: `name: type`. Reconstruct the source line from token texts up to
 			// the end-of-line so the desugared struct carries the field verbatim.
@@ -127,6 +155,11 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 			}
 		}
 	}
+	for _, st := range terminalStates {
+		if _, ok := stateIndex[st]; !ok {
+			p.errorf("typestate %q has unknown terminal state %q", name, st)
+		}
+	}
 
 	// Build the desugared source.
 	var b strings.Builder
@@ -157,12 +190,19 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 	}
 	b.WriteString("__typestate: 0}\n\n")
 	for _, tr := range transitions {
+		params := typestateTransitionParams(tr.params)
 		if tr.otherwise == "" {
-			fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&) ensures self => %s:\n", tr.name, name, tr.from, tr.to)
+			if tr.returns != "" {
+				fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&%s) -> %s ensures self => %s:\n", tr.name, name, tr.from, params, tr.returns, tr.to)
+				fmt.Fprintf(&b, "\tself.__typestate <- %d\n", stateIndex[tr.to])
+				b.WriteString("\treturn 0\n\n")
+				continue
+			}
+			fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&%s) ensures self => %s:\n", tr.name, name, tr.from, params, tr.to)
 			fmt.Fprintf(&b, "\tself.__typestate <- %d\n\n", stateIndex[tr.to])
 			continue
 		}
-		fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&) -> bool ensures return true => self => %s, return false => self => %s:\n", tr.name, name, tr.from, tr.to, tr.otherwise)
+		fmt.Fprintf(&b, "def %s(self: mutable %s[%s]&%s) -> bool ensures return true => self => %s, return false => self => %s:\n", tr.name, name, tr.from, params, tr.to, tr.otherwise)
 		fmt.Fprintf(&b, "\tself.__typestate <- %d\n", stateIndex[tr.to])
 		b.WriteString("\treturn true\n\n")
 	}
@@ -176,7 +216,22 @@ func (p *Parser) parseTypestateDecl() ast.Decl {
 	if len(decls) > 1 {
 		p.pendingDecls = append(p.pendingDecls, decls[1:]...)
 	}
+	if st, ok := decls[0].(*ast.StructDecl); ok {
+		st.TerminalStateCases = append([]string(nil), terminalStates...)
+	}
 	return decls[0]
+}
+
+func typestateTransitionParams(params string) string {
+	params = strings.TrimSpace(params)
+	if params == "" {
+		return ""
+	}
+	inner := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(params, "("), ")"))
+	if inner == "" {
+		return ""
+	}
+	return ", " + inner
 }
 
 func typestateConstructorFunctionName(name string) string {
@@ -200,6 +255,35 @@ func (p *Parser) captureFieldLineSource() string {
 	}
 	if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_SEMICOLON {
 		p.advance()
+	}
+	return strings.Join(parts, " ")
+}
+
+func (p *Parser) captureUntilLineEnd() string {
+	var parts []string
+	for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_SEMICOLON {
+		parts = append(parts, p.advance().Text)
+	}
+	return strings.Join(parts, " ")
+}
+
+func (p *Parser) captureBalancedSource(open, close lexer.TokenKind) string {
+	if p.peek() != open {
+		return ""
+	}
+	depth := 0
+	var parts []string
+	for p.peek() != lexer.TOKEN_EOF {
+		tok := p.advance()
+		parts = append(parts, tok.Text)
+		if tok.Kind == open {
+			depth++
+		} else if tok.Kind == close {
+			depth--
+			if depth == 0 {
+				break
+			}
+		}
 	}
 	return strings.Join(parts, " ")
 }

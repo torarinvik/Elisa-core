@@ -592,18 +592,19 @@ const (
 )
 
 type StructDecl struct {
-	Position        lexer.Pos
-	Annotations     []Annotation
-	Name            string
-	TypeParams      []string
-	RegionParams    []string
-	RegionOwner     string
-	GenericParams   []GenericParam
-	HasStateParam   bool
-	StateParamCount int
-	NamedStateCases []string
-	DerivedStates   []DerivedStateDecl
-	Affine          bool
+	Position           lexer.Pos
+	Annotations        []Annotation
+	Name               string
+	TypeParams         []string
+	RegionParams       []string
+	RegionOwner        string
+	GenericParams      []GenericParam
+	HasStateParam      bool
+	StateParamCount    int
+	NamedStateCases    []string
+	TerminalStateCases []string
+	DerivedStates      []DerivedStateDecl
+	Affine             bool
 	// Droppable distinguishes `affine` (use-at-most-once, may be dropped) from
 	// `linear` (use-exactly-once, must be consumed). Only meaningful when
 	// Affine is true; defaults false so a plain `linear` type is must-consume.

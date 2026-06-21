@@ -58,6 +58,7 @@ func (a *Analyzer) markCreatedProtocolSymbol(sym *Symbol, value ast.Expr) {
 	}
 	description := protocolCreationDescription(value, sym.Type)
 	if description == "" {
+		a.refreshTerminalTypestateTracking(sym, a.currentTrackedValueType(sym))
 		return
 	}
 	a.markLiveProtocolDescription(affineValueKey{Root: sym}, description)
@@ -167,8 +168,49 @@ func directProtocolLeakKind(t Type) string {
 	}
 }
 
+func terminalTypestateLeakKind(t Type) string {
+	base, ok := trackedNamedStateStructBase(t)
+	if !ok || base == nil || len(base.TerminalStateCases) == 0 {
+		return ""
+	}
+	current, ok := trackedNamedStateCurrentArg(t)
+	if !ok || current == nil {
+		return ""
+	}
+	if namedStateSubsetOf(current, base.TerminalStateCases) {
+		return ""
+	}
+	return "typestate value left in non-terminal state"
+}
+
+func namedStateSubsetOf(t Type, allowed []string) bool {
+	if len(allowed) == 0 {
+		return false
+	}
+	allowedSet := make(map[string]bool, len(allowed))
+	for _, name := range allowed {
+		allowedSet[name] = true
+	}
+	switch tt := t.(type) {
+	case *StructStateCaseType:
+		return allowedSet[tt.Case]
+	case *StructStateSetType:
+		if len(tt.Cases) == 0 {
+			return false
+		}
+		for _, name := range tt.Cases {
+			if !allowedSet[name] {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 func directProtocolCarrierType(t Type) bool {
-	return directProtocolLeakKind(t) != "" || isBuiltinProtocolOwnerType(t, "TaskGroup") || isBuiltinProtocolOwnerType(t, "ThreadPool")
+	return directProtocolLeakKind(t) != "" || terminalTypestateLeakKind(t) != "" || isBuiltinProtocolOwnerType(t, "TaskGroup") || isBuiltinProtocolOwnerType(t, "ThreadPool")
 }
 
 func isBuiltinProtocolOwnerType(t Type, name string) bool {
@@ -390,6 +432,9 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 	if kind := directProtocolLeakKind(t); kind != "" {
 		return map[string]Type{prefix: t}
 	}
+	if kind := terminalTypestateLeakKind(t); kind != "" {
+		return map[string]Type{prefix: t}
+	}
 	key := t.String()
 	if seen[key] {
 		return nil
@@ -505,9 +550,32 @@ func (a *Analyzer) reportUnconsumedProtocolValues() {
 		}
 		description := state.LiveProtocolDescription
 		if description == "" {
-			description = a.protocolLeakDescription(state.LiveProtocolType)
+			if kind := terminalTypestateLeakKind(state.LiveProtocolType); kind != "" {
+				description = kind
+			} else {
+				description = a.protocolLeakDescription(state.LiveProtocolType)
+			}
 		}
 		a.errorf(pos, "%s %q must be consumed before scope exit", description, affineValueDisplayNameFromKey(key))
+	}
+}
+
+func (a *Analyzer) refreshTerminalTypestateTracking(sym *Symbol, tracked Type) {
+	if a == nil || sym == nil || a.currentAffineValues == nil {
+		return
+	}
+	key := affineValueKey{Root: sym}
+	state := a.currentAffineValues[key]
+	if terminalTypestateLeakKind(state.LiveProtocolType) != "" || terminalTypestateLeakKind(tracked) != "" {
+		state.LiveProtocolType = nil
+		state.LiveProtocolDescription = ""
+		a.currentAffineValues[key] = state
+	}
+	if terminalTypestateLeakKind(tracked) != "" {
+		state.LiveProtocolType = tracked
+		state.LiveProtocolDescription = ""
+		state.ConsumedBy = ""
+		a.currentAffineValues[key] = state
 	}
 }
 

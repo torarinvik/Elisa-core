@@ -28,6 +28,15 @@ const typestateFileProtocol = `typestate File:
 
 `
 
+const typestateTerminalFileProtocol = `typestate File:
+	states: Closed, Open
+	terminal: Closed
+	transition open(path: i64): Closed -> Open
+	transition read: Open -> Open returns i64
+	transition close: Open -> Closed
+
+`
+
 // (a) A legal protocol walk Closed -> Connecting -> Connected -> Closed compiles cleanly.
 func TestTypestateLegalSequenceCompiles(t *testing.T) {
 	src := typestateSocketProtocol + `def use(s: mutable Socket[Closed]&) ensures s => Closed:
@@ -154,5 +163,51 @@ func TestTypestateFileProtocolCompiles(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "typestate_file_ok.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("the File protocol round trip must compile, got: %v", errs)
+	}
+}
+
+func TestTypestateTerminalNonTerminalLocalLeaks(t *testing.T) {
+	src := typestateTerminalFileProtocol + `def leaky(path: i64) -> void:
+	f: mutable File[Closed] = File.new()
+	open(f, path)
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "typestate_terminal_leak.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "non-terminal state") || !strings.Contains(all, "f") {
+		t.Fatalf("typestate value left Open must be a terminal leak error, got:\n%s", all)
+	}
+}
+
+func TestTypestateTerminalStatePassesAtScopeExit(t *testing.T) {
+	src := typestateTerminalFileProtocol + `def ok(path: i64) -> void:
+	f: mutable File[Closed] = File.new()
+	open(f, path)
+	close(f)
+`
+	result := analyzeFunctionAnalysisTestSource(t, "typestate_terminal_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("typestate value returned to terminal state must compile, got: %v", errs)
+	}
+}
+
+func TestTypestateTransitionParamsReturnAndPoststate(t *testing.T) {
+	src := typestateTerminalFileProtocol + `def read_then_close(path: i64) -> i64:
+	f: mutable File[Closed] = File.new()
+	open(f, path)
+	value = read(f)
+	close(f)
+	return value
+
+def bad_read(path: i64) -> i64:
+	f: mutable File[Closed] = File.new()
+	return read(f)
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "typestate_transition_signature.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "bad_read") && !strings.Contains(all, "File[Open]") {
+		t.Fatalf("read should type-check after open and reject Closed input, got:\n%s", all)
+	}
+	if strings.Contains(all, "read_then_close") {
+		t.Fatalf("read transition with return should type-check in legal sequence, got:\n%s", all)
 	}
 }

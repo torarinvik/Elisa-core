@@ -384,18 +384,19 @@ type StructDerivedState struct {
 }
 
 type StructType struct {
-	Name            string
-	Namespace       string
-	Usings          []string
-	TypeParams      []string
-	RegionParams    []string
-	RegionOwner     string
-	GenericParams   []ast.GenericParam
-	NamedStateCases []string
-	DerivedStates   []StructDerivedState
-	DerivedStateMap map[string]*StructDerivedState
-	Fields          map[string]Field
-	Affine          bool
+	Name               string
+	Namespace          string
+	Usings             []string
+	TypeParams         []string
+	RegionParams       []string
+	RegionOwner        string
+	GenericParams      []ast.GenericParam
+	NamedStateCases    []string
+	TerminalStateCases []string
+	DerivedStates      []StructDerivedState
+	DerivedStateMap    map[string]*StructDerivedState
+	Fields             map[string]Field
+	Affine             bool
 	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`
 	// (use-exactly-once, must-consume). Only meaningful when Affine is true;
 	// defaults false so a propagation gap is over-strict (linear), never unsound.

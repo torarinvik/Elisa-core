@@ -118,6 +118,48 @@ func TestParseTypestateConditionalTransitionDesugarsToBoolPoststates(t *testing.
 	}
 }
 
+func TestParseTypestateTerminalAndRichTransitionSignatures(t *testing.T) {
+	file, errs := parseSourceFile(t, `typestate File:
+	states: Closed, Open
+	terminal: Closed
+	transition open(path: i64): Closed -> Open
+	transition read: Open -> Open returns i64
+	transition close: Open -> Closed
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	st, ok := file.Decls[0].(*ast.StructDecl)
+	if !ok {
+		t.Fatalf("expected synthesized StructDecl, got %T", file.Decls[0])
+	}
+	if len(st.TerminalStateCases) != 1 || st.TerminalStateCases[0] != "Closed" {
+		t.Fatalf("expected Closed terminal state, got %#v", st.TerminalStateCases)
+	}
+	var openFn, readFn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		switch fn.Name {
+		case "open":
+			openFn = fn
+		case "read":
+			readFn = fn
+		}
+	}
+	if openFn == nil || len(openFn.Params) != 2 || openFn.Params[1].Name != "path" {
+		t.Fatalf("open transition should include self plus path param, got %#v", openFn)
+	}
+	if readFn == nil || readFn.ReturnType == nil {
+		t.Fatalf("read transition should include return type, got %#v", readFn)
+	}
+	if len(readFn.Ensures) != 1 {
+		t.Fatalf("read transition should carry poststate ensure, got %d", len(readFn.Ensures))
+	}
+}
+
 // An unknown source/target state in a transition is a hard error.
 func TestParseTypestateUnknownStateIsError(t *testing.T) {
 	_, errs := parseSourceFile(t, `typestate S:

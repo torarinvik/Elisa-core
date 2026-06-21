@@ -187,6 +187,7 @@ func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *Struc
 		return
 	}
 	st.NamedStateCases = append([]string(nil), stDecl.NamedStateCases...)
+	st.TerminalStateCases = append([]string(nil), stDecl.TerminalStateCases...)
 	if len(stDecl.NamedStateCases) == 0 {
 		if len(stDecl.DerivedStates) != 0 {
 			a.errorf(stDecl.DerivedStates[0].Position, "derive state: requires a named struct state parameter like [state Alive | Dead]")
@@ -200,6 +201,18 @@ func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *Struc
 	declared := make(map[string]bool, len(stDecl.NamedStateCases))
 	for _, name := range stDecl.NamedStateCases {
 		declared[name] = true
+	}
+	seenTerminal := map[string]bool{}
+	for _, name := range stDecl.TerminalStateCases {
+		if !declared[name] {
+			a.errorf(stDecl.Pos(), "struct %q declares unknown terminal state %q", stDecl.Name, name)
+			continue
+		}
+		if seenTerminal[name] {
+			a.errorf(stDecl.Pos(), "struct %q declares duplicate terminal state %q", stDecl.Name, name)
+			continue
+		}
+		seenTerminal[name] = true
 	}
 	seen := map[string]bool{}
 	savedScope := a.currentScope
