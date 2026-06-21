@@ -1398,7 +1398,41 @@ func defaultElisaCoreRuntimeSupportPath() (string, error) {
 	return path, nil
 }
 
+// writeDefaultElisaCoreRuntimeObject emits the default runtime support object, serving it
+// from the content-addressed runtime-object cache when possible. The underlying compile
+// (parse + analyze + -O3 codegen of the include-expanded runtime) is identical across every
+// build that shares the cache key, so this avoids redoing it per test. docs/93.
 func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
+	if !testRunnerCacheEnabled() || !runtimeObjectCacheEnabled() {
+		return compileDefaultElisaCoreRuntimeObject(outputPath, packedProfile, targetTriple, stderr)
+	}
+	artifact, err := runtimeObjectCacheArtifactFor(packedProfile, targetTriple)
+	if err != nil {
+		// Key derivation failed (e.g. runtime source unreadable) -- fall back to a direct
+		// compile rather than failing the build.
+		return compileDefaultElisaCoreRuntimeObject(outputPath, packedProfile, targetTriple, stderr)
+	}
+	if _, statErr := os.Stat(artifact.object); statErr == nil {
+		if copyErr := copyExecutableFile(artifact.object, outputPath); copyErr == nil {
+			debugRuntimeObjectCache(stderr, "hit", artifact)
+			return nil
+		}
+		// Copy failed (entry removed/corrupt mid-read) -- recompile below.
+	}
+	debugRuntimeObjectCache(stderr, "miss", artifact)
+	if err := compileDefaultElisaCoreRuntimeObject(outputPath, packedProfile, targetTriple, stderr); err != nil {
+		return err
+	}
+	if pubErr := publishCachedRuntimeObject(artifact, outputPath); pubErr != nil {
+		// Non-fatal: a failed publish just means the next build recompiles.
+		debugRuntimeObjectCache(stderr, "publish-error", artifact)
+	} else {
+		debugRuntimeObjectCache(stderr, "publish", artifact)
+	}
+	return nil
+}
+
+func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
 	runtimePath, err := defaultElisaCoreRuntimeSupportPath()
 	if err != nil {
 		return err
