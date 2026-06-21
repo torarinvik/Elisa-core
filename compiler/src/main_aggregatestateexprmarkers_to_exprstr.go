@@ -378,7 +378,10 @@ func exprStr(e ast.Expr) string {
 				if param.Mutable {
 					part += "mutable "
 				}
-				part += param.Name + ": " + typeStr(param.Type)
+				part += param.Name
+				if param.Type != nil {
+					part += ": " + typeStr(param.Type)
+				}
 				params = append(params, part)
 			}
 		}

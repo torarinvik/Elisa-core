@@ -68,6 +68,19 @@ func (a *Analyzer) analyzeDirectLambdaCallExpr(call *ast.CallExpr, lambda *ast.L
 	return a.analyzeResolvedCallExpr(call, ft, orderedArgs)
 }
 
+// cloneFuncTypeWithReturn returns a shallow copy of fn with its Return replaced.
+// Used to strip an opaque error-set-parameter union from a contextual callback
+// type before driving lambda return inference (the param is bound from the
+// lambda's own inferred error set at the call site instead).
+func cloneFuncTypeWithReturn(fn *FuncType, ret Type) *FuncType {
+	if fn == nil {
+		return nil
+	}
+	clone := *fn
+	clone.Return = ret
+	return &clone
+}
+
 func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	if expr == nil {
 		return invalidType
@@ -90,6 +103,21 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 	}
 	if expectedFunc != nil && funcTypeExplicitParamCount(expectedFunc) != len(paramTypes) {
 		a.errorf(expr.Pos(), "lambda expects %d parameters from context, got %d", funcTypeExplicitParamCount(expectedFunc), len(paramTypes))
+	}
+
+	// When the contextual callback return is an error union over an opaque
+	// error-set PARAMETER (`func(...) -> T error[R]`, R from an `[errorset R]`
+	// combinator), the lambda must INFER its own error set so the parameter
+	// binds to it at the call site — checking the body against `error[R]` would
+	// wrongly reject a concrete `raise`/`try` (R is opaque inside the callee).
+	// Drop to the value part as the contextual return; the bare-lambda error
+	// inference below then reconstructs `T error[<inferred>]`.
+	var inferredErrorReturnValue Type
+	if expectedFunc != nil {
+		if union, ok := expectedFunc.Return.(*ErrorUnionType); ok && union.Errors != nil && len(union.Errors.Params) != 0 {
+			inferredErrorReturnValue = union.Value
+			expectedFunc = cloneFuncTypeWithReturn(expectedFunc, union.Value)
+		}
 	}
 
 	returnType := Type(nil)
@@ -230,7 +258,19 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 			if existing, ok := bodyType.(*ErrorUnionType); ok {
 				bodyType = &ErrorUnionType{Value: existing.Value, Errors: UnionErrorSets(existing.Errors, a.lambdaErrorAccum)}
 			} else {
-				bodyType = &ErrorUnionType{Value: bodyType, Errors: a.lambdaErrorAccum}
+				// A lambda whose body only ever raises (`lambda(n) => raise IoErr.Bad`)
+				// yields a `<never>` value. Adopt the contextual value type so the
+				// inferred callback type matches the combinator's `T error[R]` shape
+				// (R then binds to the accumulated set); never→T is sound.
+				valueType := bodyType
+				if IsNeverType(valueType) {
+					if expectedReturn != nil {
+						valueType = expectedReturn
+					} else if inferredErrorReturnValue != nil {
+						valueType = inferredErrorReturnValue
+					}
+				}
+				bodyType = &ErrorUnionType{Value: valueType, Errors: a.lambdaErrorAccum}
 			}
 		}
 		a.lambdaErrorAccumulate = savedAccumulate
