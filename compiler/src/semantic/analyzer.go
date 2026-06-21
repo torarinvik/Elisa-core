@@ -146,6 +146,7 @@ type Analyzer struct {
 	// cleared) by invalidateSMTAssertFactsForCall.
 	callFrameContexts            map[*ast.CallExpr]callFrameCtx
 	currentProofCitation         *scopedProofCitation
+	currentClosedWorldTheory     string
 	storageViewStaleUses         map[ast.Expr]storageViewDependencyState
 	unsafeAliasExprs             map[ast.Expr]bool
 	unsafeAliasStmts             map[ast.Stmt]bool

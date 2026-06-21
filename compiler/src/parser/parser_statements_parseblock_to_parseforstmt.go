@@ -506,6 +506,11 @@ func (p *Parser) looksLikeAssertByStmt() bool {
 					i+2 < len(p.tokens) && p.tokens[i+2].Kind == lexer.TOKEN_COLON {
 					return true
 				}
+				if p.tokens[i+1].Kind == lexer.TOKEN_IDENT && p.tokens[i+1].Text == "scoped" &&
+					i+3 < len(p.tokens) && p.tokens[i+2].Kind == lexer.TOKEN_COLON &&
+					p.tokens[i+3].Kind == lexer.TOKEN_IDENT && isScopedProofTheory(p.tokens[i+3].Text) {
+					return true
+				}
 			}
 		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			return false
@@ -527,14 +532,27 @@ func (p *Parser) parseAssertByStmt() ast.Stmt {
 	}
 	p.advance() // `by`
 	scoped := false
+	theory := ""
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "scoped" {
 		scoped = true // `by scoped:` opens a CLOSED-WORLD proof block (docs/99).
 		p.advance()
 	}
 	p.expect(lexer.TOKEN_COLON)
+	if scoped && p.peek() == lexer.TOKEN_IDENT {
+		if isScopedProofTheory(p.cur().Text) {
+			theory = p.cur().Text
+			p.advance()
+		} else {
+			p.errorf("expected scoped proof theory marker `arithmetic` or `bitvector`")
+		}
+	}
 	p.expectNewline()
 	proof := p.parseBlock()
-	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof, Scoped: scoped}
+	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof, Scoped: scoped, ScopedTheory: theory}
+}
+
+func isScopedProofTheory(name string) bool {
+	return name == "arithmetic" || name == "bitvector"
 }
 
 func (p *Parser) looksLikeProofBlockStmt() bool {

@@ -157,7 +157,7 @@ func substituteProofStmt(stmt ast.Stmt, subst map[string]ast.Expr) (ast.Stmt, bo
 		if !ok {
 			return nil, false
 		}
-		return &ast.AssertByStmt{Position: n.Position, Cond: cond, Proof: proof, Scoped: n.Scoped}, true
+		return &ast.AssertByStmt{Position: n.Position, Cond: cond, Proof: proof, Scoped: n.Scoped, ScopedTheory: n.ScopedTheory}, true
 	case *ast.ProofBlockStmt:
 		goal, ok := substituteLemmaEnsure(n.Goal, subst)
 		if !ok {

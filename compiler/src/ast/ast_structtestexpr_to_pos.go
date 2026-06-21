@@ -479,7 +479,8 @@ type AssertByStmt struct {
 	// and assert facts from the enclosing scope are walled out. This makes the proof STABLE: its verdict
 	// depends only on the cited facts, not on unrelated surrounding code that might otherwise perturb the
 	// solver's hypothesis set. A non-scoped `by:` block keeps the original open-world behavior.
-	Scoped bool
+	Scoped       bool
+	ScopedTheory string // optional explicit theory marker: `assert COND by scoped: arithmetic|bitvector`
 }
 
 // ProofBlockStmt is a standalone closed-world proof region:

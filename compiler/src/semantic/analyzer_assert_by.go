@@ -9,8 +9,10 @@ import (
 )
 
 type scopedProofCitation struct {
-	Name  string
-	Facts []ast.Expr
+	Name     string
+	Requires []ast.Expr
+	Ensures  []ast.Expr
+	Facts    []ast.Expr
 }
 
 // analyzeAssertBy handles a proof-carrying `assert COND by:` statement (Dafny-style proof blocks).
@@ -38,7 +40,7 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 		return
 	}
 
-	if a.analyzeScopedProofGoal(n.Pos(), n.Cond, n.Proof, n.Scoped, "assert by") {
+	if a.analyzeScopedProofGoal(n.Pos(), n.Cond, n.Proof, n.Scoped, n.ScopedTheory, "assert by") {
 		a.applyConditionRefinements(a.currentScope, n.Cond, true)
 		a.applyIndexBoundsFactsForCondition(n.Cond, true)
 		a.recordSMTAssertFact(n.Cond)
@@ -49,14 +51,14 @@ func (a *Analyzer) analyzeProofBlock(n *ast.ProofBlockStmt) {
 	if a == nil || n == nil {
 		return
 	}
-	if a.analyzeScopedProofGoal(n.Pos(), n.Goal, n.Proof, true, "proof") {
+	if a.analyzeScopedProofGoal(n.Pos(), n.Goal, n.Proof, true, "", "proof") {
 		a.applyConditionRefinements(a.currentScope, n.Goal, true)
 		a.applyIndexBoundsFactsForCondition(n.Goal, true)
 		a.recordSMTAssertFact(n.Goal)
 	}
 }
 
-func (a *Analyzer) analyzeScopedProofGoal(pos lexer.Pos, goal ast.Expr, proof []ast.Stmt, scoped bool, subject string) bool {
+func (a *Analyzer) analyzeScopedProofGoal(pos lexer.Pos, goal ast.Expr, proof []ast.Stmt, scoped bool, theory string, subject string) bool {
 	if a == nil || goal == nil {
 		return false
 	}
@@ -75,10 +77,15 @@ func (a *Analyzer) analyzeScopedProofGoal(pos lexer.Pos, goal ast.Expr, proof []
 	// While a scoped block is analyzed and its COND discharged, suppress the ambient (non-scope-walled)
 	// hypothesis sources so the closed world holds ONLY the block's citations. Restored on the way out.
 	savedClosed := a.inClosedWorldProof
+	savedTheory := a.currentClosedWorldTheory
 	if scoped {
 		a.inClosedWorldProof = true
+		a.currentClosedWorldTheory = theory
 	}
-	defer func() { a.inClosedWorldProof = savedClosed }()
+	defer func() {
+		a.inClosedWorldProof = savedClosed
+		a.currentClosedWorldTheory = savedTheory
+	}()
 
 	// 1. Analyze the proof block in the child scope, enforcing the no-side-effects whitelist. Each
 	//    permitted statement is analyzed through the normal flow machinery, so a lemma call discharges
@@ -111,7 +118,7 @@ func (a *Analyzer) analyzeScopedProofGoal(pos lexer.Pos, goal ast.Expr, proof []
 	if condType != nil && !IsBoolType(condType) {
 		a.errorf(goal.Pos(), "proof goal must be bool, got %s", condType)
 	}
-	proven := a.proveScopedProofCond(pos, goal, subject)
+	proven := a.proveScopedProofCond(pos, goal, subject, theory, citations)
 	if scoped {
 		a.reportLoadBearingScopedCitations(pos, goal, child, citations)
 	}
@@ -154,7 +161,7 @@ func (a *Analyzer) proveAssertByCond(n *ast.AssertByStmt) {
 	}
 }
 
-func (a *Analyzer) proveScopedProofCond(pos lexer.Pos, goal ast.Expr, subject string) bool {
+func (a *Analyzer) proveScopedProofCond(pos lexer.Pos, goal ast.Expr, subject string, theory string, citations []*scopedProofCitation) bool {
 	if goal == nil {
 		return false
 	}
@@ -172,16 +179,16 @@ func (a *Analyzer) proveScopedProofCond(pos lexer.Pos, goal ast.Expr, subject st
 		return true
 	}
 	if class == ProofClassScoped {
-		a.recordProofWithClass(pos, subject, "proof", ProofRuntime, ProofClassScoped, a.closedWorldProofFacts(), "nothing establishes the scoped goal")
+		a.recordProofWithClass(pos, subject, "proof", ProofRuntime, ProofClassScoped, a.closedWorldProofFactsWithProvenance(theory, citations), "nothing establishes the scoped goal")
 	}
 	msg := "proof goal could not be proven from its proof block; the block's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
 	if subject == "assert by" {
 		msg = "`assert … by:` condition could not be proven from its proof block; the block's facts plus the caller's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
 	}
 	if a.enforceStrictProofs {
-		a.errorf(pos, "%s%s", msg, a.counterexampleSuffix(counterexample))
+		a.errorf(pos, "%s%s%s", msg, a.counterexampleSuffix(counterexample), a.closedWorldDiagnosticSuffix(theory, citations))
 	} else {
-		a.proofLint(pos, "%s%s", msg, a.counterexampleSuffix(counterexample))
+		a.proofLint(pos, "%s%s%s", msg, a.counterexampleSuffix(counterexample), a.closedWorldDiagnosticSuffix(theory, citations))
 	}
 	return false
 }
@@ -230,7 +237,7 @@ func (a *Analyzer) analyzeProofUseStmt(stmt *ast.ProofUseStmt) []*scopedProofCit
 			a.errorf(citationExpr.Pos(), "`use` citations in an `assert … by:` proof block must name a lemma or call a lemma")
 			continue
 		}
-		citation := &scopedProofCitation{Name: proofCitationName(call)}
+		citation := a.scopedProofCitationForCall(call)
 		savedCitation := a.currentProofCitation
 		a.currentProofCitation = citation
 		a.analyzeExpr(call)
@@ -272,7 +279,43 @@ func (a *Analyzer) scopedProofCitationForStmt(stmt ast.Stmt) *scopedProofCitatio
 	if !ok || call == nil || !a.callTargetsLemma(call) {
 		return nil
 	}
-	return &scopedProofCitation{Name: proofCitationName(call)}
+	return a.scopedProofCitationForCall(call)
+}
+
+func (a *Analyzer) scopedProofCitationForCall(call *ast.CallExpr) *scopedProofCitation {
+	citation := &scopedProofCitation{Name: proofCitationName(call)}
+	if a == nil || call == nil {
+		return citation
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil || !decl.IsLemma {
+		return citation
+	}
+	subst := map[string]ast.Expr{}
+	args := proofCallArgs(call)
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		if rewritten, ok := substituteLemmaEnsure(req, subst); ok {
+			citation.Requires = append(citation.Requires, rewritten)
+		}
+	}
+	for _, ensure := range decl.EnsureValues {
+		if ensure == nil {
+			continue
+		}
+		if rewritten, ok := substituteLemmaEnsure(ensure, subst); ok {
+			citation.Ensures = append(citation.Ensures, rewritten)
+		}
+	}
+	return citation
 }
 
 func (a *Analyzer) closedWorldProofFacts() []string {
@@ -301,6 +344,54 @@ func (a *Analyzer) closedWorldProofFacts() []string {
 		}
 	}
 	return out
+}
+
+func (a *Analyzer) closedWorldProofFactsWithProvenance(theory string, citations []*scopedProofCitation) []string {
+	out := []string{}
+	if theory != "" {
+		out = append(out, "theory: "+theory)
+	}
+	out = append(out, a.closedWorldProofFacts()...)
+	for _, citation := range citations {
+		if citation == nil || (len(citation.Requires) == 0 && len(citation.Ensures) == 0) {
+			continue
+		}
+		reqs := formatProofExprList(citation.Requires)
+		ensures := formatProofExprList(citation.Ensures)
+		out = append(out, "lemma "+citation.Name+": "+reqs+" |- "+ensures)
+	}
+	return out
+}
+
+func (a *Analyzer) closedWorldDiagnosticSuffix(theory string, citations []*scopedProofCitation) string {
+	facts := a.closedWorldProofFactsWithProvenance(theory, citations)
+	if len(facts) == 0 {
+		return "\nclosed world:\n  - (none)\nhint: cite the lemma facts required to establish this scoped goal"
+	}
+	var b strings.Builder
+	b.WriteString("\nclosed world:")
+	for _, fact := range facts {
+		b.WriteString("\n  - ")
+		b.WriteString(fact)
+	}
+	b.WriteString("\nhint: cite the lemma facts required to establish this scoped goal")
+	return b.String()
+}
+
+func formatProofExprList(exprs []ast.Expr) string {
+	if len(exprs) == 0 {
+		return "true"
+	}
+	parts := make([]string, 0, len(exprs))
+	for _, expr := range exprs {
+		if expr != nil {
+			parts = append(parts, unparse.FormatExpr(expr))
+		}
+	}
+	if len(parts) == 0 {
+		return "true"
+	}
+	return strings.Join(parts, " and ")
 }
 
 func (a *Analyzer) reportLoadBearingScopedCitations(pos lexer.Pos, goal ast.Expr, scope *Scope, citations []*scopedProofCitation) {

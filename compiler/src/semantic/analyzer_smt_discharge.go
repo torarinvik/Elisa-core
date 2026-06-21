@@ -2278,6 +2278,9 @@ func (tr *smtTranslator) factPreamble() string {
 	}
 	sort.Strings(names) // deterministic query text (stable across runs / cache-friendly)
 	var b strings.Builder
+	if tr.a != nil && tr.a.currentClosedWorldTheory != "" {
+		b.WriteString("; closed-world theory: " + tr.a.currentClosedWorldTheory + "\n")
+	}
 	for _, name := range names {
 		b.WriteString("(declare-const " + smtVar(name) + " Int)\n")
 	}

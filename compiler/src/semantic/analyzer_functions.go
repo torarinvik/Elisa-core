@@ -606,7 +606,7 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 		// model rather than an opaque symbol. Reuses the branch-fact narrower (truthy = assumed).
 		a.seedRangeFactsFromCondition(req)
 		if proof := proofAt(fn.RequiresProofs, i); proof != nil {
-			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "requires by scoped")
+			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "", "requires by scoped")
 		}
 	}
 }
@@ -656,7 +656,7 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 			a.errorf(e.Pos(), "ensure clause must be bool, got %s", t)
 		}
 		if proof := proofAt(fn.EnsureProofs, i); proof != nil {
-			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "ensure by scoped")
+			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "", "ensure by scoped")
 		}
 	}
 	a.currentScope = saved

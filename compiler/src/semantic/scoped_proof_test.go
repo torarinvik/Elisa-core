@@ -128,6 +128,69 @@ def use(n: i64):
 	}
 }
 
+func TestScopedProofTheoryMarkerArithmeticProves(t *testing.T) {
+	src := `
+lemma add_zero(x: i64):
+    ensure x + 0 == x
+    pass
+
+def area(w: i64) -> i64:
+    assert w + 0 == w by scoped: arithmetic
+        add_zero(w)
+    return w
+`
+	result := analyzeWithSMT(t, "scoped_proof_theory_arithmetic.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected arithmetic-scoped proof to prove cleanly, got: %v", errs)
+	}
+}
+
+func TestScopedProofTheoryMarkerBitvectorParsesAndProves(t *testing.T) {
+	src := `
+lemma nonneg(x: i64):
+    ensure x == x
+    pass
+
+def use(n: i64):
+    assert n == n by scoped: bitvector
+        nonneg(n)
+`
+	result := analyzeWithSMT(t, "scoped_proof_theory_bitvector.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected bitvector-scoped proof marker to parse and prove cleanly, got: %v", errs)
+	}
+}
+
+func TestScopedProofDeclineDiagnosticIncludesClosedWorldProvenance(t *testing.T) {
+	src := `
+lemma add_nonneg(x: i64, y: i64):
+    requires x >= 0 and y >= 0
+    ensure x + y >= 0
+    pass
+
+def area(w: i64, h: i64) -> i64:
+    assert w + h >= 0 by scoped: arithmetic
+        add_nonneg(w, h)
+    return w + h
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "scoped_proof_decline_provenance.elisa", src,
+		AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	joined := strings.Join(result.Errors(), "\n")
+	for _, want := range []string{
+		"closed world:",
+		"theory: arithmetic",
+		"lemma add_nonneg:",
+		"w >= 0",
+		"h >= 0",
+		"w + h",
+		"hint: cite the lemma facts required to establish this scoped goal",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("expected declined scoped proof diagnostic to contain %q, got:\n%s", want, joined)
+		}
+	}
+}
+
 func TestProofUseRejectedOutsideAssertBy(t *testing.T) {
 	src := `
 lemma done():

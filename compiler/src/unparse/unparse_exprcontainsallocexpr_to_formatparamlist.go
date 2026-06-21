@@ -344,6 +344,9 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		opener := " by:"
 		if n.Scoped {
 			opener = " by scoped:"
+			if n.ScopedTheory != "" {
+				opener += " " + n.ScopedTheory
+			}
 		}
 		f.writeLine(level, "assert "+formatExpr(n.Cond)+opener)
 		for _, stmt := range n.Proof {
