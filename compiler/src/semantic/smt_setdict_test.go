@@ -40,15 +40,107 @@ def probe(s: set[i64], p: i64) -> void:
 	}
 }
 
+// dictSurfaceStubs declares the stdlib free functions the SURFACE dict methods resolve to, so the
+// dict membership/lookup wiring is exercised end-to-end from source spelling (`d.contains(k)` /
+// `d.get(k)`) inside the test package (which has no stdlib prelude).
+const dictSurfaceStubs = `
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+    return null
+
+def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
+    return arena_dict_get(m, key) != null
+`
+
+// DICT MEMBERSHIP + POSITIVE-VALUE LOOKUP, REACHABLE FROM SOURCE. The surface language accesses
+// dicts via methods — `d.contains(k)` (membership) and `d.get(k)` (optional lookup) — which resolve
+// to `arena_dict_contains` / `arena_dict_get`. The SMT lowering maps them onto the dict model:
+// `d.contains(k)` -> `(select d_keys k)` and `d.get(k)` -> `(select d_vals k)`. So under a
+// `forall (key,v) in d: v > 0` hypothesis and a `requires d.contains(k)` membership guard, the goal
+// `d.get(k) > 0` discharges by instantiating the quantifier at the witnessed key. This is the
+// headline dict-modeling win made reachable from real Elisa syntax.
+func TestSMTProvesDictMembershipLookup(t *testing.T) {
+	src := dictSurfaceStubs + `
+def vals_pos(d: dict[i64, i64], k: i64) -> void:
+    requires forall (key, v) in d: v > 0
+    requires d.contains(k)
+    assert d.get(k) > 0 by:
+        pass
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_dict_lookup.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("dict membership + positive-value lookup must discharge under SMT, got:\n%s", strings.Join(errs, "\n"))
+	}
+	var smtProven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
+			smtProven++
+		}
+	}
+	if smtProven == 0 {
+		t.Fatalf("expected the dict lookup assert to be SMT-proven, report: %+v", result.ProofReport)
+	}
+}
+
+// SOUNDNESS: WITHOUT the `requires d.contains(k)` membership guard, `k` is not constrained to be a
+// key of `d`, so `d.get(k)` selects an arbitrary-but-total value the `forall` hypothesis does not
+// range over. The goal must NOT be SMT-proven (z3 finds a non-member k with a non-positive value).
+func TestSMTDeclinesDictLookupWithoutMembership(t *testing.T) {
+	src := dictSurfaceStubs + `
+def vals_pos(d: dict[i64, i64], k: i64) -> void:
+    requires forall (key, v) in d: v > 0
+    assert d.get(k) > 0 by:
+        pass
+`
+	result := analyzeWithSMT(t, "smt_dict_noguard.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
+			t.Fatalf("dict lookup without a membership guard must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+// SOUNDNESS: a FALSE claim about dict values must NOT be proven. `forall (key,v) in d: v > 0` and
+// `d.contains(k)` establish `d.get(k) > 0`, but NOT `d.get(k) > 1` (a member value could be exactly
+// 1). z3 finds the witness, so the assert stays a runtime check.
+func TestSMTDeclinesFalseDictClaim(t *testing.T) {
+	src := dictSurfaceStubs + `
+def vals_pos(d: dict[i64, i64], k: i64) -> void:
+    requires forall (key, v) in d: v > 0
+    requires d.contains(k)
+    assert d.get(k) > 1 by:
+        pass
+`
+	result := analyzeWithSMT(t, "smt_dict_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
+			t.Fatalf("false dict-value claim must not be SMT-proven: %+v", result.ProofReport)
+		}
+	}
+}
+
+// NON-INT VALUE DICT DECLINES (soundness/scope): a dict with a float VALUE is not modelable — the
+// value array is fixed to (Array <KSort> Int). The `d.get(k)` lookup term declines, so a value goal
+// cannot be SMT-proven; it is left to the runtime check, never fabricated. (Here z3 also genuinely
+// could not establish `d.get(k) > 0.0` even were it modeled — the point is the model declines.)
+func TestSMTDeclinesFloatValueDict(t *testing.T) {
+	src := dictSurfaceStubs + `
+def vals_pos(d: dict[i64, f64], k: i64) -> void:
+    requires forall (key, v) in d: v > 0.0
+    requires d.contains(k)
+    assert d.get(k) > 0.0 by:
+        pass
+`
+	result := analyzeWithSMT(t, "smt_dict_floatval.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
+			t.Fatalf("a float-value dict must not be SMT-modeled: %+v", result.ProofReport)
+		}
+	}
+}
+
 // DICT QUANTIFIER over a key/value binder lowers cleanly: `forall (key,v) in d: v > 0` translates
 // through the dict-source quantifier path (binds the value to `(select d_vals key)` guarded by
-// `(select d_keys key)`). The surface language expresses dict lookup/membership via `d.get(k)` /
-// `d.contains(k)` methods (not `d[k]` / `k in d`), so the assert-discharge form is not yet reachable
-// from source — but the law body must still lower without error or false proof.
-//
-// NOTE: the dict term-modeling (dictTermEnv, `d[k]` -> (select d_vals k), `k in d` -> (select
-// d_keys k)) is sound and present; wiring the rewritten `arena_dict_get`/`arena_dict_contains`
-// calls (and the `T?` optional result of `.get`) to it is a follow-up.
+// `(select d_keys key)`).
 func TestSMTDictQuantifierLawLowersCleanly(t *testing.T) {
 	src := `
 law ValsPos(self: dict[i64, i64]) = forall (key, v) in self: v > 0
