@@ -31,6 +31,11 @@ type Parser struct {
 	// parseStmt so the children land flat in the enclosing block — keeping the AST free of any
 	// wrapper node and letting every existing walker see plain `VarDeclStmt`s.
 	pendingStmts []ast.Stmt
+	// pendingDecls buffers extra TOP-LEVEL declarations produced by a single parseDecl call that
+	// desugars to MORE than one decl (the `protocol` typestate sugar, docs/96: one declaration expands
+	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer
+	// after each parseDecl so the synthesized decls land flat at file scope.
+	pendingDecls []ast.Decl
 }
 
 func New(tokens []lexer.Token) *Parser {
@@ -224,6 +229,10 @@ func (p *Parser) ParseFile(filename string) *ast.File {
 		if decl != nil {
 			file.Decls = append(file.Decls, decl)
 		}
+		if len(p.pendingDecls) > 0 {
+			file.Decls = append(file.Decls, p.pendingDecls...)
+			p.pendingDecls = nil
+		}
 		p.skipNewlines()
 	}
 	return file
@@ -277,6 +286,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	if p.peekIdentText("protocol") {
 		return p.parseInterfaceDecl()
+	}
+	if p.peekIdentText("typestate") {
+		return p.parseTypestateDecl()
 	}
 	if p.peek() == lexer.TOKEN_STATIC && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "interface" {
 		p.errorf("`static interface` has been removed; use `protocol`")
