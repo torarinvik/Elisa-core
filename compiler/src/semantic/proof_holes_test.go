@@ -26,7 +26,7 @@ func analyzeProofHole(t *testing.T, filename, src string) *Result {
 	if errs := p.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected parse errors: %v", errs)
 	}
-	return AnalyzeWithOptions(file, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+	return AnalyzeWithOptions(file, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true, EmitProofHoleHints: true})
 }
 
 // docs/98 — proof holes. A strict `assert(i < n)` is unprovable: nothing in scope bounds `i` above

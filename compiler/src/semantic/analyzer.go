@@ -362,6 +362,7 @@ type Analyzer struct {
 	enforceStrictConcurrency    bool
 	enforcePerfLints            bool
 	enforceStrictProofs         bool
+	emitProofHoleHints          bool
 	requireExternContracts      bool
 	// inClosedWorldProof is set while discharging a `by scoped:` proof block (docs/99). Under it, the
 	// ambient hypothesis sources that are NOT scope-walled — the enclosing function's `requires` and the
@@ -621,6 +622,12 @@ type AnalyzeOptions struct {
 	// (programmatic access, e.g. the tightness-validation harness) without needing the
 	// ELISA_DUMP_DEATHTIME env dump. Read-only analysis; no codegen effect.
 	RecordDeathTimeCohorts bool
+	// EmitProofHoleHints turns on the docs/98 constructive proof-hole assistant for plain asserts: a
+	// strict integer-comparison assert the static tiers cannot discharge emits a non-fatal hint listing
+	// the goal, in-scope known facts, and a suggested missing precondition. OFF by default — the hint is
+	// an assistant you INVOKE (the future `assert ?` / `--explain-hole` surface), not an always-on
+	// diagnostic, so normal builds stay quiet and never flag legitimate runtime-checked asserts.
+	EmitProofHoleHints bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -722,6 +729,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
+		emitProofHoleHints:                options.EmitProofHoleHints,
 		requireExternContracts:            options.RequireExternContracts,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,

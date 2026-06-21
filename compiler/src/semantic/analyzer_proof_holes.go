@@ -180,7 +180,11 @@ func (a *Analyzer) checkStrictAssertProofHole(pos lexer.Pos, cond ast.Expr) {
 	// in-body asserts, so it would reject facts a strict author legitimately established. Requiring
 	// `-smt` keeps the prove-it-or-fail bar SOUND (no false "unprovable" on a genuinely entailed assert)
 	// and leaves plain `-strict` builds without z3 exactly as they were: asserts are runtime checks.
-	if a == nil || !a.enforceStrictProofs || !a.smtEnabled || cond == nil {
+	// Opt-in only: the proof-hole assistant is something the user INVOKES (docs/98), not an always-on
+	// diagnostic. Without this gate the hint would fire on every strict+smt compile of a runtime-checked
+	// stdlib assert (e.g. stores_packed_aos.elisa), flooding normal builds. Reserved for the future
+	// `assert ?` / `--explain-hole` surface; tests opt in via AnalyzeOptions{EmitProofHoleHints: true}.
+	if a == nil || !a.emitProofHoleHints || !a.enforceStrictProofs || !a.smtEnabled || cond == nil {
 		return
 	}
 	if !isIntComparisonGoal(cond) {
