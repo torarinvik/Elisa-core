@@ -759,3 +759,75 @@ def clamp_nonneg(x: i64) -> i64:
 		t.Fatalf("clamp_nonneg should discharge via the fall-through guard fact, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
+
+// CONCEPT-SUGAR (docs/100): the `forall k in 0 ..< n: P` range binder desugars to the canonical guarded
+// form `forall k: (0 <= k and k < n) implies P`. It must prove EXACTLY what the canonical form proves —
+// `NotDouble[5]` holds for 11. This is the proof-of-equivalence for the pure parser desugar.
+func TestSMTProvesQuantifierRangeSugar(t *testing.T) {
+	src := `
+law NotDouble(self: i64, n: i64) = forall k in 0 ..< n: self != k * 2
+
+def pick() -> i64:
+    x: i64 is NotDouble[5] = 11
+    return x
+`
+	result := analyzeWithSMT(t, "smt_forall_sugar.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the range-sugar quantified law proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
+
+// Soundness: the range sugar must NOT prove a false law. `NotDouble[5]` is false for 4 (4 == 2*2).
+func TestSMTDeclinesFalseQuantifierRangeSugar(t *testing.T) {
+	src := `
+law NotDouble(self: i64, n: i64) = forall k in 0 ..< n: self != k * 2
+
+def pick() -> i64:
+    x: i64 is NotDouble[5] = 4
+    return x
+`
+	result := analyzeWithSMT(t, "smt_forall_sugar_false.elisa", src)
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			t.Fatalf("SMT must not prove NotDouble[5] for 4 via range sugar: %+v", result.ProofReport)
+		}
+	}
+}
+
+// CONCEPT PREDICATE `Sorted` written with the range sugar over a real array subject (docs/100 Form 3).
+// The law's ANTECEDENT uses the sugar `forall i in 0 ..< n - 1: self[i] <= self[i + 1]`; the law states
+// that sortedness implies the first element is the minimum. z3 proves it via array theory — and because
+// the sugar lowers to the identical canonical guarded form, it proves exactly as the hand-written
+// `SortedFirstMin` theorem above does. This is the end-to-end proof that concept predicates ride on the
+// sugar on array subjects with no new machinery.
+func TestSMTProvesSortedConceptPredicate(t *testing.T) {
+	src := `
+law SortedFirstMinSugar(self: darray[i64], n: i64) = (forall i in 0 ..< n - 1: self[i] <= self[i + 1]) implies (forall j in 0 ..< n: self[0] <= self[j])
+
+def check(xs: darray[i64]) -> i64:
+    y: darray[i64] is SortedFirstMinSugar[10] = xs
+    return 0
+`
+	result := analyzeWithSMT(t, "smt_sorted_sugar.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenSMT {
+			proven++
+		}
+	}
+	if proven != 1 {
+		t.Fatalf("expected the sugar-written sorted theorem proven by SMT, got %d: %+v", proven, result.ProofReport)
+	}
+}
