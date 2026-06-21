@@ -112,6 +112,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.TupleTypeExpr{})
 		gob.Register(&ast.RefinementTypeExpr{})
 		gob.Register(&ast.AssertByStmt{})
+		gob.Register(&ast.ProofBlockStmt{})
 		gob.Register(&ast.ProofUseStmt{})
 
 		// Expressions.

@@ -587,7 +587,7 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 	// from one function body into the next. This is the single per-function entry hook (called
 	// unconditionally before each body, and nowhere else).
 	a.currentBoundEqual = nil
-	for _, req := range fn.Requires {
+	for i, req := range fn.Requires {
 		if req == nil {
 			continue
 		}
@@ -605,6 +605,9 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 		// the bound — which is what makes a guarded `value % alignment` use the precise Euclidean
 		// model rather than an opaque symbol. Reuses the branch-fact narrower (truthy = assumed).
 		a.seedRangeFactsFromCondition(req)
+		if proof := proofAt(fn.RequiresProofs, i); proof != nil {
+			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "requires by scoped")
+		}
 	}
 }
 
@@ -644,7 +647,7 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 	a.inEnsureContext = true
 	a.ghostReadAllowed++ // `ensure` is a contract: ghost body locals are readable here.
 	defer func() { a.inEnsureContext = false; a.ghostReadAllowed-- }()
-	for _, e := range fn.EnsureValues {
+	for i, e := range fn.EnsureValues {
 		if e == nil {
 			continue
 		}
@@ -652,6 +655,16 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 		if t != nil && !IsBoolType(t) {
 			a.errorf(e.Pos(), "ensure clause must be bool, got %s", t)
 		}
+		if proof := proofAt(fn.EnsureProofs, i); proof != nil {
+			a.analyzeScopedProofGoal(proof.Pos(), proof.Goal, proof.Proof, true, "ensure by scoped")
+		}
 	}
 	a.currentScope = saved
+}
+
+func proofAt(proofs []*ast.ProofBlockStmt, i int) *ast.ProofBlockStmt {
+	if i < 0 || i >= len(proofs) {
+		return nil
+	}
+	return proofs[i]
 }

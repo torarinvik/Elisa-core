@@ -229,6 +229,7 @@ func (p *Parser) parseEnsuresClause() ast.EnsuresClause {
 	}
 	return ast.EnsuresClause{Position: pos, Condition: condition, Target: target, Kind: ast.EnsuresKindNamedState, StateCases: p.parseEnsuresStateCases()}
 }
+
 // parseChangesPathsAfterKeyword parses a comma-separated list of param-rooted paths for a frame
 // `changes` clause (docs/87), e.g. `changes r.px, r.py`. Reuses parseEnsuresPath.
 func (p *Parser) parseChangesPathsAfterKeyword() []ast.EnsuresPath {
@@ -241,6 +242,7 @@ func (p *Parser) parseChangesPathsAfterKeyword() []ast.EnsuresPath {
 	}
 	return paths
 }
+
 // parseFulfillsClausesAfterKeyword parses a comma-separated `fulfills` list (docs/88, docs/85 §4).
 // Each item is either a FRAME-law application `<param> is <Law>` (e.g. `fulfills r is
 // MovesPlayerOnly`) or a subject-free EFFECT-law application `<Law>` (e.g. `fulfills NoAlloc`). The
@@ -337,7 +339,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 	// `ensure <bool-expr>`), then lifted out into the decl here. They are NOT post-signature
 	// clauses: `-> T requires ...` is ambiguous with the region-prefix type grammar (`<region> T&`),
 	// where `T requires` reads as region label `T` + type `requires`.
-	requires, ensures2, decreases, decreasesWild, uses, body := liftLeadingContracts(body)
+	requires, requireProofs, ensures2, ensureProofs, decreases, decreasesWild, uses, body := liftLeadingContracts(body)
 	if !isStatic {
 		// Static functions are evaluated at compile time and have no runtime region; never
 		// wrap them in an auto region (it would break static darray construction).
@@ -345,14 +347,14 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, EnsureValues: ensures2, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, ReturnType: retType, Body: body}
+	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, ReturnType: retType, Body: body}
 }
 
 // liftLeadingContracts pulls leading `requires`/`ensure` value-contract statements (parsed as
 // ContractStmt) off the front of a function body into precondition/postcondition lists, returning
 // the remaining body. Only the leading run is honoured; a later stray ContractStmt is left in place
 // so the analyzer reports the misplacement rather than silently dropping it.
-func liftLeadingContracts(body []ast.Stmt) (requires []ast.Expr, ensures []ast.Expr, decreases []ast.Expr, decreasesWild string, uses []*ast.ContractStmt, rest []ast.Stmt) {
+func liftLeadingContracts(body []ast.Stmt) (requires []ast.Expr, requireProofs []*ast.ProofBlockStmt, ensures []ast.Expr, ensureProofs []*ast.ProofBlockStmt, decreases []ast.Expr, decreasesWild string, uses []*ast.ContractStmt, rest []ast.Stmt) {
 	i := 0
 	for i < len(body) {
 		cs, ok := body[i].(*ast.ContractStmt)
@@ -365,10 +367,12 @@ func liftLeadingContracts(body []ast.Stmt) (requires []ast.Expr, ensures []ast.E
 		case ast.ContractRequire:
 			if cs.Cond != nil {
 				requires = append(requires, cs.Cond)
+				requireProofs = append(requireProofs, contractProofBlock(cs))
 			}
 		case ast.ContractEnsure:
 			if cs.Cond != nil {
 				ensures = append(ensures, cs.Cond)
+				ensureProofs = append(ensureProofs, contractProofBlock(cs))
 			}
 		case ast.ContractDecreases:
 			if cs.Cond != nil {
@@ -389,9 +393,16 @@ func liftLeadingContracts(body []ast.Stmt) (requires []ast.Expr, ensures []ast.E
 		i++
 	}
 	if i == 0 {
-		return nil, nil, nil, "", nil, body
+		return nil, nil, nil, nil, nil, "", nil, body
 	}
-	return requires, ensures, decreases, decreasesWild, uses, body[i:]
+	return requires, requireProofs, ensures, ensureProofs, decreases, decreasesWild, uses, body[i:]
+}
+
+func contractProofBlock(cs *ast.ContractStmt) *ast.ProofBlockStmt {
+	if cs == nil || !cs.ScopedProof || cs.Cond == nil {
+		return nil
+	}
+	return &ast.ProofBlockStmt{Position: cs.Position, Goal: cs.Cond, Proof: cs.Proof}
 }
 
 func (p *Parser) parseFuncBodyAfterColon() []ast.Stmt {

@@ -506,8 +506,11 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 	if a == nil || a.currentFuncDecl == nil || !a.enforceStrictProofs {
 		return
 	}
-	for _, clause := range a.currentFuncDecl.EnsureValues {
+	for i, clause := range a.currentFuncDecl.EnsureValues {
 		if clause == nil || exprReferencesResult(clause) {
+			continue
+		}
+		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
 		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
@@ -536,8 +539,11 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		return
 	}
 	subst := map[string]ast.Expr{"result": n.Value}
-	for _, clause := range a.currentFuncDecl.EnsureValues {
+	for i, clause := range a.currentFuncDecl.EnsureValues {
 		if clause == nil {
+			continue
+		}
+		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
 		proven, counterexample := a.trySMTProveRequires(clause, subst)

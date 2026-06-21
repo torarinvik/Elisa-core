@@ -2,7 +2,10 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"strings"
+
+	"elisacore/src/unparse"
 )
 
 type scopedProofCitation struct {
@@ -35,6 +38,29 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 		return
 	}
 
+	if a.analyzeScopedProofGoal(n.Pos(), n.Cond, n.Proof, n.Scoped, "assert by") {
+		a.applyConditionRefinements(a.currentScope, n.Cond, true)
+		a.applyIndexBoundsFactsForCondition(n.Cond, true)
+		a.recordSMTAssertFact(n.Cond)
+	}
+}
+
+func (a *Analyzer) analyzeProofBlock(n *ast.ProofBlockStmt) {
+	if a == nil || n == nil {
+		return
+	}
+	if a.analyzeScopedProofGoal(n.Pos(), n.Goal, n.Proof, true, "proof") {
+		a.applyConditionRefinements(a.currentScope, n.Goal, true)
+		a.applyIndexBoundsFactsForCondition(n.Goal, true)
+		a.recordSMTAssertFact(n.Goal)
+	}
+}
+
+func (a *Analyzer) analyzeScopedProofGoal(pos lexer.Pos, goal ast.Expr, proof []ast.Stmt, scoped bool, subject string) bool {
+	if a == nil || goal == nil {
+		return false
+	}
+
 	saved := a.currentScope
 	child := NewScope(saved)
 	// docs/99: a `by scoped:` block is a CLOSED WORLD. The child scope is marked as a proof wall, so the
@@ -43,13 +69,13 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 	// and refinement LOOKUP still ascend (lemma/type names resolve), so only ambient PROOF FACTS are
 	// walled. This guarantees stability: the verdict depends solely on the cited facts, never on unrelated
 	// surrounding code that would otherwise perturb the solver's hypothesis set.
-	child.closedWorld = n.Scoped
+	child.closedWorld = scoped
 	a.currentScope = child
 
 	// While a scoped block is analyzed and its COND discharged, suppress the ambient (non-scope-walled)
 	// hypothesis sources so the closed world holds ONLY the block's citations. Restored on the way out.
 	savedClosed := a.inClosedWorldProof
-	if n.Scoped {
+	if scoped {
 		a.inClosedWorldProof = true
 	}
 	defer func() { a.inClosedWorldProof = savedClosed }()
@@ -59,9 +85,9 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 	//    its requires and injects its ensures as child-scope facts, a nested assert seeds its condition,
 	//    etc.
 	citations := []*scopedProofCitation{}
-	for _, stmt := range n.Proof {
+	for _, stmt := range proof {
 		if !a.assertProofStmtAllowed(stmt) {
-			a.errorf(stmt.Pos(), "an `assert … by:` proof block may contain only verification-only statements (lemma calls, nested `assert`s, `invariant`s); a statement with real effects is not allowed because the block is erased from code")
+			a.errorf(stmt.Pos(), "a proof block may contain only verification-only statements (lemma calls, nested `assert`s, `invariant`s); a statement with real effects is not allowed because the block is erased from code")
 			continue
 		}
 		if use, ok := stmt.(*ast.ProofUseStmt); ok {
@@ -81,23 +107,19 @@ func (a *Analyzer) analyzeAssertBy(n *ast.AssertByStmt) {
 
 	// 2. Prove COND under caller ∪ block facts. currentScope is still the child here, so the block's
 	//    facts are in scope for the proof.
-	condType := a.analyzeCondExpr(n.Cond)
+	condType := a.analyzeCondExpr(goal)
 	if condType != nil && !IsBoolType(condType) {
-		a.errorf(n.Cond.Pos(), "assert condition must be bool, got %s", condType)
+		a.errorf(goal.Pos(), "proof goal must be bool, got %s", condType)
 	}
-	a.proveAssertByCond(n)
-	if n.Scoped {
-		a.reportLoadBearingScopedCitations(n, child, citations)
+	proven := a.proveScopedProofCond(pos, goal, subject)
+	if scoped {
+		a.reportLoadBearingScopedCitations(pos, goal, child, citations)
 	}
 
 	// 3. Pop back to the caller scope. The child scope (and ALL block facts) is dropped here — only COND
 	//    survives, recorded below into the caller scope.
 	a.currentScope = saved
-
-	// 4. Export ONLY COND as a fact for the code after the assert, exactly as a plain assert would.
-	a.applyConditionRefinements(a.currentScope, n.Cond, true)
-	a.applyIndexBoundsFactsForCondition(n.Cond, true)
-	a.recordSMTAssertFact(n.Cond)
+	return proven
 }
 
 // proveAssertByCond discharges COND from the current (child) scope's facts: cheap linear tier first,
@@ -108,14 +130,21 @@ func (a *Analyzer) proveAssertByCond(n *ast.AssertByStmt) {
 	if n.Cond == nil {
 		return
 	}
+	class := ProofClassLinear
+	if n.Scoped {
+		class = ProofClassScoped
+	}
 	if a.proveRequiresClause(n.Cond, nil) == requiresProven {
-		a.recordProof(n.Cond.Pos(), "assert by", "assert", ProofProvenLinear)
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofProvenLinear, class, nil, "")
 		return
 	}
 	proven, counterexample := a.trySMTProveRequires(n.Cond, nil)
 	if proven {
-		a.recordProof(n.Cond.Pos(), "assert by", "assert", ProofProvenSMT)
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofProvenSMT, class, nil, "")
 		return
+	}
+	if n.Scoped {
+		a.recordProofWithClass(n.Cond.Pos(), "assert by", "assert", ProofRuntime, ProofClassScoped, a.closedWorldProofFacts(), "nothing establishes the scoped goal")
 	}
 	msg := "`assert … by:` condition could not be proven from its proof block; the block's facts plus the caller's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
 	if a.enforceStrictProofs {
@@ -123,6 +152,38 @@ func (a *Analyzer) proveAssertByCond(n *ast.AssertByStmt) {
 	} else {
 		a.proofLint(n.Cond.Pos(), "%s%s", msg, a.counterexampleSuffix(counterexample))
 	}
+}
+
+func (a *Analyzer) proveScopedProofCond(pos lexer.Pos, goal ast.Expr, subject string) bool {
+	if goal == nil {
+		return false
+	}
+	class := ProofClassLinear
+	if a != nil && a.currentScope != nil && a.currentScope.closedWorld {
+		class = ProofClassScoped
+	}
+	if a.proveRequiresClause(goal, nil) == requiresProven {
+		a.recordProofWithClass(goal.Pos(), subject, "proof", ProofProvenLinear, class, nil, "")
+		return true
+	}
+	proven, counterexample := a.trySMTProveRequires(goal, nil)
+	if proven {
+		a.recordProofWithClass(goal.Pos(), subject, "proof", ProofProvenSMT, class, nil, "")
+		return true
+	}
+	if class == ProofClassScoped {
+		a.recordProofWithClass(pos, subject, "proof", ProofRuntime, ProofClassScoped, a.closedWorldProofFacts(), "nothing establishes the scoped goal")
+	}
+	msg := "proof goal could not be proven from its proof block; the block's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
+	if subject == "assert by" {
+		msg = "`assert … by:` condition could not be proven from its proof block; the block's facts plus the caller's facts must entail it (add intermediate `assert`s or call a helper `lemma`)"
+	}
+	if a.enforceStrictProofs {
+		a.errorf(pos, "%s%s", msg, a.counterexampleSuffix(counterexample))
+	} else {
+		a.proofLint(pos, "%s%s", msg, a.counterexampleSuffix(counterexample))
+	}
+	return false
 }
 
 // assertProofStmtAllowed reports whether a statement may appear in an `assert … by:` proof block. The
@@ -214,8 +275,36 @@ func (a *Analyzer) scopedProofCitationForStmt(stmt ast.Stmt) *scopedProofCitatio
 	return &scopedProofCitation{Name: proofCitationName(call)}
 }
 
-func (a *Analyzer) reportLoadBearingScopedCitations(n *ast.AssertByStmt, scope *Scope, citations []*scopedProofCitation) {
-	if a == nil || n == nil || scope == nil || len(citations) == 0 {
+func (a *Analyzer) closedWorldProofFacts() []string {
+	if a == nil || a.currentScope == nil {
+		return nil
+	}
+	var out []string
+	seen := map[string]bool{}
+	add := func(s string) {
+		if s == "" || seen[s] {
+			return
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			if fact.Expr == nil {
+				continue
+			}
+			label := unparse.FormatExpr(fact.Expr)
+			add(label)
+		}
+		if sc.closedWorld {
+			break
+		}
+	}
+	return out
+}
+
+func (a *Analyzer) reportLoadBearingScopedCitations(pos lexer.Pos, goal ast.Expr, scope *Scope, citations []*scopedProofCitation) {
+	if a == nil || goal == nil || scope == nil || len(citations) == 0 {
 		return
 	}
 	loadBearing := []string{}
@@ -229,8 +318,8 @@ func (a *Analyzer) reportLoadBearingScopedCitations(n *ast.AssertByStmt, scope *
 		}
 		savedFacts := scope.smtAssertFacts
 		scope.smtAssertFacts = filterSMTAssertFacts(savedFacts, removed)
-		if a.proveRequiresClause(n.Cond, nil) != requiresProven {
-			if proven, _ := a.trySMTProveRequires(n.Cond, nil); !proven {
+		if a.proveRequiresClause(goal, nil) != requiresProven {
+			if proven, _ := a.trySMTProveRequires(goal, nil); !proven {
 				loadBearing = append(loadBearing, citation.Name)
 			}
 		}
@@ -239,7 +328,7 @@ func (a *Analyzer) reportLoadBearingScopedCitations(n *ast.AssertByStmt, scope *
 	if len(loadBearing) == 0 {
 		return
 	}
-	a.warnf(n.Cond.Pos(), "`assert … by scoped:` load-bearing citations: %s", strings.Join(loadBearing, ", "))
+	a.warnf(pos, "`by scoped:` load-bearing citations: %s", strings.Join(loadBearing, ", "))
 }
 
 func filterSMTAssertFacts(facts []smtFact, removed map[ast.Expr]bool) []smtFact {

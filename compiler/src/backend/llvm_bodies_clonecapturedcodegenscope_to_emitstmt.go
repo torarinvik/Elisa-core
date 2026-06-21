@@ -1037,6 +1037,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			return nil
 		}
 		return s.emitContractCheck(n.Cond, "assertion failed")
+	case *ast.ProofBlockStmt:
+		// Standalone proofs are verification-only closed-world regions. The analyzer consumes the
+		// proof and exports only the goal as a flow fact; no runtime check or proof body is emitted.
+		return nil
 	case *ast.AssertHoleStmt:
 		return nil
 	case *ast.StaticAssertStmt:

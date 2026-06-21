@@ -51,6 +51,8 @@ func (c *analyzerASTCensus) countDecl(decl ast.Decl) {
 		c.countExpr(n.Value)
 	case *ast.FuncDecl:
 		c.funcDecls++
+		c.countProofs(n.RequiresProofs)
+		c.countProofs(n.EnsureProofs)
 		c.countStmts(n.Body)
 	case *ast.StaticIfDecl:
 		c.countExpr(n.Cond)
@@ -180,6 +182,12 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 		c.countExpr(n.Message)
 	case *ast.ExprStmt:
 		c.countExpr(n.Expr)
+	case *ast.AssertByStmt:
+		c.countExpr(n.Cond)
+		c.countStmts(n.Proof)
+	case *ast.ProofBlockStmt:
+		c.countExpr(n.Goal)
+		c.countStmts(n.Proof)
 	case *ast.AssertHoleStmt:
 	case *ast.StaticIfStmt:
 		c.countExpr(n.Cond)
@@ -210,6 +218,16 @@ func (c *analyzerASTCensus) countStmt(stmt ast.Stmt) {
 	case *ast.RegionStmt:
 		c.countExpr(n.Capacity)
 		c.countStmts(n.Body)
+	}
+}
+
+func (c *analyzerASTCensus) countProofs(proofs []*ast.ProofBlockStmt) {
+	for _, proof := range proofs {
+		if proof == nil {
+			continue
+		}
+		c.countExpr(proof.Goal)
+		c.countStmts(proof.Proof)
 	}
 }
 

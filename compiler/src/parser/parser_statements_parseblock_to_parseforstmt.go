@@ -72,6 +72,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeAssertByStmt() {
 				return p.parseAssertByStmt()
 			}
+		case "proof":
+			if p.looksLikeProofBlockStmt() {
+				return p.parseProofBlockStmt()
+			}
 		case "use":
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 				return p.parseProofUseStmt()
@@ -122,17 +126,28 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.allowQuantifiers = true // docs/90 brick 90-6: quantified preconditions
 				cond := p.parseExpr()
 				p.allowQuantifiers = saved
-				p.expectNewline()
-				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond}
+				proof, scoped := p.parseOptionalContractScopedProof()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractRequire, Cond: cond, Proof: proof, ScopedProof: scoped}
 			}
 		case "uses":
-			// `uses Name(args)` — apply a named composable contract (docs/97). Lifted into the decl with
+			// `uses Name(args)` / `uses Name[T](args)` — apply a named composable contract (docs/97). Lifted into the decl with
 			// the other leading contracts. Only when it looks like `uses <Ident>(` ; otherwise a variable
 			// named `uses` falls through to expression parsing.
 			if p.looksLikeUsesStmt() {
 				pos := p.cur().Pos
 				p.advance()
 				cname := p.expect(lexer.TOKEN_IDENT).Text
+				var typeArgs []ast.TypeExpr
+				if p.match(lexer.TOKEN_LBRACKET) {
+					typeArgs = make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+					for {
+						typeArgs = append(typeArgs, p.parseGenericTypeArgExpr())
+						if !p.match(lexer.TOKEN_COMMA) {
+							break
+						}
+					}
+					p.expect(lexer.TOKEN_RBRACKET)
+				}
 				p.expect(lexer.TOKEN_LPAREN)
 				var args []ast.Expr
 				if p.peek() != lexer.TOKEN_RPAREN {
@@ -145,7 +160,7 @@ func (p *Parser) parseStmt() ast.Stmt {
 				}
 				p.expect(lexer.TOKEN_RPAREN)
 				p.expectNewline()
-				return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesArgs: args}
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesTypeArgs: typeArgs, UsesArgs: args}
 			}
 		case "ensure":
 			// `ensure <bool-expr>` value-contract postcondition (may use `result`/`old(...)`).
@@ -156,8 +171,8 @@ func (p *Parser) parseStmt() ast.Stmt {
 				p.allowQuantifiers = true // docs/90 brick 90-6: quantified postconditions
 				cond := p.parseExpr()
 				p.allowQuantifiers = saved
-				p.expectNewline()
-				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond}
+				proof, scoped := p.parseOptionalContractScopedProof()
+				return &ast.ContractStmt{Position: pos, Kind: ast.ContractEnsure, Cond: cond, Proof: proof, ScopedProof: scoped}
 			}
 		case "invariant":
 			// `invariant <bool-expr>` in-body assertion, checked in place (debug builds only). Quantifiers
@@ -520,6 +535,52 @@ func (p *Parser) parseAssertByStmt() ast.Stmt {
 	p.expectNewline()
 	proof := p.parseBlock()
 	return &ast.AssertByStmt{Position: pos, Cond: cond, Proof: proof, Scoped: scoped}
+}
+
+func (p *Parser) looksLikeProofBlockStmt() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		tok := p.tokens[i]
+		switch tok.Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			return depth == 0
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+func (p *Parser) parseProofBlockStmt() ast.Stmt {
+	pos := p.cur().Pos
+	p.advance() // `proof`
+	goal := p.parseExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	return &ast.ProofBlockStmt{Position: pos, Goal: goal, Proof: p.parseBlock()}
+}
+
+func (p *Parser) parseOptionalContractScopedProof() ([]ast.Stmt, bool) {
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+		p.advance()
+		if !(p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "scoped") {
+			p.errorf("contract clause proof blocks must use `by scoped:`")
+			p.expectNewline()
+			return nil, false
+		}
+		p.advance()
+		p.expect(lexer.TOKEN_COLON)
+		p.expectNewline()
+		return p.parseBlock(), true
+	}
+	p.expectNewline()
+	return nil, false
 }
 
 func (p *Parser) parseProofUseStmt() ast.Stmt {
@@ -1043,7 +1104,7 @@ func forWhereIdentLooksLikePatternType(name string) bool {
 func (p *Parser) looksLikeUsesStmt() bool {
 	return p.pos+2 < len(p.tokens) &&
 		p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN
+		(p.tokens[p.pos+2].Kind == lexer.TOKEN_LPAREN || p.tokens[p.pos+2].Kind == lexer.TOKEN_LBRACKET)
 }
 
 // looksLikeContractStmt reports whether a leading `requires` is a value-contract precondition

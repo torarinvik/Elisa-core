@@ -60,3 +60,33 @@ def use(n: i64) -> i64:
 		t.Fatalf("expected the proof-block lemma to be erased from IR, but @weaken appears:\n%s", output)
 	}
 }
+
+func TestStandaloneProofAndScopedEnsureEmitNoRuntimeChecks(t *testing.T) {
+	result := parseAndAnalyzeBackendTestWithSMT(t, "proof_block_contract_erase.elisa", `lemma weaken(x: i64):
+	requires x >= 10
+	ensure x >= 5
+	pass
+
+def proven(n: i64) -> i64:
+	proof n >= 5:
+		assert(n >= 10)
+		weaken(n)
+	return n
+
+def scoped_ensure(n: i64) -> i64:
+	ensure result >= 5 by scoped:
+		assert(result >= 10)
+		weaken(result)
+	return n + 10
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "@weaken") {
+		t.Fatalf("expected proof-block lemma calls to be erased from IR, but @weaken appears:\n%s", output)
+	}
+	if strings.Contains(output, "postcondition failed") || strings.Contains(output, "assertion failed") {
+		t.Fatalf("expected standalone proof and scoped ensure proof to emit no runtime checks, got IR:\n%s", output)
+	}
+}

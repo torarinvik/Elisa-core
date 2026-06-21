@@ -8,18 +8,18 @@ import (
 )
 
 type Parser struct {
-	tokens               []lexer.Token
-	pos                  int
-	errors               []string
-	notices              []string
-	poolScopes           []string
-	nurseryGroupByPool   map[string]string
-	nurseryCounter       int
-	declVisibility       map[ast.Decl]string
-	currentVisibility    string
-	allowInMembership    bool
-	allowTernary         bool
-	allowWhereExpr       bool
+	tokens             []lexer.Token
+	pos                int
+	errors             []string
+	notices            []string
+	poolScopes         []string
+	nurseryGroupByPool map[string]string
+	nurseryCounter     int
+	declVisibility     map[ast.Decl]string
+	currentVisibility  string
+	allowInMembership  bool
+	allowTernary       bool
+	allowWhereExpr     bool
 	// allowQuantifiers enables `forall`/`exists` prefix and `implies` infix in expression position.
 	// Set only while parsing law/spec bodies (docs/90 brick 90-4), so ordinary code may keep using
 	// `forall`/`exists`/`implies` as identifiers.
@@ -700,7 +700,9 @@ func (p *Parser) parseContractDecl() ast.Decl {
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
 	var requires, ensures []ast.Expr
+	var requireProofs, ensureProofs []*ast.ProofBlockStmt
 	var changes, preserves []ast.EnsuresPath
+	var includes []ast.ContractInclude
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
@@ -711,21 +713,50 @@ func (p *Parser) parseContractDecl() ast.Decl {
 			p.advance()
 			saved := p.allowQuantifiers
 			p.allowQuantifiers = true
-			requires = append(requires, p.parseExpr())
+			cond := p.parseExpr()
 			p.allowQuantifiers = saved
-			p.expectNewline()
+			proof, scoped := p.parseOptionalContractScopedProof()
+			requires = append(requires, cond)
+			if scoped {
+				requireProofs = append(requireProofs, &ast.ProofBlockStmt{Position: cond.Pos(), Goal: cond, Proof: proof})
+			} else {
+				requireProofs = append(requireProofs, nil)
+			}
 		case p.peekIdentText("ensure"):
 			p.advance()
 			saved := p.allowQuantifiers
 			p.allowQuantifiers = true
-			ensures = append(ensures, p.parseExpr())
+			cond := p.parseExpr()
 			p.allowQuantifiers = saved
-			p.expectNewline()
+			proof, scoped := p.parseOptionalContractScopedProof()
+			ensures = append(ensures, cond)
+			if scoped {
+				ensureProofs = append(ensureProofs, &ast.ProofBlockStmt{Position: cond.Pos(), Goal: cond, Proof: proof})
+			} else {
+				ensureProofs = append(ensureProofs, nil)
+			}
 		case p.matchIdentText("changes"):
 			changes = append(changes, p.parseChangesPathsAfterKeyword()...)
 			p.expectNewline()
 		case p.matchIdentText("preserves"):
 			preserves = append(preserves, p.parseChangesPathsAfterKeyword()...)
+			p.expectNewline()
+		case p.peekIdentText("includes"):
+			incPos := p.cur().Pos
+			p.advance()
+			law := p.expect(lexer.TOKEN_IDENT).Text
+			p.expect(lexer.TOKEN_LPAREN)
+			var args []ast.Expr
+			if p.peek() != lexer.TOKEN_RPAREN {
+				for {
+					args = append(args, p.parseExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+			includes = append(includes, ast.ContractInclude{Position: incPos, Law: law, Args: args})
 			p.expectNewline()
 		case p.peekIdentText("decreases"):
 			p.errorf("a `contract` body may not contain `decreases`: a termination measure is a property of a recursion, not a reusable contract (docs/97 §5)")
@@ -733,7 +764,7 @@ func (p *Parser) parseContractDecl() ast.Decl {
 			p.parseExpr()
 			p.expectNewline()
 		default:
-			p.errorf("a `contract` body may only contain requires/ensure/changes/preserves clauses, got %s", p.cur())
+			p.errorf("a `contract` body may only contain requires/ensure/changes/preserves/includes clauses, got %s", p.cur())
 			for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 				p.advance()
 			}
@@ -749,9 +780,12 @@ func (p *Parser) parseContractDecl() ast.Decl {
 		GenericParams:    genericParams,
 		Params:           params,
 		Requires:         requires,
+		RequiresProofs:   requireProofs,
 		EnsureValues:     ensures,
+		EnsureProofs:     ensureProofs,
 		Changes:          changes,
 		Preserves:        preserves,
+		ContractIncludes: includes,
 		IsContract:       true,
 	}
 }

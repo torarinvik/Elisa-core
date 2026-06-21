@@ -975,8 +975,11 @@ func (s *functionState) emitPreconditionChecks(decl *ast.FuncDecl) error {
 	if s.g.optLevel != OptimizationLevel0 && !s.g.forceContracts {
 		return nil
 	}
-	for _, cond := range decl.Requires {
+	for i, cond := range decl.Requires {
 		if cond == nil {
+			continue
+		}
+		if proofAt(decl.RequiresProofs, i) != nil {
 			continue
 		}
 		if err := s.emitContractCheck(cond, "precondition failed"); err != nil {
@@ -1008,8 +1011,11 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 			s.defineBinding("result", valueBinding{ptr: alloca, typ: s.fnType.Return, mutable: false})
 		}
 	}
-	for _, cond := range s.decl.EnsureValues {
+	for i, cond := range s.decl.EnsureValues {
 		if cond == nil {
+			continue
+		}
+		if proofAt(s.decl.EnsureProofs, i) != nil {
 			continue
 		}
 		if err := s.emitContractCheck(cond, "postcondition failed"); err != nil {
@@ -1017,6 +1023,13 @@ func (s *functionState) emitPostconditionChecks(value C.LLVMValueRef, actual sem
 		}
 	}
 	return nil
+}
+
+func proofAt(proofs []*ast.ProofBlockStmt, i int) *ast.ProofBlockStmt {
+	if i < 0 || i >= len(proofs) {
+		return nil
+	}
+	return proofs[i]
 }
 
 // emitRefinementPostconditionChecks emits the runtime half of `ensures <param> is Law` (docs/85

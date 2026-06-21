@@ -482,6 +482,15 @@ type AssertByStmt struct {
 	Scoped bool
 }
 
+// ProofBlockStmt is a standalone closed-world proof region:
+// `proof GOAL:` followed by verification-only statements. The block proves GOAL from facts cited
+// inside the block only, exports GOAL as the sole downstream fact, and is erased from codegen.
+type ProofBlockStmt struct {
+	Position lexer.Pos
+	Goal     Expr
+	Proof    []Stmt
+}
+
 // AssertHoleStmt is the explicit docs/98 proof-hole query: `assert ?`. It asks the analyzer to print
 // the in-scope goal/fact report at this position and is erased from execution/codegen.
 type AssertHoleStmt struct {
@@ -511,15 +520,18 @@ const (
 // it for `requires <bool-expr>`; the function-decl parser lifts leading ones into FuncDecl.Requires
 // (so it normally never reaches the statement analyzer/backend — see liftLeadingRequires).
 type ContractStmt struct {
-	Position   lexer.Pos
-	Kind       ContractKind
-	Cond       Expr
-	WildReason string // non-empty iff Kind == ContractDecreasesWild; the mandatory reason string
+	Position    lexer.Pos
+	Kind        ContractKind
+	Cond        Expr
+	Proof       []Stmt // non-empty for `requires/ensure COND by scoped:`
+	ScopedProof bool
+	WildReason  string // non-empty iff Kind == ContractDecreasesWild; the mandatory reason string
 	// UsesName / UsesArgs hold a named-contract application `uses Name(args)` (Kind == ContractUses,
 	// docs/97). UsesName is the contract's name; UsesArgs are the positional application arguments that
 	// bind to the contract's formal parameters. Both empty for every other Kind.
-	UsesName string
-	UsesArgs []Expr
+	UsesName     string
+	UsesTypeArgs []TypeExpr
+	UsesArgs     []Expr
 }
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos

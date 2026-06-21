@@ -807,6 +807,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.AssertByStmt:
 		a.analyzeAssertBy(n)
+	case *ast.ProofBlockStmt:
+		a.analyzeProofBlock(n)
 	case *ast.AssertHoleStmt:
 		a.emitAssertHole(n.Pos())
 	case *ast.ProofUseStmt:

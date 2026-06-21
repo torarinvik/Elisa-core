@@ -349,6 +349,11 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		for _, stmt := range n.Proof {
 			f.writeStmt(level+1, stmt)
 		}
+	case *ast.ProofBlockStmt:
+		f.writeLine(level, "proof "+formatExpr(n.Goal)+":")
+		for _, stmt := range n.Proof {
+			f.writeStmt(level+1, stmt)
+		}
 	case *ast.AssertHoleStmt:
 		f.writeLine(level, "assert ?")
 	case *ast.ProofUseStmt:
