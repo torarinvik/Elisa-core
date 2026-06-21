@@ -540,7 +540,10 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	if a.smtEquationStructType(a.exprTypes[argExpr]) {
 		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
 	}
-	if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
+	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
+	// body is type-analyzed (e.g. a loop body's `i+1`) has a nil exprTypes entry; falling through to
+	// termEnv resolves it via scope, which is what the loop-invariant preserve proof needs.
+	if t := a.exprTypes[argExpr]; t != nil && !isSMTExactAssignmentType(t) {
 		return !requireBinding
 	}
 	term, ok := tr.termEnv(argExpr, argEnv)
@@ -1089,6 +1092,15 @@ type smtTranslator struct {
 	// keeps the emitted axiom set finite; soundness does not depend on the depth (only on purity +
 	// termination), so this is purely a completeness knob.
 	callEqMaxUnroll int
+	// callEqDeclDepth bounds defining-equation unfolding PER CALLEE declaration. callEqInFlight keys on
+	// the canonical call (decl+args), so genuine recursion f(n)->f(n-1)->f(n-2) mints a fresh key each
+	// level and the per-key bound never trips — an infinite unfold. This per-decl counter trips after
+	// callEqMaxDeclDepth nested instantiations of the SAME function, leaving the deeper self-call opaque
+	// (still sound: a missing equation only weakens the hypothesis set; the recursive IH already carries
+	// the inductive content).
+	callEqDeclDepth map[*ast.FuncDecl]int
+	// callEqMaxDeclDepth bounds callEqDeclDepth.
+	callEqMaxDeclDepth int
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -1109,8 +1121,10 @@ func (a *Analyzer) newSMTTranslator(paramConsts map[string]int64) *smtTranslator
 		paramConsts:     paramConsts,
 		ceExprs:         map[string]string{},
 		callCanon:       map[string]string{},
-		callEqInFlight:  map[string]int{},
-		callEqMaxUnroll: 1,
+		callEqInFlight:     map[string]int{},
+		callEqMaxUnroll:    1,
+		callEqDeclDepth:    map[*ast.FuncDecl]int{},
+		callEqMaxDeclDepth: 2,
 	}
 }
 
@@ -2262,7 +2276,7 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	args := proofCallArgs(call)
 	var canonKey string
 	if direct && decl != nil {
-		if key, ok := tr.callCanonKeyEnv(decl, args, argEnv); ok {
+		if key, ok := tr.callCanonKeyEnv(decl, args, tr.canonKeyEnv(decl, argEnv)); ok {
 			if sym, seen := tr.callCanon[key]; seen {
 				return sym, true
 			}
@@ -2376,7 +2390,7 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	args := proofCallArgs(call)
 	var canonKey string
 	if direct && decl != nil {
-		if key, ok := tr.callCanonKeyEnv(decl, args, argEnv); ok {
+		if key, ok := tr.callCanonKeyEnv(decl, args, tr.canonKeyEnv(decl, argEnv)); ok {
 			if sym, seen := tr.callCanon[key]; seen {
 				return sym, true
 			}
@@ -2426,6 +2440,21 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 // fragment (so no stable key exists and the caller mints a fresh aux instead).
 func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (string, bool) {
 	return tr.callCanonKeyEnv(decl, args, nil)
+}
+
+// canonKeyEnv chooses the env used to CANONICALIZE a call (not to lower its body). For a recursive
+// self-call the key MUST be syntactic (nil env): the function's own defining-equation body is
+// translated under a substitution env, and we need the body's recursive sub-call to canonicalize to
+// the SAME symbol as the outer call so the equation becomes the self-referential fixpoint
+// `aux == body(aux)` that, together with the `ensure` IH, lets z3 perform the induction. Threading the
+// substitution env here would give the sub-call a distinct key, mint a fresh symbol every level, and
+// both lose the fixpoint AND defeat the bounded-unroll guard (unbounded recursion). Non-recursive
+// calls keep the env so struct/bool/forwarded args lower precisely.
+func (tr *smtTranslator) canonKeyEnv(decl *ast.FuncDecl, argEnv map[string]string) map[string]string {
+	if tr != nil && tr.a != nil && tr.a.isRecursiveProofCall(decl) {
+		return nil
+	}
+	return argEnv
 }
 
 func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {
@@ -2507,6 +2536,13 @@ func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *a
 	if tr.callEqInFlight[canonKey] >= tr.callEqMaxUnroll {
 		return // bounded unroll reached: leave the symbol opaque (still sound)
 	}
+	// Per-callee depth cap. canonKey embeds the arguments, so genuine recursion f(n)->f(n-1)->... mints a
+	// fresh key at every level and callEqInFlight never trips. This per-decl counter bounds how many
+	// nested instantiations of the SAME function may be unfolded, so the unfold terminates. Leaving the
+	// deeper self-call opaque is sound (a missing defining equation only removes a hypothesis).
+	if tr.callEqDeclDepth[decl] >= tr.callEqMaxDeclDepth {
+		return
+	}
 	if !tr.callEquationEligible(decl) {
 		return
 	}
@@ -2524,6 +2560,8 @@ func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *a
 	}
 	tr.callEqInFlight[canonKey]++
 	defer func() { tr.callEqInFlight[canonKey]-- }()
+	tr.callEqDeclDepth[decl]++
+	defer func() { tr.callEqDeclDepth[decl]-- }()
 	bodyTerm, ok := tr.termEnv(body, env)
 	if !ok {
 		bodyTerm, ok = tr.boolTerm(body, env)
