@@ -482,6 +482,14 @@ func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) 
 			env[name] = arr
 			continue
 		}
+		// A datatype-typed (enum/struct) substitution has no scalar SMT term; `tr.term` would otherwise
+		// mint a bogus integer var for the ident, breaking predicate canonicalization. Bind a recoverable
+		// datatype token instead so a bool predicate over it (`all_nonneg(result)` with `result := t`)
+		// keys to the SAME symbol as the un-substituted `all_nonneg(t)`. boolPredicateArgToken decodes it.
+		if isDatatypeValuedType(a.exprTypes[argExpr]) {
+			env[name] = dtToken(smtProjectionName(argExpr))
+			continue
+		}
 		term, ok := tr.term(argExpr)
 		if !ok {
 			return nil, false
@@ -489,6 +497,20 @@ func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) 
 		env[name] = term
 	}
 	return env, true
+}
+
+// isDatatypeValuedType reports whether a type is an enum/struct aggregate value (no scalar SMT term).
+// Used to bind datatype substitutions to a projection token rather than a fabricated integer var.
+func isDatatypeValuedType(t Type) bool {
+	if t == nil {
+		return false
+	}
+	switch stripRefForBounds(t).(type) {
+	case *EnumType, *StructType:
+		return true
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
@@ -518,17 +540,34 @@ func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Ex
 			env[name] = arr
 			continue
 		}
+		if isDatatypeValuedType(a.exprTypes[argExpr]) {
+			env[name] = dtToken(smtProjectionName(argExpr))
+			continue
+		}
 		if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
 			continue
 		}
 		term, ok := tr.term(argExpr)
 		if !ok {
-			return nil, false
+			// A datatype-typed substitution (e.g. `result := t` where t: Tree) has no integer SMT term,
+			// but a bool PREDICATE over it (`all_nonneg(result)`) can still be canonicalized. Bind a
+			// recoverable datatype token so boolPredicateArgToken maps the predicate call to the SAME
+			// symbol the un-substituted occurrence uses (sound: tokens only key opaque predicate symbols,
+			// they never enter an arithmetic term — a datatype value is never compared/added).
+			env[name] = dtToken(smtProjectionName(argExpr))
+			continue
 		}
 		env[name] = term
 	}
 	return env, true
 }
+
+// dtTokenPrefix marks an env binding as a DATATYPE-projection token (not an SMT term). Only
+// boolPredicateArgToken reads these; arithmetic/comparison lowering never sees a datatype-typed operand
+// (the type checker forbids it), so the marker can never leak into a numeric SMT term.
+const dtTokenPrefix = "__dt__"
+
+func dtToken(projection string) string { return dtTokenPrefix + projection }
 
 // smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
 // (non-negated — they are assumed), using the given translator so free variables and arrays share the
@@ -1929,6 +1968,11 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		default:
 			return "", false
 		}
+	case *ast.CallExpr:
+		// A bool-returning predicate call (e.g. a `ghost def ... -> bool` over a recursive datatype):
+		// canonicalize to one opaque Bool symbol and, when structurally well-founded, emit its bounded
+		// structural defining equation (the inductive unfolding). See analyzer_structural_induction.go.
+		return tr.boolPredicateCallSym(n, env)
 	default:
 		return "", false
 	}
