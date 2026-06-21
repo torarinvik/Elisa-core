@@ -30,6 +30,16 @@ struct Slice[T]:
 def slice[T](da: mutable darray[T]&) -> Slice[T]:
 	return Slice[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
 
+# Coerce a parallel-iteration source to a Slice. Overloaded for a darray (borrows its full backing,
+# like `slice`) and for a Slice (identity). The `for x in xs by par:` lowering calls `as_slice(xs)`
+# so it can index the source through a thread-shareable, all-scalar Slice -- reading element `idx` on
+# its band's worker is race-free because each global index is visited exactly once.
+def as_slice[T](da: mutable darray[T]&) -> Slice[T]:
+	return Slice[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
+
+def as_slice[T](s: Slice[T]) -> Slice[T]:
+	return s
+
 # Number of elements. `s.len()` reads the same value as the `count` field.
 def len[T](s: Slice[T]) -> usize:
 	return s.count

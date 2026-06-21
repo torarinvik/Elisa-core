@@ -1051,6 +1051,38 @@ func (p *Parser) parseForStmt() ast.Stmt {
 	if p.match(lexer.TOKEN_IF) {
 		filter = p.parseExpr()
 	}
+	// Optional `by par` data-parallel marker on a collection for-loop: lowers to the same
+	// `for_indices_par` disjoint-band machinery as the range form, indexing the source through a
+	// thread-shareable Slice (so reading each element is race-free) and binding the loop name to
+	// the band's element. `by simd` is rejected; recognized loop shapes vectorize by default.
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "by" {
+		byPos := p.cur().Pos
+		p.advance()
+		marker := p.expect(lexer.TOKEN_IDENT).Text
+		switch marker {
+		case "par":
+			namePattern, ok := pattern.(*ast.MoveBindNamePattern)
+			if !ok {
+				p.errorAt(byPos, "`by par` collection loop requires a simple loop name")
+				namePattern = &ast.MoveBindNamePattern{Position: pos, Name: "_"}
+			}
+			if reverse {
+				p.errorAt(byPos, "`by par` is not supported on a reverse loop")
+			}
+			if mode != ast.IterBindValue {
+				p.errorAt(byPos, "`by par` collection loop does not support ref binders")
+			}
+			if patternFilter != nil || whereFilter != nil || filter != nil {
+				p.errorAt(byPos, "`by par` is not supported on a filtered loop (`where`/`if`)")
+			}
+			body := p.parseForStmtBody()
+			return p.buildParallelCollectionFor(pos, namePattern.Name, startOrSource, body)
+		case "simd":
+			p.errorAt(byPos, "`by simd` was removed; recognized loop shapes vectorize by default (a non-vectorizable shape warns under -Wperf)")
+		default:
+			p.errorAt(byPos, "expected `par` after `by`, got %q", marker)
+		}
+	}
 	body := p.parseForStmtBody()
 	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body}
 }
@@ -1119,6 +1151,54 @@ func (p *Parser) buildParallelIndexFor(pos lexer.Pos, name string, start ast.Exp
 		Func: &ast.Ident{Position: pos, Name: "for_indices_par"},
 		Args: []ast.Expr{count, lambda}}
 	return &ast.ExprStmt{Position: pos, Expr: call}
+}
+
+// buildParallelCollectionFor lowers `for <name> in <src> by par: <body>` over a darray (or Slice)
+// `src` onto the same disjoint-band machinery as the range form. It first borrows the source's index
+// space as a thread-shareable Slice (`__by_par_src = as_slice(src)`), then runs
+// `for_indices_par(__by_par_src.len(), lambda(idx) => { <name> = __by_par_src.get(idx); ...; 0 })`.
+// Each global index is visited exactly once across the bands, so reading `src[idx]` is race-free; the
+// Slice is all-scalar so capturing it for the read is thread-safe. Capturing a non-partitioned
+// darray for OUTPUT is still rejected by the parallel-body data-race guard. A `[]Stmt{decl, expr}`
+// scope is returned so `__by_par_src` is hoisted once before the parallel region.
+func (p *Parser) buildParallelCollectionFor(pos lexer.Pos, name string, src ast.Expr, body []ast.Stmt) ast.Stmt {
+	usizeT := &ast.NamedType{Position: pos, Name: "usize"}
+	p.byParSeq++
+	srcName := fmt.Sprintf("__by_par_src_%d", p.byParSeq)
+	srcDecl := &ast.VarDeclStmt{
+		Position: pos, Name: srcName,
+		Value: &ast.CallExpr{Position: pos,
+			Func: &ast.Ident{Position: pos, Name: "as_slice"},
+			Args: []ast.Expr{src}},
+	}
+	idxName := "__by_par_idx"
+	var lambdaBody []ast.Stmt
+	// <name> = __by_par_src.get(__by_par_idx)
+	lambdaBody = append(lambdaBody, &ast.VarDeclStmt{
+		Position: pos, Name: name,
+		Value: &ast.CallExpr{Position: pos,
+			Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcName}, Field: "get"},
+			Args: []ast.Expr{&ast.Ident{Position: pos, Name: idxName}}},
+	})
+	lambdaBody = append(lambdaBody, body...)
+	lambdaBody = append(lambdaBody, &ast.ReturnStmt{Position: pos, Value: &ast.IntLit{Position: pos, Value: "0"}})
+	lambda := &ast.LambdaExpr{
+		Position: pos, Keyword: "lambda", ParallelBody: true,
+		Params:     []ast.ParamDecl{{Position: pos, Name: idxName, Type: usizeT}},
+		ReturnType: &ast.NamedType{Position: pos, Name: "i64"},
+		Body:       lambdaBody,
+	}
+	count := &ast.CallExpr{Position: pos,
+		Func: &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: srcName}, Field: "len"},
+		Args: nil}
+	call := &ast.CallExpr{Position: pos,
+		Func: &ast.Ident{Position: pos, Name: "for_indices_par"},
+		Args: []ast.Expr{count, lambda}}
+	// The `__by_par_src` Slice decl must precede the parallel loop; emit it first and buffer the
+	// loop call as a pending statement so both land flat in the enclosing block (the parser drains
+	// pendingStmts right after this statement, preserving decl-then-loop order).
+	p.pendingStmts = append(p.pendingStmts, &ast.ExprStmt{Position: pos, Expr: call})
+	return srcDecl
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {

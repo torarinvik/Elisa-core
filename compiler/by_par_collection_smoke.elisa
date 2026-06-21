@@ -1,0 +1,48 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# `for x in xs by par:` is the data-parallel COLLECTION-iteration sugar. The parser lowers it onto
+# the same `for_indices_par` disjoint-band machinery as the range form: xs's index space [0, count)
+# is partitioned into disjoint bands over a structured nursery, the source is borrowed as a
+# thread-shareable Slice (`as_slice(xs)`), and each worker reads `xs[idx]` for the indices in its
+# band. Each global index is visited exactly once, so a worker writing its own element's slot can
+# never collide with another. Output is addressed through a thread-shareable Slice (a raw darray
+# cannot cross the nursery boundary -- that stays a compile error).
+#
+# This fixture proves the parallel result is bit-identical to the equivalent sequential loop.
+@test
+def by_par_collection_smoke():
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		n: usize = 4096.usize()
+		# xs[k] == k, so each element `x` uniquely owns output slot `x` (disjoint writes).
+		xs: mutable darray[i64] = [k for k in 0..<4096]
+
+		# parallel: out[x] = x*x + 7, iterating the collection in parallel
+		par_out: mutable darray[i64] = []
+		par_out.resize(n)
+		outs: Slice[i64] = slice(&par_out)
+		for x in xs by par:
+			outs.set(x.usize(), x * x + 7)
+
+		# sequential reference
+		seq_out: mutable darray[i64] = []
+		seq_out.resize(n)
+		for x in xs:
+			seq_out[x.usize()] <- x * x + 7
+
+		ok: mutable bool = true
+		for i in 0..<n:
+			if par_out[i] != seq_out[i]:
+				ok <- false
+		assert ok
+		assert par_out[0.usize()] == 7
+		assert par_out[4095.usize()] == 4095 * 4095 + 7
+
+		# A Slice source works too (as_slice identity), iterating its elements in parallel.
+		sl: Slice[i64] = slice(&xs)
+		par2: mutable darray[i64] = []
+		par2.resize(n)
+		o2: Slice[i64] = slice(&par2)
+		for x in sl by par:
+			o2.set(x.usize(), x * 2)
+		assert par2[2048.usize()] == 4096
+		assert par2[4095.usize()] == 8190

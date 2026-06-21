@@ -31,6 +31,9 @@ type Parser struct {
 	// parseStmt so the children land flat in the enclosing block — keeping the AST free of any
 	// wrapper node and letting every existing walker see plain `VarDeclStmt`s.
 	pendingStmts []ast.Stmt
+	// byParSeq makes each `for x in xs by par:` lowering's synthesized Slice local unique, so two
+	// such loops in the same block do not collide on the `__by_par_src` name.
+	byParSeq int
 	// pendingDecls buffers extra TOP-LEVEL declarations produced by a single parseDecl call that
 	// desugars to MORE than one decl (the `protocol` typestate sugar, docs/96: one declaration expands
 	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer
