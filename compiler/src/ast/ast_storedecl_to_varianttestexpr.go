@@ -746,10 +746,14 @@ type LambdaExpr struct {
 	Position            lexer.Pos
 	Keyword             string
 	UsesShorthandParams bool
-	Params              []ParamDecl
-	ReturnType          TypeExpr
-	Body                []Stmt
-	BodyExpr            Expr
+	// ParallelBody marks a lambda synthesized as the body of a `by par` range-loop (the
+	// `for_indices_par` lowering). Such a body runs across disjoint index bands in parallel, so the
+	// analyzer rejects it if it captures thread-unsafe state (a darray header, a mutable ref, etc.).
+	ParallelBody bool
+	Params       []ParamDecl
+	ReturnType   TypeExpr
+	Body         []Stmt
+	BodyExpr     Expr
 }
 type SizeofExpr struct {
 	Position lexer.Pos

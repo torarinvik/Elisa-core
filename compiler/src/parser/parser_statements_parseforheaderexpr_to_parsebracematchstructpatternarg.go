@@ -34,6 +34,19 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 				return expr
 			}
 		case lexer.TOKEN_IDENT:
+			// A trailing `by par` / `by simd` data-parallel marker ends the range-bound expression
+			// (e.g. the `n` in `for i in 0 ..< n by par:`). Stop the header scan at `by` so the loop
+			// parser can see and consume the marker.
+			if depth == 0 && tok.Text == "by" && end+1 < len(p.tokens) && p.tokens[end+1].Kind == lexer.TOKEN_IDENT {
+				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
+				sub := New(subTokens)
+				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
+				expr := sub.parseExpr()
+				p.errors = append(p.errors, sub.Errors()...)
+				p.pos = end
+				return expr
+			}
 			if depth == 0 && p.isForHeaderWhereClauseBoundary(end) {
 				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
 				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})

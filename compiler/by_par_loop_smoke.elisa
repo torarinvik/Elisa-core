@@ -1,0 +1,48 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# `for i in 0 ..< n by par:` is the data-parallel index-loop sugar (docs/79 Part IV). The parser
+# lowers it to the runtime `for_indices_par` combinator: [0, n) is partitioned into disjoint index
+# bands over a structured nursery, so each `i` is visited exactly once and a thread writing its own
+# `out[i]` slot can never collide with another. The output is addressed through a thread-shareable
+# Slice (a raw darray cannot cross the nursery boundary -- that stays a compile error).
+#
+# This fixture proves the parallel result is bit-identical to the sequential loop, for a 0-based
+# range and a non-zero-based range (`base ..< base+n`, which rebinds i = base + band-index).
+@test
+def by_par_loop_smoke():
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		n: usize = 4096.usize()
+		src: mutable darray[i64] = [k for k in 0..<4096]
+
+		# parallel: out[i] = src[i]*src[i] + 7, written through a Slice over disjoint index bands
+		par_out: mutable darray[i64] = []
+		par_out.resize(n)
+		outs: Slice[i64] = slice(&par_out)
+		ins: Slice[i64] = slice(&src)
+		for i in 0 ..< n by par:
+			outs.set(i, ins.get(i) * ins.get(i) + 7)
+
+		# sequential reference
+		seq_out: mutable darray[i64] = []
+		seq_out.resize(n)
+		for i in 0..<n:
+			seq_out[i] <- src[i] * src[i] + 7
+
+		ok: mutable bool = true
+		for i in 0..<n:
+			if par_out[i] != seq_out[i]:
+				ok <- false
+		assert ok
+		assert par_out[0.usize()] == 7
+		assert par_out[4095.usize()] == 4095 * 4095 + 7
+
+		# non-zero-based range: i runs over [1000, 1000+n2)
+		n2: usize = 2000.usize()
+		base: usize = 1000.usize()
+		par2: mutable darray[i64] = []
+		par2.resize(4000.usize())
+		o2: Slice[i64] = slice(&par2)
+		for i in base ..< base + n2 by par:
+			o2.set(i, (i * 3.usize()).i64())
+		assert par2[1000.usize()] == 3000
+		assert par2[2999.usize()] == (2999 * 3).i64()

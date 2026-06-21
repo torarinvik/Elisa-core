@@ -36,6 +36,40 @@ def each[T](s: Slice[T], body: func(Slice[T]) -> i64, w: usize = 0.usize()) -> v
 			for t in 0..<nw:
 				submit body(s.split(nw, t))
 
+# Index-band worker arg: a half-open global index range [lo, hi) and the per-index body. The
+# ranges across workers are the disjoint ceil-split partition of [0, n), so every index is
+# visited exactly once and no two workers touch the same index -- writes through `body(i)` to
+# distinct `out[i]` slots are race-free by construction (the same disjointness as `split`).
+struct ParIndexArg:
+	lo: usize
+	hi: usize
+	body: func(usize) -> i64 can[Abort.Panic]
+
+def par_index_worker(a: ParIndexArg) -> i64:
+	can Abort.Panic:
+		for i in a.lo ..< a.hi:
+			_ = a.body(i)
+		return 0
+
+# Parallel index-for: runs `body(i)` for every `i` in `[0, n)` in parallel over disjoint index
+# bands, joining all workers before returning. This is the lowering target of the `by par` sugar
+# on a range for-loop:
+#
+#	for i in 0 ..< n by par:
+#		out[i] <- f(in[i])        # desugars to  for_indices_par(n, lambda i => { ...; 0 })
+#
+# Disjoint bands => race-free for the canonical "write your own index" shape. Sharing a darray (or
+# any non-thread-shareable value) into the body is still rejected at the lambda/nursery boundary.
+def for_indices_par(n: usize, body: func(usize) -> i64 can[Abort.Panic], w: usize = 0.usize()) -> void:
+	can Parallel, Abort.Panic:
+		nw: usize = w if w != 0.usize() else default_workers_for(n)
+		band: usize = (n + nw - 1.usize()) / nw
+		nursery workers(nw):
+			for t in 0..<nw:
+				lo: usize = t * band
+				hi: usize = (lo + band if lo + band < n else n)
+				submit par_index_worker(ParIndexArg { lo: lo if lo < n else n, hi: hi, body: body })
+
 struct ParMapArg[T, U]:
 	src: Slice[T]
 	dst: Slice[U]

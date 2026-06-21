@@ -125,6 +125,17 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 			break
 		}
 	}
+	// A `by par` range-loop body (the `for_indices_par` lowering) runs across disjoint index bands
+	// in parallel. Capturing thread-unsafe state — a darray header (which aliases its shared backing
+	// buffer), a mutable reference, etc. — would be a data race, exactly as for a directly-spawned
+	// closure. Address shared output through a thread-shareable Slice band (`s.set(i, ...)`) instead.
+	if expr.ParallelBody && fnType.CapturesThreadUnsafe {
+		for _, capture := range captures {
+			if a.closureCaptureSharesMutableState(capture.typ, map[string]bool{}) {
+				a.errorf(expr.Pos(), "the `by par` loop body shares %q (%s) across the parallel index bands; this aliases shared mutable state and is a data race. Write your own `i`-th slot through a thread-shareable Slice band (e.g. `s.set(i, ...)`) instead of capturing the container directly", capture.name, capture.typ)
+			}
+		}
+	}
 
 	savedScope := a.currentScope
 	savedReturn := a.currentReturn
