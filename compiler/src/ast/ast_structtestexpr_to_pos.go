@@ -491,6 +491,7 @@ const (
 	ContractInvariant                         // in-body assertion: `invariant <bool-expr>`, checked in place
 	ContractDecreases                         // termination measure: `decreases <int-expr>` (docs/86 brick 86-7)
 	ContractDecreasesWild                     // termination opt-out: `decreases * "reason"` (Dafny-style wildcard)
+	ContractUses                              // named-contract application: `uses Name(args)` (docs/97)
 )
 
 // ContractStmt is a value-contract clause written as a leading body statement. The parser produces
@@ -501,6 +502,11 @@ type ContractStmt struct {
 	Kind       ContractKind
 	Cond       Expr
 	WildReason string // non-empty iff Kind == ContractDecreasesWild; the mandatory reason string
+	// UsesName / UsesArgs hold a named-contract application `uses Name(args)` (Kind == ContractUses,
+	// docs/97). UsesName is the contract's name; UsesArgs are the positional application arguments that
+	// bind to the contract's formal parameters. Both empty for every other Kind.
+	UsesName string
+	UsesArgs []Expr
 }
 type StaticAssertBlockStmt struct {
 	Position   lexer.Pos

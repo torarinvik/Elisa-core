@@ -186,6 +186,18 @@ type FuncDecl struct {
 	// function machinery (generics, modules, type checking, calls); the flag drives purity
 	// enforcement and lets `is` resolve it as a predicate.
 	IsLaw bool
+	// IsContract marks a `contract Name(params):` declaration (docs/97): a named, reusable bundle of
+	// value contracts (Requires/EnsureValues) and frame conditions (Changes/Preserves), parameterised
+	// over its Params. It is represented as a FuncDecl (reusing decl/generic/module machinery, like a
+	// law) but has no executable body and is never codegen'd — it exists only to be applied to real
+	// functions via a leading `uses Name(args)` clause, whose expansion folds these slices (with
+	// formals substituted by application arguments) into the applying function's own contract slices.
+	IsContract bool
+	// Uses holds leading `uses Name(args)` named-contract applications (docs/97), lifted off the front
+	// of the body alongside the other leading contracts. The analyzer's expandUsesContracts pass
+	// resolves each name to a `contract` decl, substitutes formals→args, and folds the contract's
+	// clauses into this function's Requires/EnsureValues/Changes/Preserves before discharge runs.
+	Uses []*ContractStmt
 	// IsLemma marks a `lemma` declaration (ghost code): a verification-only function whose `ensure`
 	// postconditions are PROVEN from its `requires` + body, and which is invoked as a statement to
 	// INJECT those (proven) postconditions as assumable facts at the call site. It is erased from

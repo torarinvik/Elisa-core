@@ -62,6 +62,12 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 				a.defineGlobal(&Symbol{Name: qualifiedName, Kind: SymbolGlobal, Type: declType, Node: n, Mutable: n.Mutable, Private: scoped.Private}, n.Pos())
 			case *ast.FuncDecl:
+				// A `contract` decl (docs/97) is not a callable value: it is a named bundle of clauses
+				// consumed by expandUsesContracts, with no body and no return type. Do not register a
+				// function symbol for it (a `uses` clause references it by name, not by call).
+				if n.IsContract {
+					return
+				}
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
 				// A `def` whose name is a builtin scalar type (f32, i32, u8, …) is unreachable
 				// by call: a call site `name(x)` resolves to the type cast, not to this function.

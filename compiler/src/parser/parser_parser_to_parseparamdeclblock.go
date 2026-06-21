@@ -315,6 +315,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("lemma") && p.looksLikeLemmaDecl() {
 		return p.parseLemmaDecl()
 	}
+	if p.peekIdentText("contract") && p.looksLikeContractDecl() {
+		return p.parseContractDecl()
+	}
 	if p.peekIdentText("tokenset") {
 		return p.parseTokenSetDecl()
 	}
@@ -638,6 +641,103 @@ func (p *Parser) parseLawDecl() ast.Decl {
 		ReturnType:       &ast.NamedType{Position: pos, Name: "bool"},
 		Body:             []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: predicate}},
 		IsLaw:            true,
+	}
+}
+
+// looksLikeContractDecl distinguishes a `contract Name(...)` declaration (docs/97) from an identifier
+// merely spelled `contract`. At decl position a contract is `contract <name> [generics] ( … ):`, so
+// require an identifier name followed by `(` or `[`.
+func (p *Parser) looksLikeContractDecl() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	switch p.tokens[p.pos+2].Kind {
+	case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseContractDecl parses a named composable contract (docs/97):
+//
+//	contract Name[generics](params):
+//	    requires <bool>
+//	    ensure   <bool>
+//	    changes  <path>, …
+//	    preserves <path>, …
+//
+// It is represented as a bool-less FuncDecl with IsContract set, carrying the bundled value contracts
+// in Requires/EnsureValues and the frame conditions in Changes/Preserves. The body is exactly a run
+// of requires/ensure/changes/preserves clauses — no executable statements, no `decreases`.
+func (p *Parser) parseContractDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("contract")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
+	p.expect(lexer.TOKEN_LPAREN)
+	params, _ := p.parseExplicitSignatureParamList(true, false)
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	var requires, ensures []ast.Expr
+	var changes, preserves []ast.EnsuresPath
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		switch {
+		case p.peekIdentText("requires"):
+			p.advance()
+			saved := p.allowQuantifiers
+			p.allowQuantifiers = true
+			requires = append(requires, p.parseExpr())
+			p.allowQuantifiers = saved
+			p.expectNewline()
+		case p.peekIdentText("ensure"):
+			p.advance()
+			saved := p.allowQuantifiers
+			p.allowQuantifiers = true
+			ensures = append(ensures, p.parseExpr())
+			p.allowQuantifiers = saved
+			p.expectNewline()
+		case p.matchIdentText("changes"):
+			changes = append(changes, p.parseChangesPathsAfterKeyword()...)
+			p.expectNewline()
+		case p.matchIdentText("preserves"):
+			preserves = append(preserves, p.parseChangesPathsAfterKeyword()...)
+			p.expectNewline()
+		case p.peekIdentText("decreases"):
+			p.errorf("a `contract` body may not contain `decreases`: a termination measure is a property of a recursion, not a reusable contract (docs/97 §5)")
+			p.advance()
+			p.parseExpr()
+			p.expectNewline()
+		default:
+			p.errorf("a `contract` body may only contain requires/ensure/changes/preserves clauses, got %s", p.cur())
+			for p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+				p.advance()
+			}
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.FuncDecl{
+		Position:         pos,
+		Name:             name,
+		TypeParams:       typeParams,
+		RegionParams:     regionParams,
+		PermissionParams: permissionParams,
+		GenericParams:    genericParams,
+		Params:           params,
+		Requires:         requires,
+		EnsureValues:     ensures,
+		Changes:          changes,
+		Preserves:        preserves,
+		IsContract:       true,
 	}
 }
 
