@@ -102,6 +102,9 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 		a.recordProof(cert.pos(), "termination of "+fn.Name+" ("+cert.label()+")", "decreases", ProofRefuted)
 		a.errorf(call.Pos(), "cannot prove the `decreases` measure strictly decreases at this recursive call to %q; the function may not terminate", fn.Name)
 	}
+	if a.definingEquationCache != nil {
+		delete(a.definingEquationCache, fn)
+	}
 }
 
 // collectSelfRecursiveCalls returns every direct call `fn.Name(...)` syntactically inside fn's body.
@@ -393,7 +396,7 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	if decl.IsLemma {
 		return false
 	}
-	// PURE shape: integer params, integer return, and a single `return <pure-expr>` body. A pure return
+	// PURE shape: SMT-exact params/return and a single `return <pure-expr>` body. A pure return
 	// expression has no statements that could mutate state, loop, or perform effects.
 	sym, ok := a.symbolForFuncDecl(decl)
 	if !ok || sym == nil {
@@ -403,12 +406,11 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	if !ok || fnType == nil {
 		return false
 	}
-	if fnType.Return == nil || !IsNumericType(fnType.Return) || IsFloatType(fnType.Return) {
+	if !a.smtEquationResultType(fnType.Return) {
 		return false
 	}
 	for _, pt := range fnType.Params {
-		// A reference/aggregate param could alias mutable state, so only plain integer params qualify.
-		if pt == nil || !IsNumericType(pt) || IsFloatType(pt) {
+		if !a.smtEquationParamType(pt) {
 			return false
 		}
 	}
@@ -422,12 +424,13 @@ func (a *Analyzer) computeDefiningEquationEligible(decl *ast.FuncDecl) bool {
 	// TOTAL: a function that makes ANY direct self-recursive call must have a VERIFIED `decreases`
 	// measure — otherwise its "equation" may be inconsistent (non-termination ⇒ no fixed point). A
 	// non-recursive pure function is trivially total.
+	selfCalls := a.collectSelfRecursiveCalls(decl)
+	if len(selfCalls) > 0 {
+		return a.measureVerifiedForCalls(decl, selfCalls)
+	}
 	edges := a.collectRecursiveSCCEdges(decl)
 	if len(edges) == 0 {
 		return true
-	}
-	if len(edges) == len(a.collectSelfRecursiveCalls(decl)) {
-		return a.measureVerifiedForCalls(decl, a.collectSelfRecursiveCalls(decl))
 	}
 	return a.mutualRecursionVerified(decl, edges)
 }
@@ -460,7 +463,7 @@ func (a *Analyzer) measureVerifiedForCalls(decl *ast.FuncDecl, calls []*ast.Call
 	}
 	for _, c := range calls {
 		subst := a.substForSelfCall(decl, c)
-		if !a.proveMeasureDecreases(decl.Decreases, subst) {
+		if !a.proveMeasureDecreases(decl.Decreases, subst) && !a.directNumericSyntacticDecrease(decl, c) {
 			return false
 		}
 	}
@@ -487,11 +490,11 @@ func (a *Analyzer) functionPureEquationShape(decl *ast.FuncDecl) bool {
 	if !ok || fnType == nil {
 		return false
 	}
-	if fnType.Return == nil || !IsNumericType(fnType.Return) || IsFloatType(fnType.Return) {
+	if !a.smtEquationResultType(fnType.Return) {
 		return false
 	}
 	for _, pt := range fnType.Params {
-		if pt == nil || IsFloatType(pt) {
+		if !a.smtEquationParamType(pt) {
 			return false
 		}
 	}
@@ -503,6 +506,8 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
+	case *ast.FieldExpr:
+		return n != nil && a.exprIsPureShapeForEquation(n.Object)
 	case *ast.ParenExpr:
 		return n != nil && a.exprIsPureShapeForEquation(n.Inner)
 	case *ast.UnaryExpr:
@@ -519,6 +524,18 @@ func (a *Analyzer) exprIsPureShapeForEquation(expr ast.Expr) bool {
 		}
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if !ok || decl == nil {
+			if ident, idOK := n.Func.(*ast.Ident); idOK && ident != nil && a.definingEquationInProgress != nil {
+				for inProgress := range a.definingEquationInProgress {
+					if inProgress != nil && inProgress.Name == ident.Name {
+						for _, arg := range n.Args {
+							if !a.exprIsPureShapeForEquation(arg) {
+								return false
+							}
+						}
+						return true
+					}
+				}
+			}
 			return false
 		}
 		for _, arg := range n.Args {
@@ -541,6 +558,8 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.IntLit, *ast.BoolLit, *ast.Ident:
 		return true
+	case *ast.FieldExpr:
+		return n != nil && a.exprIsPureForEquation(n.Object)
 	case *ast.ParenExpr:
 		return n != nil && a.exprIsPureForEquation(n.Inner)
 	case *ast.UnaryExpr:
@@ -557,6 +576,18 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 		}
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if !ok || decl == nil {
+			if ident, idOK := n.Func.(*ast.Ident); idOK && ident != nil && a.definingEquationInProgress != nil {
+				for inProgress := range a.definingEquationInProgress {
+					if inProgress != nil && inProgress.Name == ident.Name {
+						for _, arg := range n.Args {
+							if !a.exprIsPureForEquation(arg) {
+								return false
+							}
+						}
+						return true
+					}
+				}
+			}
 			return false
 		}
 		for _, arg := range n.Args {
@@ -571,6 +602,36 @@ func (a *Analyzer) exprIsPureForEquation(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) smtEquationResultType(t Type) bool {
+	t = stripRefForBounds(t)
+	return t != nil && ((IsNumericType(t) && !IsFloatType(t)) || IsBoolType(t))
+}
+
+func (a *Analyzer) smtEquationParamType(t Type) bool {
+	t = stripRefForBounds(t)
+	if t == nil {
+		return false
+	}
+	if (IsNumericType(t) && !IsFloatType(t)) || IsBoolType(t) || a.smtEquationStructType(t) {
+		return true
+	}
+	return false
+}
+
+func (a *Analyzer) smtEquationStructType(t Type) bool {
+	st, ok := stripRefForBounds(t).(*StructType)
+	if !ok || st == nil || len(st.Fields) == 0 {
+		return false
+	}
+	for _, field := range st.Fields {
+		ft := stripRefForBounds(field.Type)
+		if !((IsNumericType(ft) && !IsFloatType(ft)) || IsBoolType(ft)) {
+			return false
+		}
+	}
+	return true
 }
 
 // measureBoundedBelow reports whether the measure cannot fall below 0. An unsigned-typed measure is

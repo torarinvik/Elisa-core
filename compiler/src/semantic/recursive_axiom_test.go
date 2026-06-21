@@ -135,3 +135,62 @@ def exploit(n: i64) -> i64:
 		t.Fatalf("expected a termination (decreases) error, got: %v", errs)
 	}
 }
+
+func TestGhostPredicateDefiningEquationDischargesEnsure(t *testing.T) {
+	src := `
+ghost def is_even(n: i64) -> bool:
+    return n % 2 == 0
+
+def step(n: i64) -> i64:
+    requires n >= 0
+    requires n <= 1000000
+    requires is_even(n)
+    ensure is_even(result)
+    return n + 2
+`
+	r := analyzeContractStrict(t, "ghost_predicate_equation.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("expected bool-returning ghost equation to prove evenness after +2, got: %v", errs)
+	}
+}
+
+func TestGhostStructProjectionDefiningEquationDischargesInequality(t *testing.T) {
+	src := `
+struct Point:
+    x: i64
+    y: i64
+
+ghost def manhattan(p: Point) -> i64:
+    requires p.x >= 0 and p.y >= 0
+    return p.x + p.y
+
+def grow(p: Point) -> i64:
+    requires p.x >= 0 and p.y >= 0
+    requires p.x <= 1000000 and p.y <= 1000000
+    ensure result >= manhattan(p)
+    return p.x + p.y + 1
+`
+	r := analyzeContractStrict(t, "ghost_struct_projection_equation.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("expected struct-field ghost equation to prove inequality, got: %v", errs)
+	}
+}
+
+func TestGhostRecursiveEquationDeclinesWhenBoundUnavailable(t *testing.T) {
+	src := `
+ghost def countdown(n: i64) -> i64:
+    requires n >= 0
+    decreases n
+    if n == 0:
+        return 0
+    return countdown(n - 1) + 1
+
+def zero() -> i64:
+    ensure result == countdown(0)
+    return 0
+`
+	r := analyzeContractStrict(t, "ghost_recursive_declines.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("expected recursive ghost equation without a safe unfolding certificate to decline, not accept")
+	}
+}

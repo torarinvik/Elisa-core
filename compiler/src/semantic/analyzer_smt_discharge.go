@@ -491,76 +491,97 @@ func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.Ca
 func (a *Analyzer) smtEnvForSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
 	env := map[string]string{}
 	for name, argExpr := range subst {
-		if lit, ok := argExpr.(*ast.BoolLit); ok {
-			if lit.Value {
-				env[name] = "true"
-			} else {
-				env[name] = "false"
-			}
-			continue
-		}
-		if IsBoolType(a.exprTypes[argExpr]) {
-			bterm, ok := tr.boolTerm(argExpr, nil)
-			if !ok {
-				return nil, false
-			}
-			env[name] = bterm
-			continue
-		}
-		if tr.isArrayLike(a.exprTypes[argExpr]) {
-			arr, ok := tr.arrayTermEnv(argExpr, nil)
-			if !ok {
-				return nil, false
-			}
-			env[name] = arr
-			continue
-		}
-		term, ok := tr.term(argExpr)
-		if !ok {
+		if !a.bindSMTEnvArg(tr, env, name, argExpr, nil, true) {
 			return nil, false
 		}
-		env[name] = term
 	}
 	return env, true
 }
 
 func (a *Analyzer) smtEnvForCallSubst(tr *smtTranslator, subst map[string]ast.Expr) (map[string]string, bool) {
+	return a.smtEnvForCallSubstEnv(tr, subst, nil)
+}
+
+func (a *Analyzer) smtEnvForCallSubstEnv(tr *smtTranslator, subst map[string]ast.Expr, argEnv map[string]string) (map[string]string, bool) {
 	env := map[string]string{}
 	for name, argExpr := range subst {
-		if lit, ok := argExpr.(*ast.BoolLit); ok {
-			if lit.Value {
-				env[name] = "true"
-			} else {
-				env[name] = "false"
-			}
-			continue
-		}
-		if IsBoolType(a.exprTypes[argExpr]) {
-			bterm, ok := tr.boolTerm(argExpr, nil)
-			if !ok {
-				return nil, false
-			}
-			env[name] = bterm
-			continue
-		}
-		if tr.isArrayLike(a.exprTypes[argExpr]) {
-			arr, ok := tr.arrayTermEnv(argExpr, nil)
-			if !ok {
-				return nil, false
-			}
-			env[name] = arr
-			continue
-		}
-		if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
-			continue
-		}
-		term, ok := tr.term(argExpr)
-		if !ok {
+		if !a.bindSMTEnvArg(tr, env, name, argExpr, argEnv, false) {
 			return nil, false
 		}
-		env[name] = term
 	}
 	return env, true
+}
+
+func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string, requireBinding bool) bool {
+	if lit, ok := argExpr.(*ast.BoolLit); ok {
+		if lit.Value {
+			env[name] = "true"
+		} else {
+			env[name] = "false"
+		}
+		return true
+	}
+	if IsBoolType(a.exprTypes[argExpr]) {
+		bterm, ok := tr.boolTerm(argExpr, argEnv)
+		if !ok {
+			return false
+		}
+		env[name] = bterm
+		return true
+	}
+	if tr.isArrayLike(a.exprTypes[argExpr]) {
+		arr, ok := tr.arrayTermEnv(argExpr, argEnv)
+		if !ok {
+			return false
+		}
+		env[name] = arr
+		return true
+	}
+	if a.smtEquationStructType(a.exprTypes[argExpr]) {
+		return a.bindSMTStructEnvArg(tr, env, name, argExpr, argEnv, requireBinding)
+	}
+	if !isSMTExactAssignmentType(a.exprTypes[argExpr]) {
+		return !requireBinding
+	}
+	term, ok := tr.termEnv(argExpr, argEnv)
+	if !ok {
+		return false
+	}
+	env[name] = term
+	return true
+}
+
+func (a *Analyzer) bindSMTStructEnvArg(tr *smtTranslator, env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string, requireBinding bool) bool {
+	st, ok := stripRefForBounds(a.exprTypes[argExpr]).(*StructType)
+	if !ok || st == nil {
+		return !requireBinding
+	}
+	for _, fieldName := range sortedFieldNames(st.Fields) {
+		field := st.Fields[fieldName]
+		ft := stripRefForBounds(field.Type)
+		fieldExpr := &ast.FieldExpr{Object: argExpr, Field: fieldName}
+		key := name + "__field__" + fieldName
+		if IsBoolType(ft) {
+			bterm, ok := tr.boolTerm(fieldExpr, argEnv)
+			if !ok {
+				return false
+			}
+			env[key] = bterm
+			continue
+		}
+		if IsNumericType(ft) && !IsFloatType(ft) {
+			term, ok := tr.termEnv(fieldExpr, argEnv)
+			if !ok {
+				return false
+			}
+			env[key] = term
+			continue
+		}
+		if requireBinding {
+			return false
+		}
+	}
+	return true
 }
 
 // smtRequiresHypotheses translates the enclosing function's `requires` clauses into SMT assertions
@@ -1213,7 +1234,7 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "", false
 	case *ast.CallExpr:
-		return tr.callResultTerm(n)
+		return tr.callResultTermEnv(n, env)
 	case *ast.StructLitExpr:
 		if call, ok := tr.a.proofCallExpr(n); ok {
 			return tr.callResultTerm(call)
@@ -1233,6 +1254,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		return "(select " + arr + " " + idx + ")", true
 	case *ast.FieldExpr:
+		if env != nil {
+			if bound, ok := env[smtProjectionName(n)]; ok {
+				return bound, true
+			}
+		}
 		// `result.field` where `result` is bound to a struct literal → that field's construction
 		// argument, so `ensure result.a == 1` for `return Pair(1, 2)` proves.
 		if tr.resultFields != nil {
@@ -1322,6 +1348,12 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		cond, ok := tr.boolTerm(n.Cond, env)
 		if !ok {
 			return "", false
+		}
+		if cond == "true" {
+			return tr.termEnv(n.Value, env)
+		}
+		if cond == "false" {
+			return tr.termEnv(n.Alt, env)
 		}
 		v, ok := tr.termEnv(n.Value, env)
 		if !ok {
@@ -1869,6 +1901,24 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			return name, true
 		}
 		return "", false
+	case *ast.FieldExpr:
+		if env != nil {
+			if bound, ok := env[smtProjectionName(n)]; ok {
+				return bound, true
+			}
+		}
+		fieldType := tr.a.exprTypes[n]
+		if fieldType == nil {
+			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+				fieldType = resolved
+			}
+		}
+		if IsBoolType(fieldType) {
+			pred := smtBoolVar(smtProjectionName(n))
+			tr.boolDecls[pred] = true
+			return pred, true
+		}
+		return "", false
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_NOT {
 			inner, ok := tr.boolTerm(n.Operand, env)
@@ -1948,6 +1998,12 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			// Numeric equality is the common case; try integer terms first.
 			if l, lok := tr.termEnv(n.Left, env); lok {
 				if r, rok := tr.termEnv(n.Right, env); rok {
+					if l == r {
+						if n.Op == lexer.TOKEN_EQEQ {
+							return "true", true
+						}
+						return "false", true
+					}
 					return smtCompare(n.Op, l, r), true
 				}
 			}
@@ -1955,6 +2011,12 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			// is polymorphic, so equate the two Bool terms directly (negated for `!=`).
 			if bl, blok := tr.boolTerm(n.Left, env); blok {
 				if br, brok := tr.boolTerm(n.Right, env); brok {
+					if bl == br {
+						if n.Op == lexer.TOKEN_EQEQ {
+							return "true", true
+						}
+						return "false", true
+					}
 					eq := "(= " + bl + " " + br + ")"
 					if n.Op == lexer.TOKEN_BANGEQ {
 						return "(not " + eq + ")", true
@@ -1966,6 +2028,8 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		default:
 			return "", false
 		}
+	case *ast.CallExpr:
+		return tr.callResultBoolTermEnv(n, env)
 	default:
 		return "", false
 	}
@@ -2129,6 +2193,14 @@ func (tr *smtTranslator) freshAux(nonNeg bool) string {
 	return v
 }
 
+func (tr *smtTranslator) freshBoolAux() string {
+	tr.auxSeq++
+	v := "aux_bool_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Bool)\n")
+	return v
+}
+
 // maskBoundAux models `X & C` for a non-negative constant C when X's exact bitvector term is
 // unavailable (e.g. X = `word >> runtime_shift`, outside the const-shift fragment). The result is
 // ALWAYS in [0, C] regardless of X — its set bits are a subset of C's — so a fresh integer bounded
@@ -2161,6 +2233,10 @@ func smtBitvectorRead(bvExpr string, signed bool, bits int) string {
 }
 
 func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
+	return tr.callResultTermEnv(call, nil)
+}
+
+func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string]string) (string, bool) {
 	if tr == nil || tr.a == nil || call == nil {
 		return "", false
 	}
@@ -2186,7 +2262,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	args := proofCallArgs(call)
 	var canonKey string
 	if direct && decl != nil {
-		if key, ok := tr.callCanonKey(decl, args); ok {
+		if key, ok := tr.callCanonKeyEnv(decl, args, argEnv); ok {
 			if sym, seen := tr.callCanon[key]; seen {
 				return sym, true
 			}
@@ -2207,7 +2283,7 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 		}
 		subst[param.Name] = args[i]
 	}
-	env, ok := tr.a.smtEnvForCallSubst(tr, subst)
+	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
 	if !ok {
 		return ret, true
 	}
@@ -2273,7 +2349,75 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 	// inconsistent (it would let `f(n) == f(n) + 1` style nonsense be assumed); the termination gate is
 	// exactly what forbids that. The instantiation is bounded by callEqMaxUnroll so the axiom set stays
 	// finite.
-	tr.emitDefiningEquation(call, decl, ret, subst, canonKey, guard, recursiveProofCall)
+	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, recursiveProofCall, env)
+	return ret, true
+}
+
+func (tr *smtTranslator) callResultBoolTerm(call *ast.CallExpr) (string, bool) {
+	return tr.callResultBoolTermEnv(call, nil)
+}
+
+func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	resultType := tr.a.exprTypes[call]
+	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
+	if resultType == nil && direct && decl != nil {
+		if sym, ok := tr.a.symbolForFuncDecl(decl); ok {
+			if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
+				resultType = fnType.Return
+			}
+		}
+	}
+	if !IsBoolType(resultType) {
+		return "", false
+	}
+	args := proofCallArgs(call)
+	var canonKey string
+	if direct && decl != nil {
+		if key, ok := tr.callCanonKeyEnv(decl, args, argEnv); ok {
+			if sym, seen := tr.callCanon[key]; seen {
+				return sym, true
+			}
+			canonKey = key
+		}
+	}
+	ret := tr.freshBoolAux()
+	if canonKey != "" {
+		tr.callCanon[canonKey] = ret
+	}
+	if !direct || decl == nil {
+		return ret, true
+	}
+	subst := map[string]ast.Expr{}
+	for i, param := range decl.Params {
+		if i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	env, ok := tr.a.smtEnvForCallSubstEnv(tr, subst, argEnv)
+	if !ok {
+		return ret, true
+	}
+	env["result"] = ret
+	guard := "true"
+	for _, req := range decl.Requires {
+		if req == nil {
+			continue
+		}
+		h, ok := tr.boolTerm(req, env)
+		if !ok {
+			return ret, true
+		}
+		if guard == "true" {
+			guard = h
+		} else {
+			guard = "(and " + guard + " " + h + ")"
+		}
+	}
+	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, false, env)
 	return ret, true
 }
 
@@ -2281,13 +2425,17 @@ func (tr *smtTranslator) callResultTerm(call *ast.CallExpr) (string, bool) {
 // canonical SMT term of each argument. Returns ok=false if any argument is outside the integer term
 // fragment (so no stable key exists and the caller mints a fresh aux instead).
 func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (string, bool) {
+	return tr.callCanonKeyEnv(decl, args, nil)
+}
+
+func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%p|", decl)
 	for _, arg := range args {
 		if arg == nil {
 			return "", false
 		}
-		t, ok := tr.term(arg)
+		t, ok := tr.callCanonArgKeyEnv(arg, env)
 		if !ok {
 			return "", false
 		}
@@ -2297,11 +2445,52 @@ func (tr *smtTranslator) callCanonKey(decl *ast.FuncDecl, args []ast.Expr) (stri
 	return b.String(), true
 }
 
+func (tr *smtTranslator) callCanonArgKey(arg ast.Expr) (string, bool) {
+	return tr.callCanonArgKeyEnv(arg, nil)
+}
+
+func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string) (string, bool) {
+	if arg == nil {
+		return "", false
+	}
+	if IsBoolType(tr.a.exprTypes[arg]) {
+		return tr.boolTerm(arg, env)
+	}
+	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
+		st, _ := stripRefForBounds(tr.a.exprTypes[arg]).(*StructType)
+		var parts []string
+		for _, fieldName := range sortedStructFieldNames(st) {
+			field := st.Fields[fieldName]
+			fieldExpr := &ast.FieldExpr{Object: arg, Field: fieldName}
+			ft := stripRefForBounds(field.Type)
+			if IsBoolType(ft) {
+				t, ok := tr.boolTerm(fieldExpr, env)
+				if !ok {
+					return "", false
+				}
+				parts = append(parts, fieldName+"="+t)
+				continue
+			}
+			t, ok := tr.termEnv(fieldExpr, env)
+			if !ok {
+				return "", false
+			}
+			parts = append(parts, fieldName+"="+t)
+		}
+		return "struct{" + strings.Join(parts, ",") + "}", true
+	}
+	return tr.termEnv(arg, env)
+}
+
 // emitDefiningEquation asserts `ret == body[params:=args]` for a pure, total function, with the body's
 // own recursive calls bounded-unrolled (callEqMaxUnroll). It is a NO-OP (sound decline) whenever the
 // purity/termination gate fails, the body is not a single pure return, or the body cannot be lowered
 // to an integer term.
 func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string, recursiveCallDomainProven bool) {
+	tr.emitDefiningEquationWithEnv(call, decl, ret, subst, canonKey, guard, recursiveCallDomainProven, nil)
+}
+
+func (tr *smtTranslator) emitDefiningEquationWithEnv(call *ast.CallExpr, decl *ast.FuncDecl, ret string, subst map[string]ast.Expr, canonKey, guard string, recursiveCallDomainProven bool, envOverride map[string]string) {
 	if tr == nil || decl == nil {
 		return
 	}
@@ -2325,15 +2514,22 @@ func (tr *smtTranslator) emitDefiningEquation(call *ast.CallExpr, decl *ast.Func
 	if !ok {
 		return
 	}
-	env, ok := tr.a.smtEnvForSubst(tr, subst)
-	if !ok {
-		return
+	env := envOverride
+	if env == nil {
+		var ok bool
+		env, ok = tr.a.smtEnvForSubst(tr, subst)
+		if !ok {
+			return
+		}
 	}
 	tr.callEqInFlight[canonKey]++
 	defer func() { tr.callEqInFlight[canonKey]-- }()
 	bodyTerm, ok := tr.termEnv(body, env)
 	if !ok {
-		return
+		bodyTerm, ok = tr.boolTerm(body, env)
+		if !ok {
+			return
+		}
 	}
 	eq := "(= " + ret + " " + bodyTerm + ")"
 	if guard != "" && guard != "true" {
@@ -2702,6 +2898,18 @@ func smtProjectionName(expr ast.Expr) string {
 	default:
 		return "expr__" + smtSanitize(fmt.Sprintf("%T_%s", expr, expr.Pos().String()))
 	}
+}
+
+func sortedStructFieldNames(st *StructType) []string {
+	if st == nil {
+		return nil
+	}
+	names := make([]string, 0, len(st.Fields))
+	for name := range st.Fields {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 func smtSanitize(s string) string {

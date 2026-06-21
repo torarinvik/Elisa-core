@@ -53,6 +53,17 @@ func (a *Analyzer) directNumericTerminationCertificate(fn *ast.FuncDecl, call *a
 	}
 	subst := a.substForSelfCall(fn, call)
 	if !a.proveMeasureDecreases(fn.Decreases, subst) {
+		if a.directNumericSyntacticDecrease(fn, call) {
+			return recursiveProofCertificate{
+				Kind:    recursiveProofDirectNumeric,
+				Caller:  fn,
+				Callee:  fn,
+				Call:    call,
+				Measure: fn.Decreases[0],
+				Reason:  "numeric measure syntactically decreases",
+				Outcome: ProofProvenLinear,
+			}, true
+		}
 		return recursiveProofCertificate{
 			Kind:    recursiveProofDirectNumeric,
 			Caller:  fn,
@@ -74,6 +85,40 @@ func (a *Analyzer) directNumericTerminationCertificate(fn *ast.FuncDecl, call *a
 	}, true
 }
 
+func (a *Analyzer) directNumericSyntacticDecrease(fn *ast.FuncDecl, call *ast.CallExpr) bool {
+	if a == nil || fn == nil || call == nil || len(fn.Decreases) != 1 {
+		return false
+	}
+	measure, ok := fn.Decreases[0].(*ast.Ident)
+	if !ok || measure == nil {
+		return false
+	}
+	paramIndex := -1
+	for i, param := range fn.Params {
+		if param.Name == measure.Name {
+			paramIndex = i
+			break
+		}
+	}
+	if paramIndex < 0 || paramIndex >= len(call.Args) {
+		return false
+	}
+	arg, ok := stripOptimizationParens(call.Args[paramIndex]).(*ast.BinaryExpr)
+	if !ok || arg == nil || arg.Op != lexer.TOKEN_MINUS {
+		return false
+	}
+	left, ok := stripOptimizationParens(arg.Left).(*ast.Ident)
+	if !ok || left == nil || left.Name != measure.Name {
+		return false
+	}
+	right, ok := stripOptimizationParens(arg.Right).(*ast.IntLit)
+	if !ok || right == nil {
+		return false
+	}
+	c, ok := a.constIntValue(right)
+	return ok && c > 0
+}
+
 func (a *Analyzer) structuralTerminationCertificate(fn *ast.FuncDecl, call *ast.CallExpr) (recursiveProofCertificate, bool) {
 	cert := recursiveProofCertificate{
 		Kind:    recursiveProofStructuralEnum,
@@ -83,11 +128,15 @@ func (a *Analyzer) structuralTerminationCertificate(fn *ast.FuncDecl, call *ast.
 		Outcome: ProofRefuted,
 		Reason:  "recursive call is not on a match-bound structural child",
 	}
-	if a == nil || fn == nil || call == nil || len(fn.Decreases) != 1 || !a.isStructuralDecreaseMeasure(fn, fn.Decreases[0]) {
+	if a == nil || fn == nil || call == nil {
 		return cert, false
 	}
-	cert.Measure = fn.Decreases[0]
-	id, ok := fn.Decreases[0].(*ast.Ident)
+	measures := decreaseMeasureComponents(fn.Decreases)
+	if len(measures) != 1 || !a.isStructuralDecreaseMeasure(fn, measures[0]) {
+		return cert, false
+	}
+	cert.Measure = measures[0]
+	id, ok := measures[0].(*ast.Ident)
 	if !ok || id == nil {
 		return cert, false
 	}
@@ -106,7 +155,8 @@ func (a *Analyzer) recursiveCallCertificate(caller, callee *ast.FuncDecl, call *
 		return recursiveProofCertificate{}, false
 	}
 	if caller == callee {
-		if len(caller.Decreases) == 1 && a.isStructuralDecreaseMeasure(caller, caller.Decreases[0]) {
+		measures := decreaseMeasureComponents(caller.Decreases)
+		if len(measures) == 1 && a.isStructuralDecreaseMeasure(caller, measures[0]) {
 			return a.structuralTerminationCertificate(caller, call)
 		}
 		return a.directNumericTerminationCertificate(caller, call)
@@ -119,8 +169,8 @@ func (a *Analyzer) recursiveCallCertificate(caller, callee *ast.FuncDecl, call *
 		Outcome: ProofRefuted,
 		Reason:  "mutual edge measure did not strictly decrease",
 	}
-	if len(caller.Decreases) > 0 {
-		cert.Measure = caller.Decreases[0]
+	if measures := decreaseMeasureComponents(caller.Decreases); len(measures) > 0 {
+		cert.Measure = measures[0]
 	}
 	if !a.crossFunctionMeasureDecreases(caller, callee, call) {
 		return cert, false
