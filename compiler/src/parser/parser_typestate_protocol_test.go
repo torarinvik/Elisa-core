@@ -78,6 +78,46 @@ func TestParseLinearTypestateDesugarsToLinearStruct(t *testing.T) {
 	}
 }
 
+func TestParseTypestateConditionalTransitionDesugarsToBoolPoststates(t *testing.T) {
+	file, errs := parseSourceFile(t, `typestate Socket:
+	fd: mutable i64
+	states: Closed, Connecting, Connected
+	transition connect: Closed -> Connecting
+	transition poll: Connecting -> Connected | Closed
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	var poll *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Name == "poll" {
+			poll = fn
+			break
+		}
+	}
+	if poll == nil {
+		t.Fatalf("missing synthesized poll transition in %#v", file.Decls)
+	}
+	if poll.ReturnType == nil {
+		t.Fatalf("conditional transition must lower to a bool-returning function")
+	}
+	if len(poll.Ensures) != 2 {
+		t.Fatalf("conditional transition must carry two ensures-poststates, got %d", len(poll.Ensures))
+	}
+	if poll.Ensures[0].Condition.Kind != ast.EnsuresConditionReturnBool || !poll.Ensures[0].Condition.ReturnBool {
+		t.Fatalf("first conditional poststate must be return-true, got %#v", poll.Ensures[0].Condition)
+	}
+	if poll.Ensures[0].Kind != ast.EnsuresKindNamedState || len(poll.Ensures[0].StateCases) != 1 || poll.Ensures[0].StateCases[0] != "Connected" {
+		t.Fatalf("true branch must transition to Connected, got %#v", poll.Ensures[0])
+	}
+	if poll.Ensures[1].Condition.Kind != ast.EnsuresConditionReturnBool || poll.Ensures[1].Condition.ReturnBool {
+		t.Fatalf("second conditional poststate must be return-false, got %#v", poll.Ensures[1].Condition)
+	}
+	if poll.Ensures[1].Kind != ast.EnsuresKindNamedState || len(poll.Ensures[1].StateCases) != 1 || poll.Ensures[1].StateCases[0] != "Closed" {
+		t.Fatalf("false branch must transition to Closed, got %#v", poll.Ensures[1])
+	}
+}
+
 // An unknown source/target state in a transition is a hard error.
 func TestParseTypestateUnknownStateIsError(t *testing.T) {
 	_, errs := parseSourceFile(t, `typestate S:

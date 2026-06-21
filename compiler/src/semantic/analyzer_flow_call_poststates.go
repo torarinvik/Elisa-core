@@ -214,6 +214,7 @@ func (a *Analyzer) recordCallArgPoststates(call *ast.CallExpr, arg ast.Expr, par
 		a.recordNamedStateCallArgMutation(call, arg, paramIndex, paramType)
 		return
 	}
+	a.consumeLinearTypestateTransitionArg(call, arg, paramType, poststates)
 	if a.currentSpecializedValueTypes == nil || arg == nil || paramType == nil {
 		return
 	}
@@ -233,4 +234,30 @@ func (a *Analyzer) recordCallArgPoststates(call *ast.CallExpr, arg ast.Expr, par
 	if changed && updated != nil {
 		a.bindTrackedValueType(root, updated)
 	}
+}
+
+func (a *Analyzer) consumeLinearTypestateTransitionArg(call *ast.CallExpr, arg ast.Expr, paramType Type, poststates []FuncPoststate) {
+	refType, ok := paramType.(*RefType)
+	if !ok || refType == nil || !refType.Mutable || directProtocolLeakKind(refType.Elem) != "linear value" {
+		return
+	}
+	consumes := false
+	for _, poststate := range poststates {
+		if poststate.Kind == FuncPoststateKindNamedState && len(poststate.Path) == 0 {
+			consumes = true
+			break
+		}
+	}
+	if !consumes {
+		return
+	}
+	key, ok := a.lookupProtocolTargetKey(arg)
+	if !ok {
+		return
+	}
+	reason := "argument to call"
+	if call != nil {
+		reason = "argument to call " + strconvQuote(callIdentName(call))
+	}
+	a.recordAffineConsumption(key, reason)
 }

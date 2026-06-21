@@ -86,6 +86,41 @@ def leak() -> void:
 	}
 }
 
+func TestLinearTypestateTransitionConsumesOnce(t *testing.T) {
+	src := `linear typestate Ticket:
+	id: i64
+	states: Fresh, Used
+	transition redeem: Fresh -> Used
+
+def double_spend() -> void:
+	t: mutable Ticket[Fresh] = Ticket.new(id: 1)
+	redeem(t)
+	redeem(t)
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "typestate_linear_double_spend.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "cannot be used") || !strings.Contains(all, "consumed") {
+		t.Fatalf("second transition of linear typestate must be a consumed-use error, got:\n%s", all)
+	}
+}
+
+func TestLinearTypestateTransitionLeakIsError(t *testing.T) {
+	src := `linear typestate Ticket:
+	id: i64
+	states: Fresh, Used
+	transition redeem: Fresh -> Used
+
+def leak() -> void:
+	t: mutable Ticket[Fresh] = Ticket.new(id: 2)
+	pass
+`
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "typestate_linear_leak.elisa", src)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, "linear value") || !strings.Contains(all, "must be consumed before scope exit") {
+		t.Fatalf("unconsumed linear typestate must be a leak error, got:\n%s", all)
+	}
+}
+
 // (b) An illegal transition — established() requires Connecting but the socket is Closed — is a hard
 // error. This is the whole point: illegal operation sequences are compile errors.
 func TestTypestateIllegalTransitionIsError(t *testing.T) {
