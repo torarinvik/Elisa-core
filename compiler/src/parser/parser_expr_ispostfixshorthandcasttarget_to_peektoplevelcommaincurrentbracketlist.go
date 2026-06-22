@@ -172,15 +172,42 @@ func (p *Parser) parseRefinementPred() ast.RefinementPredExpr {
 	return ast.RefinementPredExpr{Position: pos, Name: name, Args: args}
 }
 
+// ambiguousBareRangeMsg is the shared diagnostic for a bare `..` used as a RANGE operator: its endpoint
+// is ambiguous (inclusive in Elisa, exclusive in Rust/Python/Swift), so callers must write `..<` or `..=`.
+// `..` remains valid only as the for-loop step separator.
+const ambiguousBareRangeMsg = "ambiguous bare `..` range: use `..<` for exclusive (e.g. `lo ..< hi`) or `..=` for inclusive (e.g. `lo ..= hi`)"
+
+// consumeValueRangeOp consumes a just-peeked range operator (`..<` / `..=` / `..>` / bare `..`) for a
+// value / membership / comprehension range, returning the kind NORMALIZED so the downstream lowering
+// (which keys on TOKEN_RANGE = inclusive, TOKEN_RANGE_LT = exclusive) is unchanged: `..=` maps to the
+// inclusive kind, and bare `..` is rejected as ambiguous but recovered as inclusive (single diagnostic).
+func (p *Parser) consumeValueRangeOp() (lexer.TokenKind, lexer.Pos) {
+	op := p.advance()
+	switch op.Kind {
+	case lexer.TOKEN_RANGE:
+		p.errorAt(op.Pos, ambiguousBareRangeMsg)
+		return lexer.TOKEN_RANGE, op.Pos
+	case lexer.TOKEN_RANGE_LE:
+		return lexer.TOKEN_RANGE, op.Pos
+	default:
+		return op.Kind, op.Pos
+	}
+}
+
 // parseRefinementPredArgs parses the comma-separated bracket arguments of a refinement predicate,
-// shared by `T is Law[...]` types and `ensures x is Law[...]` postconditions. A `..` range is sugar
-// for its two inclusive endpoints (`Bounded[0..500]` → `0, 500`); a `..<` range is exclusive
-// (`Bounded[0..<n]` → `0, n - 1`), which makes `Bounded[0..<xs.count]` a dependent length bound.
+// shared by `T is Law[...]` types and `ensures x is Law[...]` postconditions. An inclusive `..=` range is
+// sugar for its two endpoints (`Bounded[0 ..= 500]` → `0, 500`); a `..<` range is exclusive
+// (`Bounded[0 ..< n]` → `0, n - 1`), which makes `Bounded[0 ..< xs.count]` a dependent length bound. Bare
+// `..` is rejected as ambiguous (recovered as inclusive).
 func (p *Parser) parseRefinementPredArgs() []ast.Expr {
 	var args []ast.Expr
 	for p.peek() != lexer.TOKEN_RBRACKET {
 		first := p.parseExpr()
-		if p.match(lexer.TOKEN_RANGE) {
+		if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LE {
+			if p.peek() == lexer.TOKEN_RANGE {
+				p.errorAt(p.cur().Pos, ambiguousBareRangeMsg)
+			}
+			p.advance()
 			args = append(args, first, p.parseExpr())
 		} else if rangePos := p.cur().Pos; p.match(lexer.TOKEN_RANGE_LT) {
 			end := p.parseExpr()
@@ -257,9 +284,8 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 	var rangeEnd ast.Expr
 	var rangeStep ast.Expr
 	rangeOp := lexer.TOKEN_EOF
-	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
-		op := p.advance()
-		rangeOp = op.Kind
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
+		rangeOp, _ = p.consumeValueRangeOp()
 		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 		if p.match(lexer.TOKEN_RANGE) {
 			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
@@ -311,9 +337,8 @@ func (p *Parser) parseDictComprehensionFromFirst(pos lexer.Pos, key ast.Expr, va
 	var rangeEnd ast.Expr
 	var rangeStep ast.Expr
 	rangeOp := lexer.TOKEN_EOF
-	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
-		op := p.advance()
-		rangeOp = op.Kind
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
+		rangeOp, _ = p.consumeValueRangeOp()
 		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 		if p.match(lexer.TOKEN_RANGE) {
 			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
@@ -340,9 +365,8 @@ func (p *Parser) parseSetComprehensionFromFirst(pos lexer.Pos, value ast.Expr) a
 	var rangeEnd ast.Expr
 	var rangeStep ast.Expr
 	rangeOp := lexer.TOKEN_EOF
-	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
-		op := p.advance()
-		rangeOp = op.Kind
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
+		rangeOp, _ = p.consumeValueRangeOp()
 		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 		if p.match(lexer.TOKEN_RANGE) {
 			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
@@ -419,9 +443,8 @@ func (p *Parser) parseFoldComprehensionTail(pos lexer.Pos, bindings []ast.Stmt, 
 	var rangeEnd ast.Expr
 	var rangeStep ast.Expr
 	rangeOp := lexer.TOKEN_EOF
-	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT {
-		op := p.advance()
-		rangeOp = op.Kind
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
+		rangeOp, _ = p.consumeValueRangeOp()
 		rangeEnd = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 		if p.match(lexer.TOKEN_RANGE) {
 			rangeStep = p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })

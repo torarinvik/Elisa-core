@@ -7,6 +7,15 @@ import (
 	"strings"
 )
 
+// rangeOpName renders a range operator for output, emitting `..=` for the inclusive kind (stored as
+// TOKEN_RANGE) instead of the now-deprecated bare `..`, so unparsed ranges re-parse cleanly.
+func rangeOpName(op lexer.TokenKind) string {
+	if op == lexer.TOKEN_RANGE {
+		return "..="
+	}
+	return lexer.TokenName(op)
+}
+
 func formatExpr(expr ast.Expr) string {
 	if expr == nil {
 		return ""
@@ -162,11 +171,11 @@ func formatExpr(expr ast.Expr) string {
 		}
 		return line
 	case *ast.MembershipRangeExpr:
-		return formatExpr(n.Start) + " " + lexer.TokenName(n.Op) + " " + formatExpr(n.End)
+		return formatExpr(n.Start) + " " + rangeOpName(n.Op) + " " + formatExpr(n.End)
 	case *ast.ListComprehensionExpr:
 		line := "[" + formatExpr(n.Value) + " for " + n.Name + " in " + formatExpr(n.Source)
 		if n.RangeEnd != nil {
-			line += " " + lexer.TokenName(n.RangeOp) + " " + formatExpr(n.RangeEnd)
+			line += " " + rangeOpName(n.RangeOp) + " " + formatExpr(n.RangeEnd)
 			if n.RangeStep != nil {
 				line += " .. " + formatExpr(n.RangeStep)
 			}

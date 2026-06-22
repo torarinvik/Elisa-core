@@ -92,7 +92,7 @@ func TestParseNotInMembershipExpr(t *testing.T) {
 }
 
 func TestParseBraceMembershipRangeExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep(value: i64) -> bool:\n    return value in {1..3, 8..<10}\n")
+	file, errs := parseSourceFile(t, "def keep(value: i64) -> bool:\n    return value in {1 ..= 3, 8 ..< 10}\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -118,7 +118,7 @@ func TestParseBraceMembershipRangeExpr(t *testing.T) {
 		t.Fatalf("expected exclusive membership range, got %#v", list.Elems[1])
 	}
 	formatted := unparse.FormatDecl(decl)
-	if !strings.Contains(formatted, "value in {1 .. 3, 8 ..< 10}") {
+	if !strings.Contains(formatted, "value in {1 ..= 3, 8 ..< 10}") {
 		t.Fatalf("expected membership ranges to unparse, got:\n%s", formatted)
 	}
 }

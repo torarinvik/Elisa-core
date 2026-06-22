@@ -433,6 +433,7 @@ func (p *Parser) parseGrammarOptionalTerm() ast.GrammarTerm {
 	p.expect(lexer.TOKEN_RPAREN)
 	return &ast.GrammarOptionalTerm{Position: pos, Term: term}
 }
+
 // parseGrammarListTerm parses the REMOVED `list(...)` spelling, emits a hard error,
 // and recovers into the canonical repetition IR (a separated term when a separator
 // is given, otherwise a plain repetition) so downstream passes stay well-formed.
@@ -552,6 +553,7 @@ func (p *Parser) isGrammarWhileTermStart() bool {
 	}
 	return false
 }
+
 // parseGrammarWhileTerm parses the REMOVED `[term] while tok in tokens != [...]`
 // spelling, emits a hard error, and recovers into the canonical `flatrepeat term
 // until(stop)` node so the legacy GrammarWhileTerm is never produced.

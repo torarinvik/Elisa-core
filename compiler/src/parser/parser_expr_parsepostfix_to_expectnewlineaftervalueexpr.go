@@ -378,9 +378,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 				return p.parseSetComprehensionFromFirst(pos, first)
 			} else {
 				// Set-membership literal: `first` may be a range; remaining are candidates.
-				if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT {
-					op := p.advance()
-					first = &ast.MembershipRangeExpr{Position: op.Pos, Start: first, End: p.parseExpr(), Op: op.Kind}
+				if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_LE {
+					opKind, opPos := p.consumeValueRangeOp()
+					first = &ast.MembershipRangeExpr{Position: opPos, Start: first, End: p.parseExpr(), Op: opKind}
 				}
 				elems = append(elems, first)
 				for p.match(lexer.TOKEN_COMMA) {
@@ -622,12 +622,12 @@ func (p *Parser) parseLayoutIntrospectionFieldArg() lexer.Token {
 
 func (p *Parser) parseBraceMembershipCandidateExpr() ast.Expr {
 	start := p.parseExpr()
-	if p.peek() != lexer.TOKEN_RANGE && p.peek() != lexer.TOKEN_RANGE_LT {
+	if p.peek() != lexer.TOKEN_RANGE && p.peek() != lexer.TOKEN_RANGE_LT && p.peek() != lexer.TOKEN_RANGE_LE {
 		return start
 	}
-	op := p.advance()
+	opKind, opPos := p.consumeValueRangeOp()
 	end := p.parseExpr()
-	return &ast.MembershipRangeExpr{Position: op.Pos, Start: start, End: end, Op: op.Kind}
+	return &ast.MembershipRangeExpr{Position: opPos, Start: start, End: end, Op: opKind}
 }
 func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expect(lexer.TOKEN_COLON)

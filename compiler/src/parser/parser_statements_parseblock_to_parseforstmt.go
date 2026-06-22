@@ -986,7 +986,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 			// Elisa, but exclusive in Rust/Python/Swift — a footgun either way). Require an explicit
 			// operator. Parsing recovers as the historical inclusive form so a single clear error is
 			// reported rather than a cascade.
-			p.errorAt(op.Pos, "ambiguous bare `..` range: use `..<` for exclusive (e.g. `lo ..< hi`) or `..=` for inclusive (e.g. `lo ..= hi`)")
+			p.errorAt(op.Pos, ambiguousBareRangeMsg)
 			op.Kind = lexer.TOKEN_RANGE_LE
 		}
 		end := p.parseForHeaderExpr()

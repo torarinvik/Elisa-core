@@ -242,7 +242,7 @@ func (p *Parser) parseQuantifierInSource() (source ast.Expr, lo ast.Expr, hi ast
 		if p.peek() == lexer.TOKEN_RANGE {
 			// Bare `..` as a range is ambiguous about its endpoint; require an explicit operator (same
 			// rule as the for-loop range). Recover as the inclusive form so a single error is reported.
-			p.errorAt(p.cur().Pos, "ambiguous bare `..` range: use `..<` for exclusive (e.g. `lo ..< hi`) or `..=` for inclusive (e.g. `lo ..= hi`)")
+			p.errorAt(p.cur().Pos, ambiguousBareRangeMsg)
 		}
 		// Inclusive `lo ..= hi` desugars to the half-open `lo ..< (hi + 1)`, reusing the guarded-range
 		// machinery (guard becomes `lo <= i and i < hi+1`, i.e. `i <= hi` for integers).
