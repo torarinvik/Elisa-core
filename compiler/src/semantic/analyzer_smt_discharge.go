@@ -784,6 +784,78 @@ func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
 			a.recordSMTAssertFact(req)
 		}
 	}
+	a.seedSelfStructInvariantsAsAssertFacts(fn)
+}
+
+// seedSelfStructInvariantsAsAssertFacts assumes the struct invariants of every struct-typed parameter
+// (e.g. `self: Box&`) as flow-assert facts at function entry — the data-structure analogue of a
+// `requires` precondition. This is what lets a method `ensure result == self.model` (a refinement of
+// the concrete representation onto an abstract GHOST model field) discharge: the invariant
+// `self.concrete == self.model` is a well-formedness contract the caller already established, so the
+// callee may assume it. Sound: a struct invariant must hold on entry to any method (it is checked at
+// construction and after each field store in debug builds), so assuming it here is no stronger than the
+// existing runtime contract. Dropped on mutation of the param like any other entry fact.
+func (a *Analyzer) seedSelfStructInvariantsAsAssertFacts(fn *ast.FuncDecl) {
+	if a == nil || fn == nil {
+		return
+	}
+	for _, param := range a.expandedFuncDeclParams(fn) {
+		if param.Name == "" || param.Type == nil {
+			continue
+		}
+		st := structTypeOfParam(a.resolveType(param.Type))
+		if st == nil || len(st.Invariants) == 0 {
+			continue
+		}
+		for _, inv := range st.Invariants {
+			if inv == nil {
+				continue
+			}
+			// Rewrite `self.<field>` in the invariant onto the actual parameter name so the fact is over
+			// the real binding (a no-op when the param is literally `self`).
+			a.recordSMTAssertFact(rewriteSelfFieldRoot(inv, param.Name))
+		}
+	}
+}
+
+// structTypeOfParam unwraps a reference/generic-instance parameter type down to its underlying struct.
+func structTypeOfParam(t Type) *StructType {
+	switch v := t.(type) {
+	case *RefType:
+		return structTypeOfParam(v.Elem)
+	case *StructType:
+		return v
+	case *GenericInstanceType:
+		if st, ok := v.Base.(*StructType); ok {
+			return st
+		}
+	}
+	return nil
+}
+
+// rewriteSelfFieldRoot clones a struct-invariant expression, replacing the implicit `self` receiver
+// root with `paramName`. When paramName == "self" it returns the clause unchanged.
+func rewriteSelfFieldRoot(expr ast.Expr, paramName string) ast.Expr {
+	if paramName == "self" || paramName == "" {
+		return expr
+	}
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n.Name == "self" {
+			return &ast.Ident{Position: n.Position, Name: paramName}
+		}
+		return n
+	case *ast.FieldExpr:
+		return &ast.FieldExpr{Position: n.Position, Object: rewriteSelfFieldRoot(n.Object, paramName), Field: n.Field, Safe: n.Safe}
+	case *ast.ParenExpr:
+		return &ast.ParenExpr{Position: n.Position, Inner: rewriteSelfFieldRoot(n.Inner, paramName)}
+	case *ast.BinaryExpr:
+		return &ast.BinaryExpr{Position: n.Position, Op: n.Op, Left: rewriteSelfFieldRoot(n.Left, paramName), Right: rewriteSelfFieldRoot(n.Right, paramName)}
+	case *ast.UnaryExpr:
+		return &ast.UnaryExpr{Position: n.Position, Op: n.Op, Operand: rewriteSelfFieldRoot(n.Operand, paramName)}
+	default:
+		return expr
+	}
 }
 
 // smtFlowFactHypotheses asserts the scope's flow range-facts — branch-derived bounds on

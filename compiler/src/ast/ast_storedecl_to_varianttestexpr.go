@@ -39,6 +39,10 @@ type FieldDecl struct {
 	Name         string
 	Mutable      bool
 	IsTail       bool
+	// Ghost marks a verification-only model field (`ghost name: T`). It carries abstract
+	// model state alongside the concrete representation, is readable only in contract/ghost
+	// context, and is ERASED from codegen (no layout/size/offset impact on the real fields).
+	Ghost        bool
 	Type         TypeExpr
 	DefaultValue Expr
 	BitGroup     *BitGroupDecl

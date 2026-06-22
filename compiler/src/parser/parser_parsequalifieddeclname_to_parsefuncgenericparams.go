@@ -709,6 +709,15 @@ func joinAggregateStateMarkers(states []ast.RefState) string {
 func (p *Parser) parseFieldDecl() ast.FieldDecl {
 	annotations := p.parseAnnotations()
 	pos := p.cur().Pos
+	// `ghost name: T` — a verification-only model field. The `ghost` keyword is a leading IDENT
+	// modifier; it is only consumed when followed by another identifier (the field name), so a
+	// field literally named `ghost` (`ghost: T`) still parses as an ordinary field.
+	ghost := false
+	if p.peekIdentText("ghost") && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
+		p.advance()
+		ghost = true
+		pos = p.cur().Pos
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_COLON)
 
@@ -729,6 +738,9 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 		if isTail {
 			p.errorAt(pos, "packed struct groups cannot be tail fields")
 		}
+		if ghost {
+			p.errorAt(pos, "a `ghost` field cannot be a packed bit group")
+		}
 		group := p.parseBitGroupDecl()
 		return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, BitGroup: group}
 	}
@@ -740,7 +752,7 @@ func (p *Parser) parseFieldDecl() ast.FieldDecl {
 	}
 	p.expectNewline()
 
-	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Type: typ, DefaultValue: defaultValue}
+	return ast.FieldDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Mutable: mutable, IsTail: isTail, Ghost: ghost, Type: typ, DefaultValue: defaultValue}
 }
 
 func (p *Parser) parseBitGroupDecl() *ast.BitGroupDecl {

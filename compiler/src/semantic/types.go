@@ -375,6 +375,10 @@ type Field struct {
 	Type          Type
 	Mutable       bool
 	IsTail        bool
+	// Ghost marks a verification-only model field (`ghost name: T`). It is readable only in a
+	// contract/ghost context and is erased from codegen (stripped from the struct's concrete
+	// field set, so it has zero layout/size/offset impact on the real fields).
+	Ghost         bool
 	PackedStorage PackedFieldStorageMode
 }
 
@@ -415,6 +419,15 @@ type StructType struct {
 	Store           bool
 	StoreFieldOrder []string
 	Builtin         bool
+	// GhostFieldOrder lists the verification-only model fields (`ghost name: T`) in declaration
+	// order. They live in Fields (so contract analysis resolves them) but are stripped from
+	// Decl.Fields, so codegen never lays them out — guaranteeing zero impact on the concrete
+	// layout/size/offsets of the real fields.
+	GhostFieldOrder []string
+	// Invariants is the FULL struct-invariant list (including ghost-model-referencing ones), kept
+	// for static discharge as method-entry assumptions. Decl.Invariants is stripped of ghost-reading
+	// invariants so the backend never emits a runtime check over an erased field.
+	Invariants []ast.Expr
 }
 
 type OpaqueType struct {
