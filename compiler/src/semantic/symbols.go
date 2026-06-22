@@ -120,6 +120,11 @@ type Result struct {
 	FunctionAnalyses  map[*ast.FuncDecl]*FunctionAnalysis
 	ProgressSummaries map[*ast.FuncDecl]*FunctionProgressSummary
 	AnnotatedFuncs    []*AnnotatedFunc
+	// LawFuzzObligations are protocol laws (docs/85 P3) that could NOT be statically discharged for
+	// a concrete impl (a non-affine `le` body the SMT tier declined, or SMT off). Each is auto-lowered
+	// by the test runner into a per-impl `@property` randomized harness so the law is fuzz-checked in
+	// debug/CI rather than silently assumed. A law PROVEN at the impl site produces no entry (zero cost).
+	LawFuzzObligations []*LawFuzzObligation
 	ExportedTypes     []*ExportedType
 	ExportedFuncs     []*ExportedFunc
 	ExportedGlobals   []*ExportedGlobal

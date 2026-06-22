@@ -56,6 +56,20 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 			members = append(members, p.parseAssociatedTypeDecl())
 			continue
 		}
+		// A protocol LAW (docs/85 P3): `law total(a: Self, b: Self) = a.le(b) or b.le(a)`. It is an
+		// algebraic obligation every conforming impl must satisfy, parsed with the existing law grammar
+		// (a bool-returning FuncDecl with IsLaw set) and folded into the protocol's member set. Its
+		// params range over `Self` (and related types); the analyzer discharges it per impl by SMT or,
+		// on a non-affine body, auto-lowers it to a per-impl @property fuzz harness.
+		if p.peekIdentText("law") && p.looksLikeLawDecl() {
+			decl := p.parseLawDecl()
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				members = append(members, fn)
+			} else {
+				p.errorf("a protocol law must be a predicate law (`law Name(...) = <bool-expr>`)")
+			}
+			continue
+		}
 		if p.peek() == lexer.TOKEN_DEF {
 			members = append(members, p.parseInterfaceMethodDecl())
 			continue

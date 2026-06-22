@@ -230,7 +230,7 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 // the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
 // so every query is self-contained.
 func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
@@ -294,7 +294,7 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	if !ok {
 		return ""
 	}
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -2997,6 +2997,14 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	if sel, ok := tr.dictMethodCall(call, "keys", argEnv); ok {
 		return sel, true
 	}
+	// A PROTOCOL-METHOD bool call (`x.le(y)` where le is an interface method, docs/85 P3) is modeled as
+	// an UNINTERPRETED predicate: a stable Bool symbol keyed by (Interface.method, argument idents). The
+	// same `x.le(y)` therefore denotes one symbol everywhere — so an injected protocol-law hypothesis
+	// (`(=> (and le_xy le_yz) le_xz)`) shares symbols with the goal and transports the fact. Modeling a
+	// total method as an arbitrary predicate is sound: it constrains nothing beyond what the laws assert.
+	if sym, ok := tr.interfaceMethodBoolSym(call, argEnv); ok {
+		return sym, true
+	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
 	if resultType == nil && direct && decl != nil {
@@ -3077,6 +3085,123 @@ func (tr *smtTranslator) canonKeyEnv(decl *ast.FuncDecl, argEnv map[string]strin
 		return nil
 	}
 	return argEnv
+}
+
+// interfaceMethodBoolSym models a bool-returning PROTOCOL-method call over a type-parameter receiver
+// (`x.le(y)` inside `def sort[T: Ord]`) as an uninterpreted predicate: a stable Bool symbol keyed by the
+// protocol+method and the canonical names of its receiver/argument idents. It applies ONLY when every
+// operand is a plain identifier whose type is a protocol-bounded type parameter — exactly the shape the
+// law-fact injection and the generic goal share — so it never perturbs concrete-type proofs. Returns
+// ok=false otherwise (the caller then takes the normal path).
+func (tr *smtTranslator) interfaceMethodBoolSym(call *ast.CallExpr, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	sel, ok := call.Func.(*ast.FieldExpr)
+	if !ok || sel == nil {
+		return "", false
+	}
+	// Two shapes reach here: the UFCS form `x.le(y)` (receiver = sel.Object, args = call.Args) and the
+	// qualified static form `T.le(x, y)` — the analyzer rewrites a bound type-param method call to this,
+	// so sel.Object is the type-param name `T` and ALL value operands are call.Args. Detect the latter by
+	// sel.Object naming the protocol-bounded type parameter itself.
+	var ifaceName string
+	var operands []ast.Expr
+	if ifn, ok := tr.a.qualifiedTypeParamMethodInterface(sel.Object, sel.Field); ok {
+		ifaceName = ifn
+		operands = call.Args
+	} else if ifn, ok := tr.a.protocolMethodReceiverInterface(sel.Object, sel.Field); ok {
+		ifaceName = ifn
+		operands = append([]ast.Expr{sel.Object}, call.Args...)
+	} else {
+		return "", false
+	}
+	parts := make([]string, 0, len(operands))
+	for _, op := range operands {
+		name, ok := lawOperandIdentName(op, env)
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, name)
+	}
+	sym := smtBoolVar("__iface_" + sanitizeSMTFragment(ifaceName) + "_" + sel.Field + "_" + strings.Join(parts, "_"))
+	tr.boolDecls[sym] = true
+	return sym, true
+}
+
+// lawOperandIdentName returns a stable canonical name for an operand that is a plain identifier,
+// resolving through the quantifier/substitution env so a bound `a` and the param it maps to share a key.
+func lawOperandIdentName(expr ast.Expr, env map[string]string) (string, bool) {
+	id, ok := stripOptimizationParens(expr).(*ast.Ident)
+	if !ok || id == nil {
+		return "", false
+	}
+	if env != nil {
+		if bound, ok := env[id.Name]; ok {
+			return bound, true
+		}
+	}
+	return id.Name, true
+}
+
+// protocolMethodReceiverInterface reports the protocol name whose method `method` applies to `recv` when
+// recv is an identifier typed as a protocol-bounded type parameter. This is the gate that restricts the
+// uninterpreted-predicate model to the generic protocol-law setting.
+func (a *Analyzer) protocolMethodReceiverInterface(recv ast.Expr, method string) (string, bool) {
+	id, ok := stripOptimizationParens(recv).(*ast.Ident)
+	if !ok || id == nil || a.currentScope == nil {
+		return "", false
+	}
+	sym, ok := a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil {
+		return "", false
+	}
+	tp, ok := sym.Type.(*TypeParamType)
+	if !ok {
+		return "", false
+	}
+	iface, ok := a.lookupTypeParamInterface(tp.Name)
+	if !ok || iface == nil {
+		return "", false
+	}
+	if _, ok := iface.Methods[method]; !ok {
+		return "", false
+	}
+	return iface.Name, true
+}
+
+// qualifiedTypeParamMethodInterface reports the protocol name for a qualified static method call
+// `T.method(...)` where `T` is a protocol-bounded type parameter in scope and the protocol declares
+// `method`. This is the canonical lowered shape of a generic `value.method(...)` UFCS call.
+func (a *Analyzer) qualifiedTypeParamMethodInterface(owner ast.Expr, method string) (string, bool) {
+	id, ok := stripOptimizationParens(owner).(*ast.Ident)
+	if !ok || id == nil {
+		return "", false
+	}
+	if _, ok := a.lookupTypeParam(id.Name); !ok {
+		return "", false
+	}
+	iface, ok := a.lookupTypeParamInterface(id.Name)
+	if !ok || iface == nil {
+		return "", false
+	}
+	if _, ok := iface.Methods[method]; !ok {
+		return "", false
+	}
+	return iface.Name, true
+}
+
+// sanitizeSMTFragment maps a (possibly qualified) name to an SMT-symbol-safe fragment.
+func sanitizeSMTFragment(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
 }
 
 func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {

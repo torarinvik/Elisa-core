@@ -25,6 +25,11 @@ type StaticInterface struct {
 	// Their members are folded into Methods/AssociatedTypes so a single impl of this protocol
 	// must satisfy the union of own + inherited members.
 	Bases []string
+	// Laws are the algebraic obligations declared on the protocol (docs/85 P3): a `law total(a:
+	// Self, b: Self) = …` member is a universally-quantified predicate over `Self` that every
+	// conforming impl must satisfy. They are discharged per impl (SMT or @property fuzz) and may
+	// be assumed as facts in generic code bounded on the protocol.
+	Laws []*ast.FuncDecl
 }
 
 type StaticInterfaceMethod struct {
@@ -514,6 +519,12 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
 						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
 					case *ast.FuncDecl:
+						if methodDecl.IsLaw {
+							// Protocol law: a universally-quantified predicate over Self. Recorded for
+							// per-impl discharge; not a callable method, so it does not enter Methods.
+							iface.Laws = append(iface.Laws, methodDecl)
+							continue
+						}
 						// Default method: a protocol method carrying a body. Its signature is
 						// typechecked exactly like a bodiless one; the body is recorded so a
 						// conforming impl that omits the method inherits it (synthesized later).
@@ -642,6 +653,10 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 						a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
 					}
 				}
+				// Protocol laws (docs/85 P3): discharge each of the protocol's algebraic laws against this
+				// concrete impl. A proven law costs nothing at runtime; an unproven one is auto-lowered to a
+				// per-impl @property fuzz harness so it stays honest in debug/CI.
+				a.dischargeProtocolLawsForImpl(iface, impl, decl)
 			})
 		})
 	}
