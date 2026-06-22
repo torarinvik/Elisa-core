@@ -553,6 +553,10 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if rt, ok := paramType.(*RefType); ok && rt != nil && !a.callPreservesArgRefinements(expr, appliedType, i) {
 			a.invalidatePredFactsForTarget(loweredArgs[i])
 			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
+			// A mutating ref to `self` (or any struct) lets the callee write ANY field, so every
+			// written-field fact under that root is stale — drop them all (mirrors the writtenConst drop
+			// above). An immutable borrow took the preserve credit and never reached this branch.
+			a.invalidateWrittenFieldsForRoot(rootIdentNameOrEmpty(loweredArgs[i]))
 			// docs/90 brick 90-11: a ref call may write the arg, so any range fact about it is stale too —
 			// dropped here so a postcondition seed (below) is the only interval that survives the call.
 			a.invalidateRangeFactsForTarget(loweredArgs[i])

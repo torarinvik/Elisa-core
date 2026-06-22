@@ -383,6 +383,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.invalidateRangeFactsForTarget(n.Target)
 			a.checkFrameWrite(n.Target)
 			a.recordWrittenConstForTarget(n.Target, n.Value)
+			a.recordWrittenFieldForTarget(n.Target, n.Value)
 			a.recordConstAssignmentRangeFact(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
@@ -421,6 +422,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.checkFrameWrite(n.Target)
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(n.Target))
 		a.invalidateWrittenConstForLaunderedRoots(n.Target)
+		// An augmented field write (`self.f += x`) changes that field to a non-tracked value: drop just
+		// its field fact (siblings untouched), and drop the root's fields wholesale for any other shape.
+		a.invalidateWrittenFieldForWrite(n.Target)
 		a.invalidateIndexBoundsForAssignedTarget(n.Target)
 		a.invalidateSMTAssertFactsForTarget(n.Target)
 	case *ast.AsRefAssignStmt:
@@ -450,6 +454,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRangeFactsForTarget(n.Target)
 		a.checkFrameWrite(n.Target)
 		a.recordWrittenConstForTarget(n.Target, n.Value)
+		// An `as &`/`as !` store rebinds a reference place, not a plain value; do not record it as a
+		// stable field value — just drop the affected field fact so nothing stale survives.
+		a.invalidateWrittenFieldForWrite(n.Target)
 		a.recordConstAssignmentRangeFact(n.Target, n.Value)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)

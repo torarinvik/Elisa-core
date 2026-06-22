@@ -513,6 +513,15 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
+		// Written-field fast-path: `ensure self.f == E` where the body writes `self.f <- V` and the
+		// recorded V proves the clause (V == 0 for `self.f == 0`; or both `self.a` and `self.b` trace
+		// to the same value expr for `self.a == self.b`). The fact is dropped at every mutation/borrow/
+		// mutating-callee of the root, so a hit means the last write still stands. The SMT lane fails
+		// these because two loads of a reference field are distinct opaque terms (the SetupRegions gap).
+		if a.ensureHoldsByWrittenField(clause) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
+			continue
+		}
 		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
 		// `ensure p >= old(p)` when the body keeps/raises p. The trySMTProveRequires fallback models
 		// `old(p)` as an unconstrained fresh symbol — sound but always declining an old() postcondition.
@@ -554,6 +563,82 @@ func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 		other = bin.Left
 	}
 	return exprsSyntacticallyEqual(other, retVal)
+}
+
+// ensureHoldsByWrittenField discharges a void-exit postcondition `LHS == RHS` by resolving each
+// field-place operand (`self.f`) to the last value the body wrote to it (recorded in writtenField,
+// dropped at every mutation/borrow/mutating-callee of the root). It proves two shapes:
+//
+//	ensure self.f == 0                       — self.f resolves to 0, the other side is the constant 0
+//	ensure self.a == self.b                  — both resolve to the SAME value expr
+//
+// A side with no field fact resolves to itself, so `self.f == 0` (RHS already constant) and a
+// field-vs-field equality both work. Discharge is then either constant-equality or syntactic equality
+// of the resolved value exprs — never arithmetic or calls, so a stale or unrelated write can't falsely
+// prove. Returns false unless at least one operand was actually resolved from a written-field fact
+// (otherwise this adds nothing the SMT lane didn't already try).
+func (a *Analyzer) ensureHoldsByWrittenField(clause ast.Expr) bool {
+	bin, ok := clause.(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+		return false
+	}
+	left, leftResolved := a.resolveWrittenFieldOperand(bin.Left)
+	right, rightResolved := a.resolveWrittenFieldOperand(bin.Right)
+	if !leftResolved && !rightResolved {
+		return false
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	if lc, ok := a.evalConstExpr(left); ok {
+		if rc, ok := a.evalConstExpr(right); ok {
+			return constScalarsEqual(lc, rc)
+		}
+		return false
+	}
+	// Non-constant values (e.g. both fields written `<- self.total_flexible_size`) prove only by
+	// syntactic equality of the pure place reads — exprsSyntacticallyEqual admits only ident/field
+	// projections, never calls or arithmetic, so this stays sound.
+	return exprsSyntacticallyEqual(left, right)
+}
+
+// constScalarsEqual reports whether two constant values are equal in a SCALAR kind (int/bool/float/
+// string). Aggregate kinds (tuple/list/record/optional) decline — equality of those would need a
+// deep, kind-aware comparison this fast-path does not attempt, so it falls to the runtime check.
+func constScalarsEqual(x, y ConstValue) bool {
+	if x.Kind != y.Kind {
+		return false
+	}
+	switch x.Kind {
+	case ConstInt:
+		return x.Int == y.Int
+	case ConstBool:
+		return x.Bool == y.Bool
+	case ConstFloat:
+		return x.Float == y.Float
+	case ConstString:
+		return x.String == y.String
+	default:
+		return false
+	}
+}
+
+// resolveWrittenFieldOperand returns the last-written value of a field-place operand (`self.f` →
+// its recorded RHS) and ok=true when a live written-field fact was used; otherwise it returns the
+// operand unchanged with ok=false (a literal or unresolved place is its own value).
+func (a *Analyzer) resolveWrittenFieldOperand(expr ast.Expr) (ast.Expr, bool) {
+	field, ok := unwrapParen(expr).(*ast.FieldExpr)
+	if !ok || field == nil {
+		return expr, false
+	}
+	key := smtProjectionName(field)
+	if !isPureProjectionKey(key) {
+		return expr, false
+	}
+	if v, ok := a.lookupWrittenField(key); ok {
+		return v, true
+	}
+	return expr, false
 }
 
 func isResultIdent(e ast.Expr) bool {
@@ -653,6 +738,13 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
 		if ensureHoldsByReturnReflexivity(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
+		// Written-field fast-path also applies at an explicit `return` in a void/struct-mutating fn
+		// (`ensure self.f == E` over a `self.f <- V` the body performed). The clause does not reference
+		// `result`, so the subst above is inert for it. Same soundness as the void-exit path.
+		if !exprReferencesResult(clause) && a.ensureHoldsByWrittenField(clause) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
 			continue
 		}
 		if a.tryProveEnsureByDisjunctiveResultRange(clause, n.Value) {
