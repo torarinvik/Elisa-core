@@ -91,6 +91,15 @@ func (a *Analyzer) dischargeStructFieldRefinement(field ast.FieldDecl, arg ast.E
 		if a.returnCallRefinementEntails(arg, pred) {
 			continue
 		}
+		// Composition: the value is a read of ANOTHER refined struct field whose refinement entails the
+		// field's (`Dst(s.v)` where `s.v` is itself `is UB[0,127]`). The source field's invariant is
+		// enforced at ITS construction, so the value already satisfies `pred` — symmetric to the
+		// return-by-field path (returnFieldRefinementEntails), so a refined value routed through a struct
+		// field gets the same composition as a direct return. A wider source field declines (no false
+		// entailment): refinementPredEntails requires identical constant law args.
+		if a.returnFieldRefinementEntails(arg, pred) {
+			continue
+		}
 		a.proofLint(arg.Pos(), "refinement %q on field %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, field.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 	}
 }

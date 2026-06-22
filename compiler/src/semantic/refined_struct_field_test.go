@@ -76,3 +76,49 @@ def narrow(s: S&) -> u32 is UB[0, 255]:
 		t.Fatalf("a UB[0,1000] field does not entail a UB[0,255] return; must decline")
 	}
 }
+
+// Routing a refined value THROUGH a struct field at construction (`Dst(s.v)` where the source field
+// `s.v` is itself `is UB[0,127]` and the target field `op` requires the same) discharges by composition
+// — symmetric to the direct return-by-field path. The source field's invariant is enforced at its own
+// construction, so the value already satisfies the target field's refinement, no runtime check needed.
+func TestConstructFieldFromRefinedFieldComposes(t *testing.T) {
+	ok := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+struct Src:
+    v: mutable u32 is UB[0, 127]
+struct Dst:
+    op: mutable u32 is UB[0, 127]
+def copy(s: Src&) -> Dst:
+    return Dst(s.v)
+`
+	if errs := analyzeContractStrict(t, "ctor_fld_ok.elisa", ok).Errors(); len(errs) != 0 {
+		t.Fatalf("routing a UB[0,127] field into a UB[0,127] field should prove by composition, got: %v", errs)
+	}
+}
+
+// SOUNDNESS: a WIDER source field routed into a NARROWER target field does NOT entail it (the source
+// value can exceed the target bound), and an out-of-range constant is still rejected at construction.
+func TestConstructFieldFromRefinedFieldSoundness(t *testing.T) {
+	wider := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+struct Src:
+    v: mutable u32 is UB[0, 1000]
+struct Dst:
+    op: mutable u32 is UB[0, 127]
+def copy(s: Src&) -> Dst:
+    return Dst(s.v)
+`
+	if !strings.Contains(strings.Join(analyzeContractStrict(t, "ctor_fld_wide.elisa", wider).Errors(), "\n"), "could not be proven") {
+		t.Fatalf("a UB[0,1000] source field does not entail a UB[0,127] target field; must decline")
+	}
+	badConst := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+struct Dst:
+    op: mutable u32 is UB[0, 127]
+def bad() -> Dst:
+    return Dst(999)
+`
+	if !strings.Contains(strings.Join(analyzeContractStrict(t, "ctor_fld_const.elisa", badConst).Errors(), "\n"), "is violated") {
+		t.Fatalf("Dst(999) violates op's UB[0,127]; construction must be rejected")
+	}
+}
