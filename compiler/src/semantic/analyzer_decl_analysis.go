@@ -491,7 +491,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
-	if annotation.Name == "property" {
+	if annotation.Name == "property" || annotation.Name == "differential" {
 		return a.validateFunctionPropertyAnnotation(annotation, fn, signature)
 	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
@@ -547,35 +547,40 @@ func PropertyCaseCount(arg string) (int, bool) {
 	return n, true
 }
 
+// validateFunctionPropertyAnnotation validates both @property and @differential.
+// They share the same shape requirements (non-generic, permission-free, bool return,
+// generatable scalar parameters); a @differential function is simply a @property whose
+// body compares an implementation call against a reference call, fuzzed identically.
 func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	kind := annotation.Name
 	if len(annotation.Args) > 1 {
-		a.errorf(annotation.Position, "@property on function %q takes at most one argument (the case count, e.g. @property(1000))", fn.Name)
+		a.errorf(annotation.Position, "@%s on function %q takes at most one argument (the case count, e.g. @%s(1000))", kind, fn.Name, kind)
 		return false
 	}
 	if len(annotation.Args) == 1 {
 		if n, ok := PropertyCaseCount(annotation.Args[0]); !ok || n <= 0 {
-			a.errorf(annotation.Position, "@property on function %q expects a positive integer case count, got %q", fn.Name, annotation.Args[0])
+			a.errorf(annotation.Position, "@%s on function %q expects a positive integer case count, got %q", kind, fn.Name, annotation.Args[0])
 			return false
 		}
 	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 || len(signature.GenericParams) > 0 {
-		a.errorf(annotation.Position, "@property function %q must not be generic; got %s", fn.Name, signature)
+		a.errorf(annotation.Position, "@%s function %q must not be generic; got %s", kind, fn.Name, signature)
 		return false
 	}
 	if !annotationAllowsDeclaredPermissions("property", signature) {
-		a.errorf(annotation.Position, "@property function %q must not require permissions; got %s", fn.Name, signature)
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", kind, fn.Name, signature)
 		return false
 	}
 	if signature.Variadic {
-		a.errorf(annotation.Position, "@property function %q must not be variadic", fn.Name)
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", kind, fn.Name)
 		return false
 	}
 	if !IsBoolType(signature.Return) {
-		a.errorf(annotation.Position, "@property function %q must return bool, got %s", fn.Name, signature.Return)
+		a.errorf(annotation.Position, "@%s function %q must return bool, got %s", kind, fn.Name, signature.Return)
 		return false
 	}
 	if len(signature.Params) == 0 {
-		a.errorf(annotation.Position, "@property function %q must take at least one generated parameter", fn.Name)
+		a.errorf(annotation.Position, "@%s function %q must take at least one generated parameter", kind, fn.Name)
 		return false
 	}
 	for i, p := range signature.Params {
@@ -584,7 +589,7 @@ func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation,
 			if i < len(signature.ExplicitParamNames) {
 				name = signature.ExplicitParamNames[i]
 			}
-			a.errorf(annotation.Position, "@property function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64, f32/f64)", fn.Name, name, p)
+			a.errorf(annotation.Position, "@%s function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64, f32/f64)", kind, fn.Name, name, p)
 			return false
 		}
 	}
@@ -817,7 +822,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "property", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
+	case "test", "bench", "property", "differential", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
 		return true
 	case "boundary_pointer_args":
 		return true

@@ -240,7 +240,7 @@ const propertyIterations = 256
 // positive-integer @property(N) argument, or propertyIterations by default.
 func propertyCaseCount(fn *semantic.AnnotatedFunc) int {
 	for _, ann := range fn.Annotations {
-		if ann.Name != "property" || len(ann.Args) != 1 {
+		if (ann.Name != "property" && ann.Name != "differential") || len(ann.Args) != 1 {
 			continue
 		}
 		if n, ok := semantic.PropertyCaseCount(ann.Args[0]); ok && n > 0 {
@@ -257,6 +257,17 @@ func propertyCaseCount(fn *semantic.AnnotatedFunc) int {
 // as appended Elisa source plus a synthetic test case so it runs like a @test.
 func buildPropertyDrivers(result *semantic.Result, filter string) (string, []selectedTestCase) {
 	props := selectAnnotatedFunctions(result, "property", filter)
+	// @differential functions (a reusable bit-exact-vs-reference falsification harness) reuse the
+	// exact same fuzz-input generation and counterexample machinery as @property; the only
+	// difference is the report wording ("differential ... counterexample"). We track which selected
+	// funcs are differential so propertyDriverSource can label them accordingly.
+	differentialNames := map[string]bool{}
+	for _, fn := range selectAnnotatedFunctions(result, "differential", filter) {
+		if fn != nil {
+			differentialNames[fn.Name] = true
+			props = append(props, fn)
+		}
+	}
 	// Protocol laws (docs/85 P3) the analyzer could not statically prove are auto-lowered to a
 	// @property fuzz harness. Their source is injected separately (buildLawFuzzHarnesses); here we add
 	// their synthetic @property AnnotatedFuncs so the property-driver pass generates a randomized driver
@@ -281,7 +292,11 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 			continue
 		}
 		driverName := "__property_" + fn.Name
-		src.WriteString(propertyDriverSource(driverName, fn))
+		kind := "property"
+		if differentialNames[fn.Name] {
+			kind = "differential"
+		}
+		src.WriteString(propertyDriverSource(driverName, fn, kind))
 		cases = append(cases, selectedTestCase{Func: &semantic.AnnotatedFunc{
 			Name: driverName,
 			// The driver calls panic() on a counterexample; surface Abort.Panic so
@@ -401,8 +416,9 @@ func lawHarnessName(ob *semantic.LawFuzzObligation) string {
 	return "__law_" + clean(ob.Interface) + "_" + clean(ob.LawName) + "_" + clean(ob.TypeName)
 }
 
-// propertyDriverSource emits the Elisa text for one property driver.
-func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string {
+// propertyDriverSource emits the Elisa text for one property/differential driver.
+// kind ("property" or "differential") only affects the counterexample report wording.
+func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc, kind string) string {
 	seed := propertySeed(fn.Name)
 	cases := propertyCaseCount(fn)
 	var b strings.Builder
@@ -461,14 +477,14 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc) string 
 		fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], half)
 	}
 	// Report the (shrunk) failing case and each input value to stderr (fd 2).
-	header := fmt.Sprintf(">>> property %s counterexample (case %%lld, shrunk):\\n", fn.Name)
+	header := fmt.Sprintf(">>> %s %s counterexample (case %%lld, shrunk):\\n", kind, fn.Name)
 	b.WriteString(propertyReportStmt(header, "__prop_i.i64()"))
 	for j := range mutNames {
 		verb, conv := propertyReportArg(argTypes[j], mutNames[j])
 		line := fmt.Sprintf("      %s (%s) = %s\\n", argLabels[j], argTypes[j], verb)
 		b.WriteString(propertyReportStmt(line, conv))
 	}
-	msg := elisacoreStringLiteral(fmt.Sprintf("property %q failed (deterministic seed; %d cases)", fn.Name, cases))
+	msg := elisacoreStringLiteral(fmt.Sprintf("%s %q failed (deterministic seed; %d cases)", kind, fn.Name, cases))
 	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
 	return b.String()
 }
