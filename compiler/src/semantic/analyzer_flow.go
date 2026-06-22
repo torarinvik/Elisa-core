@@ -105,6 +105,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// binding. The callee proves its return refinement; the caller now uses it without
 			// re-deriving it from the body (modular verification).
 			a.seedReturnRefinementFacts(n.Name, n.Value, bindingType)
+			// docs P1 (protocol-contract composition): when the initializer is a generic call to a
+			// protocol method through a bounded type param, assume the PROTOCOL's `ensure` (with `result`
+			// bound to this immutable binding) as a flow fact — the caller half of behavioral subtyping.
+			// Sound for an immutable binding: the fact is never invalidated by a later reassignment.
+			a.seedProtocolEnsureFacts(n.Name, n.Value)
 		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)

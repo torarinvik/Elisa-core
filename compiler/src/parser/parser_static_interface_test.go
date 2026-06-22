@@ -510,3 +510,73 @@ def use_pair[B: Builder](value: int) -> B.Node:
 		t.Fatalf("expected tuple bind source to be built, got %T %#v", tupleBind.Value, tupleBind.Value)
 	}
 }
+
+// A2: contract clauses may all live uniformly in the indented block of a bodiless protocol method —
+// requires/ensure AND the frame conditions changes/preserves — populating the decl's frame fields.
+func TestParseProtocolMethodContractsIndentedBlock(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+protocol Sink:
+    def push(self: mutable Self&, x: int) -> void
+        requires x > 0
+        changes self.elements
+        preserves self.capacity
+        ensure self.count() == old(self.count()) + 1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	iface, ok := file.Decls[0].(*ast.InterfaceDecl)
+	if !ok {
+		t.Fatalf("expected protocol decl, got %T", file.Decls[0])
+	}
+	method, ok := iface.Members[0].(*ast.ExternFuncDecl)
+	if !ok || method.Name != "push" {
+		t.Fatalf("expected bodiless push method, got %T %#v", iface.Members[0], iface.Members[0])
+	}
+	if len(method.Requires) != 1 {
+		t.Fatalf("expected 1 requires from the block, got %d", len(method.Requires))
+	}
+	if len(method.EnsureValues) != 1 {
+		t.Fatalf("expected 1 ensure from the block, got %d", len(method.EnsureValues))
+	}
+	if len(method.Changes) != 1 {
+		t.Fatalf("expected 1 changes path from the block, got %d", len(method.Changes))
+	}
+	if len(method.Preserves) != 1 {
+		t.Fatalf("expected 1 preserves path from the block, got %d", len(method.Preserves))
+	}
+}
+
+// A2 back-compat: the signature-line form of changes/preserves still parses and reaches the decl.
+func TestParseProtocolMethodFrameSignatureLineBackCompat(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+protocol Sink:
+    def push(self: mutable Self&, x: int) -> void changes self.elements preserves self.capacity
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	iface := file.Decls[0].(*ast.InterfaceDecl)
+	method, ok := iface.Members[0].(*ast.ExternFuncDecl)
+	if !ok {
+		t.Fatalf("expected bodiless push method, got %T", iface.Members[0])
+	}
+	if len(method.Changes) != 1 || len(method.Preserves) != 1 {
+		t.Fatalf("expected signature-line changes/preserves to populate decl, got %d/%d", len(method.Changes), len(method.Preserves))
+	}
+}
+
+// A2: a non-contract statement in the indented block is still a parse error (no executable body).
+func TestParseProtocolMethodContractsRejectNonContract(t *testing.T) {
+	_, errs := parseSourceFile(t, `
+protocol Sink:
+    def push(self: mutable Self&, x: int) -> void
+        x = x + 1
+`)
+	if len(errs) == 0 {
+		t.Fatal("expected a parse error for a non-contract statement in a bodiless method block")
+	}
+	if !strings.Contains(strings.Join(errs, "\n"), "may only carry requires/ensure/changes/preserves") {
+		t.Fatalf("expected the contract-only error, got: %v", errs)
+	}
+}

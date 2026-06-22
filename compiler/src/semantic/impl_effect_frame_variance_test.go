@@ -114,6 +114,31 @@ impl Sink for AuditedVec:
 	}
 }
 
+// A2 FRAME subset via INDENTED-BLOCK form: the protocol declares its `changes` frame in the uniform
+// indented contract block (not on the signature line). The P4 variance check must still fire — an
+// impl writing outside that block-declared frame is rejected — proving block-form frame conditions
+// reach the decl's Changes field exactly as the signature-line form does.
+func TestImplChangesOutsideFrameRejectedBlockForm(t *testing.T) {
+	src := `
+struct AuditedVec:
+    elements: mutable i64
+    audit_count: mutable i64
+
+protocol Sink:
+    def push(self: mutable Self&, x: i64) -> void
+        changes self.elements
+
+impl Sink for AuditedVec:
+    def push(self: mutable AuditedVec&, x: i64) -> void changes self.elements, self.audit_count:
+        self.elements <- x
+        self.audit_count <- self.audit_count + 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "impl_changes_extra_block.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "outside the protocol's `changes` frame") {
+		t.Fatalf("block-form protocol changes frame must drive P4 variance, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // FRAME subset (positive): an impl whose `changes` frame is a SUBSET of the protocol's conforms.
 func TestImplChangesSubsetOK(t *testing.T) {
 	src := `
