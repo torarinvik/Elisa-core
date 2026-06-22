@@ -41,8 +41,13 @@ type StaticImpl struct {
 	InterfaceName   string
 	Receiver        Type
 	AssociatedTypes map[string]Type
-	Methods         map[string]*Symbol
-	Decl            *ast.ImplDecl
+	// AssociatedTypeRefinements carries the refinement predicates an impl's associated-type binding
+	// declares (P2: `type Field = u32 is InRange[0,127]`). The base type is representation-erased into
+	// AssociatedTypes; the refinement lives here so a generic protocol call whose result is that
+	// associated type can recover the static interval and feed the existing bounds-check elision.
+	AssociatedTypeRefinements map[string][]ast.RefinementPredExpr
+	Methods                   map[string]*Symbol
+	Decl                      *ast.ImplDecl
 	// TypeParams names the impl's own type parameters (from `impl[T] ... for Box[T]`).
 	// When non-empty the impl is parametric: its Receiver pattern carries these as free
 	// TypeParamType leaves, and a concrete receiver is matched by unifying against them.
@@ -556,12 +561,13 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					return
 				}
 				impl := &StaticImpl{
-					InterfaceName:   interfaceName,
-					Receiver:        receiver,
-					TypeParams:      implTypeParamNamesFromDecl(decl.GenericParams),
-					AssociatedTypes: map[string]Type{},
-					Methods:         map[string]*Symbol{},
-					Decl:            decl,
+					InterfaceName:             interfaceName,
+					Receiver:                  receiver,
+					TypeParams:                implTypeParamNamesFromDecl(decl.GenericParams),
+					AssociatedTypes:           map[string]Type{},
+					AssociatedTypeRefinements: map[string][]ast.RefinementPredExpr{},
+					Methods:                   map[string]*Symbol{},
+					Decl:                      decl,
 				}
 				seenAssoc := map[string]bool{}
 				seenMethods := map[string]bool{}
@@ -579,6 +585,9 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 							continue
 						}
 						impl.AssociatedTypes[n.Name] = a.resolveType(n.Type)
+						if preds := refinementPredsOfTypeExpr(n.Type); len(preds) > 0 {
+							impl.AssociatedTypeRefinements[n.Name] = preds
+						}
 					case *ast.FuncDecl:
 						methodDecls = append(methodDecls, n)
 						if seenMethods[n.Name] {

@@ -87,7 +87,14 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		return result
 	}
 	indexCheckType := indexType
-	if idType, ok := indexType.(*IDType); ok && idType != nil {
+	// P2: an associated-type-typed index (`D.Field` from a generic protocol call) is checked against
+	// the concrete base its impls bind, so an integral associated type indexes normally.
+	if proj, ok := indexCheckType.(*AssociatedTypeProjection); ok {
+		if base, bok := a.associatedTypeProjectionBase(proj); bok {
+			indexCheckType = base
+		}
+	}
+	if idType, ok := indexCheckType.(*IDType); ok && idType != nil {
 		indexCheckType = idType.Storage
 	}
 	if _, ok := NodeKeyEnumType(indexType); !ok {

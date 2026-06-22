@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strconv"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -328,6 +330,13 @@ func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPre
 		if ok && decl != nil {
 			return refinementPredsOfTypeExpr(decl.ReturnType)
 		}
+		// P2: a generic protocol method call (`D.decode(d, w)` / `d.decode(w)`) whose result type is
+		// an unresolved associated-type projection `D.Field`. Every conforming impl that binds Field
+		// to a refined type carries that refinement; the bound a generic caller may rely on is the
+		// INTERSECTION across all impls (so one non-refined impl correctly forfeits elision).
+		if preds, ok := a.associatedTypeProjectionRefinement(a.exprTypes[n]); ok {
+			return preds
+		}
 	case *ast.Ident:
 		if a.currentFuncDecl == nil {
 			return nil
@@ -348,6 +357,118 @@ func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPre
 		}
 	}
 	return nil
+}
+
+// associatedTypeProjectionRefinement returns the refinement predicates a generic protocol-method call
+// result of associated-type type `D.Field` provably carries (P2). For an abstract type param `D: P`,
+// the concrete impl is unknown at this site, so the only bound a caller may soundly rely on is one
+// that EVERY conforming impl of P guarantees. We therefore:
+//   - require that EVERY impl of P binds `Field` to a refined type (any non-refined impl ⇒ no bound,
+//     because that impl's value could be anything — correctly forfeiting elision), and
+//   - take the convex HULL (widest lo..hi) of the impls' intervals: the concrete value lies in some
+//     one impl's interval, hence in the hull. The hull is re-expressed as a single InRange-style pred
+//     reusing the impls' law name so the existing lawRangeBounds path computes the interval.
+func (a *Analyzer) associatedTypeProjectionRefinement(t Type) ([]ast.RefinementPredExpr, bool) {
+	proj, ok := t.(*AssociatedTypeProjection)
+	if !ok || proj == nil || proj.InterfaceName == "" || proj.Name == "" {
+		return nil, false
+	}
+	var lawName string
+	var hullPred ast.RefinementPredExpr
+	var loV, hiV int64
+	count := 0
+	for _, impl := range a.staticImpls {
+		if impl == nil || impl.InterfaceName != proj.InterfaceName {
+			continue
+		}
+		count++
+		preds := impl.AssociatedTypeRefinements[proj.Name]
+		if len(preds) == 0 {
+			// An impl with no refinement on this associated type: a generic caller can prove nothing.
+			return nil, false
+		}
+		l, h, rok := a.predsInterval(preds)
+		if !rok {
+			return nil, false
+		}
+		if lawName == "" {
+			lawName = preds[0].Name
+			hullPred = preds[0]
+			loV, hiV = l, h
+			continue
+		}
+		if l < loV {
+			loV = l
+		}
+		if h > hiV {
+			hiV = h
+		}
+	}
+	if count == 0 || lawName == "" {
+		return nil, false
+	}
+	// Re-express the hull as a single InRange-style predicate carrying the widened [loV,hiV] bounds.
+	hullPred.Args = []ast.Expr{intLiteralExprForBound(loV), intLiteralExprForBound(hiV)}
+	return []ast.RefinementPredExpr{hullPred}, true
+}
+
+// associatedTypeProjectionBase returns the concrete (representation-erased) type that every impl of
+// proj's protocol binds proj's associated type to, when they all agree. Used so a generic index of
+// associated-type type can be validated/elided against its real base (e.g. u32).
+func (a *Analyzer) associatedTypeProjectionBase(proj *AssociatedTypeProjection) (Type, bool) {
+	if proj == nil || proj.InterfaceName == "" || proj.Name == "" {
+		return nil, false
+	}
+	var base Type
+	for _, impl := range a.staticImpls {
+		if impl == nil || impl.InterfaceName != proj.InterfaceName {
+			continue
+		}
+		t, ok := impl.AssociatedTypes[proj.Name]
+		if !ok || t == nil {
+			return nil, false
+		}
+		if base == nil {
+			base = t
+			continue
+		}
+		if !SameType(base, t) {
+			return nil, false
+		}
+	}
+	return base, base != nil
+}
+
+// intLiteralExprForBound builds an AST integer literal carrying the given value, for synthesizing the
+// hull predicate's bracket arguments (negative values are not produced by InRange-style bounds here).
+func intLiteralExprForBound(v int64) ast.Expr {
+	return &ast.IntLit{Value: strconv.FormatInt(v, 10)}
+}
+
+// predsInterval reduces a refinement pred list to the tightest interval its laws prove, mirroring
+// refinementCarriedInterval's reduction but over an explicit pred list.
+func (a *Analyzer) predsInterval(preds []ast.RefinementPredExpr) (lo int64, hi int64, ok bool) {
+	for _, pred := range preds {
+		lawDecl, _, lok := a.lookupLaw(pred.Name)
+		if !lok || lawDecl == nil {
+			continue
+		}
+		l, h, rok := a.lawRangeBounds(lawDecl, pred.Args)
+		if !rok {
+			continue
+		}
+		if !ok {
+			lo, hi, ok = l, h, true
+			continue
+		}
+		if l > lo {
+			lo = l
+		}
+		if h < hi {
+			hi = h
+		}
+	}
+	return lo, hi, ok
 }
 
 // refinementPredsOfTypeExpr extracts the refinement predicates of a (possibly mutable-wrapped) type expr.
