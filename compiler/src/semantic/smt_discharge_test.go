@@ -807,6 +807,40 @@ def align_up(value: u64, alignment: u64) -> u64:
 	}
 }
 
+func TestSMTUnsignedWithinReservationOverflowGuard(t *testing.T) {
+	if _, err := exec.LookPath("z3"); err != nil {
+		t.Skip("z3 not on PATH; SMT discharge test skipped")
+	}
+	src := `
+def within(addr: u64, length: u64, base: u64, cap: u64) -> bool:
+    ensure result == (addr >= base and addr + length >= addr and addr + length <= base + cap)
+    return addr >= base and addr + length >= addr and addr + length <= base + cap
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "u64_within_reservation.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("within-reservation overflow guard should discharge under SMT, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestSMTUnsignedOverflowClaimDeclinesWithCounterexample(t *testing.T) {
+	if _, err := exec.LookPath("z3"); err != nil {
+		t.Skip("z3 not on PATH; SMT discharge test skipped")
+	}
+	src := `
+def unchecked(addr: u64, length: u64) -> u64:
+    ensure addr + length >= addr
+    return addr + length
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "u64_overflow_claim.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	diags := allDiagnostics(r)
+	if !strings.Contains(diags, "could not be proven") {
+		t.Fatalf("unguarded overflowing u64 addition must not prove, got:\n%s", diags)
+	}
+	if !strings.Contains(diags, "counterexample") && !strings.Contains(diags, "can fail when") {
+		t.Fatalf("unguarded overflowing u64 addition should report a counterexample, got:\n%s", diags)
+	}
+}
+
 // The guard-narrowing soundness floor: a `<` guard establishes the post-guard lower bound, so a
 // downstream `ensure result >= 0` on a clamp proves; nothing weaker is admitted.
 func TestFallThroughGuardClampDischarges(t *testing.T) {
