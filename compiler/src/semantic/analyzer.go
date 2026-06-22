@@ -366,6 +366,12 @@ type Analyzer struct {
 	enforceStrictProofs         bool
 	emitProofHoleHints          bool
 	requireExternContracts      bool
+	// requiresReport gates the -requires-report aggregation (docs c3): per requires-bearing function,
+	// how many direct call sites statically discharge the precondition vs fall back to a runtime check.
+	// OFF by default; when off, requiresReportData/Order stay nil and nothing else changes.
+	requiresReport      bool
+	requiresReportData  map[requiresReportKey]*RequiresReportEntry
+	requiresReportOrder []requiresReportKey
 	// inClosedWorldProof is set while discharging a `by scoped:` proof block (docs/99). Under it, the
 	// ambient hypothesis sources that are NOT scope-walled — the enclosing function's `requires` and the
 	// defining equalities of immutable locals — are suppressed, so the closed world holds ONLY the facts
@@ -630,6 +636,12 @@ type AnalyzeOptions struct {
 	// an assistant you INVOKE (the future `assert ?` / `--explain-hole` surface), not an always-on
 	// diagnostic, so normal builds stay quiet and never flag legitimate runtime-checked asserts.
 	EmitProofHoleHints bool
+	// RequiresReport turns on the -requires-report blast-radius aggregation (docs c3): for every
+	// requires-bearing function, count the direct call sites whose precondition is statically
+	// dischargeable vs the ones that fall back to a runtime check (with the unprovable sites'
+	// locations). Read-only observability surfaced on Result.RequiresReport; OFF by default and with
+	// ZERO effect on existing errors/lints — it only accumulates alongside the discharge pass.
+	RequiresReport bool
 }
 
 func Analyze(file *ast.File) *Result {
@@ -732,6 +744,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
 		emitProofHoleHints:                options.EmitProofHoleHints,
+		requiresReport:                    options.RequiresReport,
 		requireExternContracts:            options.RequireExternContracts,
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
@@ -880,6 +893,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ReturnRefinementChecks:  a.returnRefinementChecks,
 		IndexBoundsProven:       a.indexBoundsProven,
 		ProofReport:             a.proofReport,
+		RequiresReport:          a.requiresReportEntries(),
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,
 		Lambdas:                 a.lambdaInfo,
