@@ -150,3 +150,80 @@ def reckless[C: Indexable](c: C) -> C.Elem:
 		t.Fatalf("generic call without establishing the protocol precondition must be flagged under -strict, got no diagnostics")
 	}
 }
+
+// A1 — protocol-contract COMPOSITION: a generic caller may ASSUME the protocol method's `ensure`
+// after the call (the covariant postcondition half of behavioral subtyping). The injected fact (with
+// `result` -> the binding the call value is assigned to) lets a downstream claim implied by the
+// protocol ensure discharge.
+func TestProtocolEnsureInjectedDownstreamProven(t *testing.T) {
+	src := `
+struct Path:
+    n: usize
+
+protocol Reader:
+    def read(self: Self, p: Path) -> dstr
+        ensure result.count >= 1
+
+def load[R: Reader](r: R, p: Path) -> dstr:
+    ensure result.count >= 1
+    text = r.read(p)
+    return text
+`
+	r := analyzeProtocolVariance(t, "proto_ensure_inject_ok.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("downstream `result.count >= 1` should be proven from the injected protocol ensure, got:\n%s", allDiagnostics(r))
+	}
+}
+
+// A1 — NO over-assumption: a downstream claim NOT implied by the protocol's `ensure`
+// (`result.count >= 5` when the protocol only guarantees `>= 0`) is still rejected under -strict.
+func TestProtocolEnsureInjectedDoesNotOverAssume(t *testing.T) {
+	src := `
+struct Path:
+    n: usize
+
+protocol Reader:
+    def read(self: Self, p: Path) -> dstr
+        ensure result.count >= 0
+
+def load[R: Reader](r: R, p: Path) -> dstr:
+    ensure result.count >= 5
+    text = r.read(p)
+    return text
+`
+	r := analyzeProtocolVariance(t, "proto_ensure_inject_overassume.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("a claim stronger than the protocol's `ensure` must NOT be assumed; expected a -strict error, got none:\n%s", allDiagnostics(r))
+	}
+}
+
+// A1 — SOUNDNESS: the injected fact is the PROTOCOL's `ensure`, never any concrete impl's stronger
+// one. An impl promising MORE (`ensure result.count >= 3`) must not leak that extra guarantee to a
+// generic caller bounded only on the protocol — so a downstream `result.count >= 3` is still rejected.
+func TestProtocolEnsureInjectionUsesProtocolNotImpl(t *testing.T) {
+	src := `
+struct Path:
+    n: usize
+
+struct StrongReader:
+    k: usize
+
+protocol Reader:
+    def read(self: Self, p: Path) -> dstr
+        ensure result.count >= 0
+
+impl Reader for StrongReader:
+    def read(self: StrongReader, p: Path) -> dstr:
+        ensure result.count >= 3
+        return "abc"
+
+def load[R: Reader](r: R, p: Path) -> dstr:
+    ensure result.count >= 3
+    text = r.read(p)
+    return text
+`
+	r := analyzeProtocolVariance(t, "proto_ensure_inject_impl_leak.elisa", src)
+	if len(r.Errors()) == 0 {
+		t.Fatalf("an impl's stronger ensure must not leak to generic callers; expected a -strict error on `result.count >= 3`, got none:\n%s", allDiagnostics(r))
+	}
+}

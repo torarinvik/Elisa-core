@@ -266,6 +266,107 @@ func renderContractClause(e ast.Expr) string {
 	return "<clause>"
 }
 
+// protocolMethodForBoundCall resolves a (already-rewritten) bound-type-param protocol-method call to
+// the protocol method it dispatches to, returning the StaticInterfaceMethod and the protocol's
+// declared parameter list. A bound-type-param call is rewritten by rewriteBoundTypeParamMethodCall to
+// the static type-path form `T.method(receiver, args...)`, where `T` is a bare type-param Ident whose
+// bound declares `method`. Returns ok=false for any call that is not exactly that form (so a concrete
+// impl call, a free function, etc. inject nothing).
+func (a *Analyzer) protocolMethodForBoundCall(call *ast.CallExpr) (*StaticInterfaceMethod, []ast.ParamDecl, bool) {
+	if a == nil || call == nil {
+		return nil, nil, false
+	}
+	field, ok := call.Func.(*ast.FieldExpr)
+	if !ok || field == nil || field.Field == "" {
+		return nil, nil, false
+	}
+	obj, ok := field.Object.(*ast.Ident)
+	if !ok || obj == nil || obj.Name == "" {
+		return nil, nil, false
+	}
+	iface, ok := a.lookupTypeParamInterface(obj.Name)
+	if !ok || iface == nil {
+		return nil, nil, false
+	}
+	method, ok := iface.Methods[field.Field]
+	if !ok || method == nil || method.Signature == nil {
+		return nil, nil, false
+	}
+	// The protocol method's declared params (receiver-first, e.g. [self, p]) align positionally with
+	// the rewritten static-call args [receiver, args...].
+	var params []ast.ParamDecl
+	switch {
+	case method.Decl != nil:
+		params = method.Decl.Params
+	case method.Default != nil:
+		params = method.Default.Params
+	default:
+		return nil, nil, false
+	}
+	return method, params, true
+}
+
+// seedProtocolEnsureFacts completes protocol-contract composition (docs P1, behavioral subtyping): at
+// a generic call to a protocol method through a bounded type param, after the caller half PROVED the
+// protocol method's `requires`, the caller may ASSUME the protocol method's `ensure` — because every
+// conforming impl must (covariantly) re-establish it (checkProtocolImplContractVariance). This injects
+// each protocol `ensure`, with `result` substituted by the binding the call value is assigned to and
+// the method's params substituted by the actual receiver/args, as a flow fact the SMT lane and affine
+// prover can USE downstream (e.g. `text = r.read(p)` then `ensure text.count >= 0`).
+//
+// SOUNDNESS:
+//   - We inject ONLY the PROTOCOL's declared `ensure`, never any concrete impl's (the generic caller
+//     does not know the impl). An impl promising MORE never leaks its extra ensure here.
+//   - Substitution is complete-or-decline per clause (substituteLemmaEnsure): a clause that cannot be
+//     faithfully rewritten into the caller's terms is dropped — it never records a fact whose meaning
+//     drifted.
+//   - `result` binds to the call value's binding (the immutable local just declared), so a downstream
+//     read of that binding (`text.count`) resolves to the SAME SMT length symbol as the injected fact.
+func (a *Analyzer) seedProtocolEnsureFacts(name string, value ast.Expr) {
+	if a == nil || a.currentScope == nil || value == nil || name == "" {
+		return
+	}
+	call, ok := a.proofCallExpr(value)
+	if !ok || call == nil {
+		return
+	}
+	method, params, ok := a.protocolMethodForBoundCall(call)
+	if !ok {
+		return
+	}
+	proto := protocolMethodContracts(method)
+	if len(proto.ensures) == 0 {
+		return
+	}
+	args := proofCallArgs(call)
+	// Map `result` to the binding, and each protocol param (self-first) to the rewritten call's
+	// positional arg. The static-call form already carries the receiver as args[0], aligned with the
+	// protocol method's first param (`self`).
+	subst := map[string]ast.Expr{
+		"result": &ast.Ident{Position: call.Pos(), Name: name},
+	}
+	for i, param := range params {
+		if param.Name == "" || i >= len(args) || args[i] == nil {
+			continue
+		}
+		subst[param.Name] = args[i]
+	}
+	for _, clause := range proto.ensures {
+		if clause == nil {
+			continue
+		}
+		rewritten, ok := substituteLemmaEnsure(clause, subst)
+		if !ok {
+			continue
+		}
+		a.recordSMTAssertFact(rewritten)
+		a.recordProofWithClass(call.Pos(), "postcondition of protocol method "+method.Name, "ensure", ProofProvenContract, ProofClassContract, nil, "")
+		if a.currentProofCitation != nil {
+			a.currentProofCitation.Facts = append(a.currentProofCitation.Facts, rewritten)
+		}
+	}
+}
+
 // forEachFreeIdent visits every identifier name referenced in a contract predicate. It is an
 // over-approximation (it also visits field/call sub-identifiers), which is fine: declaring an extra
 // unconstrained Int symbol never affects soundness.
