@@ -235,6 +235,9 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			fmt.Fprintf(stderr, "  %s\n", line)
 		}
 	}
+	if options.requiresReport {
+		printRequiresReport(stderr, result.RequiresReport)
+	}
 
 	switch options.emit {
 	case emitSemantic:
@@ -525,6 +528,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		RequireExternContracts:   options.strictExterns,
 		EnableSMT:                options.enableSMT,
 		EmitProofHoleHints:       options.explainHole,
+		RequiresReport:           options.requiresReport,
 	}
 }
 
@@ -597,6 +601,29 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole
 		}
 	}
 	fmt.Fprintf(stderr, "  %d proven statically, %d assumed, %d runtime-checked, %d measured, %d refuted\n", proven, assumed, runtime, measured, refuted)
+}
+
+// printRequiresReport renders the -requires-report blast-radius report (docs c3): one entry per
+// (requires-bearing function, clause) showing how many direct call sites statically discharge the
+// precondition vs fall back to a runtime check, listing the unprovable sites' locations. This
+// surfaces, before committing, the new runtime-check obligations that adding a `requires` to a hot
+// function would create.
+func printRequiresReport(stderr io.Writer, report []semantic.RequiresReportEntry) {
+	if len(report) == 0 {
+		fmt.Fprintln(stderr, "requires-report: (no requires-bearing call sites)")
+		return
+	}
+	for _, entry := range report {
+		total := entry.Provable + entry.Unprovable
+		fmt.Fprintf(stderr, "requires-report: %s  `%s`  — %d/%d call sites provable\n", entry.DeclName, entry.ClauseText, entry.Provable, total)
+		if entry.Unprovable > 0 {
+			fmt.Fprint(stderr, "  unprovable:")
+			for _, pos := range entry.UnprovableSites {
+				fmt.Fprintf(stderr, " %s", pos)
+			}
+			fmt.Fprintf(stderr, "  (%d)\n", entry.Unprovable)
+		}
+	}
 }
 
 func proofReportClass(outcome semantic.ProofOutcome) semantic.ProofDischargeClass {
