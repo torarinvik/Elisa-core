@@ -560,6 +560,7 @@ type affineFlowSnapshot struct {
 	FunctionValues             map[*Symbol]*FuncType
 	SpecializedValueTypes      map[*Symbol]Type
 	ValueBindings              map[*Symbol]ast.Expr
+	RangeFacts                 map[string]numRange
 	StorageViewDeps            map[*Symbol]storageViewDependencyState
 	AliasCarriers              map[string][]string
 	AliasCarrierFieldOverrides map[string]map[string][]string
@@ -580,9 +581,17 @@ func (a *Analyzer) analyzeBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) a
 	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, nil)
 }
 
+func (a *Analyzer) analyzeBranchBlockWithAffineClone(stmts []ast.Stmt, scope *Scope) affineFlowSnapshot {
+	savedRangeFacts := cloneScopeRangeFacts(scope)
+	snapshot := a.analyzeBlockWithAffineClonePrepared(stmts, scope, nil)
+	restoreScopeRangeFacts(savedRangeFacts)
+	return snapshot
+}
+
 func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent *Scope, cond ast.Expr, truthy bool) affineFlowSnapshot {
 	scope := a.refinedScopeForCondition(parent, cond, truthy)
-	return a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
+	savedRangeFacts := cloneScopeRangeFacts(scope)
+	snapshot := a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
 		a.applyIndexBoundsFactsForCondition(cond, truthy)
 		a.applyViewStaticLenForCondition(cond, truthy)
@@ -592,6 +601,8 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 		// contradicts the applied negation `x <= 10` and proves any postcondition).
 		a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(cond, truthy))
 	})
+	restoreScopeRangeFacts(savedRangeFacts)
+	return snapshot
 }
 
 // optionalBindBoundType resolves the type bound by an `if VALUE is NAME:`
@@ -1240,7 +1251,7 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 		prepare()
 	}
 	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues

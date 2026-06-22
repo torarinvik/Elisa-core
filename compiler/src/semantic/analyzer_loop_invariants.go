@@ -289,6 +289,11 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	if solver == nil || target == nil {
 		return false, ""
 	}
+	savedRangeFacts := cloneScopeRangeFacts(a.currentScope)
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		sc.rangeFacts = nil
+	}
+	defer restoreScopeRangeFacts(savedRangeFacts)
 	tr := a.newSMTTranslator(nil)
 	// The obligation: the invariant after the body's substitution. smtEnvForSubst maps each loop
 	// variable to its post-body term (declaring the free variables of those terms).

@@ -564,6 +564,74 @@ func isResultIdent(e ast.Expr) bool {
 	return ok && id != nil && id.Name == "result"
 }
 
+func (a *Analyzer) tryProveEnsureByDisjunctiveResultRange(clause ast.Expr, ret ast.Expr) bool {
+	subject, constants, ok := resultEqualityDisjunction(a, clause)
+	if !ok || !isResultIdent(subject) || len(constants) == 0 {
+		return false
+	}
+	min, max := constants[0], constants[0]
+	seen := map[int64]bool{}
+	for _, c := range constants {
+		seen[c] = true
+		if c < min {
+			min = c
+		}
+		if c > max {
+			max = c
+		}
+	}
+	if int64(len(seen)) != max-min+1 {
+		return false
+	}
+	if typ := a.exprTypes[ret]; typ != nil {
+		if _, _, ok := BitIntInfo(typ); !ok {
+			return false
+		}
+	}
+	if id, ok := stripOptimizationParens(ret).(*ast.Ident); ok && id != nil {
+		if r, found := a.lookupRangeFact(id.Name); found && r.loKnown && r.hiKnown && r.lo >= min && r.hi <= max {
+			return true
+		}
+		if c, found := a.writtenConstInt(id.Name); found && c >= min && c <= max {
+			return true
+		}
+	}
+	if c, ok := a.constIntValue(ret); ok {
+		return c >= min && c <= max
+	}
+	return false
+}
+
+func resultEqualityDisjunction(a *Analyzer, expr ast.Expr) (ast.Expr, []int64, bool) {
+	expr = stripOptimizationParens(expr)
+	if bin, ok := expr.(*ast.BinaryExpr); ok && bin != nil && bin.Op == lexer.TOKEN_OR {
+		leftSubject, leftConsts, ok := resultEqualityDisjunction(a, bin.Left)
+		if !ok {
+			return nil, nil, false
+		}
+		rightSubject, rightConsts, ok := resultEqualityDisjunction(a, bin.Right)
+		if !ok || !exprsSyntacticallyEqual(leftSubject, rightSubject) {
+			return nil, nil, false
+		}
+		return leftSubject, append(leftConsts, rightConsts...), true
+	}
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+		return nil, nil, false
+	}
+	if isResultIdent(bin.Left) {
+		if c, ok := a.constIntValue(bin.Right); ok {
+			return bin.Left, []int64{c}, true
+		}
+	}
+	if isResultIdent(bin.Right) {
+		if c, ok := a.constIntValue(bin.Left); ok {
+			return bin.Right, []int64{c}, true
+		}
+	}
+	return nil, nil, false
+}
+
 func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
@@ -585,6 +653,10 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
 		if ensureHoldsByReturnReflexivity(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
+			continue
+		}
+		if a.tryProveEnsureByDisjunctiveResultRange(clause, n.Value) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "range disjunction", ProofProvenSMT)
 			continue
 		}
 		proven, counterexample := a.trySMTProveRequires(clause, subst)
