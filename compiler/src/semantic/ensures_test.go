@@ -608,6 +608,36 @@ def bad(ev: void&?) -> u64:
     e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
     return e.data
 `, false},
+		{"pointer_null_result_disjunction_via_cast", `
+struct OrbisKernelEvent:
+    udata: void&?
+def GetEventUserData(ev: void&?) -> void&?:
+    ensure (ev != null) or (result == null)
+    e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
+    if e == null:
+        return null
+    return e.udata
+`, true},
+		{"pointer_null_result_disjunction_missing_fallback", `
+struct OrbisKernelEvent:
+    udata: void&?
+def bad_missing(ev: void&?) -> void&?:
+    ensure ev != null
+    e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
+    if e == null:
+        return null
+    return e.udata
+`, false},
+		{"pointer_null_result_disjunction_nonnull_on_null_path", `
+struct OrbisKernelEvent:
+    udata: void&?
+def bad_nonnull(ev: void&?, fallback: void&?) -> void&?:
+    ensure result == null
+    e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
+    if e == null:
+        return fallback
+    return e.udata
+`, false},
 		{"struct_result_field", `
 struct Pair:
     a: i64

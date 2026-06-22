@@ -527,6 +527,12 @@ func (a *Analyzer) smtEnvForCallSubstEnv(tr *smtTranslator, subst map[string]ast
 }
 
 func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name string, argExpr ast.Expr, argEnv map[string]string, requireBinding bool) bool {
+	// A literal-null substitution (e.g. `result` on a `return null` path) has no scalar SMT term. It is
+	// consumed structurally by the null-compare lowering (which keys an `isnull_<name>` predicate), so
+	// leave the env entry unbound rather than failing the whole env build.
+	if _, ok := stripOptimizationParens(argExpr).(*ast.NullLit); ok {
+		return true
+	}
 	if lit, ok := argExpr.(*ast.BoolLit); ok {
 		if lit.Value {
 			env[name] = "true"
@@ -560,6 +566,14 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// they never enter a numeric SMT term (the type checker forbids datatype operands in arithmetic).
 	if isDatatypeValuedType(a.exprTypes[argExpr]) {
 		env[name] = dtToken(smtProjectionName(argExpr))
+		return true
+	}
+	// A pointer-like value (nullable optional / reference, e.g. a `void&?` return on a `result == null`
+	// disjunct) has no scalar SMT term either. It too is consumed structurally by the null-compare
+	// lowering (keyed by the substituted name, not by an env term), so leave it unbound rather than
+	// failing the env build. SOUND: an unbound entry contributes no fact; only the null-compare path
+	// (which folds against the literal/flow facts) can conclude anything about it.
+	if a.exprIsPointerLike(a.exprTypes[argExpr]) {
 		return true
 	}
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
