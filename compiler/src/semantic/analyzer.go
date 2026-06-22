@@ -415,6 +415,7 @@ type Analyzer struct {
 	disjointCallSites              map[*ast.FuncDecl][]callDisjointObservation
 	funcDisjointParams             map[*ast.FuncDecl]*FuncDisjointParamInfo
 	lawIsCalls                     map[*ast.BinaryExpr]*ast.CallExpr
+	builtinModularLaws             map[string]*ast.FuncDecl
 	lemmaCalls                     map[*ast.CallExpr]bool
 	ghostDecls                     map[*ast.VarDeclStmt]bool
 	ghostContracts                 map[ast.Expr]bool
@@ -731,6 +732,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		callArgDisjoint:                   map[*ast.CallExpr]*CallArgDisjointInfo{},
 		disjointCallSites:                 map[*ast.FuncDecl][]callDisjointObservation{},
 		lawIsCalls:                        map[*ast.BinaryExpr]*ast.CallExpr{},
+		builtinModularLaws:                map[string]*ast.FuncDecl{},
 		refinementChecks:                  map[*ast.VarDeclStmt][]*ast.CallExpr{},
 		callArgRefinementChecks:           map[*ast.CallExpr][]*ast.CallExpr{},
 		returnRefinementChecks:            map[*ast.ReturnStmt][]*ast.CallExpr{},

@@ -199,6 +199,12 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 	// Reset any counterexample left over from a previous obligation; the SMT tier below re-populates it
 	// on a failed proof, so the diagnostics that follow only ever show a witness for THIS obligation.
 	a.lastSMTCounterexample = ""
+	// Cheap modular tier (docs/85 modular predicates): a syntactic alignment/mask proof that does not
+	// need the solver — `x & C`, `k*N`, an already-aligned constant. Runs first so the common
+	// page-alignment shapes discharge without z3. Sound: only proves, never refutes.
+	if isBuiltinModularLawName(pred.Name) && a.tryDischargeModularCheaply(value, pred.Name, pred.Args) {
+		return true
+	}
 	if a.tryProveRefinementByFlow(value, lawDecl, pred.Args) {
 		a.recordProof(pos, valueName, pred.Name, ProofProvenFlow)
 		return true
@@ -1033,6 +1039,13 @@ func (a *Analyzer) lookupLaw(name string) (*ast.FuncDecl, *FuncType, bool) {
 			}
 			sym = sym.AliasOf
 		}
+	}
+	// Built-in modular-arithmetic predicates (Aligned/Divides/Fits/MaskedZero) have no user `law`
+	// decl: synthesize one on demand so every law consumer (discharge, flow facts, validation) treats
+	// them uniformly. The FuncType is left nil — refinement discharge does not need it, and the
+	// builtin's subject accepts any integer width.
+	if decl := a.lookupBuiltinModularLaw(name); decl != nil {
+		return decl, nil, true
 	}
 	return nil, nil, false
 }
