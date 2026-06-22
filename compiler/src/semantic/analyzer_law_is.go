@@ -150,7 +150,10 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 	if a == nil || n == nil || a.refinementChecks == nil || n.Value == nil {
 		return
 	}
-	rt, ok := n.Type.(*ast.RefinementTypeExpr)
+	// paramRefinementTypeExpr (not a raw cast) so a `type` ALIAS local — `base: PageAddr = …` —
+	// surfaces its underlying predicates instead of erasing them (the param-boundary fix, applied
+	// to local declarations too; otherwise an alias-typed local would be a vacuous no-check).
+	rt, ok := a.paramRefinementTypeExpr(n.Type)
 	if !ok || rt == nil {
 		return
 	}
@@ -162,6 +165,14 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		}
 		// Try to discharge statically (flow then constant entailment). Proven/refuted → done.
 		if a.tryDischargeRefinementStatically(n.Value, "\""+n.Name+"\"", pred, lawDecl, n.Pos()) {
+			continue
+		}
+		// Contract composition: the initializer is itself a refinement-returning call (or a refined
+		// struct-field read) whose declared refinement entails this local's — its result satisfies the
+		// predicate on every callee exit, so the binding is proven without a runtime check. Mirrors the
+		// call-argument boundary, so `base: u64 is Aligned[4096] = page_align_down(raw)` discharges.
+		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) || a.argDeclaredRefinementEntails(n.Value, pred) {
+			a.recordProof(n.Pos(), "\""+n.Name+"\"", pred.Name, ProofProvenContract)
 			continue
 		}
 		// Not statically proven: fall back to a runtime check AND tell the user — a static guarantee
@@ -318,7 +329,7 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 			// declared refinement entails this parameter's — its result already satisfies the predicate
 			// on every callee exit, so the obligation is discharged without a runtime check. This is what
 			// makes `map_fixed(page_align_down(raw), ..)` prove when `page_align_down -> u64 is Aligned[..]`.
-			if a.returnCallRefinementEntails(args[i], pred) || a.returnFieldRefinementEntails(args[i], pred) {
+			if a.returnCallRefinementEntails(args[i], pred) || a.returnFieldRefinementEntails(args[i], pred) || a.argDeclaredRefinementEntails(args[i], pred) {
 				a.recordProof(call.Pos(), name, pred.Name, ProofProvenContract)
 				continue
 			}
@@ -411,6 +422,46 @@ func (a *Analyzer) returnFieldRefinementEntails(value ast.Expr, pred ast.Refinem
 	return false
 }
 
+// argDeclaredRefinementEntails reports whether `value` is an identifier whose DECLARED type (an
+// immutable local var-decl or a parameter) carries a refinement predicate that entails `pred`. A
+// refinement-typed value satisfies its predicate at every read — for a parameter the caller proved
+// it at the call site, for an immutable local the declaration proved it — so passing it where the
+// same predicate is required discharges without a runtime re-check: `base: u64 is Aligned[4096]`
+// then `map_fixed(base)`. Gated to IMMUTABLE bindings: a mutable variable could be reassigned to a
+// non-conforming value after declaration, so its declared refinement is not a standing guarantee.
+func (a *Analyzer) argDeclaredRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	ident, ok := stripOptimizationParens(value).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil || sym.Mutable {
+		return false
+	}
+	var declType ast.TypeExpr
+	switch d := sym.Node.(type) {
+	case *ast.VarDeclStmt:
+		declType = d.Type
+	case *ast.FuncDecl:
+		if sym.Kind == SymbolParam && sym.ParamIndex >= 0 && sym.ParamIndex < len(d.Params) {
+			declType = d.Params[sym.ParamIndex].Type
+		}
+	}
+	if declType == nil {
+		return false
+	}
+	rt, ok := a.paramRefinementTypeExpr(declType)
+	if !ok || rt == nil {
+		return false
+	}
+	for _, cp := range rt.Preds {
+		if a.refinementPredEntails(cp, pred) {
+			return true
+		}
+	}
+	return false
+}
+
 // refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
 // identical constant arguments (the trivial, overwhelmingly common forward/wrap case). Returning a value
 // already refined `Bounded[0,255]` satisfies a required `Bounded[0,255]`. Conservative: a non-constant
@@ -450,7 +501,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
 		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
 		// function that returns another refinement-typed function's result paid a redundant runtime check.
-		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) {
+		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) || a.argDeclaredRefinementEntails(n.Value, pred) {
 			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}

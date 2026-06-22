@@ -145,3 +145,64 @@ def caller(raw: u64) -> u64:
 		t.Fatalf("an unaligned inline-param argument must still be rejected, got: %v", result.Errors())
 	}
 }
+
+// `aligned` is a valid identifier (the vestigial reserved keyword was removed), and a refinement on
+// a var-decl carries through: a refined-return initializer discharges the local by contract, and the
+// refinement-typed immutable local then satisfies a same-predicate parameter without a runtime check.
+func TestModularRefinedLocalFlowsThroughToParam(t *testing.T) {
+	src := `
+type PageAddr = u64 is Aligned[4096]
+def map_fixed(addr: PageAddr) -> u64:
+    return addr
+def page_align_down(raw: u64) -> u64 is Aligned[4096]:
+    return raw & 0xFFFFFFFFFFFFF000
+def use_aligned(raw: u64) -> u64:
+    aligned: u64 is Aligned[4096] = page_align_down(raw)
+    return map_fixed(aligned)
+`
+	result := analyzeContractStrict(t, "aligned_flow.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`aligned` identifier + refined-local-flows-to-param should discharge cleanly, got: %v", errs)
+	}
+}
+
+// Soundness boundary: an UNTYPED local does not inherit a refined initializer's predicate, so passing
+// it where the predicate is required must still be rejected (the refinement must be on the binding).
+func TestModularUntypedLocalDoesNotInheritRefinement(t *testing.T) {
+	src := `
+type PageAddr = u64 is Aligned[4096]
+def map_fixed(addr: PageAddr) -> u64:
+    return addr
+def page_align_down(raw: u64) -> u64 is Aligned[4096]:
+    return raw & 0xFFFFFFFFFFFFF000
+def leaky(raw: u64) -> u64:
+    base: u64 = page_align_down(raw)
+    return map_fixed(base)
+`
+	result := analyzeContractStrict(t, "aligned_untyped.elisa", src)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "could not be proven statically") {
+		t.Fatalf("an untyped local must not silently inherit the refinement, got: %v", result.Errors())
+	}
+}
+
+// Soundness: a MUTABLE refinement-typed local is not a standing guarantee (it may be reassigned), so
+// it must NOT be trusted to satisfy a same-predicate parameter.
+func TestModularMutableRefinedLocalNotTrustedAsArg(t *testing.T) {
+	src := `
+type PageAddr = u64 is Aligned[4096]
+def map_fixed(addr: PageAddr) -> u64:
+    return addr
+def page_align_down(raw: u64) -> u64 is Aligned[4096]:
+    return raw & 0xFFFFFFFFFFFFF000
+def evil(raw: u64) -> u64:
+    base: mutable u64 is Aligned[4096] = page_align_down(raw)
+    base <- raw + 1
+    return map_fixed(base)
+`
+	result := analyzeContractStrict(t, "aligned_mutable.elisa", src)
+	joined := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(joined, "could not be proven statically") {
+		t.Fatalf("a reassigned mutable refined local must not be trusted, got: %v", result.Errors())
+	}
+}
