@@ -84,7 +84,28 @@ func (a *Analyzer) foldInterfaceBaseMembers(name string, iface *StaticInterface,
 				iface.Methods[methodName] = method
 			}
 		}
+		// Fold inherited LAWS (docs/85 P3) the same way as methods: a derived protocol owes its
+		// bases' algebraic obligations too, so an `impl Hash for T` must discharge Eq's laws, and a
+		// generic `[T: Hash]` may assume them. Dedup by FuncDecl identity so DIAMOND inheritance
+		// (two bases sharing a base) contributes each shared law exactly once.
+		for _, law := range base.Laws {
+			if law == nil || ifaceHasLaw(iface, law) {
+				continue
+			}
+			iface.Laws = append(iface.Laws, law)
+		}
 	}
+}
+
+// ifaceHasLaw reports whether the interface's law set already contains this exact law decl (pointer
+// identity). Used to dedup laws folded up a diamond so a shared base's law is not double-counted.
+func ifaceHasLaw(iface *StaticInterface, law *ast.FuncDecl) bool {
+	for _, existing := range iface.Laws {
+		if existing == law {
+			return true
+		}
+	}
+	return false
 }
 
 // receiverTypeExprName returns the bare head name of an impl's receiver type expression

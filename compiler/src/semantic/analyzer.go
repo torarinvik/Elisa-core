@@ -830,6 +830,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// the callee-body assumption can compose value contracts through first-class functions.
 	a.expandHigherOrderContracts(activeDecls)
 	a.analyzeDecls(activeDecls)
+	// A4: discharge each protocol default method's own contract against its own body (the default
+	// impl must satisfy what it promises). Runs after analyzeDecls so the prover infra is warm and
+	// after foldInterfaceBases so an inherited member/law the default uses is in scope.
+	a.checkProtocolDefaultMethodContracts(activeDecls)
 	a.inferFunctionPermissionEffects(activeDecls)
 	if options.EnforceProgressSafety {
 		a.validateProgressBlocking(activeDecls)
