@@ -238,6 +238,7 @@ type cliOptions struct {
 	explainHole       bool
 	enableSMT         bool
 	concurrencyStrict bool
+	requiresReport    bool
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -324,6 +325,12 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.
 			options.perfStrict = true
+		case arg == "-requires-report":
+			// docs c3: per requires-bearing function, report how many direct call sites statically
+			// discharge the precondition vs fall back to a runtime check (with the unprovable sites).
+			// Surfaces the blast radius of adding a `requires` to a hot function before committing.
+			// Pure observability — does NOT change any error/lint.
+			options.requiresReport = true
 		case arg == "-Wconcurrency":
 			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
 			// diagnostics to hard errors for strict-mode code.

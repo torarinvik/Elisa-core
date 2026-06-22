@@ -110,6 +110,10 @@ type Result struct {
 	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —
 	// one entry per refinement obligation).
 	ProofReport       []ProofFact
+	// RequiresReport is the docs c3 -requires-report aggregation: one entry per (requires-bearing
+	// function, clause) with the provable/unprovable call-site split. Empty unless -requires-report
+	// is on. The CLI prints it.
+	RequiresReport    []RequiresReportEntry
 	Defer             map[*ast.DeferStmt]*DeferInfo
 	Fold              map[*ast.FoldExpr]*FoldInfo
 	Lambdas           map[*ast.LambdaExpr]*LambdaInfo

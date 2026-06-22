@@ -815,11 +815,40 @@ func (a *Analyzer) tryProveEnsureNullnessCastDisjunct(clause ast.Expr, subst map
 		return false
 	}
 	extra := a.smtNullnessCastLinkHypotheses(tr)
+	// C2: also admit a pointer-nullness `result == null` disjunct. The null-compare lowering keys
+	// `result == null` to the opaque Bool `isnull_result`; on a `return null` path the return value
+	// IS the null literal, so the disjunct holds definitionally. Surface that as the extra hypothesis
+	// `(= isnull_result true)`, gated on the returned expression being a literal null (subst maps
+	// `result` to it). SOUND: the fact is asserted ONLY when the return value is *definitely* null, so a
+	// path that returns a non-null pointer leaves `isnull_result` free and a bare `ensure result == null`
+	// still fails. The cast-link disjunct (`ev != null`) is unaffected on the non-null return path.
+	extra += a.smtResultNullnessHypothesis(tr, subst)
 	if extra == "" {
 		return false
 	}
 	proven, _, lowered := a.smtCheckGoal(tr, clause, env, extra)
 	return lowered && proven
+}
+
+// smtResultNullnessHypothesis emits `(= isnull_result true)` when the substitution binds `result` to a
+// literal null return value, mirroring exactly the predicate key the null-compare lowering produces for
+// `result == null` (`isnull_` + smtProjectionName(result) == "isnull_result"). Returns "" otherwise —
+// in particular it asserts NOTHING for a non-null return, so an unsound `ensure result == null` over a
+// non-null return path is still rejected. Kept as a self-contained helper for clean merges.
+func (a *Analyzer) smtResultNullnessHypothesis(tr *smtTranslator, subst map[string]ast.Expr) string {
+	if a == nil || tr == nil || subst == nil {
+		return ""
+	}
+	ret, ok := subst["result"]
+	if !ok || ret == nil {
+		return ""
+	}
+	if _, isNull := stripOptimizationParens(ret).(*ast.NullLit); !isNull {
+		return ""
+	}
+	pred := "isnull_result"
+	tr.boolDecls[pred] = true
+	return "(assert (= " + pred + " true))\n"
 }
 
 // smtNullnessCastLinkHypotheses emits `(= isnull_<local> isnull_<source>)` for each immutable local in

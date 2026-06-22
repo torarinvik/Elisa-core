@@ -3,7 +3,69 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"elisacore/src/unparse"
 )
+
+// RequiresReportEntry aggregates static-discharge outcomes for one (function, requires-clause) pair
+// across every direct call site (docs c3 -requires-report). `Provable` counts the sites the static
+// tiers discharge (linear or SMT); `Unprovable` counts the sites that fall back to a runtime check,
+// with their source positions in `UnprovableSites`. The flag surfaces the blast radius of adding a
+// `requires` to a hot function BEFORE committing (an unprovable call site is a new runtime-check
+// obligation the caller did not have).
+type RequiresReportEntry struct {
+	DeclName        string
+	ClauseText      string
+	Provable        int
+	Unprovable      int
+	UnprovableSites []lexer.Pos
+}
+
+// requiresReportKey keys the per-clause aggregation by callee name + the rendered clause text, so
+// two distinct preconditions on the same function (or the same precondition across many callers) are
+// counted separately/together as the user expects.
+type requiresReportKey struct {
+	declName   string
+	clauseText string
+}
+
+// recordRequiresReport accumulates one call-site outcome into the requires-report aggregation. Only
+// active when the -requires-report flag is on; it changes nothing about errors/lints.
+func (a *Analyzer) recordRequiresReport(declName string, req ast.Expr, pos lexer.Pos, provable bool) {
+	if !a.requiresReport {
+		return
+	}
+	clauseText := unparse.FormatExpr(req)
+	key := requiresReportKey{declName: declName, clauseText: clauseText}
+	if a.requiresReportData == nil {
+		a.requiresReportData = map[requiresReportKey]*RequiresReportEntry{}
+	}
+	entry, ok := a.requiresReportData[key]
+	if !ok {
+		entry = &RequiresReportEntry{DeclName: declName, ClauseText: clauseText}
+		a.requiresReportData[key] = entry
+		a.requiresReportOrder = append(a.requiresReportOrder, key)
+	}
+	if provable {
+		entry.Provable++
+	} else {
+		entry.Unprovable++
+		entry.UnprovableSites = append(entry.UnprovableSites, pos)
+	}
+}
+
+// requiresReportEntries returns the aggregated report in deterministic first-seen order.
+func (a *Analyzer) requiresReportEntries() []RequiresReportEntry {
+	if len(a.requiresReportOrder) == 0 {
+		return nil
+	}
+	out := make([]RequiresReportEntry, 0, len(a.requiresReportOrder))
+	for _, key := range a.requiresReportOrder {
+		if entry := a.requiresReportData[key]; entry != nil {
+			out = append(out, *entry)
+		}
+	}
+	return out
+}
 
 // Static precondition discharge (docs/86 brick 86-5).
 //
@@ -87,6 +149,7 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 		switch a.proveRequiresClause(req, subst) {
 		case requiresProven:
 			a.recordProof(call.Pos(), subject, clauseName, ProofProvenLinear)
+			a.recordRequiresReport(declName, req, call.Pos(), true)
 		case requiresRefuted:
 			a.recordProof(call.Pos(), subject, clauseName, ProofRefuted)
 			a.errorf(call.Pos(), "precondition of %q is violated: the argument provably does not satisfy `requires`", declName)
@@ -97,12 +160,14 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			proven, counterexample := a.trySMTProveRequires(req, subst)
 			if proven {
 				a.recordProof(call.Pos(), subject, clauseName, ProofProvenSMT)
+				a.recordRequiresReport(declName, req, call.Pos(), true)
 				continue
 			}
 			// Unknown: the callee still checks this at runtime (debug builds). Surface it so the user
 			// knows a static guarantee fell back, and let -strict escalate. A solver counterexample (an
 			// input the caller's facts permit that violates the precondition) sharpens the message.
 			a.recordProof(call.Pos(), subject, clauseName, ProofRuntime)
+			a.recordRequiresReport(declName, req, call.Pos(), false)
 			if counterexample != "" {
 				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; it can fail when %s (or accept the runtime check)", declName, counterexample)
 			} else {
