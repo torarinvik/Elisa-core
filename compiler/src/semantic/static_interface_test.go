@@ -282,3 +282,43 @@ impl Container for IntBuf:
 		t.Fatalf("expected signature-mismatch diagnostic for resolved associated type, got:\n%s", joined)
 	}
 }
+
+// TestAnalyzeImplMethodSelfReceiverResolves verifies that `self: Self` written
+// in an IMPL method resolves to the concrete implementing type, instead of the
+// `<invalid>` sentinel (the impl-side counterpart of the protocol's Self binding).
+func TestAnalyzeImplMethodSelfReceiverResolves(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "impl_method_self_receiver.elisa", `
+struct EventIdAccessor:
+    id: int
+
+protocol HasId:
+    def get(self: Self) -> int
+
+impl HasId for EventIdAccessor:
+    def get(self: Self) -> int:
+        return self.id
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors for impl `self: Self`: %v", result.Errors())
+	}
+}
+
+// TestAnalyzeImplMethodSelfMatchesConcreteReceiver pins that `self: Self` and the
+// repeated concrete receiver type are interchangeable, including a Self-typed
+// parameter beyond the receiver.
+func TestAnalyzeImplMethodSelfMatchesConcreteReceiver(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "impl_method_self_param.elisa", `
+struct Counter:
+    n: int
+
+protocol Combinable:
+    def combine(self: Self, other: Self) -> int
+
+impl Combinable for Counter:
+    def combine(self: Self, other: Self) -> int:
+        return self.n + other.n
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors for impl Self-typed param: %v", result.Errors())
+	}
+}

@@ -144,27 +144,32 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					if !ok {
 						return
 					}
-					for _, member := range n.Members {
-						switch fnDecl := member.(type) {
-						case *ast.FuncDecl:
-							qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
-							sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
-							a.functionTypes[qualifiedName] = fnType
-							a.funcDeclSymbols[fnDecl] = sym
-							a.defineGlobal(sym, fnDecl.Pos())
-						case *ast.ExternFuncDecl:
-							qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-							fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
-							a.applyExternFuncAnnotations(fnDecl, fnType)
-							a.markRawExternFuncType(fnDecl, fnType)
-							linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
-							a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
-							sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
-							a.functionTypes[qualifiedName] = fnType
-							a.defineGlobal(sym, fnDecl.Pos())
+					// `Self` inside an impl method signature stands for the concrete
+					// implementing type; bind it so `def m(self: Self)` resolves to the
+					// receiver rather than an unknown type (mirrors the protocol decl).
+					a.withInterfaceAssocTypes(map[string]Type{staticInterfaceSelfName: receiver}, func() {
+						for _, member := range n.Members {
+							switch fnDecl := member.(type) {
+							case *ast.FuncDecl:
+								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
+								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
+								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
+								a.functionTypes[qualifiedName] = fnType
+								a.funcDeclSymbols[fnDecl] = sym
+								a.defineGlobal(sym, fnDecl.Pos())
+							case *ast.ExternFuncDecl:
+								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
+								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+								a.applyExternFuncAnnotations(fnDecl, fnType)
+								a.markRawExternFuncType(fnDecl, fnType)
+								linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+								a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
+								sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
+								a.functionTypes[qualifiedName] = fnType
+								a.defineGlobal(sym, fnDecl.Pos())
+							}
 						}
-					}
+					})
 				})
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
