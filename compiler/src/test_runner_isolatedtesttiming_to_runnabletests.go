@@ -277,7 +277,16 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 			props = append(props, fn)
 		}
 	}
-	if len(props) == 0 {
+	// @lockstep functions are STATE-LEVEL differential oracles: a step-and-project
+	// stepper plus a same-signature reference named `<name>__ref`. We lower each to (a)
+	// a synthetic bool "agree over all steps" @property whose seeds the existing fuzz +
+	// shrink machinery drives, and (b) extra source/report wiring that names the first
+	// diverging step index. The synthetic agree-predicate AnnotatedFuncs are appended to
+	// `props` so they flow through the normal property-driver pass; the lockstep-specific
+	// helper source + step-reporting driver is emitted alongside.
+	lockstepFns := selectAnnotatedFunctions(result, "lockstep", filter)
+
+	if len(props) == 0 && len(lockstepFns) == 0 {
 		return "", nil
 	}
 	var src strings.Builder
@@ -309,7 +318,26 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 			src.WriteString(biasedDrawHelperSource(t))
 		}
 	}
-	cases := make([]selectedTestCase, 0, len(props))
+	cases := make([]selectedTestCase, 0, len(props)+len(lockstepFns))
+
+	// Emit the lockstep helpers + step-reporting drivers. Each contributes one test case
+	// (the step-aware driver) that subsumes the seed-shrink + step report end to end.
+	for _, fn := range lockstepFns {
+		if fn == nil || fn.Signature == nil {
+			continue
+		}
+		src.WriteString(lockstepHelperSource(fn))
+		driverName := "__property_" + fn.Name
+		src.WriteString(lockstepDriverSource(driverName, fn))
+		cases = append(cases, selectedTestCase{Func: &semantic.AnnotatedFunc{
+			Name: driverName,
+			Signature: &semantic.FuncType{
+				Return:         result.NamedTypes["void"],
+				PermissionRefs: []ast.PermissionRef{{Name: "Abort", Member: "Panic"}},
+			},
+		}})
+	}
+
 	for _, fn := range props {
 		if fn == nil || fn.Signature == nil {
 			continue
@@ -510,6 +538,177 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc, kind st
 	msg := elisacoreStringLiteral(fmt.Sprintf("%s %q failed (deterministic seed; %d cases)", kind, fn.Name, cases))
 	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
 	return b.String()
+}
+
+// lockstepDefaultSteps is the default number of steps a @lockstep oracle advances
+// both steppers per fuzzed seed before giving up. Overridable with @lockstep(N).
+const lockstepDefaultSteps = 64
+
+// lockstepCases is the number of distinct fuzzed seeds a @lockstep oracle tries.
+// Each seed is stepped up to the step count, so total work is cases * steps; we keep
+// the seed count modest because the per-seed step loop already explores deeply.
+const lockstepCases = 64
+
+// lockstepStepCount returns the per-seed step bound for a @lockstep function: the
+// optional positive-integer @lockstep(N) argument, or lockstepDefaultSteps.
+func lockstepStepCount(fn *semantic.AnnotatedFunc) int {
+	for _, ann := range fn.Annotations {
+		if ann.Name != "lockstep" || len(ann.Args) != 1 {
+			continue
+		}
+		if n, ok := semantic.PropertyCaseCount(ann.Args[0]); ok && n > 0 {
+			return n
+		}
+	}
+	return lockstepDefaultSteps
+}
+
+// lockstepSeedParams returns the seed (non-step) parameter type names and labels of a
+// @lockstep function. The trailing `step` parameter is excluded; the analyzer has
+// already guaranteed it is present, named, and integer-typed.
+func lockstepSeedParams(fn *semantic.AnnotatedFunc) (types, labels []string) {
+	n := len(fn.Signature.Params) - 1 // drop trailing step param
+	for j := 0; j < n; j++ {
+		t, _ := semantic.PropertyParamTypeName(fn.Signature.Params[j])
+		types = append(types, t)
+		label := fmt.Sprintf("arg%d", j)
+		if j < len(fn.Signature.ExplicitParamNames) && fn.Signature.ExplicitParamNames[j] != "" {
+			label = fn.Signature.ExplicitParamNames[j]
+		}
+		labels = append(labels, label)
+	}
+	return types, labels
+}
+
+// lockstepHelperSource emits two pure helper functions for a @lockstep oracle:
+//   - `__lockstep_<name>_div(seeds...) -> i64` returns the first step index (0..<N) at
+//     which the impl projection diverges from the `<name>__ref` projection, or -1 if
+//     they agree for all N steps. This is the comparable scalar the seed-shrinker uses
+//     (a seed is "interesting" iff div >= 0) and is also how the step index is reported.
+//
+// Both the impl and reference are called as `f(seeds..., step)`; the reference must be
+// declared by the program (or a compile error naming `<name>__ref` results — that is
+// the intended, sound way to require the partner stepper).
+func lockstepHelperSource(fn *semantic.AnnotatedFunc) string {
+	seedTypes, seedLabels := lockstepSeedParams(fn)
+	_ = seedLabels
+	steps := lockstepStepCount(fn)
+	var b strings.Builder
+	// Build the seed parameter list with stable synthetic names.
+	params := make([]string, len(seedTypes))
+	seedArgs := make([]string, len(seedTypes))
+	for j, t := range seedTypes {
+		params[j] = fmt.Sprintf("__ls_s%d: %s", j, t)
+		seedArgs[j] = fmt.Sprintf("__ls_s%d", j)
+	}
+	stepType, _ := semantic.PropertyParamTypeName(fn.Signature.Params[len(fn.Signature.Params)-1])
+	fmt.Fprintf(&b, "\ndef __lockstep_%s_div(%s) -> i64:\n", fn.Name, strings.Join(params, ", "))
+	fmt.Fprintf(&b, "\tfor __ls_step in 0..<%d:\n", steps)
+	// Convert the loop counter to the stepper's step-parameter type.
+	stepExpr := lockstepStepConv(stepType, "__ls_step")
+	implCall := fmt.Sprintf("%s(%s)", fn.Name, lockstepArgs(seedArgs, stepExpr))
+	refCall := fmt.Sprintf("%s%s(%s)", fn.Name, semantic.LockstepRefSuffix, lockstepArgs(seedArgs, stepExpr))
+	fmt.Fprintf(&b, "\t\tif %s != %s:\n", implCall, refCall)
+	b.WriteString("\t\t\treturn __ls_step.i64()\n")
+	b.WriteString("\treturn (0 - 1).i64()\n")
+	return b.String()
+}
+
+// lockstepArgs joins seed args with the step expression for a stepper call.
+func lockstepArgs(seedArgs []string, stepExpr string) string {
+	all := make([]string, 0, len(seedArgs)+1)
+	all = append(all, seedArgs...)
+	all = append(all, stepExpr)
+	return strings.Join(all, ", ")
+}
+
+// lockstepStepConv converts the i64 loop counter to the declared step-parameter type.
+func lockstepStepConv(stepType, counter string) string {
+	switch stepType {
+	case "int":
+		return counter
+	case "i64":
+		return counter + ".i64()"
+	case "u32":
+		return counter + ".u32()"
+	case "u64":
+		return counter + ".u64()"
+	default:
+		return counter
+	}
+}
+
+// lockstepDriverSource emits the void test driver for a @lockstep oracle: it fuzzes the
+// seed inputs (deterministic xorshift64, reusing the property draw helpers), calls the
+// `__lockstep_<name>_div` helper to find the first diverging step, greedily shrinks the
+// seeds while they still diverge, and on the first divergence reports the step index,
+// shrunk seeds, and panics — reusing the @property counterexample report machinery.
+func lockstepDriverSource(driverName string, fn *semantic.AnnotatedFunc) string {
+	seedTypes, seedLabels := lockstepSeedParams(fn)
+	seed := propertySeed(fn.Name)
+	steps := lockstepStepCount(fn)
+	divFn := fmt.Sprintf("__lockstep_%s_div", fn.Name)
+	var b strings.Builder
+	b.WriteString("\ndef ")
+	b.WriteString(driverName)
+	b.WriteString("() -> void:\n")
+	b.WriteString("\tcan Abort.Panic:\n")
+	fmt.Fprintf(&b, "\t\t__prop_s: mutable u64 = %d\n", seed)
+	b.WriteString("\t\t__prop_buf: mutable u8[128] = zeroed\n")
+	b.WriteString("\t\t__prop_n: mutable int = 0\n")
+	fmt.Fprintf(&b, "\t\tfor __prop_i in 0..<%d:\n", lockstepCases)
+	argNames := make([]string, len(seedTypes))
+	for j, t := range seedTypes {
+		argNames[j] = fmt.Sprintf("__prop_a%d", j)
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 13)\n")
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s >> 7)\n")
+		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 17)\n")
+		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", argNames[j], t, propertyDrawExpr(t, "__prop_s"))
+	}
+	// A seed is interesting iff the steppers diverge at some step (div >= 0).
+	fmt.Fprintf(&b, "\t\t\tif %s(%s) >= 0:\n", divFn, strings.Join(argNames, ", "))
+	mutNames := make([]string, len(argNames))
+	for j := range argNames {
+		mutNames[j] = fmt.Sprintf("__prop_m%d", j)
+		fmt.Fprintf(&b, "\t\t\t\t%s: mutable %s = %s\n", mutNames[j], seedTypes[j], argNames[j])
+	}
+	// Greedy coordinate-descent shrink: drive each seed toward zero while the steppers
+	// still diverge for SOME step, so the reported seed is minimal-ish.
+	fmt.Fprintf(&b, "\t\t\t\tfor __prop_r in 0..<%d:\n", propertyShrinkRounds)
+	b.WriteString("\t\t\t\t\t_ = __prop_r\n")
+	for j := range mutNames {
+		t := seedTypes[j]
+		zero := propertyZeroExpr(t)
+		fmt.Fprintf(&b, "\t\t\t\t\tif %s(%s) >= 0:\n", divFn, strings.Join(lockstepReplace(mutNames, j, zero), ", "))
+		fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], zero)
+		if t != "bool" {
+			half := propertyHalfExpr(t, mutNames[j])
+			fmt.Fprintf(&b, "\t\t\t\t\tif %s != %s and %s(%s) >= 0:\n", mutNames[j], half, divFn, strings.Join(lockstepReplace(mutNames, j, half), ", "))
+			fmt.Fprintf(&b, "\t\t\t\t\t\t%s <- %s\n", mutNames[j], half)
+		}
+	}
+	// Report: first diverging step index, then each shrunk seed.
+	header := fmt.Sprintf(">>> lockstep %s counterexample (case %%lld, shrunk):\\n", fn.Name)
+	b.WriteString(propertyReportStmt(header, "__prop_i.i64()"))
+	stepLine := "      first diverging step = %lld\\n"
+	b.WriteString(propertyReportStmt(stepLine, fmt.Sprintf("%s(%s)", divFn, strings.Join(mutNames, ", "))))
+	for j := range mutNames {
+		verb, conv := propertyReportArg(seedTypes[j], mutNames[j])
+		line := fmt.Sprintf("      %s (%s) = %s\\n", seedLabels[j], seedTypes[j], verb)
+		b.WriteString(propertyReportStmt(line, conv))
+	}
+	msg := elisacoreStringLiteral(fmt.Sprintf("lockstep %q diverged (deterministic seed; %d cases x %d steps)", fn.Name, lockstepCases, steps))
+	fmt.Fprintf(&b, "\t\t\t\tpanic(%s)\n", msg)
+	return b.String()
+}
+
+// lockstepReplace renders the div-helper seed arguments with the j-th replaced by a
+// candidate expression (for shrink trial calls).
+func lockstepReplace(mutNames []string, j int, candidate string) []string {
+	parts := make([]string, len(mutNames))
+	copy(parts, mutNames)
+	parts[j] = candidate
+	return parts
 }
 
 // propertyReportExterns declares libc snprintf/write under distinct Elisa names so

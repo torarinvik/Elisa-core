@@ -505,6 +505,9 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "property" || annotation.Name == "differential" {
 		return a.validateFunctionPropertyAnnotation(annotation, fn, signature)
 	}
+	if annotation.Name == "lockstep" {
+		return a.validateFunctionLockstepAnnotation(annotation, fn, signature)
+	}
 	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 {
 		a.errorf(annotation.Position, "@%s function %q must not have type or shape parameters; got %s", annotation.Name, fn.Name, signature)
 		return false
@@ -601,6 +604,87 @@ func (a *Analyzer) validateFunctionPropertyAnnotation(annotation ast.Annotation,
 				name = signature.ExplicitParamNames[i]
 			}
 			a.errorf(annotation.Position, "@%s function %q parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64, f32/f64)", kind, fn.Name, name, p)
+			return false
+		}
+	}
+	return true
+}
+
+// LockstepStepParamName is the required name of a @lockstep stepper's final
+// parameter: the number of steps to advance the state before projecting.
+const LockstepStepParamName = "step"
+
+// LockstepRefSuffix is appended to a @lockstep function name to form the name of
+// its paired reference stepper. The harness drives both in lockstep and reports the
+// first step index at which their projections diverge.
+const LockstepRefSuffix = "__ref"
+
+// validateFunctionLockstepAnnotation validates a @lockstep state-level differential
+// oracle (docs: state-level lockstep). A @lockstep function is a *step-and-project*
+// function: given fuzzed scalar seed inputs plus a final `step: <int>` parameter, it
+// builds a state from the seeds, advances it `step` times, and returns an i64
+// projection of the observable state. The harness pairs it with a same-signature
+// reference function named `<name>__ref`, steps both from step 0 upward, and reports
+// the first diverging step index (with shrunk seeds) via the @property machinery.
+//
+// This keeps the analyzer ordering-independent: only the lockstep function's own
+// shape is checked here; the existence/signature of the `<name>__ref` partner is
+// enforced naturally when the generated driver (which calls both) is compiled.
+func (a *Analyzer) validateFunctionLockstepAnnotation(annotation ast.Annotation, fn *ast.FuncDecl, signature *FuncType) bool {
+	kind := "lockstep"
+	if len(annotation.Args) > 1 {
+		a.errorf(annotation.Position, "@%s on function %q takes at most one argument (the step count, e.g. @%s(64))", kind, fn.Name, kind)
+		return false
+	}
+	if len(annotation.Args) == 1 {
+		if n, ok := PropertyCaseCount(annotation.Args[0]); !ok || n <= 0 {
+			a.errorf(annotation.Position, "@%s on function %q expects a positive integer step count, got %q", kind, fn.Name, annotation.Args[0])
+			return false
+		}
+	}
+	if len(signature.TypeParams) > 0 || len(signature.RegionParams) > 0 || len(signature.ShapeParams) > 0 || len(signature.GenericParams) > 0 {
+		a.errorf(annotation.Position, "@%s function %q must not be generic; got %s", kind, fn.Name, signature)
+		return false
+	}
+	if !annotationAllowsDeclaredPermissions("property", signature) {
+		a.errorf(annotation.Position, "@%s function %q must not require permissions; got %s", kind, fn.Name, signature)
+		return false
+	}
+	if signature.Variadic {
+		a.errorf(annotation.Position, "@%s function %q must not be variadic", kind, fn.Name)
+		return false
+	}
+	// The projection of the observable state must be a single comparable i64 scalar.
+	if b, ok := signature.Return.(*BuiltinType); !ok || b.Name != "i64" {
+		a.errorf(annotation.Position, "@%s function %q must return i64 (the observable-state projection), got %s", kind, fn.Name, signature.Return)
+		return false
+	}
+	// At least one fuzzed seed parameter plus the trailing step parameter.
+	if len(signature.Params) < 2 {
+		a.errorf(annotation.Position, "@%s function %q must take at least one generated seed parameter plus a trailing %q parameter", kind, fn.Name, LockstepStepParamName)
+		return false
+	}
+	last := len(signature.Params) - 1
+	lastName := ""
+	if last < len(signature.ExplicitParamNames) {
+		lastName = signature.ExplicitParamNames[last]
+	}
+	if lastName != LockstepStepParamName {
+		a.errorf(annotation.Position, "@%s function %q final parameter must be named %q (the step index), got %q", kind, fn.Name, LockstepStepParamName, lastName)
+		return false
+	}
+	if b, ok := signature.Params[last].(*BuiltinType); !ok || (b.Name != "int" && b.Name != "i64" && b.Name != "u32" && b.Name != "u64") {
+		a.errorf(annotation.Position, "@%s function %q step parameter %q must be int/i64/u32/u64, got %s", kind, fn.Name, LockstepStepParamName, signature.Params[last])
+		return false
+	}
+	// Every seed parameter (all but the step) must be a generatable scalar.
+	for i := 0; i < last; i++ {
+		if _, ok := PropertyParamTypeName(signature.Params[i]); !ok {
+			name := ""
+			if i < len(signature.ExplicitParamNames) {
+				name = signature.ExplicitParamNames[i]
+			}
+			a.errorf(annotation.Position, "@%s function %q seed parameter %q has type %s, which the harness cannot generate (supported: bool, int, i8/i16/i32/i64, u8/u16/u32/u64, f32/f64)", kind, fn.Name, name, signature.Params[i])
 			return false
 		}
 	}
@@ -833,7 +917,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "property", "differential", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
+	case "test", "bench", "property", "differential", "lockstep", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
 		return true
 	case "boundary_pointer_args":
 		return true
