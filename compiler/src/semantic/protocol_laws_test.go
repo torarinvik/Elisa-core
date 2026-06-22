@@ -111,6 +111,69 @@ def chained[T: Ord](x: T, y: T, z: T) -> bool:
 	}
 }
 
+// `min2[T: Ord]` discharges `ensure result.le(a) and result.le(b)` using `total` PLUS the branch
+// facts of the body: in the `a.le(b)` branch result==a, so result.le(b)==a.le(b) holds from the
+// guard and result.le(a)==a.le(a) holds via total's reflexive instance (total a a ⇒ a.le(a)); in
+// the fall-through branch result==b symmetrically. This is the law-facts-meet-flow-facts acceptance.
+func TestProtocolLawMin2DischargesViaLawAndBody(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "law_min2.elisa", ordProtocolSource+`
+def min2[T: Ord](a: T, b: T) -> T:
+    ensure result.le(a) and result.le(b)
+    if a.le(b):
+        return a
+    return b
+`, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("min2 ensure should be provable from total + branch facts, got: %v", errs)
+	}
+}
+
+// `clamp3[T: Ord]` returns one of its three args; the disjunctive `ensure result.le(a) or
+// result.le(b) or result.le(c)` is provable from `total`'s reflexive instance alone (the returned
+// arg r satisfies r.le(r) ⇒ the matching disjunct), with no branch facts required.
+func TestProtocolLawClamp3DischargesViaReflexivity(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "law_clamp3.elisa", ordProtocolSource+`
+def clamp3[T: Ord](a: T, b: T, c: T) -> T:
+    ensure result.le(a) or result.le(b) or result.le(c)
+    if a.le(b):
+        return a
+    if b.le(c):
+        return b
+    return c
+`, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("clamp3 disjunctive ensure should be provable from total reflexivity, got: %v", errs)
+	}
+}
+
+// Soundness guard for min2: with NO laws at all (a plain `le` method, no total/transitive), the same
+// ensure cannot be discharged — reflexivity `a.le(a)` is unavailable, so `result.le(a)` in the
+// `a.le(b)` branch is unprovable. The ensure must be rejected (no fabricated reflexivity).
+func TestProtocolLawMin2RejectedWithoutLaws(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "law_min2_nofab.elisa", `
+protocol Ord:
+    def le(self: Self, other: Self) -> bool
+
+def min2[T: Ord](a: T, b: T) -> T:
+    ensure result.le(a) and result.le(b)
+    if a.le(b):
+        return a
+    return b
+`, AnalyzeOptions{EnableSMT: true, EnforceStrictProofs: true})
+
+	found := false
+	for _, e := range result.Errors() {
+		if strings.Contains(e, "ensure postcondition") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("without any law the min2 ensure must NOT be provable (no fabricated reflexivity); errors: %v", result.Errors())
+	}
+}
+
 // Soundness guard: WITHOUT a transitive law the same generic ensure is NOT provable (the assumption
 // must come from the declared law, not be fabricated). With only `total` declared, the chained ensure
 // must fail under -strict.

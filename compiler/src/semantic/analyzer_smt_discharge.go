@@ -3268,7 +3268,13 @@ func lawOperandIdentName(expr ast.Expr, env map[string]string) (string, bool) {
 	}
 	if env != nil {
 		if bound, ok := env[id.Name]; ok {
-			return bound, true
+			// A `T`-typed operand resolves through the env to a DATATYPE-projection token (`__dt__a`), not
+			// an SMT term. The law-hypothesis side instantiates the law over the bare parameter idents
+			// (env-free ⇒ raw name `a`). Both denote the SAME place, so normalize the dt-token to its bare
+			// projection — otherwise the goal symbol (`le___dt__a_a`) and the law symbol (`le_a_a`) diverge
+			// and the injected law fact never transports to the goal. This is the chokepoint that connects
+			// a `return a` ensure (`result` ↦ `a`) to the law instantiated at `a`.
+			return strings.TrimPrefix(bound, dtTokenPrefix), true
 		}
 	}
 	return id.Name, true
