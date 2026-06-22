@@ -286,6 +286,29 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 	// not initialized in the standalone test binary). Distinct Elisa names avoid
 	// colliding with any snprintf the program itself declares.
 	src.WriteString(propertyReportExterns)
+	// Boundary-biased input generation: emit one per-integer-type draw helper that,
+	// with ~50% probability, returns a structured edge-case value (0/1/2, type-MAX
+	// and near-MAX, powers of two, masks, page-aligned ±1) instead of a uniform draw.
+	// This closes the "sparse domain" blindness (e.g. random u64 is essentially never
+	// page-aligned) while preserving the uniform component for broad coverage. The
+	// helper is a PURE function of the already-advanced generator state `s`, so the
+	// input sequence stays deterministic and the shrinker still converges.
+	usedBiasTypes := map[string]bool{}
+	for _, fn := range props {
+		if fn == nil || fn.Signature == nil {
+			continue
+		}
+		for _, p := range fn.Signature.Params {
+			if t, _ := semantic.PropertyParamTypeName(p); biasedDrawTypes[t] {
+				usedBiasTypes[t] = true
+			}
+		}
+	}
+	for _, t := range []string{"i8", "i16", "i32", "i64", "int", "u8", "u16", "u32", "u64"} {
+		if usedBiasTypes[t] {
+			src.WriteString(biasedDrawHelperSource(t))
+		}
+	}
 	cases := make([]selectedTestCase, 0, len(props))
 	for _, fn := range props {
 		if fn == nil || fn.Signature == nil {
@@ -448,7 +471,7 @@ func propertyDriverSource(driverName string, fn *semantic.AnnotatedFunc, kind st
 		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 13)\n")
 		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s >> 7)\n")
 		b.WriteString("\t\t\t__prop_s <- __prop_s ^ (__prop_s << 17)\n")
-		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawExpr(typeName, "__prop_s"))
+		fmt.Fprintf(&b, "\t\t\t%s: %s = %s\n", arg, typeName, propertyDrawSelect(typeName, "__prop_s"))
 	}
 	fmt.Fprintf(&b, "\t\t\tif not %s(%s):\n", fn.Name, strings.Join(argNames, ", "))
 	// Copy the failing tuple into mutable shrink locals.
@@ -599,6 +622,81 @@ func propertyDrawExpr(typeName, s string) string {
 	default:
 		return s
 	}
+}
+
+// biasedDrawTypes is the set of integer types for which boundary-biased generation
+// emits a draw helper. bool and floats keep the existing uniform draw.
+var biasedDrawTypes = map[string]bool{
+	"i8": true, "i16": true, "i32": true, "i64": true, "int": true,
+	"u8": true, "u16": true, "u32": true, "u64": true,
+}
+
+// propertyDrawSelect returns the per-param draw expression. For the integer types that
+// have a boundary-biased helper it calls that helper; everything else (bool, floats)
+// falls back to the uniform draw.
+func propertyDrawSelect(typeName, s string) string {
+	if biasedDrawTypes[typeName] {
+		return fmt.Sprintf("__prop_draw_%s(%s)", typeName, s)
+	}
+	return propertyDrawExpr(typeName, s)
+}
+
+// biasedTypeInfo describes the unsigned MAX literal and the bit-width of an integer
+// type for edge-case construction. For signed types MAX is the unsigned all-ones
+// pattern of the same width; the helper produces a u64 edge value and converts it
+// to the target type by truncation (.T()), so all-ones maps to the signed -1/MAX
+// boundaries that matter for overflow/mask predicates.
+var biasedTypeBits = map[string]int{
+	"i8": 8, "i16": 16, "i32": 32, "i64": 64, "int": 64,
+	"u8": 8, "u16": 16, "u32": 32, "u64": 64,
+}
+
+// biasedDrawHelperSource emits an Elisa function `__prop_draw_<T>(s: u64) -> T` that,
+// from the already-advanced generator state `s`, returns either a uniform value
+// (mode bit clear, ~50%) or a structured edge-case value. The edge value is built in
+// u64 space and converted to T by truncation. All entropy comes from disjoint bit
+// slices of `s`, so the helper is a pure deterministic function of `s` (the driver's
+// xorshift sequence is unchanged) and the shrinker still converges toward zero.
+func biasedDrawHelperSource(typeName string) string {
+	bits := biasedTypeBits[typeName]
+	// all-ones mask for the width, as a u64 literal expression.
+	var maxU string
+	if bits >= 64 {
+		maxU = "18446744073709551615" // 2^64-1
+	} else {
+		maxU = fmt.Sprintf("%d", (uint64(1)<<uint(bits))-1)
+	}
+	conv := func(uexpr string) string {
+		if typeName == "u64" {
+			return uexpr
+		}
+		return "(" + uexpr + ")." + typeName + "()"
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "\ndef __prop_draw_%s(s: u64) -> %s:\n", typeName, typeName)
+	// Mode bit (~50%): bit 1 of s. Disjoint from low bits used by the uniform draw.
+	b.WriteString("\tif ((s >> 1) & 1) == 0:\n")
+	fmt.Fprintf(&b, "\t\treturn %s\n", propertyDrawExpr(typeName, "s"))
+	// Edge-case construction. Category selector and sub-index from disjoint bit slices.
+	fmt.Fprintf(&b, "\tmaxU: u64 = %s\n", maxU)
+	fmt.Fprintf(&b, "\tk: u64 = (s >> 8) %% %d\n", bits) // bit index 0..bits-1
+	b.WriteString("\tpage: u64 = ((s >> 20) << 12) & maxU\n")
+	b.WriteString("\tcat: u64 = (s >> 4) % 11\n")
+	b.WriteString("\tev: mutable u64 = 0\n")
+	// 0,1,2 / MAX, MAX-1, MAX-k / pow2 / mask / page, page+1, page-1.
+	b.WriteString("\tif cat == 0:\n\t\tev <- 0\n")
+	b.WriteString("\telif cat == 1:\n\t\tev <- 1\n")
+	b.WriteString("\telif cat == 2:\n\t\tev <- 2\n")
+	b.WriteString("\telif cat == 3:\n\t\tev <- maxU\n")
+	b.WriteString("\telif cat == 4:\n\t\tev <- maxU - 1\n")
+	b.WriteString("\telif cat == 5:\n\t\tev <- (maxU - ((s >> 16) % 4)) & maxU\n")
+	b.WriteString("\telif cat == 6:\n\t\tev <- (1.u64() << k) & maxU\n")
+	b.WriteString("\telif cat == 7:\n\t\tev <- ((1.u64() << k) - 1) & maxU\n")
+	b.WriteString("\telif cat == 8:\n\t\tev <- page\n")
+	b.WriteString("\telif cat == 9:\n\t\tev <- (page + 1) & maxU\n")
+	b.WriteString("\telse:\n\t\tev <- (page - 1) & maxU\n")
+	fmt.Fprintf(&b, "\treturn %s\n", conv("ev"))
+	return b.String()
 }
 
 // propertySeed derives a fixed nonzero xorshift64 seed from the property name so
