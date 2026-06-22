@@ -669,6 +669,80 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 	a.currentScope = saved
 }
 
+// exprReferencesGhostField reports whether an analyzed contract expression reads a `ghost` struct
+// field. Such a clause is verification-only: the ghost field is erased in codegen, so a runtime
+// check over it would dereference a field that does not exist at runtime. The clause is kept for
+// static discharge but must be dropped from the backend's runtime-check set — mirroring the
+// ghost-invariant split in analyzeStructInvariants. Walks the contract-expression shapes.
+func (a *Analyzer) exprReferencesGhostField(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ast.ParenExpr:
+		return a.exprReferencesGhostField(n.Inner)
+	case *ast.UnaryExpr:
+		return a.exprReferencesGhostField(n.Operand)
+	case *ast.BinaryExpr:
+		return a.exprReferencesGhostField(n.Left) || a.exprReferencesGhostField(n.Right)
+	case *ast.TernaryExpr:
+		return a.exprReferencesGhostField(n.Cond) || a.exprReferencesGhostField(n.Value) || a.exprReferencesGhostField(n.Alt)
+	case *ast.IndexExpr:
+		return a.exprReferencesGhostField(n.Object) || a.exprReferencesGhostField(n.Index) || a.exprReferencesGhostField(n.Fallback)
+	case *ast.CallExpr:
+		if a.exprReferencesGhostField(n.Func) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if a.exprReferencesGhostField(arg) {
+				return true
+			}
+		}
+		return false
+	case *ast.FieldExpr:
+		if st, ok := stripRefForBounds(a.exprTypes[n.Object]).(*StructType); ok && st != nil {
+			if f, ok := st.Fields[n.Field]; ok && f.Ghost {
+				return true
+			}
+		}
+		return a.exprReferencesGhostField(n.Object)
+	default:
+		return false
+	}
+}
+
+// stripGhostFieldContractsForRuntime drops ghost-field-referencing `requires`/`ensure` clauses from
+// the codegen-visible contract slices of the current function, AFTER static discharge has run over
+// them. The backend emits debug runtime checks from FuncDecl.Requires/EnsureValues; a clause over an
+// erased ghost field has no runtime representation, so leaving it in produces a "no field <ghost>"
+// codegen error under non-strict / -emit test. Soundness: this runs post-discharge, so a false
+// ghost-referencing refinement is still reported statically; only the runtime check is suppressed.
+func (a *Analyzer) stripGhostFieldContractsForRuntime() {
+	fn := a.currentFuncDecl
+	if fn == nil {
+		return
+	}
+	if len(fn.EnsureValues) != 0 {
+		kept := fn.EnsureValues[:0:0]
+		for _, e := range fn.EnsureValues {
+			if a.exprReferencesGhostField(e) {
+				continue
+			}
+			kept = append(kept, e)
+		}
+		fn.EnsureValues = kept
+	}
+	if len(fn.Requires) != 0 {
+		kept := fn.Requires[:0:0]
+		for _, r := range fn.Requires {
+			if a.exprReferencesGhostField(r) {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		fn.Requires = kept
+	}
+}
+
 func proofAt(proofs []*ast.ProofBlockStmt, i int) *ast.ProofBlockStmt {
 	if i < 0 || i >= len(proofs) {
 		return nil

@@ -885,6 +885,9 @@ func (a *Analyzer) validateCurrentFuncPoststates() {
 	// over params — the explicit-return path handles those via dischargeEnsureBooleans.
 	if a.currentFuncDecl != nil {
 		a.dischargeEnsureBooleansAtVoidExit(a.currentFuncDecl.Pos())
+		// All discharge (explicit-return + void-exit) has now run, so ghost-field-referencing
+		// contract clauses can be dropped from the codegen-visible set without losing the proof.
+		a.stripGhostFieldContractsForRuntime()
 	}
 }
 
