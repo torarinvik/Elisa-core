@@ -266,9 +266,14 @@ type ExternFuncDecl struct {
 	// extern preconditions have been discharged.
 	EnsureValues []Expr
 	Uses         []*ContractStmt
-	Params       []ParamDecl
-	ReturnType   TypeExpr
-	Variadic     bool
+	// Changes / Preserves hold the frame condition (`changes`/`preserves <path>, ...`, docs/87) on a
+	// bodiless boundary or protocol method. On a PROTOCOL method, Changes is the upper-bound frame an
+	// impl may write (impl `changes` must be a subset of it; P4 effect/frame variance).
+	Changes    []EnsuresPath
+	Preserves  []EnsuresPath
+	Params     []ParamDecl
+	ReturnType TypeExpr
+	Variadic   bool
 }
 type ExternVarDecl struct {
 	Position    lexer.Pos

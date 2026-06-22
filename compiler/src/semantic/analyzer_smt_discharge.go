@@ -230,7 +230,7 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 // the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
 // so every query is self-contained.
 func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
@@ -294,7 +294,7 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	if !ok {
 		return ""
 	}
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -574,6 +574,15 @@ func (a *Analyzer) bindSMTEnvArg(tr *smtTranslator, env map[string]string, name 
 	// failing the env build. SOUND: an unbound entry contributes no fact; only the null-compare path
 	// (which folds against the literal/flow facts) can conclude anything about it.
 	if a.exprIsPointerLike(a.exprTypes[argExpr]) {
+		return true
+	}
+	// A bound type-param-typed value (the receiver of a protocol-method call in a behavioral-subtyping
+	// contract, e.g. `self`↦`c` where `c: C`) has no scalar SMT term, but it must still bind to a stable
+	// projection token so an abstract method call `c.count()` keyed by its receiver canonicalizes the
+	// same on both the obligation and the caller-fact side (docs P1). SOUND: the token only ever keys an
+	// uninterpreted method-result symbol; it never enters a numeric term.
+	if _, ok := stripRefForBounds(a.exprTypes[argExpr]).(*TypeParamType); ok {
+		env[name] = dtToken(smtProjectionName(argExpr))
 		return true
 	}
 	// Only early-decline when the type is KNOWN to be non-exact. A substitution expr captured before its
@@ -2880,6 +2889,12 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 			}
 		}
 	}
+	if resultType == nil && !direct {
+		// Abstract protocol-method call inside a contract (docs P1): its node was never analyzed in
+		// this caller context (the predicate lives on the protocol decl), so recover the return type
+		// from the bound protocol's method signature.
+		resultType = tr.abstractMethodReturnType(call)
+	}
 	if !isSMTExactAssignmentType(resultType) || IsBoolType(resultType) {
 		return "", false
 	}
@@ -2894,6 +2909,20 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	var canonKey string
 	if direct && decl != nil {
 		if key, ok := tr.callCanonKeyEnv(decl, args, tr.canonKeyEnv(decl, argEnv)); ok {
+			if sym, seen := tr.callCanon[key]; seen {
+				return sym, true
+			}
+			canonKey = key
+		}
+	}
+	// ABSTRACT protocol-method canonicalization (docs P1 behavioral subtyping): a call to a protocol
+	// method through a bounded type param (`self.count()` in a contract, `c.count()` in a caller fact)
+	// has no resolvable decl, but is still DETERMINISTIC — the same method on the same receiver denotes
+	// one value. Key it by (method name, receiver SMT term, arg SMT terms) so the protocol-side
+	// obligation and the caller-side hypothesis share a symbol and facts transport. This treats the
+	// abstract method as an uninterpreted function, which is sound: we assert nothing about its result.
+	if !direct || decl == nil {
+		if key, ok := tr.abstractMethodCanonKey(call, argEnv); ok {
 			if sym, seen := tr.callCanon[key]; seen {
 				return sym, true
 			}
@@ -2984,6 +3013,107 @@ func (tr *smtTranslator) callResultTermEnv(call *ast.CallExpr, argEnv map[string
 	return ret, true
 }
 
+// abstractMethodReturnType recovers the return type of an abstract protocol-method call (one with no
+// resolvable concrete decl) from the bound protocol's method signature. It handles both the method
+// form (`recv.m(...)`, receiver typed as a bound type param) and the static type-path form
+// (`T.m(...)`). Returns nil when the protocol/method cannot be identified.
+func (tr *smtTranslator) abstractMethodReturnType(call *ast.CallExpr) Type {
+	if tr == nil || tr.a == nil || call == nil {
+		return nil
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field == "" {
+		return nil
+	}
+	var iface *StaticInterface
+	if obj, ok := fieldExpr.Object.(*ast.Ident); ok {
+		// Static type-path form: object is a bound type param `T` with interface bound.
+		if bound, isTypeParam := tr.a.lookupTypeParamInterface(obj.Name); isTypeParam {
+			iface = bound
+		}
+	}
+	if iface == nil {
+		// Method form: the receiver expression's resolved type is a bound type param.
+		if recvType := tr.a.exprTypes[fieldExpr.Object]; recvType != nil {
+			if tp, ok := stripRefForBounds(recvType).(*TypeParamType); ok {
+				if bound, isTypeParam := tr.a.lookupTypeParamInterface(tp.Name); isTypeParam {
+					iface = bound
+				}
+			}
+		}
+	}
+	if iface == nil {
+		// The receiver is an unresolved contract identifier (`self` on a protocol-decl predicate that
+		// was never analyzed in this caller context). Fall back to the in-scope bound type-param
+		// interfaces: find the unique one declaring a method of this name.
+		for i := len(tr.a.typeParamInterfaceScopes) - 1; i >= 0 && iface == nil; i-- {
+			for _, bound := range tr.a.typeParamInterfaceScopes[i] {
+				if bound == nil {
+					continue
+				}
+				if _, ok := bound.Methods[fieldExpr.Field]; ok {
+					iface = bound
+					break
+				}
+			}
+		}
+	}
+	if iface == nil {
+		return nil
+	}
+	method, ok := iface.Methods[fieldExpr.Field]
+	if !ok || method == nil || method.Signature == nil {
+		return nil
+	}
+	return method.Signature.Return
+}
+
+// abstractMethodCanonKey builds a stable canonicalization key for a deterministic protocol-method
+// call that does not resolve to a concrete decl. It normalizes BOTH surface forms to the same key:
+//
+//   - method form  `recv.m(a, b)`   → participants = [recv, a, b]
+//   - static form  `T.m(recv, a, b)` (the bound-type-param rewrite) → participants = [recv, a, b]
+//
+// The key is `method-name | term(p0) | term(p1) | …`, so `self.count()` (with `self`↦c) and the
+// caller's `c.count()` produce the same key and share one SMT symbol. Returns false when the call is
+// not a recognizable method/static-method form or any participant is outside the integer fragment.
+func (tr *smtTranslator) abstractMethodCanonKey(call *ast.CallExpr, argEnv map[string]string) (string, bool) {
+	if tr == nil || call == nil {
+		return "", false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field == "" {
+		return "", false
+	}
+	args := proofCallArgs(call)
+	var participants []ast.Expr
+	// Static type-path form `T.m(...)`: the object is a bare type-param / type name, and the receiver
+	// is the first argument. Detect it by the object being an Ident bound to a type-param interface.
+	if obj, ok := fieldExpr.Object.(*ast.Ident); ok && tr.a != nil {
+		if _, isTypeParam := tr.a.lookupTypeParamInterface(obj.Name); isTypeParam {
+			participants = args
+		}
+	}
+	if participants == nil {
+		// Method form `recv.m(args...)`: receiver is the object, followed by the explicit args.
+		participants = append(participants, fieldExpr.Object)
+		participants = append(participants, args...)
+	}
+	var b strings.Builder
+	b.WriteString("absmethod|")
+	b.WriteString(fieldExpr.Field)
+	b.WriteByte('|')
+	for _, p := range participants {
+		t, ok := tr.callCanonArgKeyEnv(p, argEnv)
+		if !ok {
+			return "", false
+		}
+		b.WriteString(t)
+		b.WriteByte('|')
+	}
+	return b.String(), true
+}
+
 func (tr *smtTranslator) callResultBoolTerm(call *ast.CallExpr) (string, bool) {
 	return tr.callResultBoolTermEnv(call, nil)
 }
@@ -2996,6 +3126,14 @@ func (tr *smtTranslator) callResultBoolTermEnv(call *ast.CallExpr, argEnv map[st
 	// array, so it can serve as the in-domain GUARD for a value-lookup goal.
 	if sel, ok := tr.dictMethodCall(call, "keys", argEnv); ok {
 		return sel, true
+	}
+	// A PROTOCOL-METHOD bool call (`x.le(y)` where le is an interface method, docs/85 P3) is modeled as
+	// an UNINTERPRETED predicate: a stable Bool symbol keyed by (Interface.method, argument idents). The
+	// same `x.le(y)` therefore denotes one symbol everywhere — so an injected protocol-law hypothesis
+	// (`(=> (and le_xy le_yz) le_xz)`) shares symbols with the goal and transports the fact. Modeling a
+	// total method as an arbitrary predicate is sound: it constrains nothing beyond what the laws assert.
+	if sym, ok := tr.interfaceMethodBoolSym(call, argEnv); ok {
+		return sym, true
 	}
 	resultType := tr.a.exprTypes[call]
 	decl, direct := tr.a.resolveDirectCallFuncDecl(call)
@@ -3079,6 +3217,123 @@ func (tr *smtTranslator) canonKeyEnv(decl *ast.FuncDecl, argEnv map[string]strin
 	return argEnv
 }
 
+// interfaceMethodBoolSym models a bool-returning PROTOCOL-method call over a type-parameter receiver
+// (`x.le(y)` inside `def sort[T: Ord]`) as an uninterpreted predicate: a stable Bool symbol keyed by the
+// protocol+method and the canonical names of its receiver/argument idents. It applies ONLY when every
+// operand is a plain identifier whose type is a protocol-bounded type parameter — exactly the shape the
+// law-fact injection and the generic goal share — so it never perturbs concrete-type proofs. Returns
+// ok=false otherwise (the caller then takes the normal path).
+func (tr *smtTranslator) interfaceMethodBoolSym(call *ast.CallExpr, env map[string]string) (string, bool) {
+	if tr == nil || tr.a == nil || call == nil {
+		return "", false
+	}
+	sel, ok := call.Func.(*ast.FieldExpr)
+	if !ok || sel == nil {
+		return "", false
+	}
+	// Two shapes reach here: the UFCS form `x.le(y)` (receiver = sel.Object, args = call.Args) and the
+	// qualified static form `T.le(x, y)` — the analyzer rewrites a bound type-param method call to this,
+	// so sel.Object is the type-param name `T` and ALL value operands are call.Args. Detect the latter by
+	// sel.Object naming the protocol-bounded type parameter itself.
+	var ifaceName string
+	var operands []ast.Expr
+	if ifn, ok := tr.a.qualifiedTypeParamMethodInterface(sel.Object, sel.Field); ok {
+		ifaceName = ifn
+		operands = call.Args
+	} else if ifn, ok := tr.a.protocolMethodReceiverInterface(sel.Object, sel.Field); ok {
+		ifaceName = ifn
+		operands = append([]ast.Expr{sel.Object}, call.Args...)
+	} else {
+		return "", false
+	}
+	parts := make([]string, 0, len(operands))
+	for _, op := range operands {
+		name, ok := lawOperandIdentName(op, env)
+		if !ok {
+			return "", false
+		}
+		parts = append(parts, name)
+	}
+	sym := smtBoolVar("__iface_" + sanitizeSMTFragment(ifaceName) + "_" + sel.Field + "_" + strings.Join(parts, "_"))
+	tr.boolDecls[sym] = true
+	return sym, true
+}
+
+// lawOperandIdentName returns a stable canonical name for an operand that is a plain identifier,
+// resolving through the quantifier/substitution env so a bound `a` and the param it maps to share a key.
+func lawOperandIdentName(expr ast.Expr, env map[string]string) (string, bool) {
+	id, ok := stripOptimizationParens(expr).(*ast.Ident)
+	if !ok || id == nil {
+		return "", false
+	}
+	if env != nil {
+		if bound, ok := env[id.Name]; ok {
+			return bound, true
+		}
+	}
+	return id.Name, true
+}
+
+// protocolMethodReceiverInterface reports the protocol name whose method `method` applies to `recv` when
+// recv is an identifier typed as a protocol-bounded type parameter. This is the gate that restricts the
+// uninterpreted-predicate model to the generic protocol-law setting.
+func (a *Analyzer) protocolMethodReceiverInterface(recv ast.Expr, method string) (string, bool) {
+	id, ok := stripOptimizationParens(recv).(*ast.Ident)
+	if !ok || id == nil || a.currentScope == nil {
+		return "", false
+	}
+	sym, ok := a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil {
+		return "", false
+	}
+	tp, ok := sym.Type.(*TypeParamType)
+	if !ok {
+		return "", false
+	}
+	iface, ok := a.lookupTypeParamInterface(tp.Name)
+	if !ok || iface == nil {
+		return "", false
+	}
+	if _, ok := iface.Methods[method]; !ok {
+		return "", false
+	}
+	return iface.Name, true
+}
+
+// qualifiedTypeParamMethodInterface reports the protocol name for a qualified static method call
+// `T.method(...)` where `T` is a protocol-bounded type parameter in scope and the protocol declares
+// `method`. This is the canonical lowered shape of a generic `value.method(...)` UFCS call.
+func (a *Analyzer) qualifiedTypeParamMethodInterface(owner ast.Expr, method string) (string, bool) {
+	id, ok := stripOptimizationParens(owner).(*ast.Ident)
+	if !ok || id == nil {
+		return "", false
+	}
+	if _, ok := a.lookupTypeParam(id.Name); !ok {
+		return "", false
+	}
+	iface, ok := a.lookupTypeParamInterface(id.Name)
+	if !ok || iface == nil {
+		return "", false
+	}
+	if _, ok := iface.Methods[method]; !ok {
+		return "", false
+	}
+	return iface.Name, true
+}
+
+// sanitizeSMTFragment maps a (possibly qualified) name to an SMT-symbol-safe fragment.
+func sanitizeSMTFragment(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('_')
+		}
+	}
+	return b.String()
+}
+
 func (tr *smtTranslator) callCanonKeyEnv(decl *ast.FuncDecl, args []ast.Expr, env map[string]string) (string, bool) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "%p|", decl)
@@ -3106,6 +3361,17 @@ func (tr *smtTranslator) callCanonArgKeyEnv(arg ast.Expr, env map[string]string)
 	}
 	if IsBoolType(tr.a.exprTypes[arg]) {
 		return tr.boolTerm(arg, env)
+	}
+	// A bound type-param-typed receiver (`c: C`) has no scalar term; key it by its env binding (a
+	// dtToken, when substituted) or its projection token. This is what makes an abstract method call
+	// keyed by its receiver canonicalize identically on the obligation and caller-fact sides (docs P1).
+	if _, ok := stripRefForBounds(tr.a.exprTypes[arg]).(*TypeParamType); ok {
+		if id, ok := arg.(*ast.Ident); ok && env != nil {
+			if bound, ok := env[id.Name]; ok {
+				return bound, true
+			}
+		}
+		return dtToken(smtProjectionName(arg)), true
 	}
 	if tr.a.smtEquationStructType(tr.a.exprTypes[arg]) {
 		st, _ := stripRefForBounds(tr.a.exprTypes[arg]).(*StructType)

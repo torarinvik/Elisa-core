@@ -194,6 +194,7 @@ type Analyzer struct {
 	freshShapeCounter        int
 	returnFreshShapeStatus   map[string]freshReturnStatus
 	annotatedFuncs           []*AnnotatedFunc
+	lawFuzzObligations       []*LawFuzzObligation
 	exportedTypes            []*ExportedType
 	exportedFuncs            []*ExportedFunc
 	exportedGlobals          []*ExportedGlobal
@@ -900,6 +901,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		FunctionAnalyses:        a.functionAnalyses,
 		ProgressSummaries:       a.progressSummaries,
 		AnnotatedFuncs:          a.annotatedFuncs,
+		LawFuzzObligations:      a.lawFuzzObligations,
 		ExportedTypes:           a.exportedTypes,
 		ExportedFuncs:           a.exportedFuncs,
 		ExportedGlobals:         a.exportedGlobals,

@@ -357,6 +357,16 @@ func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr
 		expr.ArgItemOrder = prependedItems
 	}
 	expr.Func = callee
+	// Behavioral-subtyping caller obligation (docs P1): when calling a protocol method through a
+	// bounded type param, the CALLER must prove the protocol method's `requires` (substituting the
+	// actual receiver/args) from the facts it has — knowing only the protocol's contract, not any
+	// concrete impl. The protocol method's `requires`/params live on its bodiless decl. The
+	// prepended args (receiver first) align positionally with the protocol method's params.
+	if protoDecl := method.Decl; protoDecl != nil && len(protoDecl.Requires) > 0 {
+		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, protoDecl.Requires, protoDecl.Params, expr.Args)
+	} else if def := method.Default; def != nil && len(def.Requires) > 0 {
+		a.checkCalleeRequires(expr, iface.Name+"."+fieldExpr.Field, def.Requires, def.Params, expr.Args)
+	}
 	return extensionMethodCallRewriteApplied
 }
 

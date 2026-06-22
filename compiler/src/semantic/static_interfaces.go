@@ -25,6 +25,11 @@ type StaticInterface struct {
 	// Their members are folded into Methods/AssociatedTypes so a single impl of this protocol
 	// must satisfy the union of own + inherited members.
 	Bases []string
+	// Laws are the algebraic obligations declared on the protocol (docs/85 P3): a `law total(a:
+	// Self, b: Self) = …` member is a universally-quantified predicate over `Self` that every
+	// conforming impl must satisfy. They are discharged per impl (SMT or @property fuzz) and may
+	// be assumed as facts in generic code bounded on the protocol.
+	Laws []*ast.FuncDecl
 }
 
 type StaticInterfaceMethod struct {
@@ -41,8 +46,13 @@ type StaticImpl struct {
 	InterfaceName   string
 	Receiver        Type
 	AssociatedTypes map[string]Type
-	Methods         map[string]*Symbol
-	Decl            *ast.ImplDecl
+	// AssociatedTypeRefinements carries the refinement predicates an impl's associated-type binding
+	// declares (P2: `type Field = u32 is InRange[0,127]`). The base type is representation-erased into
+	// AssociatedTypes; the refinement lives here so a generic protocol call whose result is that
+	// associated type can recover the static interval and feed the existing bounds-check elision.
+	AssociatedTypeRefinements map[string][]ast.RefinementPredExpr
+	Methods                   map[string]*Symbol
+	Decl                      *ast.ImplDecl
 	// TypeParams names the impl's own type parameters (from `impl[T] ... for Box[T]`).
 	// When non-empty the impl is parametric: its Receiver pattern carries these as free
 	// TypeParamType leaves, and a concrete receiver is matched by unifying against them.
@@ -514,6 +524,12 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
 						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
 					case *ast.FuncDecl:
+						if methodDecl.IsLaw {
+							// Protocol law: a universally-quantified predicate over Self. Recorded for
+							// per-impl discharge; not a callable method, so it does not enter Methods.
+							iface.Laws = append(iface.Laws, methodDecl)
+							continue
+						}
 						// Default method: a protocol method carrying a body. Its signature is
 						// typechecked exactly like a bodiless one; the body is recorded so a
 						// conforming impl that omits the method inherits it (synthesized later).
@@ -556,12 +572,13 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					return
 				}
 				impl := &StaticImpl{
-					InterfaceName:   interfaceName,
-					Receiver:        receiver,
-					TypeParams:      implTypeParamNamesFromDecl(decl.GenericParams),
-					AssociatedTypes: map[string]Type{},
-					Methods:         map[string]*Symbol{},
-					Decl:            decl,
+					InterfaceName:             interfaceName,
+					Receiver:                  receiver,
+					TypeParams:                implTypeParamNamesFromDecl(decl.GenericParams),
+					AssociatedTypes:           map[string]Type{},
+					AssociatedTypeRefinements: map[string][]ast.RefinementPredExpr{},
+					Methods:                   map[string]*Symbol{},
+					Decl:                      decl,
 				}
 				seenAssoc := map[string]bool{}
 				seenMethods := map[string]bool{}
@@ -579,6 +596,9 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 							continue
 						}
 						impl.AssociatedTypes[n.Name] = a.resolveType(n.Type)
+						if preds := refinementPredsOfTypeExpr(n.Type); len(preds) > 0 {
+							impl.AssociatedTypeRefinements[n.Name] = preds
+						}
 					case *ast.FuncDecl:
 						methodDecls = append(methodDecls, n)
 						if seenMethods[n.Name] {
@@ -626,11 +646,27 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 						continue
 					}
 					expectedSig := a.specializeInterfaceMethodSignature(methodInfo.Signature, receiver)
-					if !SameType(expectedSig, actualSig) {
+					// Structural signature match ignores the effect/error channels (they are checked
+					// with SUBSET variance below, not invariant equality) so a conforming impl that
+					// uses a strict subset of the protocol's capabilities / error modes still matches.
+					if !SameType(stripEffectChannels(expectedSig), stripEffectChannels(actualSig)) {
 						a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
 						continue
 					}
+					// P4: effect / error / frame (`changes`) subset variance (impl ⊆ protocol). Kept
+					// in a dedicated function so the merge with P1's requires/ensure variance is trivial.
+					var protoDecl ast.Node
+					if methodInfo.Default != nil {
+						protoDecl = methodInfo.Default
+					} else if methodInfo.Decl != nil {
+						protoDecl = methodInfo.Decl
+					}
+					a.checkImplEffectErrorFrameVariance(interfaceName, name, expectedSig, actualSig, protoDecl, member, pos.Pos())
 					impl.Methods[name] = sym
+					// Behavioral-subtyping (Liskov–Wing) variance check on value contracts:
+					// the impl method's `requires` must be entailed by the protocol's (contravariant)
+					// and the impl's `ensure` must imply the protocol's (covariant). docs P1.
+					a.checkProtocolImplContractVariance(methodInfo, member, interfaceName, receiver, name)
 				}
 				for name := range iface.AssociatedTypes {
 					if _, ok := impl.AssociatedTypes[name]; !ok {
@@ -642,6 +678,10 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 						a.errorf(decl.Pos(), "impl of interface %q for %s is missing method %q", interfaceName, receiver, name)
 					}
 				}
+				// Protocol laws (docs/85 P3): discharge each of the protocol's algebraic laws against this
+				// concrete impl. A proven law costs nothing at runtime; an unproven one is auto-lowered to a
+				// per-impl @property fuzz harness so it stays honest in debug/CI.
+				a.dischargeProtocolLawsForImpl(iface, impl, decl)
 			})
 		})
 	}

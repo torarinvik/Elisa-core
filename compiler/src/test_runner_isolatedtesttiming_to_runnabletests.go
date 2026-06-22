@@ -220,6 +220,7 @@ func generateTestRunnerSource(inputFile string, result *semantic.Result, filter 
 	if err != nil {
 		return "", err
 	}
+	source = appendLawFuzzHarnessSource(source, result)
 	driverSource, propertyCases := buildPropertyDrivers(result, filter)
 	if driverSource != "" {
 		if len(source) != 0 && source[len(source)-1] != '\n' {
@@ -256,6 +257,15 @@ func propertyCaseCount(fn *semantic.AnnotatedFunc) int {
 // as appended Elisa source plus a synthetic test case so it runs like a @test.
 func buildPropertyDrivers(result *semantic.Result, filter string) (string, []selectedTestCase) {
 	props := selectAnnotatedFunctions(result, "property", filter)
+	// Protocol laws (docs/85 P3) the analyzer could not statically prove are auto-lowered to a
+	// @property fuzz harness. Their source is injected separately (buildLawFuzzHarnesses); here we add
+	// their synthetic @property AnnotatedFuncs so the property-driver pass generates a randomized driver
+	// for each (with name-filter applied, like authored @property functions).
+	for _, fn := range lawFuzzAnnotatedFuncs(result) {
+		if fn != nil && matchesNameFilter(fn.Name, filter) {
+			props = append(props, fn)
+		}
+	}
 	if len(props) == 0 {
 		return "", nil
 	}
@@ -283,6 +293,112 @@ func buildPropertyDrivers(result *semantic.Result, filter string) (string, []sel
 		}})
 	}
 	return src.String(), cases
+}
+
+// appendLawFuzzHarnessSource appends the generated protocol-law @property harness functions to the
+// program source (a newline-safe concatenation), so they are recompiled and analyzed alongside it.
+func appendLawFuzzHarnessSource(source []byte, result *semantic.Result) []byte {
+	harness := buildLawFuzzHarnesses(result)
+	if harness == "" {
+		return source
+	}
+	if len(source) != 0 && source[len(source)-1] != '\n' {
+		source = append(source, '\n')
+	}
+	return append(source, []byte(harness)...)
+}
+
+// buildLawFuzzHarnesses synthesizes a `@property` function for each protocol-law obligation the
+// analyzer could not statically prove (docs/85 P3). Each harness takes the scalar struct fields of the
+// law's Self parameters, reconstructs the Self values, and returns the law predicate — so the existing
+// @property machinery fuzzes the law and reports a counterexample if the impl violates it. Emitting
+// these as ordinary source (recompiled with the program) means they flow through normal analysis and
+// the property-driver pass with no special-casing.
+func buildLawFuzzHarnesses(result *semantic.Result) string {
+	if result == nil || len(result.LawFuzzObligations) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	for _, ob := range result.LawFuzzObligations {
+		if ob == nil {
+			continue
+		}
+		name := lawHarnessName(ob)
+		// Flatten every Self parameter's fields into distinct scalar harness parameters.
+		params := make([]string, 0)
+		type recon struct {
+			param string
+			args  []string
+		}
+		recons := make([]recon, 0, len(ob.Params))
+		for _, p := range ob.Params {
+			r := recon{param: p.Name}
+			for _, f := range p.Fields {
+				pn := "__law_" + p.Name + "_" + f.Name
+				params = append(params, pn+": "+f.Type)
+				r.args = append(r.args, pn)
+			}
+			recons = append(recons, r)
+		}
+		fmt.Fprintf(&b, "\n@property\ndef %s(%s) -> bool:\n", name, strings.Join(params, ", "))
+		for _, r := range recons {
+			fmt.Fprintf(&b, "\t%s: %s = %s(%s)\n", r.param, ob.TypeName, ob.TypeName, strings.Join(r.args, ", "))
+		}
+		fmt.Fprintf(&b, "\treturn %s\n", ob.BodySource)
+	}
+	return b.String()
+}
+
+// lawFuzzAnnotatedFuncs builds the synthetic @property AnnotatedFunc for each law harness so the
+// property-driver pass generates a randomized driver that invokes it. The signature mirrors the
+// generated harness: one scalar (BuiltinType) parameter per Self field, bool return. Field labels are
+// carried in ExplicitParamNames so a counterexample names the failing field.
+func lawFuzzAnnotatedFuncs(result *semantic.Result) []*semantic.AnnotatedFunc {
+	if result == nil || len(result.LawFuzzObligations) == 0 {
+		return nil
+	}
+	out := make([]*semantic.AnnotatedFunc, 0, len(result.LawFuzzObligations))
+	for _, ob := range result.LawFuzzObligations {
+		if ob == nil {
+			continue
+		}
+		var params []semantic.Type
+		var labels []string
+		for _, p := range ob.Params {
+			for _, f := range p.Fields {
+				params = append(params, &semantic.BuiltinType{Name: f.Type})
+				labels = append(labels, p.Name+"."+f.Name)
+			}
+		}
+		out = append(out, &semantic.AnnotatedFunc{
+			Name:        lawHarnessName(ob),
+			Annotations: []ast.Annotation{{Name: "property"}},
+			Signature: &semantic.FuncType{
+				Params:             params,
+				ExplicitParamNames: labels,
+				Return:             &semantic.BuiltinType{Name: "bool"},
+			},
+		})
+	}
+	return out
+}
+
+// lawHarnessName is the canonical `__law_<Protocol>_<law>_<Type>` harness name. Non-identifier
+// characters in the (possibly-qualified) protocol/type names are sanitized to underscores so the
+// generated Elisa identifier is always valid.
+func lawHarnessName(ob *semantic.LawFuzzObligation) string {
+	clean := func(s string) string {
+		var out strings.Builder
+		for _, r := range s {
+			if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+				out.WriteRune(r)
+			} else {
+				out.WriteByte('_')
+			}
+		}
+		return out.String()
+	}
+	return "__law_" + clean(ob.Interface) + "_" + clean(ob.LawName) + "_" + clean(ob.TypeName)
 }
 
 // propertyDriverSource emits the Elisa text for one property driver.
@@ -748,6 +864,7 @@ func executeSelectedTests(inputFile string, result *semantic.Result, filter stri
 		return 1
 	}
 	writeTestPhaseLine(stderr, "selected_tests", "select_cases")
+	source = appendLawFuzzHarnessSource(source, result)
 	testCases := selectTestCases(result, filter)
 	driverSource, propertyCases := buildPropertyDrivers(result, filter)
 	if driverSource != "" {

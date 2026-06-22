@@ -56,6 +56,20 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 			members = append(members, p.parseAssociatedTypeDecl())
 			continue
 		}
+		// A protocol LAW (docs/85 P3): `law total(a: Self, b: Self) = a.le(b) or b.le(a)`. It is an
+		// algebraic obligation every conforming impl must satisfy, parsed with the existing law grammar
+		// (a bool-returning FuncDecl with IsLaw set) and folded into the protocol's member set. Its
+		// params range over `Self` (and related types); the analyzer discharges it per impl by SMT or,
+		// on a non-affine body, auto-lowers it to a per-impl @property fuzz harness.
+		if p.peekIdentText("law") && p.looksLikeLawDecl() {
+			decl := p.parseLawDecl()
+			if fn, ok := decl.(*ast.FuncDecl); ok {
+				members = append(members, fn)
+			} else {
+				p.errorf("a protocol law must be a predicate law (`law Name(...) = <bool-expr>`)")
+			}
+			continue
+		}
 		if p.peek() == lexer.TOKEN_DEF {
 			members = append(members, p.parseInterfaceMethodDecl())
 			continue
@@ -102,11 +116,22 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 
+	// Frame conditions on a protocol method: `changes`/`preserves` declare the upper-bound frame an
+	// impl may write (P4 effect/frame variance — impl `changes` must be a subset).
+	var changes, preserves []ast.EnsuresPath
+	if p.matchIdentText("changes") {
+		changes = p.parseChangesPathsAfterKeyword()
+	}
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
+
 	// A trailing `:` introduces a DEFAULT METHOD BODY: the protocol method carries an
 	// implementation that conforming types inherit unless they override it. Represented as a
 	// FuncDecl member (mirroring the impl-method shape) rather than a bodiless ExternFuncDecl.
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
+		reqs, reqProofs, ensureVals, ensureProofs, _, _, _, body := liftLeadingContracts(body)
 		return &ast.FuncDecl{
 			Position:         pos,
 			Name:             name,
@@ -116,12 +141,25 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 			RegionParams:     regionParams,
 			Permissions:      permissions,
 			Ensures:          ensures,
+			Requires:         reqs,
+			RequiresProofs:   reqProofs,
+			EnsureValues:     ensureVals,
+			EnsureProofs:     ensureProofs,
+			Changes:          changes,
+			Preserves:        preserves,
 			Params:           params,
 			ReturnType:       retType,
 			Body:             body,
 		}
 	}
 
+	// A bodiless protocol method may still carry value contracts as an indented block of
+	// `requires`/`ensure` statements with NO `:` introducing an executable body (docs P1):
+	//     def get(self: Self, i: usize) -> Elem
+	//         requires i < self.count()
+	// These behavioral-subtyping contracts are checked against each impl with the correct
+	// variance. Parse the indented contract-only block and lift it into the bodiless decl.
+	reqs, ensureVals := p.parseBodilessMethodContracts()
 	p.expectNewline()
 	return &ast.ExternFuncDecl{
 		Position:         pos,
@@ -132,9 +170,56 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 		RegionParams:     regionParams,
 		Permissions:      permissions,
 		Ensures:          ensures,
+		Requires:         reqs,
+		EnsureValues:     ensureVals,
+		Changes:          changes,
+		Preserves:        preserves,
 		Params:           params,
 		ReturnType:       retType,
 	}
+}
+
+// parseBodilessMethodContracts parses an optional indented block of value-contract statements
+// (`requires`/`ensure`) attached to a bodiless protocol method signature. The signature line ends
+// with a newline; if the following line is INDENTed it must contain only contract statements (a
+// stray non-contract statement is a parse error, since there is no executable body here). Returns
+// the lifted precondition and postcondition expressions.
+func (p *Parser) parseBodilessMethodContracts() (requires []ast.Expr, ensures []ast.Expr) {
+	if p.peek() != lexer.TOKEN_NEWLINE {
+		return nil, nil
+	}
+	// Look past the newline for an INDENT; if absent, there is no contract block.
+	if p.peekAt(1) != lexer.TOKEN_INDENT {
+		return nil, nil
+	}
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		stmt := p.parseContextualStmt()
+		cs, ok := stmt.(*ast.ContractStmt)
+		if !ok || cs == nil {
+			p.errorf("bodiless protocol method may only carry requires/ensure contracts")
+			continue
+		}
+		switch cs.Kind {
+		case ast.ContractRequire:
+			if cs.Cond != nil {
+				requires = append(requires, cs.Cond)
+			}
+		case ast.ContractEnsure:
+			if cs.Cond != nil {
+				ensures = append(ensures, cs.Cond)
+			}
+		default:
+			p.errorf("bodiless protocol method may only carry requires/ensure contracts")
+		}
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return requires, ensures
 }
 
 func (p *Parser) parseImplDecl() *ast.ImplDecl {
@@ -244,10 +329,26 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 
+	// Frame conditions on an impl method (`changes`/`preserves`): checked for SUBSET conformance
+	// against the protocol method's frame (P4) and enforced intraprocedurally as on any function.
+	var changes, preserves []ast.EnsuresPath
+	if p.matchIdentText("changes") {
+		changes = p.parseChangesPathsAfterKeyword()
+	}
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
+
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+		// Lift leading value contracts (`requires`/`ensure`) off the impl-method body into the decl,
+		// mirroring the top-level function parser. These are checked for behavioral-subtyping variance
+		// against the protocol method's contracts (contravariant requires, covariant ensure + P4's
+		// effect/error/frame subset variance).
+		reqs, reqProofs, ensureVals, ensureProofs, _, _, _, body := liftLeadingContracts(body)
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, RequiresProofs: reqProofs, EnsureValues: ensureVals, EnsureProofs: ensureProofs, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType, Body: body}
 	}
+	reqs, ensureVals := p.parseBodilessMethodContracts()
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, EnsureValues: ensureVals, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType}
 }
