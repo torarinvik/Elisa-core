@@ -44,11 +44,20 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// exit fact is exported.
 	subst, arrayStores, captured := a.captureLoopBodyEffect(stmt.Body)
 
+	// Establishment scope: a child of the live pre-loop scope additionally carrying POINT range facts
+	// for any loop variable pinned to a compile-time constant at entry (`n: usize = 0` records the
+	// assert fact `n == 0`, which we lift to the range `[0,0]`). This lets the affine prover establish a
+	// constant-bounded invariant (`n <= MAX` from `n == 0`) with no solver. It is local to
+	// establishment — the entry value is NEVER admitted into the preservation proof (the body runs on an
+	// arbitrary iteration), preserving the inductive-step isolation.
+	establishScope := NewScope(a.currentScope)
+	a.seedLoopEntryRangeFacts(establishScope, subst)
+
 	allProven := true
 	for _, inv := range invs {
-		// Establishment: prove from the pre-loop facts on the current scope (intact: the body has not
-		// been analyzed yet).
-		established, viaSMT := a.proveLoopClause(inv.Cond, nil, a.currentScope)
+		// Establishment: prove from the pre-loop facts (plus the entry-value point ranges). The body has
+		// not been analyzed yet, so these facts are intact.
+		established, viaSMT := a.proveLoopClause(inv.Cond, nil, establishScope)
 		if !established {
 			a.recordProof(inv.Pos(), "loop invariant", "establish", ProofRuntime)
 			a.proofLint(inv.Pos(), "loop invariant could not be established on entry; it is only checked at runtime")
@@ -60,12 +69,24 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 			allProven = false
 			continue
 		}
-		// Preservation: prove `cond ∧ (every invariant) ⊢ inv[body]`. This is discharged by a
-		// dedicated SMT implication where the loop variables are FREE — constrained only by the loop
-		// condition and the invariants, never by their (now stale) pre-loop values. That isolation is
-		// what makes it sound: a child scope cannot mask the outer loop-variable facts (range-fact
-		// lookup intersects the whole chain), so reusing the ambient fact set would let a false
-		// invariant like `i < 5` "prove" preserved off the entry value `i == 0`.
+		// Preservation: prove `cond ∧ (every invariant) ⊢ inv[body]`.
+		//
+		// Affine fast path (no SMT): seed ONLY the truthy loop-guard's constant range facts about the
+		// loop variables into a scratch scope, then bound the substituted invariant difference over
+		// those ranges. This proves the common constant-bounded inductive step `n < MAX ⊢ n+1 <= MAX`
+		// with no solver — the missing hypothesis was the truthy guard, which the body executes under.
+		// Sound: the scratch scope carries ONLY guard-derived facts (no stale pre-loop entry values),
+		// and the affine difference is bounded conservatively (open/decline on any unknown bound).
+		if a.proveLoopPreservationAffine(stmt.Cond, inv.Cond, subst) {
+			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofProvenLinear)
+			continue
+		}
+		// SMT fallback (off unless -smt): a dedicated implication where the loop variables are FREE —
+		// constrained only by the loop condition and the invariants, never by their (now stale)
+		// pre-loop values. That isolation is what makes it sound: a child scope cannot mask the outer
+		// loop-variable facts (range-fact lookup intersects the whole chain), so reusing the ambient
+		// fact set would let a false invariant like `i < 5` "prove" preserved off the entry value
+		// `i == 0`.
 		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst, arrayStores); !preserved {
 			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofRuntime)
 			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(counterexample))
@@ -144,6 +165,146 @@ func (a *Analyzer) proveLoopClause(clause ast.Expr, subst map[string]ast.Expr, s
 	// concludes — sound, and a decline simply leaves the runtime check.
 	proven, _ := a.trySMTProveRequires(clause, subst)
 	return proven, proven
+}
+
+// proveLoopPreservationAffine discharges the inductive step `cond ⊢ inv[body]` with the affine prover
+// alone (no solver). It seeds a scratch child scope with the constant range facts implied by the
+// TRUTHY loop guard about the loop variables — the body runs only when the guard holds — then bounds
+// the substituted invariant over those ranges. This is the missing-hypothesis fix: without the guard,
+// `n` is unbounded and `n + 1 <= MAX` cannot be concluded; with `n < MAX` seeded it follows.
+//
+// Soundness: the scratch scope carries ONLY guard-derived facts (a child of the live scope chain, so
+// it adds facts but cannot mask outer ones); it never seeds the stale pre-loop entry value (`n == 0`),
+// so a false invariant cannot be "proven" off it. boundAffine is conservative — any unknown bound
+// declines — so this path only ADDS proofs, never admits an unsound one. The invariants themselves are
+// NOT assumed here (unlike the SMT tier): the affine fragment cannot use a relational invariant as a
+// hypothesis anyway, and the constant-bounded cases this path targets need only the guard.
+func (a *Analyzer) proveLoopPreservationAffine(cond, inv ast.Expr, subst map[string]ast.Expr) bool {
+	if cond == nil || inv == nil || a.currentScope == nil {
+		return false
+	}
+	saved := a.currentScope
+	scratch := NewScope(saved)
+	// SOUNDNESS: close the world at the scratch scope so the range-fact lookup STOPS here and never
+	// reaches the pre-loop entry value of a loop variable (e.g. the decl-seeded `n == 0`). The body
+	// runs on an ARBITRARY iteration, so the only admissible facts about a loop variable are the ones
+	// the truthy guard re-establishes — using the entry value would let a false invariant like
+	// `n < MAX` "prove" preserved off `n == 0`. (Constants/written-consts resolve through the symbol
+	// table and live-fact channels, which closedWorld does not gate, so `MAX` is still available.)
+	scratch.closedWorld = true
+	a.currentScope = scratch
+	defer func() { a.currentScope = saved }()
+	a.seedLoopGuardRangeFacts(scratch, cond)
+	if scratch.rangeFacts == nil {
+		return false // the guard gave us no usable constant bound on a loop variable
+	}
+	return a.proveLoopClauseAffine(inv, subst, scratch)
+}
+
+// seedLoopEntryRangeFacts seeds point range facts for loop variables pinned to a compile-time
+// constant on entry, read from the live `name == const` SMT assert facts (which `n: usize = 0`
+// records). Only the variables the body actually mutates (the keys of subst) are seeded — those are
+// the loop counters whose entry value matters for establishment. Used ONLY for the establishment
+// proof; the preservation proof deliberately excludes the entry value (the inductive-step isolation).
+func (a *Analyzer) seedLoopEntryRangeFacts(scope *Scope, subst map[string]ast.Expr) {
+	if scope == nil || len(subst) == 0 {
+		return
+	}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			be, ok := fact.Expr.(*ast.BinaryExpr)
+			if !ok || be.Op != lexer.TOKEN_EQEQ {
+				continue
+			}
+			name, c, ok := a.eqConstFactForLoopVar(be, subst)
+			if !ok {
+				continue
+			}
+			if scope.rangeFacts == nil {
+				scope.rangeFacts = map[string]numRange{}
+			}
+			if _, seen := scope.rangeFacts[name]; seen {
+				continue // a nearer (already-seeded) fact wins; never widen
+			}
+			scope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+		}
+		if sc.closedWorld {
+			break
+		}
+	}
+}
+
+// eqConstFactForLoopVar interprets `loopvar == const` (either operand order) where loopvar is one of
+// the body-mutated loop variables, returning the variable name and the constant value.
+func (a *Analyzer) eqConstFactForLoopVar(be *ast.BinaryExpr, subst map[string]ast.Expr) (string, int64, bool) {
+	if id, ok := be.Left.(*ast.Ident); ok && id != nil {
+		if _, isLoopVar := subst[id.Name]; isLoopVar {
+			if c, ok := a.constIntValue(be.Right); ok {
+				return id.Name, c, true
+			}
+		}
+	}
+	if id, ok := be.Right.(*ast.Ident); ok && id != nil {
+		if _, isLoopVar := subst[id.Name]; isLoopVar {
+			if c, ok := a.constIntValue(be.Left); ok {
+				return id.Name, c, true
+			}
+		}
+	}
+	return "", 0, false
+}
+
+// seedLoopGuardRangeFacts records the constant integer range facts implied by a truthy loop guard
+// (a conjunction of `loopvar OP const` / `const OP loopvar` comparisons) onto scope. Unlike
+// gatherNumericRangeRefinement it admits MUTABLE loop variables (via loopIntIdentName): within one
+// inductive iteration the entry value is fixed, so the guard's bound on it is a valid hypothesis.
+func (a *Analyzer) seedLoopGuardRangeFacts(scope *Scope, cond ast.Expr) {
+	switch n := stripOptimizationParens(cond).(type) {
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			a.seedLoopGuardRangeFacts(scope, n.Left)
+			a.seedLoopGuardRangeFacts(scope, n.Right)
+			return
+		}
+		a.seedLoopGuardComparisonFact(scope, n)
+	}
+}
+
+// seedLoopGuardComparisonFact records the range fact for a single `loopvar OP const` (or flipped)
+// comparison drawn from the truthy loop guard.
+func (a *Analyzer) seedLoopGuardComparisonFact(scope *Scope, n *ast.BinaryExpr) {
+	op := n.Op
+	name, ok := loopIntIdentName(a, scope, n.Left)
+	var c int64
+	var cok bool
+	if ok {
+		c, cok = a.constIntValue(n.Right)
+	} else if name, ok = loopIntIdentName(a, scope, n.Right); ok {
+		c, cok = a.constIntValue(n.Left)
+		op = flipComparison(op)
+	}
+	if !ok || !cok {
+		return
+	}
+	var fact numRange
+	switch op {
+	case lexer.TOKEN_GT: // v > c  ⇒ v >= c+1
+		fact = numRange{loKnown: true, lo: c + 1}
+	case lexer.TOKEN_GTEQ: // v >= c
+		fact = numRange{loKnown: true, lo: c}
+	case lexer.TOKEN_LT: // v < c  ⇒ v <= c-1
+		fact = numRange{hiKnown: true, hi: c - 1}
+	case lexer.TOKEN_LTEQ: // v <= c
+		fact = numRange{hiKnown: true, hi: c}
+	case lexer.TOKEN_EQEQ: // v == c
+		fact = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+	default:
+		return
+	}
+	if scope.rangeFacts == nil {
+		scope.rangeFacts = map[string]numRange{}
+	}
+	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
 }
 
 func (a *Analyzer) proveLoopClauseAffine(clause ast.Expr, subst map[string]ast.Expr, scope *Scope) bool {
