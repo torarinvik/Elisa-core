@@ -176,6 +176,51 @@ def count_up(n: usize) -> usize:
 	}
 }
 
+// The K3 fix: a constant-bounded invariant `n <= MAX` is established on entry AND proven PRESERVED by
+// the body `n <- n + 1` WITHOUT the SMT tier, because the truthy loop guard `n < MAX` is now threaded
+// into the preservation proof as a hypothesis: `n < MAX ⊢ n + 1 <= MAX`. The proof is affine (linear),
+// so it holds even when z3 is not on PATH.
+func TestLoopInvariantGuardedPreservedByAffine(t *testing.T) {
+	src := `
+const MAX: usize = 16
+def scan(name: usize[16]) -> usize:
+    n: mutable usize = 0
+    while n < MAX and name[n] != 0:
+        invariant n <= MAX
+        n <- n + 1
+    return n
+`
+	result := analyzeTreeTestSource(t, "loop_inv_guard_affine.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenLinear); got != 1 {
+		t.Fatalf("expected the guarded invariant to be proven preserved by the affine prover, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+// Soundness counterpart: an invariant genuinely broken by the body — `n < MAX` with `n <- n + 1` —
+// must NOT be proven preserved, since `n < MAX ⊢ n + 1 < MAX` is false (take n = MAX-1). The affine
+// guard-seeded path must decline and fall back to the runtime preservation check.
+func TestLoopInvariantGuardedFalsePreservationDeclined(t *testing.T) {
+	src := `
+const MAX: usize = 16
+def scan(name: usize[16]) -> usize:
+    n: mutable usize = 0
+    while n < MAX and name[n] != 0:
+        invariant n < MAX
+        n <- n + 1
+    return n
+`
+	result := analyzeTreeTestSource(t, "loop_inv_guard_false.elisa", src)
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenLinear); got != 0 {
+		t.Fatalf("the guard-seeded affine path must not prove a non-inductive invariant preserved (n=MAX-1 is a counterexample): %+v", result.ProofReport)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofRuntime); got != 1 {
+		t.Fatalf("expected the non-inductive invariant to fall back to a runtime preservation check, got %d: %+v", got, result.ProofReport)
+	}
+}
+
 func parseFileForTest(t *testing.T, filename, src string) *ast.File {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))

@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"strconv"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -355,6 +356,154 @@ func (a *Analyzer) invalidateWrittenConst(name string) {
 			delete(scope.writtenStruct, name)
 		}
 	}
+	// Field facts (`self.f <- v`) under this root are dropped via the dedicated root-escape path
+	// (invalidateWrittenFieldsForRoot), NOT here: a sibling field write (`self.b <- …`) routes through
+	// invalidateWrittenConst(self) for the writtenConst channel but must NOT drop `self.a`'s field fact.
+	// Whole-root escapes (reassign, borrow, mutating callee) call invalidateWrittenFieldsForRoot directly.
+}
+
+// invalidateWrittenFieldsForRoot drops EVERY field fact whose root is `name` across the scope chain.
+// Called when the whole root escapes or is mutated wholesale (reassignment of `self`, a `&self` borrow,
+// passing `self` to a mutating callee) — any field could then have changed, so no last-written value
+// can be trusted. Over-dropping only forces the runtime check, so this stays sound.
+func (a *Analyzer) invalidateWrittenFieldsForRoot(name string) {
+	if name == "" {
+		return
+	}
+	prefix := name + "__field__"
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenField == nil {
+			continue
+		}
+		for key := range scope.writtenField {
+			if key == name || strings.HasPrefix(key, prefix) {
+				delete(scope.writtenField, key)
+			}
+		}
+	}
+}
+
+// recordWrittenFieldForTarget records (or clears) the last-written value of a struct-field place
+// `self.f <- value`. The target must be a pure field path rooted at an identifier (its canonical
+// projection name is the map key); any other target shape records nothing. The stored expr is the
+// raw RHS — equality discharge is syntactic (`self.f == 0`, or `self.a == self.b` when both fields
+// trace to the same value expr), so no const-fold is required. Sound because invalidateWrittenConst
+// drops every field fact under a root the moment that root is mutated, aliased, or escapes.
+func (a *Analyzer) recordWrittenFieldForTarget(target, value ast.Expr) {
+	// A write laundered through a borrow-local alias (`r := &self; r.f <- …` or `r <- …`) mutates the
+	// underlying root, so every field fact under each laundered root must drop too.
+	if name, ok := rootIdentName(unwrapParen(target)); ok {
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			a.invalidateWrittenFieldsForRoot(r)
+		}
+	}
+	field, ok := unwrapParen(target).(*ast.FieldExpr)
+	if !ok || field == nil {
+		// A whole-root reassignment (`self = other`) or any non-field target replaces the aggregate, so
+		// every field fact under the root is stale. (A bare ident is the common case; conservatively drop
+		// the structural root of any other shape too.)
+		a.invalidateWrittenFieldsForRoot(rootIdentNameOrEmpty(target))
+		return
+	}
+	root, ok := rootIdentName(field)
+	if !ok || root == "" {
+		return
+	}
+	// Only pure ident/field projections get a stable key; smtProjectionName falls back to a position-
+	// based name for anything else (an index, a call), which we must not track as a field place.
+	key := smtProjectionName(field)
+	if !isPureProjectionKey(key) {
+		return
+	}
+	if a.currentScope == nil {
+		return
+	}
+	// Drop any prior fact for THIS field first (a re-write supersedes it); sibling fields are untouched.
+	a.invalidateWrittenField(key)
+	// Only a re-evaluation-stable value is tracked: a compile-time constant, or a pure place read
+	// (ident / field projection — no call, index, or arithmetic). A constant proves `self.f == 0`; a
+	// pure place read proves `self.a == self.b` by syntactic equality of the two recorded reads. An
+	// impure value (a call) is NOT recorded — the field's prior fact was already dropped above, so the
+	// place correctly falls to the runtime check rather than carrying an unstable term.
+	if !a.isStableWrittenFieldValue(value) {
+		return
+	}
+	if a.currentScope.writtenField == nil {
+		a.currentScope.writtenField = map[string]ast.Expr{}
+	}
+	a.currentScope.writtenField[key] = value
+}
+
+// isStableWrittenFieldValue reports whether an assigned value can be recorded as a field's last-written
+// value: a compile-time constant, or a pure place read (ident or field projection whose key is pure).
+// Anything that could observe or cause a side effect, or whose re-evaluation could differ (a call,
+// arithmetic, an index), is rejected so a recorded fact never carries an unstable term.
+func (a *Analyzer) isStableWrittenFieldValue(value ast.Expr) bool {
+	if _, ok := a.evalConstExpr(value); ok {
+		return true
+	}
+	switch n := unwrapParen(value).(type) {
+	case *ast.Ident:
+		return n != nil
+	case *ast.FieldExpr:
+		return n != nil && isPureProjectionKey(smtProjectionName(n))
+	default:
+		return false
+	}
+}
+
+// invalidateWrittenFieldForWrite drops the field fact(s) a write to `target` invalidates WITHOUT
+// recording a new value: a pure field-path target drops only that field (siblings stay); any other
+// shape (a bare-ident reassign, an index, a non-pure path) drops the whole root's fields. Used by
+// writes whose new value is not a tracked field value (augmented assignment, `as &` stores).
+func (a *Analyzer) invalidateWrittenFieldForWrite(target ast.Expr) {
+	if name, ok := rootIdentName(unwrapParen(target)); ok {
+		for _, r := range a.borrowLaunderedRoots(name, map[string]bool{}) {
+			a.invalidateWrittenFieldsForRoot(r)
+		}
+	}
+	if field, ok := unwrapParen(target).(*ast.FieldExpr); ok && field != nil {
+		key := smtProjectionName(field)
+		if isPureProjectionKey(key) {
+			a.invalidateWrittenField(key)
+			return
+		}
+	}
+	a.invalidateWrittenFieldsForRoot(rootIdentNameOrEmpty(target))
+}
+
+// invalidateWrittenField drops a single field place's last-written fact across the scope chain.
+func (a *Analyzer) invalidateWrittenField(key string) {
+	if key == "" {
+		return
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenField != nil {
+			delete(scope.writtenField, key)
+		}
+	}
+}
+
+// lookupWrittenField returns the last-written value expr for a field place (keyed by its projection
+// name), if a live fact exists in the active scope chain.
+func (a *Analyzer) lookupWrittenField(key string) (ast.Expr, bool) {
+	if key == "" {
+		return nil, false
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenField != nil {
+			if v, ok := scope.writtenField[key]; ok {
+				return v, true
+			}
+		}
+	}
+	return nil, false
+}
+
+// isPureProjectionKey reports whether a projection name was built purely from ident/field components
+// (so it round-trips a real field place) rather than smtProjectionName's `expr__…` position fallback.
+func isPureProjectionKey(key string) bool {
+	return key != "" && !strings.HasPrefix(key, "expr__")
 }
 
 // lookupWrittenStructField returns the construction-time value expr of `name.field` when `name` is a

@@ -513,6 +513,15 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
+		// Written-field fast-path: `ensure self.f == E` where the body writes `self.f <- V` and the
+		// recorded V proves the clause (V == 0 for `self.f == 0`; or both `self.a` and `self.b` trace
+		// to the same value expr for `self.a == self.b`). The fact is dropped at every mutation/borrow/
+		// mutating-callee of the root, so a hit means the last write still stands. The SMT lane fails
+		// these because two loads of a reference field are distinct opaque terms (the SetupRegions gap).
+		if a.ensureHoldsByWrittenField(clause) {
+			a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
+			continue
+		}
 		// WP transport relates the param's EXIT value to `old(p)` (its entry value), proving e.g.
 		// `ensure p >= old(p)` when the body keeps/raises p. The trySMTProveRequires fallback models
 		// `old(p)` as an unconstrained fresh symbol — sound but always declining an old() postcondition.
@@ -554,6 +563,82 @@ func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
 		other = bin.Left
 	}
 	return exprsSyntacticallyEqual(other, retVal)
+}
+
+// ensureHoldsByWrittenField discharges a void-exit postcondition `LHS == RHS` by resolving each
+// field-place operand (`self.f`) to the last value the body wrote to it (recorded in writtenField,
+// dropped at every mutation/borrow/mutating-callee of the root). It proves two shapes:
+//
+//	ensure self.f == 0                       — self.f resolves to 0, the other side is the constant 0
+//	ensure self.a == self.b                  — both resolve to the SAME value expr
+//
+// A side with no field fact resolves to itself, so `self.f == 0` (RHS already constant) and a
+// field-vs-field equality both work. Discharge is then either constant-equality or syntactic equality
+// of the resolved value exprs — never arithmetic or calls, so a stale or unrelated write can't falsely
+// prove. Returns false unless at least one operand was actually resolved from a written-field fact
+// (otherwise this adds nothing the SMT lane didn't already try).
+func (a *Analyzer) ensureHoldsByWrittenField(clause ast.Expr) bool {
+	bin, ok := clause.(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+		return false
+	}
+	left, leftResolved := a.resolveWrittenFieldOperand(bin.Left)
+	right, rightResolved := a.resolveWrittenFieldOperand(bin.Right)
+	if !leftResolved && !rightResolved {
+		return false
+	}
+	if left == nil || right == nil {
+		return false
+	}
+	if lc, ok := a.evalConstExpr(left); ok {
+		if rc, ok := a.evalConstExpr(right); ok {
+			return constScalarsEqual(lc, rc)
+		}
+		return false
+	}
+	// Non-constant values (e.g. both fields written `<- self.total_flexible_size`) prove only by
+	// syntactic equality of the pure place reads — exprsSyntacticallyEqual admits only ident/field
+	// projections, never calls or arithmetic, so this stays sound.
+	return exprsSyntacticallyEqual(left, right)
+}
+
+// constScalarsEqual reports whether two constant values are equal in a SCALAR kind (int/bool/float/
+// string). Aggregate kinds (tuple/list/record/optional) decline — equality of those would need a
+// deep, kind-aware comparison this fast-path does not attempt, so it falls to the runtime check.
+func constScalarsEqual(x, y ConstValue) bool {
+	if x.Kind != y.Kind {
+		return false
+	}
+	switch x.Kind {
+	case ConstInt:
+		return x.Int == y.Int
+	case ConstBool:
+		return x.Bool == y.Bool
+	case ConstFloat:
+		return x.Float == y.Float
+	case ConstString:
+		return x.String == y.String
+	default:
+		return false
+	}
+}
+
+// resolveWrittenFieldOperand returns the last-written value of a field-place operand (`self.f` →
+// its recorded RHS) and ok=true when a live written-field fact was used; otherwise it returns the
+// operand unchanged with ok=false (a literal or unresolved place is its own value).
+func (a *Analyzer) resolveWrittenFieldOperand(expr ast.Expr) (ast.Expr, bool) {
+	field, ok := unwrapParen(expr).(*ast.FieldExpr)
+	if !ok || field == nil {
+		return expr, false
+	}
+	key := smtProjectionName(field)
+	if !isPureProjectionKey(key) {
+		return expr, false
+	}
+	if v, ok := a.lookupWrittenField(key); ok {
+		return v, true
+	}
+	return expr, false
 }
 
 func isResultIdent(e ast.Expr) bool {
@@ -655,6 +740,13 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
 			continue
 		}
+		// Written-field fast-path also applies at an explicit `return` in a void/struct-mutating fn
+		// (`ensure self.f == E` over a `self.f <- V` the body performed). The clause does not reference
+		// `result`, so the subst above is inert for it. Same soundness as the void-exit path.
+		if !exprReferencesResult(clause) && a.ensureHoldsByWrittenField(clause) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "written field", ProofProvenSMT)
+			continue
+		}
 		if a.tryProveEnsureByDisjunctiveResultRange(clause, n.Value) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "range disjunction", ProofProvenSMT)
 			continue
@@ -687,8 +779,104 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "return paths", ProofProvenSMT)
 			continue
 		}
+		if a.tryProveEnsureNullnessCastDisjunct(clause, subst) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "nullness-cast disjunct", ProofProvenSMT)
+			continue
+		}
 		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
 	}
+}
+
+// tryProveEnsureNullnessCastDisjunct discharges a disjunctive postcondition `(P != null) or (result == …)`
+// where the non-null operand `P` is a function parameter whose non-null-ness on the active return path is
+// only KNOWN through a nullness-preserving cast: a local `e = P.cast[…]` is null-guarded (`if e == null:
+// return …`), so the surviving path carries the flow fact `e != null` — but the disjunct is phrased over
+// `P`. A pointer cast maps null↔null and non-null↔non-null bijectively, so the two pointers share their
+// null-ness exactly; this helper surfaces that equivalence as the extra hypothesis `(= isnull_e isnull_P)`
+// for every immutable local in scope that is defined as a pointer cast of another pointer path, then
+// re-runs the standard discharge (which already assumes the path's `e != null` flow fact). SOUND: only an
+// equality between the two predicates the prover already keys is added; no extra non-null-ness is asserted,
+// so a return that genuinely permits `P == null` (and a falsy `result`) still fails (its flow lacks the
+// `e != null` fact). Kept as a self-contained helper + one fast-path line so a later merge stays trivial.
+func (a *Analyzer) tryProveEnsureNullnessCastDisjunct(clause ast.Expr, subst map[string]ast.Expr) bool {
+	if a == nil || clause == nil {
+		return false
+	}
+	bin, ok := stripOptimizationParens(clause).(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_OR {
+		return false
+	}
+	if a.openSMT() == nil {
+		return false
+	}
+	tr := a.newSMTTranslator(nil)
+	env, ok := a.smtEnvForSubst(tr, subst)
+	if !ok {
+		return false
+	}
+	extra := a.smtNullnessCastLinkHypotheses(tr)
+	if extra == "" {
+		return false
+	}
+	proven, _, lowered := a.smtCheckGoal(tr, clause, env, extra)
+	return lowered && proven
+}
+
+// smtNullnessCastLinkHypotheses emits `(= isnull_<local> isnull_<source>)` for each immutable local in
+// scope whose defining expression is a pointer cast `<source>.cast[…]` of a projectable pointer path. The
+// predicate keys mirror exactly what the BinaryExpr null-compare lowering produces (`isnull_` +
+// smtProjectionName), so the asserted equivalence connects a `e == null` guard fact to a `P != null`
+// obligation. Returns "" when no such link exists (the helper then declines, costing nothing).
+func (a *Analyzer) smtNullnessCastLinkHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentScope == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	seen := map[string]bool{}
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for name, sym := range sc.Symbols {
+			if seen[name] || sym == nil || sym.Mutable || sym.Kind != SymbolLocal {
+				continue
+			}
+			vd, ok := sym.Node.(*ast.VarDeclStmt)
+			if !ok || vd == nil || vd.Value == nil {
+				continue
+			}
+			cast, ok := stripOptimizationParens(vd.Value).(*ast.CastExpr)
+			if !ok || cast == nil || cast.Operand == nil {
+				continue
+			}
+			if !a.exprIsPointerLike(sym.Type) || !a.exprIsPointerLike(a.exprTypes[cast.Operand]) {
+				continue
+			}
+			srcName := smtProjectionName(stripOptimizationParens(cast.Operand))
+			if srcName == "" {
+				continue
+			}
+			seen[name] = true
+			localPred := "isnull_" + name
+			srcPred := "isnull_" + srcName
+			tr.boolDecls[localPred] = true
+			tr.boolDecls[srcPred] = true
+			b.WriteString("(assert (= " + localPred + " " + srcPred + "))\n")
+		}
+	}
+	return b.String()
+}
+
+// exprIsPointerLike reports whether a type is a nullable/reference pointer (an optional or a ref), the
+// only shape whose null-ness a cast preserves and the only shape the null-compare lowering keys.
+func (a *Analyzer) exprIsPointerLike(t Type) bool {
+	if t == nil {
+		return false
+	}
+	if _, ok := IsOptionalType(t); ok {
+		return true
+	}
+	if _, ok := IsRefType(t); ok {
+		return true
+	}
+	return false
 }
 
 func (a *Analyzer) trySMTProveEnsureFromPureReturnPaths(clause ast.Expr) bool {

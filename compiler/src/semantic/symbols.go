@@ -440,6 +440,16 @@ type Scope struct {
 	// writtenConst (invalidateWrittenConst), so a field write, reassignment, or mutable-borrow escape of
 	// `v` drops it; it can never go stale.
 	writtenStruct map[string]*ast.StructLitExpr
+	// writtenField records the last value written to a STRUCT-FIELD place via `self.f <- value`
+	// (`root.field`), keyed by the field path's canonical projection name (smtProjectionName, e.g.
+	// `self__field__pool_budget`). Used to discharge an `ensure self.f == E` postcondition over fields
+	// the void body writes — proving `self.f == 0` directly and `self.a == self.b` when both fields
+	// trace to the same value expr — which the SMT lane otherwise fails because two loads of a
+	// reference field are distinct opaque terms. Routed through the SAME root-keyed invalidation as
+	// writtenConst (invalidateWrittenConst drops every field fact whose root matches), so a re-write,
+	// reassignment, mutable-borrow escape, or pass to a mutating callee of the root drops it; it can
+	// never go stale.
+	writtenField map[string]ast.Expr
 	// smtAssertFacts holds scoped proof facts known to hold after a branch, proven assertion,
 	// invariant, or exact assignment. They are consumed only by the SMT tier and invalidated when a
 	// later mutation touches one of their dependency roots; calls still clear them conservatively.
