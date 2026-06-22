@@ -274,6 +274,26 @@ func (a *Analyzer) substitutedAffine(expr ast.Expr, subst map[string]ast.Expr) (
 		default:
 			return affineForm{}, false
 		}
+	case *ast.FieldExpr:
+		// A field place in a requires clause (`requires off + 4 <= v.size`): resolve the formal `v`
+		// to its caller argument, then recover that argument's construction-time field constant.
+		base, ok := n.Object.(*ast.Ident)
+		if !ok || base == nil {
+			return affineForm{}, false
+		}
+		argName := base.Name
+		if arg, ok := subst[base.Name]; ok {
+			argIdent, ok2 := unwrapParen(arg).(*ast.Ident)
+			if !ok2 || argIdent == nil {
+				return affineForm{}, false
+			}
+			argName = argIdent.Name
+		}
+		fieldVal, ok := a.lookupWrittenStructField(argName, n.Field)
+		if !ok {
+			return affineForm{}, false
+		}
+		return a.affineOf(fieldVal, a.currentScope)
 	default:
 		return affineForm{}, false
 	}

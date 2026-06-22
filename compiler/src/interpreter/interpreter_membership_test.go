@@ -53,7 +53,7 @@ func TestExecuteNotInMembershipExpr(t *testing.T) {
 
 func TestExecuteMembershipRangeExpr(t *testing.T) {
 	src := `def run() -> bool:
-    return 9 in {1..3, 8..<10}
+    return 9 in {1..=3, 8..<10}
 `
 
 	result := parseAndAnalyzeInterpreterTest(t, "interpreter_membership_range.elisa", src)
@@ -75,7 +75,7 @@ func TestExecuteMembershipRangeExprAcceptsConstEnumBounds(t *testing.T) {
     STRING
 
 def keep(kind: TokenKind) -> bool:
-    return kind in {.IF..IDENT}
+    return kind in {.IF..=IDENT}
 
 def run() -> bool:
     return keep(.LET)
@@ -100,7 +100,7 @@ func TestExecuteMembershipRangeExprRejectsOutOfEnumRange(t *testing.T) {
     STRING
 
 def keep(kind: TokenKind) -> bool:
-    return kind in {.IF..IDENT}
+    return kind in {.IF..=IDENT}
 
 def run() -> bool:
     return keep(.STRING)

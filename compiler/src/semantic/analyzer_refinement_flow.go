@@ -1158,6 +1158,17 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 			return affineForm{}, false // narrowing/wrapping cast: bound would be unsound
 		}
 		return inner, true
+	case *ast.FieldExpr:
+		// `v.size` where `v` is a local known to hold a struct literal with a constant `size` field.
+		base, ok := n.Object.(*ast.Ident)
+		if !ok || base == nil {
+			return affineForm{}, false
+		}
+		fieldVal, ok := a.lookupWrittenStructField(base.Name, n.Field)
+		if !ok {
+			return affineForm{}, false
+		}
+		return a.affineOf(fieldVal, scope)
 	default:
 		return affineForm{}, false
 	}

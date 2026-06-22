@@ -60,7 +60,7 @@ func TestGenerateLLVMIRLowersNotInMembershipExpr(t *testing.T) {
 
 func TestGenerateLLVMIRLowersBraceMembershipRangeExpr(t *testing.T) {
 	src := `def keep(value: i64) -> bool:
-    return value in {1..3, 8..<10}
+    return value in {1..=3, 8..<10}
 `
 
 	result := parseAndAnalyzeBackendTest(t, "backend_brace_membership_range.elisa", src)
@@ -192,7 +192,7 @@ func TestGenerateLLVMIRLowersBraceMembershipRangeConstEnumBounds(t *testing.T) {
     STRING
 
 def keep(kind: TokenKind) -> bool:
-    return kind in {.IF..IDENT, .NUMBER..<STRING}
+    return kind in {.IF..=IDENT, .NUMBER..<STRING}
 `
 
 	result := parseAndAnalyzeBackendTest(t, "backend_brace_membership_range_enum.elisa", src)

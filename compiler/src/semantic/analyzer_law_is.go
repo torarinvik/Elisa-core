@@ -531,6 +531,39 @@ func exprReferencesResult(expr ast.Expr) bool {
 	return smtFactDeps(expr)["result"]
 }
 
+// ensureHoldsByReturnReflexivity reports whether the postcondition `clause` is `result == E` (in
+// either operand order) where `E` is structurally identical to the returned expression `retVal` and
+// is a pure place read. Such a clause holds by definition: at the return point `result` is exactly the
+// value of `retVal`, and re-reading the same side-effect-free places yields the same value. Sound
+// because exprsSyntacticallyEqual admits only ident/field/paren projections — never calls or arithmetic.
+func ensureHoldsByReturnReflexivity(clause ast.Expr, retVal ast.Expr) bool {
+	if retVal == nil {
+		return false
+	}
+	bin, ok := clause.(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_EQEQ {
+		return false
+	}
+	leftIsResult := isResultIdent(bin.Left)
+	rightIsResult := isResultIdent(bin.Right)
+	if leftIsResult == rightIsResult {
+		return false // need exactly one side to be `result`
+	}
+	other := bin.Right
+	if rightIsResult {
+		other = bin.Left
+	}
+	return exprsSyntacticallyEqual(other, retVal)
+}
+
+func isResultIdent(e ast.Expr) bool {
+	if p, ok := e.(*ast.ParenExpr); ok {
+		return isResultIdent(p.Inner)
+	}
+	id, ok := e.(*ast.Ident)
+	return ok && id != nil && id.Name == "result"
+}
+
 func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
@@ -544,6 +577,14 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			continue
 		}
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
+			continue
+		}
+		// Reflexivity fast-path: `ensure result == E` where the body is `return E` and E is a pure
+		// place read (ident / field projection) holds definitionally — result IS the value of E at this
+		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a
+		// reference field (`self.base`) are modeled as distinct opaque terms (shadPS4 memory-06 finding).
+		if ensureHoldsByReturnReflexivity(clause, n.Value) {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "reflexivity", ProofProvenSMT)
 			continue
 		}
 		proven, counterexample := a.trySMTProveRequires(clause, subst)

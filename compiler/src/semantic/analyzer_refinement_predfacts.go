@@ -304,6 +304,21 @@ func (a *Analyzer) recordWrittenConstForTarget(target, value ast.Expr) {
 		a.invalidateWrittenConst(rootIdentNameOrEmpty(target))
 		return
 	}
+	// A struct-literal RHS does not const-fold as a whole, but its individual fields may be constants
+	// we want to recover later for field-place refinements (`requires off + 4 <= v.size`). Record the
+	// literal itself; field extraction const-evaluates per field at use. invalidateWrittenConst (called
+	// at every mutation/borrow of `name`) also clears writtenStruct, so this can never go stale.
+	if lit, ok := unwrapParen(value).(*ast.StructLitExpr); ok && lit != nil {
+		a.invalidateWrittenConst(name.Name)
+		if a.currentScope == nil {
+			return
+		}
+		if a.currentScope.writtenStruct == nil {
+			a.currentScope.writtenStruct = map[string]*ast.StructLitExpr{}
+		}
+		a.currentScope.writtenStruct[name.Name] = lit
+		return
+	}
 	if _, ok := a.evalConstExpr(value); !ok {
 		a.invalidateWrittenConst(name.Name)
 		return
@@ -336,7 +351,35 @@ func (a *Analyzer) invalidateWrittenConst(name string) {
 		if scope.writtenConst != nil {
 			delete(scope.writtenConst, name)
 		}
+		if scope.writtenStruct != nil {
+			delete(scope.writtenStruct, name)
+		}
 	}
+}
+
+// lookupWrittenStructField returns the construction-time value expr of `name.field` when `name` is a
+// local known to hold a struct literal (via writtenStruct) AND the field was given by name in that
+// literal. Positional or absent fields decline (sound: no proof, falls to the runtime check).
+func (a *Analyzer) lookupWrittenStructField(name, field string) (ast.Expr, bool) {
+	if name == "" || field == "" {
+		return nil, false
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenStruct == nil {
+			continue
+		}
+		lit, ok := scope.writtenStruct[name]
+		if !ok || lit == nil {
+			continue
+		}
+		for i := range lit.Args {
+			if lit.ArgName(i) == field {
+				return lit.Args[i], true
+			}
+		}
+		return nil, false
+	}
+	return nil, false
 }
 
 // lookupWrittenConst returns the known constant-value expr of a variable, if a written-constant fact

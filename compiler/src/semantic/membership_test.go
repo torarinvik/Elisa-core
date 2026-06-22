@@ -89,7 +89,7 @@ func TestAnalyzeNotInMembershipExprUsesBool(t *testing.T) {
 
 func TestAnalyzeBraceMembershipRangeExprUsesBool(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range.elisa", `def keep(value: i64) -> bool:
-    return value in {1..3, 8..<10}
+    return value in {1..=3, 8..<10}
 `)
 
 	decl := result.File.Decls[0].(*ast.FuncDecl)
@@ -112,7 +112,7 @@ func TestAnalyzeBraceMembershipRangeExprUsesBool(t *testing.T) {
 
 func TestAnalyzeBraceMembershipRangeAcceptsCharBounds(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range_char.elisa", `def keep(value: char) -> bool:
-    return value in {'0'..'9'}
+    return value in {'0'..='9'}
 `)
 
 	decl := result.File.Decls[0].(*ast.FuncDecl)
@@ -135,7 +135,7 @@ func TestAnalyzeBraceMembershipRangeAcceptsConstEnumBounds(t *testing.T) {
     STRING
 
 def keep(kind: TokenKind) -> bool:
-    return kind in {.IF..LET, .NUMBER..<STRING}
+    return kind in {.IF..=LET, .NUMBER..<STRING}
 `)
 
 	decl := result.File.Decls[1].(*ast.FuncDecl)
@@ -162,7 +162,7 @@ def keep(kind: TokenKind) -> bool:
 
 func TestAnalyzeBraceMembershipRangeRejectsNonIntegralBounds(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "brace_membership_range_float.elisa", `def keep(value: f64) -> bool:
-    return value in {1.0..3.0}
+    return value in {1.0..=3.0}
 `)
 
 	all := strings.Join(result.Errors(), "\n")

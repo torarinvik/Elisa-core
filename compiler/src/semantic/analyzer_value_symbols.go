@@ -225,7 +225,15 @@ func (a *Analyzer) validateExternLinkNameSignatureString(symbolName string, link
 	}
 	if previous, ok := a.externLinkNames[linkName]; ok {
 		if previous.Signature != signature {
-			a.errorf(pos, "extern link_name %q for %q has signature %s, but previous declaration %q at %s has signature %s; use one shared declaration or matching wrapper to avoid native symbol splitting", linkName, symbolName, signature, previous.SymbolName, previous.Pos.String(), previous.Signature)
+			// The property-test harness emits compiler-internal `__prop_*` externs (snprintf/write) to
+			// print failing inputs. Their signatures are ABI-correct by construction, so a nominal
+			// mismatch against a project's own binding of the same libc symbol (e.g. a custom runtime
+			// that types write's fd as a distinct `FileDescriptor` or adds a `can[Console]` effect) is
+			// not real symbol splitting. Suppress the diagnostic when either side is harness-internal so
+			// `@property` works in projects that rebind libc symbols.
+			if !strings.HasPrefix(symbolName, "__prop_") && !strings.HasPrefix(previous.SymbolName, "__prop_") {
+				a.errorf(pos, "extern link_name %q for %q has signature %s, but previous declaration %q at %s has signature %s; use one shared declaration or matching wrapper to avoid native symbol splitting", linkName, symbolName, signature, previous.SymbolName, previous.Pos.String(), previous.Signature)
+			}
 		}
 		return
 	}

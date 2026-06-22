@@ -671,7 +671,7 @@ def f() -> i64:
 func TestRefinementParametricRangeRefuted(t *testing.T) {
 	src := boundedLaw + `
 def f() -> i64:
-    x: i64 is Bounded[0..500] = 600
+    x: i64 is Bounded[0..=500] = 600
     return x
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_param_refute.elisa", src, AnalyzeOptions{})
@@ -685,7 +685,7 @@ func TestRefinementParametricFlowProven(t *testing.T) {
 	src := boundedLaw + `
 def f(a: i64) -> i64:
     if a >= 10 and a <= 20:
-        x: i64 is Bounded[0..500] = a
+        x: i64 is Bounded[0..=500] = a
         return x
     return 0
 `
@@ -700,7 +700,7 @@ func TestRefinementParametricFlowInsufficient(t *testing.T) {
 	src := boundedLaw + `
 def f(a: i64) -> i64:
     if a >= 10:
-        x: i64 is Bounded[0..500] = a
+        x: i64 is Bounded[0..=500] = a
         return x
     return 0
 `
@@ -1445,17 +1445,17 @@ def clamp(p: mutable i64&) -> void ensures p is Bounded[0, 500]:
 	}
 }
 
-// The range-sugar form `Bounded[0..500]` desugars to the same two endpoints.
+// The range-sugar form `Bounded[0..=500]` desugars to the same two endpoints.
 func TestEnsuresParametricRefinementRangeSugarProven(t *testing.T) {
 	src := `
 law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
-def clamp(p: mutable i64&) -> void ensures p is Bounded[0..500]:
+def clamp(p: mutable i64&) -> void ensures p is Bounded[0..=500]:
     p <- 500
     return
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensures_param_range_proven.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
 	if len(result.Errors()) != 0 {
-		t.Fatalf("`p <- 500` should statically prove `ensures p is Bounded[0..500]`, got: %v", result.Errors())
+		t.Fatalf("`p <- 500` should statically prove `ensures p is Bounded[0..=500]`, got: %v", result.Errors())
 	}
 }
 

@@ -434,6 +434,12 @@ type Scope struct {
 	// every mutation site alongside predFacts, so it can never go stale; const-only RHS (no mutable
 	// reference) keeps re-evaluation stable.
 	writtenConst map[string]ast.Expr
+	// writtenStruct holds, for a bare-identifier local assigned a struct literal `v = T{f: <const>}`,
+	// that literal — so a refinement/precondition over a field place (`requires off + 4 <= v.size`) can
+	// resolve `v.size` to its construction-time constant. Routed through the SAME invalidation path as
+	// writtenConst (invalidateWrittenConst), so a field write, reassignment, or mutable-borrow escape of
+	// `v` drops it; it can never go stale.
+	writtenStruct map[string]*ast.StructLitExpr
 	// smtAssertFacts holds scoped proof facts known to hold after a branch, proven assertion,
 	// invariant, or exact assignment. They are consumed only by the SMT tier and invalidated when a
 	// later mutation touches one of their dependency roots; calls still clear them conservatively.
