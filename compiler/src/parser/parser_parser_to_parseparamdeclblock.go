@@ -930,26 +930,49 @@ func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotati
 func (p *Parser) parseAnnotations() []ast.Annotation {
 	annotations := make([]ast.Annotation, 0, 1)
 	for p.peek() == lexer.TOKEN_AT {
-		pos := p.cur().Pos
-		p.advance()
-		name := p.expect(lexer.TOKEN_IDENT).Text
-		var args []string
-		if p.match(lexer.TOKEN_LPAREN) {
-			for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
-				args = append(args, p.parseAnnotationArg())
+		p.advance() // @
+		// Bracketed list form `@[a, b(args), ...]` — a comma-separated group of annotations that
+		// desugars to the same flat list as stacking them one per `@` line. Self-delimiting, so it
+		// composes cleanly with arg-bearing entries. Commas may be followed by newlines (multiline list).
+		if p.match(lexer.TOKEN_LBRACKET) {
+			p.skipNewlines()
+			for p.peek() != lexer.TOKEN_RBRACKET && p.peek() != lexer.TOKEN_EOF {
+				annotations = append(annotations, p.parseAnnotationEntry())
 				if p.match(lexer.TOKEN_COMMA) {
+					p.skipNewlines()
 					continue
 				}
-				if !annotationArgCanStart(p.peek()) {
-					break
-				}
+				break
 			}
-			p.expect(lexer.TOKEN_RPAREN)
+			p.skipNewlines()
+			p.expect(lexer.TOKEN_RBRACKET)
+		} else {
+			annotations = append(annotations, p.parseAnnotationEntry())
 		}
-		annotations = append(annotations, ast.Annotation{Position: pos, Name: name, Args: args})
 		p.skipNewlines()
 	}
 	return annotations
+}
+
+// parseAnnotationEntry parses a single annotation `name` with an optional `(args)` suffix, shared by
+// the per-`@` form and the bracketed `@[...]` list form.
+func (p *Parser) parseAnnotationEntry() ast.Annotation {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	var args []string
+	if p.match(lexer.TOKEN_LPAREN) {
+		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+			args = append(args, p.parseAnnotationArg())
+			if p.match(lexer.TOKEN_COMMA) {
+				continue
+			}
+			if !annotationArgCanStart(p.peek()) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	return ast.Annotation{Position: pos, Name: name, Args: args}
 }
 func (p *Parser) parseFuncAnnotations() []ast.Annotation {
 	return p.parseAnnotations()

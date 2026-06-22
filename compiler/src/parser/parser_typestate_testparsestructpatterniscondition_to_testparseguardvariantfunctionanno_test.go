@@ -489,6 +489,36 @@ func TestParseInlineFunctionAnnotation(t *testing.T) {
 		t.Fatalf("expected inline(always), got %#v", decl.Annotations[0].Args)
 	}
 }
+func TestParseBracketedAnnotationList(t *testing.T) {
+	// `@[a, b(args)]` desugars to the same flat annotation list as stacking them per `@` line, and
+	// composes with stacked annotations and arg-bearing entries.
+	src := "@[noalloc, nolock, differential(256)]\n@inbounds\ndef f(x: int) -> int:\n    return x\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected func decl, got %T", file.Decls[0])
+	}
+	got := make([]string, 0, len(decl.Annotations))
+	for _, a := range decl.Annotations {
+		got = append(got, a.Name)
+	}
+	want := []string{"noalloc", "nolock", "differential", "inbounds"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("annotation %d: expected %q, got %q (full: %v)", i, want[i], got[i], got)
+		}
+	}
+	// the arg-bearing entry keeps its args inside the bracket
+	if a := decl.Annotations[2]; len(a.Args) != 1 || a.Args[0] != "256" {
+		t.Fatalf("expected differential(256) inside the bracket, got %#v", a.Args)
+	}
+}
 func TestParseNoRecurseFunctionAnnotation(t *testing.T) {
 	file, errs := parseSourceFile(t, "@norecurse\ndef fold(value: int) -> int:\n    return value\n")
 	if len(errs) != 0 {
