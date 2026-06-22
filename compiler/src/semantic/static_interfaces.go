@@ -626,10 +626,22 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 						continue
 					}
 					expectedSig := a.specializeInterfaceMethodSignature(methodInfo.Signature, receiver)
-					if !SameType(expectedSig, actualSig) {
+					// Structural signature match ignores the effect/error channels (they are checked
+					// with SUBSET variance below, not invariant equality) so a conforming impl that
+					// uses a strict subset of the protocol's capabilities / error modes still matches.
+					if !SameType(stripEffectChannels(expectedSig), stripEffectChannels(actualSig)) {
 						a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
 						continue
 					}
+					// P4: effect / error / frame (`changes`) subset variance (impl ⊆ protocol). Kept
+					// in a dedicated function so the merge with P1's requires/ensure variance is trivial.
+					var protoDecl ast.Node
+					if methodInfo.Default != nil {
+						protoDecl = methodInfo.Default
+					} else if methodInfo.Decl != nil {
+						protoDecl = methodInfo.Decl
+					}
+					a.checkImplEffectErrorFrameVariance(interfaceName, name, expectedSig, actualSig, protoDecl, member, pos.Pos())
 					impl.Methods[name] = sym
 				}
 				for name := range iface.AssociatedTypes {

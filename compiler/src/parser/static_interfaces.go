@@ -102,6 +102,16 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 
+	// Frame conditions on a protocol method: `changes`/`preserves` declare the upper-bound frame an
+	// impl may write (P4 effect/frame variance — impl `changes` must be a subset).
+	var changes, preserves []ast.EnsuresPath
+	if p.matchIdentText("changes") {
+		changes = p.parseChangesPathsAfterKeyword()
+	}
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
+
 	// A trailing `:` introduces a DEFAULT METHOD BODY: the protocol method carries an
 	// implementation that conforming types inherit unless they override it. Represented as a
 	// FuncDecl member (mirroring the impl-method shape) rather than a bodiless ExternFuncDecl.
@@ -116,6 +126,8 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 			RegionParams:     regionParams,
 			Permissions:      permissions,
 			Ensures:          ensures,
+			Changes:          changes,
+			Preserves:        preserves,
 			Params:           params,
 			ReturnType:       retType,
 			Body:             body,
@@ -132,6 +144,8 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 		RegionParams:     regionParams,
 		Permissions:      permissions,
 		Ensures:          ensures,
+		Changes:          changes,
+		Preserves:        preserves,
 		Params:           params,
 		ReturnType:       retType,
 	}
@@ -244,10 +258,20 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		ensures = p.parseEnsuresClausesAfterKeyword()
 	}
 
+	// Frame conditions on an impl method (`changes`/`preserves`): checked for SUBSET conformance
+	// against the protocol method's frame (P4) and enforced intraprocedurally as on any function.
+	var changes, preserves []ast.EnsuresPath
+	if p.matchIdentText("changes") {
+		changes = p.parseChangesPathsAfterKeyword()
+	}
+	if p.matchIdentText("preserves") {
+		preserves = p.parseChangesPathsAfterKeyword()
+	}
+
 	if p.match(lexer.TOKEN_COLON) {
 		body := p.parseFuncBodyAfterColon()
-		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType, Body: body}
+		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType, Body: body}
 	}
 	p.expectNewline()
-	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Params: params, ReturnType: retType}
+	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType}
 }
