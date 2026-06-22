@@ -590,6 +590,24 @@ def bad(out_ptr: void&?, val: i64) -> bool:
     ensure (out_ptr != null) or (result == false)
     return true
 `, false},
+		{"pointer_null_disjunction_via_cast", `
+struct OrbisKernelEvent:
+    data: u64
+def GetEventData(ev: void&?) -> u64:
+    ensure (ev != null) or (result == 0)
+    e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
+    if e == null:
+        return 0
+    return e.data
+`, true},
+		{"pointer_null_disjunction_via_cast_wrong", `
+struct OrbisKernelEvent:
+    data: u64
+def bad(ev: void&?) -> u64:
+    ensure (ev != null) or (result == 0)
+    e: OrbisKernelEvent&? = ev.cast[OrbisKernelEvent&?]
+    return e.data
+`, false},
 		{"struct_result_field", `
 struct Pair:
     a: i64
