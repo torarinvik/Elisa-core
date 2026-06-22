@@ -73,14 +73,28 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.StaticGenerateDecl:
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
-				for _, member := range n.Members {
-					fnDecl, ok := member.(*ast.FuncDecl)
-					if !ok {
-						continue
+				// `Self` inside an impl method body/signature stands for the concrete
+				// implementing type; bind it (under the impl's generic params) so that
+				// `def m(self: Self)` resolves to the receiver during body analysis,
+				// mirroring the symbol-collection pass and the protocol decl.
+				a.withGenericParams(n.GenericParams, nil, func() {
+					var selfBindings map[string]Type
+					if !n.IsExtension() {
+						if receiver := a.resolveType(n.ForType); receiver != nil && !IsInvalidType(receiver) {
+							selfBindings = map[string]Type{staticInterfaceSelfName: receiver}
+						}
 					}
-					a.analyzeFunctionAnnotations(fnDecl)
-					a.analyzeFunc(fnDecl)
-				}
+					a.withInterfaceAssocTypes(selfBindings, func() {
+						for _, member := range n.Members {
+							fnDecl, ok := member.(*ast.FuncDecl)
+							if !ok {
+								continue
+							}
+							a.analyzeFunctionAnnotations(fnDecl)
+							a.analyzeFunc(fnDecl)
+						}
+					})
+				})
 			case *ast.ConstEnumDecl:
 			case *ast.EnumDecl:
 			case *ast.ErrorDecl:
