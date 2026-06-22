@@ -84,6 +84,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if n.Mutable && n.Value != nil {
 			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			a.recordConstAssignmentRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
@@ -382,6 +383,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.invalidateRangeFactsForTarget(n.Target)
 			a.checkFrameWrite(n.Target)
 			a.recordWrittenConstForTarget(n.Target, n.Value)
+			a.recordConstAssignmentRangeFact(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
@@ -448,6 +450,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateRangeFactsForTarget(n.Target)
 		a.checkFrameWrite(n.Target)
 		a.recordWrittenConstForTarget(n.Target, n.Value)
+		a.recordConstAssignmentRangeFact(n.Target, n.Value)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
@@ -592,6 +595,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		var mergedAliasCarrierFieldOverrides map[string]map[string][]string
 		functionValueBranches := make([]map[*Symbol]*FuncType, 0, len(n.Elifs)+2)
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
+		entryRangeFacts := a.visibleRangeFacts()
+		rangeBranches := make([]map[string]numRange, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
@@ -601,6 +606,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, thenSnapshot.AliasCarriers)
 			functionValueBranches = append(functionValueBranches, thenSnapshot.FunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, thenSnapshot.SpecializedValueTypes)
+			rangeBranches = append(rangeBranches, thenSnapshot.RangeFacts)
 		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
@@ -616,6 +622,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elifSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elifSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elifSnapshot.SpecializedValueTypes)
+				rangeBranches = append(rangeBranches, elifSnapshot.RangeFacts)
 			}
 		}
 		if len(n.Elifs) == 0 {
@@ -628,9 +635,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elseSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
+				rangeBranches = append(rangeBranches, elseSnapshot.RangeFacts)
 			}
 		} else {
-			elseSnapshot := a.analyzeBlockWithAffineClone(n.Else, NewScope(a.currentScope))
+			elseSnapshot := a.analyzeBranchBlockWithAffineClone(n.Else, NewScope(a.currentScope))
 			if !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
@@ -639,11 +647,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				mergedAliasCarriers = mergeAliasCarriers(mergedAliasCarriers, elseSnapshot.AliasCarriers)
 				functionValueBranches = append(functionValueBranches, elseSnapshot.FunctionValues)
 				specializedValueTypeBranches = append(specializedValueTypeBranches, elseSnapshot.SpecializedValueTypes)
+				rangeBranches = append(rangeBranches, elseSnapshot.RangeFacts)
 			}
 		}
 		if len(n.Else) == 0 {
 			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
+			rangeBranches = append(rangeBranches, entryRangeFacts)
 		}
 		if mergedAffine == nil {
 			// Every taken branch diverged and an else covered the remaining
@@ -662,6 +672,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if mergedSpecializedValueTypes, ok := a.intersectSpecializedValueTypeFlows(specializedValueTypeBranches...); ok {
 			a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 		}
+		a.mergePostIfRangeFacts(entryRangeFacts, rangeBranches)
 		a.applyPostIfFallthroughRefinement(n)
 		if len(n.Elifs) == 0 && len(n.Else) == 0 && blockDefinitelyExits(n.Then) {
 			a.applyIndexBoundsFactsForCondition(n.Cond, false)

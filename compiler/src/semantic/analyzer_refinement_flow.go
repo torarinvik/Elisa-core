@@ -15,6 +15,31 @@ type numRange struct {
 	hi      int64
 }
 
+func cloneNumRangeMap(in map[string]numRange) map[string]numRange {
+	if in == nil {
+		return nil
+	}
+	out := make(map[string]numRange, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func cloneScopeRangeFacts(scope *Scope) map[*Scope]map[string]numRange {
+	out := map[*Scope]map[string]numRange{}
+	for sc := scope; sc != nil; sc = sc.Parent {
+		out[sc] = cloneNumRangeMap(sc.rangeFacts)
+	}
+	return out
+}
+
+func restoreScopeRangeFacts(saved map[*Scope]map[string]numRange) {
+	for sc, facts := range saved {
+		sc.rangeFacts = cloneNumRangeMap(facts)
+	}
+}
+
 // join widens a range to cover both itself and another (the union of two branch results): a bound is
 // kept only if BOTH ranges bound that side, taking the looser endpoint. Used to combine the per-branch
 // result ranges of a conditional into the range guaranteed regardless of which branch is taken.
@@ -468,6 +493,25 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 	return acc, found
 }
 
+func (a *Analyzer) visibleRangeFacts() map[string]numRange {
+	out := map[string]numRange{}
+	names := map[string]bool{}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		for name := range scope.rangeFacts {
+			names[name] = true
+		}
+		if scope.closedWorld {
+			break
+		}
+	}
+	for name := range names {
+		if r, ok := a.lookupRangeFact(name); ok {
+			out[name] = r
+		}
+	}
+	return out
+}
+
 // invalidateRangeFacts drops the known integer range fact about `name` across the active scope chain.
 // Called at every mutation site for `name`, mirroring invalidatePredFacts. Unlike predFacts there is
 // NO dependent-fact cascade: a range fact is a concrete interval snapshot (even one seeded from another
@@ -489,6 +533,113 @@ func (a *Analyzer) invalidateRangeFacts(name string) {
 func (a *Analyzer) invalidateRangeFactsForTarget(target ast.Expr) {
 	for _, name := range a.mutationRootsForTarget(target) {
 		a.invalidateRangeFacts(name)
+	}
+}
+
+func (a *Analyzer) recordConstAssignmentRangeFact(target ast.Expr, value ast.Expr) {
+	if a == nil || a.currentScope == nil {
+		return
+	}
+	name, ok := rootIdentName(target)
+	if !ok || name == "" {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
+		return
+	}
+	c, ok := a.constIntValue(value)
+	if !ok {
+		return
+	}
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+}
+
+func declaredTypeRange(t Type) (numRange, bool) {
+	signed, width, ok := BitIntInfo(t)
+	if !ok || width <= 0 || width >= 63 {
+		return numRange{}, false
+	}
+	if signed {
+		return numRange{loKnown: true, lo: -(int64(1) << (width - 1)), hiKnown: true, hi: (int64(1) << (width - 1)) - 1}, true
+	}
+	return numRange{loKnown: true, lo: 0, hiKnown: true, hi: (int64(1) << width) - 1}, true
+}
+
+func sameNumRange(a, b numRange) bool {
+	return a.loKnown == b.loKnown && a.lo == b.lo && a.hiKnown == b.hiKnown && a.hi == b.hi
+}
+
+func (a *Analyzer) mergePostIfRangeFacts(entry map[string]numRange, branches []map[string]numRange) {
+	if a == nil || a.currentScope == nil || len(branches) == 0 {
+		return
+	}
+	names := map[string]bool{}
+	for name := range entry {
+		names[name] = true
+	}
+	for _, br := range branches {
+		for name := range br {
+			names[name] = true
+		}
+	}
+	for name := range names {
+		base, hadBase := entry[name]
+		changed := false
+		for _, br := range branches {
+			r, ok := br[name]
+			if !ok {
+				if !hadBase {
+					changed = true
+					break
+				}
+				r = base
+			}
+			if !hadBase || !sameNumRange(r, base) {
+				changed = true
+				break
+			}
+		}
+		if !changed {
+			continue
+		}
+		var joined numRange
+		joinedSet := false
+		for _, br := range branches {
+			r, ok := br[name]
+			if !ok {
+				if hadBase {
+					r = base
+				} else if sym, found := a.currentScope.Lookup(name); found && sym != nil {
+					if tr, found := declaredTypeRange(sym.Type); found {
+						r = tr
+					}
+				}
+			}
+			if !ok && !hadBase {
+				if sym, found := a.currentScope.Lookup(name); found && sym != nil {
+					if tr, found := declaredTypeRange(sym.Type); found {
+						r = tr
+						ok = true
+					}
+				}
+			}
+			if !ok && !hadBase {
+				r = numRange{}
+			}
+			if !joinedSet {
+				joined, joinedSet = r, true
+			} else {
+				joined = joined.join(r)
+			}
+		}
+		if a.currentScope.rangeFacts == nil {
+			a.currentScope.rangeFacts = map[string]numRange{}
+		}
+		a.currentScope.rangeFacts[name] = joined
 	}
 }
 
