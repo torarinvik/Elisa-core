@@ -169,6 +169,12 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		// under -strict (prove-it-or-fail, the Dafny-like mode).
 		a.recordProof(n.Pos(), "\""+n.Name+"\"", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on %q could not be proven statically; it is checked at runtime (debug) — make the value provable, or accept the runtime check%s", pred.Name, n.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
+		// A built-in modular predicate (Aligned/Divides/Fits/MaskedZero) has no callable symbol, so a
+		// synthetic `Pred(value)` check would mis-analyze as an undefined identifier. Skip it — under
+		// -strict the proofLint above is already a hard error.
+		if isBuiltinModularLawName(pred.Name) {
+			continue
+		}
 		call := &ast.CallExpr{
 			Position: pred.Position,
 			Func:     &ast.Ident{Position: pred.Position, Name: pred.Name},
@@ -293,7 +299,7 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 		if i >= len(args) || args[i] == nil {
 			break
 		}
-		rt, ok := param.Type.(*ast.RefinementTypeExpr)
+		rt, ok := a.paramRefinementTypeExpr(param.Type)
 		if !ok || rt == nil {
 			continue
 		}
@@ -308,12 +314,20 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 			if a.tryDischargeRefinementStaticallyOpt(args[i], name, pred, lawDecl, call.Pos(), false) {
 				continue
 			}
+			// Contract composition: the argument is itself a direct call (or a struct-field read) whose
+			// declared refinement entails this parameter's — its result already satisfies the predicate
+			// on every callee exit, so the obligation is discharged without a runtime check. This is what
+			// makes `map_fixed(page_align_down(raw), ..)` prove when `page_align_down -> u64 is Aligned[..]`.
+			if a.returnCallRefinementEntails(args[i], pred) || a.returnFieldRefinementEntails(args[i], pred) {
+				a.recordProof(call.Pos(), name, pred.Name, ProofProvenContract)
+				continue
+			}
 			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
 			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, name, decl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
 			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
 			// double evaluation would change behavior), so the runtime tier stays sound.
-			if !a.isSideEffectFreeRefinementArg(args[i]) {
+			if isBuiltinModularLawName(pred.Name) || !a.isSideEffectFreeRefinementArg(args[i]) {
 				continue
 			}
 			check := &ast.CallExpr{
@@ -350,7 +364,7 @@ func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.Refineme
 	if !ok || decl == nil {
 		return false
 	}
-	rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr)
+	rt, ok := a.paramRefinementTypeExpr(decl.ReturnType)
 	if !ok || rt == nil {
 		return false
 	}
@@ -419,7 +433,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
 	}
-	rt, ok := a.currentFuncDecl.ReturnType.(*ast.RefinementTypeExpr)
+	rt, ok := a.paramRefinementTypeExpr(a.currentFuncDecl.ReturnType)
 	if !ok || rt == nil {
 		return
 	}
@@ -442,7 +456,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		}
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check%s", pred.Name, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
-		if !a.isSideEffectFreeRefinementArg(n.Value) {
+		if isBuiltinModularLawName(pred.Name) || !a.isSideEffectFreeRefinementArg(n.Value) {
 			continue
 		}
 		check := &ast.CallExpr{

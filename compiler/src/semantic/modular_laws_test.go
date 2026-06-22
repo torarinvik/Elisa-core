@@ -88,3 +88,60 @@ def caller(raw: u64) -> u64:
 		t.Fatalf("a non-aligned argument must be rejected at the call boundary, got: %v", result.Errors())
 	}
 }
+
+// PRIMARY (alias transparency): when a parameter is typed by a `type` ALIAS whose definition carries a
+// refinement (`type PageAddr = u64 is Aligned[4096]`), the predicate must NOT erase at the call
+// boundary — an unaligned argument must be rejected under -strict, exactly like the inline form.
+func TestModularAlignedAliasParamUnsoundRejected(t *testing.T) {
+	src := `
+type PageAddr = u64 is Aligned[4096]
+def map_fixed(addr: PageAddr) -> u64:
+    return addr
+def caller(raw: u64) -> u64:
+    return map_fixed(raw)
+`
+	result := analyzeContractStrict(t, "aligned_alias_unsound.elisa", src)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "could not be proven statically") {
+		t.Fatalf("an alias-typed Aligned[4096] param must reject an unaligned argument, got: %v", result.Errors())
+	}
+}
+
+// PRIMARY (positive): a provably-aligned argument passed to an alias-typed Aligned[4096] parameter
+// must prove with no error. `page_align_down -> u64 is Aligned[4096]` gives a result whose contract
+// entails the parameter's refinement, so `map_fixed(page_align_down(raw))` is discharged.
+func TestModularAlignedAliasParamProven(t *testing.T) {
+	src := `
+type PageAddr = u64 is Aligned[4096]
+def map_fixed(addr: PageAddr) -> u64:
+    return addr
+def page_align_down(raw: u64) -> u64 is Aligned[4096]:
+    return raw & 0xFFFFFFFFFFFFF000
+def caller(raw: u64) -> u64:
+    return map_fixed(page_align_down(raw))
+`
+	result := analyzeContractStrict(t, "aligned_alias_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a provably-aligned argument must discharge the alias-typed Aligned[4096] param; got: %v", errs)
+	}
+}
+
+// SECONDARY: an inline-`is` refinement in a parameter type must resolve `Aligned` as a predicate, not
+// be looked up as a callable/type identifier — so no spurious "undefined identifier" / "cannot call
+// non-function value" diagnostic leaks even when the obligation is unproven.
+func TestModularInlineParamNoSpuriousIdentifier(t *testing.T) {
+	src := `
+def map_fixed(addr: u64 is Aligned[4096]) -> u64:
+    return addr
+def caller(raw: u64) -> u64:
+    return map_fixed(raw)
+`
+	result := analyzeContractStrict(t, "inline_no_spurious.elisa", src)
+	joined := strings.Join(result.Errors(), "\n")
+	if strings.Contains(joined, "undefined identifier") || strings.Contains(joined, "cannot call non-function value") {
+		t.Fatalf("Aligned in a refinement position must not be looked up as an identifier/callable; got: %v", result.Errors())
+	}
+	// The genuine obligation must still be reported (the arg is not provably aligned).
+	if !strings.Contains(joined, "could not be proven statically") {
+		t.Fatalf("an unaligned inline-param argument must still be rejected, got: %v", result.Errors())
+	}
+}
