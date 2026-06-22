@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
@@ -108,25 +109,17 @@ func TestQuantifierInclusiveRangeSugarDesugars(t *testing.T) {
 	}
 }
 
-// Bare `lo .. hi` is INCLUSIVE in a quantifier too (matching the for-loop semantics), so it desugars
-// identically to `..=` — the upper bound becomes `n + 1`. `..` and `..=` are interchangeable here.
-func TestQuantifierBareRangeIsInclusive(t *testing.T) {
+// Bare `lo .. hi` as a quantifier range is REJECTED: its endpoint is ambiguous (inclusive in Elisa,
+// exclusive in Rust/Python/Swift), so an explicit `..<` / `..=` is required. The diagnostic names both.
+func TestQuantifierBareRangeIsRejected(t *testing.T) {
 	src := "law InRange(self: array[i64, 8], n: i64) = forall k in 0 .. n: self[k] >= 0\n"
-	file, errs := parseSourceFile(t, src)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors for bare `..` quantifier range: %v", errs)
+	_, errs := parseSourceFile(t, src)
+	joined := ""
+	for _, e := range errs {
+		joined += e + "\n"
 	}
-	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
-	if !ok {
-		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
-	}
-	or := q.Body.(*ast.BinaryExpr)
-	not := or.Left.(*ast.UnaryExpr)
-	guard := not.Operand.(*ast.BinaryExpr)
-	hiCmp := guard.Right.(*ast.BinaryExpr)
-	hi, ok := hiCmp.Right.(*ast.BinaryExpr)
-	if !ok || hi.Op != lexer.TOKEN_PLUS {
-		t.Fatalf("bare `.. n` in a quantifier must be inclusive (upper bound `n + 1`), got %T %+v", hiCmp.Right, hiCmp.Right)
+	if !strings.Contains(joined, "ambiguous bare `..` range") || !strings.Contains(joined, "..<") || !strings.Contains(joined, "..=") {
+		t.Fatalf("bare `.. n` in a quantifier must error pointing to `..<`/`..=`, got: %v", errs)
 	}
 }
 

@@ -981,6 +981,14 @@ func (p *Parser) parseForStmt() ast.Stmt {
 			p.errorf("range for loop does not support ref binders")
 		}
 		op := p.advance()
+		if op.Kind == lexer.TOKEN_RANGE {
+			// Bare `lo .. hi` as a range is ambiguous about its endpoint (historically inclusive in
+			// Elisa, but exclusive in Rust/Python/Swift — a footgun either way). Require an explicit
+			// operator. Parsing recovers as the historical inclusive form so a single clear error is
+			// reported rather than a cascade.
+			p.errorAt(op.Pos, "ambiguous bare `..` range: use `..<` for exclusive (e.g. `lo ..< hi`) or `..=` for inclusive (e.g. `lo ..= hi`)")
+			op.Kind = lexer.TOKEN_RANGE_LE
+		}
 		end := p.parseForHeaderExpr()
 		if op.Kind == lexer.TOKEN_RANGE_LE {
 			// Inclusive `lo ..= hi` desugars to the half-open `lo ..< (hi + 1)`, so everything
