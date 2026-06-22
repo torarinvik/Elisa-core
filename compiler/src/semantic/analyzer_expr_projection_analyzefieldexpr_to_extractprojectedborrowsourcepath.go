@@ -62,6 +62,17 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	}
 	field, ok := a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
 	if ok {
+		if field.Ghost {
+			a.ghostReadSeen = true
+			if a.ghostReadAllowed == 0 {
+				// SOUNDNESS: a ghost field is verification-only and erased from codegen. Real runtime
+				// code may never read it (the value does not exist at runtime). Ghost-field reads are
+				// permitted ONLY inside a contract clause (requires/ensure/invariant/assert) or a ghost
+				// declaration — contexts that raise a.ghostReadAllowed.
+				a.errorf(expr.Pos(), "ghost field %q is verification-only and cannot be read by real code: it is erased from codegen, so it may appear only in contracts (requires/ensure/invariant/assert) or `ghost` declarations", expr.Field)
+				return invalidType
+			}
+		}
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		// docs/91 S4: a container field of a region-carrying struct lives in the struct's region.
 		// Struct fields are not region-stamped at declaration, so propagate the object's region onto a

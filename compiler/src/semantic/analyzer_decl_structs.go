@@ -57,7 +57,30 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 			a.analyzeStructAnnotations(stDecl, st)
 			a.withGenericParams(stDecl.GenericParams, nil, func() {
 				a.withRegionParams(stDecl.RegionParams, func() {
+					concreteFields := stDecl.Fields[:0:0]
 					for _, field := range stDecl.Fields {
+						if field.Ghost {
+							// A ghost field is verification-only model state: record its type in st.Fields so
+							// contracts can resolve `self.<field>`, but DROP it from the concrete field list so
+							// codegen never lays it out (zero impact on real layout/size/offsets). Reads outside
+							// a contract/ghost context are rejected at field-access analysis (Field.Ghost).
+							if field.BitGroup != nil || field.IsTail {
+								a.errorf(field.Position, "ghost field %q cannot be a packed bit group or tail field", field.Name)
+								continue
+							}
+							if field.DefaultValue != nil {
+								a.errorf(field.Position, "ghost field %q cannot have a default value: it is verification-only and erased, so it has no runtime initializer; assign it in a `ghost`/contract context instead", field.Name)
+							}
+							if _, exists := st.Fields[field.Name]; exists {
+								a.errorf(field.Position, "duplicate field %q in struct %q", field.Name, stDecl.Name)
+								continue
+							}
+							fieldType := a.resolveType(field.Type)
+							st.Fields[field.Name] = Field{Name: field.Name, Type: fieldType, Mutable: true, Ghost: true}
+							st.GhostFieldOrder = append(st.GhostFieldOrder, field.Name)
+							continue
+						}
+						concreteFields = append(concreteFields, field)
 						if len(field.Annotations) != 0 {
 							for _, annotation := range field.Annotations {
 								a.errorf(annotation.Position, "field annotation @%s is only supported on packed enum common fields", annotation.Name)
@@ -86,6 +109,11 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 							Mutable: field.Mutable,
 							IsTail:  field.IsTail,
 						}
+					}
+					// Drop ghost fields from the concrete field list so codegen (and constructor
+					// arity) never see them — guaranteeing zero layout/size/offset impact.
+					if len(st.GhostFieldOrder) != 0 {
+						stDecl.Fields = concreteFields
 					}
 					a.validateStructDerivedStates(stDecl, st)
 					a.analyzeStructInvariants(stDecl, st)
@@ -171,15 +199,32 @@ func (a *Analyzer) analyzeStructInvariants(stDecl *ast.StructDecl, st *StructTyp
 	scope.Define(&Symbol{Name: "self", Kind: SymbolLocal, Type: DefaultNamedStateType(st)})
 	a.currentScope = scope
 	defer func() { a.currentScope = saved }()
+	// A struct invariant is a contract position: ghost model fields (`ghost name: T`) are readable
+	// here so an invariant can relate concrete representation to the abstract model.
+	a.ghostReadAllowed++
+	defer func() { a.ghostReadAllowed-- }()
+	// An invariant that reads a ghost model field is verification-only: the ghost is erased from
+	// codegen, so the invariant has no runtime representation and must be dropped from the backend's
+	// debug-recheck set (kept only for static discharge, where it is seeded as a method-entry fact).
+	runtimeInvariants := stDecl.Invariants[:0:0]
 	for _, inv := range stDecl.Invariants {
 		if inv == nil {
 			continue
 		}
+		a.ghostReadSeen = false
 		t := a.analyzeExpr(inv)
 		if t != nil && !IsBoolType(t) {
 			a.errorf(inv.Pos(), "struct invariant must be bool, got %s", t)
 		}
+		if !a.ghostReadSeen {
+			runtimeInvariants = append(runtimeInvariants, inv)
+		}
 	}
+	// Preserve the full invariant list on the semantic type for static discharge (method-entry
+	// assumption seeding); strip ghost-referencing ones from the AST so the backend never emits a
+	// runtime check that would dereference an erased field.
+	st.Invariants = append([]ast.Expr(nil), stDecl.Invariants...)
+	stDecl.Invariants = runtimeInvariants
 }
 
 func (a *Analyzer) validateStructDerivedStates(stDecl *ast.StructDecl, st *StructType) {
