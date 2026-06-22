@@ -513,6 +513,7 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
+		clause = normalizeBoolLiteralEnsure(clause)
 		// Written-field fast-path: `ensure self.f == E` where the body writes `self.f <- V` and the
 		// recorded V proves the clause (V == 0 for `self.f == 0`; or both `self.a` and `self.b` trace
 		// to the same value expr for `self.a == self.b`). The fact is dropped at every mutation/borrow/
@@ -538,6 +539,39 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 // exprReferencesResult reports whether an expression reads the contract `result` binding.
 func exprReferencesResult(expr ast.Expr) bool {
 	return smtFactDeps(expr)["result"]
+}
+
+// normalizeBoolLiteralEnsure rewrites a postcondition phrased against a boolean literal to the bare
+// predicate the discharge ladder already proves: `X == true` / `X != false` become `X`, and
+// `X == false` / `X != true` become `not X` (either operand may be the literal). Without this, a
+// no-overflow law written as `ensure result == true` over a `return base+size >= base` fails to
+// discharge even under -smt, while the identical bare `ensure result` (and the integer phrasing
+// `ensure result >= base`) prove — the SMT lane models `==` between a Bool term and a bool literal as
+// an opaque equality rather than the predicate itself. Folding the literal away routes the wrapped form
+// through the same path. SOUND: `X == true` is logically `X` and `X == false` is `not X`; the rewrite is
+// a pure logical identity, asserting nothing extra, so an unprovable `X` still declines.
+func normalizeBoolLiteralEnsure(clause ast.Expr) ast.Expr {
+	bin, ok := stripOptimizationParens(clause).(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return clause
+	}
+	if bin.Op != lexer.TOKEN_EQEQ && bin.Op != lexer.TOKEN_BANGEQ {
+		return clause
+	}
+	var lit *ast.BoolLit
+	var other ast.Expr
+	if l, ok := stripOptimizationParens(bin.Left).(*ast.BoolLit); ok {
+		lit, other = l, bin.Right
+	} else if r, ok := stripOptimizationParens(bin.Right).(*ast.BoolLit); ok {
+		lit, other = r, bin.Left
+	} else {
+		return clause
+	}
+	// `== true` and `!= false` keep the predicate; `== false` and `!= true` negate it.
+	if (bin.Op == lexer.TOKEN_EQEQ) == lit.Value {
+		return other
+	}
+	return &ast.UnaryExpr{Position: bin.Pos(), Op: lexer.TOKEN_NOT, Operand: other}
 }
 
 // ensureHoldsByReturnReflexivity reports whether the postcondition `clause` is `result == E` (in
@@ -732,6 +766,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
 			continue
 		}
+		clause = normalizeBoolLiteralEnsure(clause)
 		// Reflexivity fast-path: `ensure result == E` where the body is `return E` and E is a pure
 		// place read (ident / field projection) holds definitionally — result IS the value of E at this
 		// same side-effect-free point. The SMT lane otherwise fails these because two loads of a

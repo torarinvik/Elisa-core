@@ -392,6 +392,40 @@ def bad(x: i64) -> i64:
 	}
 }
 
+// A boolean postcondition phrased against a literal (`ensure result == true` / `== false`) must
+// discharge exactly like the bare predicate it folds to — `result == true` ≡ `result`, `result ==
+// false` ≡ `not result`. Before normalizeBoolLiteralEnsure, the literal comparison was modeled as an
+// opaque Bool equality and a no-overflow law written `ensure result == true` over `return a >= b`
+// failed even under -smt, while the bare `ensure result` proved. Soundness: an unsatisfiable literal
+// postcondition still declines with a counterexample.
+func TestEnsureBooleanLiteralComparisonNormalizes(t *testing.T) {
+	provable := `
+def no_overflow(a: u32, b: u32) -> bool:
+    requires a < 1000
+    requires b < 1000
+    ensure result == true
+    return a + b >= a
+
+def empty_range(a: u64) -> bool:
+    ensure result == false
+    return a < a
+`
+	r := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_boollit_ok.elisa", provable, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("`ensure result == true/false` should discharge like the bare predicate, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	unsound := `
+def bad(a: u64, b: u64) -> bool:
+    ensure result == true
+    return a >= b
+`
+	r2 := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ensure_boollit_bad.elisa", unsound, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	if !contains(allDiagnostics(r2), "could not be proven statically") {
+		t.Fatalf("an unprovable `ensure result == true` over `return a >= b` must still be a -strict error, got:\n%s", allDiagnostics(r2))
+	}
+}
+
 // A `requires`-seeded interval bound makes a guarded integer modulo discharge via the SMT tier's
 // NATIVE `mod`/`div` (Euclidean == truncating for non-negative operands). Both prove that the
 // `requires alignment >= 1` precondition reaches the modulo-soundness gate (provablyPositive) AND
