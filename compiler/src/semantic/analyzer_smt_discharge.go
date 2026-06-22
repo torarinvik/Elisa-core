@@ -2328,6 +2328,9 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 			if !ok {
 				return "", false
 			}
+			if cmp, ok := tr.bitvectorCompare(n, l, r, env); ok {
+				return cmp, true
+			}
 			return smtCompare(n.Op, l, r), true
 		case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
 			// Pointer-null test (`p == null` / `p != null`). Model null-ness as a Bool predicate keyed by
@@ -2393,6 +2396,96 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 		return tr.callResultBoolTermEnv(n, env)
 	default:
 		return "", false
+	}
+}
+
+// bitvectorCompare lowers fixed-width integer ordering to SMT bitvector ordering. The integer term
+// lane already models machine arithmetic by wrapping results back into the source type's value range;
+// comparing the corresponding bit patterns preserves the same source-level signed/unsigned ordering
+// for overflow-sensitive guards such as `addr + len >= addr`.
+func (tr *smtTranslator) bitvectorCompare(n *ast.BinaryExpr, l, r string, env map[string]string) (string, bool) {
+	if smtEnvHasQuantifierBinder(env) {
+		return "", false
+	}
+	if !tr.containsFixedWidthMachineArith(n.Left) && !tr.containsFixedWidthMachineArith(n.Right) {
+		return "", false
+	}
+	signed, bits, ok := tr.compareWidthSign(n.Left, n.Right)
+	if !ok || signed || bits <= 0 || bits > 64 {
+		return "", false
+	}
+	op := ""
+	switch n.Op {
+	case lexer.TOKEN_GT:
+		op = "bvugt"
+	case lexer.TOKEN_GTEQ:
+		op = "bvuge"
+	case lexer.TOKEN_LT:
+		op = "bvult"
+	case lexer.TOKEN_LTEQ:
+		op = "bvule"
+	default:
+		return "", false
+	}
+	width := strconv.Itoa(bits)
+	return "(" + op + " ((_ int2bv " + width + ") " + l + ") ((_ int2bv " + width + ") " + r + "))", true
+}
+
+func smtEnvHasQuantifierBinder(env map[string]string) bool {
+	for _, term := range env {
+		if strings.HasPrefix(term, "q_") || strings.Contains(term, " q_") {
+			return true
+		}
+	}
+	return false
+}
+
+func (tr *smtTranslator) compareWidthSign(left, right ast.Expr) (signed bool, bits int, ok bool) {
+	ls, lb, lok := smtIntWidthSign(tr.a.exprTypes[left])
+	rs, rb, rok := smtIntWidthSign(tr.a.exprTypes[right])
+	if lok && rok && ls == rs && lb == rb {
+		return ls, lb, true
+	}
+	if lok && isIntegerLiteralExpr(right) {
+		return ls, lb, true
+	}
+	if rok && isIntegerLiteralExpr(left) {
+		return rs, rb, true
+	}
+	return false, 0, false
+}
+
+func (tr *smtTranslator) containsFixedWidthMachineArith(expr ast.Expr) bool {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR:
+			if _, bits, ok := smtIntWidthSign(tr.a.exprTypes[n]); ok && bits > 0 && bits <= 64 {
+				return true
+			}
+		}
+		return tr.containsFixedWidthMachineArith(n.Left) || tr.containsFixedWidthMachineArith(n.Right)
+	case *ast.UnaryExpr:
+		return tr.containsFixedWidthMachineArith(n.Operand)
+	case *ast.CastExpr:
+		return tr.containsFixedWidthMachineArith(n.Operand)
+	case *ast.TernaryExpr:
+		return tr.containsFixedWidthMachineArith(n.Cond) ||
+			tr.containsFixedWidthMachineArith(n.Value) ||
+			tr.containsFixedWidthMachineArith(n.Alt)
+	default:
+		return false
+	}
+}
+
+func isIntegerLiteralExpr(expr ast.Expr) bool {
+	switch n := stripOptimizationParens(expr).(type) {
+	case *ast.IntLit:
+		return true
+	case *ast.UnaryExpr:
+		return n.Op == lexer.TOKEN_MINUS && isIntegerLiteralExpr(n.Operand)
+	default:
+		return false
 	}
 }
 
