@@ -457,6 +457,17 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
+	if annotation.Name == "noalloc" || annotation.Name == "inbounds" || annotation.Name == "nolock" {
+		// Enforceable performance contracts (docs/70, the perf analog of -strict). They apply to any
+		// function — including generic/permissioned ones — and take no arguments. Enforcement runs after
+		// the body is analyzed in checkPerfContracts (the transitive permission/guarded-index sets are
+		// final there).
+		if len(annotation.Args) != 0 {
+			a.errorf(annotation.Position, "@%s on function %q does not take arguments", annotation.Name, fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "fast_math" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@fast_math on function %q does not take arguments", fn.Name)
@@ -822,7 +833,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "property", "differential", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated":
+	case "test", "bench", "property", "differential", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
 		return true
 	case "boundary_pointer_args":
 		return true
