@@ -218,6 +218,19 @@ func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LL
 		return nil, nil, false, nil
 	}
 }
+// backendStructLikeValueType reports whether t is a by-value aggregate (struct or
+// generic struct instance) for which a reference argument should be auto-dereferenced
+// when fed to a by-value parameter.
+func backendStructLikeValueType(t semantic.Type) bool {
+	switch semantic.StripAggregateStateType(t).(type) {
+	case *semantic.StructType:
+		return true
+	case *semantic.GenericInstanceType:
+		return true
+	}
+	return false
+}
+
 func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {
 	if s != nil && fnType != nil && fnType.SinkParamsKnown && index >= 0 && index < len(fnType.SinkParams) && fnType.SinkParams[index] {
 		if operand, moved := backendExplicitMoveOperand(arg); moved {
@@ -238,6 +251,25 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 					ExplicitStorage: expectedRef.ExplicitStorage,
 				}, nil
 			}
+		}
+	} else if expected != nil && backendStructLikeValueType(expected) {
+		// Symmetric autoderef (mirror of the autoref branch above): a by-VALUE struct
+		// parameter fed a REFERENCE argument whose pointee is that struct — load the
+		// pointee. Reaches the generic-dispatch case where a `mutable R&` receiver is
+		// passed to a protocol method whose `self` is by value (`self: Self`); the
+		// numeric/bool ref→value path stays in coerceValue (with its uintptr nuance).
+		actual := s.exprType(arg)
+		if actualRef, ok := actual.(*semantic.RefType); ok && actualRef != nil &&
+			!semantic.AssignableTo(expected, actual) && semantic.AssignableTo(expected, actualRef.Elem) {
+			ptr, _, err := s.emitExpr(arg, actual)
+			if err != nil {
+				return nil, nil, err
+			}
+			loaded, err := s.loadValue(ptr, actualRef.Elem, "ref.deref")
+			if err != nil {
+				return nil, nil, err
+			}
+			return loaded, actualRef.Elem, nil
 		}
 	}
 	return s.emitExpr(arg, expected)
