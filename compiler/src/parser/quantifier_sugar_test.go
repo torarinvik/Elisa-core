@@ -108,6 +108,28 @@ func TestQuantifierInclusiveRangeSugarDesugars(t *testing.T) {
 	}
 }
 
+// Bare `lo .. hi` is INCLUSIVE in a quantifier too (matching the for-loop semantics), so it desugars
+// identically to `..=` — the upper bound becomes `n + 1`. `..` and `..=` are interchangeable here.
+func TestQuantifierBareRangeIsInclusive(t *testing.T) {
+	src := "law InRange(self: array[i64, 8], n: i64) = forall k in 0 .. n: self[k] >= 0\n"
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for bare `..` quantifier range: %v", errs)
+	}
+	q, ok := lawPredicate(t, file).(*ast.QuantifierExpr)
+	if !ok {
+		t.Fatalf("expected QuantifierExpr, got %T", lawPredicate(t, file))
+	}
+	or := q.Body.(*ast.BinaryExpr)
+	not := or.Left.(*ast.UnaryExpr)
+	guard := not.Operand.(*ast.BinaryExpr)
+	hiCmp := guard.Right.(*ast.BinaryExpr)
+	hi, ok := hiCmp.Right.(*ast.BinaryExpr)
+	if !ok || hi.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("bare `.. n` in a quantifier must be inclusive (upper bound `n + 1`), got %T %+v", hiCmp.Right, hiCmp.Right)
+	}
+}
+
 func TestExistsExplicitRangeSugarDesugarsToGuardedConjunction(t *testing.T) {
 	src := "law HasZero(self: array[i64, 8]) = exists i in 0 ..< self.count: self[i] == 0\n"
 	file, errs := parseSourceFile(t, src)

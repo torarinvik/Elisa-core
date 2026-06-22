@@ -238,9 +238,11 @@ func (p *Parser) parseQuantifierInSource() (source ast.Expr, lo ast.Expr, hi ast
 	if p.match(lexer.TOKEN_RANGE_LT) {
 		return first, first, p.parseOr(), true
 	}
-	if p.match(lexer.TOKEN_RANGE_LE) {
-		// Inclusive `lo ..= hi` desugars to the half-open `lo ..< (hi + 1)`, reusing the existing
-		// guarded-range machinery (guard becomes `lo <= i and i < hi+1`, i.e. `i <= hi` for integers).
+	if p.peek() == lexer.TOKEN_RANGE_LE || p.peek() == lexer.TOKEN_RANGE {
+		// Both the explicit inclusive `lo ..= hi` and the bare `lo .. hi` are INCLUSIVE here, matching
+		// the for-loop range semantics (where bare `..` is inclusive too). Each desugars to the half-open
+		// `lo ..< (hi + 1)`, reusing the guarded-range machinery (guard `lo <= i and i < hi+1`).
+		p.advance()
 		hiInclusive := p.parseOr()
 		hiPlusOne := &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: hiInclusive, Right: &ast.IntLit{Position: pos, Value: "1"}}
 		return first, first, hiPlusOne, true
