@@ -657,6 +657,40 @@ var biasedTypeBits = map[string]int{
 // u64 space and converted to T by truncation. All entropy comes from disjoint bit
 // slices of `s`, so the helper is a pure deterministic function of `s` (the driver's
 // xorshift sequence is unchanged) and the shrinker still converges toward zero.
+// commonShiftSet returns the deduplicated set of high-value bit-shift indices
+// (byte/word/cacheline/page/2048/typical-width boundaries) clamped to a type of
+// `bits` width. Used to bias the `1<<k` (pow2) and `(1<<k)-1` (mask) categories
+// so a divergence localized to one specific power of two (e.g. 2048 == 1<<11)
+// recurs often enough to be hit within a normal case budget.
+func commonShiftSet(bits int) []int {
+	candidates := []int{0, 1, 2, 3, 6, 8, 11, 12, 16, 21, 30, 31, 32, 63}
+	// Drop shifts >= bits-2: 1<<(bits-1) is the sign-bit / near-MAX value that
+	// categories 3/4/5 already cover, and 1<<(bits-2) is large enough that summing
+	// two of them overflows a signed value of this width (e.g. 1<<30 + 1<<30 ==
+	// 1<<31 on i32). Over-weighting either would manufacture operands that
+	// spuriously trap checked arithmetic in holding properties (e.g. `a + b`). The
+	// common set's purpose is the under-sampled MID alignment boundaries
+	// (cacheline/2048/page/typical-width), not the extremes; capping at bits-3
+	// keeps 1<<k below a quarter of the magnitude so paired sums stay in range.
+	hi := bits - 2
+	seen := map[int]bool{}
+	out := []int{}
+	for _, k := range candidates {
+		if k >= hi {
+			continue
+		}
+		if seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, k)
+	}
+	if len(out) == 0 {
+		out = append(out, 0)
+	}
+	return out
+}
+
 func biasedDrawHelperSource(typeName string) string {
 	bits := biasedTypeBits[typeName]
 	// all-ones mask for the width, as a u64 literal expression.
@@ -679,9 +713,49 @@ func biasedDrawHelperSource(typeName string) string {
 	fmt.Fprintf(&b, "\t\treturn %s\n", propertyDrawExpr(typeName, "s"))
 	// Edge-case construction. Category selector and sub-index from disjoint bit slices.
 	fmt.Fprintf(&b, "\tmaxU: u64 = %s\n", maxU)
-	fmt.Fprintf(&b, "\tk: u64 = (s >> 8) %% %d\n", bits) // bit index 0..bits-1
+	// Shift index k for the pow2 (cat 6, 1<<k) and mask (cat 7, (1<<k)-1)
+	// categories. The uniform `(s >> 8) % bits` alone draws any SPECIFIC power of
+	// two (e.g. exactly 1<<11 == 2048) with probability <1/bits, so a divergence
+	// localized to one alignment/width boundary is missed within a normal case
+	// budget. With ~75% probability (a disjoint 2-bit slice of s) pick k from a
+	// small high-value set of common byte/word/cacheline/page/2048/typical-width
+	// boundaries; otherwise fall back to a uniform draw so arbitrary widths stay
+	// reachable. Both the uniform draw and the common set are bounded to shift
+	// indices < bits-2, so 1<<k / (1<<k)-1 never produce the sign-bit / near-MAX
+	// magnitudes (covered by cats 3/4/5) and two pow2 draws can't sum past a signed
+	// MAX of this width; this keeps holding properties like `a + b` on i32 from
+	// spuriously overflowing checked arithmetic when the pow2 category is paired.
+	// All entropy comes from disjoint slices of s, so the xorshift sequence is
+	// unchanged and shrinking/reproduction is unaffected.
+	commonK := commonShiftSet(bits)
+	kmod := bits - 2
+	if kmod < 1 {
+		kmod = 1
+	}
+	fmt.Fprintf(&b, "\tku: u64 = (s >> 8) %% %d\n", kmod) // uniform shift index 0..bits-3
+	b.WriteString("\tk: mutable u64 = ku\n")
+	// Common-shift mode (~75%): bits 2..3 of s nonzero. Disjoint from bit 1
+	// (helper mode), bit 0, and the uniform-k slice.
+	b.WriteString("\tif ((s >> 2) & 3) != 0:\n")
+	fmt.Fprintf(&b, "\t\tki: u64 = (s >> 24) %% %d\n", len(commonK))
+	for i, ck := range commonK {
+		if i == 0 {
+			fmt.Fprintf(&b, "\t\tif ki == %d:\n\t\t\tk <- %d\n", i, ck)
+		} else {
+			fmt.Fprintf(&b, "\t\telif ki == %d:\n\t\t\tk <- %d\n", i, ck)
+		}
+	}
 	b.WriteString("\tpage: u64 = ((s >> 20) << 12) & maxU\n")
-	b.WriteString("\tcat: u64 = (s >> 4) % 11\n")
+	// Category selector. Categories 6 (pow2 1<<k) and 7 (mask (1<<k)-1) are the
+	// shift-driven ones; give them extra weight so the common-shift k above recurs
+	// often enough to hit a divergence localized to a single power of two (e.g.
+	// 2048) within the case budget. `(s >> 4) % 22`: craw>=11 collapses onto {6,7}
+	// (doubling their share), else the original 0..10 distribution is preserved.
+	// Safe against holding-property overflow because k is bounded below the sign
+	// bit, so the extra pow2/mask draws stay mid-magnitude.
+	b.WriteString("\tcraw: u64 = (s >> 4) % 22\n")
+	b.WriteString("\tcat: mutable u64 = craw\n")
+	b.WriteString("\tif craw >= 11:\n\t\tcat <- 6 + (craw & 1)\n")
 	b.WriteString("\tev: mutable u64 = 0\n")
 	// 0,1,2 / MAX, MAX-1, MAX-k / pow2 / mask / page, page+1, page-1.
 	b.WriteString("\tif cat == 0:\n\t\tev <- 0\n")
