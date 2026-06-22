@@ -86,8 +86,16 @@ func (p *Parser) parseAssociatedTypeDecl() *ast.AssociatedTypeDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("type")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	// An optional `= <type>` introduces a DEFAULT binding for the associated type that conforming
+	// impls inherit unless they override it (`type Field = u64 is PageAligned`). The default type
+	// may carry a refinement, which is parsed as part of the type expression and propagated to the
+	// inheriting impl by the analyzer.
+	var defaultType ast.TypeExpr
+	if p.match(lexer.TOKEN_ASSIGN) {
+		defaultType = p.parseTypeExpr()
+	}
 	p.expectNewline()
-	return &ast.AssociatedTypeDecl{Position: pos, Name: name}
+	return &ast.AssociatedTypeDecl{Position: pos, Name: name, DefaultType: defaultType}
 }
 
 func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {

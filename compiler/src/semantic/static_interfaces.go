@@ -616,6 +616,21 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					}
 				}
 				a.staticImpls[key] = impl
+				// Inherit any protocol associated-type DEFAULT the impl omitted, BEFORE the method
+				// signatures are checked: an associated-type projection (`Self.Field`) in a method
+				// signature resolves through impl.AssociatedTypes, so the default binding (and its
+				// refinement) must already be present when the signatures are compared.
+				for name, assocDecl := range iface.AssociatedTypes {
+					if _, ok := impl.AssociatedTypes[name]; ok {
+						continue
+					}
+					if assocDecl != nil && assocDecl.DefaultType != nil {
+						impl.AssociatedTypes[name] = a.resolveType(assocDecl.DefaultType)
+						if preds := refinementPredsOfTypeExpr(assocDecl.DefaultType); len(preds) > 0 {
+							impl.AssociatedTypeRefinements[name] = preds
+						}
+					}
+				}
 				for _, member := range methodDecls {
 					var name string
 					var pos ast.Node
@@ -669,6 +684,8 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					a.checkProtocolImplContractVariance(methodInfo, member, interfaceName, receiver, name)
 				}
 				for name := range iface.AssociatedTypes {
+					// Defaults were already inherited above; a still-missing associated type has no
+					// default and the impl must bind it explicitly.
 					if _, ok := impl.AssociatedTypes[name]; !ok {
 						a.errorf(decl.Pos(), "impl of interface %q for %s is missing associated type %q", interfaceName, receiver, name)
 					}

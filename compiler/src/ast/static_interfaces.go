@@ -20,6 +20,12 @@ type InterfaceMember interface {
 type AssociatedTypeDecl struct {
 	Position lexer.Pos
 	Name     string
+	// DefaultType, when non-nil, is a DEFAULT binding for the associated type declared on the
+	// protocol (`type Field = u64 is PageAligned`). A conforming impl that omits this associated
+	// type inherits DefaultType — including any refinement predicate it carries — exactly as if it
+	// had written the binding itself. An impl that DOES provide the type overrides the default and
+	// must still satisfy the protocol's refinement.
+	DefaultType TypeExpr
 }
 
 type ImplDecl struct {

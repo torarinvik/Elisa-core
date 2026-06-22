@@ -421,7 +421,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		for _, member := range n.Members {
 			switch m := member.(type) {
 			case *ast.AssociatedTypeDecl:
-				f.writeLine(level+1, "type "+m.Name)
+				if m.DefaultType != nil {
+					f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.DefaultType))
+				} else {
+					f.writeLine(level+1, "type "+m.Name)
+				}
 			case *ast.ExternFuncDecl:
 				f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
 			case *ast.FuncDecl:
