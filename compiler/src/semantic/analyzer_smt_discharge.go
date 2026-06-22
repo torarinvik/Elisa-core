@@ -158,7 +158,12 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 	// implies xs[k] >= 0` instantiates to prove `return xs[0] is NonNeg`). Contract-sound: the callee may
 	// assume its preconditions and an SMT-proven VALUE fact never drives bounds-check elision. On a failed
 	// proof, stash z3's satisfying assignment so the refinement diagnostic can show a counterexample.
-	proven, counterexample, ok := a.smtCheckGoal(tr, body, env, "")
+	// Immutable params carrying their OWN refinements (e.g. `addr: PageAddr` ≡ `Aligned[4096]`) are
+	// postconditions the caller proved; assert each as a hypothesis so a return obligation over them
+	// (`return addr + 4096 is Aligned[4096]`) can discharge. Non-interval refinements (alignment, mask)
+	// have no rangeFact representation, so this is the only channel that carries them into the solver.
+	extra := a.smtParamRefinementHypotheses(tr)
+	proven, counterexample, ok := a.smtCheckGoal(tr, body, env, extra)
 	if !ok {
 		return false
 	}
@@ -166,6 +171,63 @@ func (a *Analyzer) trySMTProveRefinement(value ast.Expr, decl *ast.FuncDecl, pre
 		a.lastSMTCounterexample = counterexample
 	}
 	return proven
+}
+
+// smtParamRefinementHypotheses emits `(assert <law-body>)` for each IMMUTABLE param of the enclosing
+// function whose declared (or aliased) type carries a refinement predicate that is a known,
+// quantifier-free law. The law body is instantiated at the param's identifier and its static args, then
+// lowered in `tr`'s namespace so it shares symbols with the goal. SOUND: a param's refinement is a
+// precondition the caller is obligated to satisfy (checked/proven at every call site), so assuming it
+// inside the body adds no unproven fact; a param whose body falls outside the SMT fragment is skipped.
+func (a *Analyzer) smtParamRefinementHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentFuncDecl == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, param := range a.currentFuncDecl.Params {
+		if a.paramIsMutable(param) {
+			continue
+		}
+		rt, ok := a.paramRefinementTypeExpr(param.Type)
+		if !ok || rt == nil {
+			continue
+		}
+		for _, pred := range rt.Preds {
+			lawDecl, _, ok := a.lookupLaw(pred.Name)
+			if !ok || lawDecl == nil || len(lawDecl.Params) == 0 {
+				continue
+			}
+			if a.lawBodyContainsQuantifier(lawDecl) {
+				continue
+			}
+			body, ok := a.lawBodyExpr(lawDecl)
+			if !ok || body == nil {
+				continue
+			}
+			subst := map[string]ast.Expr{lawDecl.Params[0].Name: &ast.Ident{Position: param.Position, Name: param.Name}}
+			bad := false
+			for i, arg := range pred.Args {
+				if i+1 >= len(lawDecl.Params) || arg == nil {
+					bad = true
+					break
+				}
+				subst[lawDecl.Params[i+1].Name] = arg
+			}
+			if bad {
+				continue
+			}
+			inst := ast.CloneExprSubst(body, subst)
+			if inst == nil {
+				continue
+			}
+			f, ok := tr.lowerVCFormula(inst, nil)
+			if !ok {
+				continue
+			}
+			b.WriteString("(assert " + emitVCFormula(f) + ")\n")
+		}
+	}
+	return b.String()
 }
 
 // fieldReadResolvedType resolves the type of a struct-field read `obj.field` from the object's type,
