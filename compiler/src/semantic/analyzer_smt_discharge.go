@@ -642,7 +642,10 @@ func (a *Analyzer) smtRequiresHypotheses(tr *smtTranslator) string {
 		if a.requiresReferencesMutableRoot(req) {
 			continue
 		}
-		if h, ok := tr.boolTerm(req, nil); ok {
+		tr.requiresHypMode = true
+		h, ok := tr.boolTerm(req, nil)
+		tr.requiresHypMode = false
+		if ok {
 			b.WriteString("(assert " + h + ")\n")
 		}
 	}
@@ -1138,6 +1141,14 @@ type smtTranslator struct {
 	callEqDeclDepth map[*ast.FuncDecl]int
 	// callEqMaxDeclDepth bounds callEqDeclDepth.
 	callEqMaxDeclDepth int
+	// requiresHypMode is set ONLY while emitting an entry `requires` clause as a hypothesis. In that mode
+	// an unsigned upper-bound-by-type-max comparison (`a + b <= 2^W-1`) is read as the ℤ no-overflow
+	// predicate rather than B2's wrapped bvule (which is vacuously true, since `int2bv` reduces the sum
+	// mod 2^W). This makes such a precondition a real constraint — paired with the body's matching `+`
+	// being emitted clean only WHEN this same requires proves it no-wrap (provablyNoArithWrap →
+	// knownRequiresSumNoWrap). Without the clause, neither the hypothesis nor the clean body term exists,
+	// so the genuine overflow counterexample is preserved (the C1 soundness gate).
+	requiresHypMode bool
 }
 
 // newSMTTranslator builds a translator with all collection maps initialized.
@@ -1460,6 +1471,11 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 	case *ast.IntLit:
 		if c, ok := tr.a.constIntValue(n); ok {
 			return smtInt(c), true
+		}
+		// A u64-range literal (e.g. 0xFFFFFFFFFFFFFFFF) does not fit int64 so constIntValue declines; emit
+		// its exact non-negative value as an SMT Int so unsigned upper-bound preconditions translate.
+		if v, ok := tr.a.unsignedConstBound(n); ok {
+			return v.String(), true
 		}
 		return "", false
 	case *ast.Ident:
@@ -1894,6 +1910,17 @@ func (a *Analyzer) provablyNoArithWrap(n *ast.BinaryExpr, signed bool, bits int)
 	if n.Op == lexer.TOKEN_MINUS && !signed && a.provablyNoUnsignedUnderflow(n.Left, n.Right) {
 		return true
 	}
+	// A `requires`-supplied UPPER bound on this exact addition (`requires value + alignment <= 2^W-1`)
+	// proves the unsigned sum cannot wrap — the affine interval prover cannot represent the 2^64-1 bound
+	// (it computes in int64), so it is recognized symbolically here. This lets an overflow-guarded
+	// postcondition (e.g. an AlignUp `ensure result >= value`) discharge from its entry precondition:
+	// without the clean term the inner `+` would be emitted as `(mod … 2^W)`, which z3 cannot relate to
+	// the surrounding div/mod/* goals. SOUNDNESS: this never makes the conclusion unconditional — it
+	// requires an actual `requires` clause bounding the sum below the type maximum, so dropping the guard
+	// (the C1 soundness gate) restores the exact-wrap model and the genuine overflow counterexample.
+	if n.Op == lexer.TOKEN_PLUS && !signed && a.knownRequiresSumNoWrap(n, bits) {
+		return true
+	}
 	// The affine interval prover now computes in OVERFLOW-CHECKED int64 (boundAffine via
 	// mulInt64Checked/addInt64Checked, audit cluster E): a computation that would overflow int64 yields
 	// an UNKNOWN (open) bound rather than a wrong one, so the in-range gate below is sound up to 64-bit
@@ -1969,6 +1996,101 @@ func (a *Analyzer) knownRequiresGE(left, right ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// knownRequiresSumNoWrap reports whether the enclosing function's `requires` clauses prove the unsigned
+// addition `n` (`a + b`) cannot wrap at `bits` width — i.e. some conjunct `a + b <= C` (or `C >= a + b`)
+// with a constant `C <= 2^bits - 1` and `n`'s SAME operands. Only IMMUTABLE-rooted addends qualify: a
+// `requires` constrains entry values, so it stays valid only if neither operand was reassigned since
+// entry. The bound is read structurally (the requires LHS sum must be syntactically the same two
+// addends as `n`, order-insensitive), so this can only conclude no-wrap for a sum the precondition
+// actually guards — making the conclusion conditional, never unconditional.
+func (a *Analyzer) knownRequiresSumNoWrap(n *ast.BinaryExpr, bits int) bool {
+	if a == nil || a.currentFuncDecl == nil || a.currentScope == nil || bits <= 0 || bits > 64 {
+		return false
+	}
+	// Both addends must be immutable since entry for the requires fact to remain valid here.
+	if _, ok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(n.Left)); !ok {
+		return false
+	}
+	if _, ok := immutableIntIdentName(a, a.currentScope, stripOptimizationParens(n.Right)); !ok {
+		return false
+	}
+	max := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))
+	for _, req := range a.currentFuncDecl.Requires {
+		if a.requiresConjunctBoundsSum(req, n, max) {
+			return true
+		}
+	}
+	return false
+}
+
+// requiresConjunctBoundsSum reports whether a `requires` conjunct establishes `sum <= max` where `sum`
+// is the same two-addend addition as `n` (`a + b`, order-insensitive). Accepts `sum <= C` and `C >= sum`.
+func (a *Analyzer) requiresConjunctBoundsSum(e ast.Expr, n *ast.BinaryExpr, max *big.Int) bool {
+	bin, ok := stripOptimizationParens(e).(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	if bin.Op == lexer.TOKEN_AND {
+		return a.requiresConjunctBoundsSum(bin.Left, n, max) || a.requiresConjunctBoundsSum(bin.Right, n, max)
+	}
+	var sumSide, constSide ast.Expr
+	switch bin.Op {
+	case lexer.TOKEN_LTEQ: // sum <= C
+		sumSide, constSide = bin.Left, bin.Right
+	case lexer.TOKEN_GTEQ: // C >= sum
+		sumSide, constSide = bin.Right, bin.Left
+	default:
+		return false
+	}
+	cBig, ok := a.unsignedConstBound(constSide)
+	if !ok {
+		return false
+	}
+	// cBig <= max (= 2^bits-1) proves the user-supplied sum bound forbids the wrap.
+	if cBig.Cmp(max) > 0 {
+		return false
+	}
+	sum, ok := stripOptimizationParens(sumSide).(*ast.BinaryExpr)
+	if !ok || sum.Op != lexer.TOKEN_PLUS {
+		return false
+	}
+	return additionsSameOperands(sum, n)
+}
+
+// unsignedConstBound returns the non-negative big.Int value of a constant `+`-bound expression. It
+// handles a u64-max literal like 0xFFFFFFFFFFFFFFFF (which does not fit int64, so the const folder reads
+// it as -1): the raw IntLit string is parsed directly as a big.Int. Other forms fall back to the int64
+// const evaluator; a negative result is rejected (a sum upper bound below zero is meaningless here).
+func (a *Analyzer) unsignedConstBound(e ast.Expr) (*big.Int, bool) {
+	if lit, ok := stripOptimizationParens(e).(*ast.IntLit); ok && lit != nil {
+		base := 10
+		s := lit.Value
+		if lit.IsHex {
+			base = 16
+			s = strings.TrimPrefix(strings.TrimPrefix(s, "0x"), "0X")
+		}
+		s = strings.ReplaceAll(s, "_", "")
+		if v, ok := new(big.Int).SetString(s, base); ok && v.Sign() >= 0 {
+			return v, true
+		}
+	}
+	if c, ok := a.constIntValue(e); ok && c >= 0 {
+		return big.NewInt(c), true
+	}
+	return nil, false
+}
+
+// additionsSameOperands reports whether two `+` expressions add the same pair of lvalue operands
+// (order-insensitive), using the path-stable SMT projection name for each addend.
+func additionsSameOperands(x, y *ast.BinaryExpr) bool {
+	xl, xr := smtProjectionName(stripOptimizationParens(x.Left)), smtProjectionName(stripOptimizationParens(x.Right))
+	yl, yr := smtProjectionName(stripOptimizationParens(y.Left)), smtProjectionName(stripOptimizationParens(y.Right))
+	if xl == "" || xr == "" || yl == "" || yr == "" {
+		return false
+	}
+	return (xl == yl && xr == yr) || (xl == yr && xr == yl)
 }
 
 func requiresConjunctImpliesGE(e ast.Expr, geName, leName string) bool {
@@ -2407,6 +2529,13 @@ func (tr *smtTranslator) bitvectorCompare(n *ast.BinaryExpr, l, r string, env ma
 	if smtEnvHasQuantifierBinder(env) {
 		return "", false
 	}
+	// In requires-hypothesis mode an unsigned `sum <= 2^W-1` (a no-overflow precondition) must be read as
+	// the ℤ bound, not the wrapped bvule (which `int2bv` makes vacuously true). Decline here so boolTerm
+	// falls through to the clean ℤ comparison. Gated to the exact overflow-guard shape the body's clean
+	// term is justified by (provablyNoArithWrap), so it cannot over-assume on any other comparison.
+	if tr.requiresHypMode && tr.isUnsignedSumTypeMaxGuard(n) {
+		return "", false
+	}
 	if !tr.containsFixedWidthMachineArith(n.Left) && !tr.containsFixedWidthMachineArith(n.Right) {
 		return "", false
 	}
@@ -2429,6 +2558,35 @@ func (tr *smtTranslator) bitvectorCompare(n *ast.BinaryExpr, l, r string, env ma
 	}
 	width := strconv.Itoa(bits)
 	return "(" + op + " ((_ int2bv " + width + ") " + l + ") ((_ int2bv " + width + ") " + r + "))", true
+}
+
+// isUnsignedSumTypeMaxGuard reports whether `n` is an upper-bound comparison of an unsigned addition by
+// a constant within its width — `a + b <= C` or `C >= a + b` with `C <= 2^W-1` (W the sum's width). This
+// is the no-overflow precondition shape; in requiresHypMode it is read in ℤ (declining bitvectorCompare).
+func (tr *smtTranslator) isUnsignedSumTypeMaxGuard(n *ast.BinaryExpr) bool {
+	var sumSide, constSide ast.Expr
+	switch n.Op {
+	case lexer.TOKEN_LTEQ:
+		sumSide, constSide = n.Left, n.Right
+	case lexer.TOKEN_GTEQ:
+		sumSide, constSide = n.Right, n.Left
+	default:
+		return false
+	}
+	sum, ok := stripOptimizationParens(sumSide).(*ast.BinaryExpr)
+	if !ok || sum.Op != lexer.TOKEN_PLUS {
+		return false
+	}
+	signed, bits, ok := smtIntWidthSign(tr.a.exprTypes[sum])
+	if !ok || signed || bits <= 0 || bits > 64 {
+		return false
+	}
+	c, ok := tr.a.unsignedConstBound(constSide)
+	if !ok {
+		return false
+	}
+	max := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits)), big.NewInt(1))
+	return c.Cmp(max) <= 0
 }
 
 func smtEnvHasQuantifierBinder(env map[string]string) bool {
