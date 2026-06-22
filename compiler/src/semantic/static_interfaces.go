@@ -631,6 +631,10 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 						continue
 					}
 					impl.Methods[name] = sym
+					// Behavioral-subtyping (Liskov–Wing) variance check on value contracts:
+					// the impl method's `requires` must be entailed by the protocol's (contravariant)
+					// and the impl's `ensure` must imply the protocol's (covariant). docs P1.
+					a.checkProtocolImplContractVariance(methodInfo, member, interfaceName, receiver, name)
 				}
 				for name := range iface.AssociatedTypes {
 					if _, ok := impl.AssociatedTypes[name]; !ok {
