@@ -159,7 +159,12 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 	//         requires i < self.count()
 	// These behavioral-subtyping contracts are checked against each impl with the correct
 	// variance. Parse the indented contract-only block and lift it into the bodiless decl.
-	reqs, ensureVals := p.parseBodilessMethodContracts()
+	// The indented block is the uniform contract surface: it may carry requires/ensure AND
+	// changes/preserves. Merge any block-form frame conditions with the signature-line form
+	// (back-compat) so the decl's Changes/Preserves are populated from EITHER place.
+	reqs, ensureVals, blockChanges, blockPreserves := p.parseBodilessMethodContracts()
+	changes = append(changes, blockChanges...)
+	preserves = append(preserves, blockPreserves...)
 	p.expectNewline()
 	return &ast.ExternFuncDecl{
 		Position:         pos,
@@ -179,18 +184,21 @@ func (p *Parser) parseInterfaceMethodDecl() ast.InterfaceMember {
 	}
 }
 
-// parseBodilessMethodContracts parses an optional indented block of value-contract statements
-// (`requires`/`ensure`) attached to a bodiless protocol method signature. The signature line ends
-// with a newline; if the following line is INDENTed it must contain only contract statements (a
-// stray non-contract statement is a parse error, since there is no executable body here). Returns
-// the lifted precondition and postcondition expressions.
-func (p *Parser) parseBodilessMethodContracts() (requires []ast.Expr, ensures []ast.Expr) {
+// parseBodilessMethodContracts parses an optional indented block of contract clauses attached to a
+// bodiless protocol/impl method signature. The signature line ends with a newline; if the following
+// line is INDENTed it must contain only contract clauses (a stray non-contract statement is a parse
+// error, since there is no executable body here). All four clause kinds are accepted uniformly in
+// this block — value contracts `requires`/`ensure` AND frame conditions `changes`/`preserves` — so
+// the indented block is the single consistent contract surface (the signature-line `changes`/
+// `preserves` form is still parsed by the caller for back-compat). Returns the lifted preconditions,
+// postconditions, and frame paths.
+func (p *Parser) parseBodilessMethodContracts() (requires []ast.Expr, ensures []ast.Expr, changes []ast.EnsuresPath, preserves []ast.EnsuresPath) {
 	if p.peek() != lexer.TOKEN_NEWLINE {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	// Look past the newline for an INDENT; if absent, there is no contract block.
 	if p.peekAt(1) != lexer.TOKEN_INDENT {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -199,10 +207,22 @@ func (p *Parser) parseBodilessMethodContracts() (requires []ast.Expr, ensures []
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
+		// Frame conditions are parsed by keyword dispatch (they have no ContractStmt kind); value
+		// contracts go through the contextual-statement parser as ContractStmts.
+		switch {
+		case p.matchIdentText("changes"):
+			changes = append(changes, p.parseChangesPathsAfterKeyword()...)
+			p.expectNewline()
+			continue
+		case p.matchIdentText("preserves"):
+			preserves = append(preserves, p.parseChangesPathsAfterKeyword()...)
+			p.expectNewline()
+			continue
+		}
 		stmt := p.parseContextualStmt()
 		cs, ok := stmt.(*ast.ContractStmt)
 		if !ok || cs == nil {
-			p.errorf("bodiless protocol method may only carry requires/ensure contracts")
+			p.errorf("bodiless protocol method may only carry requires/ensure/changes/preserves contracts")
 			continue
 		}
 		switch cs.Kind {
@@ -215,11 +235,11 @@ func (p *Parser) parseBodilessMethodContracts() (requires []ast.Expr, ensures []
 				ensures = append(ensures, cs.Cond)
 			}
 		default:
-			p.errorf("bodiless protocol method may only carry requires/ensure contracts")
+			p.errorf("bodiless protocol method may only carry requires/ensure/changes/preserves contracts")
 		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return requires, ensures
+	return requires, ensures, changes, preserves
 }
 
 func (p *Parser) parseImplDecl() *ast.ImplDecl {
@@ -348,7 +368,9 @@ func (p *Parser) parseImplMethodDeclWithAnnotations(annotations []ast.Annotation
 		reqs, reqProofs, ensureVals, ensureProofs, _, _, _, body := liftLeadingContracts(body)
 		return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, RequiresProofs: reqProofs, EnsureValues: ensureVals, EnsureProofs: ensureProofs, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType, Body: body}
 	}
-	reqs, ensureVals := p.parseBodilessMethodContracts()
+	reqs, ensureVals, blockChanges, blockPreserves := p.parseBodilessMethodContracts()
+	changes = append(changes, blockChanges...)
+	preserves = append(preserves, blockPreserves...)
 	p.expectNewline()
 	return &ast.ExternFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Override: override, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Requires: reqs, EnsureValues: ensureVals, Changes: changes, Preserves: preserves, Params: params, ReturnType: retType}
 }
