@@ -322,3 +322,43 @@ impl Combinable for Counter:
 		t.Fatalf("unexpected semantic errors for impl Self-typed param: %v", result.Errors())
 	}
 }
+
+func TestAnalyzeBoundTypeParamMethodCallThroughReference(t *testing.T) {
+	// Generic protocol-method dispatch must fire when the receiver is a reference to a
+	// bound type parameter (`r: mutable R&`), not only a by-value `r: R`. Both forms
+	// route through rewriteBoundTypeParamMethodCall, which unwraps the reference before
+	// resolving the bound method.
+	result := analyzeFunctionAnalysisTestSource(t, "bound_type_param_method_ref.elisa", `
+protocol ByteReader:
+    def remaining(self: Self) -> u64
+    def take(self: mutable Self&, n: u64) -> u64
+
+struct Cursor:
+    cursor: mutable u64
+    len: u64
+
+impl ByteReader for Cursor:
+    def remaining(self: Self) -> u64:
+        return self.len - self.cursor
+    def take(self: mutable Self&, n: u64) -> u64:
+        self.cursor <- self.cursor + n
+        return self.cursor
+
+def by_value[R: ByteReader](r: R) -> u64:
+    return r.remaining()
+
+def read_two[R: ByteReader](r: mutable R&) -> u64:
+    a: u64 = r.remaining()
+    r.take(1)
+    return a
+
+def main() -> int:
+    c: mutable Cursor = Cursor(0, 4)
+    v: u64 = by_value(c)
+    n: u64 = read_two(&c)
+    return 0
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("unexpected semantic errors for by-ref bound type-param dispatch: %v", result.Errors())
+	}
+}

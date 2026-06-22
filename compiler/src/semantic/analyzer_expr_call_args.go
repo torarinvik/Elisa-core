@@ -308,7 +308,12 @@ func (a *Analyzer) rewriteFreeCallReceiverOverload(expr *ast.CallExpr) {
 // Returns extensionMethodCallRewriteNone when the receiver is not a bound type param or
 // the bound protocol has no such method, leaving normal resolution untouched.
 func (a *Analyzer) rewriteBoundTypeParamMethodCall(expr *ast.CallExpr, fieldExpr *ast.FieldExpr, receiverType Type, callTypeArgs []ast.TypeExpr) extensionMethodCallRewriteStatus {
-	tp, ok := receiverType.(*TypeParamType)
+	// A receiver value whose type is a bound type parameter may arrive wrapped in a
+	// reference (`r: mutable R&`) or an aggregate-state wrapper; unwrap so the same
+	// protocol-method dispatch fires for by-ref receivers as for by-value ones. The
+	// prepended receiver arg (fieldExpr.Object) keeps its reference type and is
+	// autoderef/autoref-matched to the protocol method's self parameter downstream.
+	tp, ok := StripAggregateStateType(unwrapReceiverRef(receiverType)).(*TypeParamType)
 	if !ok || tp == nil || tp.Name == "" {
 		return extensionMethodCallRewriteNone
 	}
