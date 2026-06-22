@@ -188,6 +188,39 @@ def build[B: Builder](value: int) -> B.Node:
 	}
 }
 
+// GAP #2: an associated type may carry a DEFAULT binding on the protocol, including a refined
+// default (`type Field = u64 is PageAligned`). Both the plain and refined default parse and the
+// default type is recorded on the AssociatedTypeDecl.
+func TestParseAssociatedTypeDefaultBinding(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+protocol FieldDecoder:
+    type Word = u32
+    type Field = u32 is InRange[0, 127]
+    def decode(value: int) -> Field
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	iface, ok := file.Decls[0].(*ast.InterfaceDecl)
+	if !ok {
+		t.Fatalf("expected interface decl, got %T", file.Decls[0])
+	}
+	word, ok := iface.Members[0].(*ast.AssociatedTypeDecl)
+	if !ok || word.Name != "Word" || word.DefaultType == nil {
+		t.Fatalf("expected associated type Word with a default, got %#v", iface.Members[0])
+	}
+	if named, ok := word.DefaultType.(*ast.NamedType); !ok || named.Name != "u32" {
+		t.Fatalf("expected Word default u32, got %T %#v", word.DefaultType, word.DefaultType)
+	}
+	field, ok := iface.Members[1].(*ast.AssociatedTypeDecl)
+	if !ok || field.Name != "Field" || field.DefaultType == nil {
+		t.Fatalf("expected associated type Field with a default, got %#v", iface.Members[1])
+	}
+	if _, ok := field.DefaultType.(*ast.RefinementTypeExpr); !ok {
+		t.Fatalf("expected Field default to be a refinement type, got %T", field.DefaultType)
+	}
+}
+
 func TestParseStaticInterfaceZeroArgMethodCall(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 struct BuilderTag:
