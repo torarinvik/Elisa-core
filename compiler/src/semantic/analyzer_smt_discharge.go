@@ -1101,16 +1101,23 @@ func (a *Analyzer) smtImmutableLocalHypotheses(tr *smtTranslator) string {
 				continue
 			}
 			eterm, ok := tr.termEnv(vd.Value, nil)
-			if !ok {
-				continue
+			if ok {
+				tr.decls[name] = true
+				b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
 			}
-			tr.decls[name] = true
-			b.WriteString("(assert (= " + smtVar(name) + " " + eterm + "))\n")
-			if bin, ok := stripOptimizationParens(vd.Value).(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_PERCENT {
-				rterm, rok := tr.termEnv(bin.Right, nil)
-				if rok && a.provablyPositive(bin.Right) {
-					b.WriteString("(assert (>= " + smtVar(name) + " 0))\n")
-					b.WriteString("(assert (< " + smtVar(name) + " " + rterm + "))\n")
+			// A `name = X % C` local is bounded 0 <= name < C for ANY X when C > 0 and name is
+			// unsigned — independent of whether X itself translates to an SMT term. The left operand
+			// may carry a width conversion or shift (e.g. `(seed.u64() >> 16) % C`) that termEnv cannot
+			// model, which previously dropped the whole local (and with it this bound). Seed the modulo
+			// bound directly so a refinement like VmInRange[0, C-1] on the value still discharges. Gated
+			// to unsigned `name` (where 0 <= X%C < C holds unconditionally) and a provably-positive C.
+			if bin, isBin := stripOptimizationParens(vd.Value).(*ast.BinaryExpr); isBin && bin.Op == lexer.TOKEN_PERCENT {
+				if signed, _, sok := smtIntWidthSign(sym.Type); sok && !signed {
+					if rterm, rok := tr.termEnv(bin.Right, nil); rok && a.provablyPositive(bin.Right) {
+						tr.decls[name] = true
+						b.WriteString("(assert (>= " + smtVar(name) + " 0))\n")
+						b.WriteString("(assert (< " + smtVar(name) + " " + rterm + "))\n")
+					}
 				}
 			}
 		}

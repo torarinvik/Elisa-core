@@ -206,3 +206,44 @@ def evil(raw: u64) -> u64:
 		t.Fatalf("a reassigned mutable refined local must not be trusted, got: %v", result.Errors())
 	}
 }
+
+// A `name = X % C` local is bounded 0 <= name < C for any X when C>0 and name is unsigned, EVEN
+// when X carries a width conversion/shift that the SMT translator cannot model (e.g. an i32->u64
+// `.u64()` then `>> 16`). Previously the opaque left operand dropped the whole local and with it the
+// modulo bound, so an alias-typed refinement param (VmCap = u64 is InRange[0, C-1]) failed to
+// discharge. Regression for the emulator's vm_window_end property.
+func TestModuloBoundSurvivesOpaqueLeftOperand(t *testing.T) {
+	src := `
+const M: u64 = 0x100000000000
+law InR(self: u64, lo: u64, hi: u64) = self >= lo and self <= hi
+type Cap = u64 is InR[0, 0x100000000000]
+def takes_cap(a: Cap) -> u64:
+    return a
+def via_conversion(seed: i32) -> u64:
+    a: u64 = (seed.u64() >> 16) % (M + 1)
+    return takes_cap(a)
+`
+	result := analyzeContractStrict(t, "modulo_opaque.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("X-mod-C with opaque X should bound the local and discharge Cap, got: %v", errs)
+	}
+}
+
+// Soundness guard for the above: a SIGNED `x % c` may be negative (truncated remainder), so the
+// 0 <= name bound must NOT be seeded for signed locals — a NonNeg refinement must still be rejected.
+func TestModuloBoundNotSeededForSignedLocal(t *testing.T) {
+	src := `
+law NonNeg(self: i64) = self >= 0
+type NN = i64 is NonNeg
+def takes_nn(a: NN) -> i64:
+    return a
+def signed_mod(x: i64, c: i64) -> i64:
+    requires c > 0
+    a: i64 = x % c
+    return takes_nn(a)
+`
+	result := analyzeContractStrict(t, "modulo_signed.elisa", src)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "could not be proven statically") {
+		t.Fatalf("a signed `x %% c` may be negative; NonNeg must NOT be falsely proven, got: %v", result.Errors())
+	}
+}
