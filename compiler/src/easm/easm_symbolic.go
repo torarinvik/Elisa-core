@@ -165,6 +165,102 @@ func symbolicEncodeBody(insts []Instruction) (*symbolicState, string) {
 			if !st.writeReg(ops[1], term) {
 				return nil, op + " destination not a register"
 			}
+		case "orq":
+			if len(ops) != 2 {
+				return nil, "malformed orq"
+			}
+			dstTerm, ok := st.read(ops[1])
+			if !ok {
+				return nil, "orq destination not modelable"
+			}
+			srcTerm, ok2 := st.read(ops[0])
+			if !ok2 {
+				return nil, "orq source not modelable (memory or sub-register)"
+			}
+			if !st.writeReg(ops[1], fmt.Sprintf("(bvor %s %s)", dstTerm, srcTerm)) {
+				return nil, "orq destination not a register"
+			}
+		case "notq", "negq":
+			if len(ops) != 1 {
+				return nil, "malformed " + op
+			}
+			dstTerm, ok := st.read(ops[0])
+			if !ok {
+				return nil, op + " destination not modelable"
+			}
+			fn := "bvnot"
+			if op == "negq" {
+				fn = "bvneg"
+			}
+			if !st.writeReg(ops[0], fmt.Sprintf("(%s %s)", fn, dstTerm)) {
+				return nil, op + " destination not a register"
+			}
+		case "shlq", "salq", "shrq", "sarq":
+			if len(ops) != 2 {
+				return nil, "malformed " + op
+			}
+			cnt, isImm := immediateShiftCount(ops[0])
+			if !isImm {
+				return nil, op + " with a non-immediate (variable %cl) count not modeled"
+			}
+			dstTerm, ok := st.read(ops[1])
+			if !ok {
+				return nil, op + " destination not modelable"
+			}
+			var bvOp string
+			switch op {
+			case "shlq", "salq":
+				bvOp = "bvshl"
+			case "shrq":
+				bvOp = "bvlshr"
+			case "sarq":
+				bvOp = "bvashr"
+			}
+			if !st.writeReg(ops[1], fmt.Sprintf("(%s %s %s)", bvOp, dstTerm, bv64(cnt))) {
+				return nil, op + " destination not a register"
+			}
+		case "xchgq", "xchg":
+			if len(ops) != 2 {
+				return nil, "malformed xchgq"
+			}
+			if !strings.HasPrefix(strings.TrimSpace(ops[0]), "%") || !strings.HasPrefix(strings.TrimSpace(ops[1]), "%") {
+				return nil, "xchgq with a non-register operand not modeled"
+			}
+			a, ok := st.read(ops[0])
+			b, ok2 := st.read(ops[1])
+			if !ok || !ok2 {
+				return nil, "xchgq operand not a register"
+			}
+			if !st.writeReg(ops[0], b) || !st.writeReg(ops[1], a) {
+				return nil, "xchgq destination not a register"
+			}
+		case "leaq", "lea":
+			if len(ops) != 2 {
+				return nil, "malformed leaq"
+			}
+			term, ok := leaAddressTerm(st.read, ops[0])
+			if !ok {
+				return nil, "leaq addressing form not modeled (index/scale or non-register base)"
+			}
+			if !st.writeReg(ops[1], term) {
+				return nil, "leaq destination not a register"
+			}
+		case "movl":
+			if len(ops) != 2 {
+				return nil, "malformed movl"
+			}
+			if !is32BitX86GPROperand(ops[1]) {
+				return nil, "movl destination not a 32-bit register (memory write not modeled)"
+			}
+			src, ok := movlSourceTerm(st.read, ops[0])
+			if !ok {
+				return nil, "movl source not modelable (memory or non-32-bit)"
+			}
+			// x86 32-bit write zero-extends to 64 bits.
+			zext := fmt.Sprintf("(concat (_ bv0 32) ((_ extract 31 0) %s))", src)
+			if !st.writeReg(ops[1], zext) {
+				return nil, "movl destination not a register"
+			}
 		case "incq", "decq":
 			if len(ops) != 1 {
 				return nil, "malformed " + op
@@ -308,4 +404,101 @@ func parseImmediate64(s string) (uint64, error) {
 
 func bv64(v uint64) string {
 	return fmt.Sprintf("(_ bv%d 64)", v)
+}
+
+// immediateShiftCount parses an immediate shift count operand ($imm). A variable (%cl) count returns
+// ok=false so the caller can skip. The count is masked to its 64-bit value as written.
+func immediateShiftCount(operand string) (uint64, bool) {
+	operand = strings.TrimSpace(operand)
+	if !strings.HasPrefix(operand, "$") {
+		return 0, false
+	}
+	v, err := parseImmediate64(strings.TrimPrefix(operand, "$"))
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// is32BitX86GPROperand reports whether an operand is written with a 32-bit register spelling
+// (%eXX or %rNd), the only forms whose write zero-extends to 64 bits in the modeled movl case.
+func is32BitX86GPROperand(operand string) bool {
+	operand = strings.TrimSpace(operand)
+	if !strings.HasPrefix(operand, "%") {
+		return false
+	}
+	reg := strings.ToLower(strings.TrimPrefix(operand, "%"))
+	switch reg {
+	case "eax", "ebx", "ecx", "edx", "esi", "edi", "esp", "ebp":
+		return true
+	}
+	for _, base := range []string{"r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"} {
+		if reg == base+"d" {
+			return true
+		}
+	}
+	return false
+}
+
+// readFn reads an operand into an SMT term, binding an input symbol for an uninitialized register.
+type readFn func(operand string) (term string, ok bool)
+
+// movlSourceTerm reads a movl source: either a 32-bit register or a 32-bit immediate. The full 64-bit
+// term is returned; the caller extracts the low 32 bits and zero-extends.
+func movlSourceTerm(read readFn, operand string) (string, bool) {
+	operand = strings.TrimSpace(operand)
+	if strings.HasPrefix(operand, "%") {
+		if !is32BitX86GPROperand(operand) {
+			return "", false
+		}
+		return read(operand)
+	}
+	if strings.HasPrefix(operand, "$") {
+		return read(operand)
+	}
+	return "", false // memory operand
+}
+
+// leaAddressTerm models the only supported lea form: disp(%base) with a register base and a constant
+// displacement (disp may be empty ⇒ 0). Any index/scale or non-register base returns ok=false.
+func leaAddressTerm(read readFn, operand string) (string, bool) {
+	base, disp, ok := parseSimpleDisp(operand)
+	if !ok {
+		return "", false
+	}
+	baseTerm, okr := read(base)
+	if !okr {
+		return "", false
+	}
+	if disp == 0 {
+		return baseTerm, true // lea (%reg), %dst ⇒ plain copy
+	}
+	return fmt.Sprintf("(bvadd %s %s)", baseTerm, bv64(disp)), true
+}
+
+// parseSimpleDisp parses "disp(%reg)" / "(%reg)" into the %reg base operand and the displacement.
+// Returns ok=false for any index/scale form ("disp(%base,%idx,scale)") or a non-register base.
+func parseSimpleDisp(operand string) (base string, disp uint64, ok bool) {
+	operand = strings.TrimSpace(operand)
+	open := strings.IndexByte(operand, '(')
+	if open < 0 || !strings.HasSuffix(operand, ")") {
+		return "", 0, false
+	}
+	inner := operand[open+1 : len(operand)-1]
+	if strings.Contains(inner, ",") {
+		return "", 0, false // index/scale form
+	}
+	inner = strings.TrimSpace(inner)
+	if !strings.HasPrefix(inner, "%") {
+		return "", 0, false
+	}
+	dispStr := strings.TrimSpace(operand[:open])
+	if dispStr == "" {
+		return inner, 0, true
+	}
+	v, err := parseImmediate64(dispStr)
+	if err != nil {
+		return "", 0, false
+	}
+	return inner, v, true
 }
