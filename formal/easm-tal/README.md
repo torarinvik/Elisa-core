@@ -43,29 +43,22 @@ the definite-init safety theorem and are deliberately not modeled — see below.
 
 ```sh
 cd formal/easm-tal
-coqc EasmTAL.v          # succeeds silently with no warnings/errors if the proofs check
+rocq compile EasmTAL.v   # succeeds silently with no warnings/errors if the proofs check
+# (equivalently, the compat binary: coqc EasmTAL.v)
 ```
 
-`coqc` needs only the Coq standard library (`Lists.List`, `Arith.PeanoNat`); no mathlib /
-opam packages / external solvers. Any Coq ≥ 8.13 (including Rocq) works.
+The checker needs only the standard library (`Stdlib.Lists.List`, `Stdlib.Arith.PeanoNat`);
+no mathlib / opam packages / external solvers.
 
 ### Local verification status
 
-**Not machine-checked locally** — this machine has no Coq toolchain installed
-(`which coqc` / `which lean` / `which agda` all return nothing, and per task constraints
-nothing was installed system-wide). The development is written to be checked the moment a
-`coqc` is available, via the command above. The proofs use only standard, robust tactics
-(`inversion`, `destruct ... eqn:`, `discriminate`, `eauto`, list induction) and the model was
-kept minimal precisely so the goals close mechanically.
+**Machine-checked** with **The Rocq Prover, version 9.1.1** (`rocq compile EasmTAL.v` exits 0,
+silently, producing `EasmTAL.vo`). `progress`, `preservation`, and their lift to straight-line
+sequences (`seq_safety`, `no_stuck`) are verified theorems with no `admit`/`Admitted`/axioms.
 
-To install Coq and check:
-
-```sh
-# macOS, opam route:
-opam install coq
-# then:
-cd formal/easm-tal && coqc EasmTAL.v && echo "PROOFS OK"
-```
+Imports use the Rocq 9 `Stdlib.*` namespace. On Coq ≤ 8.x use `Coq.*` instead (the only change
+needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, robust tactics
+(`inversion`, `destruct ... eqn:`, `discriminate`, `eauto`, list induction).
 
 ## What is and isn't covered
 

@@ -105,6 +105,8 @@ In rough order of leverage:
 ## Status
 
 - `formal/easm-tal/EasmTAL.v` — model + `progress` + `preservation` + sequence safety, no
-  `admit`/`Admitted`. Checkable with `coqc EasmTAL.v` (stdlib only).
-- Local machine-check: pending a `coqc` toolchain (none installed here; nothing installed
-  system-wide per task constraints). Exact check command and install steps are in the README.
+  `admit`/`Admitted`. Checked with `rocq compile EasmTAL.v` (stdlib only).
+- Local machine-check: **DONE** — verified with The Rocq Prover 9.1.1 (`rocq compile EasmTAL.v`
+  exits 0, silent, produces `EasmTAL.vo`). The definite-initialization soundness of the EASM core
+  is now a machine-checked theorem, not only property-tested. Imports use the Rocq 9 `Stdlib.*`
+  namespace; see the README for the toolchain note and the `make` target.

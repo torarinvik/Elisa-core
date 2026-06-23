@@ -16,11 +16,11 @@
 (*      register (no stuck-by-uninitialized-read), and a well-typed      *)
 (*      sequence runs to completion without getting stuck.               *)
 (*                                                                       *)
-(*  Checked with: coqc EasmTAL.v   (no admits / no Admitted).            *)
+(*  Checked with: rocq compile EasmTAL.v  (Rocq 9.1; no admits/Admitted).*)
 (* ===================================================================== *)
 
-Require Import Coq.Lists.List.
-Require Import Coq.Arith.PeanoNat.
+Require Import Stdlib.Lists.List.
+Require Import Stdlib.Arith.PeanoNat.
 Import ListNotations.
 
 (* ------------------------------------------------------------------ *)
