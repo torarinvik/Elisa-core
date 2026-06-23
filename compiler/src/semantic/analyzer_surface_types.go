@@ -119,6 +119,19 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "%s expects 1 type argument, got %d", expr.Name, len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
 		}
+		// docs/107 overlay: capture the carrier's bare type-arg name verbatim. When the name is a
+		// registered guest-memory overlay layout rather than a declared Elisa type, the name is
+		// what the overlay accessor resolves against, and we must NOT error on the missing type.
+		layoutName := bareNamedTypeName(expr.TypeArgs[0])
+		if layoutName != "" && a.overlayLayouts[layoutName] != nil {
+			space := "guest"
+			if expr.Name == "HostPtr" {
+				space = "host"
+			} else if expr.Name == "NativeMappedGuestPtr" {
+				space = "native_mapped_guest"
+			}
+			return &AddressSpaceType{Space: space, Elem: a.namedTypes["uintptr"], Storage: a.namedTypes["uintptr"], LayoutName: layoutName}
+		}
 		elem := a.resolveType(expr.TypeArgs[0])
 		if IsInvalidType(elem) {
 			return invalidType
@@ -129,7 +142,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 		} else if expr.Name == "NativeMappedGuestPtr" {
 			space = "native_mapped_guest"
 		}
-		return &AddressSpaceType{Space: space, Elem: elem, Storage: a.namedTypes["uintptr"]}
+		return &AddressSpaceType{Space: space, Elem: elem, Storage: a.namedTypes["uintptr"], LayoutName: layoutName}
 	case "RowId":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			a.errorf(expr.Pos(), "RowId expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))

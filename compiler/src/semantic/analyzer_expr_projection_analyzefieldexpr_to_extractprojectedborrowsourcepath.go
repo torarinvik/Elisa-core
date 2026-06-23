@@ -23,6 +23,16 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		}
 	}
 	objType := a.analyzeExpr(expr.Object)
+	// docs/107 guest-memory overlay: a `carrier.field` where carrier is a `GuestVAddr[L]` whose
+	// layout L is registered is NOT an ordinary struct field access — it is the field half of an
+	// overlay accessor `carrier.field[mem]`. The IndexExpr hook (tryDesugarGuestOverlayIndex) does
+	// the real lowering; here we just resolve the bare FieldExpr to the field's element type so the
+	// incidental expression walks (alias/provenance/region pre-passes) do not raise a spurious
+	// "field access requires struct type" on the overlay carrier.
+	if overlayType, ok := a.guestOverlayFieldType(objType, expr.Field); ok {
+		a.exprTypes[expr] = overlayType
+		return overlayType
+	}
 	if constType, ok := objType.(*ConstValueType); ok && constType != nil {
 		if expr.Field == "count" && (constType.Value.Kind == ConstList || constType.Value.Kind == ConstTuple) {
 			result := a.namedTypes["usize"]

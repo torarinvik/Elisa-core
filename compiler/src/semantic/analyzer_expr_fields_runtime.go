@@ -13,6 +13,13 @@ func (a *Analyzer) lookupFieldNoError(objType Type, fieldName string) (Field, bo
 }
 
 func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, pos lexer.Pos, emitDiagnostics bool) (Field, bool) {
+	// docs/107 guest-memory overlay: a field of a `GuestVAddr[L]` overlay carrier resolves to the
+	// field's element type. The actual lowering happens in the IndexExpr accessor hook; this branch
+	// keeps every field-resolving pass (alias/affine/mutation) from raising a spurious struct-field
+	// error on the overlay carrier when it walks the bare `carrier.field`.
+	if overlayType, ok := a.guestOverlayFieldType(objType, fieldName); ok {
+		return Field{Name: fieldName, Type: overlayType, Mutable: false}, true
+	}
 	if field, ok := cstrSyntheticField(objType, fieldName); ok {
 		return field, true
 	}

@@ -1,0 +1,154 @@
+package semantic
+
+import (
+	"elisacore/src/ast"
+	"elisacore/src/easm"
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
+	"strings"
+	"testing"
+)
+
+// orbisProcParamLayout is the docs/107 §(a)/§(d) example layout: the OrbisProcParam guest struct
+// whose `size`@0 and `mem_param`@64 fields the emulator's linker reads by computed address.
+func orbisProcParamLayout() *easm.Layout {
+	return &easm.Layout{
+		Name: "OrbisProcParam",
+		Fields: []easm.LayoutField{
+			{Offset: 0, Name: "size", Type: "u64", Width: 8},
+			{Offset: 64, Name: "mem_param", Type: "u64", Width: 8},
+			{Offset: 4, Name: "magic", Type: "u32", Width: 4},
+		},
+	}
+}
+
+func analyzeOverlaySource(t *testing.T, src string) *Result {
+	t.Helper()
+	l := lexer.New("overlay.elisa", []byte(src))
+	tokens := l.Tokenize()
+	if errs := l.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile("overlay.elisa")
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{orbisProcParamLayout()}})
+}
+
+// findOverlayIndex finds the single overlay-rewritten IndexExpr (AsOverlayCall set) in a `return
+// EXPR` function body — sufficient for these focused tests (the accessor under test is the return
+// value of each function).
+func findOverlayIndex(result *Result) *ast.IndexExpr {
+	for _, decl := range result.ActiveFile().Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		for _, stmt := range fn.Body {
+			ret, ok := stmt.(*ast.ReturnStmt)
+			if !ok {
+				continue
+			}
+			if idx, ok := ret.Value.(*ast.IndexExpr); ok && idx.AsOverlayCall != nil {
+				return idx
+			}
+		}
+	}
+	return nil
+}
+
+// TestGuestOverlayReadDesugarsToReadU64 is the docs/107 increment 5a end-to-end test: a real .elisa
+// program reads a guest-memory field through a declared layout via `proc_param.mem_param[memory]`,
+// and the analyzer lowers it to the byte-identical MemoryManager_ReadU64(memory, proc_param + 64).
+func TestGuestOverlayReadDesugarsToReadU64(t *testing.T) {
+	result := analyzeOverlaySource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load_mem_param(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
+	return proc_param.mem_param[memory]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	idx := findOverlayIndex(result)
+	if idx == nil {
+		t.Fatal("expected an IndexExpr rewritten with AsOverlayCall")
+	}
+	call := idx.AsOverlayCall
+	fn, ok := call.Func.(*ast.Ident)
+	if !ok || fn.Name != "MemoryManager_ReadU64" {
+		t.Fatalf("expected lowering to MemoryManager_ReadU64, got %#v", call.Func)
+	}
+	if len(call.Args) != 2 {
+		t.Fatalf("expected 2 args (mem, base+offset), got %d", len(call.Args))
+	}
+	if mem, ok := call.Args[0].(*ast.Ident); !ok || mem.Name != "memory" {
+		t.Fatalf("expected first arg `memory`, got %#v", call.Args[0])
+	}
+	bin, ok := call.Args[1].(*ast.BinaryExpr)
+	if !ok || bin.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected `base + offset`, got %#v", call.Args[1])
+	}
+	off, ok := bin.Right.(*ast.IntLit)
+	if !ok || off.Value != "64" {
+		t.Fatalf("expected offset literal 64, got %#v", bin.Right)
+	}
+}
+
+func TestGuestOverlayZeroOffsetReadOmitsAddition(t *testing.T) {
+	result := analyzeOverlaySource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load_size(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
+	return proc_param.size[memory]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	idx := findOverlayIndex(result)
+	if idx == nil {
+		t.Fatal("expected overlay rewrite")
+	}
+	// offset 0: address is the bare cast base, no `+ 0`.
+	if _, ok := idx.AsOverlayCall.Args[1].(*ast.CastExpr); !ok {
+		t.Fatalf("expected zero-offset address to be the bare cast base, got %#v", idx.AsOverlayCall.Args[1])
+	}
+}
+
+func TestGuestOverlayUnknownFieldRejected(t *testing.T) {
+	result := analyzeOverlaySourceAllowingErrors(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
+	return proc_param.nope[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-unknown-field") {
+		t.Fatalf("expected overlay-unknown-field diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func TestGuestOverlayWidthMismatchRejected(t *testing.T) {
+	// `magic` is a u32 (4-byte) field, which has a ReadU32 form — so width itself is fine; assert a
+	// non-power-of-two width is rejected. Use a layout field of odd width.
+	odd := &easm.Layout{Name: "Odd", Fields: []easm.LayoutField{{Offset: 0, Name: "weird", Type: "u24", Width: 3}}}
+	l := lexer.New("overlay.elisa", []byte(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load(p: GuestVAddr[Odd], memory: uintptr) -> u64:
+	return p.weird[memory]
+`))
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	file := p.ParseFile("overlay.elisa")
+	result := AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{odd}})
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-width-mismatch") {
+		t.Fatalf("expected overlay-field-width-mismatch diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
+	t.Helper()
+	l := lexer.New("overlay.elisa", []byte(src))
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	file := p.ParseFile("overlay.elisa")
+	return AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{orbisProcParamLayout()}})
+}

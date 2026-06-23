@@ -659,6 +659,11 @@ type IndexExpr struct {
 	// `fn[A, B]` SpecializeExpr the parser produces). When non-nil, codegen emits this instead
 	// of an index. nil for ordinary indexing.
 	AsSpecialize *SpecializeExpr
+	// AsOverlayCall is set by the analyzer when `base.field[mem]` over a `GuestVAddr[L]` carrier is
+	// recognized as a docs/107 typed guest-memory overlay accessor. When non-nil, codegen emits this
+	// MemoryManager_ReadU<N>(mem, base + offset) call instead of an index, making the lowered code
+	// byte-identical to the hand-written read. nil for ordinary indexing.
+	AsOverlayCall *CallExpr
 }
 type SliceExpr struct {
 	Position lexer.Pos

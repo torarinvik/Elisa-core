@@ -15,6 +15,12 @@ func exprAsSpecializeTypeArg(e ast.Expr) (ast.TypeExpr, bool) {
 }
 
 func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
+	// docs/107 typed guest-memory overlay: `base.field[mem]` over a `GuestVAddr[L]` carrier whose
+	// layout L is registered is a checked field accessor, not an ordinary index. Recognize and
+	// desugar it before analyzing the FieldExpr object (which has no real struct field to resolve).
+	if result, handled := a.tryDesugarGuestOverlayIndex(expr); handled {
+		return result
+	}
 	objType := a.analyzeExpr(expr.Object)
 	// `fn[T]` over a generic function is not an index (functions are not indexable) -- it is a
 	// single-type-arg value specialization, the counterpart of the multi-arg `fn[A, B]` the parser

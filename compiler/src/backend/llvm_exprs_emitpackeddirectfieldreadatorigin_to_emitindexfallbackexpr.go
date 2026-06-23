@@ -505,6 +505,12 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 		// value specialization. Emit the materialized generic-function value, not an index.
 		return s.emitSpecializeExpr(expr.AsSpecialize)
 	}
+	if expr != nil && expr.AsOverlayCall != nil {
+		// docs/107 typed guest-memory overlay: `base.field[mem]` over a `GuestVAddr[L]` carrier was
+		// rewritten by the analyzer to the equivalent MemoryManager_ReadU<N>(mem, base + offset)
+		// call. Emit that call so codegen is byte-identical to the hand-written read (§(e)).
+		return s.emitCallExpr(expr.AsOverlayCall)
+	}
 	if expr != nil && expr.Fallback != nil {
 		return s.emitIndexFallbackExpr(expr)
 	}

@@ -48,6 +48,11 @@ type AddressSpaceType struct {
 	Space   string
 	Elem    Type
 	Storage Type
+	// LayoutName is the bare name written as the carrier's type argument
+	// (`GuestVAddr[OrbisProcParam]` -> "OrbisProcParam"). It is retained verbatim so the
+	// docs/107 guest-memory overlay can resolve the carrier against a registered `easm.Layout`
+	// even when the name is not a declared Elisa type. Empty when the type arg was not a bare name.
+	LayoutName string
 }
 
 type TypeParamType struct {

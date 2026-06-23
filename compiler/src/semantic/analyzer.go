@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/easm"
 	"elisacore/src/grammar"
 	"elisacore/src/lexer"
 )
@@ -83,6 +84,11 @@ type Analyzer struct {
 	file        *ast.File
 	diagnostics []Diagnostic
 	namedTypes  map[string]Type
+	// overlayLayouts registers the docs/107 typed guest-memory overlay layouts by name. A
+	// `GuestVAddr[L]` carrier whose L is a key here gets `base.field[mem]` field-access desugared
+	// to MemoryManager_ReadU<N>/WriteU<N> against L's declared field offsets/widths. Empty unless
+	// overlay layouts are supplied via AnalyzeOptions.OverlayLayouts.
+	overlayLayouts map[string]*easm.Layout
 	// aliasRefinements keeps a type alias's REFINEMENT target expr (`type TileX = i32 is Bounded[..]`)
 	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
 	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).
@@ -650,6 +656,10 @@ type AnalyzeOptions struct {
 	// locations). Read-only observability surfaced on Result.RequiresReport; OFF by default and with
 	// ZERO effect on existing errors/lints — it only accumulates alongside the discharge pass.
 	RequiresReport bool
+	// OverlayLayouts registers docs/107 typed guest-memory overlay layouts (keyed by name) so a
+	// `GuestVAddr[L]` carrier can have `base.field[mem]` field accesses checked against L and
+	// desugared to MemoryManager_ReadU<N>/WriteU<N>. Nil/empty disables the overlay accessor.
+	OverlayLayouts []*easm.Layout
 }
 
 func Analyze(file *ast.File) *Result {
@@ -758,6 +768,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		smtEnabled:                        options.EnableSMT,
 		smtBinary:                         options.SMTSolverBinary,
 		recordDeathCohortsOpt:             options.RecordDeathTimeCohorts,
+		overlayLayouts:                    overlayLayoutRegistry(options.OverlayLayouts),
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
