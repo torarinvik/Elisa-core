@@ -23,9 +23,13 @@ progress/preservation theorems. We mechanize exactly that slice.
 
 ### The model (faithful to the verifier)
 
-- **Abstract state `Γ`** — `reg -> bool` (`absstate`), mirroring `LiveRegs`: `true` = Defined.
-  Writing a register defines it (`adefine`), matching `state.LiveRegs[canonical] = true`
-  ("instruction writes a defined result here", `easm.go:1278`).
+- **Abstract state `Γ`** — a record `{ aregs : reg -> bool; aflags : bool }` (`absstate`).
+  `aregs` mirrors `LiveRegs` (`true` = Defined); writing a register defines it (`adefine`),
+  matching `state.LiveRegs[canonical] = true` ("instruction writes a defined result here",
+  `easm.go:1278`). `aflags` is the **EFLAGS-defined slot** — the first widening from this
+  document's path. It is DEFINED by ALU ops and PRESERVED by mov, mirroring
+  `opRules.ClobbersFlags` (`easm_oprules.go` / `instructionClobbersFlags`, `easm.go:3013`):
+  add/sub/and/xor/inc/dec carry `ClobbersFlags=true`, mov does not.
 - **Instructions** — `mov` (reg/imm), `add`, `sub`, `and`, `xor` (two-operand), `inc`, `dec`
   (one-operand read-modify-write): the q-suffix GPR/ALU subset, with the same read/define
   effect shape the `opRules` table declares in `compiler/src/easm/easm_oprules.go`.
@@ -34,11 +38,14 @@ progress/preservation theorems. We mechanize exactly that slice.
   Defined in `Γ`; reading an Undefined register means *no rule applies* = ill-typed = stuck.
   RMW ops additionally require the destination already Defined. The destination is Defined
   in `Γ'`.
-- **Concrete semantics** — a register file `reg -> option nat` (`None` = physically
-  undefined). `step` returns `None` exactly when an instruction reads an undefined register
-  (a stuck read); otherwise the defined result.
-- **`rho ⊨ Γ`** (`models`) — every Defined-in-`Γ` register is physically defined in `rho`;
-  i.e. `Γ` is a sound under-approximation of physical definedness.
+- **Concrete semantics** — a machine `{ rregs : reg -> option nat; rflags : option unit }`
+  (`None` = physically undefined). `step` returns `None` exactly when an instruction reads an
+  undefined register (a stuck read); otherwise the defined result. ALU ops set `rflags` to
+  `Some tt` (flags now physically defined); mov leaves `rflags` untouched. The flags VALUE is
+  `unit` because the modeled subset has no flag-reading op — only definedness is observable.
+- **`rho ⊨ Γ`** (`models`) — every Defined-in-`Γ` register is physically defined in `rho`,
+  AND if `aflags Γ = true` the machine's flags are physically defined; i.e. `Γ` is a sound
+  under-approximation of physical definedness on both slots.
 
 ### The theorems (no `admit` / `Admitted`)
 
@@ -46,6 +53,10 @@ progress/preservation theorems. We mechanize exactly that slice.
   ⇒ `rho' ⊨ Γ'`.
 - **PROGRESS** (`progress`): `Γ ⊢ i ⇒ Γ'` ∧ `rho ⊨ Γ` ⇒ `step rho i` succeeds — a well-typed
   instruction never gets stuck on an uninitialized read.
+- **FLAGS FAITHFULNESS** (`alu_defines_flags`, `mov_preserves_flags`): an ALU op defines the
+  flags slot in the post-state (`aflags Γ' = true`) and mov preserves it
+  (`aflags Γ' = aflags Γ`) — exactly what `opRules.ClobbersFlags` declares. `preservation`
+  additionally shows this abstract flags fact is sound w.r.t. the machine's physical flags.
 - **MERGE SOUNDNESS** (`merge_soundness`): typing a post-merge block under the meet `ameet g1 g2`
   (pointwise `&&`) of predecessor states is sound from a machine that arrived via *either*
   predecessor. `meet_demanded_on_all_preds` is the exact fact the Go `checkMergeConsistency` relies
@@ -105,8 +116,9 @@ from the fuzzer so the correspondence stays exact rather than spuriously divergi
 
 - Words are `nat` and `and`/`xor` use placeholder value functions: the definite-init theorem
   is about *definedness*, independent of the computed value.
-- Flags, `KnownUInt`, `FS`, `StackMod16` are not modeled — orthogonal to the
-  uninitialized-read guarantee.
+- Flags *definedness* IS now modeled (`aflags`); flag *values* and flag-reading ops are not —
+  the modeled subset has no `jcc`/`setcc`/`cmov`, so only definedness is observable. `KnownUInt`,
+  `FS`, `StackMod16` remain unmodeled — orthogonal to the uninitialized-read guarantee.
 - Only straight-line blocks (no labels/jumps/joins). The verifier's `checkMergeConsistency`
   (docs/104 increment 2 brick 2) is the CFG-level analogue and is the natural extension.
 
@@ -116,8 +128,10 @@ These are recorded honestly in `formal/easm-tal/README.md` under "What is and is
 
 In rough order of leverage:
 
-1. **Flags as a lattice slot** — model `ClobbersFlags` from `opRules` so flag-read ops are
-   covered.
+1. **Flags as a lattice slot** — *done.* `aflags` models `ClobbersFlags` from `opRules`: ALU
+   ops define the flags slot, mov preserves it, the meet extends pointwise, and `preservation`
+   shows it sound vs. the concrete flags (`alu_defines_flags` / `mov_preserves_flags`). The
+   remaining step is a flag-READING op (`jcc`/`cmov`) whose rule requires `aflags Γ = true`.
 2. **Control flow + dataflow join** — generalize the sequence relation to a labeled CFG with a
    pointwise-`&&` meet at merges; prove the join is a lower bound and lift progress/
    preservation per edge. This makes `checkMergeConsistency` a proven theorem rather than a

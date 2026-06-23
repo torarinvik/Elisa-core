@@ -23,6 +23,20 @@ package easm
 //
 // If the Go walk and the Coq model ever drift on this subset, this test fails,
 // turning the hand-maintained correspondence into a tested one.
+//
+// FLAGS SLOT (EasmTAL.v `aflags`, docs/106): the Coq model now also carries a
+// flags-defined lattice slot — ALU ops (add/sub/and/xor/inc/dec) DEFINE it,
+// mov PRESERVES it — mirroring opRules.ClobbersFlags. We mirror that slot here
+// (coqState.flags / coqHasType) and assert the model's own flags invariant
+// (ALU defines, mov preserves) holds on every fuzzed body, so the Go mirror
+// stays a faithful transcription of the EXTENDED relation. We do NOT cross-
+// check flag definedness against the real verifier: machineFactState exposes
+// no flags-defined fact (it only enforces, separately, that ClobbersFlags ops
+// list `cc` in their clobbers — the cc-clobber-missing check, easm.go), and
+// the modeled subset has no flag-READING op. So flags definedness is not an
+// observable verifier state to compare against; asserting equality would be
+// asserting something the verifier does not expose. The register-definedness
+// correspondence below remains the cross-checked invariant.
 
 import (
 	"fmt"
@@ -63,41 +77,59 @@ func coqOpOk(g [8]bool, o coqOperand) bool {
 	return g[o.reg]
 }
 
-// coqAdefine mirrors `adefine g r = aset g r true` (EasmTAL.v:105): defining a
-// register sets it Defined, leaving the rest untouched.
-func coqAdefine(g [8]bool, r int) [8]bool {
-	g[r] = true
+// coqState mirrors the EXTENDED EasmTAL.v `absstate` record: per-register
+// definedness (regs, == aregs) plus the EFLAGS-defined slot (flags == aflags).
+type coqState struct {
+	regs  [8]bool
+	flags bool
+}
+
+// coqAdefine mirrors `adefine g r = aset g r true` (EasmTAL.v): defining a
+// register sets it Defined, leaving the rest — including the flags slot —
+// untouched (aset_flags / adefine_flags).
+func coqAdefine(g coqState, r int) coqState {
+	g.regs[r] = true
+	return g
+}
+
+// coqAdefineCC mirrors `adefine_cc g r = asetflags (adefine g r) true`
+// (EasmTAL.v): an ALU op defines BOTH the destination register AND the flags
+// slot — the abstract image of opRules.ClobbersFlags=true.
+func coqAdefineCC(g coqState, r int) coqState {
+	g.regs[r] = true
+	g.flags = true
 	return g
 }
 
 // coqHasType mirrors `has_type : absstate -> instr -> absstate -> Prop`
-// (EasmTAL.v:137-158). ok=false means NO rule applies = ill-typed = stuck
-// (the abstract counterpart of a stuck uninitialized read). On ok=true the
-// returned state is g' such that has_type g i g'.
-func coqHasType(g [8]bool, i coqInstr) (gPrime [8]bool, ok bool) {
+// (EasmTAL.v). ok=false means NO rule applies = ill-typed = stuck (the abstract
+// counterpart of a stuck uninitialized read). On ok=true the returned state is
+// g' such that has_type g i g'. mov uses adefine (flags preserved); the ALU ops
+// use adefine_cc (flags defined), per ClobbersFlags.
+func coqHasType(g coqState, i coqInstr) (gPrime coqState, ok bool) {
 	switch i.kind {
-	case "mov": // T_mov: op_ok g s = true -> g' = adefine g d
-		if !coqOpOk(g, i.src) {
+	case "mov": // T_mov: op_ok g s = true -> g' = adefine g d   (no ClobbersFlags)
+		if !coqOpOk(g.regs, i.src) {
 			return g, false
 		}
 		return coqAdefine(g, i.dst), true
-	case "add", "sub", "and", "xor": // T_{add,sub,and,xor}: g d = true /\ op_ok g s = true
-		if !g[i.dst] || !coqOpOk(g, i.src) {
+	case "add", "sub", "and", "xor": // T_{add,sub,and,xor}: g d = true /\ op_ok g s = true; g' = adefine_cc g d
+		if !g.regs[i.dst] || !coqOpOk(g.regs, i.src) {
 			return g, false
 		}
-		return coqAdefine(g, i.dst), true
-	case "inc", "dec": // T_{inc,dec}: g d = true
-		if !g[i.dst] {
+		return coqAdefineCC(g, i.dst), true
+	case "inc", "dec": // T_{inc,dec}: g d = true; g' = adefine_cc g d
+		if !g.regs[i.dst] {
 			return g, false
 		}
-		return coqAdefine(g, i.dst), true
+		return coqAdefineCC(g, i.dst), true
 	}
 	return g, false
 }
 
-// coqSeqType mirrors `seq_type` (EasmTAL.v:161-166): fold has_type along the
-// list, stopping (stuck) at the first instruction with no applicable rule.
-func coqSeqType(g [8]bool, insts []coqInstr) (gFinal [8]bool, ok bool) {
+// coqSeqType mirrors `seq_type` (EasmTAL.v): fold has_type along the list,
+// stopping (stuck) at the first instruction with no applicable rule.
+func coqSeqType(g coqState, insts []coqInstr) (gFinal coqState, ok bool) {
 	for _, i := range insts {
 		var step bool
 		g, step = coqHasType(g, i)
@@ -114,7 +146,31 @@ func TestEASMGoCoqRelationFidelity(t *testing.T) {
 		var g0 [8]bool
 		insts := generateCoqFidelityBody(rng, &g0)
 
-		coqFinal, coqOK := coqSeqType(g0, insts)
+		// Coq entry state: declared-input regs Defined, flags Undefined (no
+		// flag-writing op has run yet on entry — aempty's flags slot is false).
+		coqFinal, coqOK := coqSeqType(coqState{regs: g0, flags: false}, insts)
+
+		// Flags-slot invariant (the EXTENDED relation, not cross-checked against
+		// the verifier since it exposes no flags fact — see file header): on an
+		// accepted body, the final flags slot is Defined iff the LAST modeled
+		// instruction clobbers flags (any ALU op), and Undefined only if the
+		// body is empty or ends in a non-clobbering op (mov) with flags never
+		// established earlier. We assert the local recomputation matches.
+		if coqOK {
+			wantFlags := false
+			for _, in := range insts {
+				switch in.kind {
+				case "mov":
+					// preserves: leaves wantFlags as-is
+				default: // ALU: add/sub/and/xor/inc/dec define flags
+					wantFlags = true
+				}
+			}
+			if coqFinal.flags != wantFlags {
+				t.Fatalf("case %d: Coq flags-slot mismatch: got %v want %v\nbody:\n%s",
+					c, coqFinal.flags, wantFlags, wrapCoqFidelityBody(insts, g0))
+			}
+		}
 
 		src := wrapCoqFidelityBody(insts, g0)
 
@@ -147,9 +203,9 @@ func TestEASMGoCoqRelationFidelity(t *testing.T) {
 		if coqOK && sawState {
 			for idx, name := range coqFidelityRegs {
 				goDefined := abstract.LiveRegs[name]
-				if goDefined != coqFinal[idx] {
+				if goDefined != coqFinal.regs[idx] {
 					t.Fatalf("case %d: definedness mismatch for %s: Coq=%v Go=%v\nbody:\n%s\nLiveRegs: %#v",
-						c, name, coqFinal[idx], goDefined, src, abstract.LiveRegs)
+						c, name, coqFinal.regs[idx], goDefined, src, abstract.LiveRegs)
 				}
 			}
 		}

@@ -69,9 +69,10 @@ Proof. destruct a, b; simpl; intro H; (discriminate || (intro Heq; discriminate)
 (*  (compiler/src/easm/easm_oprules.go):                               *)
 (*    mov(reg/imm), add, sub, and, xor (two-operand dst,src)           *)
 (*    inc, dec (one-operand dst, read-modify-write)                    *)
-(*  All of add/sub/and/xor clobber flags in the real ISA; flags are    *)
-(*  not part of the definite-init lattice we formalize, so they are    *)
-(*  elided (see README "What is not covered").                         *)
+(*  All of add/sub/and/xor/inc/dec clobber flags in the real ISA       *)
+(*  (opRules.ClobbersFlags). Flags DEFINEDNESS is now modeled as the    *)
+(*  `aflags` lattice slot: ALU ops define it, mov preserves it. See     *)
+(*  the absstate definition and alu_defines_flags/mov_preserves_flags.  *)
 (* ------------------------------------------------------------------ *)
 
 Inductive operand : Type :=
@@ -88,32 +89,62 @@ Inductive instr : Type :=
   | Idec : reg -> instr.             (* dst <- dst - 1     (reads dst)     *)
 
 (* ------------------------------------------------------------------ *)
-(*  Abstract state Gamma : reg -> definedness                          *)
+(*  Abstract state Gamma : per-register definedness + a flags slot      *)
 (*                                                                     *)
-(*  Matches machineFactState.LiveRegs (a finite map reg -> bool, true  *)
-(*  meaning "established/Defined"). We represent it as a total          *)
-(*  function reg -> bool; absence in the Go map = Undefined = false.    *)
+(*  The register map matches machineFactState.LiveRegs (a finite map    *)
+(*  reg -> bool, true meaning "established/Defined"); absence in the Go  *)
+(*  map = Undefined = false. We additionally carry ONE extra lattice     *)
+(*  bit, `aflags`, tracking whether the EFLAGS condition codes are       *)
+(*  Defined at this program point. This is the first item of docs/106's  *)
+(*  "Path to widening the mechanized subset" (flags as a lattice slot).  *)
+(*                                                                       *)
+(*  Faithfulness note: the Go verifier records, per opcode, a            *)
+(*  ClobbersFlags bit (easm_oprules.go opRules / instructionClobbersFlags*)
+(*  easm.go:3013). The ALU ops add/sub/and/xor/inc/dec carry             *)
+(*  ClobbersFlags=true; mov(reg/imm) carries ClobbersFlags=false. The    *)
+(*  flags slot here is DEFINED by exactly the clobbering ops and         *)
+(*  PRESERVED across mov — mirroring that table. (The verifier does not  *)
+(*  expose a flags-defined fact in machineFactState, nor a flag-reading  *)
+(*  op in the modeled subset; we therefore do not invent a flag read —   *)
+(*  see preservation_flags below and the README.)                        *)
 (* ------------------------------------------------------------------ *)
 
-Definition absstate := reg -> bool.
+Record absstate := mkabs {
+  aregs  : reg -> bool;   (* per-register definite-init (LiveRegs) *)
+  aflags : bool           (* EFLAGS condition codes Defined?        *)
+}.
 
-Definition aempty : absstate := fun _ => false.
+(* coercion-free accessor for reading a register's definedness *)
+Definition aget (g : absstate) (r : reg) : bool := aregs g r.
+
+Definition aempty : absstate := mkabs (fun _ => false) false.
 
 Definition aset (g : absstate) (r : reg) (b : bool) : absstate :=
-  fun r' => if reg_eqb r r' then b else g r'.
+  mkabs (fun r' => if reg_eqb r r' then b else aregs g r') (aflags g).
 
 Definition adefine (g : absstate) (r : reg) : absstate := aset g r true.
 
-Lemma aset_same : forall g r b, aset g r b r = b.
-Proof. intros. unfold aset. rewrite reg_eqb_refl. reflexivity. Qed.
+(* set the flags slot (Defined when the op clobbers flags). *)
+Definition asetflags (g : absstate) (b : bool) : absstate :=
+  mkabs (aregs g) b.
 
-Lemma aset_other : forall g r b r', r <> r' -> aset g r b r' = g r'.
+Lemma aset_same : forall g r b, aget (aset g r b) r = b.
+Proof. intros. unfold aget, aset. simpl. rewrite reg_eqb_refl. reflexivity. Qed.
+
+Lemma aset_other : forall g r b r', r <> r' -> aget (aset g r b) r' = aget g r'.
 Proof.
-  intros g r b r' H. unfold aset.
+  intros g r b r' H. unfold aget, aset. simpl.
   destruct (reg_eqb r r') eqn:E.
   - apply reg_eqb_true in E. contradiction.
   - reflexivity.
 Qed.
+
+(* setting/defining a register leaves the flags slot untouched. *)
+Lemma aset_flags : forall g r b, aflags (aset g r b) = aflags g.
+Proof. intros. unfold aset. reflexivity. Qed.
+
+Lemma adefine_flags : forall g r, aflags (adefine g r) = aflags g.
+Proof. intros. apply aset_flags. Qed.
 
 (* ------------------------------------------------------------------ *)
 (*  The abstract typing relation  Gamma |- instr => Gamma'             *)
@@ -130,32 +161,38 @@ Qed.
 (* an operand is "abstractly readable" under Gamma *)
 Definition op_ok (g : absstate) (o : operand) : bool :=
   match o with
-  | OReg r => g r
+  | OReg r => aget g r
   | OImm _ => true
   end.
+
+(* The flags-defining wrapper: an ALU op defines BOTH its destination register
+   and the flags slot. mov defines only the destination, leaving flags alone.
+   This is the abstract image of opRules.ClobbersFlags. *)
+Definition adefine_cc (g : absstate) (r : reg) : absstate :=
+  asetflags (adefine g r) true.
 
 Inductive has_type : absstate -> instr -> absstate -> Prop :=
   | T_mov : forall g d s,
       op_ok g s = true ->
-      has_type g (Imov d s) (adefine g d)
+      has_type g (Imov d s) (adefine g d)          (* mov: no ClobbersFlags *)
   | T_add : forall g d s,
-      g d = true -> op_ok g s = true ->
-      has_type g (Iadd d s) (adefine g d)
+      aget g d = true -> op_ok g s = true ->
+      has_type g (Iadd d s) (adefine_cc g d)        (* ALU: ClobbersFlags     *)
   | T_sub : forall g d s,
-      g d = true -> op_ok g s = true ->
-      has_type g (Isub d s) (adefine g d)
+      aget g d = true -> op_ok g s = true ->
+      has_type g (Isub d s) (adefine_cc g d)
   | T_and : forall g d s,
-      g d = true -> op_ok g s = true ->
-      has_type g (Iand d s) (adefine g d)
+      aget g d = true -> op_ok g s = true ->
+      has_type g (Iand d s) (adefine_cc g d)
   | T_xor : forall g d s,
-      g d = true -> op_ok g s = true ->
-      has_type g (Ixor d s) (adefine g d)
+      aget g d = true -> op_ok g s = true ->
+      has_type g (Ixor d s) (adefine_cc g d)
   | T_inc : forall g d,
-      g d = true ->
-      has_type g (Iinc d) (adefine g d)
+      aget g d = true ->
+      has_type g (Iinc d) (adefine_cc g d)
   | T_dec : forall g d,
-      g d = true ->
-      has_type g (Idec d) (adefine g d).
+      aget g d = true ->
+      has_type g (Idec d) (adefine_cc g d).
 
 (* Typing of a straight-line sequence (list of instructions). *)
 Inductive seq_type : absstate -> list instr -> absstate -> Prop :=
@@ -174,37 +211,67 @@ Inductive seq_type : absstate -> list instr -> absstate -> Prop :=
 (*  approximates.                                                      *)
 (* ------------------------------------------------------------------ *)
 
-Definition rfile := reg -> option nat.
+(* The concrete machine carries the register file AND the flags. flags = None
+   means the condition codes are physically undefined/garbage (e.g. on function
+   entry, before any flag-writing op has run); Some tt means defined. We model
+   the flags VALUE as unit, since the modeled subset has no flag-reading op:
+   only flag DEFINEDNESS is observable, matching the verifier. *)
+Record rfile := mkrf {
+  rregs  : reg -> option nat;
+  rflags : option unit
+}.
 
 Definition rfset (rho : rfile) (r : reg) (v : nat) : rfile :=
-  fun r' => if reg_eqb r r' then Some v else rho r'.
+  mkrf (fun r' => if reg_eqb r r' then Some v else rregs rho r') (rflags rho).
 
-Lemma rfset_same : forall rho r v, rfset rho r v r = Some v.
-Proof. intros. unfold rfset. rewrite reg_eqb_refl. reflexivity. Qed.
+(* an ALU op also defines the flags (sets them to Some tt). *)
+Definition rfsetf (rho : rfile) (r : reg) (v : nat) : rfile :=
+  mkrf (fun r' => if reg_eqb r r' then Some v else rregs rho r') (Some tt).
 
-Lemma rfset_other : forall rho r v r', r <> r' -> rfset rho r v r' = rho r'.
+Lemma rfset_same : forall rho r v, rregs (rfset rho r v) r = Some v.
+Proof. intros. unfold rfset. simpl. rewrite reg_eqb_refl. reflexivity. Qed.
+
+Lemma rfset_other : forall rho r v r', r <> r' -> rregs (rfset rho r v) r' = rregs rho r'.
 Proof.
-  intros rho r v r' H. unfold rfset.
+  intros rho r v r' H. unfold rfset. simpl.
   destruct (reg_eqb r r') eqn:E.
   - apply reg_eqb_true in E. contradiction.
   - reflexivity.
 Qed.
 
+Lemma rfset_flags : forall rho r v, rflags (rfset rho r v) = rflags rho.
+Proof. intros. reflexivity. Qed.
+
+Lemma rfsetf_same : forall rho r v, rregs (rfsetf rho r v) r = Some v.
+Proof. intros. unfold rfsetf. simpl. rewrite reg_eqb_refl. reflexivity. Qed.
+
+Lemma rfsetf_other : forall rho r v r', r <> r' -> rregs (rfsetf rho r v) r' = rregs rho r'.
+Proof.
+  intros rho r v r' H. unfold rfsetf. simpl.
+  destruct (reg_eqb r r') eqn:E.
+  - apply reg_eqb_true in E. contradiction.
+  - reflexivity.
+Qed.
+
+Lemma rfsetf_flags : forall rho r v, rflags (rfsetf rho r v) = Some tt.
+Proof. intros. reflexivity. Qed.
+
 (* Value of an operand in a concrete machine: None if it reads an
    undefined register (a STUCK read). *)
 Definition oval (rho : rfile) (o : operand) : option nat :=
   match o with
-  | OReg r => rho r
+  | OReg r => rregs rho r
   | OImm n => Some n
   end.
 
 (* Big-step evaluation: step rho i = Some rho' on success, None if the
    instruction reads an undefined register (gets stuck). This is the
    concrete counterpart of "ill-typed = stuck". *)
+(* ALU ops define the flags: they use rfsetf, which sets rflags to Some tt. *)
 Definition alu (f : nat -> nat -> nat) (rho : rfile) (d : reg) (o : operand)
   : option rfile :=
-  match rho d, oval rho o with
-  | Some a, Some b => Some (rfset rho d (f a b))
+  match rregs rho d, oval rho o with
+  | Some a, Some b => Some (rfsetf rho d (f a b))
   | _, _ => None
   end.
 
@@ -212,15 +279,15 @@ Definition step (rho : rfile) (i : instr) : option rfile :=
   match i with
   | Imov d s =>
       match oval rho s with
-      | Some v => Some (rfset rho d v)
+      | Some v => Some (rfset rho d v)         (* mov: flags preserved (rfset) *)
       | None => None
       end
   | Iadd d s => alu Nat.add rho d s
   | Isub d s => alu Nat.sub rho d s
   | Iand d s => alu (fun a b => a) rho d s   (* concrete bit-op shape irrelevant to safety *)
   | Ixor d s => alu (fun a b => a) rho d s
-  | Iinc d   => match rho d with Some a => Some (rfset rho d (S a)) | None => None end
-  | Idec d   => match rho d with Some a => Some (rfset rho d (Nat.pred a)) | None => None end
+  | Iinc d   => match rregs rho d with Some a => Some (rfsetf rho d (S a)) | None => None end
+  | Idec d   => match rregs rho d with Some a => Some (rfsetf rho d (Nat.pred a)) | None => None end
   end.
 
 Fixpoint run (rho : rfile) (is : list instr) : option rfile :=
@@ -241,27 +308,61 @@ Fixpoint run (rho : rfile) (is : list instr) : option rfile :=
 (*  definedness.)                                                      *)
 (* ------------------------------------------------------------------ *)
 
+(* models has TWO conjuncts now: the register conjunct (every Defined-in-g reg
+   is physically defined) AND the flags conjunct (if g says flags are Defined,
+   they are physically defined in rho). *)
 Definition models (rho : rfile) (g : absstate) : Prop :=
-  forall r, g r = true -> exists v, rho r = Some v.
+  (forall r, aget g r = true -> exists v, rregs rho r = Some v)
+  /\ (aflags g = true -> exists u, rflags rho = Some u).
+
+(* projections for convenience *)
+Lemma models_regs : forall rho g r,
+  models rho g -> aget g r = true -> exists v, rregs rho r = Some v.
+Proof. intros rho g r [Hr _] H. apply Hr. exact H. Qed.
+
+Lemma models_flags : forall rho g,
+  models rho g -> aflags g = true -> exists u, rflags rho = Some u.
+Proof. intros rho g [_ Hf] H. apply Hf. exact H. Qed.
 
 (* operand soundness: if op_ok abstractly, it has a concrete value *)
 Lemma op_ok_models : forall rho g o,
   models rho g -> op_ok g o = true -> exists v, oval rho o = Some v.
 Proof.
   intros rho g o Hm Hok. destruct o as [r | n]; simpl in *.
-  - apply Hm. exact Hok.
+  - apply (models_regs rho g r Hm). exact Hok.
   - exists n. reflexivity.
 Qed.
 
-(* defining a register preserves the models relation *)
+(* defining a register via mov (rfset / adefine) preserves the models relation.
+   Both sides leave the flags slot UNCHANGED, so the flags conjunct is carried
+   verbatim. *)
 Lemma models_define : forall rho g d v,
   models rho g -> models (rfset rho d v) (adefine g d).
 Proof.
-  intros rho g d v Hm r Hr. unfold adefine, aset in Hr.
-  destruct (reg_eqb d r) eqn:E.
-  - apply reg_eqb_true in E. subst. exists v. apply rfset_same.
-  - apply reg_eqb_false in E.
-    destruct (Hm r Hr) as [w Hw]. exists w. rewrite rfset_other; auto.
+  intros rho g d v [Hmr Hmf]. split.
+  - intros r Hr. unfold adefine, aset, aget in Hr. simpl in Hr.
+    destruct (reg_eqb d r) eqn:E.
+    + apply reg_eqb_true in E. subst. exists v. apply rfset_same.
+    + apply reg_eqb_false in E.
+      assert (Hr' : aget g r = true) by exact Hr.
+      destruct (Hmr r Hr') as [w Hw]. exists w. rewrite rfset_other; auto.
+  - rewrite adefine_flags. rewrite rfset_flags. exact Hmf.
+Qed.
+
+(* defining a register via an ALU op (rfsetf / adefine_cc) preserves models AND
+   establishes the flags conjunct: the post-state's flags slot is Defined (true)
+   and the concrete machine's flags are physically Some tt. *)
+Lemma models_define_cc : forall rho g d v,
+  models rho g -> models (rfsetf rho d v) (adefine_cc g d).
+Proof.
+  intros rho g d v [Hmr _]. split.
+  - intros r Hr. unfold adefine_cc, asetflags, adefine, aset, aget in Hr. simpl in Hr.
+    destruct (reg_eqb d r) eqn:E.
+    + apply reg_eqb_true in E. subst. exists v. apply rfsetf_same.
+    + apply reg_eqb_false in E.
+      assert (Hr' : aget g r = true) by exact Hr.
+      destruct (Hmr r Hr') as [w Hw]. exists w. rewrite rfsetf_other; auto.
+  - intros _. exists tt. apply rfsetf_flags.
 Qed.
 
 (* ================================================================== *)
@@ -281,19 +382,19 @@ Proof.
   - (* mov *) destruct (op_ok_models rho g s Hm H) as [v Hv].
     rewrite Hv. eauto.
   - (* add *) unfold alu.
-    destruct (Hm d H) as [a Ha]. rewrite Ha.
+    destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha.
     destruct (op_ok_models rho g s Hm H0) as [b Hb]. rewrite Hb. eauto.
   - (* sub *) unfold alu.
-    destruct (Hm d H) as [a Ha]. rewrite Ha.
+    destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha.
     destruct (op_ok_models rho g s Hm H0) as [b Hb]. rewrite Hb. eauto.
   - (* and *) unfold alu.
-    destruct (Hm d H) as [a Ha]. rewrite Ha.
+    destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha.
     destruct (op_ok_models rho g s Hm H0) as [b Hb]. rewrite Hb. eauto.
   - (* xor *) unfold alu.
-    destruct (Hm d H) as [a Ha]. rewrite Ha.
+    destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha.
     destruct (op_ok_models rho g s Hm H0) as [b Hb]. rewrite Hb. eauto.
-  - (* inc *) destruct (Hm d H) as [a Ha]. rewrite Ha. eauto.
-  - (* dec *) destruct (Hm d H) as [a Ha]. rewrite Ha. eauto.
+  - (* inc *) destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha. eauto.
+  - (* dec *) destruct (models_regs rho g d Hm H) as [a Ha]. rewrite Ha. eauto.
 Qed.
 
 (* ================================================================== *)
@@ -315,27 +416,60 @@ Proof.
     destruct (oval rho s) as [v|] eqn:Ev; [|discriminate].
     inversion Hstep; subst. apply models_define; auto.
   - (* add *) unfold alu in Hstep.
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
     destruct (oval rho s) as [b|] eqn:Eb; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    inversion Hstep; subst. apply models_define_cc; auto.
   - (* sub *) unfold alu in Hstep.
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
     destruct (oval rho s) as [b|] eqn:Eb; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    inversion Hstep; subst. apply models_define_cc; auto.
   - (* and *) unfold alu in Hstep.
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
     destruct (oval rho s) as [b|] eqn:Eb; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    inversion Hstep; subst. apply models_define_cc; auto.
   - (* xor *) unfold alu in Hstep.
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
     destruct (oval rho s) as [b|] eqn:Eb; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    inversion Hstep; subst. apply models_define_cc; auto.
   - (* inc *)
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
+    inversion Hstep; subst. apply models_define_cc; auto.
   - (* dec *)
-    destruct (rho d) as [a|] eqn:Ea; [|discriminate].
-    inversion Hstep; subst. apply models_define; auto.
+    destruct (rregs rho d) as [a|] eqn:Ea; [|discriminate].
+    inversion Hstep; subst. apply models_define_cc; auto.
+Qed.
+
+(* ================================================================== *)
+(*  FLAGS TRACKING IS FAITHFUL TO opRules.ClobbersFlags               *)
+(*                                                                    *)
+(*  These two corollaries pin down the flags slot's behavior, which   *)
+(*  is exactly what the Go opRules table declares per opcode:         *)
+(*   - an ALU op (ClobbersFlags=true) DEFINES the flags slot in the   *)
+(*     post-state (aflags g' = true), regardless of the pre-state;    *)
+(*   - mov (ClobbersFlags=false) PRESERVES the flags slot (aflags g'  *)
+(*     = aflags g): it neither establishes nor clears it.             *)
+(*  preservation (above) already shows these abstract facts are sound *)
+(*  w.r.t. the concrete flags (rflags): when the post-state claims    *)
+(*  flags Defined, the machine's flags are physically Some.           *)
+(* ================================================================== *)
+
+(* ALU ops define the flags slot in the abstract post-state. *)
+Theorem alu_defines_flags : forall g i g',
+  has_type g i g' ->
+  (forall d s, i <> Imov d s) ->
+  aflags g' = true.
+Proof.
+  intros g i g' Ht Hnmov.
+  inversion Ht; subst; try reflexivity.
+  - exfalso. eapply Hnmov. reflexivity.
+Qed.
+
+(* mov preserves the flags slot (does not clobber it). *)
+Theorem mov_preserves_flags : forall g d s g',
+  has_type g (Imov d s) g' ->
+  aflags g' = aflags g.
+Proof.
+  intros g d s g' Ht. inversion Ht; subst. apply adefine_flags.
 Qed.
 
 (* ================================================================== *)
@@ -384,12 +518,14 @@ Qed.
    ones it writes itself. *)
 Corollary no_stuck_from_empty : forall is g',
   seq_type aempty is g' ->
-  run (fun _ => None) is <> None.
+  run (mkrf (fun _ => None) None) is <> None.
 Proof.
   intros is g' Hseq.
   apply (no_stuck is aempty g').
   - exact Hseq.
-  - intros r Hr. unfold aempty in Hr. discriminate.
+  - split.
+    + intros r Hr. unfold aempty, aget in Hr. simpl in Hr. discriminate.
+    + intros Hf. unfold aempty in Hf. simpl in Hf. discriminate.
 Qed.
 
 (* ================================================================== *)
@@ -407,39 +543,72 @@ Qed.
 (*  without getting stuck.                                            *)
 (* ================================================================== *)
 
-(* The meet of two abstract states: a register is Defined only if Defined on BOTH. *)
-Definition ameet (g1 g2 : absstate) : absstate := fun r => andb (g1 r) (g2 r).
+(* The meet of two abstract states. The meet extends POINTWISE to BOTH lattice
+   slots: a register is Defined only if Defined on BOTH predecessors, and the
+   flags slot is Defined only if Defined on BOTH. This mirrors the verifier's
+   per-fact meet at merges (a fact survives only if established on every edge). *)
+Definition ameet (g1 g2 : absstate) : absstate :=
+  mkabs (fun r => andb (aregs g1 r) (aregs g2 r)) (andb (aflags g1) (aflags g2)).
 
-(* The meet is a lower bound of each predecessor (Defined-in-meet => Defined-in-pred). *)
-Lemma ameet_lb_l : forall g1 g2 r, ameet g1 g2 r = true -> g1 r = true.
-Proof. intros g1 g2 r H. unfold ameet in H. destruct (g1 r); simpl in H; [reflexivity | discriminate]. Qed.
+(* The register meet is a lower bound of each predecessor. *)
+Lemma ameet_lb_l : forall g1 g2 r, aget (ameet g1 g2) r = true -> aget g1 r = true.
+Proof. intros g1 g2 r H. unfold ameet, aget in *. simpl in H. destruct (aregs g1 r); simpl in H; [reflexivity | discriminate]. Qed.
 
-Lemma ameet_lb_r : forall g1 g2 r, ameet g1 g2 r = true -> g2 r = true.
-Proof. intros g1 g2 r H. unfold ameet in H. destruct (g1 r); simpl in H; [exact H | discriminate]. Qed.
+Lemma ameet_lb_r : forall g1 g2 r, aget (ameet g1 g2) r = true -> aget g2 r = true.
+Proof. intros g1 g2 r H. unfold ameet, aget in *. simpl in H. destruct (aregs g1 r); simpl in H; [exact H | discriminate]. Qed.
+
+(* The flags meet is a lower bound of each predecessor's flags slot too. *)
+Lemma ameet_flags_lb_l : forall g1 g2, aflags (ameet g1 g2) = true -> aflags g1 = true.
+Proof. intros g1 g2 H. unfold ameet in H. simpl in H. destruct (aflags g1); simpl in H; [reflexivity | discriminate]. Qed.
+
+Lemma ameet_flags_lb_r : forall g1 g2, aflags (ameet g1 g2) = true -> aflags g2 = true.
+Proof. intros g1 g2 H. unfold ameet in H. simpl in H. destruct (aflags g1); simpl in H; [exact H | discriminate]. Qed.
 
 (* checkMergeConsistency's core fact: a register the post-merge code DEMANDS (reads, hence must be
    Defined in the meet) is established on EVERY predecessor edge -- not just the linear fall-through. *)
 Corollary meet_demanded_on_all_preds : forall g1 g2 r,
-  ameet g1 g2 r = true -> g1 r = true /\ g2 r = true.
+  aget (ameet g1 g2) r = true -> aget g1 r = true /\ aget g2 r = true.
 Proof. intros g1 g2 r H. split; [apply (ameet_lb_l g1 g2 r H) | apply (ameet_lb_r g1 g2 r H)]. Qed.
 
-(* The meet is the GREATEST lower bound: any state below both predecessors is below the meet. So the
-   verifier loses no information it could soundly keep -- the join is as precise as soundness allows. *)
+(* The same fact for flags: flags demanded after a merge are established on every edge. *)
+Corollary meet_flags_demanded_on_all_preds : forall g1 g2,
+  aflags (ameet g1 g2) = true -> aflags g1 = true /\ aflags g2 = true.
+Proof. intros g1 g2 H. split; [apply (ameet_flags_lb_l g1 g2 H) | apply (ameet_flags_lb_r g1 g2 H)]. Qed.
+
+(* The meet is the GREATEST lower bound (registers AND flags): any state below both predecessors is
+   below the meet. So the verifier loses no information it could soundly keep. *)
 Lemma ameet_glb : forall g g1 g2,
-  (forall r, g r = true -> g1 r = true) ->
-  (forall r, g r = true -> g2 r = true) ->
-  (forall r, g r = true -> ameet g1 g2 r = true).
+  (forall r, aget g r = true -> aget g1 r = true) ->
+  (forall r, aget g r = true -> aget g2 r = true) ->
+  (forall r, aget g r = true -> aget (ameet g1 g2) r = true).
 Proof.
-  intros g g1 g2 H1 H2 r Hr. unfold ameet.
+  intros g g1 g2 H1 H2 r Hr. unfold ameet, aget in *. simpl.
   rewrite (H1 r Hr). rewrite (H2 r Hr). reflexivity.
 Qed.
 
-(* A concrete state modeling either predecessor models the meet (fewer obligations). *)
+Lemma ameet_flags_glb : forall g g1 g2,
+  (aflags g = true -> aflags g1 = true) ->
+  (aflags g = true -> aflags g2 = true) ->
+  (aflags g = true -> aflags (ameet g1 g2) = true).
+Proof.
+  intros g g1 g2 H1 H2 Hr. unfold ameet. simpl.
+  rewrite (H1 Hr). rewrite (H2 Hr). reflexivity.
+Qed.
+
+(* A concrete state modeling either predecessor models the meet (fewer obligations on BOTH slots). *)
 Lemma models_meet_l : forall rho g1 g2, models rho g1 -> models rho (ameet g1 g2).
-Proof. intros rho g1 g2 H r Hr. apply H. apply (ameet_lb_l g1 g2 r Hr). Qed.
+Proof.
+  intros rho g1 g2 [Hr Hf]. split.
+  - intros r H. apply Hr. apply (ameet_lb_l g1 g2 r H).
+  - intros H. apply Hf. apply (ameet_flags_lb_l g1 g2 H).
+Qed.
 
 Lemma models_meet_r : forall rho g1 g2, models rho g2 -> models rho (ameet g1 g2).
-Proof. intros rho g1 g2 H r Hr. apply H. apply (ameet_lb_r g1 g2 r Hr). Qed.
+Proof.
+  intros rho g1 g2 [Hr Hf]. split.
+  - intros r H. apply Hr. apply (ameet_lb_r g1 g2 r H).
+  - intros H. apply Hf. apply (ameet_flags_lb_r g1 g2 H).
+Qed.
 
 (* MERGE SOUNDNESS: if the post-merge continuation is well-typed under the meet of the predecessor
    states, then from a concrete machine that arrived via EITHER predecessor it runs to completion

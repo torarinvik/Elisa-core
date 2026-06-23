@@ -16,7 +16,8 @@ The Go verifier is authoritative; the Coq model is faithful to it, not the rever
 
 | Coq (`EasmTAL.v`) | Go verifier |
 |---|---|
-| `absstate = reg -> bool` | `machineFactState.LiveRegs` (`compiler/src/easm/easm.go:133`), a finite map register→Defined |
+| `absstate` record: `aregs : reg -> bool` + `aflags : bool` | `machineFactState.LiveRegs` (`compiler/src/easm/easm.go`), a finite map register→Defined, plus a flags-defined slot tracking `opRules.ClobbersFlags` |
+| ALU ops define the flags slot (`adefine_cc`); `mov` preserves it (`adefine`) | `opRule.ClobbersFlags` (`easm_oprules.go`) / `instructionClobbersFlags` (`easm.go:3013`): add/sub/and/xor/inc/dec set it, mov does not |
 | `adefine g d` (write defines dst) | `state.LiveRegs[canonical] = true` — *"instruction writes a defined result here"* (`easm.go:1278`) |
 | `op_ok g (OReg r) = g r` must hold to read | the `register-read-uninitialized` check (`easm.go:1212–1215`): a read register must be in `LiveRegs` (or preserved) |
 | `has_type` rules per opcode (mov/add/sub/and/xor/inc/dec) | per-op effect signature in `opRules` (`compiler/src/easm/easm_oprules.go`): which registers are implicitly read, which destination is a defined result |
@@ -24,8 +25,12 @@ The Go verifier is authoritative; the Coq model is faithful to it, not the rever
 | `seq_type` (list induction) | the linear body walk in `verifyFunction` carrying one `machineFactState` |
 | reading Undefined = no typing rule applies = STUCK | the verifier emits an error and refuses the block |
 
-The omitted lattice components (`KnownUInt`, `FS`, `StackMod16`) are orthogonal to
-the definite-init safety theorem and are deliberately not modeled — see below.
+The flags slot (`aflags`) is the first widening from docs/106's path: it tracks
+EFLAGS definedness exactly as `opRules.ClobbersFlags` declares — ALU ops define
+it, mov preserves it — and `preservation` shows that abstract fact is sound
+w.r.t. the concrete machine's physical flags. The remaining omitted lattice
+components (`KnownUInt`, `FS`, `StackMod16`) are orthogonal to the definite-init
+safety theorem and are deliberately not modeled — see below.
 
 **This correspondence is machine-tested, not just asserted.** `compiler/src/easm/easm_coq_fidelity_test.go`
 re-implements the *exact* Coq relation in Go (`coqOpOk`/`coqHasType`/`coqAdefine`/`coqSeqType`,
@@ -35,7 +40,13 @@ correspondence continuously: (1) the Coq relation gets **stuck** (a read with no
 rule) **iff** the verifier emits `register-read-uninitialized` — the *progress* correspondence; and
 (2) on acceptance the final Coq abstract state (which registers are Defined) **equals** the verifier's
 `LiveRegs` over the modeled registers — the *preservation/state* correspondence. If the Go walk and
-the Coq model ever drift on this subset, the test fails. (The self-zeroing idiom `xorq/subq %r,%r`,
+the Coq model ever drift on this subset, the test fails. The Go mirror also carries the extended
+relation's flags slot (`coqState.flags`, defined by ALU ops, preserved by mov) and asserts its own
+flags invariant on every body; flags definedness is *not* cross-checked against the verifier because
+`machineFactState` exposes no flags-defined fact (it separately enforces only that flag-clobbering
+ops list `cc`, the `cc-clobber-missing` check) and the modeled subset has no flag-reading op — so
+there is no observable verifier state to compare against (documented in the test header). (The
+self-zeroing idiom `xorq/subq %r,%r`,
 which the verifier defines without reading the dst — a value-tracking optimization outside the
 definite-init RMW rule — is excluded from the fuzzer so the correspondence stays exact.)
 
@@ -88,6 +99,12 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
 **Covered:**
 - The definite-initialization lattice (`LiveRegs`) — the heart of the
   `register-read-uninitialized` guarantee.
+- **Flags (EFLAGS) definedness** as a lattice slot (`aflags`): ALU ops
+  (add/sub/and/xor/inc/dec) DEFINE the flags slot, mov PRESERVES it — exactly
+  mirroring `opRules.ClobbersFlags`. `alu_defines_flags` and
+  `mov_preserves_flags` pin the abstract behavior; `preservation` shows it is
+  sound w.r.t. the concrete machine's physical flags; the meet (`ameet`)
+  extends pointwise to the flags slot (`ameet_flags_lb_l/r`, `ameet_flags_glb`).
 - mov(reg/imm), add, sub, and, xor (two-operand), inc, dec (one-operand RMW) — the
   q-suffix GPR/ALU subset.
 - Operand = register | immediate.
@@ -102,8 +119,13 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
 - **Concrete bit-width / exact ALU semantics.** Words are `nat`; `and`/`xor` use a
   placeholder binary function. The safety theorem is about *definedness*, which is
   independent of the computed value, so this loses nothing for the property proven.
-- **Flags (EFLAGS).** add/sub/and/xor clobber flags in the real ISA and `opRules` records
-  `ClobbersFlags`, but flags are not part of the definite-init lattice, so they are elided.
+- **Flag-READING operations / flag VALUES.** The flags slot tracks *definedness*
+  only (`aflags` / concrete `rflags : option unit`), because the modeled subset
+  has no flag-reading op (no `jcc`/`setcc`/`cmov`). Conditional jumps are
+  control transfers handled outside this straight-line core; when they enter the
+  model, the flags slot is the precondition they will read. Concrete flag bits
+  (CF/ZF/SF/…​) and their computed values are likewise not modeled — only whether
+  the condition codes are established, which is the verifier-relevant fact.
 - **`KnownUInt` value tracking, `FS` segment state, `StackMod16`** — separate facts in
   `machineFactState`; orthogonal to progress/preservation for uninitialized reads.
 - **Full control flow / labels / CFG fixpoint.** The *soundness of the merge join* is now proven
@@ -119,8 +141,9 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
 1. **More opcodes:** add a constructor to `instr`, a `has_type` rule, and a `step` clause,
    then add the two new cases to `progress` and `preservation` (each is one `destruct` +
    `apply models_define`). The proofs are structured so new RMW/def-only ops are mechanical.
-2. **Flags as a lattice element:** extend `absstate`/`rfile` to carry a flags slot and thread
-   it through; the models relation gains a flags conjunct.
+2. **Flags as a lattice element:** *(done)* `absstate` and `rfile` carry a flags slot threaded
+   through `has_type`/`step`; `models` gained a flags conjunct. Extending this further means
+   adding a flag-reading op (e.g. `jcc`/`cmov`) whose typing rule requires `aflags g = true`.
 3. **Control flow:** generalize `seq_type` to a labeled CFG and add a `join` (pointwise `&&`
    on `absstate`); prove the join is a lower bound and re-run the sequence argument per edge.
    This is exactly the Go-side `checkMergeConsistency` made provable.
