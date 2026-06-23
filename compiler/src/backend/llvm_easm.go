@@ -24,6 +24,19 @@ func (g *llvmGenerator) emitEASMModule(module *easm.Module) error {
 	if module == nil {
 		return nil
 	}
+	// Record declared layout names so layout-typed carriers (`HostPtr[L]`) lower as host pointers.
+	// The layout is purely a verifier artifact; it carries no ABI, so the pointer is identical to
+	// `HostPtr[void]`.
+	if len(module.Layouts) > 0 {
+		if g.easmLayoutNames == nil {
+			g.easmLayoutNames = map[string]bool{}
+		}
+		for _, l := range module.Layouts {
+			if l.Name != "" {
+				g.easmLayoutNames[l.Name] = true
+			}
+		}
+	}
 	for i := range module.Functions {
 		if err := g.emitEASMFunction(&module.Functions[i]); err != nil {
 			return err
@@ -312,7 +325,13 @@ func (g *llvmGenerator) easmAddressSpaceCarrierType(name string) (semantic.Type,
 		elemName := strings.TrimSpace(name[len(spec.prefix) : len(name)-1])
 		elem, ok := g.result.NamedTypes[elemName]
 		if !ok {
-			return nil, false
+			// A layout-typed carrier (`HostPtr[ThreadCtx]`) names a verifier-only record shape with
+			// no ABI of its own; lower it as a host pointer to bytes, identical to HostPtr[u8]/[void].
+			if g.easmLayoutNames[elemName] {
+				elem = g.result.NamedTypes["u8"]
+			} else {
+				return nil, false
+			}
 		}
 		return &semantic.AddressSpaceType{Space: spec.space, Elem: elem, Storage: g.result.NamedTypes["uintptr"]}, true
 	}

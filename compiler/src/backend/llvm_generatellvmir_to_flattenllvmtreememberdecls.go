@@ -154,6 +154,7 @@ type llvmGenerator struct {
 	packedProfile             PackedLoweringProfile
 	packedEnumABI             packedEnumABIMode
 	symbolsByNode             map[ast.Node]*semantic.Symbol
+	easmLayoutNames           map[string]bool
 	structTypes               map[string]C.LLVMTypeRef
 	structBodies              map[string]bool
 	functionTypes             map[*semantic.FuncType]C.LLVMTypeRef

@@ -73,4 +73,12 @@ stuck*. Reachable without a proof assistant:
 ## Status
 
 - Increment 1 (typed memory layouts: `layout` declarations + field offset/width checking on
-  layout-typed carriers) — see the `easm` package and its tests.
+  layout-typed carriers) — DONE in the `easm` package with tests.
+- Emit lowering for layout-typed carriers — DONE: `HostPtr[L]` lowers as a host pointer to bytes,
+  ABI-identical to `HostPtr[void]` (the layout is a verifier-only artifact with no ABI).
+- First live adoption — DONE: the emulator's `CallGuestInitEntryOnStackWithFsAsm` ctx parameter is
+  retyped `HostPtr[GuestInitCtx]`, so its seven raw `N(%r14)` field reads are now type-checked
+  (verified clean; a corrupted offset is rejected — the check has teeth). Zero boot risk by the
+  ABI-identity above.
+- Next: extend layouts to the other ctx-reading boot routines; then increment 2 (explicit Γ +
+  per-opcode typing rules + joins).
