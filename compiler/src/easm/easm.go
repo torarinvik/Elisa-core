@@ -41,7 +41,14 @@ type LayoutField struct {
 	Name   string
 	Type   string
 	Width  int // bytes; 0 = width unknown (offset checked, width not)
-	Line   int
+	// RequiresSizeAtLeast is the field's declared minimum runtime struct size, from a
+	// `requires size >= N` suffix on the field line (docs/107 increment 4). 0 means the field
+	// is unconditionally present. When >0, an overlay accessor of this field must be dominated by
+	// a guard establishing the struct's runtime `size >= N`, else CheckGuestOverlaySizeGuard emits
+	// overlay-field-needs-size-guard. This declaratively replaces the emulator's hand-written
+	// "if size < N: fall back to defaults" under-size guards.
+	RequiresSizeAtLeast int64
+	Line                int
 }
 
 // Template is a routine assembled at build time into bytes with typed runtime-filled holes
@@ -196,7 +203,7 @@ var (
 	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
 	lockstepTargetRE = regexp.MustCompile(`^target\s+([A-Za-z0-9_]+)\s+lockstep\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+size\s+(\d+))?\s*:\s*$`)
-	layoutFieldRE    = regexp.MustCompile(`^(\d+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]]*)\s*$`)
+	layoutFieldRE    = regexp.MustCompile(`^(\d+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]]*)\s*(?:\s+requires\s+size\s*>=\s*(\d+))?\s*$`)
 	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
 	platformForRE    = regexp.MustCompile(`\bfor\b\s+(\([^)]*\)|[^\s]+)`)
@@ -264,7 +271,11 @@ func Parse(path string, src string) (*Module, []Issue) {
 			if m := layoutFieldRE.FindStringSubmatch(line); m != nil {
 				offset, _ := strconv.ParseInt(m[1], 10, 64)
 				width, _ := layoutTypeWidth(m[3])
-				currentLayout.Fields = append(currentLayout.Fields, LayoutField{Offset: offset, Name: m[2], Type: m[3], Width: width, Line: lineNo})
+				var reqSize int64
+				if m[4] != "" {
+					reqSize, _ = strconv.ParseInt(m[4], 10, 64)
+				}
+				currentLayout.Fields = append(currentLayout.Fields, LayoutField{Offset: offset, Name: m[2], Type: m[3], Width: width, RequiresSizeAtLeast: reqSize, Line: lineNo})
 				continue
 			}
 			currentLayout = nil

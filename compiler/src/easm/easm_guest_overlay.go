@@ -104,6 +104,70 @@ func CheckGuestOverlayAccessSized(path string, line int, l *Layout, size int64, 
 }
 
 // ---------------------------------------------------------------------------
+// docs/107 increment 4 — static size-guard obligation
+//
+// A field may be tagged `requires size >= N` (LayoutField.RequiresSizeAtLeast), meaning it is only
+// present when the struct's runtime `size` field is at least N bytes. This is the declarative form
+// of the emulator's hand-written under-size fallback ("if mem_param_size < 48: use defaults"):
+// instead of a runtime branch, accessing the field becomes a static OBLIGATION that the access be
+// dominated by a guard establishing `size >= N`.
+//
+// FLOW MODEL. We do NOT walk the program. Mirroring the rest of the overlay checker (which takes
+// resolved facts — layout, size, width — as explicit inputs rather than re-deriving them), and the
+// known-value/lower-bound style the easm verifier already uses at merges, the caller hands us the
+// set of size lower-bounds that provably hold at the access point: each entry is "the struct's
+// runtime size is known to be >= K", established by a dominating guard such as
+// `if base.size[mem] >= K:`. The front-end (the parallel increment-5 wiring) is responsible for
+// turning a dominating guard into a SizeGuardFact; here we only decide whether the known facts
+// discharge the field's requirement.
+//
+// SOUNDNESS. The obligation is discharged iff some known lower-bound K satisfies K >= N: a guard
+// proving `size >= K` with K >= N a fortiori proves `size >= N`. A weaker guard (K < N), or no
+// guard at all (empty fact set), leaves the requirement undischarged and the access is rejected as
+// overlay-field-needs-size-guard. A field with no requirement (RequiresSizeAtLeast == 0) is
+// unconditionally present and is accepted regardless of facts.
+
+// SizeGuardFact is a single proven lower-bound on a layout carrier's runtime `size` field, holding
+// at an access point because a dominating guard established it (e.g. `if base.size[mem] >= AtLeast:`).
+// It is the explicit-input analogue of the easm verifier's known-value facts: the front-end derives
+// these from dominators and hands them in, so this checker stays a pure fact-discharge decision.
+type SizeGuardFact struct {
+	AtLeast int64 // the struct's runtime size is proven to be >= AtLeast
+}
+
+// CheckGuestOverlaySizeGuard verifies the static size-guard obligation (docs/107 §(b), increment 4)
+// for an overlay access to `fieldName` of layout `l`, given the size-guard facts known to hold at
+// the access point. If the field carries no `requires size >= N` tag it is accepted unconditionally
+// (regression-safe: size-less fields are unaffected). Otherwise the obligation is discharged iff some
+// known fact proves `size >= N`; if none does, it emits overlay-field-needs-size-guard.
+//
+// An unknown field name is NOT this checker's concern — it is reported by CheckGuestOverlayAccess.
+// Here an unknown field simply carries no requirement and is accepted, so the two checks compose
+// without double-reporting.
+func CheckGuestOverlaySizeGuard(path string, line int, l *Layout, fieldName string, facts []SizeGuardFact) []Issue {
+	var field *LayoutField
+	for i := range l.Fields {
+		if l.Fields[i].Name == fieldName {
+			field = &l.Fields[i]
+			break
+		}
+	}
+	if field == nil || field.RequiresSizeAtLeast == 0 {
+		return nil
+	}
+	need := field.RequiresSizeAtLeast
+	for _, f := range facts {
+		if f.AtLeast >= need {
+			return nil
+		}
+	}
+	return []Issue{{
+		Severity: "error", Code: "overlay-field-needs-size-guard", File: path, Line: line,
+		Message: fmt.Sprintf("field %s.%s requires the struct's runtime size >= %d; guard the access with `if base.size[mem] >= %d:` (no dominating size guard proves it here)", l.Name, field.Name, need, need),
+	}}
+}
+
+// ---------------------------------------------------------------------------
 // docs/107 increment 3 — front-end accessor desugar
 //
 // This is the load-bearing front-end step: parse the overlay accessor surface form, resolve the
