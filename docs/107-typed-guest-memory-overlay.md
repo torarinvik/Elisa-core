@@ -170,12 +170,16 @@ docs/104 adoptions rely on, and it is what makes adoption safe to do incremental
    declares its own carrier layout with a top-level `layout Name [size N]:` block (fields
    `<offset> <name>: <u8|u16|u32|u64> [requires size >= N]`); the analyzer registers it into the
    overlay registry in the early collect pre-pass, so `GuestVAddr[Name]` carriers and their accessors
-   resolve against it with NO `AnalyzeOptions.OverlayLayouts` wiring. *The in-source declaration path
-   is built and tested end-to-end (read + write desugar to the byte-identical
-   MemoryManager_Read/WriteU64 calls; verified through real LLVM codegen).* Still remaining for the
-   `core/linker.elisa` migration: connecting increment 4's size-guard discharge to dominating
-   `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact` derivation), so the hand-written
-   under-size fallbacks can be deleted rather than duplicated.
+   resolve against it with NO `AnalyzeOptions.OverlayLayouts` wiring. *Done, end-to-end and adopted.*
+   The dogfooding PS4 emulator's `core/linker.elisa` proc_param/mem_param reads now run on two
+   in-source layouts (`ProcParamOverlay`, `MemParamOverlay`): the field offsets are single-sourced in
+   the layouts, and the under-size fallbacks are compile-checked `requires size >= N` obligations
+   discharged by inline `if base.size[mem] < N: return 0` guards (the early-return-guard-clause form).
+   The reads lower byte-for-byte to the previous `MemoryManager_ReadU64(mem, base + offset)`. Adopting
+   it surfaced one real backend bug — `GuestVAddr[L]` with an overlay-layout type-arg failed codegen
+   on a LOCAL-variable annotation (`unknown type "L"`; fixed by falling back to the uintptr pointee,
+   which is ABI-irrelevant for address-space carriers). **Runtime-verified**: emulator boot smoke
+   9/9 and the linker bounds-refusal regression 4/4 pass natively against the migrated code.
 
 Honest status: increments 1, 2, 3 (read **and** write forms), 4 — *including* the
 dominator→`SizeGuardFact` derivation in **both** the positive-guard and early-return-guard-clause
@@ -183,9 +187,21 @@ forms — and the in-source `layout` declaration path of increment 5 are all rea
 slices. A `.elisa` program can now declare its own carrier layout, read/write its fields with no
 embedding-side wiring (byte-identical MemoryManager calls, verified through LLVM codegen), and have
 `requires size >= N` fields enforced against dominating size guards written either as
-`if base.size[mem] >= N:` or as the guard-clause `if base.size[mem] < N: return`. The front-end
-machinery is therefore complete; what remains (increment 5 proper) is the mechanical migration of the
-emulator's `core/linker.elisa` proc_param/mem_param reads onto the overlay — declaring the two
-layouts with their `requires` tags, retyping the carriers as `GuestVAddr[L]`, and deleting the
-hand-written field reads and under-size fallbacks now that the obligations are checked. That work
-lives in the emulator repo.
+`if base.size[mem] >= N:` or as the guard-clause `if base.size[mem] < N: return`. **All five
+increments are landed and the feature is dogfooded** — the emulator's `core/linker.elisa`
+proc_param/mem_param reads run on it and pass natively (boot smoke 9/9, bounds-refusal 4/4).
+
+Scope note — where the overlay does and does NOT apply: it is the right tool for a **named,
+fixed-layout guest struct read field-by-field through `base + offset`** (the proc_param/mem_param
+case). It is deliberately NOT applied to the emulator's other guest-memory surfaces, which have a
+different shape and their own (already-landed) safety: variable-count / variable-stride tables
+(ELF phdr/shdr/sym/rela, the dynamic section) are bounds-checked with `Elf_RangeFits`/`Elf_TableFits`
+and parsed into structured `DynamicModuleInfo`; raw backing reads go through
+`MemoryManager_BackingOffset` / `Module_ImageOffsetForSpan` range gates. Those are the correct fit
+for their shape; forcing them onto the fixed-field overlay would be a worse model.
+
+Genuinely optional future extensions (not currently needed): (a) let the overlay desugar target a
+configurable reader (e.g. `Module_ReadImageU64`) so image-relative struct fields like
+`proc_param.sdk_version` can be typed too — today that one field stays a raw image read; (b) a
+table-entry overlay form for fixed-stride array entries (`Elf64_Sym`/`Elf64_Rela`) layered over the
+existing table bounds checks. Both are feature extensions, not gaps in the current design.
