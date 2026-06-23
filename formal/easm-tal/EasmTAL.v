@@ -15,6 +15,9 @@
 (*    - PROGRESS: a well-typed instruction never reads an undefined      *)
 (*      register (no stuck-by-uninitialized-read), and a well-typed      *)
 (*      sequence runs to completion without getting stuck.               *)
+(*    - MERGE SOUNDNESS: typing a post-merge block under the MEET of      *)
+(*      the predecessor states is sound on every incoming edge (the      *)
+(*      soundness of checkMergeConsistency / the dataflow join).         *)
 (*                                                                       *)
 (*  Checked with: rocq compile EasmTAL.v  (Rocq 9.1; no admits/Admitted).*)
 (* ===================================================================== *)
@@ -387,4 +390,67 @@ Proof.
   apply (no_stuck is aempty g').
   - exact Hseq.
   - intros r Hr. unfold aempty in Hr. discriminate.
+Qed.
+
+(* ================================================================== *)
+(*  DATAFLOW JOIN AT CONTROL-FLOW MERGES                              *)
+(*                                                                    *)
+(*  Mechanizes the soundness of checkMergeConsistency                 *)
+(*  (compiler/src/easm/easm_oprules.go): at a label reached from      *)
+(*  several predecessors, the verifier types the continuation under   *)
+(*  the MEET (pointwise intersection) of the predecessor abstract     *)
+(*  states. A register the continuation reads must therefore be       *)
+(*  Defined in the meet -- i.e. established on EVERY incoming edge     *)
+(*  (the "merge-state-unsound" diagnostic fires otherwise). The       *)
+(*  theorem below shows this is sound: whichever predecessor the      *)
+(*  concrete machine actually arrived from, the continuation runs     *)
+(*  without getting stuck.                                            *)
+(* ================================================================== *)
+
+(* The meet of two abstract states: a register is Defined only if Defined on BOTH. *)
+Definition ameet (g1 g2 : absstate) : absstate := fun r => andb (g1 r) (g2 r).
+
+(* The meet is a lower bound of each predecessor (Defined-in-meet => Defined-in-pred). *)
+Lemma ameet_lb_l : forall g1 g2 r, ameet g1 g2 r = true -> g1 r = true.
+Proof. intros g1 g2 r H. unfold ameet in H. destruct (g1 r); simpl in H; [reflexivity | discriminate]. Qed.
+
+Lemma ameet_lb_r : forall g1 g2 r, ameet g1 g2 r = true -> g2 r = true.
+Proof. intros g1 g2 r H. unfold ameet in H. destruct (g1 r); simpl in H; [exact H | discriminate]. Qed.
+
+(* checkMergeConsistency's core fact: a register the post-merge code DEMANDS (reads, hence must be
+   Defined in the meet) is established on EVERY predecessor edge -- not just the linear fall-through. *)
+Corollary meet_demanded_on_all_preds : forall g1 g2 r,
+  ameet g1 g2 r = true -> g1 r = true /\ g2 r = true.
+Proof. intros g1 g2 r H. split; [apply (ameet_lb_l g1 g2 r H) | apply (ameet_lb_r g1 g2 r H)]. Qed.
+
+(* The meet is the GREATEST lower bound: any state below both predecessors is below the meet. So the
+   verifier loses no information it could soundly keep -- the join is as precise as soundness allows. *)
+Lemma ameet_glb : forall g g1 g2,
+  (forall r, g r = true -> g1 r = true) ->
+  (forall r, g r = true -> g2 r = true) ->
+  (forall r, g r = true -> ameet g1 g2 r = true).
+Proof.
+  intros g g1 g2 H1 H2 r Hr. unfold ameet.
+  rewrite (H1 r Hr). rewrite (H2 r Hr). reflexivity.
+Qed.
+
+(* A concrete state modeling either predecessor models the meet (fewer obligations). *)
+Lemma models_meet_l : forall rho g1 g2, models rho g1 -> models rho (ameet g1 g2).
+Proof. intros rho g1 g2 H r Hr. apply H. apply (ameet_lb_l g1 g2 r Hr). Qed.
+
+Lemma models_meet_r : forall rho g1 g2, models rho g2 -> models rho (ameet g1 g2).
+Proof. intros rho g1 g2 H r Hr. apply H. apply (ameet_lb_r g1 g2 r Hr). Qed.
+
+(* MERGE SOUNDNESS: if the post-merge continuation is well-typed under the meet of the predecessor
+   states, then from a concrete machine that arrived via EITHER predecessor it runs to completion
+   without getting stuck and ends in a state modeling the final context. This is exactly why typing
+   the continuation against the meet (and rejecting reads of registers not in the meet) is sound. *)
+Theorem merge_soundness : forall is g1 g2 g' rho,
+  seq_type (ameet g1 g2) is g' ->
+  (models rho g1 \/ models rho g2) ->
+  exists rho', run rho is = Some rho' /\ models rho' g'.
+Proof.
+  intros is g1 g2 g' rho Hseq [H1 | H2].
+  - apply (seq_safety is (ameet g1 g2) g' rho Hseq). apply models_meet_l. exact H1.
+  - apply (seq_safety is (ameet g1 g2) g' rho Hseq). apply models_meet_r. exact H2.
 Qed.

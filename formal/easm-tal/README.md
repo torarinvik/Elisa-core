@@ -1,13 +1,14 @@
-# EASM TAL core — mechanized progress + preservation
+# EASM TAL core — mechanized progress + preservation + merge soundness
 
 This directory contains a machine-checkable Coq formalization of the **core of the
 EASM transition relation**: the straight-line GPR/ALU subset that the Go verifier
 tracks for definite-initialization ("liveness"). It proves the two standard
-type-safety metatheorems — **PROGRESS** and **PRESERVATION** — plus their lift to
-whole instruction sequences, so the soundness of the EASM definite-init check is a
-machine-checked theorem rather than only a property-tested one.
+type-safety metatheorems — **PROGRESS** and **PRESERVATION** — their lift to whole
+instruction sequences, and **MERGE SOUNDNESS** (the dataflow join at control-flow
+merges), so the soundness of the EASM definite-init check — including its merge
+handling — is a machine-checked theorem rather than only a property-tested one.
 
-- `EasmTAL.v` — the entire development: model + both theorems, no `admit`/`Admitted`/`sorry`.
+- `EasmTAL.v` — the entire development: model + all theorems, no `admit`/`Admitted`/`sorry`.
 
 ## Correspondence to the Go verifier (the source of truth)
 
@@ -38,6 +39,15 @@ the definite-init safety theorem and are deliberately not modeled — see below.
   a well-typed straight-line block run from a modeling state always runs to completion
   (`run` never returns `None`) and ends in a state modeling the final context. This is the
   headline *well-typed ⇒ can't get stuck*.
+- **`merge_soundness`** (+ `ameet_lb_l/r`, `meet_demanded_on_all_preds`, `ameet_glb`,
+  `models_meet_l/r`) — the dataflow join at control-flow merges. At a label reached from several
+  predecessors, the verifier types the continuation under the **meet** (pointwise intersection) of
+  the predecessor states. `merge_soundness` proves this is sound: from a concrete machine that
+  arrived via *either* predecessor, the meet-typed continuation runs without getting stuck.
+  `meet_demanded_on_all_preds` is the exact fact `checkMergeConsistency` relies on — a register the
+  continuation reads (Defined in the meet) is established on **every** incoming edge; `ameet_glb`
+  shows the meet loses no information soundness would let it keep. Mechanizes the soundness of the
+  `merge-state-unsound` check (`compiler/src/easm/easm_oprules.go`).
 
 ## How to check the proofs
 
@@ -53,8 +63,9 @@ no mathlib / opam packages / external solvers.
 ### Local verification status
 
 **Machine-checked** with **The Rocq Prover, version 9.1.1** (`rocq compile EasmTAL.v` exits 0,
-silently, producing `EasmTAL.vo`). `progress`, `preservation`, and their lift to straight-line
-sequences (`seq_safety`, `no_stuck`) are verified theorems with no `admit`/`Admitted`/axioms.
+silently, producing `EasmTAL.vo`). `progress`, `preservation`, their lift to straight-line
+sequences (`seq_safety`, `no_stuck`), and `merge_soundness` (the dataflow join) are verified
+theorems with no `admit`/`Admitted`/axioms.
 
 Imports use the Rocq 9 `Stdlib.*` namespace. On Coq ≤ 8.x use `Coq.*` instead (the only change
 needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, robust tactics
@@ -69,7 +80,11 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
   q-suffix GPR/ALU subset.
 - Operand = register | immediate.
 - Straight-line (acyclic, no labels/jumps) sequences via list induction.
-- Both metatheorems with no axioms or `Admitted`.
+- The **dataflow join at control-flow merges** (`merge_soundness`): typing a post-merge block
+  under the meet of predecessor states is sound on every incoming edge — the soundness of
+  `checkMergeConsistency`. (The full CFG/fixpoint is still future work; what is proven is the join's
+  soundness, which is the load-bearing part.)
+- All metatheorems with no axioms or `Admitted`.
 
 **Not covered (deliberate narrowing — documented so it is honest):**
 - **Concrete bit-width / exact ALU semantics.** Words are `nat`; `and`/`xor` use a
@@ -79,9 +94,11 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
   `ClobbersFlags`, but flags are not part of the definite-init lattice, so they are elided.
 - **`KnownUInt` value tracking, `FS` segment state, `StackMod16`** — separate facts in
   `machineFactState`; orthogonal to progress/preservation for uninitialized reads.
-- **Control flow / labels / dataflow joins.** The verifier's merge-consistency check
-  (`checkMergeConsistency`, docs/104 increment 2 brick 2) is not modeled; only straight-line
-  blocks. Extending to a CFG with the meet-of-predecessors join is the natural next step.
+- **Full control flow / labels / CFG fixpoint.** The *soundness of the merge join* is now proven
+  (`merge_soundness`, see above), but the surrounding machinery — a control-flow graph, label
+  contracts, and the iterate-to-fixpoint over back-edges — is still modeled only implicitly (the
+  meet is taken as given two predecessor states). Modeling the CFG and proving the fixpoint
+  terminates + is sound is the natural next step.
 - **Capabilities, clobbers, frame conditions, calling-convention preservation.** These are
   other rungs of the rigor ladder (docs/104), not the definite-init core.
 

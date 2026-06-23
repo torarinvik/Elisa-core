@@ -40,12 +40,17 @@ progress/preservation theorems. We mechanize exactly that slice.
 - **`rho ⊨ Γ`** (`models`) — every Defined-in-`Γ` register is physically defined in `rho`;
   i.e. `Γ` is a sound under-approximation of physical definedness.
 
-### The two theorems (no `admit` / `Admitted`)
+### The theorems (no `admit` / `Admitted`)
 
 - **PRESERVATION** (`preservation`): `Γ ⊢ i ⇒ Γ'` ∧ `rho ⊨ Γ` ∧ `step rho i = Some rho'`
   ⇒ `rho' ⊨ Γ'`.
 - **PROGRESS** (`progress`): `Γ ⊢ i ⇒ Γ'` ∧ `rho ⊨ Γ` ⇒ `step rho i` succeeds — a well-typed
   instruction never gets stuck on an uninitialized read.
+- **MERGE SOUNDNESS** (`merge_soundness`): typing a post-merge block under the meet `ameet g1 g2`
+  (pointwise `&&`) of predecessor states is sound from a machine that arrived via *either*
+  predecessor. `meet_demanded_on_all_preds` is the exact fact the Go `checkMergeConsistency` relies
+  on (a register read after the merge is established on every incoming edge); `ameet_glb` shows the
+  meet is the greatest lower bound (no information lost beyond what soundness forces).
 - **Sequence lift** (`seq_safety`, `no_stuck`, `no_stuck_from_empty`): by list induction, a
   well-typed straight-line block run from a modeling state runs to completion and ends in a
   state modeling the final context. This is the headline *well-typed ⇒ can't get stuck*.
