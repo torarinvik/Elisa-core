@@ -13,11 +13,16 @@ import "fmt"
 // accessor desugars to exactly today's ReadU64 call (ABI-identical); only out-of-bounds / unknown /
 // width-mismatched accesses are rejected.
 
-// LayoutSize returns a layout's declared byte size. When a layout carries no explicit `size`
-// (Layout has no Size field today), the size is computed as max(field.Offset + field.Width) over
-// declared fields — sound for offset checks. A field with unknown width (Width == 0) contributes
-// only its offset. This is the default until the `layout Name size N:` parse lands (increment 2).
+// LayoutSize returns a layout's declared byte size. When a layout carries an explicit declared size
+// (`layout Name size N:` — increment 2), that size is authoritative and is returned verbatim, so an
+// access past it is rejected even if no field reaches that far. When no explicit size is declared
+// (l.Size == 0), the size is computed as max(field.Offset + field.Width) over declared fields —
+// sound for offset checks, and identical to the pre-increment-2 behavior so existing size-less
+// layouts are unaffected. A field with unknown width (Width == 0) contributes only its offset.
 func LayoutSize(l *Layout) int64 {
+	if l.Size > 0 {
+		return l.Size
+	}
 	var max int64
 	for _, f := range l.Fields {
 		end := f.Offset + int64(f.Width)

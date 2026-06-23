@@ -59,3 +59,75 @@ func TestOverlayRejectsWidthMismatch(t *testing.T) {
 		t.Fatalf("expected overlay-field-width-mismatch, got %#v", issues)
 	}
 }
+
+// docs/107 increment 2: a `layout Name size N:` header carries an EXPLICIT declared byte size. The
+// declared size is authoritative for bounds — an access whose end (offset+width) exceeds it is
+// rejected as overlay-field-out-of-bounds, and the out-of-bounds field cannot enlarge the size basis
+// it is checked against. A layout WITHOUT `size` falls back to field-derived bounds (LayoutSize),
+// so existing size-less layouts are unaffected.
+
+// fooSize16 models `layout Foo size 16:` with a tail field at offset 12 width 8 (reaching 20 > 16).
+func fooSize16Layout() *Layout {
+	return &Layout{
+		Name: "Foo",
+		Size: 16,
+		Fields: []LayoutField{
+			{Offset: 0, Name: "head", Type: "u64", Width: 8},
+			{Offset: 12, Name: "tail", Type: "u64", Width: 8},
+		},
+	}
+}
+
+// The declared size parses off the header into Layout.Size; an in-bounds field is accepted.
+func TestOverlayDeclaredSizeParsesAndAccepts(t *testing.T) {
+	module, issues := Parse("lay.easm", `module lay
+target x86_64
+layout Foo size 16:
+    0 head: u64
+`)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues parsing sized layout: %#v", issues)
+	}
+	if len(module.Layouts) != 1 || module.Layouts[0].Size != 16 {
+		t.Fatalf("expected layout Foo with Size 16, got %#v", module.Layouts)
+	}
+	acc := CheckGuestOverlayAccessReady(t, fooSize16Layout(), "head", 8)
+	if acc.Offset != 0 || acc.Width != 8 {
+		t.Fatalf("in-bounds head access resolved wrong: %#v", acc)
+	}
+}
+
+// A field access at offset 12 width 8 (-> 20 > 16) is rejected against the declared size, even
+// though that very field is the one reaching past the end.
+func TestOverlayDeclaredSizeRejectsOutOfBounds(t *testing.T) {
+	l := fooSize16Layout()
+	issues, _ := CheckGuestOverlayAccess("lay.elisa", 7, l, "tail", 8)
+	if !containsIssue(issues, "overlay-field-out-of-bounds") {
+		t.Fatalf("expected overlay-field-out-of-bounds against declared size 16, got %#v", issues)
+	}
+}
+
+// Regression: the SAME layout WITHOUT an explicit size falls back to field-derived bounds, so the
+// offset-12 width-8 field (which now grows the inferred size to 20) is in bounds and accepted —
+// existing size-less layouts are unaffected by increment 2.
+func TestOverlaySizelessFallsBackToFieldDerived(t *testing.T) {
+	l := fooSize16Layout()
+	l.Size = 0 // drop the explicit size; bounds now come from the fields (LayoutSize).
+	issues, acc := CheckGuestOverlayAccess("lay.elisa", 8, l, "tail", 8)
+	if len(issues) != 0 {
+		t.Fatalf("size-less layout should accept field-derived in-bounds access, got %#v", issues)
+	}
+	if acc.Offset != 12 || acc.Width != 8 {
+		t.Fatalf("field-derived access resolved wrong: %#v", acc)
+	}
+}
+
+// CheckGuestOverlayAccessReady asserts a clean resolution and returns the access.
+func CheckGuestOverlayAccessReady(t *testing.T, l *Layout, field string, w int) GuestOverlayAccess {
+	t.Helper()
+	issues, acc := CheckGuestOverlayAccess("lay.elisa", 1, l, field, w)
+	if len(issues) != 0 {
+		t.Fatalf("expected clean access of %s, got %#v", field, issues)
+	}
+	return acc
+}

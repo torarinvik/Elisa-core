@@ -29,7 +29,11 @@ type Module struct {
 type Layout struct {
 	Name   string
 	Fields []LayoutField
-	Line   int
+	// Size is the layout's explicitly declared byte size from a `layout Name size N:` header.
+	// 0 means no explicit size was declared; bounds are then derived from the fields via
+	// LayoutSize, preserving the field-inferred behavior of layouts written without `size`.
+	Size int64
+	Line int
 }
 
 type LayoutField struct {
@@ -191,7 +195,7 @@ var (
 	protocolHeaderRE = regexp.MustCompile(`^protocol\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
 	lockstepTargetRE = regexp.MustCompile(`^target\s+([A-Za-z0-9_]+)\s+lockstep\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
-	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
+	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+size\s+(\d+))?\s*:\s*$`)
 	layoutFieldRE    = regexp.MustCompile(`^(\d+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]]*)\s*$`)
 	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
@@ -287,7 +291,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 				section = ""
 			case layoutHeaderRE.MatchString(line):
 				m := layoutHeaderRE.FindStringSubmatch(line)
-				module.Layouts = append(module.Layouts, Layout{Name: m[1], Line: lineNo})
+				module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Line: lineNo})
 				currentLayout = &module.Layouts[len(module.Layouts)-1]
 				section = ""
 			case exportHeaderRE.MatchString(line):
@@ -366,7 +370,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 		}
 		if layoutHeaderRE.MatchString(line) {
 			m := layoutHeaderRE.FindStringSubmatch(line)
-			module.Layouts = append(module.Layouts, Layout{Name: m[1], Line: lineNo})
+			module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Line: lineNo})
 			currentLayout = &module.Layouts[len(module.Layouts)-1]
 			current = nil
 			section = ""
@@ -784,6 +788,21 @@ func verifyPreservationParametricGate(path string, fn *Function, hasErr bool) []
 		return nil
 	}
 	return verifyPreservationParametric(path, fn)
+}
+
+// parseLayoutSize converts the optional `size N` capture of a `layout Name size N:` header into a
+// declared byte size. An empty capture (no `size` clause) yields 0, which signals "infer bounds
+// from the declared fields" (LayoutSize) — preserving the behavior of size-less layouts. The regex
+// guarantees the capture is all digits, so a parse failure is impossible and treated as absent.
+func parseLayoutSize(raw string) int64 {
+	if raw == "" {
+		return 0
+	}
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return n
 }
 
 func parseFragmentHeader(path string, line int, text string) (Function, *Issue) {
