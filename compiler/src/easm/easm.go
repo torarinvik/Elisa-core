@@ -1095,6 +1095,15 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 	returnRegWritten := false
 	inputRegRead := map[string]bool{}
 	inputRegOverwritten := map[string]bool{}
+	// Control-flow-merge bookkeeping (docs/104 increment 2, dataflow joins). We record the machine
+	// state at every jump site (a predecessor edge of its target label) and at every label entry (the
+	// state the linear walk carries into the label), plus whether the label is reachable by fallthrough.
+	// After the walk, checkMergeConsistency verifies the walk's post-label state is justified by every
+	// incoming edge -- the join condition a linear walk cannot enforce inline.
+	mergeJumpPreds := map[string][]easmMergeSnap{}
+	mergeLabelEntry := map[string]easmMergeSnap{}
+	mergeFallReachable := map[string]bool{}
+	prevFallsThrough := true
 	for _, inst := range fn.Instructions {
 		op := normalizeOp(inst.Op)
 		if inst.Label != "" {
@@ -1103,6 +1112,13 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 			} else {
 				seenLabelDefinitions[inst.Label] = inst.Line
 			}
+			// Snapshot the state the linear walk carries into this label, and whether the textual
+			// predecessor falls through to it. A label itself flows into the following instruction.
+			mergeLabelEntry[inst.Label] = easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, line: inst.Line}
+			if prevFallsThrough {
+				mergeFallReachable[inst.Label] = true
+			}
+			prevFallsThrough = true
 			if contract, ok := labelContracts[inst.Label]; ok {
 				state = withStackMod16(state, stackMod16, stackMod16Known)
 				issues = append(issues, checkLabelPreconditions(path, inst.Line, "fallthrough", inst.Label, contract.Preconditions, state)...)
@@ -1431,7 +1447,16 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		for _, written := range writtenRegisters(inst.Text) {
 			delete(clobberedByCall, canonicalX86GPR(written))
 		}
+		// Record a predecessor edge for any direct jump's target, and whether this instruction lets
+		// control fall through to the textually-following one (jmp and ret terminate the straight-line path).
+		if (op == "jmp" || op == "jmpq" || isConditionalJump(op)) {
+			if tgt := directControlTarget(op, inst.Text); tgt != "" {
+				mergeJumpPreds[tgt] = append(mergeJumpPreds[tgt], easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, line: inst.Line})
+			}
+		}
+		prevFallsThrough = !(op == "jmp" || op == "jmpq" || op == "ret" || op == "retq")
 	}
+	issues = append(issues, checkMergeConsistency(path, fn, mergeJumpPreds, mergeLabelEntry, mergeFallReachable, labelContracts)...)
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)

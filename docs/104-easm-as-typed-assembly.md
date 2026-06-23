@@ -94,7 +94,17 @@ stuck*. Reachable without a proof assistant:
   predicate functions, which are themselves cross-checked against LLVM MC). The relation is now a
   declared, auditable artifact rather than an emergent property of the 300-line switch — the stable
   base the remaining increment-2 work rests on.
-- Next within increment 2: per-opcode *state-transition* rules (drive the walker's Γ mutation off
-  the table rather than the ad-hoc switch) and dataflow joins at control-flow merges (every
-  predecessor must establish a label's precondition; post-label state is the meet). Then the
-  symbolic/lockstep equivalence tier (docs/103 stage 3c).
+- Increment 2, brick 2 (dataflow joins at control-flow merges) — DONE: the verifier walks the body
+  linearly with one machine state, which is unsound at a merge (a label that is a jump target),
+  because the walk only carries the textual-predecessor state and ignores the jump-in edges. The walk
+  now records a state snapshot at every jump site and every label entry; `checkMergeConsistency`
+  then enforces the join — a register *demanded* after a contract-less merge label (read before being
+  rewritten in the block it heads) must be established on EVERY incoming edge (the meet of predecessor
+  live-sets), plus the analogous FS-segment-state check. The fix an author applies is to declare a
+  `labels:` contract, which types the merge and is already enforced per-edge (so contract labels are
+  exempt). Additive: it only emits new `merge-state-unsound`/`merge-fs-state-unsound` diagnostics for
+  genuine divergences; the whole existing corpus (incl. the `done:`/`loop:` label tests) and the
+  emulator stay clean. Demand-driven scan = no false positives on dead carried registers.
+- Next within increment 2: drive the walker's Γ mutation off the `opRules` table rather than the
+  ad-hoc switch, so the state *dynamics* are declared too. Then the symbolic/lockstep equivalence
+  tier (docs/103 stage 3c).
