@@ -16,7 +16,14 @@ all-inputs proof as it will go.
 2. **Typed / TAL** — machine-state safety proven for all inputs: no stuck states, memory/control/
    stack well-typed, ABI preserved. *This document.*
 3. **Symbolic equivalence** — prove `reference ≡ target` by SMT over the typed machine semantics
-   (static, all-inputs, decidable on a subset).
+   (static, all-inputs, decidable on a subset). IMPLEMENTED (off by default,
+   `ELISA_EASM_LOCKSTEP_SYMBOLIC=1`): both bodies are encoded as bit-precise 64-bit bit-vector terms
+   and z3 is asked whether any input makes a declared output register differ. `unsat` ⇒ equivalent for
+   every input — strictly stronger than the rung-4 fuzz agreement (e.g. it proves `a+b ≡ b+a` outright,
+   which sampling can only fail to refute). Scope is the decidable straight-line GPR + 64-bit-ALU
+   subset (movq/addq/subq/andq/xorq/incq/decq, terminated by ret); anything outside it (memory,
+   control flow, sub-register writes, segment/stack effects) is reported `lockstep-symbolic-skip`,
+   never passed. `sat` ⇒ `lockstep-symbolic-divergence`; solver `unknown` ⇒ decline, never a proof.
 4. **Lockstep fuzz** (docs/103 stage 3c) — dynamic equivalence on sampled inputs. The initial
    implementation is off by default (`ELISA_EASM_LOCKSTEP_ORACLE=1`) and only runs for gated x86_64
    safe leaves; it assembles `reference` and `target`, executes deterministic fuzz vectors, and diffs

@@ -769,6 +769,9 @@ func verifyLockstepRoutine(path, target string, fn *Function, layouts map[string
 	if os.Getenv("ELISA_EASM_LOCKSTEP_ORACLE") == "1" && !hasErrorIssue(issues) {
 		issues = append(issues, verifyLockstepOracle(path, target, fn)...)
 	}
+	if os.Getenv("ELISA_EASM_LOCKSTEP_SYMBOLIC") == "1" && !hasErrorIssue(issues) {
+		issues = append(issues, verifyLockstepSymbolic(path, target, fn)...)
+	}
 	return issues
 }
 
