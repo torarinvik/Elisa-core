@@ -378,3 +378,87 @@ export def add_pair(a: u64, b: u64) -> u64 abi c:
 		t.Fatalf("symbolic checks must be off by default, got %#v", issues)
 	}
 }
+
+// --- Full-pipeline reachability (allowedOps + opRules widened) ----------------------------------
+// These prove the newly-allowed mnemonics (leaq/orq/notq/negq/shifts) pass the BASE verifier and
+// reach the symbolic checker end-to-end via Parse() -- not just the direct-encoder tests.
+
+// A plain routine using the new opcodes verifies clean (no unsupported-instruction).
+func TestPipelineAcceptsNewOpcodes(t *testing.T) {
+	src := `module newops
+target x86_64
+export def churn(a: u64) -> u64 abi c:
+    inputs: a = rdi
+    outputs: ret = rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    body:
+        leaq 8(%rdi), %rax
+        shlq $2, %rax
+        orq %rdi, %rax
+        notq %rax
+        negq %rax
+        ret
+`
+	_, issues := Parse("newops.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("new opcodes must verify clean through the base pipeline, got %#v", issues)
+	}
+}
+
+// leaq 8(%rdi) proven equivalent to mov+add $8 FOR ALL INPUTS, end-to-end through Parse().
+func TestPipelineSymbolicProvesLeaq(t *testing.T) {
+	requireZ3(t)
+	t.Setenv(lockstepSymbolicEnv, "1")
+	src := `module newops
+target x86_64
+export def addeight(a: u64) -> u64 abi c:
+    inputs: a = rdi
+    outputs: ret = rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    reference:
+        leaq 8(%rdi), %rax
+        ret
+    target x86_64 lockstep reference:
+        movq %rdi, %rax
+        addq $8, %rax
+        ret
+`
+	_, issues := Parse("newops.easm", src)
+	if containsIssue(issues, "lockstep-symbolic-skip") {
+		t.Fatalf("leaq body must now be modelable end-to-end, got skip: %#v", issues)
+	}
+	if len(issues) != 0 {
+		t.Fatalf("expected leaq == mov+add proven, got %#v", issues)
+	}
+}
+
+// shlq $1 proven equivalent to add-self, end-to-end.
+func TestPipelineSymbolicProvesShift(t *testing.T) {
+	requireZ3(t)
+	t.Setenv(lockstepSymbolicEnv, "1")
+	src := `module newops
+target x86_64
+export def dbl(a: u64) -> u64 abi c:
+    inputs: a = rdi
+    outputs: ret = rax
+    clobbers: rax, cc
+    stack: unchanged
+    control: returns
+    reference:
+        movq %rdi, %rax
+        shlq $1, %rax
+        ret
+    target x86_64 lockstep reference:
+        movq %rdi, %rax
+        addq %rax, %rax
+        ret
+`
+	_, issues := Parse("newops.easm", src)
+	if len(issues) != 0 {
+		t.Fatalf("expected shlq $1 == add-self proven end-to-end, got %#v", issues)
+	}
+}

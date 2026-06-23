@@ -205,6 +205,8 @@ var (
 		"movzx": true, "movzbw": true, "movzbl": true, "movzbq": true, "movzwl": true, "movzwq": true,
 		"xchg": true, "xchgl": true, "xchgq": true,
 		"add": true, "addq": true, "sub": true, "subq": true, "and": true, "andq": true,
+		"or": true, "orq": true, "not": true, "notq": true, "neg": true, "negq": true,
+		"leaq": true, "shl": true, "shlq": true, "sal": true, "salq": true, "shr": true, "shrq": true, "sar": true, "sarq": true,
 		"cmp": true, "cmpq": true, "test": true, "testq": true, "inc": true, "incq": true, "dec": true, "decq": true,
 		"xor": true, "xorq": true, "call": true, "callq": true, "jmp": true, "jmpq": true, "ret": true, "retq": true,
 		"cpuid": true, "cld": true, "std": true,
@@ -1651,19 +1653,25 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 			if inst.Pseudo {
 				continue
 			}
-			for _, operand := range splitInstructionOperands(inst.Text) {
-				if !operandIsMemory(operand) {
-					continue
-				}
-				base := memoryBaseRegister(operand)
-				if base == "" || base == "rsp" || base == "rip" {
-					continue
-				}
-				if provenance, ok := regProvenance[base]; ok && provenance.Raw {
-					issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, provenance.Param, provenance.Type)})
-				}
-				if provenance, ok := regProvenance[base]; ok && !provenance.Raw {
-					issues = append(issues, checkLayoutAccess(path, inst, operand, provenance, layouts)...)
+			// lea computes an address without dereferencing memory; its memory operand is arithmetic,
+			// not an access, so neither the raw-memory-base nor the layout-field check applies (a later
+			// dereference of the computed pointer is where memory typing is enforced). Provenance still
+			// flows through lea via updateMemoryBaseProvenance below.
+			if !strings.HasPrefix(normalizeOp(inst.Op), "lea") {
+				for _, operand := range splitInstructionOperands(inst.Text) {
+					if !operandIsMemory(operand) {
+						continue
+					}
+					base := memoryBaseRegister(operand)
+					if base == "" || base == "rsp" || base == "rip" {
+						continue
+					}
+					if provenance, ok := regProvenance[base]; ok && provenance.Raw {
+						issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, provenance.Param, provenance.Type)})
+					}
+					if provenance, ok := regProvenance[base]; ok && !provenance.Raw {
+						issues = append(issues, checkLayoutAccess(path, inst, operand, provenance, layouts)...)
+					}
 				}
 			}
 			updateMemoryBaseProvenance(regProvenance, inst.Text)
@@ -3041,7 +3049,7 @@ func instructionOverwritesDestination(text string) bool {
 		return false
 	}
 	switch normalizeOp(fields[0]) {
-	case "mov", "movq", "movl", "movw", "movb", "lea", "pop", "popq":
+	case "mov", "movq", "movl", "movw", "movb", "lea", "leaq", "leal", "pop", "popq":
 		return true
 	case "xor", "xorq":
 		parts := splitInstructionOperands(text)

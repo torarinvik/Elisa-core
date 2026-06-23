@@ -103,9 +103,12 @@ stuck*. Reachable without a proof assistant:
 
 Note: the symbolic-equivalence and preservation checkers (rung 3, item 3) model a widened subset —
 beyond mov/ALU they now cover `lea` (disp), `or`/`not`/`neg`, immediate shifts, `xchg`, `movl`
-zero-extension, and (preservation only) rsp-relative stack `movq`. Mnemonics not yet in the base
-verifier's `allowedOps` are exercised by direct-encoder tests; full-pipeline proof tests light up as
-`allowedOps` widens.
+zero-extension, and (preservation only) rsp-relative stack `movq`. These mnemonics are now in the
+base verifier's `allowedOps` + `opRules` (with correct flag semantics: `or`/`neg`/shifts write flags,
+`not`/`lea` do not), so they verify and prove **end-to-end through `Parse()`**, not only via
+direct-encoder tests. `lea` is exempt from the raw-memory-base / layout-field checks because it
+computes an address without dereferencing (a later dereference of the computed pointer is still
+caught, and provenance flows through `lea`).
 
 ## Status
 

@@ -61,11 +61,20 @@ var opRules = map[string]opRule{
 	"add": {ClobbersFlags: true}, "addq": {ClobbersFlags: true},
 	"sub": {ClobbersFlags: true}, "subq": {ClobbersFlags: true},
 	"and": {ClobbersFlags: true}, "andq": {ClobbersFlags: true},
+	"or": {ClobbersFlags: true}, "orq": {ClobbersFlags: true},
 	"xor": {ClobbersFlags: true}, "xorq": {ClobbersFlags: true},
 	"inc": {ClobbersFlags: true}, "incq": {ClobbersFlags: true},
 	"dec": {ClobbersFlags: true}, "decq": {ClobbersFlags: true},
+	"neg": {ClobbersFlags: true}, "negq": {ClobbersFlags: true},
 	"cmp": {ClobbersFlags: true}, "cmpq": {ClobbersFlags: true},
 	"test": {ClobbersFlags: true}, "testq": {ClobbersFlags: true},
+	// Shifts — write flags (CF gets the last bit shifted out).
+	"shl": {ClobbersFlags: true}, "shlq": {ClobbersFlags: true},
+	"sal": {ClobbersFlags: true}, "salq": {ClobbersFlags: true},
+	"shr": {ClobbersFlags: true}, "shrq": {ClobbersFlags: true},
+	"sar": {ClobbersFlags: true}, "sarq": {ClobbersFlags: true},
+	// `not` is the one bitwise op that does NOT affect flags; `lea` computes an address, no flags.
+	"not": {}, "notq": {}, "leaq": {},
 
 	// Direction-flag control — write flags (DF), no operands.
 	"cld": {ClobbersFlags: true}, "std": {ClobbersFlags: true},
