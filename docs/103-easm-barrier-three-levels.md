@@ -92,19 +92,21 @@ The existing `compiler/src/easm` package already implements most of the membrane
 - **Stage 2 — `ensures` functional contracts.** Discharge against machine semantics via the
   existing ladder (affine → linear → SMT). Needs a small machine-state model.
 - **Stage 3 — `reference` + `target … lockstep …` — surface + structure DONE; runtime oracle (3c)
-  pending.** Landed: the parser accepts `reference:` and `target <arch> lockstep <ref>:` body
+  initial leaf tier DONE.** Landed: the parser accepts `reference:` and `target <arch> lockstep <ref>:` body
   blocks; the structural proof obligations are enforced (`lockstep-unknown-reference`,
   `lockstep-missing-reference`); **every sub-body — reference and each target — is verified with the
   full machinery** (clobbers, frame conditions, capabilities), so an optimized target gets no free
   pass (the integrity test clobbers an undeclared register and is rejected); and the emit path
   selects the target implementation via `easm.EmittedBody` (routines without targets are byte-for-byte
-  unchanged). Adopted on the emulator's `AeroLibFallbackUnknownStubAsm` (byte-identical reference ≡
-  target, zero boot risk). **Pending (3c):** the actual runtime equivalence proof — fuzz the target
-  bytes against the `reference` via the `@lockstep` state-level oracle (commit `bdda4456c`) +
-  `@property` harness. Until 3c, `lockstep` certifies signature/structure and that both bodies
-  independently verify — NOT observational equality. The emulator is itself an x86 engine; reuse it
-  as the execution oracle. Multi-target selection by build triple is also a 3c follow-on (today the
-  first target block is emitted).
+  unchanged). Stage 3c is now wired behind `ELISA_EASM_LOCKSTEP_ORACLE=1`: for gated x86_64 safe
+  leaf routines, the verifier assembles `reference` and `target` with `llvm-mc`, links a tiny SysV
+  probe, runs deterministic fuzz vectors, and reports `lockstep-divergence` on bit-level observable
+  mismatches. The first gate is intentionally narrow: GPR/cc-only leaves, plus at most one bounded
+  `HostPtr[T]` input whose buffer bytes are compared. Non-leaf or ambient-effect bodies are reported
+  as `lockstep-oracle-skip`, never as passes. Adopted on the emulator's
+  `AeroLibFallbackUnknownStubAsm` (byte-identical reference ≡ target, zero boot risk). This is
+  coverage-bounded fuzz agreement, not an all-input proof. Multi-target selection by build triple is
+  still a follow-on (today the first target block is emitted).
 - **Stage 4 — the L2 typed-SSA ISA.** Typed virtual registers, `Flag`/`Carry` as first-class
   values, deterministic non-optimizing lowering to L3 validated per-routine by Stage 3. Model on
   QBE / C-- / Cranelift CLIF, *not* LLVM IR (reject poison/undef; expose flags and exact width).
