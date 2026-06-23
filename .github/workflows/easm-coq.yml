@@ -1,0 +1,40 @@
+name: EASM Mechanized Core (Rocq)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/easm-coq.yml"
+      - "formal/easm-tal/**"
+      - "docs/106-easm-mechanized-core.md"
+  push:
+    branches:
+      - main
+      - work
+    paths:
+      - ".github/workflows/easm-coq.yml"
+      - "formal/easm-tal/**"
+      - "docs/106-easm-mechanized-core.md"
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Progress + Preservation (Rocq 9.1.1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # docker-coq-action loads the opam environment (putting `rocq` on PATH) and runs the
+      # custom_script as the image's non-root user, handling checkout-permission setup. Pinned to
+      # the exact Rocq version the proof was verified against locally (rocq compile EasmTAL.v -> .vo).
+      - name: Machine-check the mechanized core
+        uses: coq-community/docker-coq-action@v1
+        with:
+          custom_image: rocq/rocq-prover:9.1.1
+          custom_script: |
+            startGroup "Check EASM definite-init core (progress + preservation)"
+              cd formal/easm-tal
+              make check
+            endGroup
