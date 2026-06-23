@@ -362,6 +362,85 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	}
 }
 
+// TestGuestOverlaySizeGuardEarlyReturnDischarges: the guard-clause idiom — `if size < N: return` with
+// the access in the fall-through (where the negation `size >= N` dominates) — discharges the
+// obligation (docs/107 increment 4, the early-return form).
+func TestGuestOverlaySizeGuardEarlyReturnDischarges(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] < 48:
+		return 0
+	return mem_param.ext2[memory]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("early-return guard should discharge, got: %v", errs)
+	}
+}
+
+// TestGuestOverlaySizeGuardEarlyReturnLessEqual: `if size <= 47: return` proves `size >= 48` in the
+// fall-through (the <= boundary negates to > 47, i.e. >= 48).
+func TestGuestOverlaySizeGuardEarlyReturnLessEqual(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] <= 47:
+		return 0
+	return mem_param.ext2[memory]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("early-return <= guard should discharge, got: %v", errs)
+	}
+}
+
+// TestGuestOverlaySizeGuardEarlyReturnWeakerRejected: `if size < 40: return` only proves `size >= 40`
+// in the fall-through, which does NOT discharge a `requires size >= 48` access.
+func TestGuestOverlaySizeGuardEarlyReturnWeakerRejected(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] < 40:
+		return 0
+	return mem_param.ext2[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-needs-size-guard") {
+		t.Fatalf("expected weaker early-return guard to be rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestGuestOverlaySizeGuardNonExitingGuardRejected: a guard clause whose then-branch does NOT exit
+// leaves the negation un-proven in the fall-through (control reaches it on both branches), so the
+// access is rejected.
+func TestGuestOverlaySizeGuardNonExitingGuardRejected(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+extern note(x: u64) -> void
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] < 48:
+		note(1)
+	return mem_param.ext2[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-needs-size-guard") {
+		t.Fatalf("expected non-exiting guard to be rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	t.Helper()
 	l := lexer.New("overlay.elisa", []byte(src))

@@ -224,14 +224,16 @@ func overlayCarrierKey(expr ast.Expr) string {
 	return ""
 }
 
-// applyOverlaySizeGuardForCondition pushes a size-guard fact when `cond` (the truthy branch of an
-// `if`/`elif`) is a recognized carrier size guard `base.size[mem] >= N` (or `> N`). It is the
-// dominator→SizeGuardFact derivation docs/107 increment 4 left as a follow-up: the front-end turns a
-// dominating guard into the explicit fact the easm size-guard checker consumes. The fact is active
-// for the branch body (the caller truncates the stack when the branch completes).
-func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
+// sizeGuardFactForCondition recognizes a carrier size comparison `base.size[mem] <op> N` and returns
+// the proven size lower-bound that holds when the condition has truthiness `truthy`. The two callers
+// are the dominator→SizeGuardFact derivation (docs/107 increment 4): the truthy branch of a positive
+// guard (`if base.size[mem] >= N:` → fact holds in the body) and the fall-through after an
+// early-return negation guard (`if base.size[mem] < N: return` → the NEGATION `size >= N` holds for
+// the rest of the block). ok is false when the condition is not a carrier size guard or yields only
+// an (unhelpful) upper bound at the requested truthiness.
+func (a *Analyzer) sizeGuardFactForCondition(cond ast.Expr, truthy bool) (overlaySizeGuardFact, bool) {
 	if a == nil || len(a.overlayLayouts) == 0 {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	for {
 		paren, ok := cond.(*ast.ParenExpr)
@@ -242,7 +244,7 @@ func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
 	}
 	bin, ok := cond.(*ast.BinaryExpr)
 	if !ok || bin == nil {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	op := bin.Op
 	access, isIdx := bin.Left.(*ast.IndexExpr)
@@ -254,26 +256,31 @@ func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
 		op = flipComparison(op)
 	}
 	if !isIdx {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	base, field, _, ok := overlayAccessorParts(access)
 	if !ok || field != overlaySizeFieldName {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	carrier := overlayCarrierKey(base)
 	if carrier == "" {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	addr, isAddr := a.analyzeExpr(base).(*AddressSpaceType)
 	if !isAddr || addr == nil || addr.Space != "guest" || addr.LayoutName == "" {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	if a.overlayLayouts[addr.LayoutName] == nil {
-		return
+		return overlaySizeGuardFact{}, false
 	}
 	c, ok := a.constIntValue(bound)
 	if !ok {
-		return
+		return overlaySizeGuardFact{}, false
+	}
+	// The fact is read off the condition under the requested truthiness: a false `size < N` proves
+	// `size >= N`, a false `size <= N` proves `size > N` (i.e. `>= N+1`).
+	if !truthy {
+		op = negateComparison(op)
 	}
 	var atLeast int64
 	switch op {
@@ -282,9 +289,36 @@ func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
 	case lexer.TOKEN_GT:
 		atLeast = c + 1
 	default:
+		return overlaySizeGuardFact{}, false
+	}
+	return overlaySizeGuardFact{carrier: carrier, layout: addr.LayoutName, atLeast: atLeast}, true
+}
+
+// applyOverlaySizeGuardForCondition pushes a size-guard fact for the truthy branch of a positive
+// guard `if base.size[mem] >= N:` (or `> N`). The fact is active for the branch body; the caller
+// truncates the stack when the branch completes.
+func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
+	if fact, ok := a.sizeGuardFactForCondition(cond, true); ok {
+		a.overlaySizeGuards = append(a.overlaySizeGuards, fact)
+	}
+}
+
+// applyOverlayFallthroughGuard handles the early-return guard-clause idiom: an
+// `if base.size[mem] < N: <exits>` statement with no elif/else whose then-branch definitely exits
+// means control only continues when the condition is FALSE, so the negation `size >= N` dominates the
+// rest of the enclosing block. The fact is pushed for the remaining statements; analyzeBlockInScope
+// truncates it at the block boundary.
+func (a *Analyzer) applyOverlayFallthroughGuard(stmt ast.Stmt) {
+	if a == nil || len(a.overlayLayouts) == 0 {
 		return
 	}
-	a.overlaySizeGuards = append(a.overlaySizeGuards, overlaySizeGuardFact{carrier: carrier, layout: addr.LayoutName, atLeast: atLeast})
+	ifStmt, ok := stmt.(*ast.IfStmt)
+	if !ok || len(ifStmt.Elifs) != 0 || len(ifStmt.Else) != 0 || !blockDefinitelyExits(ifStmt.Then) {
+		return
+	}
+	if fact, ok := a.sizeGuardFactForCondition(ifStmt.Cond, false); ok {
+		a.overlaySizeGuards = append(a.overlaySizeGuards, fact)
+	}
 }
 
 // checkOverlaySizeGuard discharges a field's `requires size >= N` obligation (docs/107 increment 4)

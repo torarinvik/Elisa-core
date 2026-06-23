@@ -25,9 +25,15 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 	a.currentAliasBindings = a.cloneAliasBindings()
 	a.currentAliasCarriers = a.cloneAliasCarriers()
 	a.currentAliasCarrierFieldOverrides = a.cloneAliasCarrierFieldOverrides()
+	// docs/107 increment 4: an early-return size guard (`if base.size[mem] < N: return`) leaves its
+	// negation `size >= N` holding for the rest of THIS block. Facts pushed below are scoped to the
+	// block and dropped at its end.
+	savedSizeGuards := len(a.overlaySizeGuards)
 	for _, stmt := range stmts {
 		a.analyzeStmt(stmt)
+		a.applyOverlayFallthroughGuard(stmt)
 	}
+	a.overlaySizeGuards = a.overlaySizeGuards[:savedSizeGuards]
 	savedAliasCarriers, savedAliasCarrierFieldOverrides = a.propagateAliasCarrierBlockEffects(saved, scope, savedAliasCarriers, savedAliasCarrierFieldOverrides)
 	a.currentAliasAccesses = savedAliasAccesses
 	a.currentAliasBindings = savedAliasBindings

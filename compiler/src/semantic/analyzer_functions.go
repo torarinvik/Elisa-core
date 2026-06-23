@@ -6,6 +6,20 @@ import (
 	"strings"
 )
 
+// analyzeFunctionBodyStmts analyzes a function body as a top-level statement list, threading the
+// docs/107 early-return size-guard fall-through facts across sibling statements: a guard clause
+// `if base.size[mem] < N: return` leaves `size >= N` proven for the statements that follow it. Facts
+// are scoped to this body and dropped on return. (Nested blocks get the same treatment in
+// analyzeBlockInScope; function bodies are iterated directly here, so they need the same threading.)
+func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
+	savedSizeGuards := len(a.overlaySizeGuards)
+	for _, stmt := range body {
+		a.analyzeStmt(stmt)
+		a.applyOverlayFallthroughGuard(stmt)
+	}
+	a.overlaySizeGuards = a.overlaySizeGuards[:savedSizeGuards]
+}
+
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	sym, ok := a.symbolForFuncDecl(fn)
 	if !ok || sym == nil {
@@ -158,9 +172,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.analyzeFunctionBodyStmts(fn.Body)
 					a.verifyLemmaEnsures(fn)
 					a.currentImplicitScopes = savedBodyImplicitScopes
 				})
@@ -367,9 +379,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.analyzeFunctionBodyStmts(fn.Body)
 				})
 			})
 		})
@@ -537,9 +547,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 					}()
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
-					for _, stmt := range fn.Body {
-						a.analyzeStmt(stmt)
-					}
+					a.analyzeFunctionBodyStmts(fn.Body)
 				})
 			})
 		})

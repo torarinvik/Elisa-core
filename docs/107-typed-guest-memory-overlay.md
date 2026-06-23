@@ -89,17 +89,21 @@ at least N". The accessor then *must* be dominated by a guard `if proc_param.siz
 the verifier emits `overlay-field-needs-size-guard`. This turns the hand-written, easily-forgotten
 under-size fallback into a checked obligation.
 
-This is now **built**: a truthy `if base.size[mem] >= N:` (or `> N`) guard is recognized by the
-front-end (`applyOverlaySizeGuardForCondition`), which pushes a `SizeGuardFact` that holds for that
-branch body; an access to a `requires size >= K` field inside the branch is discharged iff the
-dominating guard proves `size >= K` (a weaker bound is rejected; the fact does not leak past the
-branch). The check delegates to the same `easm.CheckGuestOverlaySizeGuard` the prototype defined, so
-the fact-discharge logic is single-sourced.
+This is now **built**, in BOTH dominating forms:
 
-Known gap (next follow-up): only the *positive* form `if base.size[mem] >= N: <access>` is derived.
-The early-return idiom — `if base.size[mem] < N: return …` followed by an access in the
-fall-through, where the negation `size >= N` dominates — needs fall-through-negation fact derivation
-and is not yet wired.
+- **Positive guard** `if base.size[mem] >= N:` (or `> N`) — `applyOverlaySizeGuardForCondition`
+  pushes a `SizeGuardFact` that holds for the branch body.
+- **Early-return guard clause** `if base.size[mem] < N: return …` (the idiom the emulator's linker
+  actually uses) — `applyOverlayFallthroughGuard` recognizes an `if` whose then-branch definitely
+  exits with no elif/else, and pushes the *negation* (`size >= N`) as a fact holding for the rest of
+  the enclosing block. Both spellings of the boundary are handled: `< N` negates to `>= N`, `<= N`
+  negates to `>= N+1`.
+
+Both forms share one recognizer (`sizeGuardFactForCondition`, parameterized by the truthiness the
+fact is read under) and discharge through the same `easm.CheckGuestOverlaySizeGuard` the prototype
+defined, so the fact logic is single-sourced. An access to a `requires size >= K` field is discharged
+iff a dominating guard proves `size >= K`; a weaker bound is rejected, a non-exiting guard clause is
+rejected (control reaches the fall-through on both branches), and no fact leaks past its block.
 
 ## (c) Verifier extension vs library — RECOMMENDATION
 
@@ -174,11 +178,14 @@ docs/104 adoptions rely on, and it is what makes adoption safe to do incremental
    under-size fallbacks can be deleted rather than duplicated.
 
 Honest status: increments 1, 2, 3 (read **and** write forms), 4 — *including* the
-dominator→`SizeGuardFact` derivation for the positive guard form — and the in-source `layout`
-declaration path of increment 5 are all real, compiling, tested slices. A `.elisa` program can now
-declare its own carrier layout, read/write its fields with no embedding-side wiring (byte-identical
-MemoryManager calls, verified through LLVM codegen), and have `requires size >= N` fields enforced
-against dominating `if base.size[mem] >= N:` guards. The remaining work before the
-`core/linker.elisa` proc_param/mem_param reads migrate cleanly is the early-return-negation guard
-form (above) — the linker's under-size fallbacks are written as guard clauses, so that form must be
-derived to delete (not duplicate) them.
+dominator→`SizeGuardFact` derivation in **both** the positive-guard and early-return-guard-clause
+forms — and the in-source `layout` declaration path of increment 5 are all real, compiling, tested
+slices. A `.elisa` program can now declare its own carrier layout, read/write its fields with no
+embedding-side wiring (byte-identical MemoryManager calls, verified through LLVM codegen), and have
+`requires size >= N` fields enforced against dominating size guards written either as
+`if base.size[mem] >= N:` or as the guard-clause `if base.size[mem] < N: return`. The front-end
+machinery is therefore complete; what remains (increment 5 proper) is the mechanical migration of the
+emulator's `core/linker.elisa` proc_param/mem_param reads onto the overlay — declaring the two
+layouts with their `requires` tags, retyping the carriers as `GuestVAddr[L]`, and deleting the
+hand-written field reads and under-size fallbacks now that the obligations are checked. That work
+lives in the emulator repo.
