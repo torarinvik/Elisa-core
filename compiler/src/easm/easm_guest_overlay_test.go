@@ -131,3 +131,77 @@ func CheckGuestOverlayAccessReady(t *testing.T, l *Layout, field string, w int) 
 	}
 	return acc
 }
+
+// --- docs/107 increment 3: front-end accessor desugar -----------------------
+
+// An in-bounds named field access desugars to the right-width read, byte-identical to the
+// hand-written MemoryManager_ReadU64 (docs/107 §(d)/(e)).
+func TestOverlayDesugarReadLowersToRightWidth(t *testing.T) {
+	l := procParamLayout()
+	issues, d := DesugarGuestOverlayAccessor("linker.elisa", 20, l, LayoutSize(l), "proc_param.mem_param[memory]")
+	if len(issues) != 0 {
+		t.Fatalf("expected accessor to desugar, got %#v", issues)
+	}
+	if d.Access.Offset != 64 || d.Access.Width != 8 {
+		t.Fatalf("resolved access wrong: %#v", d.Access)
+	}
+	want := "MemoryManager_ReadU64(memory, proc_param + 64)"
+	if d.Call != want {
+		t.Fatalf("desugar mismatch:\n got %q\nwant %q", d.Call, want)
+	}
+}
+
+// A u32 field lowers to ReadU32 (width-driven function selection).
+func TestOverlayDesugarReadU32(t *testing.T) {
+	l := &Layout{Name: "L", Fields: []LayoutField{{Offset: 8, Name: "flags", Type: "u32", Width: 4}}}
+	issues, d := DesugarGuestOverlayAccessor("x.elisa", 1, l, 16, "p.flags[m]")
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues: %#v", issues)
+	}
+	if d.Call != "MemoryManager_ReadU32(m, p + 8)" {
+		t.Fatalf("got %q", d.Call)
+	}
+}
+
+// The write counterpart desugars to MemoryManager_WriteU64 with the value passed through verbatim.
+func TestOverlayDesugarWrite(t *testing.T) {
+	l := procParamLayout()
+	issues, d := DesugarGuestOverlayAccessor("linker.elisa", 21, l, LayoutSize(l), "proc_param.mem_param[memory] = new_val")
+	if len(issues) != 0 {
+		t.Fatalf("expected write accessor to desugar, got %#v", issues)
+	}
+	if !d.IsWrite {
+		t.Fatalf("expected IsWrite=true: %#v", d)
+	}
+	want := "MemoryManager_WriteU64(memory, proc_param + 64, new_val)"
+	if d.Call != want {
+		t.Fatalf("desugar mismatch:\n got %q\nwant %q", d.Call, want)
+	}
+}
+
+// An unknown field is rejected (overlay-unknown-field), not silently lowered.
+func TestOverlayDesugarRejectsUnknownField(t *testing.T) {
+	l := procParamLayout()
+	issues, _ := DesugarGuestOverlayAccessor("linker.elisa", 22, l, LayoutSize(l), "proc_param.bogus[memory]")
+	if !containsIssue(issues, "overlay-unknown-field") {
+		t.Fatalf("expected overlay-unknown-field, got %#v", issues)
+	}
+}
+
+// A non-standard field width (no ReadU<N> form) is rejected as a width mismatch.
+func TestOverlayDesugarRejectsWidthMismatch(t *testing.T) {
+	l := &Layout{Name: "L", Fields: []LayoutField{{Offset: 0, Name: "odd", Type: "u24", Width: 3}}}
+	issues, _ := DesugarGuestOverlayAccessor("x.elisa", 2, l, 8, "p.odd[m]")
+	if !containsIssue(issues, "overlay-field-width-mismatch") {
+		t.Fatalf("expected overlay-field-width-mismatch, got %#v", issues)
+	}
+}
+
+// A malformed accessor (not the base.field[mem] shape) is rejected, not crash.
+func TestOverlayDesugarRejectsBadAccessor(t *testing.T) {
+	l := procParamLayout()
+	issues, _ := DesugarGuestOverlayAccessor("x.elisa", 3, l, LayoutSize(l), "proc_param + 64")
+	if !containsIssue(issues, "overlay-bad-accessor") {
+		t.Fatalf("expected overlay-bad-accessor, got %#v", issues)
+	}
+}
