@@ -146,7 +146,7 @@ docs/104 adoptions rely on, and it is what makes adoption safe to do incremental
 3. **Accessor desugar.** Front-end: parse `base.field[mem]` over a `GuestVAddr[L]` carrier, resolve
    the field against the layout, desugar to `ReadU64/U32/...` by field width. Emit
    `overlay-unknown-field` / `overlay-field-width-mismatch` on failure. No codegen change on success.
-2. **Size-guard obligation.** Add `requires size >= N` field tags + a dominator check that the
+4. **Size-guard obligation.** Add `requires size >= N` field tags + a dominator check that the
    accessor is guarded by `if base.size[mem] >= N`. Retires the hand-written under-size fallbacks.
 5. **Live adoption in `core/linker.elisa`.** Retype `proc_param`/`mem_param` as `GuestVAddr[L]`,
    declare the two layouts, migrate the six reads. Verify byte-identical codegen + clean check.
