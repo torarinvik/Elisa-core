@@ -71,6 +71,8 @@ type Function struct {
 	Stack        []string
 	Control      []string
 	Requires     []string
+	Changes      []string
+	Reads        []string
 	Instructions []Instruction
 	Line         int
 	IsFragment   bool
@@ -1482,7 +1484,94 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 			updateMemoryBaseProvenance(regProvenance, inst.Text)
 		}
 	}
+	issues = append(issues, checkFrameConditions(path, fn, paramTypes)...)
 	return issues
+}
+
+// checkFrameConditions enforces precise `changes`/`reads` frame contracts. When a routine names
+// the buffers it may write (`changes`) or read (`reads`), every memory access in the body must go
+// through one of those named carrier parameters. This upgrades the coarse `clobbers: memory`
+// discipline into a per-pointer guarantee: a stray write through any other carrier is rejected.
+// Opt-in -- a routine that declares neither clause is governed only by the coarse memory clobbers,
+// exactly as before. x86 instructions carry at most one memory operand, so attribution is exact.
+func checkFrameConditions(path string, fn *Function, paramTypes map[string]string) []Issue {
+	changes := lowerStringSet(fn.Changes)
+	reads := lowerStringSet(fn.Reads)
+	if len(changes) == 0 && len(reads) == 0 {
+		return nil
+	}
+	var issues []Issue
+	// A frame clause may only name actual parameters; a typo would otherwise silently widen the
+	// permitted footprint.
+	for _, decl := range []struct {
+		clause string
+		names  []string
+	}{{"changes", fn.Changes}, {"reads", fn.Reads}} {
+		for _, name := range decl.names {
+			key := strings.ToLower(strings.TrimSpace(name))
+			if key == "" {
+				continue
+			}
+			if _, ok := paramTypes[key]; !ok {
+				issues = append(issues, Issue{Severity: "error", Code: "frame-unknown-carrier", File: path, Line: fn.Line, Message: fmt.Sprintf("%s names %q, which is not a parameter of this routine", decl.clause, name)})
+			}
+		}
+	}
+	// Trace every memory base register back to the carrier parameter it came from, following
+	// register-to-register moves, then require the access to be authorised by the frame.
+	regProvenance := map[string]memoryBaseProvenance{}
+	for _, input := range fn.Inputs {
+		if reg := registerAfterEquals(input); reg != "" {
+			paramName := strings.ToLower(bindingName(input))
+			regProvenance[canonicalX86GPR(reg)] = memoryBaseProvenance{Param: paramName, Type: paramTypes[paramName]}
+		}
+	}
+	for _, inst := range fn.Instructions {
+		if inst.Pseudo {
+			updateMemoryBaseProvenance(regProvenance, inst.Text)
+			continue
+		}
+		writes := writesMemory(inst.Text)
+		readsMem := readsMemory(inst.Text)
+		if writes || readsMem {
+			for _, operand := range splitInstructionOperands(inst.Text) {
+				if !operandIsMemory(operand) {
+					continue
+				}
+				base := memoryBaseRegister(operand)
+				if base == "" || base == "rsp" || base == "rip" {
+					continue
+				}
+				prov, ok := regProvenance[base]
+				if !ok || prov.Param == "" {
+					// Base is not traceable to a named carrier (e.g. a freshly computed scratch
+					// pointer); the coarse memory clobber discipline still governs it.
+					continue
+				}
+				if writes && !changes[prov.Param] {
+					issues = append(issues, Issue{Severity: "error", Code: "frame-write-outside-changes", File: path, Line: inst.Line, Message: fmt.Sprintf("writes memory through %s but `changes` does not list it; add `changes: %s` or route the write through a declared buffer", prov.Param, prov.Param)})
+				}
+				if readsMem && !writes && !changes[prov.Param] && !reads[prov.Param] {
+					issues = append(issues, Issue{Severity: "error", Code: "frame-read-outside-reads", File: path, Line: inst.Line, Message: fmt.Sprintf("reads memory through %s but neither `reads` nor `changes` lists it; add `reads: %s`", prov.Param, prov.Param)})
+				}
+			}
+		}
+		updateMemoryBaseProvenance(regProvenance, inst.Text)
+	}
+	return issues
+}
+
+func lowerStringSet(values []string) map[string]bool {
+	if len(values) == 0 {
+		return nil
+	}
+	set := map[string]bool{}
+	for _, v := range values {
+		if key := strings.ToLower(strings.TrimSpace(v)); key != "" {
+			set[key] = true
+		}
+	}
+	return set
 }
 
 type memoryBaseProvenance struct {
@@ -1701,7 +1790,7 @@ func inlineContract(line string) (string, string, bool) {
 
 func isSection(s string) bool {
 	switch strings.ToLower(s) {
-	case "facts", "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "body":
+	case "facts", "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "changes", "reads", "body":
 		return true
 	default:
 		return false
@@ -1731,6 +1820,10 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 		fn.Control = append(fn.Control, splitCSV(value)...)
 	case "requires":
 		fn.Requires = append(fn.Requires, splitCSV(value)...)
+	case "changes":
+		fn.Changes = append(fn.Changes, splitCSV(value)...)
+	case "reads":
+		fn.Reads = append(fn.Reads, splitCSV(value)...)
 	case "body":
 		if inst, ok := parseBodyInstruction(value, line); ok {
 			fn.Instructions = append(fn.Instructions, inst)
