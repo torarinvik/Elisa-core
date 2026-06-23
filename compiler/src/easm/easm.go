@@ -20,6 +20,24 @@ type Module struct {
 	Fragments []Function
 	Protocols []Protocol
 	Templates []Template
+	Layouts   []Layout
+}
+
+// Layout is a typed record shape behind a pointer carrier (`HostPtr[Name]` / `GuestVAddr[Name]`).
+// It lifts EASM toward typed assembly: a memory access `off(%base)` through a layout-typed carrier
+// is checked to land on a declared field of matching width, rather than "some memory at an offset".
+type Layout struct {
+	Name   string
+	Fields []LayoutField
+	Line   int
+}
+
+type LayoutField struct {
+	Offset int64
+	Name   string
+	Type   string
+	Width  int // bytes; 0 = width unknown (offset checked, width not)
+	Line   int
 }
 
 // Template is a routine assembled at build time into bytes with typed runtime-filled holes
@@ -165,6 +183,8 @@ var (
 	protocolHeaderRE = regexp.MustCompile(`^protocol\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
 	lockstepTargetRE = regexp.MustCompile(`^target\s+([A-Za-z0-9_]+)\s+lockstep\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
+	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
+	layoutFieldRE    = regexp.MustCompile(`^(\d+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]]*)\s*$`)
 	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
 	platformForRE    = regexp.MustCompile(`\bfor\b\s+(\([^)]*\)|[^\s]+)`)
@@ -208,6 +228,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 	var current *Function
 	var currentProto *Protocol
 	var currentTemplate *Template
+	var currentLayout *Layout
 	var section string
 	// bodySink, when non-nil, redirects body instructions into a `reference:` or `target … lockstep`
 	// sub-block instead of the function's primary body. Reset to nil whenever a new routine begins.
@@ -233,6 +254,15 @@ func Parse(path string, src string) (*Module, []Issue) {
 			}
 			currentProto = nil
 		}
+		if currentLayout != nil {
+			if m := layoutFieldRE.FindStringSubmatch(line); m != nil {
+				offset, _ := strconv.ParseInt(m[1], 10, 64)
+				width, _ := layoutTypeWidth(m[3])
+				currentLayout.Fields = append(currentLayout.Fields, LayoutField{Offset: offset, Name: m[2], Type: m[3], Width: width, Line: lineNo})
+				continue
+			}
+			currentLayout = nil
+		}
 		if currentTemplate != nil {
 			if !isHeaderLine(line) {
 				if inst, ok := parseBodyInstruction(line, lineNo); ok {
@@ -252,6 +282,11 @@ func Parse(path string, src string) (*Module, []Issue) {
 				m := protocolHeaderRE.FindStringSubmatch(line)
 				module.Protocols = append(module.Protocols, Protocol{Name: m[1], Line: lineNo})
 				currentProto = &module.Protocols[len(module.Protocols)-1]
+				section = ""
+			case layoutHeaderRE.MatchString(line):
+				m := layoutHeaderRE.FindStringSubmatch(line)
+				module.Layouts = append(module.Layouts, Layout{Name: m[1], Line: lineNo})
+				currentLayout = &module.Layouts[len(module.Layouts)-1]
 				section = ""
 			case exportHeaderRE.MatchString(line):
 				fn, issue := parseFunctionHeader(path, lineNo, line)
@@ -327,6 +362,14 @@ func Parse(path string, src string) (*Module, []Issue) {
 			section = ""
 			continue
 		}
+		if layoutHeaderRE.MatchString(line) {
+			m := layoutHeaderRE.FindStringSubmatch(line)
+			module.Layouts = append(module.Layouts, Layout{Name: m[1], Line: lineNo})
+			currentLayout = &module.Layouts[len(module.Layouts)-1]
+			current = nil
+			section = ""
+			continue
+		}
 		// `reference:` and `target <arch> lockstep <ref>:` open body sub-blocks: subsequent
 		// instructions flow into the spec or the per-arch implementation rather than the primary body.
 		if line == "reference:" {
@@ -387,7 +430,8 @@ func Parse(path string, src string) (*Module, []Issue) {
 func isHeaderLine(line string) bool {
 	return strings.HasPrefix(line, "module ") || strings.HasPrefix(line, "target ") ||
 		exportHeaderRE.MatchString(line) || fragmentHeaderRE.MatchString(line) ||
-		protocolHeaderRE.MatchString(line) || templateHeaderRE.MatchString(line)
+		protocolHeaderRE.MatchString(line) || templateHeaderRE.MatchString(line) ||
+		layoutHeaderRE.MatchString(line)
 }
 
 func parseTemplateHeader(path string, line int, text string) (Template, *Issue) {
@@ -666,6 +710,13 @@ func VerifyModule(module *Module) []Issue {
 		return nil
 	}
 	var issues []Issue
+	layouts := map[string]*Layout{}
+	for i := range module.Layouts {
+		l := &module.Layouts[i]
+		if l.Name != "" {
+			layouts[l.Name] = l
+		}
+	}
 	seenExports := map[string]int{}
 	for i := range module.Functions {
 		fn := &module.Functions[i]
@@ -675,10 +726,10 @@ func VerifyModule(module *Module) []Issue {
 			seenExports[fn.Name] = fn.Line
 		}
 		if len(fn.Reference) > 0 || len(fn.Targets) > 0 {
-			issues = append(issues, verifyLockstepRoutine(module.Path, module.Target, fn)...)
+			issues = append(issues, verifyLockstepRoutine(module.Path, module.Target, fn, layouts)...)
 			continue
 		}
-		issues = append(issues, verifyFunction(module.Path, module.Target, fn)...)
+		issues = append(issues, verifyFunction(module.Path, module.Target, fn, layouts)...)
 	}
 	return issues
 }
@@ -690,7 +741,7 @@ func VerifyModule(module *Module) []Issue {
 // ordinary function body — so an optimized target gets no free pass. The runtime equivalence proof
 // against the reference (the @lockstep oracle, docs/103 stage 3c) is not yet wired; until it is,
 // `lockstep` certifies signature/structure, not observational equality.
-func verifyLockstepRoutine(path, target string, fn *Function) []Issue {
+func verifyLockstepRoutine(path, target string, fn *Function, layouts map[string]*Layout) []Issue {
 	var issues []Issue
 	hasReference := len(fn.Reference) > 0
 	for _, tb := range fn.Targets {
@@ -707,7 +758,7 @@ func verifyLockstepRoutine(path, target string, fn *Function) []Issue {
 		sub.Instructions = insts
 		sub.Reference = nil
 		sub.Targets = nil
-		issues = append(issues, verifyFunction(path, target, &sub)...)
+		issues = append(issues, verifyFunction(path, target, &sub, layouts)...)
 	}
 	if hasReference {
 		verifyBody(fn.Reference)
@@ -994,7 +1045,7 @@ func appendUnique(dst []string, add []string) []string {
 	return dst
 }
 
-func verifyFunction(path string, target string, fn *Function) []Issue {
+func verifyFunction(path string, target string, fn *Function, layouts map[string]*Layout) []Issue {
 	var issues []Issue
 	if fn.Name == "" {
 		return append(issues, Issue{Severity: "error", Code: "missing-name", File: path, Line: fn.Line, Message: "EASM export is missing a symbol name"})
@@ -1376,7 +1427,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)
-	issues = append(issues, verifyMachineRoleTypes(path, fn, requireSet, controlSet)...)
+	issues = append(issues, verifyMachineRoleTypes(path, fn, requireSet, controlSet, layouts)...)
 	issues = append(issues, verifyBindings(path, target, fn)...)
 	issues = append(issues, verifyRegisterLists(path, target, fn)...)
 	issues = append(issues, verifyDuplicateContractAtoms(path, fn)...)
@@ -1496,7 +1547,7 @@ func verifyFunction(path string, target string, fn *Function) []Issue {
 	return issues
 }
 
-func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]bool, controlSet map[string]bool) []Issue {
+func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]bool, controlSet map[string]bool, layouts map[string]*Layout) []Issue {
 	var issues []Issue
 	paramTypes := map[string]string{}
 	for _, param := range fn.Params {
@@ -1559,12 +1610,53 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 				if provenance, ok := regProvenance[base]; ok && provenance.Raw {
 					issues = append(issues, Issue{Severity: "error", Code: "raw-memory-base", File: path, Line: inst.Line, Message: fmt.Sprintf("memory base %%%s comes from EASM parameter %s of raw type %s; use an address-space carrier such as HostPtr[T] or GuestVAddr[T] that names the memory class, or require memory.base.untyped after a manual proof", base, provenance.Param, provenance.Type)})
 				}
+				if provenance, ok := regProvenance[base]; ok && !provenance.Raw {
+					issues = append(issues, checkLayoutAccess(path, inst, operand, provenance, layouts)...)
+				}
 			}
 			updateMemoryBaseProvenance(regProvenance, inst.Text)
 		}
 	}
 	issues = append(issues, checkFrameConditions(path, fn, paramTypes)...)
 	return issues
+}
+
+// checkLayoutAccess type-checks one memory operand against the record layout of its carrier. When
+// the base register's carrier is `HostPtr[L]`/`GuestVAddr[L]` for a declared layout L, the operand's
+// constant displacement must land on a declared field, and the access width must match the field's
+// width. Indexed (base,index,scale), symbolic-displacement, and extend/address-compute forms are
+// skipped (not a single static field / suffix does not reflect memory width). Non-layout carriers
+// (e.g. HostPtr[u32]) are unaffected.
+func checkLayoutAccess(path string, inst Instruction, operand string, prov memoryBaseProvenance, layouts map[string]*Layout) []Issue {
+	elem := layoutElemName(prov.Type)
+	if elem == "" {
+		return nil
+	}
+	layout, ok := layouts[elem]
+	if !ok {
+		return nil
+	}
+	if open := strings.Index(operand, "("); open >= 0 {
+		if rel := strings.Index(operand[open:], ")"); rel >= 0 && strings.Contains(operand[open:open+rel], ",") {
+			return nil
+		}
+	}
+	disp, ok := memoryDisplacement(operand)
+	if !ok {
+		return nil
+	}
+	field, ok := layoutFieldAt(layout, disp)
+	if !ok {
+		return []Issue{{Severity: "error", Code: "layout-unknown-field", File: path, Line: inst.Line, Message: fmt.Sprintf("offset %d into %s of layout %s is not a declared field; add the field or correct the access", disp, prov.Param, layout.Name)}}
+	}
+	op := normalizeOp(inst.Op)
+	if strings.HasPrefix(op, "movs") || strings.HasPrefix(op, "movz") || strings.HasPrefix(op, "lea") {
+		return nil
+	}
+	if w, ok := accessWidthBytes(op); ok && field.Width != 0 && w != field.Width {
+		return []Issue{{Severity: "error", Code: "layout-field-width-mismatch", File: path, Line: inst.Line, Message: fmt.Sprintf("%d-byte access at offset %d hits field %s.%s declared %s (%d bytes); widths must match", w, disp, layout.Name, field.Name, field.Type, field.Width)}}
+	}
+	return nil
 }
 
 // checkFrameConditions enforces precise `changes`/`reads` frame contracts. When a routine names
@@ -3450,6 +3542,86 @@ func hasMemoryOperand(text string) bool {
 // disp(base, index, scale), or "" if it has no GPR base (a segment-relative reference or an
 // absolute address). Only the base is returned -- the index register is a scalar offset, not
 // a pointer, so it is not subject to pointer-provenance typing.
+// layoutTypeWidth maps a layout field's declared type to its size in bytes. Pointer-class carrier
+// and role types are pointer-width (8); selectors are 16-bit. Returns (0,false) when the width is
+// unknown, in which case the field's offset is still checked but its access width is not.
+func layoutTypeWidth(typ string) (int, bool) {
+	t := strings.TrimSpace(typ)
+	switch t {
+	case "u8", "i8", "bool", "char":
+		return 1, true
+	case "u16", "i16":
+		return 2, true
+	case "u32", "i32", "f32":
+		return 4, true
+	case "u64", "i64", "usize", "uintptr", "f64":
+		return 8, true
+	}
+	if strings.Contains(t, "Selector") {
+		return 2, true
+	}
+	if isAddressSpaceCarrierType(t) || isEASMRoleType(t) {
+		return 8, true
+	}
+	return 0, false
+}
+
+// layoutElemName returns the element name of a layout-typed carrier (`HostPtr[Name]` ->
+// "Name"), or "" if the type is not a carrier.
+func layoutElemName(typ string) string {
+	t := strings.TrimSpace(typ)
+	for _, prefix := range []string{"GuestVAddr[", "HostPtr[", "NativeMappedGuestPtr["} {
+		if strings.HasPrefix(t, prefix) && strings.HasSuffix(t, "]") {
+			return strings.TrimSpace(t[len(prefix) : len(t)-1])
+		}
+	}
+	return ""
+}
+
+// memoryDisplacement extracts the constant displacement of a `disp(base,...)` memory operand.
+// Returns (0,true) for a bare `(%base)` and (0,false) for a symbolic/non-constant displacement,
+// which cannot be statically typed against a layout.
+func memoryDisplacement(operand string) (int64, bool) {
+	open := strings.Index(operand, "(")
+	if open < 0 {
+		return 0, false
+	}
+	disp := strings.TrimSpace(operand[:open])
+	if disp == "" {
+		return 0, true
+	}
+	v, err := strconv.ParseInt(disp, 0, 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
+// accessWidthBytes returns the memory access width implied by an AT&T mnemonic suffix
+// (b/w/l/q -> 1/2/4/8). Returns (0,false) when there is no explicit width suffix.
+func accessWidthBytes(op string) (int, bool) {
+	switch {
+	case strings.HasSuffix(op, "b"):
+		return 1, true
+	case strings.HasSuffix(op, "w"):
+		return 2, true
+	case strings.HasSuffix(op, "l"):
+		return 4, true
+	case strings.HasSuffix(op, "q"):
+		return 8, true
+	}
+	return 0, false
+}
+
+func layoutFieldAt(layout *Layout, offset int64) (LayoutField, bool) {
+	for _, f := range layout.Fields {
+		if f.Offset == offset {
+			return f, true
+		}
+	}
+	return LayoutField{}, false
+}
+
 func memoryBaseRegister(operand string) string {
 	open := strings.Index(operand, "(")
 	if open < 0 {
