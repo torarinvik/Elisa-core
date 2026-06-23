@@ -455,9 +455,14 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("%s expects 1 type argument, got %d", expr.Name, len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
+		// The pointee type is ABI-irrelevant: an address-space carrier always lowers to its uintptr
+		// storage (i64), so the Elem is purely informational. When the type-arg is a docs/107 overlay
+		// LAYOUT name (registered in the semantic overlay registry, not in the backend's NamedTypes),
+		// it does not resolve here — fall back to uintptr as the opaque pointee. The semantic analyzer
+		// has already validated the type-arg (real type or registered layout), so this is sound.
 		elem, err := s.resolveTypeExpr(expr.TypeArgs[0])
 		if err != nil {
-			return nil, err
+			elem = s.g.result.NamedTypes["uintptr"]
 		}
 		space := "guest"
 		if expr.Name == "HostPtr" {
