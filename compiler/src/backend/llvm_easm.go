@@ -252,7 +252,7 @@ func easmDeclaredFinalFSOwner(fn *easm.Function) string {
 		return ""
 	}
 	owner := ""
-	for _, inst := range fn.Instructions {
+	for _, inst := range easm.EmittedBody(fn) {
 		if !inst.Pseudo || strings.ToLower(strings.TrimSpace(inst.Op)) != "state" {
 			continue
 		}
@@ -329,8 +329,9 @@ func easmCallConv(abi string) string {
 }
 
 func easmInlineAsmText(fn *easm.Function) string {
-	lines := make([]string, 0, len(fn.Instructions))
-	for _, inst := range fn.Instructions {
+	body := easm.EmittedBody(fn)
+	lines := make([]string, 0, len(body))
+	for _, inst := range body {
 		lines = append(lines, inst.Text)
 	}
 	return strings.Join(lines, "\n")

@@ -74,9 +74,23 @@ type Function struct {
 	Changes      []string
 	Reads        []string
 	Instructions []Instruction
+	Reference    []Instruction // portable spec body for `lockstep` translation validation, if any
+	Targets      []TargetBody  // per-arch implementations validated against Reference
 	Line         int
 	IsFragment   bool
 	Platform     string
+}
+
+// TargetBody is one architecture-specific implementation of a routine that declares it must be
+// observationally equivalent to the routine's `reference` spec body (`target <arch> lockstep
+// <ref>:`). Its instruction stream is verified with the full machinery exactly like an ordinary
+// body; the runtime equivalence proof against the named reference is the @lockstep oracle (see
+// docs/103 stage 3c) and is not yet wired.
+type TargetBody struct {
+	Arch         string
+	Lockstep     string
+	Instructions []Instruction
+	Line         int
 }
 
 type Param struct {
@@ -150,6 +164,7 @@ var (
 	fragmentHeaderRE = regexp.MustCompile(`^fragment\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
 	protocolHeaderRE = regexp.MustCompile(`^protocol\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
+	lockstepTargetRE = regexp.MustCompile(`^target\s+([A-Za-z0-9_]+)\s+lockstep\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
 	platformForRE    = regexp.MustCompile(`\bfor\b\s+(\([^)]*\)|[^\s]+)`)
@@ -194,6 +209,9 @@ func Parse(path string, src string) (*Module, []Issue) {
 	var currentProto *Protocol
 	var currentTemplate *Template
 	var section string
+	// bodySink, when non-nil, redirects body instructions into a `reference:` or `target … lockstep`
+	// sub-block instead of the function's primary body. Reset to nil whenever a new routine begins.
+	var bodySink *[]Instruction
 	scanner := bufio.NewScanner(strings.NewReader(src))
 	lineNo := 0
 	for scanner.Scan() {
@@ -202,6 +220,11 @@ func Parse(path string, src string) (*Module, []Issue) {
 		line := stripComment(strings.TrimSpace(raw))
 		if line == "" {
 			continue
+		}
+		// Any declaration header (a new routine, fragment, or `target … lockstep` block) closes the
+		// previous body sink; the reference/target detection below re-establishes it in the same pass.
+		if isHeaderLine(line) {
+			bodySink = nil
 		}
 		if currentProto != nil {
 			if m := protocolMethodRE.FindStringSubmatch(line); m != nil {
@@ -304,10 +327,27 @@ func Parse(path string, src string) (*Module, []Issue) {
 			section = ""
 			continue
 		}
+		// `reference:` and `target <arch> lockstep <ref>:` open body sub-blocks: subsequent
+		// instructions flow into the spec or the per-arch implementation rather than the primary body.
+		if line == "reference:" {
+			bodySink = &current.Reference
+			section = "body"
+			continue
+		}
+		if m := lockstepTargetRE.FindStringSubmatch(line); m != nil {
+			current.Targets = append(current.Targets, TargetBody{Arch: m[1], Lockstep: m[2], Line: lineNo})
+			bodySink = &current.Targets[len(current.Targets)-1].Instructions
+			section = "body"
+			continue
+		}
 		if matches := sectionRE.FindStringSubmatch(line); matches != nil && isSection(matches[1]) {
 			section = strings.ToLower(matches[1])
 			if rest := strings.TrimSpace(matches[2]); rest != "" {
-				addSectionValue(current, section, rest, lineNo)
+				if section == "body" {
+					addBodyOrSink(current, bodySink, rest, lineNo)
+				} else {
+					addSectionValue(current, section, rest, lineNo)
+				}
 			}
 			continue
 		}
@@ -330,7 +370,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 		// Otherwise it is a body instruction. In the native form, instructions just begin — no
 		// `body:` marker required.
 		section = "body"
-		addSectionValue(current, "body", lineWithIndent(raw), lineNo)
+		addBodyOrSink(current, bodySink, lineWithIndent(raw), lineNo)
 	}
 	if err := scanner.Err(); err != nil {
 		issues = append(issues, Issue{Severity: "error", Code: "scan-failed", File: path, Message: err.Error()})
@@ -634,7 +674,46 @@ func VerifyModule(module *Module) []Issue {
 		} else {
 			seenExports[fn.Name] = fn.Line
 		}
+		if len(fn.Reference) > 0 || len(fn.Targets) > 0 {
+			issues = append(issues, verifyLockstepRoutine(module.Path, module.Target, fn)...)
+			continue
+		}
 		issues = append(issues, verifyFunction(module.Path, module.Target, fn)...)
+	}
+	return issues
+}
+
+// verifyLockstepRoutine handles a routine carrying a `reference` spec body and/or one or more
+// `target … lockstep` implementations. It enforces the structural proof obligations that must hold
+// before any runtime equivalence check is meaningful, then verifies the reference and every target
+// body with the FULL machinery (clobbers, frame conditions, capabilities, …) as if each were an
+// ordinary function body — so an optimized target gets no free pass. The runtime equivalence proof
+// against the reference (the @lockstep oracle, docs/103 stage 3c) is not yet wired; until it is,
+// `lockstep` certifies signature/structure, not observational equality.
+func verifyLockstepRoutine(path, target string, fn *Function) []Issue {
+	var issues []Issue
+	hasReference := len(fn.Reference) > 0
+	for _, tb := range fn.Targets {
+		name := strings.ToLower(strings.TrimSpace(tb.Lockstep))
+		if name != "reference" {
+			issues = append(issues, Issue{Severity: "error", Code: "lockstep-unknown-reference", File: path, Line: tb.Line, Message: fmt.Sprintf("target %s declares `lockstep %s`, but the only spec block a routine may reference is `reference`", tb.Arch, tb.Lockstep)})
+		} else if !hasReference {
+			issues = append(issues, Issue{Severity: "error", Code: "lockstep-missing-reference", File: path, Line: tb.Line, Message: fmt.Sprintf("target %s declares `lockstep reference`, but the routine has no `reference:` spec body to validate against", tb.Arch)})
+		}
+	}
+	// Verify each body in isolation using the full per-instruction machinery.
+	verifyBody := func(insts []Instruction) {
+		sub := *fn
+		sub.Instructions = insts
+		sub.Reference = nil
+		sub.Targets = nil
+		issues = append(issues, verifyFunction(path, target, &sub)...)
+	}
+	if hasReference {
+		verifyBody(fn.Reference)
+	}
+	for _, tb := range fn.Targets {
+		verifyBody(tb.Instructions)
 	}
 	return issues
 }
@@ -1828,6 +1907,36 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 		if inst, ok := parseBodyInstruction(value, line); ok {
 			fn.Instructions = append(fn.Instructions, inst)
 		}
+	}
+}
+
+// EmittedBody returns the instruction stream that should be lowered to machine code for fn: the
+// implementation selected from its `target … lockstep` blocks when present, otherwise the routine's
+// primary body (falling back to the `reference` spec if the primary body is empty). Routines with no
+// target blocks are returned byte-for-byte unchanged. Multi-target selection by build triple is a
+// follow-on; a single-arch build carries one target block, so the first is used.
+func EmittedBody(fn *Function) []Instruction {
+	if fn == nil {
+		return nil
+	}
+	if len(fn.Targets) > 0 {
+		return fn.Targets[0].Instructions
+	}
+	if len(fn.Instructions) == 0 && len(fn.Reference) > 0 {
+		return fn.Reference
+	}
+	return fn.Instructions
+}
+
+// addBodyOrSink routes a body line into the active `reference:`/`target` sub-block when one is
+// open, and into the function's primary body otherwise.
+func addBodyOrSink(fn *Function, sink *[]Instruction, value string, line int) {
+	if sink == nil {
+		addSectionValue(fn, "body", value, line)
+		return
+	}
+	if inst, ok := parseBodyInstruction(value, line); ok {
+		*sink = append(*sink, inst)
 	}
 }
 
