@@ -1,0 +1,52 @@
+name: EASM Lockstep Oracle
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/easm-lockstep-oracle.yml"
+      - "compiler/src/easm/**"
+      - "compiler/scripts/run_lockstep_oracle_gate.sh"
+      - "docs/103-easm-barrier-three-levels.md"
+      - "docs/104-easm-as-typed-assembly.md"
+  push:
+    branches:
+      - main
+      - work
+    paths:
+      - ".github/workflows/easm-lockstep-oracle.yml"
+      - "compiler/src/easm/**"
+      - "compiler/scripts/run_lockstep_oracle_gate.sh"
+      - "docs/103-easm-barrier-three-levels.md"
+      - "docs/104-easm-as-typed-assembly.md"
+  workflow_dispatch:
+
+jobs:
+  oracle:
+    name: Lockstep Execution Oracle
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: compiler/go.mod
+          cache-dependency-path: compiler/go.sum
+
+      - name: Install LLVM toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang llvm-dev libllvm-dev
+
+      - name: Show toolchain versions
+        run: |
+          go version
+          clang --version
+          llvm-mc --version || llvm-config --version
+
+      - name: Run lockstep oracle gate
+        working-directory: compiler
+        run: ./scripts/run_lockstep_oracle_gate.sh

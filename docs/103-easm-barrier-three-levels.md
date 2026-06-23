@@ -106,7 +106,11 @@ The existing `compiler/src/easm` package already implements most of the membrane
   as `lockstep-oracle-skip`, never as passes. Adopted on the emulator's
   `AeroLibFallbackUnknownStubAsm` (byte-identical reference ≡ target, zero boot risk). This is
   coverage-bounded fuzz agreement, not an all-input proof. Multi-target selection by build triple is
-  still a follow-on (today the first target block is emitted).
+  still a follow-on (today the first target block is emitted). The oracle is now exercised in CI
+  (`.github/workflows/easm-lockstep-oracle.yml` → `compiler/scripts/run_lockstep_oracle_gate.sh`):
+  the gate installs LLVM, fails if the toolchain is absent (so a silent skip cannot hide bit-rot),
+  and runs the oracle test family including a production-representative check of the real AeroLib
+  stub body — turning the oracle "on for real" rather than leaving it to synthetic fixtures alone.
 - **Stage 4 — the L2 typed-SSA ISA.** Typed virtual registers, `Flag`/`Carry` as first-class
   values, deterministic non-optimizing lowering to L3 validated per-routine by Stage 3. Model on
   QBE / C-- / Cranelift CLIF, *not* LLVM IR (reject poison/undef; expose flags and exact width).
