@@ -551,6 +551,28 @@ func TestParseArgsAcceptsUnifiedStrictFlag(t *testing.T) {
 	}
 }
 
+// docs/102: -Wprogress activates the (already-built, dormant) progress-safety obligation checker
+// on its own dial, without dragging in the rest of -Wstrict.
+func TestParseArgsProgressDialIsIsolated(t *testing.T) {
+	options, err := parseArgs([]string{"-Wprogress", "fixture.elisa"})
+	if err != nil {
+		t.Fatalf("parseArgs returned error: %v", err)
+	}
+	if !options.progressStrict {
+		t.Fatal("expected -Wprogress to set progressStrict")
+	}
+	if options.strictPolicy || options.perfStrict || options.concurrencyStrict {
+		t.Fatalf("-Wprogress must be isolated, got strict=%v perf=%v concurrency=%v", options.strictPolicy, options.perfStrict, options.concurrencyStrict)
+	}
+	semanticOptions := semanticOptionsForCLI(options)
+	if !semanticOptions.EnforceProgressSafety {
+		t.Fatal("expected -Wprogress to enable progress safety analysis")
+	}
+	if semanticOptions.EnforcePerfLints || semanticOptions.EnforceStrictConcurrency || semanticOptions.EnforceUnsafePermissions {
+		t.Fatal("expected -Wprogress not to enable unrelated lints")
+	}
+}
+
 // docs/90: the SMT discharge tier is ON by default; `-nosmt` opts out. (A missing
 // solver latches off and falls back to the runtime check, so default-on is safe.)
 func TestParseArgsEnablesSMTByDefault(t *testing.T) {

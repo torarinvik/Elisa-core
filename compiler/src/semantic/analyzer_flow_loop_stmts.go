@@ -23,7 +23,25 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 		if grantsStaleRef {
 			a.currentGrantedStaleRefDepth++
 		}
+		// `can Unsafe.NonProgress/AssumeProgress:` discharges a wrapped loop's progress obligation
+		// like `trusted` (the grant is in scope for the loop), while still propagating via the
+		// recordFunctionPermissionRefs above. Without this, converting a wrapping `trusted` to `can`
+		// would silently re-flag the loop.
+		grantsNonProgress := permissionRefsContain(refs, "Unsafe", "NonProgress")
+		grantsAssumeProgress := permissionRefsContain(refs, "Unsafe", "AssumeProgress")
+		if grantsNonProgress {
+			a.currentGrantedNonProgressDepth++
+		}
+		if grantsAssumeProgress {
+			a.currentGrantedAssumeProgressDepth++
+		}
 		a.analyzeBlockWithRegionClone(stmt.Body, NewScope(a.currentScope))
+		if grantsNonProgress {
+			a.currentGrantedNonProgressDepth--
+		}
+		if grantsAssumeProgress {
+			a.currentGrantedAssumeProgressDepth--
+		}
 		if grantsStaleRef {
 			a.currentGrantedStaleRefDepth--
 		}

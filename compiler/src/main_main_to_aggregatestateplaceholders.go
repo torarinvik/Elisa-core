@@ -238,6 +238,7 @@ type cliOptions struct {
 	explainHole       bool
 	enableSMT         bool
 	concurrencyStrict bool
+	progressStrict    bool
 	requiresReport    bool
 }
 
@@ -335,6 +336,11 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
 			// diagnostics to hard errors for strict-mode code.
 			options.concurrencyStrict = true
+		case arg == "-Wprogress":
+			// docs/102: activate the (already-built but dormant) progress-safety obligation
+			// checker on its own dial — every `while` loop / recursive cycle must show progress
+			// evidence (`decreases`, `Progress.*`) or declare intentional non-progress.
+			options.progressStrict = true
 		case arg == "-strict":
 			// docs/85: prove-it-or-fail — a refinement/contract that cannot be discharged
 			// statically fails the build (Dafny-like). ON by default now; kept as the explicit
@@ -369,6 +375,7 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.strictPolicy = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
+			options.progressStrict = true
 			options.proofStrict = true
 		case arg == "-debug":
 			options.debug = true

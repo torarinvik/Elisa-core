@@ -344,6 +344,12 @@ type Analyzer struct {
 	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
 	// auditable through the capability system rather than invisibly suppressed.
 	currentGrantedStaleRefDepth       int
+	// currentGranted{NonProgress,AssumeProgress}Depth: an enclosing tracked `can Unsafe.NonProgress:`
+	// / `can Unsafe.AssumeProgress:` discharges a wrapped loop's progress obligation just like
+	// `trusted` (the grant is in scope), but — unlike `trusted` — also propagates the effect to the
+	// function's signature. Mirrors currentGrantedStaleRefDepth above.
+	currentGrantedNonProgressDepth    int
+	currentGrantedAssumeProgressDepth int
 	currentReturnProvenance           regionRefState
 	currentReturnBorrowedOwnerRefs    borrowedOwnerRefSummary
 	currentConservativeCallWidenings  map[*Symbol][]conservativeCallWidening

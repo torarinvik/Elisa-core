@@ -17,6 +17,43 @@ type Module struct {
 	Name      string
 	Target    string
 	Functions []Function
+	Fragments []Function
+	Protocols []Protocol
+	Templates []Template
+}
+
+// Template is a routine assembled at build time into bytes with typed runtime-filled holes
+// (docs/101 §3). A hole is just a parameter filled at instantiate time rather than call time;
+// the body references it by bare name, so a template reads like an ordinary Elisa function.
+type Template struct {
+	Name         string
+	Holes        []Param
+	Instructions []Instruction
+	PatchPoints  []PatchPoint
+	Line         int
+}
+
+// PatchPoint records where a typed hole is consumed in the assembled body.
+type PatchPoint struct {
+	Hole       string
+	Type       string
+	InstrIndex int
+	Class      string // "sel16" | "wide64" | ""
+}
+
+// Protocol declares a machine operation by signature; each platform-tagged function whose
+// name matches a method is an impl, and selectPlatformImpls keeps the one matching the build
+// target. This is the (arch × os × role) dispatch layer of docs/101 §2.
+type Protocol struct {
+	Name    string
+	Methods []protocolMethod
+	Line    int
+}
+
+type protocolMethod struct {
+	Name   string
+	Arity  int
+	Return string
 }
 
 type Function struct {
@@ -36,6 +73,8 @@ type Function struct {
 	Requires     []string
 	Instructions []Instruction
 	Line         int
+	IsFragment   bool
+	Platform     string
 }
 
 type Param struct {
@@ -99,11 +138,21 @@ type FunctionSummary struct {
 	Labels     []string `json:"labels,omitempty"`
 	Control    []string `json:"control,omitempty"`
 	Stack      []string `json:"stack,omitempty"`
+	// DerivedEffects is the caller-facing Unsafe.*/Segment.* set projected from the verified
+	// contract (docs/101 §4) — surfaced for honesty and migration planning.
+	DerivedEffects []string `json:"derivedEffects,omitempty"`
 }
 
 var (
-	exportHeaderRE = regexp.MustCompile(`^export\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*(.*):\s*$`)
-	sectionRE      = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$`)
+	exportHeaderRE   = regexp.MustCompile(`^export\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*(.*):\s*$`)
+	fragmentHeaderRE = regexp.MustCompile(`^fragment\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
+	protocolHeaderRE = regexp.MustCompile(`^protocol\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
+	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
+	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
+	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
+	platformForRE    = regexp.MustCompile(`\bfor\b\s+(\([^)]*\)|[^\s]+)`)
+	nativeCanRE      = regexp.MustCompile(`\bcan\b\s+([^\[].*?)(?:\s+abi\b|\s+for\b|$)`)
+	sectionRE        = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$`)
 	allowedOps     = map[string]bool{
 		"mov": true, "movq": true, "lea": true, "push": true, "pushq": true, "pop": true, "popq": true,
 		"movb": true, "movw": true, "movl": true,
@@ -140,6 +189,8 @@ func Parse(path string, src string) (*Module, []Issue) {
 	module := &Module{Path: path, Target: "any"}
 	var issues []Issue
 	var current *Function
+	var currentProto *Protocol
+	var currentTemplate *Template
 	var section string
 	scanner := bufio.NewScanner(strings.NewReader(src))
 	lineNo := 0
@@ -150,12 +201,33 @@ func Parse(path string, src string) (*Module, []Issue) {
 		if line == "" {
 			continue
 		}
+		if currentProto != nil {
+			if m := protocolMethodRE.FindStringSubmatch(line); m != nil {
+				currentProto.Methods = append(currentProto.Methods, protocolMethod{Name: m[1], Arity: len(splitCSV(m[2])), Return: m[3]})
+				continue
+			}
+			currentProto = nil
+		}
+		if currentTemplate != nil {
+			if !isHeaderLine(line) {
+				if inst, ok := parseBodyInstruction(line, lineNo); ok {
+					currentTemplate.Instructions = append(currentTemplate.Instructions, inst)
+				}
+				continue
+			}
+			currentTemplate = nil
+		}
 		if current == nil {
 			switch {
 			case strings.HasPrefix(line, "module "):
 				module.Name = strings.TrimSpace(strings.TrimPrefix(line, "module "))
 			case strings.HasPrefix(line, "target "):
 				module.Target = strings.TrimSpace(strings.TrimPrefix(line, "target "))
+			case protocolHeaderRE.MatchString(line):
+				m := protocolHeaderRE.FindStringSubmatch(line)
+				module.Protocols = append(module.Protocols, Protocol{Name: m[1], Line: lineNo})
+				currentProto = &module.Protocols[len(module.Protocols)-1]
+				section = ""
 			case exportHeaderRE.MatchString(line):
 				fn, issue := parseFunctionHeader(path, lineNo, line)
 				if issue != nil {
@@ -165,8 +237,26 @@ func Parse(path string, src string) (*Module, []Issue) {
 				module.Functions = append(module.Functions, fn)
 				current = &module.Functions[len(module.Functions)-1]
 				section = ""
+			case fragmentHeaderRE.MatchString(line):
+				fr, issue := parseFragmentHeader(path, lineNo, line)
+				if issue != nil {
+					issues = append(issues, *issue)
+					continue
+				}
+				module.Fragments = append(module.Fragments, fr)
+				current = &module.Fragments[len(module.Fragments)-1]
+				section = ""
+			case templateHeaderRE.MatchString(line):
+				tpl, issue := parseTemplateHeader(path, lineNo, line)
+				if issue != nil {
+					issues = append(issues, *issue)
+					continue
+				}
+				module.Templates = append(module.Templates, tpl)
+				currentTemplate = &module.Templates[len(module.Templates)-1]
+				section = ""
 			default:
-				issues = append(issues, Issue{Severity: "error", Code: "unexpected-top-level", File: path, Line: lineNo, Message: "expected module, target, or export def"})
+				issues = append(issues, Issue{Severity: "error", Code: "unexpected-top-level", File: path, Line: lineNo, Message: "expected module, target, export def, fragment, protocol, or template def"})
 			}
 			continue
 		}
@@ -181,6 +271,37 @@ func Parse(path string, src string) (*Module, []Issue) {
 			section = ""
 			continue
 		}
+		if fragmentHeaderRE.MatchString(line) {
+			fr, issue := parseFragmentHeader(path, lineNo, line)
+			if issue != nil {
+				issues = append(issues, *issue)
+				continue
+			}
+			module.Fragments = append(module.Fragments, fr)
+			current = &module.Fragments[len(module.Fragments)-1]
+			section = ""
+			continue
+		}
+		if protocolHeaderRE.MatchString(line) {
+			m := protocolHeaderRE.FindStringSubmatch(line)
+			module.Protocols = append(module.Protocols, Protocol{Name: m[1], Line: lineNo})
+			currentProto = &module.Protocols[len(module.Protocols)-1]
+			current = nil
+			section = ""
+			continue
+		}
+		if templateHeaderRE.MatchString(line) {
+			tpl, issue := parseTemplateHeader(path, lineNo, line)
+			if issue != nil {
+				issues = append(issues, *issue)
+				continue
+			}
+			module.Templates = append(module.Templates, tpl)
+			currentTemplate = &module.Templates[len(module.Templates)-1]
+			current = nil
+			section = ""
+			continue
+		}
 		if matches := sectionRE.FindStringSubmatch(line); matches != nil && isSection(matches[1]) {
 			section = strings.ToLower(matches[1])
 			if rest := strings.TrimSpace(matches[2]); rest != "" {
@@ -188,11 +309,26 @@ func Parse(path string, src string) (*Module, []Issue) {
 			}
 			continue
 		}
-		if section == "" {
-			issues = append(issues, Issue{Severity: "error", Code: "missing-section", File: path, Line: lineNo, Message: "function body line appears before a contract section"})
+		// Native inline contract — `requires x86_64.segment.gs`, `clobbers rax, cc`, `can Unsafe.X`
+		// — a contract keyword with values on one line, no colon and no `body:` ceremony.
+		if kw, rest, ok := inlineContract(line); ok {
+			if kw == "can" {
+				current.Effects = append(current.Effects, splitCSV(rest)...)
+			} else {
+				addSectionValue(current, kw, rest, lineNo)
+			}
+			section = "body"
 			continue
 		}
-		addSectionValue(current, section, lineWithIndent(raw), lineNo)
+		// A bare line inside an open colon-section is a continuation value (legacy multi-line form).
+		if section != "" && section != "body" {
+			addSectionValue(current, section, lineWithIndent(raw), lineNo)
+			continue
+		}
+		// Otherwise it is a body instruction. In the native form, instructions just begin — no
+		// `body:` marker required.
+		section = "body"
+		addSectionValue(current, "body", lineWithIndent(raw), lineNo)
 	}
 	if err := scanner.Err(); err != nil {
 		issues = append(issues, Issue{Severity: "error", Code: "scan-failed", File: path, Message: err.Error()})
@@ -200,7 +336,242 @@ func Parse(path string, src string) (*Module, []Issue) {
 	if strings.TrimSpace(module.Name) == "" {
 		module.Name = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
+	issues = append(issues, expandCompositions(module)...)
+	issues = append(issues, selectPlatformImpls(module)...)
+	issues = append(issues, analyzeTemplates(module)...)
 	return module, append(issues, VerifyModule(module)...)
+}
+
+func isHeaderLine(line string) bool {
+	return strings.HasPrefix(line, "module ") || strings.HasPrefix(line, "target ") ||
+		exportHeaderRE.MatchString(line) || fragmentHeaderRE.MatchString(line) ||
+		protocolHeaderRE.MatchString(line) || templateHeaderRE.MatchString(line)
+}
+
+func parseTemplateHeader(path string, line int, text string) (Template, *Issue) {
+	m := templateHeaderRE.FindStringSubmatch(text)
+	if m == nil {
+		return Template{}, &Issue{Severity: "error", Code: "invalid-template", File: path, Line: line, Message: "invalid template header"}
+	}
+	tpl := Template{Name: m[1], Line: line}
+	seen := map[string]bool{}
+	for _, part := range splitCSV(m[2]) {
+		if part == "" {
+			continue
+		}
+		name := part
+		typ := ""
+		if pieces := strings.SplitN(part, ":", 2); len(pieces) == 2 {
+			name = strings.TrimSpace(pieces[0])
+			typ = strings.TrimSpace(pieces[1])
+		}
+		if seen[name] {
+			return tpl, &Issue{Severity: "error", Code: "duplicate-hole", File: path, Line: line, Message: fmt.Sprintf("duplicate template hole %s", name)}
+		}
+		seen[name] = true
+		tpl.Holes = append(tpl.Holes, Param{Name: name, Type: typ})
+	}
+	return tpl, nil
+}
+
+// analyzeTemplates records, for each template, where its typed holes are consumed, and checks
+// that (1) every declared hole is referenced and (2) a hole's type fits the operand slot it
+// lands in — a 16-bit selector cannot be baked where a 64-bit address/target is expected, and
+// vice versa. This is the type-safe half of runtime code-gen; the byte assembly is Stage 4b.
+func analyzeTemplates(module *Module) []Issue {
+	if module == nil {
+		return nil
+	}
+	var issues []Issue
+	for ti := range module.Templates {
+		tpl := &module.Templates[ti]
+		holeType := map[string]string{}
+		for _, h := range tpl.Holes {
+			holeType[h.Name] = h.Type
+		}
+		referenced := map[string]bool{}
+		var pps []PatchPoint
+		for idx, inst := range tpl.Instructions {
+			if inst.Op == "compose" {
+				issues = append(issues, Issue{Severity: "error", Code: "template-compose", File: module.Path, Line: inst.Line, Message: "templates may not compose fragments"})
+				continue
+			}
+			class := operandClassForMnemonic(strings.ToLower(strings.TrimSpace(inst.Op)))
+			for _, tok := range identTokenRE.FindAllString(inst.Text, -1) {
+				typ, ok := holeType[tok]
+				if !ok {
+					continue
+				}
+				referenced[tok] = true
+				if hc := holeClass(typ); class != "" && hc != "" && class != hc {
+					issues = append(issues, Issue{Severity: "error", Code: "template-hole-type-mismatch", File: module.Path, Line: inst.Line, Message: fmt.Sprintf("hole %s (%s) is %s but %s expects a %s operand", tok, typ, hc, inst.Op, class)})
+				}
+				pps = append(pps, PatchPoint{Hole: tok, Type: typ, InstrIndex: idx, Class: class})
+			}
+		}
+		for _, h := range tpl.Holes {
+			if !referenced[h.Name] {
+				issues = append(issues, Issue{Severity: "error", Code: "unused-template-hole", File: module.Path, Line: tpl.Line, Message: fmt.Sprintf("template hole %s is declared but never referenced", h.Name)})
+			}
+		}
+		tpl.PatchPoints = pps
+	}
+	return issues
+}
+
+func operandClassForMnemonic(mnemonic string) string {
+	switch mnemonic {
+	case "movw", "fldcw", "fnstcw":
+		return "sel16"
+	case "movabs", "movq", "lea", "call", "callq", "jmp", "jmpq", "push", "pushq":
+		return "wide64"
+	default:
+		return ""
+	}
+}
+
+func holeClass(typ string) string {
+	switch strings.TrimSpace(typ) {
+	case "u16", "i16", "GuestFsSelector", "HostFsSelector", "GuestGsSelector", "HostGsSelector":
+		return "sel16"
+	case "":
+		return ""
+	default:
+		return "wide64"
+	}
+}
+
+// selectPlatformImpls keeps only the platform-tagged functions whose `for <platform>` matches
+// the build target, and checks that any kept impl named after a protocol method conforms to
+// its signature. Dropping the non-matching impls before VerifyModule is what lets two impls
+// share a name (e.g. read_fenced for x86_64 / for aarch64) without a duplicate-export clash —
+// the collapse of the parallel common_x86_64 / common_aarch64 files into one protocol.
+func selectPlatformImpls(module *Module) []Issue {
+	if module == nil {
+		return nil
+	}
+	var issues []Issue
+	methods := map[string]protocolMethod{}
+	for i := range module.Protocols {
+		for _, m := range module.Protocols[i].Methods {
+			methods[m.Name] = m
+		}
+	}
+	var kept []Function
+	for _, fn := range module.Functions {
+		if fn.Platform != "" && !platformMatchesTarget(fn.Platform, module.Target) {
+			continue
+		}
+		if sig, ok := methods[fn.Name]; ok {
+			if len(fn.Params) != sig.Arity || strings.TrimSpace(fn.ReturnType) != strings.TrimSpace(sig.Return) {
+				issues = append(issues, Issue{Severity: "error", Code: "protocol-conformance", File: module.Path, Line: fn.Line, Message: fmt.Sprintf("impl %s does not match protocol method signature (params %d vs %d, return %q vs %q)", fn.Name, len(fn.Params), sig.Arity, strings.TrimSpace(fn.ReturnType), strings.TrimSpace(sig.Return))})
+			}
+		}
+		kept = append(kept, fn)
+	}
+	module.Functions = kept
+	return issues
+}
+
+func platformMatchesTarget(platform string, target string) bool {
+	platform = strings.ToLower(strings.TrimSpace(platform))
+	platform = strings.TrimSuffix(strings.TrimPrefix(platform, "("), ")")
+	target = strings.ToLower(strings.TrimSpace(target))
+	for _, key := range strings.Split(platform, ",") {
+		if key = strings.TrimSpace(key); key == "" || key == "any" {
+			continue
+		}
+		if !platformKeyMatches(key, target) {
+			return false
+		}
+	}
+	return true
+}
+
+// DerivedEffects projects a function's caller-facing Unsafe.* / Segment.* effect set from its
+// verified `requires:` contract and segment-state, per docs/101 §4. It is the honest, drift-proof
+// alternative to hand-authored can[...]: the hazard is stated once, in the contract the verifier
+// already checks, so the effect cannot disagree with what the instructions do.
+//
+// This is the COMPLETE set, used for reporting and migration planning. The backend
+// (easmDeclaredEffectPermissions) currently ENFORCES only a subset against the matching Elisa
+// extern's can[...]; widening enforcement onto this full set is a coordinated migration that must
+// add the new permissions to those extern declarations, so it is intentionally not wired here.
+func DerivedEffects(fn *Function) []string {
+	if fn == nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	add := func(e string) {
+		if e != "" && !seen[e] {
+			seen[e] = true
+			out = append(out, e)
+		}
+	}
+	// Floor: any raw EASM routine is outside Elisa's value semantics.
+	add("Unsafe.RawExtern")
+	for _, req := range fn.Requires {
+		switch strings.TrimSpace(req) {
+		case "x86_64.segment.write":
+			add("Unsafe.SegmentMutation")
+		case "control.indirect", "control.target.untyped":
+			add("Unsafe.IndirectCall")
+		case "memory.base.untyped":
+			add("Unsafe.PointerCast")
+		}
+	}
+	switch finalFSOwner(fn) {
+	case "guest":
+		add("Unsafe.GuestSegmentInstall")
+		add("Segment.Guest")
+	case "host":
+		add("Segment.Host")
+	}
+	return out
+}
+
+func finalFSOwner(fn *Function) string {
+	owner := ""
+	for _, inst := range fn.Instructions {
+		if !inst.Pseudo || strings.ToLower(strings.TrimSpace(inst.Op)) != "state" {
+			continue
+		}
+		text := strings.TrimSpace(inst.Text)
+		if !strings.HasPrefix(strings.ToLower(text), "fs:") {
+			continue
+		}
+		fields := strings.Fields(strings.TrimSpace(text[len("fs:"):]))
+		if len(fields) == 0 {
+			continue
+		}
+		switch strings.ToLower(fields[0]) {
+		case "guest":
+			owner = "guest"
+		case "host":
+			owner = "host"
+		}
+	}
+	return owner
+}
+
+func platformKeyMatches(key string, target string) bool {
+	switch key {
+	case "x86_64", "amd64", "x64":
+		return strings.Contains(target, "x86_64") || strings.Contains(target, "amd64")
+	case "aarch64", "arm64":
+		return strings.Contains(target, "aarch64") || strings.Contains(target, "arm64")
+	case "darwin", "macos", "apple":
+		return strings.Contains(target, "darwin") || strings.Contains(target, "apple") || strings.Contains(target, "macos")
+	case "linux":
+		return strings.Contains(target, "linux")
+	case "windows", "win32":
+		return strings.Contains(target, "windows")
+	default:
+		// A role axis (host/guest) or any key not encoded in the target triple is treated as
+		// non-discriminating for now; build-level role dispatch is a documented follow-up.
+		return true
+	}
 }
 
 func parseFunctionHeader(path string, line int, text string) (Function, *Issue) {
@@ -237,6 +608,13 @@ func parseFunctionHeader(path string, line int, text string) (Function, *Issue) 
 		if end >= 0 {
 			fn.Effects = splitCSV(tail[i+len("can[") : i+end])
 		}
+	} else if cm := nativeCanRE.FindStringSubmatch(tail); cm != nil {
+		// Native unbracketed form: `... can Unsafe.X, Unsafe.Y` (like Elisa's `can`), ending
+		// at the next `abi`/`for` clause or end of the header.
+		fn.Effects = splitCSV(cm[1])
+	}
+	if pm := platformForRE.FindStringSubmatch(tail); pm != nil {
+		fn.Platform = strings.TrimSpace(pm[1])
 	}
 	return fn, nil
 }
@@ -257,6 +635,282 @@ func VerifyModule(module *Module) []Issue {
 		issues = append(issues, verifyFunction(module.Path, module.Target, fn)...)
 	}
 	return issues
+}
+
+func parseFragmentHeader(path string, line int, text string) (Function, *Issue) {
+	m := fragmentHeaderRE.FindStringSubmatch(text)
+	if m == nil {
+		return Function{}, &Issue{Severity: "error", Code: "invalid-fragment", File: path, Line: line, Message: "invalid fragment header"}
+	}
+	fr := Function{Name: m[1], Line: line, IsFragment: true}
+	seen := map[string]bool{}
+	for _, part := range splitCSV(m[2]) {
+		if part == "" {
+			continue
+		}
+		name := part
+		typ := ""
+		if pieces := strings.SplitN(part, ":", 2); len(pieces) == 2 {
+			name = strings.TrimSpace(pieces[0])
+			typ = strings.TrimSpace(pieces[1])
+		}
+		if seen[name] {
+			return fr, &Issue{Severity: "error", Code: "duplicate-param", File: path, Line: line, Message: fmt.Sprintf("duplicate fragment parameter %s", name)}
+		}
+		seen[name] = true
+		fr.Params = append(fr.Params, Param{Name: name, Type: typ})
+	}
+	return fr, nil
+}
+
+// expandCompositions resolves every `compose` directive by splicing the named fragment's
+// body into the host function and materializing one concrete variant per subset of the
+// composition flags. It is pure desugaring that runs BEFORE verifyFunction, so the verifier
+// certifies the spliced instruction stream of each variant exactly as if it had been written
+// inline — a fragment is never certified in isolation, and no unchecked sequence can be
+// smuggled through composition.
+func expandCompositions(module *Module) []Issue {
+	if module == nil {
+		return nil
+	}
+	var issues []Issue
+	frags := map[string]*Function{}
+	for i := range module.Fragments {
+		f := &module.Fragments[i]
+		if f.Name == "" {
+			continue
+		}
+		if _, dup := frags[f.Name]; dup {
+			issues = append(issues, Issue{Severity: "error", Code: "duplicate-fragment", File: module.Path, Line: f.Line, Message: fmt.Sprintf("EASM fragment %s already defined", f.Name)})
+		}
+		frags[f.Name] = f
+		for _, inst := range f.Instructions {
+			if inst.Op == "compose" {
+				issues = append(issues, Issue{Severity: "error", Code: "nested-compose", File: module.Path, Line: inst.Line, Message: fmt.Sprintf("EASM fragment %s may not compose another fragment", f.Name)})
+			}
+		}
+	}
+	var expanded []Function
+	for i := range module.Functions {
+		fn := &module.Functions[i]
+		if !functionComposes(fn) {
+			expanded = append(expanded, *fn)
+			continue
+		}
+		variants, vIssues := materializeComposition(module.Path, fn, frags)
+		issues = append(issues, vIssues...)
+		expanded = append(expanded, variants...)
+	}
+	module.Functions = expanded
+	return issues
+}
+
+func functionComposes(fn *Function) bool {
+	for _, inst := range fn.Instructions {
+		if inst.Op == "compose" {
+			return true
+		}
+	}
+	return false
+}
+
+func materializeComposition(path string, fn *Function, frags map[string]*Function) ([]Function, []Issue) {
+	var issues []Issue
+	var flagOrder []string
+	flagSeen := map[string]bool{}
+	for _, inst := range fn.Instructions {
+		if inst.Op != "compose" {
+			continue
+		}
+		flag, name, args, ok := parseComposeDirective(inst.Text)
+		if !ok {
+			issues = append(issues, Issue{Severity: "error", Code: "invalid-compose", File: path, Line: inst.Line, Message: fmt.Sprintf("invalid compose directive %q", inst.Text)})
+			continue
+		}
+		frag, found := frags[name]
+		if !found {
+			issues = append(issues, Issue{Severity: "error", Code: "unknown-fragment", File: path, Line: inst.Line, Message: fmt.Sprintf("compose references unknown fragment %s", name)})
+			continue
+		}
+		if len(args) != len(frag.Params) {
+			issues = append(issues, Issue{Severity: "error", Code: "fragment-arity", File: path, Line: inst.Line, Message: fmt.Sprintf("fragment %s expects %d argument(s), got %d", name, len(frag.Params), len(args))})
+		}
+		if flag != "" && !flagSeen[flag] {
+			flagSeen[flag] = true
+			flagOrder = append(flagOrder, flag)
+		}
+	}
+	if len(issues) > 0 {
+		return nil, issues
+	}
+	var variants []Function
+	n := len(flagOrder)
+	for mask := 0; mask < (1 << uint(n)); mask++ {
+		active := map[string]bool{}
+		var suffixParts []string
+		for bit, flag := range flagOrder {
+			if mask&(1<<uint(bit)) != 0 {
+				active[flag] = true
+				suffixParts = append(suffixParts, flag)
+			}
+		}
+		variant := *fn
+		variant.IsFragment = false
+		variant.Requires = append([]string(nil), fn.Requires...)
+		variant.Clobbers = append([]string(nil), fn.Clobbers...)
+		variant.Preserves = append([]string(nil), fn.Preserves...)
+		variant.Instructions = nil
+		for _, inst := range fn.Instructions {
+			if inst.Op != "compose" {
+				variant.Instructions = append(variant.Instructions, inst)
+				continue
+			}
+			flag, name, args, _ := parseComposeDirective(inst.Text)
+			if flag != "" && !active[flag] {
+				continue
+			}
+			frag := frags[name]
+			subst := map[string]string{}
+			for idx, p := range frag.Params {
+				subst[p.Name] = args[idx]
+			}
+			for _, finst := range frag.Instructions {
+				spliced := finst
+				spliced.Text = substituteParams(finst.Text, subst)
+				spliced.Line = inst.Line
+				variant.Instructions = append(variant.Instructions, spliced)
+			}
+			variant.Requires = appendUnique(variant.Requires, frag.Requires)
+			variant.Clobbers = appendUnique(variant.Clobbers, frag.Clobbers)
+			variant.Preserves = appendUnique(variant.Preserves, frag.Preserves)
+		}
+		if len(suffixParts) > 0 {
+			variant.Name = fn.Name + "__" + strings.Join(suffixParts, "_")
+		}
+		variant.Inputs = append([]string(nil), fn.Inputs...)
+		variants = append(variants, variant)
+	}
+	pruneConditionalInputs(variants)
+	return variants, issues
+}
+
+// pruneConditionalInputs drops an input *binding* from the variants that do not read it,
+// but only when that input is read by some OTHER variant (i.e. it is conditional on a
+// composition flag — like a guest-fs selector consumed only by the WithFs variant). An
+// input read by NO variant is genuinely dead and is kept everywhere, so the verifier's
+// input-register-unused check still fires on it. This mirrors the hand-written world, where
+// the base and WithFs entry points have different signatures.
+func pruneConditionalInputs(variants []Function) {
+	readSets := make([]map[string]bool, len(variants))
+	everUsed := map[string]bool{}
+	for i := range variants {
+		readSets[i] = canonicalReadSet(variants[i].Instructions)
+		for reg := range readSets[i] {
+			everUsed[reg] = true
+		}
+	}
+	for i := range variants {
+		var keptInputs []string
+		droppedParams := map[string]bool{}
+		for _, input := range variants[i].Inputs {
+			canon := canonicalX86GPR(registerAfterEquals(input))
+			if canon != "" && everUsed[canon] && !readSets[i][canon] {
+				if name := bindingName(input); name != "" {
+					droppedParams[name] = true
+				}
+				continue
+			}
+			keptInputs = append(keptInputs, input)
+		}
+		variants[i].Inputs = keptInputs
+		if len(droppedParams) > 0 {
+			// A conditional input's parameter only exists in variants that consume it, so the
+			// base variant's signature is genuinely smaller — exactly like the hand-written
+			// JumpMainEntry vs JumpMainEntryWithFs pair.
+			var keptParams []Param
+			for _, p := range variants[i].Params {
+				if droppedParams[p.Name] {
+					continue
+				}
+				keptParams = append(keptParams, p)
+			}
+			variants[i].Params = keptParams
+		}
+	}
+}
+
+func canonicalReadSet(insts []Instruction) map[string]bool {
+	set := map[string]bool{}
+	for _, inst := range insts {
+		if inst.Pseudo {
+			continue
+		}
+		for _, reg := range registersReadBy(inst.Text) {
+			if canon := canonicalX86GPR(reg); canon != "" {
+				set[canon] = true
+			}
+		}
+	}
+	return set
+}
+
+func parseComposeDirective(text string) (flag string, name string, args []string, ok bool) {
+	s := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(text), "compose"))
+	head := s
+	if open := strings.Index(s, "("); open >= 0 {
+		closeIdx := strings.LastIndex(s, ")")
+		if closeIdx < open {
+			return "", "", nil, false
+		}
+		head = strings.TrimSpace(s[:open])
+		for _, a := range strings.Split(s[open+1:closeIdx], ",") {
+			if a = strings.TrimSpace(a); a != "" {
+				args = append(args, a)
+			}
+		}
+	}
+	switch fields := strings.Fields(head); len(fields) {
+	case 1:
+		name = fields[0]
+	case 2:
+		flag, name = fields[0], fields[1]
+	default:
+		return "", "", nil, false
+	}
+	return flag, name, args, true
+}
+
+func substituteParams(text string, subst map[string]string) string {
+	for name, arg := range subst {
+		// Legacy bracketed form (kept as an alias).
+		text = strings.ReplaceAll(text, "<"+name+">", arg)
+		// Native bare-name form (matches the template surface): replace a whole-word hole
+		// reference that is not part of a %register or $immediate token.
+		re := regexp.MustCompile(`(^|[^%$\w.])` + regexp.QuoteMeta(name) + `($|[^\w])`)
+		repl := "${1}" + strings.ReplaceAll(arg, "$", "$$") + "${2}" // $$ = literal $ in replacement
+		for {
+			next := re.ReplaceAllString(text, repl)
+			if next == text {
+				break
+			}
+			text = next
+		}
+	}
+	return text
+}
+
+func appendUnique(dst []string, add []string) []string {
+	seen := map[string]bool{}
+	for _, v := range dst {
+		seen[strings.TrimSpace(v)] = true
+	}
+	for _, v := range add {
+		if v = strings.TrimSpace(v); v != "" && !seen[v] {
+			seen[v] = true
+			dst = append(dst, v)
+		}
+	}
+	return dst
 }
 
 func verifyFunction(path string, target string, fn *Function) []Issue {
@@ -942,7 +1596,7 @@ func BuildReport(paths []string, targetTriple string) (*Report, []*Module) {
 			} else {
 				seenExports[fn.Name] = module.Path
 			}
-			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Facts: fn.Facts, Labels: labels, Control: fn.Control, Stack: fn.Stack})
+			summary.Exports = append(summary.Exports, FunctionSummary{Name: fn.Name, ABI: fn.ABI, Params: fn.Params, ReturnType: fn.ReturnType, Facts: fn.Facts, Labels: labels, Control: fn.Control, Stack: fn.Stack, DerivedEffects: DerivedEffects(&fn)})
 			for _, req := range fn.Requires {
 				reqs[req] = true
 			}
@@ -1029,6 +1683,22 @@ func stripComment(line string) string {
 
 func lineWithIndent(line string) string { return stripComment(strings.TrimSpace(line)) }
 
+// inlineContract recognises the native single-line contract form (`requires <values>`,
+// `clobbers <values>`, `can <effects>`, …) so a function body needs no `body:` marker and no
+// `section:` soup. Returns the lowercased keyword, the values after it, and whether it matched.
+func inlineContract(line string) (string, string, bool) {
+	fields := strings.Fields(line)
+	if len(fields) < 2 {
+		return "", "", false
+	}
+	kw := strings.ToLower(fields[0])
+	if kw == "body" || (!isSection(kw) && kw != "can") {
+		return "", "", false
+	}
+	rest := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), fields[0]))
+	return kw, rest, true
+}
+
 func isSection(s string) bool {
 	switch strings.ToLower(s) {
 	case "facts", "inputs", "outputs", "labels", "clobbers", "preserves", "stack", "control", "requires", "body":
@@ -1062,20 +1732,29 @@ func addSectionValue(fn *Function, section string, value string, line int) {
 	case "requires":
 		fn.Requires = append(fn.Requires, splitCSV(value)...)
 	case "body":
-		if state, ok := parseStateAssertion(value); ok {
-			fn.Instructions = append(fn.Instructions, Instruction{Op: "state", Text: state, Line: line, Pseudo: true})
-			return
+		if inst, ok := parseBodyInstruction(value, line); ok {
+			fn.Instructions = append(fn.Instructions, inst)
 		}
-		if label, ok := parseBodyLabel(value); ok {
-			fn.Instructions = append(fn.Instructions, Instruction{Op: "label", Text: label + ":", Line: line, Label: label})
-			return
-		}
-		op := strings.Fields(value)
-		if len(op) == 0 {
-			return
-		}
-		fn.Instructions = append(fn.Instructions, Instruction{Op: op[0], Text: value, Line: line})
 	}
+}
+
+// parseBodyInstruction turns one body line into an Instruction, shared by function bodies and
+// template bodies so both accept the identical instruction surface.
+func parseBodyInstruction(value string, line int) (Instruction, bool) {
+	if strings.HasPrefix(strings.ToLower(strings.TrimSpace(value)), "compose ") {
+		return Instruction{Op: "compose", Text: strings.TrimSpace(value), Line: line, Pseudo: true}, true
+	}
+	if state, ok := parseStateAssertion(value); ok {
+		return Instruction{Op: "state", Text: state, Line: line, Pseudo: true}, true
+	}
+	if label, ok := parseBodyLabel(value); ok {
+		return Instruction{Op: "label", Text: label + ":", Line: line, Label: label}, true
+	}
+	op := strings.Fields(value)
+	if len(op) == 0 {
+		return Instruction{}, false
+	}
+	return Instruction{Op: op[0], Text: value, Line: line}, true
 }
 
 func parseLabelContract(value string, line int) LabelContract {
@@ -1256,7 +1935,7 @@ func isEASMRoleType(name string) bool {
 	switch name {
 	case "GuestEntryPoint", "GuestCallable", "GuestThreadEntry", "GuestThreadArg", "GuestThreadResult", "GuestPC",
 		"HostCallable", "NativeCallable", "ExitFunction",
-		"GuestStackTop", "GuestFsSelector", "HostFsSelector",
+		"GuestStackTop", "GuestFsSelector", "HostFsSelector", "GuestGsSelector", "HostGsSelector",
 		"PublishedExecutableAddr", "WritableExecutableAddr",
 		"HostStackPointer", "SegmentSelfPointer", "HostThreadId", "SignalContextPtr", "MachineContextPtr":
 		return true

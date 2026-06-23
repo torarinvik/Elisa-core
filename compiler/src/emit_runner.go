@@ -521,7 +521,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		TargetTriple:             options.targetTriple,
 		TargetDebug:              effectiveOptimizationLevel(options) == backend.OptimizationLevel0,
 		EnforceUnsafePermissions: options.strictPolicy,
-		EnforceProgressSafety:    options.strictPolicy,
+		EnforceProgressSafety:    options.progressStrict || options.strictPolicy,
 		EnforcePerfLints:         options.perfStrict,
 		EnforceStrictConcurrency: options.concurrencyStrict,
 		EnforceStrictProofs:      options.proofStrict,

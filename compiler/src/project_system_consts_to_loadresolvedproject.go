@@ -62,6 +62,7 @@ type projectCLIOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	concurrencyStrict bool
+	progressStrict    bool
 	proofStrict       bool
 	enableSMT         bool
 }
@@ -97,6 +98,7 @@ type projectTargetWarnings struct {
 	Strict      bool `json:"strict,omitempty"`
 	Perf        bool `json:"perf,omitempty"`
 	Concurrency bool `json:"concurrency,omitempty"`
+	Progress    bool `json:"progress,omitempty"`
 }
 type manifestDefinition struct {
 	Provides     string   `json:"provides"`
@@ -149,6 +151,7 @@ type resolvedProjectTarget struct {
 	strictPolicy          bool
 	perfStrict            bool
 	concurrencyStrict     bool
+	progressStrict        bool
 	proofStrict           bool
 	enableSMT             bool
 }
@@ -241,6 +244,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		strictPolicy:      target.strictPolicy,
 		perfStrict:        target.perfStrict,
 		concurrencyStrict: target.concurrencyStrict,
+		progressStrict:    target.progressStrict,
 		proofStrict:       target.proofStrict,
 		enableSMT:         target.enableSMT,
 	}
@@ -421,6 +425,11 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.perfStrict = true
 		case arg == "-Wconcurrency":
 			options.concurrencyStrict = true
+		case arg == "-Wprogress":
+			// docs/102: activate the (already-built but dormant) progress-safety obligation
+			// checker on its own dial — every `while` loop / recursive cycle must show progress
+			// evidence (`decreases`, `Progress.*`) or declare intentional non-progress.
+			options.progressStrict = true
 		case arg == "-smt":
 			// docs/90: SMT discharge tier — ON by default; explicit opt-in kept for back-compat.
 			options.enableSMT = true
@@ -439,6 +448,7 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			options.strictPolicy = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
+			options.progressStrict = true
 			options.proofStrict = true
 		case arg == "-o":
 			i++

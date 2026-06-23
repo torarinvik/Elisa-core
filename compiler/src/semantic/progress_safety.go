@@ -71,7 +71,15 @@ func (a *Analyzer) finishFunctionProgressSummary(fn *ast.FuncDecl, refs []ast.Pe
 		}
 		switch obligation.Kind {
 		case ProgressObligationLoop:
-			a.warnf(obligation.Pos, "progress warning: while loop has no progress evidence; add a Progress.Tick/Progress.Yield budget check in the loop, or wrap an intentional non-progress loop in trusted Unsafe.NonProgress")
+			// Prefer propagation (`can`) over firewalling (`trusted`): push the unsafe
+			// assumption upward until a boundary where propagating no longer helps. Warning
+			// under -Wprogress (observe); hard error under full -Wstrict (enforce).
+			msg := "while loop has no progress evidence; prove termination with `decreases <measure>`, add a Progress.Tick/Progress.Yield budget check, or — if progress is real but unprovable — `can Unsafe.AssumeProgress` to propagate the assumption upward (reach for `trusted` only at the boundary where propagation no longer helps); for a deliberately non-terminating loop, `can Unsafe.NonProgress`"
+			if a.enforceUnsafePermissions {
+				a.errorf(obligation.Pos, "progress error: %s", msg)
+			} else {
+				a.warnf(obligation.Pos, "progress warning: %s", msg)
+			}
 		}
 	}
 }
@@ -80,11 +88,22 @@ func (a *Analyzer) recordProgressLoopObligation(stmt *ast.WhileStmt) int {
 	if a == nil || stmt == nil || a.currentProgressSummary == nil {
 		return -1
 	}
-	discharged := a.currentTrustedNonProgressDepth > 0 || a.currentTrustedAssumeProgressDepth > 0
-	if a.currentTrustedNonProgressDepth > 0 {
+	nonProgress := a.currentTrustedNonProgressDepth > 0 || a.currentGrantedNonProgressDepth > 0
+	assumeProgress := a.currentTrustedAssumeProgressDepth > 0 || a.currentGrantedAssumeProgressDepth > 0
+	discharged := nonProgress || assumeProgress
+	if nonProgress {
 		a.currentProgressSummary.HasUnsafeNonProgress = true
 	}
-	if a.currentTrustedAssumeProgressDepth > 0 {
+	if assumeProgress {
+		a.currentProgressSummary.HasProgressEvidence = true
+	}
+	// A `decreases <measure>` clause proves termination — the strongest possible progress
+	// evidence — so it discharges the progress obligation too (the termination prover and this
+	// checker are otherwise separate systems). `decreases *` (the audited give-up) carries no
+	// measure and so does not discharge here. A recognized counting-loop shape (docs/102 slice 3)
+	// also discharges without an annotation.
+	if !discharged && (len(leadingDecreases(stmt.Body)) > 0 || isCountingLoop(stmt)) {
+		discharged = true
 		a.currentProgressSummary.HasProgressEvidence = true
 	}
 	a.currentProgressSummary.Obligations = append(a.currentProgressSummary.Obligations, ProgressObligation{
@@ -102,6 +121,113 @@ func (a *Analyzer) finishProgressLoopObligation(index int, bodyRefs []ast.Permis
 	if progressPermissionRefsContainEvidence(bodyRefs) || unsafePermissionRefsContainNonProgress(bodyRefs) {
 		a.currentProgressSummary.Obligations[index].Discharged = true
 	}
+}
+
+// isCountingLoop recognizes the canonical terminating shape — `while v </<=/>/>= bound:` with a
+// monotone step `v <- v + c` / `v += c` (or `- c` / `-= c`) among the loop's direct statements, c a
+// positive integer literal, moving v toward the bound, with v and the bound not otherwise reassigned
+// at the top level. Such loops obviously make progress, so they discharge the progress obligation
+// without an explicit `decreases` (docs/102 slice 3). Conservative by design: an unrecognized shape
+// just keeps the warning (add `decreases` / `can Unsafe.AssumeProgress`); a wrong discharge only drops
+// a warning, never soundness — termination is not memory safety, and `-Wstrict`'s explicit `decreases`
+// is the sound fallback.
+func isCountingLoop(stmt *ast.WhileStmt) bool {
+	if stmt == nil {
+		return false
+	}
+	cond, ok := stmt.Cond.(*ast.BinaryExpr)
+	if !ok {
+		return false
+	}
+	lhs, ok := cond.Left.(*ast.Ident)
+	if !ok {
+		return false
+	}
+	v := lhs.Name
+	var wantIncrease bool
+	switch cond.Op {
+	case lexer.TOKEN_LT, lexer.TOKEN_LTEQ:
+		wantIncrease = true
+	case lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
+		wantIncrease = false
+	default:
+		return false
+	}
+	boundName := identNameOf(cond.Right) // "" when the bound is not a bare identifier (e.g. a literal)
+	hasStep := false
+	for _, s := range stmt.Body {
+		var tgt string
+		var isStep bool
+		switch n := s.(type) {
+		case *ast.AssignStmt:
+			tgt = identNameOf(n.Target)
+			isStep = assignIsMonotoneStep(n.Value, v, wantIncrease)
+		case *ast.AugAssignStmt:
+			tgt = identNameOf(n.Target)
+			isStep = augIsMonotoneStep(n.Op, n.Value, wantIncrease)
+		default:
+			continue
+		}
+		if tgt == v {
+			if !isStep {
+				return false // v reassigned non-monotonically at the top level
+			}
+			hasStep = true
+		} else if boundName != "" && tgt == boundName {
+			return false // bound is not loop-invariant
+		}
+	}
+	return hasStep
+}
+
+func identNameOf(e ast.Expr) string {
+	if id, ok := e.(*ast.Ident); ok {
+		return id.Name
+	}
+	return ""
+}
+
+func assignIsMonotoneStep(value ast.Expr, v string, wantIncrease bool) bool {
+	be, ok := value.(*ast.BinaryExpr)
+	if !ok || identNameOf(be.Left) != v {
+		return false
+	}
+	switch be.Op {
+	case lexer.TOKEN_PLUS:
+		return wantIncrease && isPositiveIntLit(be.Right)
+	case lexer.TOKEN_MINUS:
+		return !wantIncrease && isPositiveIntLit(be.Right)
+	}
+	return false
+}
+
+func augIsMonotoneStep(op lexer.TokenKind, value ast.Expr, wantIncrease bool) bool {
+	switch op {
+	case lexer.TOKEN_PLUSEQ:
+		return wantIncrease && isPositiveIntLit(value)
+	case lexer.TOKEN_MINUSEQ:
+		return !wantIncrease && isPositiveIntLit(value)
+	}
+	return false
+}
+
+func isPositiveIntLit(e ast.Expr) bool {
+	lit, ok := e.(*ast.IntLit)
+	if !ok {
+		return false
+	}
+	val := strings.TrimSpace(lit.Value)
+	if val == "" {
+		return false
+	}
+	// IntLit values are unsigned magnitudes (negatives are UnaryExpr); any non-zero literal is
+	// positive. Accept if a non-zero digit appears (handles hex, underscores, leading zeros).
+	for _, r := range strings.TrimPrefix(strings.ToLower(val), "0x") {
+		if r >= '1' && r <= '9' || r >= 'a' && r <= 'f' {
+			return true
+		}
+	}
+	return false
 }
 
 func permissionRefsContain(refs []ast.PermissionRef, family string, member string) bool {
@@ -272,7 +398,13 @@ func (a *Analyzer) validateProgressRecursion(decls []scopedDecl) {
 			continue
 		}
 		sort.Strings(names)
-		a.warnf(component[0].Pos(), "progress warning: recursive cycle %s has no progress evidence; add Progress.EnterRecursion/Progress.Tick budget checks, make the recursion structurally bounded, or wrap intentional non-progress recursion in trusted Unsafe.NonProgress", strings.Join(names, " -> "))
+		cycle := strings.Join(names, " -> ")
+		rmsg := "recursive cycle %s has no progress evidence; prove it with `decreases <measure>` or structural recursion, add Progress.EnterRecursion/Progress.Tick budget checks, or — if non-progress is intended — `can Unsafe.NonProgress` to propagate it upward (reach for `trusted` only at the boundary where propagation no longer helps)"
+		if a.enforceUnsafePermissions {
+			a.errorf(component[0].Pos(), "progress error: "+rmsg, cycle)
+		} else {
+			a.warnf(component[0].Pos(), "progress warning: "+rmsg, cycle)
+		}
 	}
 }
 
