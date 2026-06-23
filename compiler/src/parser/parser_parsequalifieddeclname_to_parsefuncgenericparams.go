@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"strconv"
 	"strings"
 )
 
@@ -404,6 +405,95 @@ func (p *Parser) parseCharsetDecl() *ast.CharsetDecl {
 	p.expectNewline()
 	return &ast.CharsetDecl{Position: pos, Name: name, Terms: terms}
 }
+// looksLikeLayoutDecl distinguishes a guest-memory overlay `layout Name [size N]:` declaration
+// (docs/107) from the struct/enum layout-mode prefix that shares the `layout` keyword
+// (`layout soa struct …`, `layout(...) enum …`, docs/01). The overlay form reaches a `:` directly
+// (with at most a `size N` between), whereas the layout-mode prefix reaches `struct`/`enum` (or opens
+// a `(...)` option list) first. We scan the rest of the logical line: a `:` before any
+// `struct`/`enum`/`(` means the overlay form; `struct`/`enum`/`(` first (or a newline) means it is the
+// layout-mode prefix and we defer to the struct/enum decl path.
+func (p *Parser) looksLikeLayoutDecl() bool {
+	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	for j := p.pos + 1; j < len(p.tokens); j++ {
+		switch p.tokens[j].Kind {
+		case lexer.TOKEN_COLON:
+			return true
+		case lexer.TOKEN_STRUCT, lexer.TOKEN_ENUM, lexer.TOKEN_LPAREN, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			return false
+		}
+	}
+	return false
+}
+
+// parseLayoutDecl parses an in-source typed guest-memory layout (docs/107 §(a)):
+//
+//	layout OrbisProcParam size 80:
+//	    0  size:      u64
+//	    64 mem_param: u64 requires size >= 72
+//
+// `size N` is optional (bounds otherwise derive from the fields). Each field line is
+// `<offset> <name>: <scalar-type>` with an optional trailing `requires size >= <N>` minimum-size tag.
+func (p *Parser) parseLayoutDecl() *ast.LayoutDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("layout")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	decl := &ast.LayoutDecl{Position: pos, Name: name}
+	if p.matchIdentText("size") {
+		decl.Size = p.parseLayoutInt()
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		decl.Fields = append(decl.Fields, p.parseLayoutField())
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return decl
+}
+
+// parseLayoutField parses one `<offset> <name>: <scalar-type> [requires size >= <N>]` line.
+func (p *Parser) parseLayoutField() ast.LayoutFieldDecl {
+	fpos := p.cur().Pos
+	offset := p.parseLayoutInt()
+	fname := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_COLON)
+	ftype := p.expect(lexer.TOKEN_IDENT).Text
+	field := ast.LayoutFieldDecl{Position: fpos, Offset: offset, Name: fname, Type: ftype}
+	if p.matchIdentText("requires") {
+		p.expectIdentText("size")
+		p.expect(lexer.TOKEN_GTEQ)
+		field.RequiresSizeAtLeast = p.parseLayoutInt()
+	}
+	p.expectNewline()
+	return field
+}
+
+// parseLayoutInt parses a non-negative integer literal (decimal or 0x-hex) for layout offsets/sizes.
+func (p *Parser) parseLayoutInt() int64 {
+	tok := p.advance()
+	text := tok.Text
+	base := 0
+	if tok.Kind == lexer.TOKEN_HEX_LIT {
+		base = 16
+		text = strings.TrimPrefix(strings.TrimPrefix(text, "0x"), "0X")
+	} else if tok.Kind != lexer.TOKEN_INT_LIT {
+		p.errorAt(tok.Pos, "expected an integer offset/size in layout declaration, got %q", tok.Text)
+		return 0
+	}
+	v, err := strconv.ParseInt(text, base, 64)
+	if err != nil {
+		p.errorAt(tok.Pos, "invalid integer %q in layout declaration", tok.Text)
+		return 0
+	}
+	return v
+}
+
 func (p *Parser) parseKeywordMapDecl() *ast.KeywordMapDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("keywordmap")

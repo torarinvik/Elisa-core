@@ -345,6 +345,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("charset") {
 		return p.parseCharsetDecl()
 	}
+	if p.peekIdentText("layout") && p.looksLikeLayoutDecl() {
+		return p.parseLayoutDecl()
+	}
 	if p.peekIdentText("keywordmap") {
 		return p.parseKeywordMapDecl()
 	}

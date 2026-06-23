@@ -188,6 +188,7 @@ func (n *ScopeStmt) Pos() lexer.Pos                    { return n.Position }
 func (*ConstDecl) nodeTag()                            {}
 func (*TokenSetDecl) nodeTag()                         {}
 func (*CharsetDecl) nodeTag()                          {}
+func (*LayoutDecl) nodeTag()                           {}
 func (*KeywordMapDecl) nodeTag()                       {}
 func (*KeywordMapEntry) nodeTag()                      {}
 func (*ConstEnumDecl) nodeTag()                        {}
@@ -388,6 +389,7 @@ func (*ResetStmt) nodeTag()                            {}
 func (*ConstDecl) declTag()                            {}
 func (*TokenSetDecl) declTag()                         {}
 func (*CharsetDecl) declTag()                          {}
+func (*LayoutDecl) declTag()                           {}
 func (*KeywordMapDecl) declTag()                       {}
 func (*ConstEnumDecl) declTag()                        {}
 func (*ErrorDecl) declTag()                            {}

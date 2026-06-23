@@ -151,12 +151,21 @@ docs/104 adoptions rely on, and it is what makes adoption safe to do incremental
    resolution, byte-identical store).*
 4. **Size-guard obligation.** Add `requires size >= N` field tags + a dominator check that the
    accessor is guarded by `if base.size[mem] >= N`. Retires the hand-written under-size fallbacks.
-5. **Live adoption in `core/linker.elisa`.** Retype `proc_param`/`mem_param` as `GuestVAddr[L]`,
-   declare the two layouts, migrate the six reads. Verify byte-identical codegen + clean check.
+5. **In-source `layout` declaration + live adoption in `core/linker.elisa`.** A `.elisa` program
+   declares its own carrier layout with a top-level `layout Name [size N]:` block (fields
+   `<offset> <name>: <u8|u16|u32|u64> [requires size >= N]`); the analyzer registers it into the
+   overlay registry in the early collect pre-pass, so `GuestVAddr[Name]` carriers and their accessors
+   resolve against it with NO `AnalyzeOptions.OverlayLayouts` wiring. *The in-source declaration path
+   is built and tested end-to-end (read + write desugar to the byte-identical
+   MemoryManager_Read/WriteU64 calls; verified through real LLVM codegen).* Still remaining for the
+   `core/linker.elisa` migration: connecting increment 4's size-guard discharge to dominating
+   `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact` derivation), so the hand-written
+   under-size fallbacks can be deleted rather than duplicated.
 
-Honest status: increments 1, 2, 3 (read **and** write forms), and 4 are real, compiling, tested
-slices. Increment 5 (live `core/linker.elisa` adoption) still needs an in-source `layout`
-registration path — today the overlay layouts are supplied through `AnalyzeOptions.OverlayLayouts`,
-so a `.elisa` program cannot yet declare its own carrier layouts — plus connecting increment 4's
-size-guard discharge to real dominating `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact`
-derivation). Those two are the remaining gates before the proc_param/mem_param reads can be migrated.
+Honest status: increments 1, 2, 3 (read **and** write forms), 4, and the in-source `layout`
+declaration path of increment 5 are all real, compiling, tested slices — a `.elisa` program can now
+declare its own carrier layout and read/write its fields with no embedding-side wiring, lowering to
+byte-identical MemoryManager calls (verified through LLVM codegen). The one remaining gate before the
+`core/linker.elisa` proc_param/mem_param reads can be migrated is connecting increment 4's size-guard
+discharge to real dominating `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact`
+derivation), so the hand-written under-size fallbacks are deleted rather than duplicated.

@@ -648,6 +648,7 @@ type StaticElifClause struct {
 func (n *ConstDecl) Pos() lexer.Pos    { return n.Position }
 func (n *TokenSetDecl) Pos() lexer.Pos { return n.Position }
 func (n *CharsetDecl) Pos() lexer.Pos  { return n.Position }
+func (n *LayoutDecl) Pos() lexer.Pos   { return n.Position }
 func (n *KeywordMapDecl) Pos() lexer.Pos {
 	return n.Position
 }

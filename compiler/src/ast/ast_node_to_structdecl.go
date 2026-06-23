@@ -32,6 +32,28 @@ type CharsetDecl struct {
 	Name     string
 	Terms    []LexerCharClassTerm
 }
+
+// LayoutDecl is an in-source declaration of a typed guest-memory layout (docs/107): the carrier
+// description that `GuestVAddr[Name]` field accessors resolve against. It mirrors the EASM `layout`
+// model so the boot-assembly `N(%base)` reads (docs/104) and the high-level `base.field[mem]` reads
+// are checked against ONE description. It emits no code — the analyzer registers it into the overlay
+// registry, and accessors over it desugar to MemoryManager_Read/WriteU<N> calls (ABI-neutral).
+type LayoutDecl struct {
+	Position lexer.Pos
+	Name     string
+	Size     int64 // explicit `layout Name size N:`; 0 = unspecified (bounds derived from fields)
+	Fields   []LayoutFieldDecl
+}
+
+// LayoutFieldDecl is one field of a LayoutDecl: a byte Offset, a Name, a width-bearing scalar Type
+// (u8|u16|u32|u64), and an optional `requires size >= N` minimum-size obligation (0 = none).
+type LayoutFieldDecl struct {
+	Position            lexer.Pos
+	Offset              int64
+	Name                string
+	Type                string
+	RequiresSizeAtLeast int64
+}
 type KeywordMapDecl struct {
 	Position   lexer.Pos
 	Name       string

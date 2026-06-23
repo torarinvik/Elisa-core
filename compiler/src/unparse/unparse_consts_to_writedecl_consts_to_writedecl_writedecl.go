@@ -71,6 +71,19 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeLine(level+1, strconv.Quote(entry.Text)+" => "+formatExpr(entry.Value))
 		}
 		f.writeLine(level+1, "_ => "+formatExpr(n.Fallback))
+	case *ast.LayoutDecl:
+		header := "layout " + n.Name
+		if n.Size > 0 {
+			header += " size " + strconv.FormatInt(n.Size, 10)
+		}
+		f.writeLine(level, header+":")
+		for _, field := range n.Fields {
+			line := strconv.FormatInt(field.Offset, 10) + " " + field.Name + ": " + field.Type
+			if field.RequiresSizeAtLeast > 0 {
+				line += " requires size >= " + strconv.FormatInt(field.RequiresSizeAtLeast, 10)
+			}
+			f.writeLine(level+1, line)
+		}
 	case *ast.ConstEnumDecl:
 		f.writeLine(level, "const enum "+n.Name+" of "+formatTypeExpr(n.Storage)+":")
 		for _, member := range n.Members {

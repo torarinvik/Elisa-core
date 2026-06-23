@@ -213,6 +213,82 @@ def store(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr, value: u64) -
 	}
 }
 
+// analyzeBareSource analyzes a program with NO OverlayLayouts option supplied — the docs/107
+// increment 5 path, where the layout must be declared in-source with a `layout` declaration.
+func analyzeBareSource(src string) *Result {
+	l := lexer.New("overlay.elisa", []byte(src))
+	tokens := l.Tokenize()
+	p := parser.New(tokens)
+	file := p.ParseFile("overlay.elisa")
+	return AnalyzeWithOptions(file, AnalyzeOptions{})
+}
+
+// TestGuestOverlayInSourceLayoutReadAndWrite is the docs/107 increment 5 end-to-end test: a program
+// declares its own `layout` and both reads and writes its fields through `GuestVAddr[L]` carriers,
+// with NO option-supplied layouts. Both accessors desugar to the byte-identical MemoryManager calls.
+func TestGuestOverlayInSourceLayoutReadAndWrite(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+extern MemoryManager_WriteU64(mem: uintptr, addr: uintptr, value: u64) -> void
+
+layout OrbisProcParam size 80:
+	0 size: u64
+	64 mem_param: u64
+
+def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
+	return proc_param.mem_param[memory]
+
+def store(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr, value: u64) -> void:
+	proc_param.mem_param[memory] <- value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	idx := findOverlayIndex(result)
+	if idx == nil {
+		t.Fatal("expected the read accessor to desugar against the in-source layout")
+	}
+	if fn, ok := idx.AsOverlayCall.Func.(*ast.Ident); !ok || fn.Name != "MemoryManager_ReadU64" {
+		t.Fatalf("read: expected MemoryManager_ReadU64, got %#v", idx.AsOverlayCall.Func)
+	}
+	as := findOverlayWrite(result)
+	if as == nil {
+		t.Fatal("expected the write accessor to desugar against the in-source layout")
+	}
+	if fn, ok := as.AsOverlayCall.Func.(*ast.Ident); !ok || fn.Name != "MemoryManager_WriteU64" {
+		t.Fatalf("write: expected MemoryManager_WriteU64, got %#v", as.AsOverlayCall.Func)
+	}
+}
+
+// TestGuestOverlayInSourceUnknownFieldRejected: a field not declared in the in-source layout is
+// rejected, proving the registered layout (not a permissive fallback) is what resolution consults.
+func TestGuestOverlayInSourceUnknownFieldRejected(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisProcParam size 80:
+	0 size: u64
+
+def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
+	return proc_param.mem_param[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-unknown-field") {
+		t.Fatalf("expected overlay-unknown-field, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestGuestOverlayInSourceBadFieldTypeRejected: a layout field whose type has no fixed-width accessor
+// is rejected at declaration time.
+func TestGuestOverlayInSourceBadFieldTypeRejected(t *testing.T) {
+	result := analyzeBareSource(`layout Bad:
+	0 weird: f32
+
+def f() -> void:
+	return
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "no fixed-width accessor") {
+		t.Fatalf("expected fixed-width-accessor diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	t.Helper()
 	l := lexer.New("overlay.elisa", []byte(src))

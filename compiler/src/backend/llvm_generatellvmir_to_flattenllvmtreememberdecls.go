@@ -483,6 +483,10 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		return nil
 	case *ast.ConstDecl, *ast.TokenSetDecl, *ast.CharsetDecl, *ast.KeywordMapDecl, *ast.ConstEnumDecl:
 		return nil
+	case *ast.LayoutDecl:
+		// docs/107 guest-memory layout: a verifier-only declaration; emits no code (accessors over it
+		// were already desugared to MemoryManager_Read/WriteU<N> calls by the analyzer).
+		return nil
 	case *ast.StaticAssertDecl:
 		return g.checkStaticAssertDecl(n)
 	case *ast.StaticAssertBlockDecl:
@@ -556,6 +560,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.KeywordMapDecl:
 		return nil
 	case *ast.ConstEnumDecl:
+		return nil
+	case *ast.LayoutDecl:
+		// docs/107 guest-memory layout: verifier-only, emits no code.
 		return nil
 	case *ast.StructDecl:
 		if len(n.GenericParams) == 0 {

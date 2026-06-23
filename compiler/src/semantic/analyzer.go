@@ -87,8 +87,13 @@ type Analyzer struct {
 	// overlayLayouts registers the docs/107 typed guest-memory overlay layouts by name. A
 	// `GuestVAddr[L]` carrier whose L is a key here gets `base.field[mem]` field-access desugared
 	// to MemoryManager_ReadU<N>/WriteU<N> against L's declared field offsets/widths. Empty unless
-	// overlay layouts are supplied via AnalyzeOptions.OverlayLayouts.
+	// overlay layouts are supplied via AnalyzeOptions.OverlayLayouts or declared in-source with a
+	// `layout` declaration (collectOverlayLayouts).
 	overlayLayouts map[string]*easm.Layout
+	// overlaySourceLayouts records which overlay layout names came from an in-source `layout`
+	// declaration (docs/107 increment 5), so duplicate source declarations are reported while an
+	// option-supplied layout of the same name is overridden silently by the program's own.
+	overlaySourceLayouts map[string]bool
 	// aliasRefinements keeps a type alias's REFINEMENT target expr (`type TileX = i32 is Bounded[..]`)
 	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
 	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).
@@ -783,6 +788,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
 	a.collectConstValues(activeDecls)
 	a.collectPermissionDecls(activeDecls)
+	a.collectOverlayLayouts(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
 	a.collectCapabilityAliases(activeDecls)
@@ -808,6 +814,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		}
 		a.collectConstValues(generatedScopedDecls)
 		a.collectPermissionDecls(generatedScopedDecls)
+		a.collectOverlayLayouts(generatedScopedDecls)
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
 		a.collectCapabilityAliases(generatedScopedDecls)
