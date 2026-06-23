@@ -199,6 +199,68 @@ func (a *Analyzer) tryDesugarGuestOverlayIndex(expr *ast.IndexExpr) (Type, bool)
 	return a.analyzeExpr(call), true
 }
 
+// tryDesugarGuestOverlayWrite recognizes and rewrites the docs/107 overlay WRITE accessor
+// `base.field[mem] = value` in place. When the assignment target is `base.field[mem]` over a
+// `GuestVAddr[L]`-with-registered-layout carrier, it resolves the field against L (the same
+// unknown-field / out-of-bounds / width-mismatch checks as the read form) and stashes the equivalent
+// MemoryManager_WriteU<N>(mem, base + offset, value) CallExpr on stmt.AsOverlayCall, which the backend
+// emits in place of the store. handled=false means "not an overlay write" and the caller proceeds with
+// the normal assignment path. On a resolution error it reports and returns handled=true (consumed).
+func (a *Analyzer) tryDesugarGuestOverlayWrite(stmt *ast.AssignStmt) bool {
+	if a == nil || len(a.overlayLayouts) == 0 || stmt == nil || stmt.Optional {
+		return false
+	}
+	target, ok := stmt.Target.(*ast.IndexExpr)
+	if !ok {
+		return false
+	}
+	base, field, mem, ok := overlayAccessorParts(target)
+	if !ok {
+		return false
+	}
+	a.suppressUninitReadCheck++
+	a.suppressGlobalReadCheck++
+	baseType := a.analyzeExpr(base)
+	a.suppressGlobalReadCheck--
+	a.suppressUninitReadCheck--
+	addr, isAddr := baseType.(*AddressSpaceType)
+	if !isAddr || addr == nil || addr.Space != "guest" || addr.LayoutName == "" {
+		return false
+	}
+	layout := a.overlayLayouts[addr.LayoutName]
+	if layout == nil {
+		return false
+	}
+
+	offset, width, code, message := resolveOverlayField(layout, field)
+	if code != "" {
+		a.errorf(stmt.Pos(), "%s: %s", code, message)
+		return true
+	}
+	writeFn, hasFn := overlayWriteFns[width]
+	if !hasFn {
+		a.errorf(stmt.Pos(), "overlay-field-width-mismatch: field %s.%s has %d-byte width, which has no MemoryManager_WriteU<N> form (expected 1/2/4/8)", layout.Name, field, width)
+		return true
+	}
+
+	call := a.buildOverlayWriteCall(target.Position, writeFn, mem, base, offset, stmt.Value)
+	stmt.AsOverlayCall = call
+	a.analyzeExpr(call)
+	return true
+}
+
+// buildOverlayWriteCall constructs `writeFn(mem, base + offset, value)` as a CallExpr. The address
+// expression is the same `base.cast[uintptr]() + offset` form the read lowering uses; the stored
+// value is passed through verbatim (docs/107 §(e) ABI-neutrality).
+func (a *Analyzer) buildOverlayWriteCall(pos lexer.Pos, writeFn, mem string, base ast.Expr, offset int64, value ast.Expr) *ast.CallExpr {
+	addr := a.overlayAddrExpr(pos, base, offset)
+	return &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: writeFn},
+		Args:     []ast.Expr{&ast.Ident{Position: pos, Name: mem}, addr, value},
+	}
+}
+
 // buildOverlayReadCall constructs `readFn(mem, base + offset)` as a CallExpr. The base carrier is
 // cast to uintptr so the `+ offset` integer arithmetic matches the MemoryManager address parameter;
 // this is the ABI-identical lowering of docs/107 §(e) (a guest carrier lowers to a raw guest

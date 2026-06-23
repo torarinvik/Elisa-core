@@ -301,6 +301,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.AdoptStmt:
 		a.analyzeAdoptStmt(n)
 	case *ast.AssignStmt:
+		// A guest-overlay write `base.field[mem] = value` (docs/107) is desugared to a
+		// MemoryManager_WriteU<N> call stashed on n.AsOverlayCall and consumed here, before the
+		// normal assignment path would try (and fail) to take the address of the overlay accessor.
+		if a.tryDesugarGuestOverlayWrite(n) {
+			return
+		}
 		var targetType Type
 		// Analyzing an assignment target reads the base of a field/index path as
 		// a location, not a value; don't trip the uninitialized-read check there

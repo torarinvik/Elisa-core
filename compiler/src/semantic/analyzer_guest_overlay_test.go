@@ -144,6 +144,75 @@ def load(p: GuestVAddr[Odd], memory: uintptr) -> u64:
 	}
 }
 
+// findOverlayWrite finds the single overlay-rewritten AssignStmt (AsOverlayCall set) in any function
+// body of the result.
+func findOverlayWrite(result *Result) *ast.AssignStmt {
+	for _, decl := range result.ActiveFile().Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok {
+			continue
+		}
+		for _, stmt := range fn.Body {
+			if as, ok := stmt.(*ast.AssignStmt); ok && as.AsOverlayCall != nil {
+				return as
+			}
+		}
+	}
+	return nil
+}
+
+// TestGuestOverlayWriteDesugarsToWriteU64 is the docs/107 write-form counterpart: an assignment
+// `proc_param.mem_param[memory] <- value` over a declared layout lowers to the byte-identical
+// MemoryManager_WriteU64(memory, proc_param + 64, value).
+func TestGuestOverlayWriteDesugarsToWriteU64(t *testing.T) {
+	result := analyzeOverlaySource(t, `extern MemoryManager_WriteU64(mem: uintptr, addr: uintptr, value: u64) -> void
+
+def store_mem_param(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr, value: u64) -> void:
+	proc_param.mem_param[memory] <- value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	as := findOverlayWrite(result)
+	if as == nil {
+		t.Fatal("expected an AssignStmt rewritten with AsOverlayCall")
+	}
+	call := as.AsOverlayCall
+	fn, ok := call.Func.(*ast.Ident)
+	if !ok || fn.Name != "MemoryManager_WriteU64" {
+		t.Fatalf("expected lowering to MemoryManager_WriteU64, got %#v", call.Func)
+	}
+	if len(call.Args) != 3 {
+		t.Fatalf("expected 3 args (mem, base+offset, value), got %d", len(call.Args))
+	}
+	if mem, ok := call.Args[0].(*ast.Ident); !ok || mem.Name != "memory" {
+		t.Fatalf("expected first arg `memory`, got %#v", call.Args[0])
+	}
+	bin, ok := call.Args[1].(*ast.BinaryExpr)
+	if !ok || bin.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected `base + offset`, got %#v", call.Args[1])
+	}
+	if off, ok := bin.Right.(*ast.IntLit); !ok || off.Value != "64" {
+		t.Fatalf("expected offset literal 64, got %#v", bin.Right)
+	}
+	if v, ok := call.Args[2].(*ast.Ident); !ok || v.Name != "value" {
+		t.Fatalf("expected value arg `value`, got %#v", call.Args[2])
+	}
+}
+
+// TestGuestOverlayWriteUnknownFieldRejected ensures the write path runs the same field resolution as
+// the read path (an unknown field is rejected, not silently stored).
+func TestGuestOverlayWriteUnknownFieldRejected(t *testing.T) {
+	result := analyzeOverlaySourceAllowingErrors(t, `extern MemoryManager_WriteU64(mem: uintptr, addr: uintptr, value: u64) -> void
+
+def store(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr, value: u64) -> void:
+	proc_param.nope[memory] <- value
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-unknown-field") {
+		t.Fatalf("expected overlay-unknown-field diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	t.Helper()
 	l := lexer.New("overlay.elisa", []byte(src))

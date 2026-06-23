@@ -734,6 +734,16 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.PromoteStmt:
 		return s.emitPromoteStmt(n)
 	case *ast.AssignStmt:
+		if n.AsOverlayCall != nil {
+			// Guest-overlay write (docs/107): `base.field[mem] = value` was desugared by the analyzer
+			// to a MemoryManager_WriteU<N> call. Emit that call in place of the store; the lowering is
+			// byte-identical to the hand-written write.
+			if s.g.trace != nil {
+				s.g.trace.recordStep(s, n.Pos().Line)
+			}
+			_, _, err := s.emitCallExpr(n.AsOverlayCall)
+			return err
+		}
 		if n.FastMath {
 			// A comprehension fold's accumulator update: emit its value with reassociation+contraction
 			// so the reduction re-brackets into the vectorizable tree form (the defined reduction order

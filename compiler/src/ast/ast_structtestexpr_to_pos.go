@@ -248,6 +248,12 @@ type AssignStmt struct {
 	// vectorizable tree reduction, not strict left-to-right, so its FP accumulator reassociates by
 	// default (no `by simd` marker needed; integer accumulators are unaffected) (docs/79 Part IV).
 	FastMath bool
+	// AsOverlayCall is set by the analyzer when the assignment TARGET is a guest-overlay write
+	// accessor — `base.field[mem] = value` over a `GuestVAddr[L]` carrier (docs/107). It carries the
+	// equivalent `MemoryManager_WriteU<N>(mem, base + offset, value)` CallExpr; when set, the backend
+	// emits that call and ignores Target/Value, so the write lowers byte-identically to the
+	// hand-written store. Mirrors IndexExpr.AsOverlayCall for the read form.
+	AsOverlayCall *CallExpr
 }
 type AugAssignStmt struct {
 	Position lexer.Pos
