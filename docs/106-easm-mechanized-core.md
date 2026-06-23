@@ -76,9 +76,30 @@ shows the *relation itself* is sound (admits no stuck states). A drift between t
 `opRules` is caught by the consistency test; an unsoundness in the relation's design would be
 caught here.
 
-> Note: the task brief referred to a test file `easm_relation_property_test.go`; in the current
-> tree the corresponding coverage lives in `easm_enforcement_fuzz_test.go` and
-> `easm_register_read_test.go`. The role is the same.
+### Closing the Go↔Coq fidelity gap (the model *is* the verifier, tested)
+
+A proof about a model is only as good as the model's fidelity to the code. Rather than leave the
+correspondence table above as documentation, `compiler/src/easm/easm_coq_fidelity_test.go` makes it a
+continuously-checked invariant. It re-implements the **exact** Coq relation in Go —
+`coqOpOk`/`coqHasType`/`coqAdefine`/`coqSeqType`, transcribed line-for-line from `EasmTAL.v` with
+per-definition citations — then fuzzes 6000 straight-line bodies over the modeled
+mov/add/sub/and/xor/inc/dec subset through the *real* verifier (`Parse`) and asserts:
+
+1. **Progress correspondence** — the Coq `seq_type` relation gets *stuck* (a read with no applicable
+   typing rule) **iff** the verifier emits `register-read-uninitialized`.
+2. **Preservation/state correspondence** — on acceptance, the final Coq abstract state (the set of
+   Defined registers) **equals** the verifier's `LiveRegs` over the modeled registers.
+
+If the Go walk and the mechanized model ever diverge on this subset, the test fails — a mutation
+check (faulting the mirror so `add` no longer reads its destination) confirms it has teeth. The
+self-zeroing idiom (`xorq/subq %r,%r`, which the verifier defines without reading the dst — a
+value-tracking optimization *outside* the definite-init RMW rule the Coq model encodes) is excluded
+from the fuzzer so the correspondence stays exact rather than spuriously diverging.
+
+> Note: the original task brief referred to a test file `easm_relation_property_test.go`; that file
+> now exists (sampled checker-vs-concrete-machine agreement), and `easm_coq_fidelity_test.go` adds the
+> tighter checker-vs-*mechanized-relation* correspondence described here. Earlier sampled coverage also
+> lives in `easm_enforcement_fuzz_test.go` and `easm_register_read_test.go`.
 
 ## What is narrowed (and why it costs nothing for this property)
 

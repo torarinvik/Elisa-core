@@ -27,6 +27,18 @@ The Go verifier is authoritative; the Coq model is faithful to it, not the rever
 The omitted lattice components (`KnownUInt`, `FS`, `StackMod16`) are orthogonal to
 the definite-init safety theorem and are deliberately not modeled — see below.
 
+**This correspondence is machine-tested, not just asserted.** `compiler/src/easm/easm_coq_fidelity_test.go`
+re-implements the *exact* Coq relation in Go (`coqOpOk`/`coqHasType`/`coqAdefine`/`coqSeqType`,
+transcribed line-for-line from `EasmTAL.v` with citations) and fuzzes 6000 straight-line bodies over
+the modeled subset against the real verifier (`Parse`). It asserts the two halves of the
+correspondence continuously: (1) the Coq relation gets **stuck** (a read with no applicable typing
+rule) **iff** the verifier emits `register-read-uninitialized` — the *progress* correspondence; and
+(2) on acceptance the final Coq abstract state (which registers are Defined) **equals** the verifier's
+`LiveRegs` over the modeled registers — the *preservation/state* correspondence. If the Go walk and
+the Coq model ever drift on this subset, the test fails. (The self-zeroing idiom `xorq/subq %r,%r`,
+which the verifier defines without reading the dst — a value-tracking optimization outside the
+definite-init RMW rule — is excluded from the fuzzer so the correspondence stays exact.)
+
 ## The two theorems
 
 - **`progress`** — if `Gamma |- i => Gamma'` and `rho |= Gamma` (every Defined-in-Gamma
