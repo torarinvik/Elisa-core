@@ -34,11 +34,11 @@ type DerivedStateDecl struct {
 	Condition Expr
 }
 type FieldDecl struct {
-	Position     lexer.Pos
-	Annotations  []Annotation
-	Name         string
-	Mutable      bool
-	IsTail       bool
+	Position    lexer.Pos
+	Annotations []Annotation
+	Name        string
+	Mutable     bool
+	IsTail      bool
 	// Ghost marks a verification-only model field (`ghost name: T`). It carries abstract
 	// model state alongside the concrete representation, is readable only in contract/ghost
 	// context, and is ERASED from codegen (no layout/size/offset impact on the real fields).
@@ -649,6 +649,11 @@ type IndexExpr struct {
 	Position lexer.Pos
 	Object   Expr
 	Index    Expr
+	// Index2 is the optional SECOND subscript of a two-operand index `obj[a, b]`. It is non-nil
+	// only for the docs/108 fixed-stride table overlay accessor `table.field[mem, i]`, where
+	// Index is the MemoryManager and Index2 is the entry index. nil for ordinary single-subscript
+	// indexing; the analyzer rejects any non-overlay two-operand index.
+	Index2   Expr
 	Fallback Expr
 	// LegacyElseFallback marks a postfix `xs[i] else fallback` parsed directly from
 	// source. `get xs[i] else ...` still reuses IndexExpr.Fallback internally, so

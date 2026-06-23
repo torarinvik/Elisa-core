@@ -449,3 +449,141 @@ func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	file := p.ParseFile("overlay.elisa")
 	return AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{orbisProcParamLayout()}})
 }
+
+
+// elf64SymTableLayout is the docs/108 example: a 24-byte-stride table of Elf64_Sym entries. `value`
+// is the u64 at offset 8 of each entry; the indexed accessor reads entry i at base + i*24 + 8.
+func elf64SymTableLayout() *easm.Layout {
+	return &easm.Layout{
+		Name:   "Elf64Sym",
+		Stride: 24,
+		Fields: []easm.LayoutField{
+			{Offset: 0, Name: "name", Type: "u32", Width: 4},
+			{Offset: 8, Name: "value", Type: "u64", Width: 8},
+			{Offset: 16, Name: "size", Type: "u64", Width: 8},
+		},
+	}
+}
+
+func analyzeTableSource(t *testing.T, src string, l *easm.Layout) *Result {
+	t.Helper()
+	lx := lexer.New("table.elisa", []byte(src))
+	tokens := lx.Tokenize()
+	if errs := lx.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected lex errors: %v", errs)
+	}
+	p := parser.New(tokens)
+	file := p.ParseFile("table.elisa")
+	if errs := p.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	return AnalyzeWithOptions(file, AnalyzeOptions{OverlayLayouts: []*easm.Layout{l}})
+}
+
+// TestGuestOverlayTableReadDesugars is the docs/108 end-to-end test: `table.value[memory, i]` over a
+// stride-24 layout lowers to MemoryManager_ReadU64(memory, table + i*24 + 8).
+func TestGuestOverlayTableReadDesugars(t *testing.T) {
+	result := analyzeTableSource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def sym_value(table: GuestVAddr[Elf64Sym], memory: uintptr, i: u64) -> u64:
+	return table.value[memory, i]
+`, elf64SymTableLayout())
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	idx := findOverlayIndex(result)
+	if idx == nil {
+		t.Fatal("expected an IndexExpr rewritten with AsOverlayCall")
+	}
+	call := idx.AsOverlayCall
+	if fn, ok := call.Func.(*ast.Ident); !ok || fn.Name != "MemoryManager_ReadU64" {
+		t.Fatalf("expected lowering to MemoryManager_ReadU64, got %#v", call.Func)
+	}
+	if mem, ok := call.Args[0].(*ast.Ident); !ok || mem.Name != "memory" {
+		t.Fatalf("expected first arg `memory`, got %#v", call.Args[0])
+	}
+	// Args[1] is `((table.cast[uintptr]) + (i * 24)) + 8`.
+	outer, ok := call.Args[1].(*ast.BinaryExpr)
+	if !ok || outer.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected outer `+ offset`, got %#v", call.Args[1])
+	}
+	if off, ok := outer.Right.(*ast.IntLit); !ok || off.Value != "8" {
+		t.Fatalf("expected field offset literal 8, got %#v", outer.Right)
+	}
+	inner, ok := outer.Left.(*ast.BinaryExpr)
+	if !ok || inner.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected inner `base + i*stride`, got %#v", outer.Left)
+	}
+	mul, ok := inner.Right.(*ast.BinaryExpr)
+	if !ok || mul.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected `i * stride`, got %#v", inner.Right)
+	}
+	if stride, ok := mul.Right.(*ast.IntLit); !ok || stride.Value != "24" {
+		t.Fatalf("expected stride literal 24, got %#v", mul.Right)
+	}
+}
+
+// TestGuestOverlayTableZeroOffsetField: a field at offset 0 still gets the `+ i*stride` term but no
+// trailing `+ 0`.
+func TestGuestOverlayTableZeroOffsetField(t *testing.T) {
+	result := analyzeTableSource(t, `extern MemoryManager_ReadU32(mem: uintptr, addr: uintptr) -> u32
+
+def sym_name(table: GuestVAddr[Elf64Sym], memory: uintptr, i: u64) -> u32:
+	return table.name[memory, i]
+`, elf64SymTableLayout())
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	idx := findOverlayIndex(result)
+	if idx == nil {
+		t.Fatal("expected overlay rewrite")
+	}
+	// Address is `base + i*stride` with no `+ 0`; outer op is the i*stride add.
+	outer, ok := idx.AsOverlayCall.Args[1].(*ast.BinaryExpr)
+	if !ok || outer.Op != lexer.TOKEN_PLUS {
+		t.Fatalf("expected `base + i*stride`, got %#v", idx.AsOverlayCall.Args[1])
+	}
+	if mul, ok := outer.Right.(*ast.BinaryExpr); !ok || mul.Op != lexer.TOKEN_STAR {
+		t.Fatalf("expected `i * stride` as the right term, got %#v", outer.Right)
+	}
+}
+
+// TestGuestOverlayTableFieldExceedsStrideRejected: a field whose offset+width runs past the stride
+// is rejected — the over-read surface the table overlay guards.
+func TestGuestOverlayTableFieldExceedsStrideRejected(t *testing.T) {
+	bad := &easm.Layout{Name: "Tiny", Stride: 8, Fields: []easm.LayoutField{{Offset: 4, Name: "wide", Type: "u64", Width: 8}}}
+	result := analyzeTableSource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load(table: GuestVAddr[Tiny], memory: uintptr, i: u64) -> u64:
+	return table.wide[memory, i]
+`, bad)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-exceeds-stride") {
+		t.Fatalf("expected overlay-field-exceeds-stride diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestGuestOverlayTableUnknownFieldRejected: an unknown field over a stride layout is still rejected.
+func TestGuestOverlayTableUnknownFieldRejected(t *testing.T) {
+	result := analyzeTableSource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load(table: GuestVAddr[Elf64Sym], memory: uintptr, i: u64) -> u64:
+	return table.nope[memory, i]
+`, elf64SymTableLayout())
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-unknown-field") {
+		t.Fatalf("expected overlay-unknown-field diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestTwoOperandIndexWithoutStrideRejected: a two-operand index over a NON-table carrier (or a plain
+// value) is a usage error, not silently accepted.
+func TestTwoOperandIndexWithoutStrideRejected(t *testing.T) {
+	// OrbisProcParam has no stride; a table-form access over it is rejected.
+	result := analyzeTableSource(t, `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+def load(table: GuestVAddr[OrbisProcParam], memory: uintptr, i: u64) -> u64:
+	return table.size[memory, i]
+`, orbisProcParamLayout())
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-table-index-invalid") {
+		t.Fatalf("expected overlay-table-index-invalid diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}

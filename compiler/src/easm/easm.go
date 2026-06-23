@@ -33,7 +33,13 @@ type Layout struct {
 	// 0 means no explicit size was declared; bounds are then derived from the fields via
 	// LayoutSize, preserving the field-inferred behavior of layouts written without `size`.
 	Size int64
-	Line int
+	// Stride is the per-element byte size of a fixed-stride table layout from a
+	// `layout Name stride N:` header (docs/108). 0 means the layout is a single-struct overlay
+	// (no stride). When >0, the layout describes a packed array of records and field offsets are
+	// bounded by the stride rather than the struct size; the indexed accessor `table.field[mem, i]`
+	// reads entry i at base + i*Stride + field.Offset. `size` and `stride` are mutually exclusive.
+	Stride int64
+	Line   int
 }
 
 type LayoutField struct {
@@ -202,7 +208,7 @@ var (
 	protocolHeaderRE = regexp.MustCompile(`^protocol\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
 	templateHeaderRE = regexp.MustCompile(`^template\s+def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*:\s*$`)
 	lockstepTargetRE = regexp.MustCompile(`^target\s+([A-Za-z0-9_]+)\s+lockstep\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*$`)
-	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+size\s+(\d+))?\s*:\s*$`)
+	layoutHeaderRE   = regexp.MustCompile(`^layout\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+size\s+(\d+)|\s+stride\s+(\d+))?\s*:\s*$`)
 	layoutFieldRE    = regexp.MustCompile(`^(\d+)\s+([A-Za-z_][A-Za-z0-9_]*)\s*:\s*([A-Za-z_][A-Za-z0-9_\[\]]*)\s*(?:\s+requires\s+size\s*>=\s*(\d+))?\s*$`)
 	identTokenRE     = regexp.MustCompile(`[A-Za-z_][A-Za-z0-9_]*`)
 	protocolMethodRE = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_]*)\s*\(([^)]*)\)\s*->\s*([A-Za-z_][A-Za-z0-9_\[\]&?]*)\s*$`)
@@ -302,7 +308,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 				section = ""
 			case layoutHeaderRE.MatchString(line):
 				m := layoutHeaderRE.FindStringSubmatch(line)
-				module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Line: lineNo})
+				module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Stride: parseLayoutSize(m[3]), Line: lineNo})
 				currentLayout = &module.Layouts[len(module.Layouts)-1]
 				section = ""
 			case exportHeaderRE.MatchString(line):
@@ -381,7 +387,7 @@ func Parse(path string, src string) (*Module, []Issue) {
 		}
 		if layoutHeaderRE.MatchString(line) {
 			m := layoutHeaderRE.FindStringSubmatch(line)
-			module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Line: lineNo})
+			module.Layouts = append(module.Layouts, Layout{Name: m[1], Size: parseLayoutSize(m[2]), Stride: parseLayoutSize(m[3]), Line: lineNo})
 			currentLayout = &module.Layouts[len(module.Layouts)-1]
 			current = nil
 			section = ""

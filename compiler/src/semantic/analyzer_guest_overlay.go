@@ -144,6 +144,12 @@ func overlayAccessorParts(expr *ast.IndexExpr) (base ast.Expr, field string, mem
 	if expr == nil || expr.Fallback != nil {
 		return nil, "", "", false
 	}
+	// A two-operand index `table.field[mem, i]` is the docs/108 fixed-stride table form, NOT the
+	// single-struct accessor — bail so tryDesugarGuestOverlayTableIndex handles it (otherwise the
+	// single-operand path would greedily match and silently drop the `i*stride` term).
+	if expr.Index2 != nil {
+		return nil, "", "", false
+	}
 	fieldExpr, isField := expr.Object.(*ast.FieldExpr)
 	if !isField || fieldExpr == nil || fieldExpr.Field == "" || fieldExpr.Safe {
 		return nil, "", "", false
@@ -451,4 +457,94 @@ func intToDecimal(v int64) string {
 		buf[i] = '-'
 	}
 	return string(buf[i:])
+}
+
+// --- docs/108 fixed-stride table-entry overlay --------------------------------------------------
+//
+// A `layout Name stride N:` declares a fixed-stride array of guest structs; a `table.field[mem, i]`
+// access over a `GuestVAddr[L]` carrier reads entry i's field, lowering to
+// MemoryManager_ReadU<N>(mem, base + i*stride + offset). Read-only prototype (see docs/108).
+
+// resolveOverlayTableField resolves a named field of a fixed-stride table layout (docs/108). The
+// bound is the per-element Stride (not the struct size): field.Offset+field.Width must lie within
+// one element. This is the stride-array counterpart of resolveOverlayField's struct-size bound and
+// guards the classic table over-read where a field straddles or runs past an entry.
+func resolveOverlayTableField(l *easm.Layout, fieldName string) (offset int64, width int, code string, message string) {
+	var field *easm.LayoutField
+	for i := range l.Fields {
+		if l.Fields[i].Name == fieldName {
+			field = &l.Fields[i]
+			break
+		}
+	}
+	if field == nil {
+		return 0, 0, "overlay-unknown-field", "field " + fieldName + " is not declared in layout " + l.Name + "; add the field or correct the access"
+	}
+	if field.Width != 0 && field.Offset+int64(field.Width) > l.Stride {
+		return 0, 0, "overlay-field-exceeds-stride", "field " + l.Name + "." + field.Name + " ends past the " + intToDecimal(l.Stride) + "-byte stride of table layout " + l.Name + "; the indexed read would run into the next entry"
+	}
+	return field.Offset, field.Width, "", ""
+}
+
+// tryDesugarGuestOverlayTableIndex recognizes and rewrites the docs/108 fixed-stride table accessor
+// `table.field[mem, i]` in place. The carrier is a `GuestVAddr[L]` whose layout L declares a
+// `stride N`; the field is resolved against the stride (resolveOverlayTableField) and the read lowers
+// to MemoryManager_ReadU<N>(mem, base + i*stride + offset). Reuses IndexExpr.AsOverlayCall, so the
+// backend emits it byte-identically to the hand-written table read. handled=false means "not a table
+// accessor" and the caller proceeds. Read-only for this prototype (write form is future work).
+func (a *Analyzer) tryDesugarGuestOverlayTableIndex(expr *ast.IndexExpr) (Type, bool) {
+	if a == nil || len(a.overlayLayouts) == 0 || expr == nil || expr.Index2 == nil || expr.Fallback != nil {
+		return nil, false
+	}
+	fieldExpr, isField := expr.Object.(*ast.FieldExpr)
+	if !isField || fieldExpr == nil || fieldExpr.Field == "" || fieldExpr.Safe {
+		return nil, false
+	}
+	memIdent, isIdent := expr.Index.(*ast.Ident)
+	if !isIdent || memIdent == nil || memIdent.Name == "" {
+		return nil, false
+	}
+	base := fieldExpr.Object
+	baseType := a.analyzeExpr(base)
+	addr, isAddr := baseType.(*AddressSpaceType)
+	if !isAddr || addr == nil || addr.Space != "guest" || addr.LayoutName == "" {
+		return nil, false
+	}
+	layout := a.overlayLayouts[addr.LayoutName]
+	if layout == nil || layout.Stride <= 0 {
+		// No stride: not a table layout. A two-operand index over a non-table overlay carrier is
+		// a usage error; let it fall through to the generic two-operand rejection below.
+		return nil, false
+	}
+	offset, width, code, message := resolveOverlayTableField(layout, fieldExpr.Field)
+	if code != "" {
+		a.errorf(expr.Pos(), "%s: %s", code, message)
+		return invalidType, true
+	}
+	readFn, hasFn := overlayReadFns[width]
+	if !hasFn {
+		a.errorf(expr.Pos(), "overlay-field-width-mismatch: field %s.%s has %d-byte width, which has no MemoryManager_ReadU<N> form (expected 1/2/4/8)", layout.Name, fieldExpr.Field, width)
+		return invalidType, true
+	}
+	call := a.buildOverlayTableReadCall(expr.Position, readFn, memIdent.Name, base, expr.Index2, layout.Stride, offset)
+	expr.AsOverlayCall = call
+	return a.analyzeExpr(call), true
+}
+
+// buildOverlayTableReadCall constructs `readFn(mem, base.cast[uintptr]() + i*stride + offset)`. The
+// `i*stride` term is the dynamic entry displacement; `offset` is the static field offset within an
+// entry. Both fold into the single address argument so the lowered call is an ordinary read.
+func (a *Analyzer) buildOverlayTableReadCall(pos lexer.Pos, readFn, mem string, base ast.Expr, index ast.Expr, stride, offset int64) *ast.CallExpr {
+	baseAddr := &ast.CastExpr{Position: pos, Operand: base, Target: &ast.NamedType{Position: pos, Name: "uintptr"}}
+	// i * stride
+	strideTerm := &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_STAR, Left: index, Right: &ast.IntLit{Position: pos, Value: intToDecimal(stride)}}
+	addr := ast.Expr(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseAddr, Right: strideTerm})
+	if offset != 0 {
+		addr = &ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: addr, Right: &ast.IntLit{Position: pos, Value: intToDecimal(offset)}}
+	}
+	return &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.Ident{Position: pos, Name: readFn},
+		Args:     []ast.Expr{&ast.Ident{Position: pos, Name: mem}, addr},
+	}
 }

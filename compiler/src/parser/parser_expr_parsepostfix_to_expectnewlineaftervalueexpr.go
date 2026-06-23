@@ -170,7 +170,13 @@ func (p *Parser) parsePostfix() ast.Expr {
 			// A multi-element bracket cannot be an index, so this
 			// is unambiguous. The single-arg value form `fn[T]` stays an IndexExpr here and is
 			// reinterpreted as a specialization in the analyzer when the operand is a function.
-			if p.peekPostfixGenericValueApplication() {
+			//
+			// A field access `x.field[a, b]` is never a generic-function value specialization (you
+			// specialize a named generic function, not a field projection), so it is excluded here
+			// and routes to the two-operand index form below — that is the docs/108 fixed-stride
+			// table accessor `table.field[mem, i]`.
+			_, operandIsField := expr.(*ast.FieldExpr)
+			if !operandIsField && p.peekPostfixGenericValueApplication() {
 				p.advance()
 				typeArgs := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
 				for {
@@ -207,8 +213,15 @@ func (p *Parser) parsePostfix() ast.Expr {
 				expr = &ast.SliceExpr{Position: pos, Object: expr, Start: start, End: end}
 				continue
 			}
+			// Two-operand index `obj[a, b]` (docs/108 fixed-stride table overlay accessor
+			// `table.field[mem, i]`). Parsed structurally here; the analyzer accepts it only as an
+			// overlay table read and rejects any other two-operand index.
+			var index2 ast.Expr
+			if p.match(lexer.TOKEN_COMMA) {
+				index2 = p.parseExpr()
+			}
 			p.expect(lexer.TOKEN_RBRACKET)
-			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: start}
+			expr = &ast.IndexExpr{Position: pos, Object: expr, Index: start, Index2: index2}
 			// A trailing `else <value>` is a postfix index fallback. Recovery forms
 			// (`else return`, `else raise`, `else void`, `else binding:`) are left
 			// for the expression-level recovery handling, so that e.g.

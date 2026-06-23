@@ -508,7 +508,9 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	if expr != nil && expr.AsOverlayCall != nil {
 		// docs/107 typed guest-memory overlay: `base.field[mem]` over a `GuestVAddr[L]` carrier was
 		// rewritten by the analyzer to the equivalent MemoryManager_ReadU<N>(mem, base + offset)
-		// call. Emit that call so codegen is byte-identical to the hand-written read (§(e)).
+		// call. Emit that call so codegen is byte-identical to the hand-written read (§(e)). docs/108
+		// reuses the same hook for the fixed-stride table read `table.field[mem, i]`, whose lowered
+		// call carries the `i*stride + offset` address arithmetic.
 		return s.emitCallExpr(expr.AsOverlayCall)
 	}
 	if expr != nil && expr.Fallback != nil {

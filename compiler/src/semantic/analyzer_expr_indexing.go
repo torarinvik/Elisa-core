@@ -21,6 +21,18 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if result, handled := a.tryDesugarGuestOverlayIndex(expr); handled {
 		return result
 	}
+	// docs/108 fixed-stride table overlay: `table.field[mem, i]` over a `GuestVAddr[L]` carrier whose
+	// layout L declares a `stride`. Recognized only in the table form; recognize before generic
+	// index analysis.
+	if result, handled := a.tryDesugarGuestOverlayTableIndex(expr); handled {
+		return result
+	}
+	// A two-operand index `obj[a, b]` is only valid as the docs/108 table overlay accessor above.
+	// Anything else reaching here is a usage error (ordinary indexing takes one subscript).
+	if expr.Index2 != nil {
+		a.errorf(expr.Pos(), "overlay-table-index-invalid: two-operand index `obj[a, b]` is only valid as a fixed-stride guest table read `table.field[mem, i]` over a GuestVAddr[L] carrier whose layout declares a stride")
+		return invalidType
+	}
 	objType := a.analyzeExpr(expr.Object)
 	// `fn[T]` over a generic function is not an index (functions are not indexable) -- it is a
 	// single-type-arg value specialization, the counterpart of the multi-arg `fn[A, B]` the parser

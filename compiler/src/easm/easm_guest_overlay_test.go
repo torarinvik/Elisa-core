@@ -205,3 +205,25 @@ func TestOverlayDesugarRejectsBadAccessor(t *testing.T) {
 		t.Fatalf("expected overlay-bad-accessor, got %#v", issues)
 	}
 }
+
+// docs/108: a `layout Name stride N:` header parses the per-element byte size off into
+// Layout.Stride (leaving Size 0), describing a packed array of records. `size` and `stride` are
+// mutually exclusive header forms.
+func TestOverlayStrideHeaderParses(t *testing.T) {
+	module, issues := Parse("lay.easm", `module lay
+target x86_64
+layout Elf64Sym stride 24:
+    0 name: u32
+    8 value: u64
+`)
+	if len(issues) != 0 {
+		t.Fatalf("unexpected issues parsing stride layout: %#v", issues)
+	}
+	if len(module.Layouts) != 1 {
+		t.Fatalf("expected one layout, got %#v", module.Layouts)
+	}
+	l := module.Layouts[0]
+	if l.Stride != 24 || l.Size != 0 {
+		t.Fatalf("expected Stride 24 / Size 0, got Stride=%d Size=%d", l.Stride, l.Size)
+	}
+}
