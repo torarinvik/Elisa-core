@@ -80,5 +80,11 @@ stuck*. Reachable without a proof assistant:
   retyped `HostPtr[GuestInitCtx]`, so its seven raw `N(%r14)` field reads are now type-checked
   (verified clean; a corrupted offset is rejected — the check has teeth). Zero boot risk by the
   ABI-identity above.
-- Next: extend layouts to the other ctx-reading boot routines; then increment 2 (explicit Γ +
-  per-opcode typing rules + joins).
+- Boot-routine sweep — DONE: the guest main-entry parameter block is declared as `layout
+  GuestMainParams` (argc@0/argv@8/entry_addr@272, the authoritative `GuestEntryParams` shape from
+  core/guest_exec.elisa), and `params` is retyped `HostPtr[GuestMainParams]` across all six entry
+  routines (`EnterMainEntryAsm`, `CallMainEntryAsm`, and the four `JumpMainEntry*` variants). Their
+  raw `0/8/272(%base)` reads are now field-checked (verified clean; a corrupted `272→280` offset is
+  rejected). Same ABI-identity zero-risk argument as the init-ctx adoption.
+- Next: increment 2 (explicit Γ + per-opcode typing rules + dataflow joins) — the soundness
+  backbone — or the symbolic/lockstep equivalence tier (docs/103 stage 3c).
