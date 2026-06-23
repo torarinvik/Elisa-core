@@ -289,6 +289,79 @@ def f() -> void:
 	}
 }
 
+// TestGuestOverlaySizeGuardRequiredRejectsUnguarded: a field tagged `requires size >= N` accessed
+// with NO dominating size guard is rejected (docs/107 increment 4 obligation).
+func TestGuestOverlaySizeGuardRequiredRejectsUnguarded(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	return mem_param.ext2[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-needs-size-guard") {
+		t.Fatalf("expected overlay-field-needs-size-guard, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestGuestOverlaySizeGuardDischargedByDominatingGuard: the same access, dominated by
+// `if mem_param.size[memory] >= 48:`, is accepted — the front-end derives the SizeGuardFact.
+func TestGuestOverlaySizeGuardDischargedByDominatingGuard(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] >= 48:
+		return mem_param.ext2[memory]
+	return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("guarded access should be accepted, got: %v", errs)
+	}
+}
+
+// TestGuestOverlaySizeGuardWeakerGuardRejected: a guard proving only `size >= 40` does NOT discharge
+// a `requires size >= 48` obligation (the lower bound must reach the requirement).
+func TestGuestOverlaySizeGuardWeakerGuardRejected(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] >= 40:
+		return mem_param.ext2[memory]
+	return 0
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-needs-size-guard") {
+		t.Fatalf("expected weaker guard to be rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
+// TestGuestOverlaySizeGuardScopedToBranch: the size-guard fact does not leak past the guarding `if`.
+func TestGuestOverlaySizeGuardScopedToBranch(t *testing.T) {
+	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
+
+layout OrbisKernelMemParam size 48:
+	0 size: u64
+	40 ext2: u64 requires size >= 48
+
+def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
+	if mem_param.size[memory] >= 48:
+		return 0
+	return mem_param.ext2[memory]
+`)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "overlay-field-needs-size-guard") {
+		t.Fatalf("expected the access outside the guarded branch to be rejected, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func analyzeOverlaySourceAllowingErrors(t *testing.T, src string) *Result {
 	t.Helper()
 	l := lexer.New("overlay.elisa", []byte(src))

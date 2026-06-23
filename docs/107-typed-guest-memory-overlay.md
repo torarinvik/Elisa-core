@@ -87,8 +87,19 @@ expressed declaratively as a per-field **minimum size**: a field may be tagged
 `requires size >= N`, meaning "this field is only present when the struct's runtime `size` field is
 at least N". The accessor then *must* be dominated by a guard `if proc_param.size[memory] >= N`, or
 the verifier emits `overlay-field-needs-size-guard`. This turns the hand-written, easily-forgotten
-under-size fallback into a checked obligation. (Prototype scope: the static
-offset/size/width checks; the dominator-based size-guard check is a named follow-up increment.)
+under-size fallback into a checked obligation.
+
+This is now **built**: a truthy `if base.size[mem] >= N:` (or `> N`) guard is recognized by the
+front-end (`applyOverlaySizeGuardForCondition`), which pushes a `SizeGuardFact` that holds for that
+branch body; an access to a `requires size >= K` field inside the branch is discharged iff the
+dominating guard proves `size >= K` (a weaker bound is rejected; the fact does not leak past the
+branch). The check delegates to the same `easm.CheckGuestOverlaySizeGuard` the prototype defined, so
+the fact-discharge logic is single-sourced.
+
+Known gap (next follow-up): only the *positive* form `if base.size[mem] >= N: <access>` is derived.
+The early-return idiom — `if base.size[mem] < N: return …` followed by an access in the
+fall-through, where the negation `size >= N` dominates — needs fall-through-negation fact derivation
+and is not yet wired.
 
 ## (c) Verifier extension vs library — RECOMMENDATION
 
@@ -162,10 +173,12 @@ docs/104 adoptions rely on, and it is what makes adoption safe to do incremental
    `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact` derivation), so the hand-written
    under-size fallbacks can be deleted rather than duplicated.
 
-Honest status: increments 1, 2, 3 (read **and** write forms), 4, and the in-source `layout`
-declaration path of increment 5 are all real, compiling, tested slices — a `.elisa` program can now
-declare its own carrier layout and read/write its fields with no embedding-side wiring, lowering to
-byte-identical MemoryManager calls (verified through LLVM codegen). The one remaining gate before the
-`core/linker.elisa` proc_param/mem_param reads can be migrated is connecting increment 4's size-guard
-discharge to real dominating `if base.size[mem] >= N:` guards (the dominator→`SizeGuardFact`
-derivation), so the hand-written under-size fallbacks are deleted rather than duplicated.
+Honest status: increments 1, 2, 3 (read **and** write forms), 4 — *including* the
+dominator→`SizeGuardFact` derivation for the positive guard form — and the in-source `layout`
+declaration path of increment 5 are all real, compiling, tested slices. A `.elisa` program can now
+declare its own carrier layout, read/write its fields with no embedding-side wiring (byte-identical
+MemoryManager calls, verified through LLVM codegen), and have `requires size >= N` fields enforced
+against dominating `if base.size[mem] >= N:` guards. The remaining work before the
+`core/linker.elisa` proc_param/mem_param reads migrate cleanly is the early-return-negation guard
+form (above) — the linker's under-size fallbacks are written as guard clauses, so that form must be
+derived to delete (not duplicate) them.

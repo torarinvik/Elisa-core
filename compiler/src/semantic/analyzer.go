@@ -94,6 +94,12 @@ type Analyzer struct {
 	// declaration (docs/107 increment 5), so duplicate source declarations are reported while an
 	// option-supplied layout of the same name is overridden silently by the program's own.
 	overlaySourceLayouts map[string]bool
+	// overlaySizeGuards is the stack of size lower-bound facts (docs/107 increment 4) proven by
+	// dominating guards `if base.size[mem] >= N:` that are in scope at the current program point. A
+	// `base.field[mem]` access whose field carries `requires size >= N` is discharged when some
+	// active guard on the same carrier proves `size >= N`. Pushed for the truthy branch of a
+	// recognized size guard and truncated when that branch's analysis completes.
+	overlaySizeGuards []overlaySizeGuardFact
 	// aliasRefinements keeps a type alias's REFINEMENT target expr (`type TileX = i32 is Bounded[..]`)
 	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
 	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).

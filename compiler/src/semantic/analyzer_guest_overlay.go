@@ -193,10 +193,113 @@ func (a *Analyzer) tryDesugarGuestOverlayIndex(expr *ast.IndexExpr) (Type, bool)
 		a.errorf(expr.Pos(), "overlay-field-width-mismatch: field %s.%s has %d-byte width, which has no MemoryManager_ReadU<N> form (expected 1/2/4/8)", layout.Name, field, width)
 		return invalidType, true
 	}
+	a.checkOverlaySizeGuard(expr.Pos(), layout, field, overlayCarrierKey(base))
 
 	call := a.buildOverlayReadCall(expr.Position, readFn, mem, base, offset)
 	expr.AsOverlayCall = call
 	return a.analyzeExpr(call), true
+}
+
+// overlaySizeFieldName is the conventional name of a layout's runtime size field — the field a
+// `requires size >= N` obligation refers to, and the field a dominating guard `if base.size[mem] >= N:`
+// reads. docs/107 §(b) and the easm checker's diagnostic both spell it `size`.
+const overlaySizeFieldName = "size"
+
+// overlaySizeGuardFact is one proven lower-bound on a carrier's runtime size field, established by a
+// dominating guard. carrier is the carrier key (see overlayCarrierKey); layout is its layout name.
+type overlaySizeGuardFact struct {
+	carrier string
+	layout  string
+	atLeast int64
+}
+
+// overlayCarrierKey returns a stable key identifying the carrier a `base.field[mem]` access (or a
+// `base.size[mem]` guard) is taken through, so a guard and a later access on the SAME carrier match.
+// Only a bare identifier carrier yields a key; richer base expressions return "" (no key), which
+// never matches — sound, just conservative (the access stays unguarded and is rejected).
+func overlayCarrierKey(expr ast.Expr) string {
+	if id, ok := expr.(*ast.Ident); ok && id != nil {
+		return id.Name
+	}
+	return ""
+}
+
+// applyOverlaySizeGuardForCondition pushes a size-guard fact when `cond` (the truthy branch of an
+// `if`/`elif`) is a recognized carrier size guard `base.size[mem] >= N` (or `> N`). It is the
+// dominator→SizeGuardFact derivation docs/107 increment 4 left as a follow-up: the front-end turns a
+// dominating guard into the explicit fact the easm size-guard checker consumes. The fact is active
+// for the branch body (the caller truncates the stack when the branch completes).
+func (a *Analyzer) applyOverlaySizeGuardForCondition(cond ast.Expr) {
+	if a == nil || len(a.overlayLayouts) == 0 {
+		return
+	}
+	for {
+		paren, ok := cond.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		cond = paren.Inner
+	}
+	bin, ok := cond.(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return
+	}
+	op := bin.Op
+	access, isIdx := bin.Left.(*ast.IndexExpr)
+	bound := bin.Right
+	if !isIdx {
+		// Allow the flipped spelling `N <= base.size[mem]` / `N < ...`.
+		access, isIdx = bin.Right.(*ast.IndexExpr)
+		bound = bin.Left
+		op = flipComparison(op)
+	}
+	if !isIdx {
+		return
+	}
+	base, field, _, ok := overlayAccessorParts(access)
+	if !ok || field != overlaySizeFieldName {
+		return
+	}
+	carrier := overlayCarrierKey(base)
+	if carrier == "" {
+		return
+	}
+	addr, isAddr := a.analyzeExpr(base).(*AddressSpaceType)
+	if !isAddr || addr == nil || addr.Space != "guest" || addr.LayoutName == "" {
+		return
+	}
+	if a.overlayLayouts[addr.LayoutName] == nil {
+		return
+	}
+	c, ok := a.constIntValue(bound)
+	if !ok {
+		return
+	}
+	var atLeast int64
+	switch op {
+	case lexer.TOKEN_GTEQ:
+		atLeast = c
+	case lexer.TOKEN_GT:
+		atLeast = c + 1
+	default:
+		return
+	}
+	a.overlaySizeGuards = append(a.overlaySizeGuards, overlaySizeGuardFact{carrier: carrier, layout: addr.LayoutName, atLeast: atLeast})
+}
+
+// checkOverlaySizeGuard discharges a field's `requires size >= N` obligation (docs/107 increment 4)
+// against the size-guard facts in scope. It collects the active facts for this carrier+layout and
+// hands them to the easm checker; an undischarged obligation surfaces as overlay-field-needs-size-guard.
+func (a *Analyzer) checkOverlaySizeGuard(pos lexer.Pos, layout *easm.Layout, fieldName, carrier string) {
+	var facts []easm.SizeGuardFact
+	for _, g := range a.overlaySizeGuards {
+		if g.layout == layout.Name && g.carrier == carrier && carrier != "" {
+			facts = append(facts, easm.SizeGuardFact{AtLeast: g.atLeast})
+		}
+	}
+	for _, issue := range easm.CheckGuestOverlaySizeGuard("", pos.Line, layout, fieldName, facts) {
+		a.errorf(pos, "%s: %s", issue.Code, issue.Message)
+	}
 }
 
 // tryDesugarGuestOverlayWrite recognizes and rewrites the docs/107 overlay WRITE accessor
@@ -242,6 +345,7 @@ func (a *Analyzer) tryDesugarGuestOverlayWrite(stmt *ast.AssignStmt) bool {
 		a.errorf(stmt.Pos(), "overlay-field-width-mismatch: field %s.%s has %d-byte width, which has no MemoryManager_WriteU<N> form (expected 1/2/4/8)", layout.Name, field, width)
 		return true
 	}
+	a.checkOverlaySizeGuard(stmt.Pos(), layout, field, overlayCarrierKey(base))
 
 	call := a.buildOverlayWriteCall(target.Position, writeFn, mem, base, offset, stmt.Value)
 	stmt.AsOverlayCall = call

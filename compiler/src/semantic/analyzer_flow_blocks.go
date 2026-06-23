@@ -591,10 +591,16 @@ func (a *Analyzer) analyzeBranchBlockWithAffineClone(stmts []ast.Stmt, scope *Sc
 func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent *Scope, cond ast.Expr, truthy bool) affineFlowSnapshot {
 	scope := a.refinedScopeForCondition(parent, cond, truthy)
 	savedRangeFacts := cloneScopeRangeFacts(scope)
+	savedSizeGuards := len(a.overlaySizeGuards)
 	snapshot := a.analyzeBlockWithAffineClonePrepared(stmts, scope, func() {
 		a.applyConditionRefinementsInternal(scope, cond, truthy, true)
 		a.applyIndexBoundsFactsForCondition(cond, truthy)
 		a.applyViewStaticLenForCondition(cond, truthy)
+		// docs/107 increment 4: a truthy `if base.size[mem] >= N:` guard establishes a size
+		// lower-bound that discharges `requires size >= N` overlay accesses in this branch body.
+		if truthy {
+			a.applyOverlaySizeGuardForCondition(cond)
+		}
 		// Record the branch-condition fact into the BRANCH scope, not the current (parent) scope —
 		// currentScope is not switched to `scope` until the body is analyzed below, so using it here would
 		// leak the condition past the branch (a then-branch `x > 10` reaching the fall-through, where it
@@ -602,6 +608,7 @@ func (a *Analyzer) analyzeBlockWithConditionAffineClone(stmts []ast.Stmt, parent
 		a.recordSMTAssertFactInScope(scope, smtFactExprForCondition(cond, truthy))
 	})
 	restoreScopeRangeFacts(savedRangeFacts)
+	a.overlaySizeGuards = a.overlaySizeGuards[:savedSizeGuards]
 	return snapshot
 }
 
