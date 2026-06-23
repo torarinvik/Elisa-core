@@ -17,8 +17,11 @@ all-inputs proof as it will go.
    stack well-typed, ABI preserved. *This document.*
 3. **Symbolic equivalence** — prove `reference ≡ target` by SMT over the typed machine semantics
    (static, all-inputs, decidable on a subset).
-4. **Lockstep fuzz** (docs/103 stage 3c) — dynamic equivalence on sampled inputs; the residual
-   discharge for whatever tier 3 cannot prove.
+4. **Lockstep fuzz** (docs/103 stage 3c) — dynamic equivalence on sampled inputs. The initial
+   implementation is off by default (`ELISA_EASM_LOCKSTEP_ORACLE=1`) and only runs for gated x86_64
+   safe leaves; it assembles `reference` and `target`, executes deterministic fuzz vectors, and diffs
+   observed `rax`/buffer state. A skipped gate is reported explicitly and is not a pass. This is
+   coverage-bounded agreement, the residual discharge for whatever tier 3 cannot prove.
 
 Lockstep is the bottom rung (coverage-bounded). Tiers 2–3 should carry as much as possible.
 
@@ -100,11 +103,20 @@ stuck*. Reachable without a proof assistant:
   now records a state snapshot at every jump site and every label entry; `checkMergeConsistency`
   then enforces the join — a register *demanded* after a contract-less merge label (read before being
   rewritten in the block it heads) must be established on EVERY incoming edge (the meet of predecessor
-  live-sets), plus the analogous FS-segment-state check. The fix an author applies is to declare a
-  `labels:` contract, which types the merge and is already enforced per-edge (so contract labels are
-  exempt). Additive: it only emits new `merge-state-unsound`/`merge-fs-state-unsound` diagnostics for
-  genuine divergences; the whole existing corpus (incl. the `done:`/`loop:` label tests) and the
-  emulator stay clean. Demand-driven scan = no false positives on dead carried registers.
-- Next within increment 2: drive the walker's Γ mutation off the `opRules` table rather than the
-  ad-hoc switch, so the state *dynamics* are declared too. Then the symbolic/lockstep equivalence
-  tier (docs/103 stage 3c).
+  live-sets), plus the analogous FS-segment-state check. The meet also covers stack `rsp mod 16`
+  alignment when the merge-headed block reaches a call or indirect control transfer, and known
+  concrete register values when the block consumes them as indirect control targets. The fix an
+  author applies is to declare a `labels:` contract, which types the merge and is already enforced
+  per-edge (so contract labels are exempt). Additive: it only emits new `merge-state-unsound` /
+  `merge-fs-state-unsound` / `merge-stack-alignment-unsound` / `merge-known-value-unsound`
+  diagnostics for genuine divergences; the whole existing corpus (incl. the `done:`/`loop:` label
+  tests) and the emulator stay clean. Demand-driven scan = no false positives on dead carried
+  registers.
+- Increment 2, brick 3 (walker Γ mutation driven by `opRules`) — DONE: the walker no longer keeps
+  parallel per-opcode effect facts in ad-hoc predicate switches or a separate capability map. Its
+  capability, flag-clobber, implicit-read, implicit-clobber, and implicit-result-definition queries
+  are thin readers of `opRules`, so the declared transition relation is the enforced state-dynamics
+  source of truth.
+- Next within increment 2: factor the remaining structural stack/control special cases into named
+  transition-rule fragments where useful. Then the symbolic/lockstep equivalence tier (docs/103
+  stage 3c).

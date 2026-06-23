@@ -111,3 +111,101 @@ export def merge_contract(flag: u64, p: HostPtr[u32]) -> u64 abi c:
 		t.Fatalf("contract label must be exempt from the meet check, got %#v", issues)
 	}
 }
+
+func TestMergeRejectsDivergentStackAlignmentForCall(t *testing.T) {
+	src := `module merge
+target x86_64
+export def merge_stack_bad(flag: u64, target: HostCallable) -> void abi c:
+    inputs: flag = rdi, target = rsi
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: compare.unsigned, control.indirect
+    body:
+        cmpq $0, %rdi
+        je callsite
+        subq $8, %rsp
+    callsite:
+        call *%rsi
+        addq $8, %rsp
+        ret
+`
+	_, issues := Parse("merge_stack.easm", src)
+	if !containsIssue(issues, "merge-stack-alignment-unsound") {
+		t.Fatalf("expected merge-stack-alignment-unsound, got %#v", issues)
+	}
+}
+
+func TestMergeAcceptsMatchingStackAlignmentForCall(t *testing.T) {
+	src := `module merge
+target x86_64
+export def merge_stack_ok(flag: u64, target: HostCallable) -> void abi c:
+    inputs: flag = rdi, target = rsi
+    clobbers: rax, rcx, rdx, rsi, rdi, r8, r9, r10, r11, cc, memory
+    stack: unchanged, aligned 16
+    control: returns
+    requires: compare.unsigned, control.indirect
+    body:
+        subq $8, %rsp
+        cmpq $0, %rdi
+        je callsite
+    callsite:
+        call *%rsi
+        addq $8, %rsp
+        ret
+`
+	_, issues := Parse("merge_stack_ok.easm", src)
+	if containsIssue(issues, "merge-stack-alignment-unsound") {
+		t.Fatalf("matching stack alignment should not be flagged, got %#v", issues)
+	}
+}
+
+func TestMergeRejectsDivergentKnownIndirectTarget(t *testing.T) {
+	src := `module merge
+target x86_64
+export def merge_known_bad(flag: u64) -> void abi c:
+    inputs: flag = rdi
+    clobbers: rax, cc
+    stack: noreturn
+    control: noreturn, tail_jumps
+    requires: compare.unsigned, control.indirect
+    body:
+        cmpq $0, %rdi
+        je poison
+        movq $0x10000, %rax
+    target:
+        jmp *%rax
+    poison:
+        movq $0xffff800000000000, %rax
+        jmp target
+`
+	_, issues := Parse("merge_known.easm", src)
+	if !containsIssue(issues, "merge-known-value-unsound") {
+		t.Fatalf("expected merge-known-value-unsound, got %#v", issues)
+	}
+}
+
+func TestMergeAcceptsMatchingKnownIndirectTarget(t *testing.T) {
+	src := `module merge
+target x86_64
+export def merge_known_ok(flag: u64) -> void abi c:
+    inputs: flag = rdi
+    clobbers: rax, cc
+    stack: noreturn
+    control: noreturn, tail_jumps
+    requires: compare.unsigned, control.indirect
+    body:
+        cmpq $0, %rdi
+        je same
+        movq $0x10000, %rax
+    target:
+        jmp *%rax
+    same:
+        movq $0x10000, %rax
+        jmp target
+`
+	_, issues := Parse("merge_known_ok.easm", src)
+	if containsIssue(issues, "merge-known-value-unsound") {
+		t.Fatalf("matching known indirect target should not be flagged, got %#v", issues)
+	}
+}

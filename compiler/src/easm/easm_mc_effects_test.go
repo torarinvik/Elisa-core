@@ -390,8 +390,8 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 		// clobber (LLVM keeps no values there), but EASM must gate it behind an explicit
 		// capability so a function cannot silently perturb FP rounding/exception state.
 		for _, d := range eff.defs {
-			if isX86FPUControlRegister(d) && capabilityByOp[op] == "" {
-				t.Errorf("UNGATED FPU STATE: MC says %s (%s) writes %s, but capabilityByOp[%q] "+
+			if isX86FPUControlRegister(d) && opCapability(op) == "" {
+				t.Errorf("UNGATED FPU STATE: MC says %s (%s) writes %s, but opCapability(%q) "+
 					"is empty. Touching FP control/status state must require a capability.",
 					op, opcodeName, d, op)
 				break
@@ -404,7 +404,7 @@ func TestEASMEffectsMatchLLVMMC(t *testing.T) {
 		// one of its mechanisms: a required capability, a declared flags clobber (cld/std
 		// touch DF), or structural control-flow modeling (ret). Anything that slips through
 		// would let a future whitelisted op smuggle in an undeclared ambient effect.
-		if eff.side && capabilityByOp[op] == "" && !instructionClobbersFlags(op) && !isControlFlowOp(op) {
+		if eff.side && opCapability(op) == "" && !instructionClobbersFlags(op) && !isControlFlowOp(op) {
 			t.Errorf("UNGATED SIDE EFFECT: MC marks %s (%s) as having unmodeled side effects, "+
 				"but it has no capability requirement, no flags clobber, and is not control flow. "+
 				"The op can perturb ambient processor state with nothing declaring that intent.",

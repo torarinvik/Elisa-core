@@ -7,9 +7,9 @@ import (
 )
 
 // docs/104 increment 2: the declared transition relation (opRules) must be TOTAL over the allowed
-// instruction set and CONSISTENT with the legacy per-opcode predicate functions the walker enforces.
-// Together these make opRules the single auditable source of truth for `Γ ⊢ instr ⇒ Γ'`, not a
-// parallel description that can silently drift.
+// instruction set, and the walker's accessor helpers must be thin table readers. Together these make
+// opRules the single auditable source of truth for `Γ ⊢ instr ⇒ Γ'`, not a parallel description that
+// can silently drift.
 
 // Totality: every allowed opcode has a declared rule.
 func TestOpRulesTotalOverAllowedOps(t *testing.T) {
@@ -35,15 +35,15 @@ func sortedCopy(in []string) []string {
 	return out
 }
 
-// Consistency: each rule field agrees with the legacy predicate function the walker actually calls.
-// Those functions are themselves cross-checked against LLVM MC (easm_mc_effects_test.go), so passing
-// here means the declared relation IS the enforced relation.
+// Consistency: each rule field agrees with the accessor function the walker actually calls. Those
+// accessors are themselves cross-checked against LLVM MC (easm_mc_effects_test.go), so passing here
+// means the declared relation IS the enforced relation.
 func TestOpRulesConsistentWithLegacyPredicates(t *testing.T) {
 	for op := range allowedOps {
 		rule, _ := lookupOpRule(op)
 
-		if got := capabilityByOp[op]; got != rule.Capability {
-			t.Errorf("%q: rule.Capability=%q but capabilityByOp=%q", op, rule.Capability, got)
+		if got := opCapability(op); got != rule.Capability {
+			t.Errorf("%q: rule.Capability=%q but opCapability=%q", op, rule.Capability, got)
 		}
 		if got := instructionClobbersFlags(op); got != rule.ClobbersFlags {
 			t.Errorf("%q: rule.ClobbersFlags=%v but instructionClobbersFlags=%v", op, rule.ClobbersFlags, got)

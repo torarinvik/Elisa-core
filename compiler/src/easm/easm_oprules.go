@@ -9,7 +9,8 @@ import (
 // Explicit transition relation (docs/104, TAL increment 2).
 //
 // EASM's per-instruction effects were historically encoded as a scatter of predicate functions
-// (capabilityByOp, instructionClobbersFlags, implicitClobbers, implicitUses, implicitResultDefines).
+// (required capability, instructionClobbersFlags, implicitClobbers, implicitUses,
+// implicitResultDefines).
 // That is operationally a typing relation `Γ ⊢ instr ⇒ Γ'`, but with the rules spread across the
 // file there was no single place to audit it for *totality* — "every allowed opcode has a declared
 // rule, and no instruction mutates machine state ad-hoc."
@@ -28,7 +29,7 @@ import (
 // rules + dataflow joins) to rest on a stable, auditable base.
 
 type opRule struct {
-	// Capability required to use the opcode at all (matches capabilityByOp); "" if none.
+	// Capability required to use the opcode at all; "" if none.
 	Capability string
 	// ClobbersFlags reports that the opcode writes the condition codes (matches instructionClobbersFlags).
 	ClobbersFlags bool
@@ -71,9 +72,9 @@ var opRules = map[string]opRule{
 
 	// Control transfer — no implicit GPR effects in the relation itself (call's caller-saved
 	// trashing is modeled separately in the walker, see implicitClobbers/clobberedByCall).
-	"call": {ImplicitClobbers: []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}},
+	"call":  {ImplicitClobbers: []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}},
 	"callq": {ImplicitClobbers: []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}},
-	"jmp": {}, "jmpq": {}, "ret": {}, "retq": {},
+	"jmp":   {}, "jmpq": {}, "ret": {}, "retq": {},
 
 	// Serializing / timing / fences.
 	"cpuid":  {Capability: "x86_64.cpuid", ImplicitReads: []string{"rax", "rcx"}, ImplicitClobbers: []string{"rax", "rbx", "rcx", "rdx"}, ResultDefines: true},
@@ -85,24 +86,27 @@ var opRules = map[string]opRule{
 	"isb":    {Capability: "aarch64.cntvct"},
 
 	// FPU/SIMD control-word state.
-	"fldcw":  {Capability: "x86_64.fpu_control"},
-	"fnstcw": {Capability: "x86_64.fpu_control"},
-	"stmxcsr": {Capability: "x86_64.fpu_control"},
-	"ldmxcsr": {Capability: "x86_64.fpu_control"},
-	"emms":    {Capability: "x86_64.fpu_control"},
+	"fldcw":    {Capability: "x86_64.fpu_control"},
+	"fnstcw":   {Capability: "x86_64.fpu_control"},
+	"stmxcsr":  {Capability: "x86_64.fpu_control"},
+	"ldmxcsr":  {Capability: "x86_64.fpu_control"},
+	"emms":     {Capability: "x86_64.fpu_control"},
 	"vzeroall": {Capability: "x86_64.simd_state"},
 
 	// Debug trap.
 	"trap": {Capability: "debug.trap"},
 }
 
-// easmMergeSnap captures the abstract machine state (live registers + FS segment state) at a
-// control-flow edge: a jump site or a label entry. Used by checkMergeConsistency to verify dataflow
-// joins at control-flow merges (docs/104 increment 2).
+// easmMergeSnap captures the abstract machine state at a control-flow edge: a jump site or a label
+// entry. Used by checkMergeConsistency to verify dataflow joins at control-flow merges (docs/104
+// increment 2).
 type easmMergeSnap struct {
-	live map[string]bool
-	fs   string
-	line int
+	live            map[string]bool
+	fs              string
+	stackMod16      int
+	stackMod16Known bool
+	known           map[string]uint64
+	line            int
 }
 
 func easmCopyLive(m map[string]bool) map[string]bool {
@@ -111,6 +115,14 @@ func easmCopyLive(m map[string]bool) map[string]bool {
 		if v {
 			out[k] = true
 		}
+	}
+	return out
+}
+
+func easmCopyKnownUInt(m map[string]uint64) map[string]uint64 {
+	out := make(map[string]uint64, len(m))
+	for k, v := range m {
+		out[k] = v
 	}
 	return out
 }
@@ -184,6 +196,28 @@ func checkMergeConsistency(path string, fn *Function, jumpPreds map[string][]eas
 				}
 			}
 		}
+		// Stack alignment is another meet fact. Only demand it when the block is about to rely on the
+		// linear walk's alignment proof for a call or indirect control transfer.
+		if walker.stackMod16Known && stackAlignmentDemandedAfterLabel(fn, label) {
+			for _, p := range realPreds {
+				if !p.stackMod16Known || p.stackMod16 != walker.stackMod16 {
+					issues = append(issues, Issue{Severity: "error", Code: "merge-stack-alignment-unsound", File: path, Line: entry[label].line, Message: fmt.Sprintf("merge label %s: rsp mod 16 = %d is assumed after the label but an incoming edge (line %d) does not establish the same alignment; declare a labels: contract or realign on every edge", label, walker.stackMod16, p.line)})
+					break
+				}
+			}
+		}
+		for _, reg := range knownControlTargetDemandedAfterLabel(fn, label) {
+			value, ok := walker.known[reg]
+			if !ok {
+				continue
+			}
+			for _, p := range realPreds {
+				if predValue, predOK := p.known[reg]; !predOK || predValue != value {
+					issues = append(issues, Issue{Severity: "error", Code: "merge-known-value-unsound", File: path, Line: entry[label].line, Message: fmt.Sprintf("merge label %s: %s is assumed to have concrete value 0x%x for an indirect control target but an incoming edge (line %d) does not establish the same value; declare a labels: contract or materialize the value on every edge", label, reg, value, p.line)})
+					break
+				}
+			}
+		}
 	}
 	return issues
 }
@@ -237,10 +271,79 @@ func demandedAfterLabel(fn *Function, label string) []string {
 	return out
 }
 
+func stackAlignmentDemandedAfterLabel(fn *Function, label string) bool {
+	started := false
+	for _, inst := range fn.Instructions {
+		if inst.Label != "" {
+			if inst.Label == label {
+				started = true
+				continue
+			}
+			if started {
+				return false
+			}
+			continue
+		}
+		if !started || inst.Pseudo {
+			continue
+		}
+		op := normalizeOp(inst.Op)
+		if strings.HasPrefix(op, "call") || isIndirectControlTransfer(op, inst.Text) {
+			return true
+		}
+		if op == "ret" || op == "retq" || op == "jmp" || op == "jmpq" {
+			return false
+		}
+	}
+	return false
+}
+
+func knownControlTargetDemandedAfterLabel(fn *Function, label string) []string {
+	demanded := map[string]bool{}
+	started := false
+	for _, inst := range fn.Instructions {
+		if inst.Label != "" {
+			if inst.Label == label {
+				started = true
+				continue
+			}
+			if started {
+				break
+			}
+			continue
+		}
+		if !started || inst.Pseudo {
+			continue
+		}
+		op := normalizeOp(inst.Op)
+		if isIndirectControlTransfer(op, inst.Text) {
+			if reg := indirectControlTargetRegister(inst.Text); reg != "" {
+				demanded[reg] = true
+			}
+		}
+		if op == "ret" || op == "retq" || op == "jmp" || op == "jmpq" {
+			break
+		}
+	}
+	out := make([]string, 0, len(demanded))
+	for reg := range demanded {
+		out = append(out, reg)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // lookupOpRule returns the declared rule for an opcode and whether one exists. Conditional jumps
 // (matched by family, not membership) are flag-reading control transfers with no GPR effects and are
 // intentionally not table rows; callers gate on isConditionalJump before consulting the table.
 func lookupOpRule(op string) (opRule, bool) {
 	r, ok := opRules[op]
 	return r, ok
+}
+
+func opCapability(op string) string {
+	if r, ok := lookupOpRule(op); ok {
+		return r.Capability
+	}
+	return ""
 }

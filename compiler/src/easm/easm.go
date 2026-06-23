@@ -148,6 +148,14 @@ type Issue struct {
 	Message  string `json:"message"`
 }
 
+var verifyFunctionStateHook func(path string, fn *Function, state machineFactState)
+
+func easmCopyMachineFactState(state machineFactState) machineFactState {
+	state.LiveRegs = easmCopyLive(state.LiveRegs)
+	state.KnownUInt = easmCopyKnownUInt(state.KnownUInt)
+	return state
+}
+
 type Report struct {
 	TargetTriple string          `json:"targetTriple,omitempty"`
 	Files        []string        `json:"files"`
@@ -190,7 +198,7 @@ var (
 	platformForRE    = regexp.MustCompile(`\bfor\b\s+(\([^)]*\)|[^\s]+)`)
 	nativeCanRE      = regexp.MustCompile(`\bcan\b\s+([^\[].*?)(?:\s+abi\b|\s+for\b|$)`)
 	sectionRE        = regexp.MustCompile(`^([A-Za-z_][A-Za-z0-9_-]*)\s*:\s*(.*)$`)
-	allowedOps     = map[string]bool{
+	allowedOps       = map[string]bool{
 		"mov": true, "movq": true, "lea": true, "push": true, "pushq": true, "pop": true, "popq": true,
 		"movb": true, "movw": true, "movl": true,
 		"movsx": true, "movsxd": true, "movsbw": true, "movsbl": true, "movsbq": true, "movswl": true, "movswq": true, "movslq": true,
@@ -203,14 +211,6 @@ var (
 		"lfence": true, "rdtsc": true, "pause": true, "yield": true, "mrs": true, "isb": true,
 		"fldcw": true, "fnstcw": true, "stmxcsr": true, "ldmxcsr": true, "emms": true,
 		"vzeroall": true, "trap": true,
-	}
-	capabilityByOp = map[string]string{
-		"rdtsc": "x86_64.rdtsc", "lfence": "x86_64.sse.lfence", "pause": "x86_64.sse.pause", "yield": "aarch64.yield",
-		"cpuid": "x86_64.cpuid",
-		"xchg":  "x86_64.atomic.rmw", "xchgl": "x86_64.atomic.rmw", "xchgq": "x86_64.atomic.rmw",
-		"mrs": "aarch64.cntvct", "isb": "aarch64.cntvct", "fldcw": "x86_64.fpu_control",
-		"fnstcw": "x86_64.fpu_control", "stmxcsr": "x86_64.fpu_control", "ldmxcsr": "x86_64.fpu_control",
-		"emms": "x86_64.fpu_control", "vzeroall": "x86_64.simd_state", "trap": "debug.trap",
 	}
 )
 
@@ -738,9 +738,9 @@ func VerifyModule(module *Module) []Issue {
 // `target … lockstep` implementations. It enforces the structural proof obligations that must hold
 // before any runtime equivalence check is meaningful, then verifies the reference and every target
 // body with the FULL machinery (clobbers, frame conditions, capabilities, …) as if each were an
-// ordinary function body — so an optimized target gets no free pass. The runtime equivalence proof
-// against the reference (the @lockstep oracle, docs/103 stage 3c) is not yet wired; until it is,
-// `lockstep` certifies signature/structure, not observational equality.
+// ordinary function body — so an optimized target gets no free pass. When
+// ELISA_EASM_LOCKSTEP_ORACLE=1 is set, safe leaf targets are also fuzzed against the reference by a
+// narrow observational oracle. Skips are reported explicitly; a skip is not a pass.
 func verifyLockstepRoutine(path, target string, fn *Function, layouts map[string]*Layout) []Issue {
 	var issues []Issue
 	hasReference := len(fn.Reference) > 0
@@ -765,6 +765,9 @@ func verifyLockstepRoutine(path, target string, fn *Function, layouts map[string
 	}
 	for _, tb := range fn.Targets {
 		verifyBody(tb.Instructions)
+	}
+	if os.Getenv("ELISA_EASM_LOCKSTEP_ORACLE") == "1" && !hasErrorIssue(issues) {
+		issues = append(issues, verifyLockstepOracle(path, target, fn)...)
 	}
 	return issues
 }
@@ -1114,7 +1117,7 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 			}
 			// Snapshot the state the linear walk carries into this label, and whether the textual
 			// predecessor falls through to it. A label itself flows into the following instruction.
-			mergeLabelEntry[inst.Label] = easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, line: inst.Line}
+			mergeLabelEntry[inst.Label] = easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, stackMod16: stackMod16, stackMod16Known: stackMod16Known, known: easmCopyKnownUInt(state.KnownUInt), line: inst.Line}
 			if prevFallsThrough {
 				mergeFallReachable[inst.Label] = true
 			}
@@ -1150,7 +1153,7 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 				issues = append(issues, Issue{Severity: "error", Code: "opcode-rule-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("opcode %q is allowed but has no declared transition rule", inst.Op)})
 			}
 		}
-		if cap := capabilityByOp[op]; cap != "" && !requireSet[cap] {
+		if cap := opCapability(op); cap != "" && !requireSet[cap] {
 			issues = append(issues, Issue{Severity: "error", Code: "missing-capability", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q requires capability %s", inst.Op, cap)})
 		}
 		if usesStackRegister(inst.Text) || strings.HasPrefix(op, "push") || strings.HasPrefix(op, "pop") {
@@ -1449,14 +1452,17 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		}
 		// Record a predecessor edge for any direct jump's target, and whether this instruction lets
 		// control fall through to the textually-following one (jmp and ret terminate the straight-line path).
-		if (op == "jmp" || op == "jmpq" || isConditionalJump(op)) {
+		if op == "jmp" || op == "jmpq" || isConditionalJump(op) {
 			if tgt := directControlTarget(op, inst.Text); tgt != "" {
-				mergeJumpPreds[tgt] = append(mergeJumpPreds[tgt], easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, line: inst.Line})
+				mergeJumpPreds[tgt] = append(mergeJumpPreds[tgt], easmMergeSnap{live: easmCopyLive(state.LiveRegs), fs: state.FS, stackMod16: stackMod16, stackMod16Known: stackMod16Known, known: easmCopyKnownUInt(state.KnownUInt), line: inst.Line})
 			}
 		}
 		prevFallsThrough = !(op == "jmp" || op == "jmpq" || op == "ret" || op == "retq")
 	}
 	issues = append(issues, checkMergeConsistency(path, fn, mergeJumpPreds, mergeLabelEntry, mergeFallReachable, labelContracts)...)
+	if verifyFunctionStateHook != nil {
+		verifyFunctionStateHook(path, fn, easmCopyMachineFactState(state))
+	}
 	issues = append(issues, verifyABI(path, fn)...)
 	issues = append(issues, verifyContractTokens(path, fn)...)
 	issues = append(issues, verifySignatureTypes(path, fn)...)
@@ -2951,26 +2957,15 @@ func isUnsignedConditionalJump(op string) bool {
 }
 
 func instructionClobbersFlags(op string) bool {
-	switch op {
-	case "add", "addq", "sub", "subq", "and", "andq", "xor", "xorq", "inc", "incq", "dec", "decq",
-		"cmp", "cmpq", "test", "testq", "cld", "std":
-		return true
-	default:
-		return false
-	}
+	rule, ok := lookupOpRule(op)
+	return ok && rule.ClobbersFlags
 }
 
 func implicitClobbers(op string) []string {
-	switch op {
-	case "rdtsc":
-		return []string{"rax", "rdx"}
-	case "cpuid":
-		return []string{"rax", "rbx", "rcx", "rdx"}
-	case "call", "callq":
-		return []string{"rax", "rcx", "rdx", "rsi", "rdi", "r8", "r9", "r10", "r11", "cc"}
-	default:
-		return nil
+	if rule, ok := lookupOpRule(op); ok && len(rule.ImplicitClobbers) != 0 {
+		return rule.ImplicitClobbers
 	}
+	return nil
 }
 
 // implicitUses returns the registers an instruction reads WITHOUT them appearing as an
@@ -2981,12 +2976,10 @@ func implicitClobbers(op string) []string {
 // table is cross-checked against LLVM MC's implicit_uses in easm_mc_effects_test.go so it
 // can never silently miss a read. Returned names are canonical 64-bit forms.
 func implicitUses(op string) []string {
-	switch op {
-	case "cpuid":
-		return []string{"rax", "rcx"}
-	default:
-		return nil
+	if rule, ok := lookupOpRule(op); ok && len(rule.ImplicitReads) != 0 {
+		return rule.ImplicitReads
 	}
+	return nil
 }
 
 // implicitResultDefines reports whether an instruction's implicit clobbers are defined
@@ -2994,11 +2987,8 @@ func implicitUses(op string) []string {
 // value (a call's caller-saved set). Result writes establish the registers for later
 // reads; trashing leaves them unreadable until re-established.
 func implicitResultDefines(op string) bool {
-	switch op {
-	case "rdtsc", "cpuid":
-		return true
-	}
-	return false
+	rule, ok := lookupOpRule(op)
+	return ok && rule.ResultDefines
 }
 
 func callerSavedGPRs() []string {
