@@ -1670,6 +1670,9 @@ func verifyMachineRoleTypes(path string, fn *Function, requireSet map[string]boo
 		}
 	}
 	issues = append(issues, checkFrameConditions(path, fn, paramTypes)...)
+	// TAL item 4: existential handle types (docs/104). Additive — no-op unless the routine declares
+	// a Handle[K] parameter or return type. See easm_handle.go.
+	issues = append(issues, verifyHandleTypes(path, fn)...)
 	return issues
 }
 
@@ -2272,7 +2275,7 @@ func allowedSignatureType(name string) bool {
 	case "void", "bool", "char", "int", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "usize", "uintptr", "f32", "f64":
 		return true
 	default:
-		return isEASMRoleType(name) || isAddressSpaceCarrierType(name)
+		return isEASMRoleType(name) || isAddressSpaceCarrierType(name) || isHandleCarrierType(name)
 	}
 }
 
