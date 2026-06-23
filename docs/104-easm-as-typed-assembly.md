@@ -74,7 +74,13 @@ The move to full TAL is therefore not a rewrite — it is closing gaps and re-fo
    `preserve-parametric-skip`, never a silent pass.
 4. **Existential types for handles.** `*_from_handle` is `∃α. α`; existential typing makes
    "use a handle as the wrong concrete type" unrepresentable. Same consolidation as the
-   `handle_as[T]` scatter cluster.
+   `handle_as[T]` scatter cluster. IMPLEMENTED (`easm_handle.go`): a new opaque carrier `Handle[K]`
+   (parsed like `HostPtr[…]`, ABI-identical to an integer — opacity is verifier-only). Three rules:
+   a `Handle[K]` may be moved/passed/returned but never used as a memory base
+   (`handle-deref-forbidden`), never reinterpreted as `Handle[J]` (K≠J) or a concrete pointer carrier
+   (`handle-type-confusion`), and is a handle only by entering through a `Handle[K]` boundary
+   (provenance cleared on any non-move write). Additive — non-handle routines are byte-for-byte
+   unaffected.
 
 ## Maximum rigor: a soundness property
 
@@ -88,6 +94,18 @@ stuck*. Reachable without a proof assistant:
   `@property` muscle pointed at the type system itself.
 - **Optional ceiling:** mechanize the ~20-instruction core (Γ, transition, preservation+progress)
   in a proof assistant, as TALx86 did. Our instruction set is far smaller, so it is tractable.
+  STARTED (`formal/easm-tal/EasmTAL.v`, see docs/106): the definite-initialization core (the
+  `LiveRegs` lattice + `register-read-uninitialized` rule) is formalized in Coq with `progress` and
+  `preservation` proven for the mov/add/sub/and/xor/inc/dec subset and lifted to straight-line
+  sequences, no `admit`/`Admitted`. Caveat: not yet machine-checked locally (no `coqc` toolchain on
+  the dev box); the check command and narrowing (values elided, flags/known-values/control-flow out
+  of scope) are documented in docs/106.
+
+Note: the symbolic-equivalence and preservation checkers (rung 3, item 3) model a widened subset —
+beyond mov/ALU they now cover `lea` (disp), `or`/`not`/`neg`, immediate shifts, `xchg`, `movl`
+zero-extension, and (preservation only) rsp-relative stack `movq`. Mnemonics not yet in the base
+verifier's `allowedOps` are exercised by direct-encoder tests; full-pipeline proof tests light up as
+`allowedOps` widens.
 
 ## Status
 
