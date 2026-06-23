@@ -775,6 +775,15 @@ func verifyLockstepRoutine(path, target string, fn *Function, layouts map[string
 	return issues
 }
 
+// verifyPreservationParametricGate runs the register-polymorphic preservation check on an ordinary
+// routine when ELISA_EASM_PRESERVE_PARAMETRIC=1. Called from the ordinary-function verify path.
+func verifyPreservationParametricGate(path string, fn *Function, hasErr bool) []Issue {
+	if os.Getenv("ELISA_EASM_PRESERVE_PARAMETRIC") != "1" || hasErr {
+		return nil
+	}
+	return verifyPreservationParametric(path, fn)
+}
+
 func parseFragmentHeader(path string, line int, text string) (Function, *Issue) {
 	m := fragmentHeaderRE.FindStringSubmatch(text)
 	if m == nil {
@@ -1586,6 +1595,7 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		}
 	}
 	_ = target
+	issues = append(issues, verifyPreservationParametricGate(path, fn, hasErrorIssue(issues))...)
 	return issues
 }
 

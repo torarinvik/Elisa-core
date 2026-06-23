@@ -63,6 +63,15 @@ The move to full TAL is therefore not a rewrite — it is closing gaps and re-fo
 3. **Register-polymorphic calling conventions.** Express "preserves all callee-saved" as type
    variables — a routine's type is `∀ρ. (args; ρ) → (ret; ρ)` — so preservation holds by
    parametricity and catches the save-but-restore-wrong-value case a presence checklist misses.
+   IMPLEMENTED (off by default, `ELISA_EASM_PRESERVE_PARAMETRIC=1`): each preserved callee-saved
+   register's entry value is a symbol `ρ`; the body is symbolically executed over a modeled stack
+   (push stores the source term at a decremented rsp offset, pop loads whatever term sits there), and
+   z3 is asked whether any input makes the register's exit term differ from `ρ`. `unsat` ⇒ preserved
+   for all inputs; `sat` ⇒ `callee-saved-value-unrestored`. This catches interleaved-stack
+   misalignment (`push r12; push rdi; pop r12; pop rdi` leaves r12 holding rdi's value) and wrong-slot
+   restores that the structural push/pop-ordering check (`calleeSavedPushPopProven`) passes. Modeled
+   subset: straight-line push/pop/movq/ALU + ABI-respecting `call`; anything else ⇒
+   `preserve-parametric-skip`, never a silent pass.
 4. **Existential types for handles.** `*_from_handle` is `∃α. α`; existential typing makes
    "use a handle as the wrong concrete type" unrepresentable. Same consolidation as the
    `handle_as[T]` scatter cluster.
