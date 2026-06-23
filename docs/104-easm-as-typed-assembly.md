@@ -86,5 +86,15 @@ stuck*. Reachable without a proof assistant:
   routines (`EnterMainEntryAsm`, `CallMainEntryAsm`, and the four `JumpMainEntry*` variants). Their
   raw `0/8/272(%base)` reads are now field-checked (verified clean; a corrupted `272→280` offset is
   rejected). Same ABI-identity zero-risk argument as the init-ctx adoption.
-- Next: increment 2 (explicit Γ + per-opcode typing rules + dataflow joins) — the soundness
-  backbone — or the symbolic/lockstep equivalence tier (docs/103 stage 3c).
+- Increment 2, brick 1 (declared transition relation + totality) — DONE: the per-opcode effect
+  fragments (capability, flag-write, implicit reads/clobbers, result-defines) are consolidated into
+  one declared `opRules` table (`easm_oprules.go`). Two theorems anchor it: **totality** (every
+  `allowedOps` entry has a row, plus a runtime `opcode-rule-missing` guard if an allowed op ever
+  reaches the walker ruleless) and **consistency** (each row agrees field-for-field with the legacy
+  predicate functions, which are themselves cross-checked against LLVM MC). The relation is now a
+  declared, auditable artifact rather than an emergent property of the 300-line switch — the stable
+  base the remaining increment-2 work rests on.
+- Next within increment 2: per-opcode *state-transition* rules (drive the walker's Γ mutation off
+  the table rather than the ad-hoc switch) and dataflow joins at control-flow merges (every
+  predecessor must establish a label's precondition; post-label state is the meet). Then the
+  symbolic/lockstep equivalence tier (docs/103 stage 3c).

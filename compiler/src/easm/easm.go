@@ -1126,6 +1126,14 @@ func verifyFunction(path string, target string, fn *Function, layouts map[string
 		if !allowedOps[op] && !isConditionalJump(op) {
 			issues = append(issues, Issue{Severity: "error", Code: "unsupported-instruction", File: path, Line: inst.Line, Message: fmt.Sprintf("unsupported EASM instruction %q", inst.Op)})
 		}
+		// Totality of the declared transition relation: an allowed opcode reaching the walker without
+		// a declared rule is a relation gap, not a program error -- the verifier would otherwise mutate
+		// machine state for it ad-hoc. Conditional jumps are a recognized family without a table row.
+		if allowedOps[op] {
+			if _, ok := lookupOpRule(op); !ok {
+				issues = append(issues, Issue{Severity: "error", Code: "opcode-rule-missing", File: path, Line: inst.Line, Message: fmt.Sprintf("opcode %q is allowed but has no declared transition rule", inst.Op)})
+			}
+		}
 		if cap := capabilityByOp[op]; cap != "" && !requireSet[cap] {
 			issues = append(issues, Issue{Severity: "error", Code: "missing-capability", File: path, Line: inst.Line, Message: fmt.Sprintf("instruction %q requires capability %s", inst.Op, cap)})
 		}
