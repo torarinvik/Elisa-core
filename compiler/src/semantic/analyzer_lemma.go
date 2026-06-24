@@ -302,6 +302,16 @@ func substituteLemmaEnsure(expr ast.Expr, subst map[string]ast.Expr) (ast.Expr, 
 			return nil, false
 		}
 		return &ast.IndexExpr{Position: n.Position, Object: object, Index: index}, true
+	case *ast.CastExpr:
+		// A value-form numeric conversion (`(i - 1).usize()`) substituted into a loop measure. Rebuild
+		// the cast over the substituted operand, preserving Origin/Target so the SMT term translator's
+		// CastExpr handler (which keys off exprTypes of operand and result) models it value-exactly. Only
+		// the operand is rewritten; the target type is unchanged.
+		operand, ok := substituteLemmaEnsure(n.Operand, subst)
+		if !ok {
+			return nil, false
+		}
+		return &ast.CastExpr{Position: n.Position, Operand: operand, Target: n.Target, Origin: n.Origin, RefShorthand: n.RefShorthand}, true
 	case *ast.CallExpr:
 		fn, ok := substituteLemmaEnsure(n.Func, subst)
 		if !ok {

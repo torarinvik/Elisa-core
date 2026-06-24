@@ -112,6 +112,48 @@ func (a *Analyzer) checkTermination(fn *ast.FuncDecl, fnType *FuncType) {
 	}
 }
 
+// typeLoopSubstCastsForSMT quietly populates exprTypes for any value-form numeric CastExpr appearing
+// in a loop-body substitution value, so the SMT cast translator (which keys off operand/result types)
+// can model it. It analyzes only the cast subexpressions, under diagnostic suppression, on the current
+// (pristine pre-loop) scope — the same scope the loop variables and measure already resolve in. It is
+// purely a type-recording side effect: it never changes which substitutions exist or what they mean.
+func (a *Analyzer) typeLoopSubstCastsForSMT(subst map[string]ast.Expr) {
+	if a == nil || len(subst) == 0 {
+		return
+	}
+	saved := a.suppressDiagnostics
+	a.suppressDiagnostics = true
+	defer func() { a.suppressDiagnostics = saved }()
+	for _, v := range subst {
+		a.typeCastNodesInExpr(v)
+	}
+}
+
+// typeCastNodesInExpr walks a pure-arith substitution value and analyzes each CastExpr it contains
+// (recording exprTypes for the cast and, transitively, its operand). Non-cast arithmetic nodes need no
+// per-node type for the SMT translator, so only casts are analyzed.
+func (a *Analyzer) typeCastNodesInExpr(expr ast.Expr) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		if n != nil {
+			a.typeCastNodesInExpr(n.Inner)
+		}
+	case *ast.UnaryExpr:
+		if n != nil {
+			a.typeCastNodesInExpr(n.Operand)
+		}
+	case *ast.BinaryExpr:
+		if n != nil {
+			a.typeCastNodesInExpr(n.Left)
+			a.typeCastNodesInExpr(n.Right)
+		}
+	case *ast.CastExpr:
+		if n != nil {
+			a.analyzeExpr(n) // records exprTypes for n and its operand on the current scope
+		}
+	}
+}
+
 // collectSelfRecursiveCalls returns every direct call `fn.Name(...)` syntactically inside fn's body.
 // Direct-by-name only (mirrors resolveDirectCallFuncDecl's conservatism): an indirect or method call
 // is not recognized as recursion, so it never gets a (false) termination obligation.
@@ -279,7 +321,7 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 			a.errorf(m.Pos(), "loop `decreases` measure must be an integer, got %s", t)
 		}
 	}
-	subst, _, captured := a.captureLoopBodyEffect(stmt.Body)
+	subst, captured := a.captureLoopBodyEffectForTermination(stmt.Body)
 	if !captured {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
 		if !terminationAssumed {
@@ -287,6 +329,15 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 		}
 		return
 	}
+	// The SMT term translator models a value-form numeric cast (`(i - 1).usize()`) by reading the
+	// recorded types of the cast node and its operand (analyzer_smt_discharge.go CastExpr case). The
+	// loop body has NOT been analyzed yet at this point (termination runs on the pristine pre-loop
+	// scope, before the body), so those body-RHS cast nodes carry no exprTypes. Type the substitution
+	// values now — quietly (suppressing diagnostics: the body's later real analysis re-emits any genuine
+	// diagnostic) — so the cast translator can see through the conversion. A cast whose types still
+	// cannot be resolved simply makes the SMT translation decline (sound: a declined term forgoes the
+	// proof, never fabricates a decrease).
+	a.typeLoopSubstCastsForSMT(subst)
 	invs := leadingInvariants(stmt.Body)
 	if a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst) {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)

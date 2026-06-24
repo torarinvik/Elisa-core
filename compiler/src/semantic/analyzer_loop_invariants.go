@@ -558,6 +558,29 @@ type loopArrayStore struct {
 // conservatism is what makes the substitution sound: a captured body provably touches state only
 // through these pure assignments and contains no control flow.
 func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, []loopArrayStore, bool) {
+	return a.captureLoopBodyEffectMode(body, false)
+}
+
+// captureLoopBodyEffectForTermination is the relaxed capture used by the loop-termination prover. It
+// permits array-element STORES whose index/value contain side-effect-free reads (array-element and
+// field reads), because such a store mutates no scalar and is therefore irrelevant to the
+// scalar-measure decrease proof. It returns NO loopArrayStore records (termination never models
+// array contents — it proves only the scalar measure), so this relaxation cannot reach, and cannot
+// weaken, the invariant-preservation array-store SMT model, which keeps using the strict
+// captureLoopBodyEffect.
+func (a *Analyzer) captureLoopBodyEffectForTermination(body []ast.Stmt) (map[string]ast.Expr, bool) {
+	subst, _, ok := a.captureLoopBodyEffectMode(body, true)
+	return subst, ok
+}
+
+func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination bool) (map[string]ast.Expr, []loopArrayStore, bool) {
+	// On the termination path the array-store index/value may also contain side-effect-free reads;
+	// on the invariant path they must stay strictly pure-arith so the `(store arr idx val)` SMT model
+	// reads only modeled terms.
+	storeOperandPure := exprIsPureArith
+	if forTermination {
+		storeOperandPure = exprIsPureArithOrRead
+	}
 	subst := map[string]ast.Expr{}
 	assigned := map[string]bool{}
 	var order []string
@@ -598,7 +621,7 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 				if storedArrays[arrIdent.Name] || assigned[arrIdent.Name] {
 					return nil, nil, false
 				}
-				if !exprIsPureArith(target.Index) || !exprIsPureArith(n.Value) {
+				if !storeOperandPure(target.Index) || !storeOperandPure(n.Value) {
 					return nil, nil, false
 				}
 				refs := map[string]bool{}
@@ -609,7 +632,13 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 						return nil, nil, false
 					}
 				}
-				stores = append(stores, loopArrayStore{arrayName: arrIdent.Name, array: target.Object, index: target.Index, value: n.Value})
+				// The termination prover proves only the scalar measure and discards stores, so recording
+				// them is unnecessary there; on the invariant path the store IS modeled in SMT. Either way
+				// the array is still marked stored so a later whole-reassignment or double element-store is
+				// rejected (the simultaneous-substitution invariant must hold regardless of mode).
+				if !forTermination {
+					stores = append(stores, loopArrayStore{arrayName: arrIdent.Name, array: target.Object, index: target.Index, value: n.Value})
+				}
 				storedArrays[arrIdent.Name] = true
 			default:
 				return nil, nil, false
@@ -618,7 +647,7 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 			return nil, nil, false // any other statement form
 		}
 	}
-	if len(order) == 0 && len(stores) == 0 {
+	if len(order) == 0 && len(stores) == 0 && len(storedArrays) == 0 {
 		return nil, nil, false
 	}
 	// Disjoint-RHS rule: each scalar right-hand side may reference an assigned variable only when it IS
@@ -638,8 +667,15 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 
 // exprIsPureArith reports whether expr is a side-effect-free integer arithmetic expression over
 // literals and variables — the only right-hand sides captureLoopBodyEffect admits. Calls,
-// address-of, container reads, and casts are rejected (default false) so capture never silently
-// admits a side effect.
+// address-of, and container reads are rejected (default false) so capture never silently admits a
+// side effect. A value-form numeric WIDTH conversion of an already-pure operand (`i.usize()`,
+// `n.u64()`, `x.i64()`) IS admitted: such a conversion is a total, side-effect-free integer function
+// of its operand, so substituting it into the loop measure is sound. A `.cast[T]` REINTERPRET, a
+// reference cast, a `?`-suffixed/optional conversion, a non-integer conversion (`.f64()`, `.bool()`),
+// and a conversion of a non-pure operand are all still rejected — the SMT term translator independently
+// models the surviving conversions value-exactly (and declines, forcing the whole proof to decline,
+// for any conversion it cannot model faithfully), so admitting them here can never make the prover
+// "prove" a false decrease.
 func exprIsPureArith(expr ast.Expr) bool {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
@@ -656,6 +692,83 @@ func exprIsPureArith(expr ast.Expr) bool {
 			return exprIsPureArith(n.Left) && exprIsPureArith(n.Right)
 		}
 		return false
+	case *ast.CastExpr:
+		return n != nil && isPureNumericValueCast(n) && exprIsPureArith(n.Operand)
+	default:
+		return false
+	}
+}
+
+// isPureNumericValueCast reports whether a CastExpr is a value-form NUMERIC INTEGER conversion (the
+// `x.u64()` / `x.usize()` postfix shorthand), as opposed to a `.cast[T]` reinterpret, a reference
+// cast, an indirect-call cast, or a float/non-numeric conversion. Only the postfix-shorthand origin
+// with a bare integer target name qualifies — that is precisely the value-preserving-or-modeled
+// conversion family the SMT term translator handles (see analyzer_smt_discharge.go CastExpr term
+// case). Everything else returns false (rejected), so capture never admits an unmodeled cast.
+func isPureNumericValueCast(n *ast.CastExpr) bool {
+	if n == nil || n.RefShorthand || n.Origin != ast.CastExprOriginPostfixShorthand {
+		return false
+	}
+	named, ok := n.Target.(*ast.NamedType)
+	if !ok || named == nil {
+		return false // optional (`x.u64?()`), ref-suffixed, or compound targets are not plain value casts
+	}
+	return isIntegerConversionTargetName(named.Name)
+}
+
+// isIntegerConversionTargetName reports whether a postfix-shorthand cast target names a built-in
+// INTEGER type (the only conversions the integer measure prover can reason about). Float, bool,
+// char, string-view, and user-defined targets are excluded.
+func isIntegerConversionTargetName(name string) bool {
+	switch name {
+	case "int",
+		"i8", "i16", "i32", "i64", "isize",
+		"s8", "s16", "s32", "s64",
+		"u8", "u16", "u32", "u64", "usize", "uintptr":
+		return true
+	}
+	return false
+}
+
+// exprIsPureArithOrRead is the relaxed purity predicate used ONLY for the index/value of an
+// array-element store on the loop-TERMINATION capture path. In addition to everything
+// exprIsPureArith admits, it allows ARRAY-ELEMENT READS (`arr[j+1]`) and FIELD READS (`p.x`), which
+// are side-effect-free. This is sound for termination specifically because the loop measure is over
+// SCALAR counters and an array store mutates no scalar — so the store (and whatever it reads) is
+// irrelevant to the scalar-measure decrease proof; the read merely needs to be guaranteed
+// effect-free. Method/overlay CALLS are NOT effect-free (could mutate a counter or diverge), so an
+// IndexExpr carrying an analyzer-rewritten overlay/specialization/fallback/two-operand form, or any
+// CallExpr, is still rejected.
+func exprIsPureArithOrRead(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return exprIsPureArithOrRead(n.Inner)
+	case *ast.IntLit:
+		return true
+	case *ast.Ident:
+		return true
+	case *ast.UnaryExpr:
+		return n.Op == lexer.TOKEN_MINUS && exprIsPureArithOrRead(n.Operand)
+	case *ast.BinaryExpr:
+		switch n.Op {
+		case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS, lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT:
+			return exprIsPureArithOrRead(n.Left) && exprIsPureArithOrRead(n.Right)
+		}
+		return false
+	case *ast.CastExpr:
+		return n != nil && isPureNumericValueCast(n) && exprIsPureArithOrRead(n.Operand)
+	case *ast.IndexExpr:
+		// A plain single-subscript array read. Reject any analyzer-rewritten / sugared form that lowers
+		// to a CALL or a non-read (overlay accessor, value specialization, `else` fallback, two-operand
+		// table accessor) — those are not guaranteed side-effect-free.
+		if n == nil || n.Index2 != nil || n.Fallback != nil || n.AsSpecialize != nil || n.AsOverlayCall != nil {
+			return false
+		}
+		return exprIsPureArithOrRead(n.Object) && exprIsPureArithOrRead(n.Index)
+	case *ast.FieldExpr:
+		// A field projection read. Safe (`?.`) navigation is still a pure read of a field; reject nothing
+		// extra here, but the object must itself be pure (no call/address-of underneath).
+		return n != nil && exprIsPureArithOrRead(n.Object)
 	default:
 		return false
 	}
@@ -674,5 +787,14 @@ func collectArithIdents(expr ast.Expr, out map[string]bool) {
 	case *ast.BinaryExpr:
 		collectArithIdents(n.Left, out)
 		collectArithIdents(n.Right, out)
+	case *ast.CastExpr:
+		collectArithIdents(n.Operand, out)
+	case *ast.IndexExpr:
+		// Reached only on the termination capture path (exprIsPureArithOrRead): the array base and the
+		// index both contribute referenced names.
+		collectArithIdents(n.Object, out)
+		collectArithIdents(n.Index, out)
+	case *ast.FieldExpr:
+		collectArithIdents(n.Object, out)
 	}
 }
