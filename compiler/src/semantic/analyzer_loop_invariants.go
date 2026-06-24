@@ -614,11 +614,20 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				// PRE-body values (no variable assigned EARLIER in this body — else the store would observe
 				// a post-assignment value, breaking the simultaneous-substitution model). The array is
 				// element-stored at most once and never also whole-reassigned.
-				arrIdent, ok := target.Object.(*ast.Ident)
-				if !ok || arrIdent == nil {
+				//
+				// On the TERMINATION path only, the array base may also be a stable struct-FIELD path
+				// rooted at a single receiver identifier through `.field` hops (`self.xs`, `self.a.b`).
+				// Such an element store changes the field array's CONTENTS but no scalar counter and not
+				// its `.count`, so it is irrelevant to a scalar / field-count measure decrease and is
+				// discarded exactly like the bare-array case. The "stored-once / not-also-reassigned"
+				// tracking is keyed by the NORMALIZED field-path string so two stores to the same path —
+				// or a store plus a whole-field reassignment — are still rejected. The strict invariant
+				// path keeps requiring a bare-Ident base (no field key produced there).
+				arrKey, arrOK := loopStoreTargetBaseKey(target, forTermination)
+				if !arrOK {
 					return nil, nil, false
 				}
-				if storedArrays[arrIdent.Name] || assigned[arrIdent.Name] {
+				if storedArrays[arrKey] || assigned[arrKey] {
 					return nil, nil, false
 				}
 				if !storeOperandPure(target.Index) || !storeOperandPure(n.Value) {
@@ -637,9 +646,9 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				// the array is still marked stored so a later whole-reassignment or double element-store is
 				// rejected (the simultaneous-substitution invariant must hold regardless of mode).
 				if !forTermination {
-					stores = append(stores, loopArrayStore{arrayName: arrIdent.Name, array: target.Object, index: target.Index, value: n.Value})
+					stores = append(stores, loopArrayStore{arrayName: arrKey, array: target.Object, index: target.Index, value: n.Value})
 				}
-				storedArrays[arrIdent.Name] = true
+				storedArrays[arrKey] = true
 			default:
 				return nil, nil, false
 			}
@@ -663,6 +672,73 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 		}
 	}
 	return subst, stores, true
+}
+
+// loopStoreTargetBaseKey returns the normalized base key of an array-element store target
+// `BASE[idx]`, plus whether the base is admissible for the current capture mode.
+//
+//   - The STRICT (invariant) path requires BASE to be a bare array variable — exactly the
+//     prior behaviour; a field path is rejected so the `(store arr idx val)` SMT model only ever
+//     keys on a plain Ident array symbol.
+//   - The TERMINATION path additionally admits a stable struct-FIELD path lvalue rooted at a single
+//     `*ast.Ident` receiver through `*ast.FieldExpr` hops only — `self.xs`, `self.a.b`. No calls,
+//     no index/subscript, no deref, no safe-navigation in the path; anything else declines.
+//
+// The returned key is a canonical string for the base path (`self`, `self__field__xs`), so the
+// caller's stored-once / not-also-reassigned tracking treats two syntactically-equal paths as the
+// same array (conservative aliasing: identical paths alias; distinct paths we cannot prove disjoint
+// are kept apart only by syntactic string, and a store is permitted at most ONCE per key — so the
+// simultaneous-substitution invariant cannot be broken even if two distinct strings happened to
+// alias, because each store is independently discarded and changes no scalar).
+//
+// The IndexExpr itself must be an ordinary single-subscript array index: any analyzer-rewritten or
+// sugared form (two-operand overlay accessor, `else` fallback, value specialization, overlay call)
+// is rejected — those do not lower to a plain element store.
+func loopStoreTargetBaseKey(target *ast.IndexExpr, forTermination bool) (string, bool) {
+	if target == nil {
+		return "", false
+	}
+	if target.Index2 != nil || target.Fallback != nil || target.LegacyElseFallback ||
+		target.AsSpecialize != nil || target.AsOverlayCall != nil {
+		return "", false
+	}
+	if arrIdent, ok := target.Object.(*ast.Ident); ok && arrIdent != nil {
+		return arrIdent.Name, true
+	}
+	if !forTermination {
+		return "", false // strict path: only a bare array variable base
+	}
+	key, ok := normalizeFieldPathLValue(target.Object)
+	return key, ok
+}
+
+// normalizeFieldPathLValue returns a canonical key string for a stable field-path lvalue rooted at a
+// single `*ast.Ident` receiver through `*ast.FieldExpr` hops ONLY, and whether `expr` is exactly such
+// a path. It walks `obj.a.b…` down to the root identifier; ANYTHING ELSE in the chain — a call, an
+// index, an address-of, a cast, a parenthesized non-field, or a safe (`?.`) navigation that could be
+// null — declines (returns ok=false). The key is the dotted path joined by a separator that cannot
+// appear in an identifier, so two equal paths produce one key and unequal paths produce distinct keys.
+func normalizeFieldPathLValue(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil {
+			return "", false
+		}
+		return n.Name, true
+	case *ast.FieldExpr:
+		// A `?.` safe-navigation field is NOT a stable lvalue store base (the object may be null), so
+		// reject it; only an unconditional `.field` projection of a stable path is admissible.
+		if n == nil || n.Safe {
+			return "", false
+		}
+		base, ok := normalizeFieldPathLValue(n.Object)
+		if !ok {
+			return "", false
+		}
+		return base + "__field__" + n.Field, true
+	default:
+		return "", false
+	}
 }
 
 // exprIsPureArith reports whether expr is a side-effect-free integer arithmetic expression over

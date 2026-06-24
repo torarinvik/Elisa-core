@@ -1216,6 +1216,69 @@ func smtIntWidthSign(t Type) (signed bool, bits int, ok bool) {
 	return false, 0, false
 }
 
+// castOperandResolvedType returns the operand type of a cast, falling back — when the per-node
+// exprTypes entry is unset (a synthetic/cloned node from measure substitution) — to resolving a
+// field-read operand from its struct type or a bare-identifier operand from the scope. This mirrors
+// the array/scalar field-read fallbacks so a `field.usize()` cast in a cloned measure resolves the
+// same way its analyzed twin does.
+func (a *Analyzer) castOperandResolvedType(n *ast.CastExpr) Type {
+	if n == nil || n.Operand == nil {
+		return nil
+	}
+	if t := a.exprTypes[n.Operand]; t != nil {
+		return t
+	}
+	switch op := n.Operand.(type) {
+	case *ast.FieldExpr:
+		if t, ok := a.fieldReadResolvedType(op); ok {
+			return t
+		}
+	case *ast.Ident:
+		if a.currentScope != nil {
+			if sym, ok := a.currentScope.Lookup(op.Name); ok && sym != nil {
+				return sym.Type
+			}
+		}
+	case *ast.ParenExpr:
+		return a.castOperandResolvedType(&ast.CastExpr{Operand: op.Inner})
+	}
+	return nil
+}
+
+// postfixCastTargetWidthSign derives the destination integer width/sign of a value-form numeric
+// postfix cast (`x.usize()`, `x.u32()`) directly from its TARGET NAME, for cloned cast nodes whose
+// result type was never recorded. Only the postfix-shorthand origin with a plain integer target name
+// qualifies — exactly the family isPureNumericValueCast admits — so this never widens what counts as a
+// modelable cast; it only recovers the type the analyzer would have attached. Declines otherwise.
+func postfixCastTargetWidthSign(n *ast.CastExpr) (bool, int, bool) {
+	if !isPureNumericValueCast(n) {
+		return false, 0, false
+	}
+	named, ok := n.Target.(*ast.NamedType)
+	if !ok || named == nil {
+		return false, 0, false
+	}
+	switch named.Name {
+	case "i8", "s8":
+		return true, 8, true
+	case "i16", "s16":
+		return true, 16, true
+	case "i32", "s32":
+		return true, 32, true
+	case "i64", "s64", "isize", "int":
+		return true, 64, true
+	case "u8":
+		return false, 8, true
+	case "u16":
+		return false, 16, true
+	case "u32":
+		return false, 32, true
+	case "u64", "usize", "uintptr":
+		return false, 64, true
+	}
+	return false, 0, false
+}
+
 func smtNumericValueType(t Type) (Type, bool) {
 	t = stripRefForBounds(t)
 	if t == nil || !IsNumericType(t) || IsFloatType(t) {
@@ -1377,17 +1440,79 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// as a stable array symbol keyed by its syntactic path, so two reads of the same path share the
 		// symbol (and thus its `.count`/`.len`). This is what lets `ensure result <= r.data.count;
 		// return r.data.count` discharge — both sides resolve to the same length symbol.
-		if tr.isArrayLike(tr.a.exprTypes[n]) {
+		// Resolve the field's array type from exprTypes (set once analyzed) OR — when the node is
+		// synthetic/cloned (e.g. the loop-termination prover's measure[body], whose field reads were
+		// produced by substitution and never analyzed) — from the object's struct type, mirroring the
+		// Ident-case scope fallback above. Both readings resolve the SAME syntactic path to the SAME
+		// projection symbol, so a field-array length cancels between measure and measure[body].
+		ft := tr.a.exprTypes[n]
+		if ft == nil {
+			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+				ft = resolved
+			}
+		}
+		if tr.isArrayLike(ft) {
 			name := smtProjectionName(n)
 			tr.arrayDecls[name] = true
 			arr := smtVar(name)
-			tr.recordFixedArrayLen(arr, tr.a.exprTypes[n])
+			tr.recordFixedArrayLen(arr, ft)
 			return arr, true
 		}
 		return "", false
 	default:
 		return "", false
 	}
+}
+
+// arrayLenSymForAnyElem returns the SMT length symbol (`<base>_len`) for the `.count`/`.len` of an
+// array/darray-valued expression of ANY element type — including a darray of structs, which
+// arrayTermEnv (integer-element only) declines. It accepts a bare array identifier or a stable
+// struct-field path; the base key is the env-bound symbol or the syntactic projection name, so two
+// reads of the same path share one length symbol (the cancellation the decrease proof needs). The
+// type is read from exprTypes, falling back to the symbol's declared type (Ident) or the resolved
+// field type (FieldExpr) for synthetic/cloned nodes. Declines for anything not provably array-like.
+func (tr *smtTranslator) arrayLenSymForAnyElem(expr ast.Expr, env map[string]string) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return tr.arrayLenSymForAnyElem(n.Inner, env)
+	case *ast.Ident:
+		if env != nil {
+			if bound, ok := env[n.Name]; ok {
+				return bound + "_len", true
+			}
+		}
+		t := tr.a.exprTypes[n]
+		if t == nil && tr.a.currentScope != nil {
+			if sym, ok := tr.a.currentScope.Lookup(n.Name); ok && sym != nil {
+				t = sym.Type
+			}
+		}
+		if isAnyArrayLike(t) {
+			return smtVar(n.Name) + "_len", true
+		}
+	case *ast.FieldExpr:
+		t := tr.a.exprTypes[n]
+		if t == nil {
+			if resolved, ok := tr.a.fieldReadResolvedType(n); ok {
+				t = resolved
+			}
+		}
+		if isAnyArrayLike(t) {
+			return smtVar(smtProjectionName(n)) + "_len", true
+		}
+	}
+	return "", false
+}
+
+// isAnyArrayLike reports whether t is an array or darray of ANY element type (unlike
+// smtTranslator.isArrayLike, which restricts to integer elements for the element-select theory). A
+// length read needs only that the value is a sized container, so the element type is irrelevant.
+func isAnyArrayLike(t Type) bool {
+	switch stripRefForBounds(t).(type) {
+	case *ArrayType, *DArrayType:
+		return true
+	}
+	return false
 }
 
 func (tr *smtTranslator) recordFixedArrayLen(arr string, t Type) {
@@ -1725,7 +1850,20 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		if n.Field == "count" || n.Field == "len" {
 			arr, ok := tr.arrayTermEnv(n.Object, env)
 			if !ok {
-				return "", false
+				// `arrayTermEnv` models only INTEGER-element arrays (it lowers `arr[k]` to a `(select …)`),
+				// so a darray of STRUCTS (`self.dmem_areas: darray[PhysicalMemoryArea]`) declines there. But
+				// the LENGTH `.count`/`.len` is just a `usize` regardless of element type, and a measure /
+				// guard only needs that scalar — never the element theory. When the object is provably an
+				// array/darray of ANY element type, mint the length symbol keyed by the object's syntactic
+				// projection (the same key arrayTermEnv would use for an Ident/Field path), so it resolves
+				// to a CONSISTENT symbol between measure and measure[body]. This is what lets the emulator's
+				// struct-element field-shift loops (`decreases self.xs.count - j`) discharge.
+				lenSym, lok := tr.arrayLenSymForAnyElem(n.Object, env)
+				if !lok {
+					return "", false
+				}
+				tr.lenDecls[lenSym] = true
+				return lenSym, true
 			}
 			lenSym := arr + "_len"
 			if c, ok := tr.lenConsts[lenSym]; ok {
@@ -1770,8 +1908,16 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		// model, so the prover sees THROUGH the conversion and refinement bounds survive it
 		// (docs/85 gap #2). A narrowing or a sign change can wrap, so those are NOT identity
 		// and decline here (sound: a declined term only forgoes a proof).
-		ssign, sbits, sok := smtIntWidthSign(tr.a.exprTypes[n.Operand])
+		ssign, sbits, sok := smtIntWidthSign(tr.a.castOperandResolvedType(n))
 		dsign, dbits, dok := smtIntWidthSign(tr.a.exprTypes[n])
+		if !dok {
+			// The result type is unset for a synthetic/cloned cast node (e.g. the loop-termination
+			// prover's measure[body], whose `field.usize()` cast was produced by substitution and never
+			// analyzed). Resolve the destination width/sign from the postfix cast TARGET NAME — the same
+			// information the analyzer would have recorded — so a field-read cast in the measure cancels
+			// against its analyzed twin. Declines for any non-integer / compound target (sound).
+			dsign, dbits, dok = postfixCastTargetWidthSign(n)
+		}
 		if !sok || !dok {
 			return "", false
 		}
@@ -2705,6 +2851,19 @@ func (tr *smtTranslator) bitvectorCompare(n *ast.BinaryExpr, l, r string, env ma
 	}
 	signed, bits, ok := tr.compareWidthSign(n.Left, n.Right)
 	if !ok || signed || bits <= 0 || bits > 64 {
+		return "", false
+	}
+	// Both operands provably non-negative ⟹ their ℤ values lie in [0, 2^bits): the term lane wraps every
+	// machine `+`/`-`/`*` modulo 2^bits and asserts the [0,2^bits) range of each unsigned variable / length
+	// symbol, so a non-negative such term cannot exceed the width. Over that range the unsigned bitvector
+	// ordering is IDENTICAL to the clean ℤ ordering, so decline the `int2bv` encoding and let boolTerm emit
+	// the plain ℤ comparison. This is not just an optimization: the `(_ int2bv …)`/`bvult` mix forces a
+	// bitvector+int query that z3 IN INCREMENTAL MODE (push/pop, mbqi) can answer `unknown` on even when it
+	// is valid — which silently dropped the loop guard `j + 1 < self.xs.count` and blocked the field-shift
+	// termination proofs. SOUNDNESS: restricted to provably-non-negative operands, where ℤ `<` is exactly
+	// the unsigned `<`; a comparison that could observe wrap (operand not provably non-negative) keeps the
+	// exact bitvector model below.
+	if tr.a.provablyNonNeg(n.Left) && tr.a.provablyNonNeg(n.Right) {
 		return "", false
 	}
 	op := ""
@@ -3787,6 +3946,12 @@ func (tr *smtTranslator) factPreamble() string {
 	for _, sym := range lens {
 		b.WriteString("(declare-const " + sym + " Int)\n")
 		b.WriteString("(assert (>= " + sym + " 0))\n")
+		// A container length is a `usize`, so it is bounded above by 2^64 by construction. Asserting this
+		// (always-true) upper bound lets an UNSIGNED loop guard `i < arr.count` — lowered as a bitvector
+		// `bvult` over `(int2bv 64 …)` — bridge back to Int reasoning: without `arr.count < 2^64` the
+		// `int2bv` of an unbounded length could wrap, so z3 cannot conclude the Int relation the
+		// termination/preservation goal needs. Sound: it only ever asserts a fact the type guarantees.
+		b.WriteString("(assert (< " + sym + " 18446744073709551616))\n")
 	}
 	// Fresh under-constrained symbols (modulo/div with a not-provably-nonzero divisor). Emitted in
 	// mint order — deterministic because the counter is monotonic over a single translation.
