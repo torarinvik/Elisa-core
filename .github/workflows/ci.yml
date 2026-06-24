@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compiler:
+    name: compiler / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      # The backend has auto-split files with ~218-char names; without long paths
+      # Git cannot check them out on Windows (MAX_PATH).
+      - name: Enable git long paths (Windows)
+        if: runner.os == 'Windows'
+        run: git config --global core.longpaths true
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: compiler/go.sum
+
+      # ---- LLVM / clang per platform (matches the #cgo stanzas) ----
+      - name: Install LLVM 19 + clang (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm-19-dev clang-19
+          # Ubuntu folds the C API into libLLVM.so, but the #cgo stanza links -lLLVM-C
+          sudo ln -sf libLLVM.so /usr/lib/llvm-19/lib/libLLVM-C.so
+          # the test runner execs unversioned clang
+          sudo ln -sf /usr/bin/clang-19  /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-19 /usr/local/bin/clang++
+
+      - name: Install LLVM (macOS)
+        if: runner.os == 'macOS'
+        run: brew install llvm
+
+      - name: Install MinGW gcc + LLVM (Windows; MSYS2 preinstalled at C:\msys64)
+        if: runner.os == 'Windows'
+        run: |
+          C:/msys64/usr/bin/bash.exe -lc "pacman -Sy --noconfirm && pacman -S --noconfirm --needed mingw-w64-x86_64-gcc mingw-w64-x86_64-llvm"
+
+      # ---- z3 4.16 (pinned). Distro z3 (e.g. apt 4.8) is too old and returns
+      # WRONG verification results, so we fetch the official release on the
+      # platforms that run the test suite. ----
+      - name: Install z3 4.16 (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          python3 - <<'PY'
+          import urllib.request, json, zipfile, io, os, sys, platform
+          def get(u):
+              return urllib.request.urlopen(urllib.request.Request(u, headers={'User-Agent':'ci'})).read()
+          mach = platform.machine().lower()
+          def want(n):
+              n = n.lower()
+              if not n.endswith('.zip'):
+                  return False
+              if sys.platform.startswith('linux'):
+                  return 'x64-glibc' in n
+              if sys.platform == 'darwin':
+                  return 'osx' in n and (('arm64' in n) if mach == 'arm64' else ('x64' in n))
+              return False
+          rel = json.loads(get('https://api.github.com/repos/Z3Prover/z3/releases/tags/z3-4.16.0'))
+          asset = next(a for a in rel['assets'] if want(a['name']))
+          print('z3 asset:', asset['name'])
+          z = zipfile.ZipFile(io.BytesIO(get(asset['browser_download_url'])))
+          member = [m for m in z.namelist() if m.endswith('bin/z3')][0]
+          dest = os.path.join(os.getcwd(), 'z3bin')
+          os.makedirs(dest, exist_ok=True)
+          out = os.path.join(dest, 'z3')
+          open(out, 'wb').write(z.read(member))
+          os.chmod(out, 0o755)
+          with open(os.environ['GITHUB_PATH'], 'a') as f:
+              f.write(dest + '\n')
+          print('installed z3 ->', out)
+          PY
+
+      - name: Build + test (Linux / macOS)
+        if: runner.os != 'Windows'
+        run: |
+          z3 --version
+          cd compiler
+          go build -o /tmp/elisac ./src
+          make test
+
+      # Windows: the native-executable link path (test runner) is not fully wired
+      # yet, so we verify the compiler BUILDS and does real codegen (emits an
+      # x86-64 COFF object) rather than running the full suite.
+      - name: Build + codegen smoke (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:CGO_ENABLED = "1"
+          $env:CC  = "C:\msys64\mingw64\bin\gcc.exe"
+          $env:CXX = "C:\msys64\mingw64\bin\g++.exe"
+          $env:PATH = "C:\msys64\mingw64\bin;$env:PATH"   # libLLVM-22.dll at build + run time
+          Set-Location compiler
+          go build -o elisac.exe ./src
+          $src = "$env:RUNNER_TEMP\hello.elisa"
+          [IO.File]::WriteAllText($src, "def main() -> i32:`n    return 0`n")  # LF: parser rejects CRLF
+          ./elisac.exe -emit obj -o "$env:RUNNER_TEMP\hello.o" $src
+          if (-not (Test-Path "$env:RUNNER_TEMP\hello.o")) { throw "no object emitted" }
+          $len = (Get-Item "$env:RUNNER_TEMP\hello.o").Length
+          Write-Host "OK: native Windows elisac emitted a $len-byte object"

@@ -46,3 +46,6 @@ Code/test_programs/fluid_dynamics_sim.cpp
 compiler/dr_probe.lowered.elisa
 compiler/vr_probe.lowered.elisa
 /compiler/verification_findings
+
+# CI workflows live in a dot-dir; keep them tracked despite the .*/ rule above
+!.github/
