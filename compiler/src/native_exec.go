@@ -342,6 +342,11 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	if runtime.GOOS == "darwin" {
 		linkArgs = append(linkArgs, "-Wl,-undefined,dynamic_lookup")
 	}
+	if runtime.GOOS == "linux" {
+		// Elisa codegen emits objects with absolute (non-PIC) relocations; Ubuntu
+		// clang/ld default to -pie and reject them, so link as a non-PIE.
+		linkArgs = append(linkArgs, "-no-pie")
+	}
 	linkArgs = append(linkArgs, objectPath)
 	if runtimeObjectPath != "" {
 		linkArgs = append(linkArgs, runtimeObjectPath)

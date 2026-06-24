@@ -155,7 +155,9 @@ func elisacoreStringLiteral(value string) string {
 func testRunnerRuntimeShimSource() string {
 	return `#include <stddef.h>
 
+#if defined(__APPLE__)
 void *stderr = NULL;
+#endif
 
 void *elisacore_test_runner_stub_va_copy(void *args) __asm__("va_copy");
 void *elisacore_test_runner_stub_va_copy(void *args) {
