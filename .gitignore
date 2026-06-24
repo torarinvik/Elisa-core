@@ -45,3 +45,4 @@ Code/test_programs/fluid_dynamics_sim.cpp
 /shadPS4-kosmickrisp
 compiler/dr_probe.lowered.elisa
 compiler/vr_probe.lowered.elisa
+/compiler/verification_findings
