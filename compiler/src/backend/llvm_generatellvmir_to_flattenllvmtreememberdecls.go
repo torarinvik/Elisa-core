@@ -9,6 +9,8 @@ package backend
 #cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM-C -lLLVM
 #cgo linux CFLAGS: -I/usr/include -I/usr/lib/llvm-21/include -I/usr/lib/llvm-20/include -I/usr/lib/llvm-19/include -I/usr/lib/llvm-18/include -I/usr/lib/llvm-17/include -I/usr/lib/llvm-16/include -I/usr/lib/llvm-15/include
 #cgo linux LDFLAGS: -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM-C -lLLVM
+#cgo windows CFLAGS: -IC:/msys64/mingw64/include
+#cgo windows LDFLAGS: -LC:/msys64/mingw64/lib -lLLVM-22
 #include <stdlib.h>
 #include <llvm-c/Analysis.h>
 #include <llvm-c/Core.h>
