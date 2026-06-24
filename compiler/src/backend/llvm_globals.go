@@ -219,7 +219,7 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			}
 			values = append(values, elemValue)
 		}
-		return C.LLVMConstArray2(elemLLVMType, llvmValueSlicePtr(values), C.ulonglong(len(values))), nil
+		return C.LLVMConstArray2(elemLLVMType, llvmValueSlicePtr(values), C.uint64_t(len(values))), nil
 	case *ast.CastExpr:
 		if value, ok := g.evalConstExpr(expr); ok {
 			coercedType := expected
@@ -407,7 +407,7 @@ func (g *llvmGenerator) constZero(t semantic.Type) (C.LLVMValueRef, error) {
 
 func (g *llvmGenerator) constGlobalStringPtr(value string) (C.LLVMValueRef, error) {
 	bytes := append([]byte(value), 0)
-	arrayType := C.LLVMArrayType2(C.LLVMInt8TypeInContext(g.context), C.ulonglong(len(bytes)))
+	arrayType := C.LLVMArrayType2(C.LLVMInt8TypeInContext(g.context), C.uint64_t(len(bytes)))
 	data := C.CBytes(bytes)
 	defer C.free(data)
 	// `bytes` already includes the trailing NUL and `arrayType` is sized to len(bytes),

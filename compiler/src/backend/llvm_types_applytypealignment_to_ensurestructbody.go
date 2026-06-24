@@ -198,7 +198,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 			return nil, err
 		}
 		if tt.HasConstSize {
-			return C.LLVMArrayType2(elemType, C.ulonglong(tt.ConstSize)), nil
+			return C.LLVMArrayType2(elemType, C.uint64_t(tt.ConstSize)), nil
 		}
 		return nil, fmt.Errorf("array type %s is missing a compile-time constant size", tt.String())
 	case *semantic.DArrayType:

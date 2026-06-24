@@ -96,7 +96,7 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 			maxSlots = slots
 		}
 	}
-	payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
+	payloadType := C.LLVMArrayType2(wordType, C.uint64_t(maxSlots))
 	fields := []C.LLVMTypeRef{tagType, payloadType}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
@@ -149,7 +149,7 @@ func (g *llvmGenerator) ensurePackedEnumRowType(name string, enum *semantic.Enum
 		if err != nil {
 			return nil, err
 		}
-		payloadType := C.LLVMArrayType2(wordType, C.ulonglong(maxSlots))
+		payloadType := C.LLVMArrayType2(wordType, C.uint64_t(maxSlots))
 		fields = append(fields, payloadType)
 	}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
