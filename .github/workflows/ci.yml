@@ -60,35 +60,18 @@ jobs:
       - name: Install z3 4.16 (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
-          python3 - <<'PY'
-          import urllib.request, json, zipfile, io, os, sys, platform
-          def get(u):
-              return urllib.request.urlopen(urllib.request.Request(u, headers={'User-Agent':'ci'})).read()
-          mach = platform.machine().lower()
-          def want(n):
-              n = n.lower()
-              if not n.endswith('.zip'):
-                  return False
-              if sys.platform.startswith('linux'):
-                  return 'x64-glibc' in n
-              if sys.platform == 'darwin':
-                  return 'osx' in n and (('arm64' in n) if mach == 'arm64' else ('x64' in n))
-              return False
-          rel = json.loads(get('https://api.github.com/repos/Z3Prover/z3/releases/tags/z3-4.16.0'))
-          asset = next(a for a in rel['assets'] if want(a['name']))
-          print('z3 asset:', asset['name'])
-          z = zipfile.ZipFile(io.BytesIO(get(asset['browser_download_url'])))
-          member = [m for m in z.namelist() if m.endswith('bin/z3')][0]
-          dest = os.path.join(os.getcwd(), 'z3bin')
-          os.makedirs(dest, exist_ok=True)
-          out = os.path.join(dest, 'z3')
-          open(out, 'wb').write(z.read(member))
-          os.chmod(out, 0o755)
-          with open(os.environ['GITHUB_PATH'], 'a') as f:
-              f.write(dest + '\n')
-          print('installed z3 ->', out)
-          PY
-
+          set -e
+          case "${{ runner.os }}" in
+            Linux) Z=z3-4.16.0-x64-glibc-2.39.zip ;;
+            macOS) Z=z3-4.16.0-arm64-osx-15.7.3.zip ;;
+          esac
+          # curl (system certs) instead of python urllib, which fails SSL on macOS runners
+          curl -fsSL -o z3.zip "https://github.com/Z3Prover/z3/releases/download/z3-4.16.0/$Z"
+          unzip -q z3.zip
+          D="${Z%.zip}"
+          chmod +x "$D/bin/z3"
+          echo "$PWD/$D/bin" >> "$GITHUB_PATH"
+          "$D/bin/z3" --version
       - name: Build + test (Linux / macOS)
         if: runner.os != 'Windows'
         run: |
