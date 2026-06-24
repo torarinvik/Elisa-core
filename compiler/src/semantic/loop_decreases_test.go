@@ -159,3 +159,58 @@ def loop(n: i64):
 		t.Fatalf("expected unmodelable loop body to fall back to runtime, got %d: %+v", got, result.ProofReport)
 	}
 }
+
+// Under strict proofs (-Wstrict / the verification-target default), an unmodelable `decreases`
+// loop body escalates the advisory proofLint to a hard error: a bare loop with no `can` must
+// still be flagged. This is the negative case the scoped escape hatch is contrasted against.
+func TestLoopDecreasesUnmodelableBodyStrictErrors(t *testing.T) {
+	src := `def sink(x: i64):
+    return
+
+def loop(n: i64):
+    requires n >= 0
+    i: mutable i64 = n
+    while i > 0:
+        decreases i
+        sink(i)
+        i <- i - 1
+`
+	result := analyzeContractStrict(t, "unmodelable_loop_strict.elisa", src)
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "could not be proven") {
+		t.Fatalf("a bare unmodelable `decreases` loop must error under strict proofs, got: %v", result.Errors())
+	}
+}
+
+// A scoped, auditable `can Unsafe.AssumeProgress:` wrapping the loop discharges the unprovable
+// `decreases` termination lint even under strict proofs (the author asserts progress this analyzer
+// cannot model), AND — unlike `trusted` — surfaces Unsafe.AssumeProgress in the function's effect
+// signature so the assumption stays auditable and propagates to callers.
+func TestLoopDecreasesAssumeProgressDischargesAndPropagates(t *testing.T) {
+	src := `def sink(x: i64):
+    return
+
+def loop(n: i64) -> void:
+    requires n >= 0
+    i: mutable i64 = n
+    can Unsafe.AssumeProgress:
+        while i > 0:
+            decreases i
+            sink(i)
+            i <- i - 1
+`
+	result := analyzeContractStrict(t, "assume_progress_loop.elisa", src)
+	if strings.Contains(strings.Join(result.Errors(), "\n"), "could not be proven") {
+		t.Fatalf("`can Unsafe.AssumeProgress` must discharge the unprovable loop termination lint, got: %v", result.Errors())
+	}
+	sym, ok := result.GlobalScope.Lookup("loop")
+	if !ok {
+		t.Fatal("expected loop symbol")
+	}
+	fnType, ok := sym.Type.(*FuncType)
+	if !ok {
+		t.Fatalf("expected loop function type, got %T", sym.Type)
+	}
+	if !strings.Contains(PermissionRefsString(fnType.PermissionRefs), "Unsafe.AssumeProgress") {
+		t.Fatalf("expected `can` to PROPAGATE Unsafe.AssumeProgress to the signature, got %q", PermissionRefsString(fnType.PermissionRefs))
+	}
+}

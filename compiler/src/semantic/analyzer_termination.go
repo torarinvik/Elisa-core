@@ -260,6 +260,15 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	if len(decs) == 0 {
 		return
 	}
+	// A tracked `can Unsafe.AssumeProgress` / `can Unsafe.NonProgress` (or their `trusted`
+	// firewall equivalents) in scope discharges the loop's termination obligation just like it
+	// discharges the progress-safety obligation: the author asserts the measure makes progress
+	// (or the non-termination is intentional) where this analyzer cannot prove it. The proof is
+	// still type-checked below for an integer measure, but the unprovable-measure proofLint is
+	// suppressed and the proof is recorded as ProofRuntime (auditable: the `can` surfaces
+	// Unsafe.AssumeProgress/NonProgress in the function's effect signature — see analyzeCanStmt).
+	terminationAssumed := a.currentGrantedAssumeProgressDepth > 0 || a.currentTrustedAssumeProgressDepth > 0 ||
+		a.currentGrantedNonProgressDepth > 0 || a.currentTrustedNonProgressDepth > 0
 	measures := make([]ast.Expr, 0, len(decs))
 	for _, d := range decs {
 		measures = append(measures, decreaseMeasureComponents([]ast.Expr{d.Cond})...)
@@ -273,7 +282,9 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	subst, _, captured := a.captureLoopBodyEffect(stmt.Body)
 	if !captured {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
-		a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow); falling back to the runtime loop-progress check")
+		if !terminationAssumed {
+			a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow); falling back to the runtime loop-progress check")
+		}
 		return
 	}
 	invs := leadingInvariants(stmt.Body)
@@ -282,6 +293,9 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 		return
 	}
 	a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
+	if terminationAssumed {
+		return
+	}
 	witness := a.loopLexicographicDecreaseDiagnostic(stmt.Cond, invs, measures, subst)
 	if witness != "" {
 		witness = " — " + witness
