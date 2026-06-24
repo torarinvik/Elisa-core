@@ -323,6 +323,20 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	}
 	subst, captured := a.captureLoopBodyEffectForTermination(stmt.Body)
 	if !captured {
+		// The body is not straight-line (it contains `if`/`break`/`return`, etc.). Attempt GUARD-`if`
+		// path modeling: enumerate the body's mutually-exclusive paths and require the measure to
+		// strictly decrease (and stay >= 0) on EVERY non-exiting path. ALL paths must discharge — a
+		// single non-decreasing non-exit path (including the implicit no-op `else`) rejects the loop.
+		if paths, ok := a.enumerateLoopBodyPaths(stmt.Body); ok {
+			for _, p := range paths {
+				a.typeLoopSubstCastsForSMT(p.subst)
+			}
+			invs := leadingInvariants(stmt.Body)
+			if a.proveLoopMeasureDecreasesAllPaths(stmt.Cond, invs, measures, paths) {
+				a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
+				return
+			}
+		}
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofRuntime)
 		if !terminationAssumed {
 			a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven: the body has effects this analyzer cannot model (calls, non-arithmetic writes, or control flow); falling back to the runtime loop-progress check")

@@ -129,20 +129,23 @@ func TestLoopDecreasesFieldArrayDoubleStoreStrictErrors(t *testing.T) {
 	}
 }
 
-// NEGATIVE / SOUNDNESS: a CONDITIONAL progress step inside the field-shift loop (`if c: j <- j + 1`)
-// must NOT prove — the extension never models `if` branches, so a guarded body stays unmodelable.
+// NEGATIVE / SOUNDNESS: a CONDITIONAL progress step inside the field-shift loop whose guard is NOT
+// implied by the loop condition leaves the implicit no-op `else` FEASIBLE — on that path the measure
+// does not decrease, so guard-`if` path modeling must REJECT the loop (it may spin forever when the
+// guard is false). The guard here (`j + 2 < self.xs.count`) can be false while the loop condition
+// (`j + 1 < self.xs.count`) still holds, so the no-op fall-through is a real non-decreasing path.
 func TestLoopDecreasesFieldConditionalProgressStrictErrors(t *testing.T) {
 	src := fieldShiftStructPreamble + `def cond(self: mutable Buf&):
     j: mutable usize = 0
     while j + 1 < self.xs.count:
         decreases self.xs.count - (j + 1)
         self.xs[j] <- self.xs[j + 1]
-        if j + 1 < self.xs.count:
+        if j + 2 < self.xs.count:
             j <- j + 1
 `
 	result := analyzeContractStrict(t, "field_conditional.elisa", src)
 	if !strings.Contains(strings.Join(result.Errors(), "\n"), "could not be proven") {
-		t.Fatalf("a conditional progress step in a field-shift loop must stay unmodelable under strict, got: %v", result.Errors())
+		t.Fatalf("a conditional progress step whose guard is weaker than the loop condition must stay unprovable under strict (the no-op else is feasible), got: %v", result.Errors())
 	}
 }
 
