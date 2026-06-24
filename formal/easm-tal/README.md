@@ -16,7 +16,10 @@ The Go verifier is authoritative; the Coq model is faithful to it, not the rever
 
 | Coq (`EasmTAL.v`) | Go verifier |
 |---|---|
-| `absstate` record: `aregs : reg -> bool` + `aflags : bool` | `machineFactState.LiveRegs` (`compiler/src/easm/easm.go`), a finite map register→Defined, plus a flags-defined slot tracking `opRules.ClobbersFlags` |
+| `absstate` record: `aregs : reg -> bool` + `aflags : bool` + `amsize : nat` | `machineFactState.LiveRegs` (`compiler/src/easm/easm.go`), a finite map register→Defined, plus a flags-defined slot tracking `opRules.ClobbersFlags`, plus a guest-carrier known-minimum-size fact (the `SizeGuardFact` lower bound, `easm_guest_overlay.go`) |
+| `Iread d off w` typing: `off + w <= amsize g` | `easm.CheckGuestOverlaySizeGuard` (`easm_guest_overlay.go`): a `requires size >= N` field read is discharged iff a dominating `SizeGuardFact` proves `size >= N`; else `overlay-field-needs-size-guard` |
+| `Iguard n` / `arefine_size g n` (refine `amsize` to `max(amsize, N)`) | a dominating `if base.size[mem] >= N:` / early-return `if base.size[mem] < N: return` guard pushing a `SizeGuardFact{AtLeast: N}` (`applyOverlaySizeGuardForCondition` / `applyOverlayFallthroughGuard`) |
+| `ameet` `amsize` = `Nat.min` | the conservative join: a size lower bound survives a merge only as strong as the weaker incoming edge |
 | ALU ops define the flags slot (`adefine_cc`); `mov` preserves it (`adefine`) | `opRule.ClobbersFlags` (`easm_oprules.go`) / `instructionClobbersFlags` (`easm.go:3013`): add/sub/and/xor/inc/dec set it, mov does not |
 | `adefine g d` (write defines dst) | `state.LiveRegs[canonical] = true` — *"instruction writes a defined result here"* (`easm.go:1278`) |
 | `op_ok g (OReg r) = g r` must hold to read | the `register-read-uninitialized` check (`easm.go:1212–1215`): a read register must be in `LiveRegs` (or preserved) |
@@ -45,7 +48,18 @@ relation's flags slot (`coqState.flags`, defined by ALU ops, preserved by mov) a
 flags invariant on every body; flags definedness is *not* cross-checked against the verifier because
 `machineFactState` exposes no flags-defined fact (it separately enforces only that flag-clobbering
 ops list `cc`, the `cc-clobber-missing` check) and the modeled subset has no flag-reading op — so
-there is no observable verifier state to compare against (documented in the test header). (The
+there is no observable verifier state to compare against (documented in the test header).
+
+A companion test, `compiler/src/easm/easm_coq_memstate_fidelity_test.go`, cross-checks the docs/107
+**guest-read** layer against its Go authority. The guest read is not part of the instruction walk the
+first fuzzer drives — it is a separate accessor checker (`easm.CheckGuestOverlaySizeGuard`) — so this
+test mirrors the Coq read rule directly: a set of dominating `SizeGuardFact`s induces the Coq known
+minimum `amsize = max_i K_i`, and the `T_read` premise `off+w <= amsize` holds **iff** the Go checker
+emits no `overlay-field-needs-size-guard`. It fuzzes 8000 fact-set/requirement pairs over that iff,
+and 4000 more pinning the `Nat.min` merge join (a post-merge read is backed only by the weaker edge).
+So the mechanized read rule and the real Go discharge stay in lockstep too.
+
+(The
 self-zeroing idiom `xorq/subq %r,%r`,
 which the verifier defines without reading the dst — a value-tracking optimization outside the
 definite-init RMW rule — is excluded from the fuzzer so the correspondence stays exact.)
@@ -71,6 +85,17 @@ definite-init RMW rule — is excluded from the fuzzer so the correspondence sta
   continuation reads (Defined in the meet) is established on **every** incoming edge; `ameet_glb`
   shows the meet loses no information soundness would let it keep. Mechanizes the soundness of the
   `merge-state-unsound` check (`compiler/src/easm/easm_oprules.go`).
+- **Guest-memory state / guest-read safety** (`read_in_bounds`, `read_never_stuck`,
+  `unguarded_read_rejected`) — the docs/107 typed guest-memory overlay. `amsize` is the carrier's
+  known-MINIMUM runtime size; a guest field read `Iread d off w` is well-typed only when its byte
+  span `[off, off+w)` is covered (`off+w <= amsize`), strengthened by a size guard `Iguard n`
+  (`arefine_size`, `amsize := max(amsize, N)`). `read_in_bounds` proves a typed read never over-reads
+  (`off+w <= rsize`); `unguarded_read_rejected` proves an unguarded read (`amsize < off+w`) has NO
+  typing rule — the formal analogue of `easm.CheckGuestOverlaySizeGuard` discharging /rejecting a
+  `requires size >= N` obligation. The merge join takes `Nat.min` of the two known minimums
+  (`ameet_msize_lb_l/r`, `ameet_msize_glb`), the conservative size join. `seq_safety`/`no_stuck`
+  carry a `guards_backed` hypothesis (every guard's branch is the runtime-taken one); `rsize` is
+  step-invariant (`step_preserves_rsize`).
 
 ## How to check the proofs
 
@@ -105,6 +130,11 @@ needed); Rocq ≥ 9.0 is the supported toolchain. The proofs use only standard, 
   `mov_preserves_flags` pin the abstract behavior; `preservation` shows it is
   sound w.r.t. the concrete machine's physical flags; the meet (`ameet`)
   extends pointwise to the flags slot (`ameet_flags_lb_l/r`, `ameet_flags_glb`).
+- **Guest-memory state + guest-read safety** (docs/107) as a lattice slot (`amsize`, the carrier's
+  known-minimum runtime size): a guest field read (`Iread`) is well-typed only when its byte span is
+  covered by a guard-established minimum (`Iguard`/`arefine_size`). `read_in_bounds` /
+  `unguarded_read_rejected` are the formal image of `easm.CheckGuestOverlaySizeGuard`; the meet takes
+  `Nat.min` (`ameet_msize_lb_l/r`, `ameet_msize_glb`).
 - mov(reg/imm), add, sub, and, xor (two-operand), inc, dec (one-operand RMW) — the
   q-suffix GPR/ALU subset.
 - Operand = register | immediate.
