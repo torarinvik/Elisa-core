@@ -32,10 +32,16 @@ jobs:
           go-version-file: compiler/go.mod
           cache-dependency-path: compiler/go.sum
 
-      - name: Install LLVM toolchain
+      - name: Install LLVM 19 toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang llvm-dev libllvm-dev
+          sudo apt-get install -y llvm-19-dev clang-19
+          # Ubuntu folds the C API into libLLVM.so, but the #cgo stanza links -lLLVM-C
+          sudo ln -sf libLLVM.so /usr/lib/llvm-19/lib/libLLVM-C.so
+          # the gate scripts exec unversioned clang / llvm-config
+          sudo ln -sf /usr/bin/clang-19       /usr/local/bin/clang
+          sudo ln -sf /usr/bin/clang++-19     /usr/local/bin/clang++
+          sudo ln -sf /usr/bin/llvm-config-19 /usr/local/bin/llvm-config
 
       - name: Show toolchain versions
         run: |
