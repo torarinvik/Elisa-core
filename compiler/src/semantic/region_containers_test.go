@@ -163,6 +163,73 @@ def build() -> darray[i64]:
 	}
 }
 
+// USE-SITE LIVENESS: a struct local constructed inside a `region r(N):` scope whose region has
+// already EXITED at the point of a field-growing call must NOT thread the dead region. The
+// declaration-time record is pinned to `r`, but `r` is no longer live at the call → threading is
+// suppressed and the call conservatively re-rejects with "cannot infer region parameter" rather
+// than binding a dead region (use-after-free). This is distinct from reassignment (handled
+// separately): here the local is never reassigned, only used after its region's scope exits.
+func TestRegionStructLocalDeadRegionNotThreaded(t *testing.T) {
+	// (a) destroy the region, then use the local: dead region, must reject.
+	destroyed := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_destroy.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region r(4096):
+            bag: mutable Bag = Bag([])
+            destroy r
+            bag_push(bag, 1)
+            return bag.items.count.i64()
+    return 0
+`)
+	if all := strings.Join(destroyed.Errors(), "\n"); !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("using a struct local after its region was destroyed must not thread the dead region; got: %s", all)
+	}
+
+	// (b) construct inside the region scope, then call AFTER the block exits: dead region, must reject.
+	exited := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_scopeexit.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+global mutable g: Bag = zeroed
+
+def build() -> void:
+    can Memory.Allocate, Abort.Panic:
+        region r(4096):
+            bag: mutable Bag = Bag([])
+            g <- bag
+    bag_push(g, 1)
+`)
+	if all := strings.Join(exited.Errors(), "\n"); !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("using a struct local after its region scope exited must not thread the dead region; got: %s", all)
+	}
+
+	// (c) in-scope use within the live region still threads (happy path preserved).
+	live := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_live.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region r(4096):
+            bag: mutable Bag = Bag([])
+            bag_push(bag, 1)
+            return bag.items.count.i64()
+    return 0
+`)
+	if all := strings.Join(live.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("in-scope use within a live region must still thread; got: %s", all)
+	}
+}
+
 // dict containers carry their region and are escape-checked too.
 func TestRegionDictReturnEscapeChecking(t *testing.T) {
 	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_dict_escape.elisa", `def leak_dict() -> dict[i64, i64]:

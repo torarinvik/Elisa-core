@@ -1,6 +1,10 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"strings"
+
+	"elisacore/src/ast"
+)
 
 // Locally-constructed structs that own region-allocated container fields need a region
 // identity so a call site can thread that region into a callee's struct-ref region param
@@ -144,6 +148,34 @@ func (a *Analyzer) structLocalArgRegion(arg ast.Expr) string {
 	return a.currentStructLocalAllocRegion[sym]
 }
 
+// structLocalRegionIsLive reports whether a recorded struct-local alloc-region is still LIVE (in
+// scope and not destroyed) at the current program point. This is the use-site liveness gate that
+// closes the use-after-scope-exit hole: a named `region r(N):` is live only within its block, so
+// after the block (the region symbol leaves currentScope) or after `destroy r` (regionState marked
+// Destroyed) the recorded region is DEAD and must not be threaded into a callee.
+//
+// Synthesized regions are always live for the whole function body and never appear in
+// currentRegions/currentScope as region owners: the inferred auto-region (`__auto_*`, opened by
+// maybeWrapFunctionBodyInAutoRegion for the function body) and the program-lifetime `perm` arena.
+// Those remain threadable.
+func (a *Analyzer) structLocalRegionIsLive(region string) bool {
+	if region == "" {
+		return false
+	}
+	// Function-scoped / program-lifetime synthesized regions: always live.
+	if region == "perm" || strings.HasPrefix(region, "__auto_") {
+		return true
+	}
+	// Named region: live iff still a region owner in scope and not destroyed. Once the
+	// `region r:` block exits, the symbol is no longer in currentScope (lookup fails);
+	// `destroy r` sets Destroyed.
+	sym, state := a.lookupRegionState(region)
+	if sym == nil {
+		return false
+	}
+	return !state.Destroyed
+}
+
 // attachStructLocalArgRegion stamps the recorded struct-local region onto a region-less struct-ref
 // argument type so the call's region-param binding (collectRegionBinding via the RefType arm) can
 // thread it into the callee. Returns argType unchanged unless the parameter is a region-param
@@ -162,6 +194,14 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 	}
 	region := a.structLocalArgRegion(arg)
 	if region == "" {
+		return argType
+	}
+	// USE-SITE LIVENESS GATE: only thread a region that is still live at the call. A recorded
+	// named region whose `region r:` scope has already exited (or been `destroy`ed) is DEAD;
+	// threading it would bind a dead region to the callee's region param → use-after-free.
+	// Falling through (return argType unchanged) makes the binding fail → conservative
+	// "cannot infer region parameter" rejection. This only REMOVES threadings, never adds — sound.
+	if !a.structLocalRegionIsLive(region) {
 		return argType
 	}
 	// The argument is a struct VALUE (auto-ref'd at the call) or already a region-less struct ref.
