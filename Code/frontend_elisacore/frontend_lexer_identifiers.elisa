@@ -1,91 +1,53 @@
-@inline(always)
-def frontend_lookup_keyword_bucket(entries: FrontendKeywordEntry&, count: usize, text: sview) -> FrontendTokenKind:
-    for i in 0..<count:
-        entry: FrontendKeywordEntry = entries[i]
-        if frontend_sv_eq_literal(text, entry.text):
-            return entry.kind
-    return FrontendTokenKind.Ident
-@inline(always)
-def frontend_lookup_keyword(text: sview) -> FrontendTokenKind:
-    if text.len == 2:
-        entries: FrontendKeywordEntry[5] = [
-            FrontendKeywordEntry("as", FrontendTokenKind.As),
-            FrontendKeywordEntry("if", FrontendTokenKind.If),
-            FrontendKeywordEntry("in", FrontendTokenKind.In),
-            FrontendKeywordEntry("or", FrontendTokenKind.Or),
-            FrontendKeywordEntry("to", FrontendTokenKind.To)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 5, text)
-
-    if text.len == 3:
-        entries: FrontendKeywordEntry[4] = [
-            FrontendKeywordEntry("and", FrontendTokenKind.And),
-            FrontendKeywordEntry("def", FrontendTokenKind.Def),
-            FrontendKeywordEntry("not", FrontendTokenKind.Not),
-            FrontendKeywordEntry("try", FrontendTokenKind.Try)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 4, text)
-
-    if text.len == 4:
-        entries: FrontendKeywordEntry[10] = [
-            FrontendKeywordEntry("elif", FrontendTokenKind.Elif),
-            FrontendKeywordEntry("else", FrontendTokenKind.Else),
-            FrontendKeywordEntry("enum", FrontendTokenKind.Enum),
-            FrontendKeywordEntry("heap", FrontendTokenKind.Heap),
-            FrontendKeywordEntry("null", FrontendTokenKind.Null),
-            FrontendKeywordEntry("pass", FrontendTokenKind.Pass),
-            FrontendKeywordEntry("repr", FrontendTokenKind.Repr),
-            FrontendKeywordEntry("tail", FrontendTokenKind.Tail),
-            FrontendKeywordEntry("true", FrontendTokenKind.True),
-            FrontendKeywordEntry("with", FrontendTokenKind.With)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 10, text)
-
-    if text.len == 5:
-        entries: FrontendKeywordEntry[10] = [
-            FrontendKeywordEntry("break", FrontendTokenKind.Break),
-            FrontendKeywordEntry("catch", FrontendTokenKind.Catch),
-            FrontendKeywordEntry("const", FrontendTokenKind.Const),
-            FrontendKeywordEntry("error", FrontendTokenKind.Error),
-            FrontendKeywordEntry("false", FrontendTokenKind.False),
-            FrontendKeywordEntry("match", FrontendTokenKind.Match),
-            FrontendKeywordEntry("panic", FrontendTokenKind.Panic),
-            FrontendKeywordEntry("raise", FrontendTokenKind.Raise),
-            FrontendKeywordEntry("stack", FrontendTokenKind.Stack),
-            FrontendKeywordEntry("while", FrontendTokenKind.While)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 10, text)
-
-    if text.len == 6:
-        entries: FrontendKeywordEntry[9] = [
-            FrontendKeywordEntry("export", FrontendTokenKind.Export),
-            FrontendKeywordEntry("extern", FrontendTokenKind.Extern),
-            FrontendKeywordEntry("global", FrontendTokenKind.Global),
-            FrontendKeywordEntry("packed", FrontendTokenKind.Packed),
-            FrontendKeywordEntry("return", FrontendTokenKind.Return),
-            FrontendKeywordEntry("sizeof", FrontendTokenKind.Sizeof),
-            FrontendKeywordEntry("static", FrontendTokenKind.Static),
-            FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
-            FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 9, text)
-
-    if text.len == 7:
-        entries: FrontendKeywordEntry[3] = [
-            FrontendKeywordEntry("alignof", FrontendTokenKind.Alignof),
-            FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
-            FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 3, text)
-
-    if text.len == 8:
-        entries: FrontendKeywordEntry[2] = [
-            FrontendKeywordEntry("continue", FrontendTokenKind.Continue),
-            FrontendKeywordEntry("offsetof", FrontendTokenKind.Offsetof)
-        ]
-        return frontend_lookup_keyword_bucket((&entries[0]).cast[FrontendKeywordEntry&], 2, text)
-
-    return FrontendTokenKind.Ident
-@inline(always)
-def frontend_maybe_keyword_first_char(ch: i64) -> bool:
-    return ch in {97, 98, 99, 100, 101, 102, 103, 104, 105, 109, 110, 111, 112, 114, 115, 116, 119, 122}
+# Keyword classification for the self-hosted lexer.
+#
+# This `keywordmap` is the single source of which identifiers are keywords; it
+# MUST stay in lockstep with the stage0 Go keyword table (compiler/src/lexer/
+# token.go `keywords`). The frontend-lexer parity harness checksums token kinds
+# against stage0, so any added/removed/renamed entry here is caught immediately.
+#
+# `aligned` is intentionally absent: its enum slot is reserved but it must remain
+# a usable identifier (see token.go:44).
+keywordmap frontend_lookup_keyword: sview -> FrontendTokenKind:
+    "as" => FrontendTokenKind.As
+    "if" => FrontendTokenKind.If
+    "in" => FrontendTokenKind.In
+    "or" => FrontendTokenKind.Or
+    "to" => FrontendTokenKind.To
+    "and" => FrontendTokenKind.And
+    "def" => FrontendTokenKind.Def
+    "not" => FrontendTokenKind.Not
+    "try" => FrontendTokenKind.Try
+    "elif" => FrontendTokenKind.Elif
+    "else" => FrontendTokenKind.Else
+    "enum" => FrontendTokenKind.Enum
+    "heap" => FrontendTokenKind.Heap
+    "null" => FrontendTokenKind.Null
+    "pass" => FrontendTokenKind.Pass
+    "repr" => FrontendTokenKind.Repr
+    "tail" => FrontendTokenKind.Tail
+    "true" => FrontendTokenKind.True
+    "with" => FrontendTokenKind.With
+    "break" => FrontendTokenKind.Break
+    "catch" => FrontendTokenKind.Catch
+    "const" => FrontendTokenKind.Const
+    "error" => FrontendTokenKind.Error
+    "false" => FrontendTokenKind.False
+    "match" => FrontendTokenKind.Match
+    "panic" => FrontendTokenKind.Panic
+    "raise" => FrontendTokenKind.Raise
+    "stack" => FrontendTokenKind.Stack
+    "while" => FrontendTokenKind.While
+    "export" => FrontendTokenKind.Export
+    "extern" => FrontendTokenKind.Extern
+    "global" => FrontendTokenKind.Global
+    "packed" => FrontendTokenKind.Packed
+    "return" => FrontendTokenKind.Return
+    "sizeof" => FrontendTokenKind.Sizeof
+    "static" => FrontendTokenKind.Static
+    "struct" => FrontendTokenKind.Struct
+    "zeroed" => FrontendTokenKind.Zeroed
+    "alignof" => FrontendTokenKind.Alignof
+    "mutable" => FrontendTokenKind.Mutable
+    "continue" => FrontendTokenKind.Continue
+    "offsetof" => FrontendTokenKind.Offsetof
+    _ => FrontendTokenKind.Ident

@@ -13,11 +13,13 @@ import (
 	golexer "elisacore/src/lexer"
 )
 
-const frontendLexerHashOffset uint64 = 1469598103934665603
-const frontendLexerHashPrime uint64 = 1099511628211
+// Checksum constants/algorithm are defined once in emit_tokens.go (the `-emit
+// tokens` oracle) and reused here so the parity test and the oracle can never
+// drift apart.
+const frontendLexerHashOffset = frontendTokenHashOffset
 
 func frontendLexerChecksumMix(hash uint64, value uint64) uint64 {
-	return (hash ^ value) * frontendLexerHashPrime
+	return frontendTokenChecksumMix(hash, value)
 }
 
 func frontendLexerChecksumView(hash uint64, text string) uint64 {
@@ -29,13 +31,12 @@ func frontendLexerChecksumView(hash uint64, text string) uint64 {
 }
 
 func frontendLexerGoChecksum(sourcePath string, raw []byte) uint64 {
-	l := golexer.New(sourcePath, raw)
-	tokens := l.Tokenize()
-	hash := frontendLexerChecksumMix(frontendLexerHashOffset, uint64(len(tokens)))
-	for _, tok := range tokens {
-		hash = frontendLexerChecksumMix(hash, uint64(tok.Kind)+1)
+	tokens := golexer.New(sourcePath, raw).Tokenize()
+	kinds := make([]golexer.TokenKind, len(tokens))
+	for i, tok := range tokens {
+		kinds[i] = tok.Kind
 	}
-	return hash
+	return frontendTokenKindChecksum(kinds)
 }
 
 func buildFrontendLexerChecksumHarness(t *testing.T) string {

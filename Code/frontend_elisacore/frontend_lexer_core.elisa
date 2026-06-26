@@ -153,9 +153,6 @@ def frontend_try_read_type_suffix(lexer: mutable FrontendLexer&) -> sview:
     lexer.pos <- probe
     lexer.col <- lexer.col + (probe - start).i64()
     return suffix
-struct FrontendKeywordEntry:
-    text: mutable static u8&
-    kind: mutable FrontendTokenKind
 def frontend_read_ident(lexer: mutable FrontendLexer&) -> FrontendToken:
     pos: FrontendPos = frontend_cur_pos(lexer)
     start: usize = lexer.pos
@@ -168,14 +165,5 @@ def frontend_read_ident_kind(lexer: mutable FrontendLexer&) -> FrontendTokenKind
     start: usize = lexer.pos
     while not frontend_is_eof(lexer) and frontend_is_ident_char(frontend_cur_char(lexer)):
         _ = frontend_advance_char(lexer)
-
-    length: usize = lexer.pos - start
-    if length < 2 or length > 7:
-        return FrontendTokenKind.Ident
-
-    first: i64 = lexer.source[start].i64()
-    if not frontend_maybe_keyword_first_char(first):
-        return FrontendTokenKind.Ident
-
     text: sview = frontend_make_lexer_view(lexer, start, lexer.pos)
     return frontend_lookup_keyword(text)

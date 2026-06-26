@@ -32,6 +32,7 @@ Elisa-core CLI parsing.
 - `bc`
 - `obj`
 - `c-archive`
+- `tokens`
 
 ## Accepted normalization aliases
 
@@ -61,6 +62,7 @@ Examples of accepted aliases that normalize to canonical modes:
 - `bitcode` -> `bc`
 - `object` -> `obj`
 - `carchive`, `archive`, `static-archive`, `staticlib`, `static-lib` -> `c-archive`
+- `token`, `token-kinds`, `lex` -> `tokens`
 
 ## Filter support
 
@@ -95,7 +97,15 @@ go run ./src -emit semantic path/to/file.elisa
 go run ./src -emit sema path/to/file.elisa
 go run ./src -emit fact-trace -filter "kind=eq:widen" path/to/file.elisa
 go run ./src -emit runner -filter beta path/to/file.elisa
+go run ./src -emit tokens path/to/file.elisa
 ```
+
+`tokens` runs the (Go) lexer over the include-expanded program source and prints
+JSON `{file, count, checksum, kinds[]}`, where `checksum` is the canonical
+token-kind FNV checksum. It is the **parity oracle** for the self-hosted stage1
+(Elisa) lexer: the stage1 lexer must reproduce the same checksum, and the
+`kinds[]` ordinals pinpoint the first divergent token when it does not. `-o` is
+not supported.
 
 For HTTP server behavior behind `-emit serve`, see
 [37-compile-server-api-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/37-compile-server-api-surface.md).

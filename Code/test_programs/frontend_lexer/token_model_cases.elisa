@@ -282,6 +282,12 @@ def frontend_tokenize_test_source(a: mutable Arena&, source: u8&) -> darray[Fron
     return tokens
 
 
+# Test-only (text, expected-kind) pair used to table-drive the keyword self-test
+# below. The lexer itself no longer needs this struct: keyword classification is
+# the `keywordmap frontend_lookup_keyword` in frontend_lexer_identifiers.elisa.
+struct FrontendKeywordEntry:
+    text: mutable static u8&
+    kind: mutable FrontendTokenKind
 def frontend_expect_lookup_keyword(text: static u8&, expected: FrontendTokenKind) -> bool:
     text_ptr: u8& = text.cast[u8&]
     return frontend_kind_eq(frontend_lookup_keyword(sview(text_ptr, 0, runtime_strlen(text_ptr).i64())), expected)

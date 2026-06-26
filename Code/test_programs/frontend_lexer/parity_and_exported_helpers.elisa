@@ -198,7 +198,7 @@ def frontend_case_lookup_keyword_table() -> bool:
         FrontendKeywordEntry("static", FrontendTokenKind.Static),
         FrontendKeywordEntry("struct", FrontendTokenKind.Struct),
         FrontendKeywordEntry("zeroed", FrontendTokenKind.Zeroed),
-        FrontendKeywordEntry("aligned", FrontendTokenKind.Aligned),
+        FrontendKeywordEntry("aligned", FrontendTokenKind.Ident),
         FrontendKeywordEntry("context", FrontendTokenKind.Ident),
         FrontendKeywordEntry("mutable", FrontendTokenKind.Mutable),
         FrontendKeywordEntry("region", FrontendTokenKind.Ident),

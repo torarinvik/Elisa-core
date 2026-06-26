@@ -202,6 +202,7 @@ const (
 	emitBitcode    = "bc"
 	emitObject     = "obj"
 	emitCArchive   = "c-archive"
+	emitTokens     = "tokens"
 )
 
 type cliOptions struct {
@@ -565,7 +566,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	return options, nil
 }
 func printUsage(w io.Writer) {
-	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive}
+	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive, emitTokens}
 	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
@@ -652,6 +653,8 @@ func normalizeEmitMode(value string) string {
 		return emitObject
 	case emitCArchive, "carchive", "archive", "static-archive", "staticlib", "static-lib":
 		return emitCArchive
+	case emitTokens, "token", "token-kinds", "lex":
+		return emitTokens
 	default:
 		return strings.TrimSpace(value)
 	}

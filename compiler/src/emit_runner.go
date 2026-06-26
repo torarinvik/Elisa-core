@@ -86,6 +86,12 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		printFile(stdout, file)
 		return 0
+	case emitTokens:
+		if options.output != "" {
+			fmt.Fprintf(stderr, "error: -o is not supported for -emit %s\n", emitTokens)
+			return 1
+		}
+		return runEmitTokens(program, stdout, stderr)
 	case emitLowered:
 		file, ok := parseLoadedProgram(program, stderr)
 		if !ok {

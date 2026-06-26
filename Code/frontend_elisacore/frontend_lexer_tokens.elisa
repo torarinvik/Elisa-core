@@ -362,6 +362,8 @@ def frontend_next_token(lexer: mutable FrontendLexer&) -> FrontendToken:
                     return frontend_make_token(FrontendTokenKind.RangeLt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
                 if frontend_match_char(lexer, FRONTEND_CH_GT):
                     return frontend_make_token(FrontendTokenKind.RangeGt, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
+                if frontend_match_char(lexer, FRONTEND_CH_ASSIGN):
+                    return frontend_make_token(FrontendTokenKind.RangeLe, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
                 return frontend_make_token(FrontendTokenKind.Range, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
             return frontend_make_token(FrontendTokenKind.Dot, pos, frontend_make_lexer_view(lexer, start, lexer.pos), frontend_empty_view())
 
