@@ -366,11 +366,9 @@ def bad() -> Positive:
 	}
 }
 
-// SOUNDNESS TODO: A struct field with `where P` that is mutated via a field-store
-// after construction (p.x <- -1) must re-discharge the field predicate at the
-// store site. Currently only construction sites are checked.
+// Struct field with `where P` mutated via a field-store after construction must re-discharge
+// the field predicate at the store site. This is now enforced by dischargeFieldStoreWhere.
 func TestSoundnessGateP2_TODO_StructFieldMutationRecheckIsError(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: struct field where-predicate re-discharge on field-store not yet enforced")
 	src := `
 struct Pos:
     x: mutable i64 where x > 0

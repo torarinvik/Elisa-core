@@ -393,6 +393,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				}
 			}
 		}
+		// Re-discharge the where-predicate on a struct field store (recv.field <- value). The field's
+		// declared type may be `T where P`; storing a new value into the field must re-prove P just as
+		// the construction site does. This is a no-op for non-struct targets or fields without a where
+		// clause. Mirrors the local-variable reassignment check just below (whereTypeForReassignTarget).
+		if fe, ok := n.Target.(*ast.FieldExpr); ok {
+			a.dischargeFieldStoreWhere(fe.Object, fe.Field, n.Value, n.Pos())
+		}
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		if !n.Optional {
 			a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
