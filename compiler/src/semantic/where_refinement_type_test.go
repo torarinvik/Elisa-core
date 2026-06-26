@@ -1,8 +1,9 @@
-//go:build cgo
-
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestWhereRefinementTypeErasesToBase(t *testing.T) {
 	src := `
@@ -63,5 +64,73 @@ def f(n: i64 where 1) -> i64:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_refine_nonbool.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "where refinement predicate must be bool") {
 		t.Fatalf("non-bool where refinement predicate should be rejected, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestParamWhereRefinementActsAsPrecondition(t *testing.T) {
+	src := `
+def need_positive(x: i64 where x > 0) -> i64:
+    return x
+
+def ok() -> i64:
+    n: i64 where n > 0 = 4
+    return need_positive(n)
+
+def bad() -> i64:
+    return need_positive(0)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_param_precondition.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "where precondition of need_positive is violated") {
+		t.Fatalf("bad call should violate param where precondition, got:\n%s", all)
+	}
+}
+
+func TestReturnWhereRefinementActsAsEnsure(t *testing.T) {
+	src := `
+def good(n: i64 where n >= 0) -> i64 where result >= n:
+    return n + 1
+
+def bad(n: i64 where n >= 0) -> i64 where result > n:
+    return n
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_return_ensure.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "return where refinement could not be proven statically") {
+		t.Fatalf("bad return should produce an unproven return where obligation, got:\n%s", all)
+	}
+}
+
+func TestLocalWhereRefinementObligation(t *testing.T) {
+	src := `
+def f() -> i64:
+    x: i64 where x > 0 = 0
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_local_obligation.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "local where refinement is violated") {
+		t.Fatalf("local where refinement should be checked at the binding, got:\n%s", all)
+	}
+}
+
+func TestWhereRefinementRestrictions(t *testing.T) {
+	src := `
+def later(a: i64 where a < b, b: i64) -> i64:
+    return a
+
+def impure(x: i64 where helper(x)) -> i64:
+    return x
+
+def helper(x: i64) -> bool:
+    return x > 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_restrictions.elisa", src, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "parameter where refinement may only reference its parameter and earlier parameters") {
+		t.Fatalf("later-param reference should be rejected, got:\n%s", all)
+	}
+	if !strings.Contains(all, "where refinement predicate must be pure and side-effect-free") {
+		t.Fatalf("call predicate should be rejected as impure for v1, got:\n%s", all)
 	}
 }

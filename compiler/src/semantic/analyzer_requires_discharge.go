@@ -93,7 +93,7 @@ func (a *Analyzer) requiresReportEntries() []RequiresReportEntry {
 // preconditions in the bounded-linear fragment.
 func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	scheme, ok := a.callRefinementScheme(call)
-	if !ok || len(scheme.Requires) == 0 {
+	if !ok {
 		return
 	}
 	if scheme.IsLemma {
@@ -105,6 +105,7 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	// Boundary preconditions, including extern FFI contracts, are checked at every call site so the
 	// caller cannot hand a callee an out-of-domain argument.
 	a.checkCalleeRequires(call, scheme.DeclName, scheme.Requires, scheme.Params, args)
+	a.checkCalleeParamWhereRefinements(call, scheme.DeclName, scheme.Params, args)
 }
 
 // resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.

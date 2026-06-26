@@ -17,7 +17,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		return base
 	case *ast.WhereRefinementTypeExpr:
 		base := a.resolveType(n.Base)
-		a.validateWhereRefinementPredicate(n)
+		a.validateConstantWhereRefinementPredicate(n)
 		return base
 	case *ast.NamedType:
 		switch n.Name {
@@ -279,7 +279,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	}
 }
 
-func (a *Analyzer) validateWhereRefinementPredicate(n *ast.WhereRefinementTypeExpr) {
+func (a *Analyzer) validateConstantWhereRefinementPredicate(n *ast.WhereRefinementTypeExpr) {
 	if a == nil || n == nil || n.Predicate == nil || exprContainsIdent(n.Predicate) {
 		return
 	}

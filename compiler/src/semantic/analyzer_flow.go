@@ -134,6 +134,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// region-less aggregate carries its dangling interior field forward.
 		a.recordStructInteriorRegionTaint(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, valueType)
 		a.recordStorageViewBinding(sym, n.Value)
+		a.dischargeLocalWhereRefinement(n)
 		aliasAccessType := declType
 		if n.Type == nil || typeExprHasExplicitMutableRef(n.Type) {
 			aliasAccessType = bindingType
@@ -505,6 +506,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			return
 		}
 		a.dischargeReturnRefinements(n)
+		a.dischargeReturnWhereRefinement(n)
 		a.dischargeEnsureBooleans(n)
 		a.checkLocalArenaEscape(n.Value, valueType, "return")
 		a.checkReturnBorrowEscapesLocal(n.Value, valueType)

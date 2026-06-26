@@ -170,8 +170,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
 						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
 					}()
+					a.analyzeParamWhereRefinements(fn)
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
+					a.analyzeReturnWhereRefinement(fn, fnType)
 					a.analyzeFunctionBodyStmts(fn.Body)
 					a.verifyLemmaEnsures(fn)
 					a.currentImplicitScopes = savedBodyImplicitScopes
@@ -377,8 +379,10 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
 						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
 					}()
+					a.analyzeParamWhereRefinements(fn)
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
+					a.analyzeReturnWhereRefinement(fn, fnType)
 					a.analyzeFunctionBodyStmts(fn.Body)
 				})
 			})
@@ -545,8 +549,10 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 						a.currentChangesPaths, a.currentHasChanges = savedChangesPaths, savedHasChanges
 						a.currentPreservesPaths, a.currentHasPreserves = savedPreservesPaths, savedHasPreserves
 					}()
+					a.analyzeParamWhereRefinements(fn)
 					a.analyzeRequiresClauses(fn)
 					a.analyzeEnsureClauses(fn, fnType)
+					a.analyzeReturnWhereRefinement(fn, fnType)
 					a.analyzeFunctionBodyStmts(fn.Body)
 				})
 			})
