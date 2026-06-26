@@ -109,7 +109,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 							Mutable: field.Mutable,
 							IsTail:  field.IsTail,
 						}
-						a.analyzeStructFieldWhereRefinement(field, fieldType)
+						a.analyzeStructFieldWhereRefinement(field, fieldType, concreteFields[:len(concreteFields)-1])
 					}
 					// Drop ghost fields from the concrete field list so codegen (and constructor
 					// arity) never see them — guaranteeing zero layout/size/offset impact.
@@ -335,11 +335,15 @@ func (a *Analyzer) isSupportedDerivedStateExpr(expr ast.Expr) bool {
 }
 
 // analyzeStructFieldWhereRefinement validates the where predicate on a struct field declaration.
-// The predicate is analyzed in a scope where the field name is bound to the base type, so that
-// references like `field > 0` resolve correctly. Cross-field references produce a clear diagnostic.
+// The predicate is analyzed in a scope where the field name and any earlier-declared sibling field
+// names are bound to their base types, so that cross-field predicates like `hi >= lo` resolve
+// correctly. References to later fields or unknown names produce clear diagnostics.
 // The field's runtime type is the BASE type (erasure is already done by resolveType); this only
 // records the predicate for later discharge at construction sites.
-func (a *Analyzer) analyzeStructFieldWhereRefinement(field ast.FieldDecl, baseType Type) {
+//
+// earlierFields contains the concrete fields that precede this field in declaration order (not
+// including the field itself); ghost and bit-group fields are excluded by the caller.
+func (a *Analyzer) analyzeStructFieldWhereRefinement(field ast.FieldDecl, baseType Type, earlierFields []ast.FieldDecl) {
 	if field.Type == nil {
 		return
 	}
@@ -351,22 +355,35 @@ func (a *Analyzer) analyzeStructFieldWhereRefinement(field ast.FieldDecl, baseTy
 	if !ok || wt == nil || wt.Predicate == nil {
 		return
 	}
-	// Validate that the predicate only references the field name itself (self-only).
-	// Cross-field references are not yet supported; emit a clear diagnostic and skip.
+	// Build the set of allowed names: the field itself + earlier siblings.
+	earlierSet := make(map[string]bool, len(earlierFields)+1)
+	earlierSet[field.Name] = true
+	for _, ef := range earlierFields {
+		earlierSet[ef.Name] = true
+	}
+	// Validate that every identifier in the predicate is either the field itself, an earlier
+	// sibling, a known type name, or a boolean literal. References to later fields are rejected
+	// with a diagnostic that names the specific offending identifier.
 	for _, name := range exprIdentNames(wt.Predicate) {
-		if name == field.Name || name == "true" || name == "false" {
+		if name == "true" || name == "false" || earlierSet[name] {
 			continue
 		}
 		if _, isType := a.namedTypes[name]; isType {
 			continue
 		}
-		a.errorf(wt.Predicate.Pos(), "struct field where refinement may only reference the field itself (%q); cross-field reference %q is not yet supported", field.Name, name)
+		// Unknown name — determine if it looks like a later field (for a better diagnostic).
+		a.errorf(wt.Predicate.Pos(), "struct field where refinement on %q may only reference the field itself or earlier-declared fields; %q is not available here (later fields are not in scope at this point)", field.Name, name)
 		return
 	}
-	// Analyze the predicate with the field name bound to the base type.
+	// Analyze the predicate with the field name and all earlier sibling names bound to their
+	// respective base types.
 	saved := a.currentScope
 	scope := NewScope(saved)
 	scope.Define(&Symbol{Name: field.Name, Kind: SymbolLocal, Type: baseType})
+	for _, ef := range earlierFields {
+		efType := a.resolveType(ef.Type)
+		scope.Define(&Symbol{Name: ef.Name, Kind: SymbolLocal, Type: efType})
+	}
 	a.currentScope = scope
 	a.ghostReadAllowed++
 	defer func() {

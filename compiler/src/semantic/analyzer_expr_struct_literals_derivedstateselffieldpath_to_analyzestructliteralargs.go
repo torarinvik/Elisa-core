@@ -159,7 +159,6 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			}
 			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 			a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
-			a.dischargeStructFieldWhereRefinement(fieldDecl, expr.Args[i])
 			if prev, exists := seen[index]; exists {
 				a.errorf(expr.Args[i].Pos(), "struct literal %q field %q is specified more than once (first at %s:%d:%d)", expr.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
 				ok = false
@@ -192,6 +191,14 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 				continue
 			}
 			ordered[i] = defaultExpr
+		}
+		// Discharge where-refinements after ordered is fully populated so that cross-field
+		// substitutions (e.g. `hi >= lo`) have all earlier-field args available regardless of
+		// the order in which named args were provided.
+		for i, fieldDecl := range base.Decl.Fields {
+			if ordered[i] != nil {
+				a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, ordered)
+			}
 		}
 		if ok {
 			expr.ResolvedArgsValid = true
@@ -264,7 +271,9 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 		a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
-		a.dischargeStructFieldWhereRefinement(fieldDecl, expr.Args[i])
+		// For the positional path, args are in field-declaration order so expr.Args[0..i]
+		// provides all earlier-field initializers needed for cross-field where substitutions.
+		a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, expr.Args)
 	}
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])
@@ -317,9 +326,15 @@ func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.Fie
 }
 
 // dischargeStructFieldWhereRefinement checks that the value assigned to a where-typed struct field
-// at a construction site satisfies the field's where predicate. The field name is substituted by the
-// initializer expression before passing to the shared proof ladder.
-func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, arg ast.Expr) {
+// at a construction site satisfies the field's where predicate.
+//
+// fieldIndex is the 0-based position of this field in allFields. orderedArgs is a slice indexed
+// by field position; entries for earlier fields must already be populated so they can be
+// substituted into cross-field predicates (e.g. `hi >= lo` substitutes `lo → orderedArgs[0]`).
+// If an earlier field's arg is nil (absent or not yet known), that name is left unsubstituted and
+// the proof attempt falls through to a runtime check — never a false positive.
+func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fieldIndex int, allFields []ast.FieldDecl, orderedArgs []ast.Expr) {
+	arg := orderedArgs[fieldIndex]
 	if arg == nil || field.Type == nil {
 		return
 	}
@@ -332,8 +347,16 @@ func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, arg 
 		return
 	}
 	subject := "where refinement on field " + strconv.Quote(field.Name)
-	if !a.dischargeWhereRefinement(wt, field.Name, arg, arg.Pos(), subject) {
-		a.recordProof(arg.Pos(), subject, "where", ProofRuntime)
-		a.proofLint(arg.Pos(), "%s could not be proven statically", subject)
+	// Build the substitution map: the field's own name → its initializer, plus any earlier
+	// sibling names → their initializers (only when the earlier arg is non-nil).
+	subst := map[string]ast.Expr{field.Name: arg}
+	for i := 0; i < fieldIndex && i < len(allFields) && i < len(orderedArgs); i++ {
+		if orderedArgs[i] != nil {
+			subst[allFields[i].Name] = orderedArgs[i]
+		}
+		// If the earlier arg is nil, leave the name unsubstituted so the prover sees an
+		// unknown variable and returns requiresUnknown, falling through to ProofRuntime.
 	}
+	// Route through the shared proof ladder with the expanded substitution map.
+	a.dischargeWherePredicate(wt.Predicate, subst, arg.Pos(), subject)
 }

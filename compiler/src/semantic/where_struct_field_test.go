@@ -53,18 +53,18 @@ def read(p: Pos) -> i64:
 	}
 }
 
-// TestWhereStructFieldCrossFieldDiagnostic verifies that a cross-field reference in a field where
-// predicate produces a clear diagnostic (not supported in v1).
-func TestWhereStructFieldCrossFieldDiagnostic(t *testing.T) {
+// TestWhereStructFieldForwardRefDiagnostic verifies that a forward reference (field where predicate
+// references a LATER-declared field) produces a clear diagnostic.
+func TestWhereStructFieldForwardRefDiagnostic(t *testing.T) {
 	src := `
 struct Range:
-    lo: i64
     hi: i64 where hi > lo
+    lo: i64
 `
-	result := analyzeContractStrict(t, "where_field_cross.elisa", src)
+	result := analyzeContractStrict(t, "where_field_fwdref.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(errs, "cross-field") {
-		t.Fatalf("expected cross-field diagnostic for hi > lo, got: %v", result.Errors())
+	if !strings.Contains(errs, "not available here") && !strings.Contains(errs, "earlier-declared") {
+		t.Fatalf("expected forward-ref diagnostic for hi > lo (lo is later), got: %v", result.Errors())
 	}
 }
 
