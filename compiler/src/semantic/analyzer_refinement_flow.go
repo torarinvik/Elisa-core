@@ -777,6 +777,15 @@ func isSelfIdent(expr ast.Expr, self string) bool {
 }
 
 // rangeEntailsConstraint reports whether the known range provably satisfies one law constraint.
+//
+// Sound cases handled:
+//   - Interval-implies-comparison: [lo,hi] ⊆ {x | x OP c} for the basic comparison ops.
+//   - Equality (degenerate interval): [k,k] entails any comparison that k satisfies, including
+//     strict forms (k > k-1, k < k+1) already handled by the lo/hi cases below.
+//   - Strict/non-strict duality via off-by-one: [lo,hi] entails x >= lo (already: r.lo >= lo)
+//     and also x > lo-1 (already: r.lo > lo-1). Both directions are covered by the GT/GTEQ cases.
+//   - Non-equality: [lo,hi] entails x != c when c is strictly outside [lo,hi] — i.e. c < lo
+//     (every value in the range is > c, hence != c) or c > hi (every value is < c, hence != c).
 func rangeEntailsConstraint(r numRange, k lawConstraint) bool {
 	switch k.op {
 	case lexer.TOKEN_GTEQ: // self >= c
@@ -787,8 +796,14 @@ func rangeEntailsConstraint(r numRange, k lawConstraint) bool {
 		return r.hiKnown && r.hi <= k.c
 	case lexer.TOKEN_LT: // self < c
 		return r.hiKnown && r.hi < k.c
-	case lexer.TOKEN_EQEQ: // self == c
+	case lexer.TOKEN_EQEQ: // self == c  (degenerate range [c,c] is the only proof)
 		return r.loKnown && r.hiKnown && r.lo == k.c && r.hi == k.c
+	case lexer.TOKEN_BANGEQ: // self != c
+		// Sound: the range is entirely below c (every value < c, hence != c), or entirely above c.
+		// A one-sided open range is insufficient: we need to rule out c being in-range on BOTH sides.
+		belowC := r.hiKnown && r.hi < k.c
+		aboveC := r.loKnown && r.lo > k.c
+		return belowC || aboveC
 	default:
 		return false
 	}
@@ -1516,12 +1531,38 @@ func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl
 // is a bare immutable integer identifier with a known range fact, and the law body is a decidable
 // conjunction of `self OP const` constraints, it checks the range entails every constraint. Returns
 // true only on a sound proof (docs/85 1d-2).
+//
+// Strengthened fallbacks (sound, narrowly scoped):
+//  1. Written-constant fact: if no rangeFact exists but the variable is pinned to an exact compile-time
+//     constant by a live written-const fact (an immutable local assigned a literal), we construct the
+//     degenerate interval [c,c] and check against it. This is the equality-fact → comparison case:
+//     a variable known to be exactly 5 satisfies any comparison or interval containing 5.
+//  2. Declared-type non-negativity: if no rangeFact or written-const is available, but the variable's
+//     declared type is unsigned (e.g. u8, u16, u32, u64, usize), we seed a [0, typeMax] range from
+//     the declared type — which already provides non-negativity. This is sound because unsigned types
+//     cannot hold negative values; the type system enforces the lower bound at construction time.
 func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
 		return false
 	}
 	r, ok := a.lookupRangeFact(ident.Name)
+	if !ok {
+		// Fallback 1: written-constant fact → degenerate [c,c] range.
+		if c, known := a.writtenConstInt(ident.Name); known {
+			r = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+			ok = true
+		}
+	}
+	if !ok {
+		// Fallback 2: declared unsigned type → [0, typeMax] non-negativity range.
+		if sym, found := a.currentScope.Lookup(ident.Name); found && sym != nil {
+			if tr, found := declaredTypeRange(sym.Type); found {
+				r = tr
+				ok = true
+			}
+		}
+	}
 	if !ok {
 		return false
 	}
