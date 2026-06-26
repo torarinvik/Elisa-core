@@ -165,6 +165,57 @@ def f() -> i64:
 	}
 }
 
+// SOUNDNESS (region-poly taint hole): a region-polymorphic call result is region-less by type but
+// lives in the AMBIENT region. Storing it into an interior field of a region-less struct built inside
+// `region a:`, then copying the struct out past the region's death, launders the dangling interior.
+// valueStoreRegion previously returned "" for a call result, so the taint table never recorded the
+// region — silently accepted. Recovering the ambient region must now reject it.
+func TestStructCopyInteriorRegionPolyResultEscapeRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "struct_copy_interior_rp_escape.elisa", `struct Holder:
+    xs: mutable darray[u8]
+
+def make_xs() -> darray[u8]:
+    out: mutable darray[u8] = []
+    out.push(65)
+    return out
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable Holder = zeroed
+        region a(4096):
+            inner: mutable Holder = zeroed
+            inner.xs <- make_xs()
+            out <- inner
+        return i64(out.xs[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "outlives the region") {
+		t.Fatalf("expected struct copy laundering a region-poly-result interior field to be rejected; got: %s", all)
+	}
+}
+
+// Positive: the same pattern where the struct never leaves the region (the interior dies with the
+// region, no laundering) must still compile — the taint only drives rejection on actual escape.
+func TestStructInteriorRegionPolyResultSameRegionAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "struct_interior_rp_same_region_ok.elisa", `struct Holder:
+    xs: mutable darray[u8]
+
+def make_xs() -> darray[u8]:
+    out: mutable darray[u8] = []
+    out.push(65)
+    return out
+
+def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region a(4096):
+            inner: mutable Holder = zeroed
+            inner.xs <- make_xs()
+            return i64(inner.xs[0])
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "dangling") || strings.Contains(all, "outlives the region") {
+		t.Fatalf("same-region use of a region-poly-result interior field must be accepted; got: %s", all)
+	}
+}
+
 // A struct whose interior field points at an OUTER region copied out is sound and
 // must stay accepted — the taint must record the field's true (outer) region.
 func TestStructCopyOuterInteriorFieldAccepted(t *testing.T) {

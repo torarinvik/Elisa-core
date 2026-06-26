@@ -695,6 +695,18 @@ func (a *Analyzer) valueStoreRegion(expr ast.Expr, valueType Type) string {
 	if r := a.structInteriorTaintRegion(expr); r != "" {
 		return r
 	}
+	// A region-polymorphic call result is region-less by type but lives in the AMBIENT
+	// (threaded) region. Storing it into an interior container/view field of a region-less
+	// aggregate tains that aggregate with the ambient region — otherwise a later
+	// copy/return/store of the struct launders the dangling interior past the region's death
+	// unflagged. Mirror the carve-out in checkRegionContainerEscape. Only ADDS taint: the
+	// outlives-lattice in the escape check still decides whether it actually escapes, so a
+	// result that genuinely outlives its use is not over-rejected.
+	if region := a.activeContainerRegionName(); region != "" && a.exprIsRegionPolyResultCarryingRegionData(expr, valueType) {
+		if _, ok := a.regionLifetimeOrdinal(region); ok {
+			return region
+		}
+	}
 	return ""
 }
 
