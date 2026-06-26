@@ -197,7 +197,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		// the order in which named args were provided.
 		for i, fieldDecl := range base.Decl.Fields {
 			if ordered[i] != nil {
-				a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, ordered)
+				a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, ordered, expr.Name)
 			}
 		}
 		if ok {
@@ -273,7 +273,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
 		// For the positional path, args are in field-declaration order so expr.Args[0..i]
 		// provides all earlier-field initializers needed for cross-field where substitutions.
-		a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, expr.Args)
+		a.dischargeStructFieldWhereRefinement(fieldDecl, i, base.Decl.Fields, expr.Args, expr.Name)
 	}
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])
@@ -333,7 +333,7 @@ func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.Fie
 // substituted into cross-field predicates (e.g. `hi >= lo` substitutes `lo → orderedArgs[0]`).
 // If an earlier field's arg is nil (absent or not yet known), that name is left unsubstituted and
 // the proof attempt falls through to a runtime check — never a false positive.
-func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fieldIndex int, allFields []ast.FieldDecl, orderedArgs []ast.Expr) {
+func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fieldIndex int, allFields []ast.FieldDecl, orderedArgs []ast.Expr, structName string) {
 	arg := orderedArgs[fieldIndex]
 	if arg == nil || field.Type == nil {
 		return
@@ -347,6 +347,9 @@ func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, fiel
 		return
 	}
 	subject := "where refinement on field " + strconv.Quote(field.Name)
+	if structName != "" {
+		subject = "where refinement on field " + strconv.Quote(field.Name) + " of " + structName
+	}
 	// Build the substitution map: the field's own name → its initializer, plus any earlier
 	// sibling names → their initializers (only when the earlier arg is non-nil).
 	subst := map[string]ast.Expr{field.Name: arg}
