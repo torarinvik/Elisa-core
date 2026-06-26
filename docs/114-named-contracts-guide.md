@@ -1,10 +1,45 @@
 # 114 — Named contracts: a user-facing guide
 
-> **(design / not yet implemented)** — everything in this document describes a planned language
-> feature.  No compiler source has been modified.
+Cross-references: docs/97 (original design), docs/111 (unified staging plan),
+docs/109 (unified refinement pipeline), docs/95 (laws and refinement cheat-sheet).
 
-Cross-references: docs/111 (unified staging plan), docs/109 (unified refinement pipeline),
-docs/95 (laws and refinement cheat-sheet).
+---
+
+## Implementation status (as of 2026-06)
+
+Named contracts are **fully implemented and working** end-to-end.  This covers:
+
+- `contract Name(params):` top-level declarations with `requires`, `ensure`, `changes`,
+  `preserves`, and `includes` clauses (docs/97).
+- `uses Name(args)` application inside `fn`/`def` and `extern` declarations.
+- Formal substitution: contract formals are substituted by the application arguments before clauses
+  are folded into the applying function's own `Requires`/`EnsureValues`/`Changes`/`Preserves`.
+- Argument type-checking: each `uses` argument is type-checked against the contract formal before
+  substitution (type mismatch is a hard error naming the formal and the expected type).
+- Arity checking: wrong number of `uses` arguments is a hard error.
+- Unknown-contract detection: `uses UnknownContract(...)` is a hard error.
+- Empty-contract detection: a contract with no clauses is a hard error.
+- No-parameter contracts: a contract with zero parameters is a hard error (the parameter is the
+  subject every clause is written against).
+- Generic contracts: `contract Name[T](...)` specialized at `uses Name[i64](...)`.
+- Included value laws (`includes NonNeg(x)`): the law predicate is substituted and folded into
+  `Requires`, so it is checked at every call site of the applying function.
+- Included effect laws (`includes NoAlloc()`): folded as an effect obligation (the function must
+  not exhibit the forbidden effect).
+- Frame conditions (`changes`, `preserves`): frame-path roots are rebound from contract formals
+  to application arguments; the result is union-merged into the applying function's frame set.
+- Proof composition: `by`-block proofs on contract clauses are substituted together with the
+  clause and carried into the applying function.
+- Extern boundary: `extern` declarations may also carry `uses` clauses.
+- Discharge: inherited requires/ensure are discharged through the standard three-tier ladder
+  (fact-lattice, linear prover, SMT under `-strict`), exactly like hand-written clauses.
+- Call-site checking: inherited `requires` obligations are enforced at every call site of the
+  applying function, just like explicit `requires` on that function.
+
+What is **not yet implemented** (still design/planned):
+
+- `@satisfies(ContractName)` conformance annotation on a struct or protocol for S1.
+- Quantified predicates over collections inside contracts (S2).
 
 ---
 
@@ -14,28 +49,24 @@ docs/95 (laws and refinement cheat-sheet).
 write a set of obligations once and apply them to multiple functions by name, avoiding
 repetition and improving readability.
 
-Think of named contracts as **proof Lego** — small, composable blocks of proof that you can
-snap together to build a more complex correctness story.
-
 ### The problem they solve
 
 Without named contracts, if you have two functions that must satisfy the same set of
 obligations, you must repeat them:
 
 ```elisa
-def sort(xs: mutable darray[i64]&):
-    ensures IsSorted(xs)
-    ensures xs.len == old(xs.len)
-    # ... function body ...
+def copy_floor(s: i64) -> i64:
+    requires s >= 0
+    ensure result >= s
+    return s
 
-def merge(out: mutable darray[i64]&, a: darray[i64], b: darray[i64]):
-    ensures IsSorted(out)
-    ensures out.len == a.len + b.len
-    # ... function body ...
+def echo_floor(s: i64) -> i64:
+    requires s >= 0
+    ensure result >= s
+    return s
 ```
 
-If the definition of "sorted" evolves or if a bug fix applies to both, you must change both
-functions.  Named contracts eliminate this duplication.
+Named contracts eliminate this duplication.
 
 ---
 
@@ -46,29 +77,43 @@ functions.  Named contracts eliminate this duplication.
 A **contract** declaration groups related `requires` and `ensure` clauses:
 
 ```elisa
-contract Sorted(xs: darray[i64]):
-    ensure IsSorted(xs)
-    ensure xs.len == old(xs.len)
+contract NonNegOut(out: i64, src: i64):
+    requires src >= 0
+    ensure result >= src
 ```
 
 A contract:
-- Has a name (`Sorted`).
-- Takes zero or more parameters (`xs: darray[i64]`), which may be mutable references (`mutable
-  darray[i64]&`).
-- Contains a list of `ensure` clauses (postconditions).
-- Optionally contains `requires` clauses (preconditions).
+- Has a name (`NonNegOut`).
+- Takes one or more parameters (`out: i64, src: i64`).  A parameter-less contract is a hard error.
+- Contains at least one `requires`, `ensure`, `changes`, `preserves`, or `includes` clause.
+  A body-less contract is a hard error.
+- Is a **top-level declaration** — it lives at the same level as `def`.
 
-### Preconditions in contracts
+### Contracts with frame conditions
 
 ```elisa
-contract Partition(lo: i64, hi: i64):
-    requires lo < hi
-    require lo >= 0
+struct Render:
+    px: mutable i32
+    py: mutable i32
+    health: mutable i32
 
-contract BuildList(items: darray[Item], target: mutable darray[Item]&):
-    requires target.len == 0
-    ensure target.len == old(items.len)
-    ensure IsPermutation(target, old(items))
+contract MovesOnly(r: mutable Render&):
+    changes r.px, r.py
+```
+
+When a function `uses MovesOnly(r)`, writing `r.health` is a frame violation.
+
+### Generic contracts
+
+```elisa
+contract Monotonic[T](lo: T, hi: T):
+    requires lo <= hi
+    ensure result >= lo
+
+def clamp_floor(x: i64) -> i64:
+    uses Monotonic[i64](0, 100)
+    requires x >= 0
+    return 100
 ```
 
 ---
@@ -78,71 +123,85 @@ contract BuildList(items: darray[Item], target: mutable darray[Item]&):
 To apply a contract to a function, use `uses`:
 
 ```elisa
-def sort(xs: mutable darray[i64]&):
-    uses Sorted(xs)
-    # ... function body ...
+def copy_floor(s: i64) -> i64:
+    uses NonNegOut(0, s)
+    return s
 ```
 
-When the compiler sees `uses Sorted(xs)`, it **expands** the contract inline.  This is macro-like
-expansion:
+When the compiler sees `uses NonNegOut(0, s)`, it substitutes `{out → 0, src → s}` into the
+contract's clauses and appends them to `copy_floor`'s own `Requires`/`EnsureValues`:
 
-```elisa
-def sort(xs: mutable darray[i64]&):
-    uses Sorted(xs)
-    # ↓ expands to:
-    # ensure IsSorted(xs)
-    # ensure xs.len == old(xs.len)
-    # ... function body ...
+```
+# Effective obligations of copy_floor after expansion:
+requires s >= 0      # from NonNegOut.requires (src → s)
+ensure result >= s   # from NonNegOut.ensure    (src → s)
 ```
 
-You can use multiple contracts on a single function:
+From the prover's perspective, a `uses`-applied clause is indistinguishable from a hand-written
+one.  Discharge uses the same three-tier ladder (fact-lattice → linear prover → SMT).
+
+You can apply multiple contracts on a single function:
 
 ```elisa
-def merge(out: mutable darray[i64]&, a: darray[i64], b: darray[i64]):
-    uses Partition(a.len, b.len)
-    uses Sorted(out)
-    # expands to:
-    # requires a.len < b.len  (from Partition)
-    # requires a.len >= 0     (from Partition)
-    # ensure IsSorted(out)    (from Sorted)
-    # ensure out.len == old(out.len)  (from Sorted)
+contract InRange(lo: i64, hi: i64, x: i64):
+    requires lo <= x
+    requires x <= hi
+    ensure result >= lo
+    ensure result <= hi
+
+def clamp(x: i64) -> i64:
+    uses InRange(0, 100, x)
+    requires x >= 0
+    requires x <= 100
+    return x
+```
+
+The composition is **conjunction of value premises ∪ union of frames** (docs/97 §5).
+
+---
+
+## Call-site checking
+
+The inherited `requires` clauses become real preconditions of the applying function.  Any caller
+that cannot prove them statically gets an error:
+
+```elisa
+contract Positive(x: i64):
+    requires x > 0
+    ensure result > 0
+
+def use_it(x: i64) -> i64:
+    uses Positive(x)
+    return x
+
+def bad_caller() -> i64:
+    return use_it(0 - 3)   # ERROR: cannot prove x > 0 (x = -3)
 ```
 
 ---
 
-## How contracts work with refinements and obligations
+## Including laws
 
-Named contracts are **not** a new obligation machinery.  They are syntactic sugar that expands
-into the existing `requires`/`ensure` system described in docs/109.
-
-### Expansion into requires/ensure
-
-After the `uses` directives are expanded, the function's obligations are discharged through the
-**same three-tier ladder** as any other `requires`/`ensure` clause:
-
-1. **Fact-lattice + linear prover** — O(1), inline pattern matching
-2. **SMT tier** — external z3 solver for complex predicates  
-3. **Runtime fallback** — proof-lint warning (hard error under `-strict`)
-
-From the prover's perspective, a contract is transparent:
+A contract can include a value law as a precondition:
 
 ```elisa
-contract SafeIndex(xs: darray[i64], i: i64):
-    require i >= 0
-    require i < xs.count
+law NonNeg(x: i64) = x >= 0
 
-def get(xs: darray[i64], i: i64):
-    uses SafeIndex(xs, i)
-    return xs[i]
-
-# ↓ Discharged as:
-# def get(xs: darray[i64], i: i64):
-#     requires i >= 0
-#     requires i < xs.count
-#     return xs[i]
+contract NonNegSrc(src: i64):
+    includes NonNeg(src)     # becomes: requires src >= 0
+    ensure result >= src
 ```
 
-See docs/109 for the full discharge-ladder details.
+It can also include an effect law as a prohibition:
+
+```elisa
+law NoAlloc forbids Memory.Allocate
+
+contract PureUse(x: i64):
+    includes NoAlloc()
+```
+
+A function `uses PureUse(x)` must not allocate.
 
 ---
 
@@ -150,176 +209,24 @@ See docs/109 for the full discharge-ladder details.
 
 | Concept | Purpose | Spelling | Reusability |
 |---|---|---|---|
-| **law** | A *predicate* — a pure, total boolean function | `law Name(self: T, ...) = <bool-expr>` | Used in type positions (`T is Law`), flow narrows (`if x is Law`), contract clauses (`requires x is Law`) |
+| **law** | A *predicate* — a pure, total boolean function | `law Name(self: T, ...) = <bool-expr>` | Used in type positions (`T is Law`), flow narrows (`if x is Law`), contract clauses |
 | **contract** | A *bundle of obligations* — pre/postconditions for a function | `contract Name(...): requires / ensure ...` | Applied to functions via `uses` |
-
-A **law is a predicate**.  It answers the question: "Does this value satisfy a property?"
-
-A **contract is a set of obligations**.  It answers: "What must be true before and after this
-function runs?"
-
-### Example: laws and contracts together
-
-```elisa
-# A law — a pure predicate.
-law IsSorted(self: darray[i64]) =
-    forall i: 0 <= i and i < self.len - 1 => self[i] <= self[i+1]
-
-# A contract — bundles obligations about a function's behavior.
-contract Sorted(xs: darray[i64]):
-    ensure IsSorted(xs)
-    ensure xs.len == old(xs.len)
-
-# Apply the contract to a function.
-def sort(xs: mutable darray[i64]&):
-    uses Sorted(xs)
-    # The function must prove:
-    # - IsSorted(xs) after execution
-    # - xs.len hasn't changed
-```
-
-You define the **law once** and then use it in many places:
-- In type annotations: `type SortedArray = darray[i64] is IsSorted`
-- In flow: `if arr is IsSorted: ...`
-- In contracts: `contract …: ensure IsSorted(xs)`
-
-The **contract** binds those laws together with additional obligations for a specific function.
-
----
-
-## Ghost models in contracts
-
-Named contracts can reference **ghost fields** — abstract spec-only state that is erased at
-runtime (docs/111 §1).
-
-```elisa
-struct RingBuf[T]:
-    head: usize
-    tail: usize
-    buf: darray[T]
-
-    ghost model: seq[T]
-    ghost invariant:
-        model == buf[head..<tail]
-
-contract Push(q: mutable RingBuf[T]&, v: T):
-    ensure q.model == old(q.model) ++ [v]
-    ensure q.len == old(q.len) + 1
-
-def push(q: mutable RingBuf[T]&, v: T):
-    uses Push(q, v)
-    # ... implementation ...
-```
-
-The ghost field `model` exists only for proofs.  The contract can refer to it because `uses` is
-a spec context, and ghost-field erasure rules (docs/111 §1.3) apply.
-
----
-
-## Parameter binding in contracts
-
-Contract parameters are bound at the `uses` site.  This works exactly like UFCS and type casting:
-
-```elisa
-contract SafeSlice(arr: darray[i64], start: i64, end: i64):
-    requires 0 <= start and start <= end
-    requires end <= arr.len
-
-def slice_and_sum(arr: darray[i64], s: i64, e: i64) -> i64:
-    uses SafeSlice(arr, s, e)
-    # The compiler binds:
-    #   arr -> the local arr param
-    #   start -> the local s param
-    #   end -> the local e param
-    # Then expands:
-    #   requires 0 <= s and s <= e
-    #   requires e <= arr.len
-```
-
-Parameters may be mutable references:
-
-```elisa
-contract Initialized(target: mutable darray[Item]&):
-    requires target.len == 0
-
-def build(items: darray[Item], target: mutable darray[Item]&):
-    uses Initialized(target)
-    # target is bound to the mutable param
-```
-
----
-
-## Design patterns
-
-### Reusable preconditions
-
-Group common input checks into a contract:
-
-```elisa
-contract ValidRange(start: i64, end: i64):
-    requires start >= 0
-    requires end <= MAX_LEN
-    requires start < end
-
-def process(start: i64, end: i64):
-    uses ValidRange(start, end)
-    # ... process the range ...
-```
-
-### State-change witnesses
-
-Document what a function changes and how:
-
-```elisa
-contract PopsFront[T](queue: mutable RingBuf[T]&):
-    require queue.len > 0
-    ensure queue.len == old(queue.len) - 1
-    ensure old(queue.model)[1..] == queue.model
-
-def pop_front(q: mutable RingBuf[T]&) -> T:
-    uses PopsFront(q)
-    # ... implementation ...
-```
-
-### Composition of multiple obligations
-
-Layer contracts to build up complex correctness:
-
-```elisa
-contract ValidInput(xs: darray[i64]):
-    requires xs.len > 0
-    requires IsSorted(xs)
-
-contract ValidOutput(xs: darray[i64]):
-    ensure IsSorted(xs)
-    ensure xs.len == old(xs.len)
-
-def dedup(xs: mutable darray[i64]&):
-    uses ValidInput(xs)
-    uses ValidOutput(xs)
-    # Must satisfy both contracts
-```
 
 ---
 
 ## Staged rollout (implementation plan)
 
-Named contracts are planned for implementation in stages (docs/111 §3.1):
-
 | Stage | Feature | Status |
 |---|---|---|
-| **S0** | `contract` declaration + `uses` inline expansion | (design / not yet implemented) |
-| **S1** | `@satisfies(ContractName)` conformance checking | (design / not yet implemented) |
-| **S2** | Parameterized contracts with quantified predicates | (design / deferred) |
-
-In S0, all contract expansion is macro-like: the clauses are inlined and discharged through the
-standard refinement ladder (docs/109).  No new prover machinery.
+| **S0** | `contract` declaration + `uses` inline expansion + discharge | **Implemented** (docs/97) |
+| **S1** | `@satisfies(ContractName)` conformance checking on structs/protocols | Not yet implemented |
+| **S2** | Quantified predicates over collections inside contracts | Not yet implemented |
 
 ---
 
 ## See also
 
-- **docs/95** — Laws and refinement types cheat-sheet; understand the difference between laws
-  (predicates) and refinements (types).
+- **docs/97** — Original named contracts design.
+- **docs/95** — Laws and refinement types cheat-sheet.
 - **docs/109** — Unified refinement pipeline; how `requires`/`ensure` discharge.
 - **docs/111** — Unified staging plan for ghost models, typestate, and named contracts.

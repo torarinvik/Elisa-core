@@ -89,11 +89,6 @@ type Analyzer struct {
 	// expands to the equivalent anonymous WhereRefinementTypeExpr (see
 	// analyzer_named_refinement_alias.go). Representation-erased — never in namedTypes.
 	refineAliases map[string]*ast.RefineDecl
-	// namedContracts registers named contract declarations (`contract Name(params):`, docs/111 Part 3 S0)
-	// by qualified name. A contract bundles requires/ensure/changes/preserves clauses for reuse via `uses`
-	// clauses at function definition sites. Contracts are collected once during symbol registration and
-	// looked up by analyzer_named_contracts.go during expansion.
-	namedContracts map[string]*ast.FuncDecl
 	// overlayLayouts registers the docs/107 typed guest-memory overlay layouts by name. A
 	// `GuestVAddr[L]` carrier whose L is a key here gets `base.field[mem]` field-access desugared
 	// to MemoryManager_ReadU<N>/WriteU<N> against L's declared field offsets/widths. Empty unless
@@ -869,9 +864,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// (purely structural; no exprTypes dependency) so checkInterprocStoreEscape can consult them
 	// at call sites while the interior-taint side-table is live.
 	a.paramStoreTargets = a.computeParamStoreTargets(collectRegionPolyCandidateFuncs(activeDecls))
-	// docs/111 Part 3 S0: register all named contract declarations in a global table so they can be
-	// resolved when functions apply them with `uses` clauses.
-	a.registerNamedContracts(activeDecls)
 	// docs/97: fold leading `uses Name(args)` named-contract applications into each function's own
 	// Requires/EnsureValues/Changes/Preserves BEFORE body analysis, so contract discharge + the frame
 	// checker see the unfolded clauses and a `uses`d precondition is checked at every call site.
