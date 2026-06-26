@@ -71,6 +71,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
+	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
@@ -311,6 +312,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
+	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
@@ -482,6 +484,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
 	a.currentRegionRefs = map[*Symbol]regionRefState{}
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
+	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}

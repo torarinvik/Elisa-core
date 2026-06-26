@@ -101,10 +101,18 @@ trusts is actually reserve_commit at runtime.
 commit on first touch) — true on POSIX (Linux/macOS/FreeBSD), but NOT on Windows `VirtualAlloc` or
 the libc-malloc backend, where the reservation would commit eagerly. So the default flip is gated
 on `ELISA_TARGET_OS_POSIX` *in the analyzer* (`targetMmapOvercommit`), which keeps the storage-view
-checker and codegen reading the same strategy — sound on every target. On Windows / libc-malloc the
+checker and codegen reading the same strategy — sound on every target. On the libc-malloc backend the
 growable keeps the prior `chained` default (correct, just without the no-fragmentation guarantee).
-32-bit is moot: only 64-bit arches (x86_64, arm64) are targeted. A future Windows commit-on-touch
-path (or a smaller eagerly-committed reservation) could extend the in-place default there.
+32-bit is moot: only 64-bit arches (x86_64, arm64) are targeted.
+
+**Windows commit-on-touch — IMPLEMENTED (was future work).** The Windows `VirtualAlloc` backend now
+runs reserve_commit/fixed as a true lazy reservation: `new_region_reserve` takes the range with
+`MEM_RESERVE` only (no physical backing), and `arena_region_ensure_committed` commits pages with
+`MEM_COMMIT` on demand (in 64 KiB chunks, `WIN_COMMIT_CHUNK`) as the bump pointer advances — the
+explicit equivalent of POSIX mmap demand-paging (`arena.elisa`). A `committed` watermark on `Region`
+skips redundant commits. So the 256 MiB default reservation costs only address space on Windows too,
+and the in-place no-fragmentation default can extend there. NOTE: implemented + reviewed but not yet
+run on a Windows host/CI — needs a Windows execution check before relying on it in production.
 
 ## Interactions
 

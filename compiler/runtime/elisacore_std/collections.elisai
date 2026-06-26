@@ -39,6 +39,7 @@ struct Region:
     owner_tag: mutable uintptr
     owner_next: mutable heap Region&?
     global_index: mutable usize
+    committed: mutable usize
     data: tail uintptr
 
 struct Arena:
@@ -74,6 +75,8 @@ static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
     extern GetCurrentProcess() -> void&
     extern VirtualAllocEx(process: void&, address: mutable heap void&?, size: usize, alloc_type: int, protect: int) -> mutable heap void&?
     extern VirtualFreeEx(process: void&, address: heap void&, size: usize, free_type: int) -> bool
+    const WIN_COMMIT_CHUNK: usize = 65536
+    extern win_commit_round_up(n: usize) -> usize
 static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
     extern __heap_base: heap u8&
     extern wasm_memory_size(index: int) -> int

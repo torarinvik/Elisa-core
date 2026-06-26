@@ -59,6 +59,10 @@ struct Region:
     owner_tag: mutable uintptr
     owner_next: mutable heap Region&?
     global_index: mutable usize
+    # Bytes physically committed from the block base (Windows reserve_commit/fixed lazy
+    # MEM_RESERVE+MEM_COMMIT path); 0 on POSIX/WASM/malloc where the block is fully backed at
+    # creation, so arena_region_ensure_committed no-ops there.
+    committed: mutable usize
     data: tail uintptr
 
 struct Arena:
@@ -127,6 +131,14 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
         free_type: int
     ) -> bool
 
+    # Commit granularity for the lazy reserve_commit/fixed path: pages are committed 64 KiB at a
+    # time (a multiple of the 4 KiB page size and equal to the reservation allocation granularity),
+    # amortizing the per-allocation MEM_COMMIT syscall.
+    const WIN_COMMIT_CHUNK: usize = 65536
+
+    def win_commit_round_up(n: usize) -> usize:
+        return ((n + (WIN_COMMIT_CHUNK - 1)) / WIN_COMMIT_CHUNK) * WIN_COMMIT_CHUNK
+
 static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
     extern __heap_base: heap u8&
     extern wasm_memory_size(index: int) -> int
@@ -163,6 +175,11 @@ def arena_region_from_uintptr(raw: uintptr) -> mutable heap Region&:
 def arena_heap_void_from_region(r: heap Region&) -> heap void&:
     trusted Unsafe.PointerCast:
         return r.cast[heap void&]
+
+@internal
+def arena_mutable_heap_void_from_region(r: heap Region&) -> mutable heap void&?:
+    trusted Unsafe.PointerCast:
+        return r.cast[mutable heap void&?]
 
 @internal
 def arena_heap_u8_from_region_data(r: heap Region&) -> mutable heap u8&:
@@ -303,6 +320,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         r.owner_tag <- owner_tag
         r.owner_next <- null
         r.global_index <- 0
+        r.committed <- 0
         return r
 
 def new_region(capacity: usize) -> mutable heap Region&:
@@ -325,7 +343,82 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
         r.owner_tag <- 0.uintptr()
         r.owner_next <- null
         r.global_index <- 0
+        r.committed <- 0
         return r
+
+# A reserve-only region block for the reserve_commit/fixed strategies. On Windows the block's
+# address range is MEM_RESERVE'd up front (no physical backing) and pages are MEM_COMMIT'd on
+# demand by arena_region_ensure_committed as the bump pointer advances — so a large default
+# reservation (256 MiB) costs only address space, matching POSIX mmap's demand-paging. On every
+# other backend it is identical to new_region (mmap demand-pages, or malloc/eager-commit), and
+# the commit-on-demand helper no-ops.
+@internal
+def new_region_reserve(capacity: usize) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+            raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    null,
+                    size_bytes,
+                    MEM_RESERVE,
+                    PAGE_READWRITE
+                )
+            assert not inv_handle(raw)
+            assert raw != null
+            # Commit an initial chunk covering the Region header before writing any field.
+            initial: usize = win_commit_round_up(size_of(Region) + size_of(uintptr))
+            commit_raw: mutable heap void&? = null
+            trusted Unsafe.RawExtern:
+                commit_raw <- VirtualAllocEx(
+                    GetCurrentProcess(),
+                    raw,
+                    initial,
+                    MEM_COMMIT,
+                    PAGE_READWRITE
+                )
+            assert not inv_handle(commit_raw)
+            r: heap Region& = arena_region_from_raw(raw)
+            r.next <- null
+            r.count <- 0
+            r.capacity <- capacity
+            r.owner_tag <- 0.uintptr()
+            r.owner_next <- null
+            r.global_index <- 0
+            r.committed <- initial
+            return r
+        static else:
+            return new_region(capacity)
+
+# WINDOWS reserve_commit/fixed only: commit (page-in) enough pages so that `needed_bytes` from the
+# block base are physically backed, growing the committed watermark in chunks to amortize syscalls.
+# Idempotent — re-committing already-committed pages is a no-op per VirtualAlloc. A no-op on every
+# other backend (their blocks are fully backed at creation: mmap demand-pages, malloc/eager-commit).
+@internal
+def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
+    can Abort.Panic:
+        static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+            if needed_bytes > r.committed:
+                target: mutable usize = win_commit_round_up(needed_bytes)
+                full: usize = size_of(Region) + size_of(uintptr) * r.capacity
+                if target > full:
+                    target <- full
+                base: mutable heap void&? = arena_mutable_heap_void_from_region(r)
+                commit_raw: mutable heap void&? = null
+                trusted Unsafe.RawExtern:
+                    commit_raw <- VirtualAllocEx(
+                        GetCurrentProcess(),
+                        base,
+                        target,
+                        MEM_COMMIT,
+                        PAGE_READWRITE
+                    )
+                assert not inv_handle(commit_raw)
+                r.committed <- target
+        static else:
+            pass
 
 # Strategy-dispatching region allocator: chooses the block source. MALLOC draws blocks from
 # libc malloc; every other strategy (CHAINED/RESERVE_COMMIT/FIXED/SCRATCH) uses the compile-time
@@ -334,6 +427,12 @@ def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
         if strategy == ARENA_STRATEGY_MALLOC:
             return new_region_malloc(capacity)
+        # reserve_commit/fixed take a contiguous block that grows in place. On Windows that block
+        # is reserved-then-committed-on-demand (new_region_reserve); on POSIX it is a demand-paged
+        # mmap (new_region_reserve falls through to new_region there). CHAINED/SCRATCH keep the
+        # plain block source.
+        if strategy == ARENA_STRATEGY_RESERVE_COMMIT or strategy == ARENA_STRATEGY_FIXED:
+            return new_region_reserve(capacity)
         return new_region(capacity)
 
 def free_region(r: heap Region&):
@@ -406,6 +505,8 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             offset_bytes: usize = a.end.count * size_of(uintptr)
             result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
             a.end.count <- a.end.count + size
+            # Windows: page-in the bytes this allocation now spans (no-op elsewhere).
+            arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
             return result
 
         if a.end == null:
@@ -472,6 +573,8 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
                 if old_offset_slots + new_slots > a.end.capacity:
                     panic("region overflow: reservation exhausted (reserve_commit/fixed grow)")
                 a.end.count <- old_offset_slots + new_slots
+                # Windows: page-in the bytes the grown tail now spans (no-op elsewhere).
+                arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
                 return arena_heap_void_from_mutable(oldptr)
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
 

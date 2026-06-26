@@ -276,12 +276,21 @@ type Analyzer struct {
 	// undetected. Consumed only by checkStructCopyInteriorRegionEscape; kept off the
 	// shared region-ref provenance map to avoid perturbing promote/packed/invalidation.
 	currentStructInteriorRegionTaint map[*Symbol]string
-	currentAffineValues              map[affineValueKey]affineValueState
-	currentBorrowedOwnerRefs         map[*Symbol]borrowedOwnerRefState
-	currentFunctionValues            map[*Symbol]*FuncType
-	currentSpecializedValueTypes     map[*Symbol]Type
-	currentValueBindings             map[*Symbol]ast.Expr
-	currentStorageViewDeps           map[*Symbol]storageViewDependencyState
+	// currentStructLocalAllocRegion records, per locally-constructed aggregate local
+	// whose container/view fields were allocated under an ambient region, the name of
+	// that region. Unlike currentStructInteriorRegionTaint (which tracks the shortest
+	// region a value was STORED FROM, for copy-escape), this records the region the
+	// struct's own fresh fields LIVE IN at construction. It lets a call site bind a
+	// callee's struct-ref region param (`def f(b: mutable Bag& @r)`) when the argument
+	// is such a local — the locally-constructed analogue of threading a struct param's
+	// region. Consumed by attachStructLocalArgRegion at call sites.
+	currentStructLocalAllocRegion map[*Symbol]string
+	currentAffineValues           map[affineValueKey]affineValueState
+	currentBorrowedOwnerRefs      map[*Symbol]borrowedOwnerRefState
+	currentFunctionValues         map[*Symbol]*FuncType
+	currentSpecializedValueTypes  map[*Symbol]Type
+	currentValueBindings          map[*Symbol]ast.Expr
+	currentStorageViewDeps        map[*Symbol]storageViewDependencyState
 	// pendingStorageViewErrors holds invalidated-view uses deferred until the per-function region
 	// stack assignment is known (Phase C1b): a use whose source darray got a reserve_commit stack
 	// is stable and the error is dropped; otherwise it is emitted. Scoped per function.
@@ -365,7 +374,7 @@ type Analyzer struct {
 	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the
 	// function's effect signature (recorded by analyzeCanStmt), so the unsafe store is
 	// auditable through the capability system rather than invisibly suppressed.
-	currentGrantedStaleRefDepth       int
+	currentGrantedStaleRefDepth int
 	// currentGranted{NonProgress,AssumeProgress}Depth: an enclosing tracked `can Unsafe.NonProgress:`
 	// / `can Unsafe.AssumeProgress:` discharges a wrapped loop's progress obligation just like
 	// `trusted` (the grant is in scope), but — unlike `trusted` — also propagates the effect to the

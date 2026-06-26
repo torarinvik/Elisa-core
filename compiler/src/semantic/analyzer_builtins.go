@@ -91,6 +91,10 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		{name: "owner_tag", typ: namedTypeExpr("uintptr", false), mutable: true},
 		{name: "owner_next", typ: heapRefTypeExpr("Region", true), mutable: true},
 		{name: "global_index", typ: namedTypeExpr("usize", false), mutable: true},
+		// committed: bytes physically committed from the block base, for the Windows
+		// reserve_commit/fixed lazy MEM_RESERVE+MEM_COMMIT path (arena.elisa). Must mirror the
+		// runtime Region struct field-for-field or the builtin shadows the source with a stale shape.
+		{name: "committed", typ: namedTypeExpr("usize", false), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
 	a.registerBuiltinStructType("Arena", nil, false, []builtinFieldSpec{

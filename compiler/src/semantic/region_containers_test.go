@@ -29,6 +29,87 @@ func TestRegionContainerReturnEscapeChecking(t *testing.T) {
 	}
 }
 
+// A locally-constructed struct whose container fields are region-backed must be passable to a
+// callee that grows a field through a struct-ref region param (`def f(b: mutable Bag& @r)`). The
+// region is inferred from the local's ambient auto-region and threaded into the callee — the
+// locally-constructed analogue of struct-param region threading. Before the fix this failed with
+// "cannot infer region parameter" because the local struct's region never reached the call site.
+func TestRegionStructLocalThreadsRegionParam(t *testing.T) {
+	// Region-polymorphic caller (returns region data): the local's adopted auto-region threads in.
+	poly := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_poly.elisa", `struct Bag:
+    items: mutable darray[i64]
+    extra: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> darray[i64]:
+    bag: mutable Bag = Bag([], [])
+    bag_push(bag, 1)
+    bag_push(bag, 2)
+    return bag.items
+`)
+	if all := strings.Join(poly.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("local struct should thread its region into the callee's region param; got: %s", all)
+	}
+
+	// Non-region-polymorphic caller (returns a scalar): the local's function-scoped auto-region
+	// still threads in; nothing escapes, so it is accepted.
+	nonpoly := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_nonpoly.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> i64:
+    bag: mutable Bag = Bag([])
+    bag_push(bag, 1)
+    return bag.items.count.i64()
+`)
+	if all := strings.Join(nonpoly.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("non-region-poly local struct should still thread its region; got: %s", all)
+	}
+
+	paren := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_paren.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> i64:
+    bag: mutable Bag = (Bag([]))
+    bag_push(bag, 1)
+    return bag.items.count.i64()
+`)
+	if all := strings.Join(paren.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("parenthesized local struct should still thread its region; got: %s", all)
+	}
+}
+
+// Reassigning a struct local across region scopes must NOT thread the stale declaration-time
+// region: a reassignment inside a `region inner:` then a use after `inner` dies would be a
+// use-after-free. The record is cleared on reassignment, so the later call conservatively
+// re-rejects with "cannot infer region parameter" rather than threading a dead region.
+func TestRegionStructLocalReassignClearsStaleRegion(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_reassign.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> darray[i64]:
+    bag: mutable Bag = Bag([])
+    can Memory.Allocate, Abort.Panic:
+        region inner(4096):
+            bag <- Bag([])
+    bag_push(bag, 1)
+    return bag.items
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("reassigning a struct local across regions must clear the stale region and re-reject; got: %s", all)
+	}
+}
+
 // dict containers carry their region and are escape-checked too.
 func TestRegionDictReturnEscapeChecking(t *testing.T) {
 	bad := analyzeTreeTestSourceWithSemanticErrors(t, "region_dict_escape.elisa", `def leak_dict() -> dict[i64, i64]:

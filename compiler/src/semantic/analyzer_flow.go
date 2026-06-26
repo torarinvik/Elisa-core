@@ -82,6 +82,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bindingType = a.stampContainerRegion(bindingType)
 		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, Ghost: n.Ghost}
 		a.defineLocal(sym, n.Pos())
+		// A freshly-constructed struct local whose container fields are backed by the ambient
+		// region gets that region recorded, so a call site can thread it into a callee's
+		// struct-ref region param (see region_struct_local.go).
+		a.recordStructLocalAllocRegion(sym, bindingType, n.Value)
 		a.recordRefinementChecks(n)
 		a.seedWhereRefinementFact(n)
 		if n.Value != nil && isZeroedInitializer(n.Value) {
@@ -392,6 +396,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// the interior-taint side-table makes that region visible to the check.
 		a.checkStructCopyInteriorRegionEscape(n.Target, targetType, n.Value, valueType)
 		a.recordStructInteriorRegionTaint(n.Target, n.Value, valueType)
+		// Reassigning a struct local invalidates any region recorded at its declaration; re-record
+		// from the new RHS or clear, so a later call never threads a stale (possibly dead) region.
+		a.invalidateStructLocalAllocRegionOnAssign(n.Target)
 		a.checkStoredBorrowEscapesLocal(n.Target, targetType, n.Value, valueType)
 		if ident, ok := n.Target.(*ast.Ident); ok && a.currentScope != nil {
 			if targetSym, ok := a.currentScope.Lookup(ident.Name); ok {

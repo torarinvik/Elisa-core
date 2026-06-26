@@ -341,6 +341,10 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 					a.inferFuncReturnBorrowedOwnerRefsForExpr(orderedArgs[i], actualFuncType)
 				}
 			}
+			// A locally-constructed struct argument whose container fields live in an ambient
+			// region threads that region into the callee's struct-ref region param (the
+			// locally-constructed analogue of struct-param region threading).
+			argType = a.attachStructLocalArgRegion(orderedArgs[i], argType, ft.Params[i], regionParams)
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 			if specializedType, ok := a.specializeFunctionValueType(expectedType, argType); ok {

@@ -549,6 +549,13 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			if (s.Type == nil && (isInferredDArrayBuilder(s.Value) || blockLaterUsesUntypedListLiteralAsDArray(stmts, s.Name))) || (isRegionlessContainerType(s.Type) && isAllocatingLiteral(s.Value)) {
 				return true
 			}
+			// A struct constructed with container-literal field arguments (`Bag([], [])`) allocates
+			// those fields region-lessly exactly like a bare container local, so it likewise needs an
+			// ambient auto region — both so the fields have a home and so a call site can thread that
+			// region into a callee's struct-ref region param.
+			if structLiteralAllocatesContainerArg(s.Value) {
+				return true
+			}
 		case *ast.ReturnStmt:
 			// A function that directly `return`s a region-less COMPREHENSION
 			// (`return [x for x in xs]`) or an allocating `each` QUERY
@@ -636,6 +643,30 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// structLiteralAllocatesContainerArg reports whether value is a struct construction
+// (`Bag([], [])`) one of whose arguments is an allocating container literal. Such a struct
+// allocates region-less container fields and needs an ambient auto region, the same as a bare
+// container local.
+func structLiteralAllocatesContainerArg(value ast.Expr) bool {
+	for {
+		paren, ok := value.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		value = paren.Inner
+	}
+	lit, ok := value.(*ast.StructLitExpr)
+	if !ok || lit == nil {
+		return false
+	}
+	for _, arg := range lit.Args {
+		if isAllocatingLiteral(arg) {
+			return true
+		}
+	}
+	return false
 }
 
 // isAllocatingLiteral reports whether an initializer is a container literal or
