@@ -505,6 +505,15 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	if bodyContainsAutoAlloc(stmts) {
 		return true
 	}
+	// A struct-constructed local whose address is forwarded to a call (`x = T(...)`/`x = Builder()`;
+	// `grow(&x)`) has its region-less container fields grown INTERPROCEDURALLY by a (region-poly)
+	// callee. The growth is invisible to the syntactic allocation checks above, so without an ambient
+	// auto region the call site has no region to thread into the callee's `@r` struct-ref param —
+	// the "cannot infer region parameter" gap. Synthesizing the region lets recordStructLocalAllocRegion
+	// bind the local to it and the call thread it through; the escape checker remains the hard backstop.
+	if bodyForwardsConstructedStructLocal(stmts) {
+		return true
+	}
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.RegionStmt:
@@ -588,6 +597,115 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 		}
 	}
 	return false
+}
+
+// bodyForwardsConstructedStructLocal reports whether the body declares a local from a struct
+// construction (`x: T = T(...)` or `x = Builder()` — both parse as *ast.StructLitExpr with
+// Brace==false, as does the brace form `T{...}`) and later passes `&x` (or the bare `x`) as a call
+// argument. That local's region-less container fields are grown interprocedurally by the callee, so
+// the function needs an ambient auto region for the call to thread into the callee's struct-ref
+// region param. CONSERVATIVE + SAFE: a non-allocating match gets a harmless lazy no-op region and
+// the escape checker is the hard backstop against a too-eager wrap.
+func unwrapParenExprAST(e ast.Expr) ast.Expr {
+	for {
+		paren, ok := e.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			return e
+		}
+		e = paren.Inner
+	}
+}
+
+func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
+	constructed := map[string]bool{}
+	var collect func(v reflect.Value)
+	collect = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if vd, ok := v.Interface().(*ast.VarDeclStmt); ok && vd != nil && vd.Name != "" {
+				if _, isLit := unwrapParenExprAST(vd.Value).(*ast.StructLitExpr); isLit {
+					constructed[vd.Name] = true
+				}
+			}
+			collect(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			collect(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				collect(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				collect(v.Index(i))
+			}
+		}
+	}
+	collect(reflect.ValueOf(stmts))
+	if len(constructed) == 0 {
+		return false
+	}
+	argForwardsConstructed := func(args []ast.Expr) bool {
+		for _, arg := range args {
+			inner := unwrapParenExprAST(arg)
+			if addr, ok := inner.(*ast.AddrOfExpr); ok && addr != nil {
+				inner = unwrapParenExprAST(addr.Operand)
+			}
+			if id, ok := inner.(*ast.Ident); ok && id != nil && constructed[id.Name] {
+				return true
+			}
+		}
+		return false
+	}
+	found := false
+	var scan func(v reflect.Value)
+	scan = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.CallExpr:
+				if n != nil && argForwardsConstructed(n.Args) {
+					found = true
+					return
+				}
+			case *ast.StructLitExpr:
+				if n != nil && !n.Brace && argForwardsConstructed(n.Args) {
+					found = true
+					return
+				}
+			}
+			scan(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			scan(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				scan(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				scan(v.Index(i))
+			}
+		}
+	}
+	scan(reflect.ValueOf(stmts))
+	return found
 }
 
 // isAutoAllocValue reports whether an initializer is a `new[auto] T(...)` allocation — a fresh

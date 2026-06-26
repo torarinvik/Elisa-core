@@ -46,6 +46,14 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// Resolve direct free-function call targets by name for the forwarding trigger. Overloads/last-wins
 	// is acceptable: a wrong match only forgoes (or, at worst, conservatively adds) an inferred region
 	// param — soundness is unaffected (the region threading is still verified at the real call site).
+	// Program-lifetime region roots: a container growth lexically inside `in perm:` or
+	// `in &<global>:` (a global/extern var arena) already has a program-lifetime allocation
+	// region supplied — its backing outlives every possible caller storage, so the param needs
+	// NO threaded region (and forcing one rejects the idiomatic helper that grows a caller-owned
+	// container into a global perm arena). Scoped arenas (`region r:`, `with arena ... as s`)
+	// are NOT here: their backing dies at scope exit, so growth into them must still thread (or
+	// be rejected as a dangling write).
+	permRoots := collectProgramLifetimeRoots(decls)
 	funcByName := map[string]*ast.FuncDecl{}
 	explicit := map[*ast.FuncDecl]bool{}
 	for _, fn := range cands {
@@ -70,7 +78,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			if fn == nil || explicit[fn] {
 				continue
 			}
-			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName) {
+			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots) {
 				changed = true
 			}
 		}
@@ -80,7 +88,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 }
 
-func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl) bool {
+func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool) bool {
 	if fn == nil || len(fn.Body) == 0 {
 		return false
 	}
@@ -92,7 +100,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		if cstamp, ok := regionlessRefContainer(p.Type); ok {
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
-			if paramContainerIsGrown(fn.Body, p.Name) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
 				stamp = cstamp
 			}
 		} else if sstamp, ok := regionlessRefStruct(p.Type); ok {
@@ -557,6 +565,108 @@ func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
 		case reflect.Pointer:
 			if v.IsNil() {
 				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+						found = true
+						return
+					}
+				}
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
+}
+
+// collectProgramLifetimeRoots gathers the names that, when used as an `in <name>:` allocation
+// scope, denote program-lifetime (never-freed) storage: the implicit `perm` arena plus every
+// global / extern variable (e.g. `global mutable elf_parse_arena: Arena`). A container growth
+// lexically inside such a scope needs no threaded caller region — its backing outlives all callers.
+func collectProgramLifetimeRoots(decls []scopedDecl) map[string]bool {
+	roots := map[string]bool{"perm": true}
+	for _, scoped := range decls {
+		switch d := scoped.Decl.(type) {
+		case *ast.GlobalDecl:
+			if d != nil && d.Name != "" {
+				roots[d.Name] = true
+			}
+		case *ast.ExternVarDecl:
+			if d != nil && d.Name != "" {
+				roots[d.Name] = true
+			}
+		case *ast.ExportGlobalDecl:
+			if d != nil && d.Alias != "" {
+				roots[d.Alias] = true
+			}
+		}
+	}
+	return roots
+}
+
+// storeRegionRootName returns the root identifier name of an `in <store>:` allocation expression,
+// peeling `&`, parens, and reborrow casts — so `in &elf_parse_arena:` yields "elf_parse_arena"
+// and `in perm:` yields "perm". Returns "" for any shape without a clear root ident.
+func storeRegionRootName(store ast.Expr) string {
+	for {
+		switch e := store.(type) {
+		case *ast.ParenExpr:
+			store = e.Inner
+		case *ast.AddrOfExpr:
+			store = e.Operand
+		case *ast.CastExpr:
+			store = e.Operand
+		default:
+			if id := rootIdentExpr(store); id != nil {
+				return id.Name
+			}
+			return ""
+		}
+	}
+}
+
+// paramContainerIsGrownNeedingRegion is the region-inference-facing variant of
+// paramContainerIsGrown: it reports whether the param's container is grown in a way that REQUIRES
+// threading the caller's region — i.e. a growth that is NOT lexically inside a program-lifetime
+// `in perm:` / `in &<global>:` scope. A growth whose allocation region is program-lifetime is
+// skipped (its backing outlives every caller, so no region param is needed); a growth into a
+// scoped/local arena, or with no enclosing region scope, still counts (preserving the prior
+// "cannot infer region parameter" / escape behaviour — soundness unchanged). This is the missing
+// complement to paramFieldContainerIsGrown's scope-skip, but restricted to PROGRAM-LIFETIME scopes
+// so a scoped-arena growth is never silently accepted.
+func paramContainerIsGrownNeedingRegion(stmts []ast.Stmt, name string, permRoots map[string]bool) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			// A growth inside an `in <programLifetimeArena>:` scope already has a program-lifetime
+			// allocation region supplied lexically — don't descend (it needs no threaded region).
+			if in, ok := v.Interface().(*ast.InStoreStmt); ok && in != nil {
+				if permRoots[storeRegionRootName(in.Store)] {
+					return
+				}
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
