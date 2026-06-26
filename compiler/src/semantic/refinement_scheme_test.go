@@ -132,3 +132,37 @@ func TestExternCallRefinementSchemeFallsBackToSignatureRefinements(t *testing.T)
 		t.Fatalf("expected extern return refinement to survive fallback, got %+v", scheme.ReturnRefinements)
 	}
 }
+
+func TestCloneSpecSignaturePreservesSplitChannels(t *testing.T) {
+	src := `
+law Positive(self: i64) = self > 0
+
+def touch(p: mutable i64&) -> i64 ensures p is Positive:
+    requires p > 0
+    ensure result == 1
+    p <- 1
+    return 1
+`
+	result := analyzeTreeTestSource(t, "spec_signature_clone_channels.elisa", src)
+	sym, ok := result.GlobalScope.Lookup("touch")
+	if !ok {
+		t.Fatal("expected touch symbol")
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || ft.SpecSignature == nil {
+		t.Fatalf("expected touch to have a function type with SpecSignature, got %T", sym.Type)
+	}
+	clone := cloneSpecSignature(ft.SpecSignature)
+	if clone == nil {
+		t.Fatal("expected cloned signature")
+	}
+	if len(clone.Requires) != 1 || len(clone.Ensures) != 1 || len(clone.ParamPostconditionLaws) != 1 {
+		t.Fatalf("clone lost split channels: requires=%d ensures=%d paramPostconditionLaws=%d", len(clone.Requires), len(clone.Ensures), len(clone.ParamPostconditionLaws))
+	}
+	clone.Requires = nil
+	clone.Ensures = nil
+	clone.ParamPostconditionLaws = nil
+	if len(ft.SpecSignature.Requires) != 1 || len(ft.SpecSignature.Ensures) != 1 || len(ft.SpecSignature.ParamPostconditionLaws) != 1 {
+		t.Fatalf("mutating clone should not mutate original split channels")
+	}
+}
