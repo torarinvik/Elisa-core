@@ -1032,6 +1032,56 @@ func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
 		}
 	}
 	a.seedSelfStructInvariantsAsAssertFacts(fn)
+	a.checkRequiresVacuity(fn)
+}
+
+// checkRequiresVacuity flags a function whose `requires` preconditions are PROVABLY contradictory
+// (their conjunction is unsatisfiable). Such a function's body assumes its own `requires` as
+// hypotheses, so contradictory preconditions let it vacuously "prove" ANY `ensure` postcondition. This
+// is sound today only because every call site must itself discharge the precondition (which it never
+// can), but it is a latent leak for exported / entry / uncalled functions where no call site exists to
+// catch the impossibility — and it is almost always a real authoring bug regardless.
+//
+// SOUNDNESS OF THE CHECK ITSELF (mirrors the discharge ladder's "only unsat concludes" discipline):
+// we ask the solver whether the CONJUNCTION of the `requires` clauses is satisfiable, and flag ONLY
+// when it answers `unsat`. `sat` (a witnessing model exists), `unknown` (timeout/incompleteness), a
+// clause outside the SMT fragment, or no solver at all all leave the function unflagged — so a
+// tight-but-satisfiable precondition is never a false positive. A clause we cannot translate is simply
+// dropped from the conjunction (a weaker assertion can only become MORE satisfiable, never less), so a
+// partial translation can lose a true contradiction but can never fabricate one.
+func (a *Analyzer) checkRequiresVacuity(fn *ast.FuncDecl) {
+	if a == nil || fn == nil || len(fn.Requires) == 0 {
+		return
+	}
+	solver := a.openSMT()
+	if solver == nil {
+		return // SMT off / unavailable — decline, exactly like the discharge tier.
+	}
+	tr := a.newSMTTranslator(nil)
+	var b strings.Builder
+	asserted := 0
+	for _, req := range fn.Requires {
+		if req == nil {
+			continue
+		}
+		tr.requiresHypMode = true
+		h, ok := tr.boolTerm(req, nil)
+		tr.requiresHypMode = false
+		if !ok {
+			continue // outside the SMT fragment — drop (keeps the conjunction weaker, never stronger).
+		}
+		b.WriteString("(assert " + h + ")\n")
+		asserted++
+	}
+	if asserted < 1 {
+		return // nothing translatable to contradict.
+	}
+	query := tr.factPreamble() + b.String()
+	res, _ := solver.Check(query)
+	if res != smt.Unsat {
+		return // sat / unknown / error → not proven contradictory → do NOT flag.
+	}
+	a.proofLint(fn.Position, "the `requires` preconditions of %q are contradictory (their conjunction is unsatisfiable); the function can never be called and its body can vacuously prove any `ensure`", fn.Name)
 }
 
 // seedSelfStructInvariantsAsAssertFacts assumes the struct invariants of every struct-typed parameter
