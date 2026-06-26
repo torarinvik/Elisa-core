@@ -15,6 +15,35 @@ func whereRefinementTypeExpr(te ast.TypeExpr) (*ast.WhereRefinementTypeExpr, boo
 	return nil, false
 }
 
+// whereTypeForReassignTarget returns the declared where-refinement type of a plain-identifier
+// local when (and only when) its DECLARED type is a WhereRefinementTypeExpr. It is a pure lookup
+// over the symbol's originating VarDeclStmt AST: non-identifier targets, non-locals, and
+// non-where-typed locals all yield (nil,"",false), so reassignment re-discharge is a no-op
+// everywhere except where-typed locals. Added for assignment re-discharge (analyzer_flow.go) and
+// deliberately does NOT touch any existing discharge function.
+func (a *Analyzer) whereTypeForReassignTarget(target ast.Expr) (*ast.WhereRefinementTypeExpr, string, bool) {
+	if a == nil || a.currentScope == nil {
+		return nil, "", false
+	}
+	ident, ok := target.(*ast.Ident)
+	if !ok {
+		return nil, "", false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil || sym.Kind != SymbolLocal {
+		return nil, "", false
+	}
+	decl, ok := sym.Node.(*ast.VarDeclStmt)
+	if !ok || decl == nil || decl.Type == nil {
+		return nil, "", false
+	}
+	wt, ok := whereRefinementTypeExpr(decl.Type)
+	if !ok || wt == nil || wt.Predicate == nil {
+		return nil, "", false
+	}
+	return wt, ident.Name, true
+}
+
 func (a *Analyzer) analyzeParamWhereRefinements(fn *ast.FuncDecl) {
 	if a == nil || fn == nil {
 		return

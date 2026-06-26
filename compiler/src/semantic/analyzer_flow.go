@@ -415,6 +415,24 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateSMTAssertFactsForTarget(n.Target)
 		if !n.Optional {
 			a.recordSMTAssignmentFact(n.Target, n.Value)
+			// Re-discharge the where-invariant on reassignment of a where-typed local. The binding's
+			// declared type still advertises `x where P`, so the new RHS must re-prove P[x ↦ rhs] —
+			// otherwise an out-of-range reassignment silently violates the refinement. No-op unless the
+			// target is a where-typed local (whereTypeForReassignTarget gates this). Mirrors the
+			// binding-site cycle in dischargeLocalWhereRefinement: refuted → hard error, unknown →
+			// runtime lint, proved → re-seed the fact for the new value.
+			if wt, name, ok := a.whereTypeForReassignTarget(n.Target); ok {
+				if !a.dischargeWhereRefinement(wt, name, n.Value, n.Pos(), "where refinement on reassignment") {
+					a.recordProof(n.Pos(), "where refinement on reassignment", "where", ProofRuntime)
+					subst := map[string]ast.Expr{}
+					if n.Value != nil {
+						subst[name] = n.Value
+					}
+					diag := a.buildRequiresFailureDiagnostic(wt.Predicate, subst, "")
+					a.proofLint(n.Pos(), "%s", diag.Format("where refinement on reassignment"))
+				}
+				a.seedRangeFactsFromCondition(wt.Predicate)
+			}
 		}
 	case *ast.AugAssignStmt:
 		targetType := a.assignmentTargetType(n.Target)
