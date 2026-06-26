@@ -265,9 +265,19 @@ type Analyzer struct {
 	// outer-region slot (a dangling pointer once the inner region is freed).
 	regionLifetimeOrdinals map[string]int
 	regionLifetimeCounter  int
-	currentRegionMarks     map[*Symbol]regionMarkState
-	currentCheckpoints     map[*Symbol]checkpointState
-	currentRegionRefs      map[*Symbol]regionRefState
+	// regionLifetimeAncestors maps a local region name to the names of the
+	// regions that were lexically OPEN (live enclosing region blocks) at the
+	// point it was declared — i.e. its true nesting ancestors. The outlives-
+	// lattice consults this so only genuinely nested regions are comparable;
+	// disjoint sibling regions, absent from each other's ancestor set, are
+	// incomparable (neither outlives the other). regionLiveStack is the stack of
+	// currently-open region names used to populate it; it is saved/restored
+	// across a scoped `region NAME(...):` block exactly like currentRegions.
+	regionLifetimeAncestors map[string][]string
+	regionLiveStack         []string
+	currentRegionMarks      map[*Symbol]regionMarkState
+	currentCheckpoints      map[*Symbol]checkpointState
+	currentRegionRefs       map[*Symbol]regionRefState
 	// currentStructInteriorRegionTaint records, per region-less aggregate local,
 	// the innermost (shortest-lived) region name that one of its interior
 	// container/view fields was stored a value from. A struct's TYPE never carries

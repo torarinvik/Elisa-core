@@ -484,17 +484,91 @@ func (a *Analyzer) regionLifetimeOrdinal(region string) (int, bool) {
 
 // regionOutlives reports whether region `outer` strictly outlives region `inner`
 // — i.e. `inner` is freed first, so a pointer into `inner` stored in `outer`'s
-// bucket would dangle. Only decides when both regions are comparable.
+// bucket would dangle. Only decides when the two regions are *comparable* in the
+// lattice, which means TRUE LEXICAL NESTING: `outer` must be an enclosing
+// ancestor of `inner` (or a caller-owned region param, which outlives every
+// local). DISJOINT SIBLING regions (sequential `region a:` then `region b:`,
+// neither nested in the other) are INCOMPARABLE — their lifetimes don't overlap,
+// so neither outlives the other and this returns false. Declaration order alone
+// (the old monotonic-ordinal model) wrongly ordered siblings; ancestry does not.
 func (a *Analyzer) regionOutlives(outer, inner string) bool {
 	if outer == inner {
 		return false
 	}
-	oo, ok1 := a.regionLifetimeOrdinal(outer)
-	io, ok2 := a.regionLifetimeOrdinal(inner)
-	if !ok1 || !ok2 {
+	// A caller-owned region param outlives every local region: it is a true
+	// (implicit) ancestor of any region declared inside the function body.
+	if a.lookupRegionParam(outer) {
+		// Only orders against a comparable (tracked) inner; an unknown/borrowed
+		// inner is not something we can prove is shorter-lived.
+		_, innerTracked := a.regionLifetimeOrdinal(inner)
+		return innerTracked && !a.lookupRegionParam(inner)
+	}
+	// Both must be tracked local regions to be comparable at all.
+	if _, ok := a.regionLifetimeOrdinal(outer); !ok {
 		return false
 	}
-	return oo < io
+	if _, ok := a.regionLifetimeOrdinal(inner); !ok {
+		return false
+	}
+	// `outer` strictly outlives `inner` iff `outer` lexically encloses `inner`,
+	// i.e. `outer` is in `inner`'s recorded ancestor set. Siblings appear in
+	// neither's ancestor set → incomparable → false.
+	return a.regionIsAncestor(outer, inner)
+}
+
+// regionIsAncestor reports whether region `outer` was lexically open (a live
+// enclosing region) at the point region `inner` was declared.
+func (a *Analyzer) regionIsAncestor(outer, inner string) bool {
+	if a == nil {
+		return false
+	}
+	for _, anc := range a.regionLifetimeAncestors[inner] {
+		if anc == outer {
+			return true
+		}
+	}
+	return false
+}
+
+// regionStoreEscapes decides whether storing a value living in `valueRegion`
+// into a slot living in `targetRegion` leaves a dangling reference — i.e. the
+// target can be read after the value's region is freed. A store is UNSAFE unless
+// the value is PROVABLY at least as long-lived as the target:
+//
+//   - same region                        → safe
+//   - value region is a caller-owned param / heap / untracked long-lived arena
+//     (ordinal not a tracked local)        → safe (outlives any local target)
+//   - target is a tracked-local but value is region-param/untracked-long-lived
+//     → safe (value outlives the local target)
+//   - both are tracked locals and the target is a true ANCESTOR of the value
+//     (genuine nesting: target outlives value)            → UNSAFE
+//   - both are tracked locals that are INCOMPARABLE (disjoint sibling regions,
+//     neither nested in the other): the value's region may already be freed when
+//     the target is later read, so we cannot prove the value outlives the target
+//     → UNSAFE (conservative; the old monotonic-ordinal model wrongly accepted)
+func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
+	if a == nil || targetRegion == "" || valueRegion == "" || targetRegion == valueRegion {
+		return false
+	}
+	_, targetTracked := a.regionLifetimeOrdinal(targetRegion)
+	_, valueTracked := a.regionLifetimeOrdinal(valueRegion)
+	// A value in an untracked region (heap, borrowed/process arena, unknown name)
+	// or in a caller-owned region param outlives every local target — never an
+	// escape on the value side.
+	if !valueTracked || a.lookupRegionParam(valueRegion) {
+		return false
+	}
+	// Value is a tracked local region. If the target is NOT a tracked local
+	// (it's a param/heap/long-lived arena), the value is shorter-lived than the
+	// target → the original outlives rule already handled this as unsafe.
+	if !targetTracked || a.lookupRegionParam(targetRegion) {
+		return a.regionOutlives(targetRegion, valueRegion)
+	}
+	// Both are tracked local regions. Safe ONLY when the value's region provably
+	// outlives (encloses) the target's region — i.e. value is an ancestor of
+	// target. Otherwise (target ancestor of value, OR disjoint siblings) it is
+	// not provably safe → reject.
+	return !a.regionIsAncestor(valueRegion, targetRegion)
 }
 
 // checkNestedRegionStoreEscape rejects storing a value whose region is freed
@@ -523,7 +597,7 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType,
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
-	if a.regionOutlives(targetRegion, valueRegion) {
+	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
 }
@@ -547,7 +621,7 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	if targetRegion == "" {
 		return
 	}
-	if a.regionOutlives(targetRegion, valueRegion) {
+	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
 }
@@ -584,7 +658,7 @@ func (a *Analyzer) checkNestedRegionBulkStoreEscape(sourceExpr, receiverExpr ast
 		}
 		return
 	}
-	if a.regionOutlives(targetRegion, valueRegion) {
+	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
 }
@@ -850,7 +924,7 @@ func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targ
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
-	if a.regionOutlives(targetRegion, valueRegion) {
+	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
 }
@@ -978,7 +1052,7 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 		return
 	}
-	if a.regionOutlives(targetRegion, valueRegion) {
+	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, via, valueRegion, targetRegion, targetRegion)
 	}
 }

@@ -108,6 +108,7 @@ func scopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
 func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	savedScope := a.currentScope
 	savedRegions := a.currentRegions
+	savedRegionLiveStack := a.regionLiveStack
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
 	savedRegionRefs := a.currentRegionRefs
@@ -134,6 +135,9 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	}
 	a.currentScope = savedScope
 	a.currentRegions = savedRegions
+	// Unwind the live-region stack: this region (and anything nested under it) is
+	// now closed, so a following sibling region won't see it as an ancestor.
+	a.regionLiveStack = savedRegionLiveStack
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
 	a.currentRegionRefs = savedRegionRefs
@@ -304,6 +308,26 @@ func (a *Analyzer) analyzeRegionDecl(stmt *ast.RegionStmt) *Symbol {
 	}
 	a.regionLifetimeCounter++
 	a.regionLifetimeOrdinals[stmt.Name] = a.regionLifetimeCounter
+	// Record the region's true lexical ancestors (the regions currently open on
+	// the live stack). The outlives-lattice uses this — not raw declaration
+	// order — so that disjoint sibling regions stay incomparable. The push onto
+	// regionLiveStack is matched by a save/restore in analyzeScopedArenaStmt
+	// (the stack is unwound when the region's block exits).
+	if a.regionLifetimeAncestors == nil {
+		a.regionLifetimeAncestors = map[string][]string{}
+	}
+	ancestors := make([]string, len(a.regionLiveStack))
+	copy(ancestors, a.regionLiveStack)
+	a.regionLifetimeAncestors[stmt.Name] = ancestors
+	// Only a SCOPED region block (one with a body) becomes a live enclosing
+	// ancestor for regions declared inside it; its push is unwound by the
+	// save/restore in analyzeScopedArenaStmt. A bare `region NAME(...)` (no body,
+	// destroyed by an explicit `destroy`) is a flat sibling — pushing it would
+	// never be popped and would wrongly order following bare siblings, so it is
+	// recorded with its ancestors but not added to the live stack.
+	if len(stmt.Body) > 0 {
+		a.regionLiveStack = append(a.regionLiveStack, stmt.Name)
+	}
 	// A region owns a bulk allocation, so it is an affine resource that must be
 	// consumed on every path before scope exit (like any other linear value).
 	// A bare `region NAME(...)` must be matched by `destroy NAME`; a scoped

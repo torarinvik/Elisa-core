@@ -211,6 +211,69 @@ def f() -> i64:
 	}
 }
 
+// DISJOINT SIBLING regions: a value produced in region `b` is stored into a
+// container that lives in region `a`, where `a` and `b` are sequential sibling
+// blocks (neither nested in the other). `a` is already freed by the time `b`
+// runs, so `outer_a`'s buffer is dangling storage. The old monotonic-ordinal
+// model ordered the siblings by declaration order (a before b) and SILENTLY
+// ACCEPTED this. Siblings are now incomparable, so the cross-store must not be
+// proved safe. (We assert it is not silently accepted; an error here is fine —
+// incomparable conservatively declines.)
+func TestDisjointSiblingRegionCrossStoreNotAccepted(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "sibling_cross_store.elisa", `def f() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        outer_a: mutable darray[darray[u8]] @a = []
+        region a(4096):
+            w: mutable darray[u8] @a = []
+            w.push(1)
+            outer_a.push(w)
+        region b(4096):
+            v: mutable darray[u8] @b = []
+            v.push(66)
+            outer_a.push(v)
+        return 0
+`)
+	all := strings.Join(res.Errors(), "\n")
+	// The previously-unsound acceptance is the failure mode: storing a b-region
+	// value into the a-region container (disjoint sibling) must no longer be
+	// proved safe by the old declaration-order ordinal ordering. It must be
+	// rejected as a dangling store.
+	if !strings.Contains(all, "freed first") {
+		t.Fatalf("expected disjoint-sibling cross-store to be rejected as a dangling reference; got: %s", all)
+	}
+}
+
+// Direct lattice unit check: disjoint sibling regions must be incomparable, while
+// a true ancestor relationship must still order correctly.
+func TestRegionOutlivesSiblingsIncomparable(t *testing.T) {
+	a := &Analyzer{}
+	a.regionLifetimeOrdinals = map[string]int{}
+	a.regionLifetimeAncestors = map[string][]string{}
+	// Simulate: region outer { region inner } ; then sibling sib (outer closed).
+	a.regionLifetimeOrdinals["outer"] = 1
+	a.regionLifetimeAncestors["outer"] = nil
+	a.regionLifetimeOrdinals["inner"] = 2
+	a.regionLifetimeAncestors["inner"] = []string{"outer"}
+	a.regionLifetimeOrdinals["sib"] = 3
+	a.regionLifetimeAncestors["sib"] = nil // outer already closed → no ancestor
+
+	if !a.regionOutlives("outer", "inner") {
+		t.Fatalf("true nesting: outer must outlive inner")
+	}
+	if a.regionOutlives("inner", "outer") {
+		t.Fatalf("inner must not outlive its ancestor outer")
+	}
+	if a.regionOutlives("outer", "sib") {
+		t.Fatalf("disjoint siblings outer/sib must be incomparable (outer must not be proved to outlive sib)")
+	}
+	if a.regionOutlives("sib", "outer") {
+		t.Fatalf("disjoint siblings sib/outer must be incomparable")
+	}
+	if a.regionOutlives("inner", "sib") || a.regionOutlives("sib", "inner") {
+		t.Fatalf("disjoint regions inner/sib must be incomparable")
+	}
+}
+
 // A LIST LITERAL `[v]` whose element is an inner-region container, assigned into an
 // outer-region container, copies the element's header into the longer-lived buffer —
 // it dangles once the inner region is freed (runtime-confirmed segfault). The store-site
