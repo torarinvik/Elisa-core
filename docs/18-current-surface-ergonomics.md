@@ -38,6 +38,39 @@ Current rules:
 - `expr is Variant as alias` binds `alias` as a narrowed variant view in the truthy branch
 - ordinary `match` arms remain exhaustive for named payload patterns, so `match value: Type.Variant(field: x): ...` must still name every payload field
 
+## Anonymous `where` refinement types
+
+`T where predicate` is accepted in binder-like type positions as anonymous refinement sugar. The
+predicate is written against the value being bound, so parameter and local refinements name the
+binder directly, while return refinements use `result`.
+
+```elisa
+def at(xs: darray[i64], index: i64 where 0 <= index and index < xs.count) -> i64:
+    return xs[index]
+
+def clamp(n: i64, limit: i64) -> i64 where 0 <= result and result < limit:
+    value: i64 where 0 <= value and value < limit = n
+    return value
+```
+
+Current behavior:
+
+- the parser preserves `T where predicate` syntax in parameters, returns, and local typed bindings
+- the semantic type is representation-erased to `T`; anonymous `where` predicates do not create a
+  distinct runtime carrier, ABI shape, `SameType` identity, or `AssignableTo` relationship
+- constant anonymous predicates are checked for `bool` type today
+- TODO lowering: anonymous `where` predicates should lower to the same proof/check pipeline as a
+  compiler-synthesized value law over the bound subject
+
+Restrictions:
+
+- use `T is Law` when the predicate is named, reusable, externally documentable, or should seed a
+  first-class refinement fact through existing law machinery
+- use `requires` for obligations the caller must establish before entering a function
+- use `ensure` for named postconditions or facts a function promises to establish for its callers
+- keep `T where predicate` for local, anonymous binder refinements; it is not a subtype operator and
+  must not affect storage, layout, overload resolution, or assignment compatibility
+
 ## Grouped `is` alternatives
 
 Use bracketed `is [A | B | C]` when a value can match any of several variants or enum members. Short checks stay inline and the bracketed form keeps the intent obvious.

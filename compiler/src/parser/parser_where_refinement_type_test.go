@@ -48,6 +48,35 @@ def local(xs: darray[i64]) -> i64:
 	}
 }
 
+func TestParseWhereRefinementTypePreservesAnonymousPredicateSyntax(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+def clamp(n: i64, limit: i64 where limit > 0) -> i64 where 0 <= result and result < limit:
+    value: i64 where 0 <= value and value < limit = n
+    return value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	param, ok := fn.Params[1].Type.(*ast.WhereRefinementTypeExpr)
+	if !ok {
+		t.Fatalf("expected parameter where refinement, got %T", fn.Params[1].Type)
+	}
+	if got := unparse.FormatType(param); got != "i64 where (limit > 0)" {
+		t.Fatalf("expected parameter where syntax to round-trip, got %q", got)
+	}
+	ret, ok := fn.ReturnType.(*ast.WhereRefinementTypeExpr)
+	if !ok {
+		t.Fatalf("expected return where refinement, got %T", fn.ReturnType)
+	}
+	if got := unparse.FormatType(ret); got != "i64 where ((0 <= result) and (result < limit))" {
+		t.Fatalf("expected return where syntax to round-trip, got %q", got)
+	}
+
+	// TODO lowering: this anonymous predicate should eventually lower like a synthesized
+	// value-law refinement over the binder/result, while preserving the source syntax above.
+}
+
 func TestParseWhereRefinementDoesNotReplaceNamedLawRefinement(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 def f(x: i64 is Bounded[0, 10]) -> i64:
