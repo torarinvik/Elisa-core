@@ -119,12 +119,28 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 			sig.ParamPredicates = append(sig.ParamPredicates, NewRefinementPredicate(RefinementPredicateType, subject, pred.Name, pred.Args, deps, nil, pred.Position))
 		}
 	}
+	// anonymous `T where <bool-expr>` refinements on params
+	for i, param := range params {
+		wt, ok := whereRefinementTypeExpr(param.Type)
+		if !ok || wt == nil || wt.Predicate == nil {
+			continue
+		}
+		subject := binders[i].Ref()
+		deps := specDependencies([]ast.Expr{wt.Predicate}, nameRefs, subject)
+		sig.ParamPredicates = append(sig.ParamPredicates, NewRefinementPredicate(RefinementPredicateType, subject, "", nil, deps, wt.Predicate, wt.Position))
+	}
 	if rt, ok := a.paramRefinementTypeExpr(ret); ok && rt != nil && result != nil {
 		subject := result.Ref()
 		for _, pred := range rt.Preds {
 			deps := specDependencies(pred.Args, nameRefs, subject)
 			sig.ResultPredicates = append(sig.ResultPredicates, NewRefinementPredicate(RefinementPredicateType, subject, pred.Name, pred.Args, deps, nil, pred.Position))
 		}
+	}
+	// anonymous `T where <bool-expr>` refinement on the return type
+	if wt, ok := whereRefinementTypeExpr(ret); ok && wt != nil && wt.Predicate != nil && result != nil {
+		subject := result.Ref()
+		deps := specDependencies([]ast.Expr{wt.Predicate}, nameRefs, subject)
+		sig.ResultPredicates = append(sig.ResultPredicates, NewRefinementPredicate(RefinementPredicateType, subject, "", nil, deps, wt.Predicate, wt.Position))
 	}
 	for _, req := range requires {
 		deps := specDependencies([]ast.Expr{req}, nameRefs, BinderRef{})

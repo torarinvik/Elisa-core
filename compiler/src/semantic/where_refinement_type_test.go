@@ -134,3 +134,101 @@ def helper(x: i64) -> bool:
 		t.Fatalf("call predicate should be rejected as impure for v1, got:\n%s", all)
 	}
 }
+
+// TestWhereParamPopulatesSpecSignature verifies that a `T where <bool>` annotation on a parameter
+// produces a non-empty ParamPredicates entry in the canonical SpecSignature.
+func TestWhereParamPopulatesSpecSignature(t *testing.T) {
+	src := `
+def f(n: i64 where true) -> i64:
+    return n + 1
+`
+	result := analyzeTreeTestSource(t, "where_spec_param.elisa", src)
+	sym, ok := result.GlobalScope.Lookup("f")
+	if !ok || sym == nil {
+		t.Fatal("symbol 'f' not found in global scope")
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || ft == nil {
+		t.Fatal("symbol 'f' is not a FuncType")
+	}
+	sig := ft.SpecSignature
+	if sig == nil {
+		t.Fatal("SpecSignature is nil for function with where param refinement")
+	}
+	if len(sig.ParamPredicates) == 0 {
+		t.Fatal("expected non-empty ParamPredicates for 'where' param refinement, got empty")
+	}
+	pred := sig.ParamPredicates[0]
+	if pred.Subject.Kind != SpecBinderParam || pred.Subject.Position != 0 {
+		t.Fatalf("expected predicate subject to be param 0, got %+v", pred.Subject)
+	}
+	if pred.SourceExpr == nil {
+		t.Fatal("expected SourceExpr to be set for where predicate, got nil")
+	}
+}
+
+// TestWhereReturnPopulatesSpecSignature verifies that a `T where <bool>` annotation on a return
+// type produces a non-empty ResultPredicates entry in the canonical SpecSignature.
+func TestWhereReturnPopulatesSpecSignature(t *testing.T) {
+	src := `
+def g() -> i64 where true:
+    return 1
+`
+	result := analyzeTreeTestSource(t, "where_spec_return.elisa", src)
+	sym, ok := result.GlobalScope.Lookup("g")
+	if !ok || sym == nil {
+		t.Fatal("symbol 'g' not found in global scope")
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || ft == nil {
+		t.Fatal("symbol 'g' is not a FuncType")
+	}
+	sig := ft.SpecSignature
+	if sig == nil {
+		t.Fatal("SpecSignature is nil for function with where return refinement")
+	}
+	if len(sig.ResultPredicates) == 0 {
+		t.Fatal("expected non-empty ResultPredicates for 'where' return refinement, got empty")
+	}
+	pred := sig.ResultPredicates[0]
+	if pred.Subject.Kind != SpecBinderResult {
+		t.Fatalf("expected predicate subject to be result binder, got %+v", pred.Subject)
+	}
+	if pred.SourceExpr == nil {
+		t.Fatal("expected SourceExpr to be set for where return predicate, got nil")
+	}
+}
+
+// TestWhereSpecSignatureClone verifies that cloneSpecSignature preserves where predicates.
+func TestWhereSpecSignatureClone(t *testing.T) {
+	src := `
+def h(n: i64 where true) -> i64 where true:
+    return n
+`
+	result := analyzeTreeTestSource(t, "where_spec_clone.elisa", src)
+	sym, ok := result.GlobalScope.Lookup("h")
+	if !ok || sym == nil {
+		t.Fatal("symbol 'h' not found in global scope")
+	}
+	ft, ok := sym.Type.(*FuncType)
+	if !ok || ft == nil {
+		t.Fatal("symbol 'h' is not a FuncType")
+	}
+	sig := ft.SpecSignature
+	if sig == nil {
+		t.Fatal("SpecSignature is nil")
+	}
+	cloned := cloneSpecSignature(sig)
+	if len(cloned.ParamPredicates) != len(sig.ParamPredicates) {
+		t.Fatalf("clone lost param predicates: got %d, want %d", len(cloned.ParamPredicates), len(sig.ParamPredicates))
+	}
+	if len(cloned.ResultPredicates) != len(sig.ResultPredicates) {
+		t.Fatalf("clone lost result predicates: got %d, want %d", len(cloned.ResultPredicates), len(sig.ResultPredicates))
+	}
+	if cloned.ParamPredicates[0].SourceExpr == nil {
+		t.Fatal("cloned param predicate has nil SourceExpr")
+	}
+	if cloned.ResultPredicates[0].SourceExpr == nil {
+		t.Fatal("cloned result predicate has nil SourceExpr")
+	}
+}
