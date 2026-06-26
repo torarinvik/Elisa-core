@@ -165,6 +165,22 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 			parts = append(parts, ast.RefStateMarker(n.State))
 		}
 		return formatTypeExpr(n.Base) + "[" + strings.Join(parts, ", ") + "]"
+	case *ast.RefinementTypeExpr:
+		parts := make([]string, 0, len(n.Preds))
+		for _, pred := range n.Preds {
+			part := pred.Name
+			if len(pred.Args) != 0 {
+				args := make([]string, 0, len(pred.Args))
+				for _, arg := range pred.Args {
+					args = append(args, formatExpr(arg))
+				}
+				part += "[" + strings.Join(args, ", ") + "]"
+			}
+			parts = append(parts, part)
+		}
+		return formatTypeExpr(n.Base) + " is " + strings.Join(parts, " and ")
+	case *ast.WhereRefinementTypeExpr:
+		return formatTypeExpr(n.Base) + " where " + formatExpr(n.Predicate)
 	case *ast.MutableType:
 		return "mutable " + formatTypeExpr(n.Elem)
 	case *ast.TailType:

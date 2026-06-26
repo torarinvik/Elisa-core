@@ -460,6 +460,9 @@ func (*NamedType) typeExprTag()                        {}
 func (*RefinementTypeExpr) typeExprTag()               {}
 func (n *RefinementTypeExpr) Pos() lexer.Pos           { return n.Position }
 func (*RefinementTypeExpr) nodeTag()                   {}
+func (*WhereRefinementTypeExpr) typeExprTag()          {}
+func (n *WhereRefinementTypeExpr) Pos() lexer.Pos      { return n.Position }
+func (*WhereRefinementTypeExpr) nodeTag()              {}
 func (*RefType) typeExprTag()                          {}
 func (*RefStateLiteralTypeExpr) typeExprTag()          {}
 func (*RefStorageLiteralTypeExpr) typeExprTag()        {}
