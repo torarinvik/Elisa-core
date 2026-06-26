@@ -101,6 +101,126 @@ Use `where` for one-off inline constraints that are too specific to name.
   the proof obligation is discharged there (or runtime-checked).
 - `SameType(T where p, T)` is `true`. The predicate is invisible to monomorphization and generics.
 
+## Named refinement aliases: `refine NAME = BASE where PRED`
+
+A **named refinement alias** is a reusable, declaration-level shorthand for an anonymous
+`where` refinement.  It names a predicate once and lets you use the name as a type in binder
+positions.
+
+```elisa
+refine Positive = i64 where self > 0
+
+def needs_positive(n: Positive) -> i64:
+    return n
+
+def caller() -> i64:
+    return needs_positive(5)   # proven: 5 > 0 ✓
+```
+
+### Parametric aliases
+
+The alias may carry value parameters (square-bracket suffix), which are substituted at each
+use site:
+
+```elisa
+refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
+
+def get(xs: darray[i64], i: IndexOf[xs]) -> i64:
+    return xs[i]
+```
+
+At the call site the compiler substitutes the concrete `xs` argument into `self >= 0 and self <
+xs.count`, then discharges via the normal three-tier ladder.
+
+### Restrictions
+
+| Restriction | Details |
+|---|---|
+| **Binder positions only** | A `refine` alias may appear as a parameter type, return type, or local-variable type annotation.  Using it as an ordinary type (e.g., inside `darray[Positive]`) is a hard error: *"may only be used in a binder position"*. |
+| **Representation erasure** | The alias erases to its base type.  `SameType(Positive param, i64 param)` is `true`; `AssignableTo` is bidirectional.  No runtime tag, no monomorphization key change. |
+| **Same discharge ladder** | The desugared `where` predicate goes through the same fact-lattice → linear → SMT ladder as any anonymous `where`.  Violations are `proofLint` warnings (hard errors under `-strict`). |
+
+The compiler desugars a `refine` alias in a binder position by rewriting the binder's type node
+to a `WhereRefinementTypeExpr` in place, so the rest of the pipeline sees no difference from a
+hand-written `where`.
+
+### Relationship to `type N = T is Law`
+
+| Form | When to use |
+|---|---|
+| `refine N = T where pred` | Predicate is complex / bespoke; you want a short name for one-off binder annotation. |
+| `law L(self: T) = pred` + `type N = T is L` | Predicate is reusable in flow (`if x is L`), contracts (`requires`), and type aliases; promotes to first-class law. |
+
+---
+
+## `where` on struct fields
+
+A struct field may carry a `where` predicate.  The compiler discharges the predicate at every
+**struct construction** site, both named-argument and positional form.
+
+```elisa
+struct Pos:
+    x: i64 where x > 0
+
+def make_valid() -> Pos:
+    return Pos(x: 5)     # proven: 5 > 0 ✓
+
+def make_pos() -> Pos:
+    return Pos(10)        # positional form also checked ✓
+
+# Pos(x: -1) and Pos(0) are hard errors / proofLint violations.
+```
+
+### Rules and restrictions
+
+| Rule | Details |
+|---|---|
+| **Discharge site** | Each struct literal (named or positional) — not field reads or assignments to fields after construction. |
+| **Self-reference only (v1)** | The predicate may reference the field itself by its own name (`x > 0`).  Cross-field references (`hi > lo`) produce a clear diagnostic: *"cross-field refinement not supported"*. |
+| **Representation erasure** | Reading `p.x` yields plain `i64`, not a where-refined type.  The predicate is construction-time proof metadata only. |
+| **Same discharge ladder** | Fact-lattice → linear → SMT, with `proofLint` fallback (hard error under `-strict`). |
+
+---
+
+## Refinement subsumption (interval entailment)
+
+When a value is known to satisfy a **stronger** law (a narrower interval), the compiler
+statically concludes it also satisfies a **weaker** law (a looser bound), with no runtime check
+emitted.
+
+```elisa
+law Positive(self: i64) = self > 0
+law InRange(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def need_positive(x: i64 is Positive) -> i64:
+    return x
+
+def caller(v: i64 is InRange[1, 100]) -> i64:
+    return need_positive(v)   # InRange[1,100] entails Positive: lo=1 > 0 ✓
+```
+
+### What entails what
+
+| Known fact | Goal | Result |
+|---|---|---|
+| `InRange[lo, hi]` with `lo > 0` | `Positive` (`> 0`) | proven statically |
+| `InRange[lo, hi]` with `lo = 0` | `Positive` (`> 0`) | NOT entailed → runtime check |
+| `InRange[lo, hi-1]` | `UpperBound[hi]` (`< hi`) | proven statically |
+| `InRange[n, n]` (point) | any comparison that `n` satisfies | proven statically |
+| Weaker law → stronger goal | any case | NOT entailed (soundness) |
+
+Subsumption also applies to **return types**: a callee returning `i64 is InRange[1, 10]` placed
+in a context that needs `i64 is Positive` is statically accepted (lo=1 > 0).
+
+### Soundness note
+
+The entailment check is **sound-only**: the prover concludes "entailed" only when it can prove
+the implication from the interval bounds.  It never falsely accepts.  If the bounds are too
+loose (e.g., `lo = 0` for a `> 0` goal), it falls through to the runtime-check tier rather
+than guessing.
+
+---
+
 ## What proves (discharge ladder, docs/85 §6)
 Conjunctions of bounds → always-on. `implies` / multi-variable linear → tier-2 (budgeted).
 `forall`/`exists` and bit masks/shifts → the SMT tier (on by default; `-nosmt` to disable).

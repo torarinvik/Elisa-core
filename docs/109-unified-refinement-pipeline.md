@@ -24,17 +24,53 @@ Surface syntax
 
 ### Stage 1 — Surface syntax
 
-Five surface spellings, all representation-erased:
+Seven surface spellings, all representation-erased:
 
 | Surface form | Binder position |
 |---|---|
 | `T where p` on a param | precondition on each call argument |
 | `T where p` on a return type | postcondition on every return point |
 | `T where p` on a local `var` / `let` | inline assertion at the declaration |
+| `refine NAME = T where p` (named alias used in a binder) | desugars to `T where p` in place; see below |
+| struct field `f: T where p` | precondition at each struct literal |
 | `requires <bool>` on a `def` | explicit precondition (same ladder) |
 | `ensure <bool>` / `<value> is Law` | explicit postcondition (same ladder) |
 
-All five produce the same internal data by the end of stage 2.
+All seven produce the same internal data by the end of stage 2.
+
+#### Named refinement aliases
+
+`refine NAME = BASE where PRED` declares a named alias.  When `NAME` appears as a binder type
+the compiler rewrites the binder's AST node to `WhereRefinementTypeExpr` in place before
+building the `SpecSignature`.  Parametric aliases carry value parameters substituted at each
+use site:
+
+```elisa
+refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
+
+def get(xs: darray[i64], i: IndexOf[xs]) -> i64:   # desugars to: i: i64 where self >= 0 and self < xs.count
+    return xs[i]
+```
+
+A `refine` alias is **binder-position-only**: using it outside a param, return, or local
+variable annotation is a compile error.  Internally the rewrite is transparent — the downstream
+pipeline sees only a `WhereRefinementTypeExpr`, never the alias name.  Erasure is preserved:
+`SameType(IndexOf[xs] param, i64 param)` is `true`.
+
+#### Struct field `where` predicates
+
+A struct field declaration may carry a `where` predicate:
+
+```elisa
+struct Pos:
+    x: i64 where x > 0
+```
+
+The predicate is discharged at every struct literal (named-arg and positional forms) via
+`analyzeStructFieldWhereRefinement`.  It is **not** a `SpecSignature` slot — it is an
+intra-construction obligation.  Cross-field references (e.g., `hi > lo` where `lo` is another
+field) are not supported in v1 and produce a diagnostic.  Erasure is preserved: reading `p.x`
+yields plain `i64`.
 
 ### Stage 2 — SpecSignature (canonical representation)
 
@@ -170,18 +206,62 @@ emit a `proofLint`.
 | Surface form | SpecSignature field | RefinementPredicateKind |
 |---|---|---|
 | param `T where p` | `ParamPredicates` | `RefinementPredicateType` |
+| `refine N = T where p` used as param type | `ParamPredicates` (desugared) | `RefinementPredicateType` |
 | return `T where p` | `ResultPredicates` | `RefinementPredicateType` |
 | `requires <bool>` | `Requires` | `RefinementPredicateRequires` |
 | `ensure <bool>` | `Ensures` | `RefinementPredicateEnsures` |
 | `<value> is Law[args]` in ensure position | `Ensures` | `RefinementPredicateLaw` |
 | local `var x: T where p` | assert-fact only (not in SpecSignature) | — |
+| struct field `f: T where p` | assert-fact at construction (not in SpecSignature) | — |
 
-Local `where` facts do not appear in `SpecSignature` because they are not part of the function's
-observable contract; they are purely intra-procedural discharge obligations.
+Local `where` facts and struct field `where` predicates do not appear in `SpecSignature` because
+they are not part of the function's observable contract; they are intra-procedural / intra-construction
+discharge obligations.
 
 ---
 
-## 6. Extension points
+## 6. Refinement subsumption (interval entailment)
+
+The discharge ladder includes a **subsumption check** before the SMT tier: when the current
+fact set contains a law whose interval bounds imply the goal law's bounds, the obligation is
+discharged statically without emitting a runtime check.
+
+The key function is `refinementPredicatesEntail` / `refinementPredicateIntervalEntails`.
+
+### What the prover checks
+
+Given a known law `InRange(self, lo, hi)` (i.e., `self >= lo and self <= hi`) and a goal law:
+
+- **Goal `Positive` (`self > 0`)**: entailed iff `lo > 0`.
+- **Goal `UpperBound[n]` (`self < n`)**: entailed iff `hi < n` (equivalently, `hi <= n-1`).
+- **Goal is the same `InRange[lo', hi']`**: entailed iff `lo' <= lo and hi <= hi'`.
+- **Point interval `InRange[n, n]`**: checked against any single-sided comparison the constant `n` satisfies.
+
+### Soundness
+
+The check is **sound-only**: it concludes "entailed" only when the implication follows from the
+interval bounds.  Weaker-implies-stronger and ambiguous cases fall through to SMT or the runtime
+tier — they are never silently accepted.
+
+```elisa
+law Positive(self: i64) = self > 0
+law InRange(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def need_pos(x: i64 is Positive) -> i64:  return x
+
+def ok(v: i64 is InRange[1, 100]) -> i64:
+    return need_pos(v)    # lo=1 > 0 → statically proven, no runtime check
+
+def not_ok(v: i64 is InRange[0, 100]) -> i64:
+    return need_pos(v)    # lo=0 is NOT > 0 → falls through to runtime check
+```
+
+Subsumption also applies to **return-type positions**: a callee returning `i64 is InRange[1, 10]`
+satisfies a caller's `i64 is Positive` return contract without a runtime check (lo=1 > 0).
+
+---
+
+## 8. Extension points
 
 - **New surface form**: add a `RefinementPredicateKind`, populate the appropriate
   `SpecSignature` field in `buildSpecSignatureFromFuncDecl`, and call `dischargeWherePredicate`
@@ -195,11 +275,15 @@ observable contract; they are purely intra-procedural discharge obligations.
 
 ---
 
-## 7. References
+## 9. References
 
 - `compiler/src/semantic/refinement_scheme.go` — `SpecSignature`, `SpecBinder`, `RefinementPredicate`
-- `compiler/src/semantic/analyzer_where_refinements.go` — all four discharge/seed entry points
+- `compiler/src/semantic/analyzer_where_refinements.go` — all discharge/seed entry points
 - `compiler/src/semantic/analyzer_refinement_scheme.go` — `buildSpecSignatureFromFuncDecl`
+- `compiler/src/semantic/analyzer_named_refinement_alias.go` — `refine NAME = BASE where PRED` desugaring
+- `compiler/src/semantic/named_refinement_alias_test.go` — alias tests
+- `compiler/src/semantic/where_struct_field_test.go` — struct field `where` tests
+- `compiler/src/semantic/refinement_subsumption_test.go` — interval entailment tests
 - `docs/85-contract-algebra.md` — discharge ladder detail, proof-hole semantics
 - `docs/95-law-and-refinement-cheatsheet.md` — surface spelling reference
 - `docs/90-smt-discharge-tier.md` — SMT tier internals

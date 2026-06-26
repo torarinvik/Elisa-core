@@ -54,6 +54,47 @@ def abs(n: i64) -> i64 where result >= 0:
     return if n >= 0: n else: -n
 ```
 
+### Level 1a — Named refinement aliases (`refine`)
+
+When a `where` predicate is used in several binder positions but is not yet complex enough to
+warrant a full `law`, name it with `refine`:
+
+```elisa
+refine Positive = i64 where self > 0
+
+def clamp_pos(n: Positive) -> Positive:
+    return n
+```
+
+The alias desugars to the equivalent `where` at each binder position and is representation-erased
+(passing a plain `i64` is still type-legal; the proof obligation is discharged at the call site).
+`refine` aliases are **binder-position-only**: using one inside `darray[Positive]` is a compile
+error.
+
+Parametric aliases carry value arguments substituted at each use:
+
+```elisa
+refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
+
+def get(xs: darray[i64], i: IndexOf[xs]) -> i64:
+    return xs[i]
+```
+
+### Level 1b — Struct field invariants (`where` on fields)
+
+A struct field may carry a `where` predicate that is discharged at every construction site:
+
+```elisa
+struct Pos:
+    x: i64 where x > 0
+
+def make() -> Pos:
+    return Pos(x: 5)    # proven: 5 > 0 ✓
+```
+
+Reading `p.x` yields plain `i64` (erasure preserved).  Cross-field predicates (`hi > lo`) are
+not yet supported in v1 and produce a diagnostic.
+
 ### Level 2 — Named laws and refinement types
 
 When a predicate is reused across multiple sites, name it as a law and build a refinement type:
@@ -69,6 +110,24 @@ def get(xs: darray[i64], i: Index[xs.count]) -> i64:
 
 `Index[xs.count]` is a refinement type — `i64` with a proven predicate attached.  The base type
 (`i64`) governs layout, ABI, and monomorphization.  The predicate is proof metadata only.
+
+#### Refinement subsumption
+
+When the compiler knows a value satisfies a **stronger** law (a narrower interval), it
+automatically concludes the value satisfies any **weaker** goal law, with no runtime check:
+
+```elisa
+law Positive(self: i64)                    = self > 0
+law InRange(self: i64, lo: i64, hi: i64)  = self >= lo and self <= hi
+
+def need_pos(x: i64 is Positive) -> i64:  return x
+
+def caller(v: i64 is InRange[1, 100]) -> i64:
+    return need_pos(v)    # lo=1 > 0 → statically entailed, zero runtime cost
+```
+
+The entailment check is **sound-only**: `InRange[0, 100]` does NOT entail `Positive` (lo=0 is
+not > 0) and falls through to a runtime check.  See docs/109 §6 for full rules.
 
 ### Level 3 — Explicit contracts (`requires` / `ensure`)
 
@@ -306,7 +365,10 @@ Features marked **(planned)** in this document are not yet implemented:
 |---|---|
 | Ordinary application code | Level 0 (+ `-fbounds-check` in debug) |
 | Library function with a non-obvious precondition | Level 1 (`where`) or Level 3 (`requires`) |
+| Named, reusable one-off predicate (binder-only) | Level 1a (`refine N = T where p`) |
+| Struct field that must always satisfy an invariant | Level 1b (field `where`) |
 | Shared predicate used at many call sites | Level 2 (named `law` + refinement type) |
+| Stronger refinement implying a weaker one | Level 2 (subsumption: no annotation needed) |
 | Public API with documented postcondition | Level 3 (`ensure`) |
 | Algebraic property that must be machine-checkable | Level 4 (`is Law` postcondition) |
 | Mutation-discipline / protocol conformance | Level 5 (effects + frame conditions) |
@@ -316,8 +378,8 @@ Features marked **(planned)** in this document are not yet implemented:
 
 ## 7. References
 
-- docs/109 — unified refinement pipeline (internals: SpecSignature, seeding, discharge)
-- docs/95 — surface spelling cheat-sheet (law / is / where / requires / ensure)
+- docs/109 — unified refinement pipeline (internals: SpecSignature, seeding, discharge, subsumption)
+- docs/95 — surface spelling cheat-sheet (law / is / where / refine / requires / ensure / subsumption)
 - docs/85 — contract algebra: discharge ladder detail, proof-hole semantics
 - docs/90 — SMT discharge tier internals
 - docs/94 — bit-level decode / mask reasoning
