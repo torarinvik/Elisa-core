@@ -603,7 +603,7 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 // falsely proven. Like the explicit-return path, a mutated-param `old()` postcondition the prover cannot
 // relate to the exit value is reported under -strict (drop -strict / use -permissive for the runtime check).
 func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
-	if a == nil || a.currentFuncDecl == nil || !a.enforceStrictProofs {
+	if a == nil || a.currentFuncDecl == nil {
 		return
 	}
 	for i, clause := range a.currentFuncDecl.EnsureValues {
@@ -611,6 +611,17 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			continue
 		}
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
+			continue
+		}
+		// Refutation gate (always on): a void-exit postcondition over params PROVABLY FALSE here is a
+		// hard error, like the refuted-`requires`/`where` gate. No `result` subst exists at a void exit
+		// (result-referencing clauses are already skipped above). Only a provably-false verdict escalates.
+		if a.ensureClauseRefuted(clause, nil) {
+			a.reportRefutedEnsure(pos, clause, nil)
+			continue
+		}
+		// The remaining ladder and its unprovable→runtime-fallback handling stay -strict-gated.
+		if !a.enforceStrictProofs {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
@@ -856,7 +867,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if a == nil || n == nil || n.Value == nil || a.currentFuncDecl == nil {
 		return
 	}
-	if len(a.currentFuncDecl.EnsureValues) == 0 || !a.enforceStrictProofs {
+	if len(a.currentFuncDecl.EnsureValues) == 0 {
 		return
 	}
 	subst := map[string]ast.Expr{"result": n.Value}
@@ -865,6 +876,18 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			continue
 		}
 		if proofAt(a.currentFuncDecl.EnsureProofs, i) != nil {
+			continue
+		}
+		// Refutation gate (always on, independent of -strict): a postcondition PROVABLY FALSE for the
+		// returned value is a hard error here, mirroring the refuted-`requires`/`where` gate. Only a
+		// provably-false verdict escalates; merely-unprovable clauses fall through to the strict ladder
+		// below (which lints / -strict-errors). Skip the rest of this clause once it is refuted.
+		if a.ensureClauseRefuted(clause, subst) {
+			a.reportRefutedEnsure(n.Pos(), clause, subst)
+			continue
+		}
+		// The remaining proving ladder and its unprovable→runtime-fallback lint stay -strict-gated.
+		if !a.enforceStrictProofs {
 			continue
 		}
 		clause = normalizeBoolLiteralEnsure(clause)
@@ -922,6 +945,50 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		diag := a.buildEnsureFailureDiagnostic(clause, subst, counterexample)
 			a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
 	}
+}
+
+// ensureClauseRefuted reports whether the postcondition `clause` (under the given substitution of
+// `result` → the returned value, or nil at a void exit) is PROVABLY FALSE on this reachable exit path.
+// This is the postcondition mirror of the precondition/`where` refutation gate (`requiresRefuted` in
+// analyzer_requires_discharge.go / analyzer_where_refinements.go): a `requires`/`where` whose negation
+// is entailed already hard-errors, and so must an `ensure` whose negation is entailed at the return site.
+//
+// It is deliberately ASYMMETRIC with the proving ladder: only a verdict of *refuted* returns true. An
+// obligation that is merely UNPROVEN (requiresUnknown) returns false and is left to the existing
+// unprovable→runtime-fallback lint. This keeps the escalation SOUND: a hard error fires only when no
+// reachable return value could satisfy the clause.
+//
+// The refutation oracle is the linear clause prover (`proveRequiresClause`), whose `requiresRefuted`
+// verdict means the clause's negation holds over the WHOLE bounded range — the exact primitive
+// `requires`/`where` use. The `result` substitution is threaded through unchanged; proveRequiresClause
+// substitutes internally (its `result` ident binds to the returned value's affine form via affineOf),
+// just as the precondition path threads the callee-param→caller-arg map. affineOf DECLINES on mutable
+// locals, so a postcondition over a reassigned local (`return y` after branch merges) yields
+// requiresUnknown, not a refutation — only constants / immutable affine values can be refuted.
+//
+// We deliberately do NOT consult an SMT negation here. trySMTProveRequires would prove `not clause`
+// against the analyzer's STANDING fact set, which can be INCOMPLETE at a return (e.g. a stale `y == 0`
+// fact from before an if/else merge that the strict ladder's WP transport corrects). Concluding
+// refutation from those facts would be unsound — the merge path can in fact satisfy the clause. The
+// linear affine prover avoids this because it relies on exact bounds and abstains on mutated locals.
+func (a *Analyzer) ensureClauseRefuted(clause ast.Expr, subst map[string]ast.Expr) bool {
+	if a == nil || clause == nil {
+		return false
+	}
+	clause = normalizeBoolLiteralEnsure(clause)
+	return a.proveRequiresClause(clause, subst) == requiresRefuted
+}
+
+// reportRefutedEnsure emits the hard error for a postcondition statically proven false on a reachable
+// exit path, reusing the rich ensure diagnostic and recording a ProofRefuted fact (mirroring the
+// requires/where refutation reporting). Unlike the unprovable lint, this fires regardless of -strict.
+func (a *Analyzer) reportRefutedEnsure(pos lexer.Pos, clause ast.Expr, subst map[string]ast.Expr) {
+	if a == nil || a.currentFuncDecl == nil {
+		return
+	}
+	a.recordProof(pos, "ensure "+a.currentFuncDecl.Name, "ensure", ProofRefuted)
+	diag := a.buildEnsureFailureDiagnostic(clause, subst, "")
+	a.errorf(pos, "postcondition of %q is provably violated: %s", a.currentFuncDecl.Name, diag.FormatEnsure(a.currentFuncDecl.Name))
 }
 
 // tryProveEnsureNullnessCastDisjunct discharges a disjunctive postcondition `(P != null) or (result == …)`
