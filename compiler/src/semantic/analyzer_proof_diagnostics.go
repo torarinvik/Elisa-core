@@ -226,6 +226,112 @@ func smtFactVars(sf smtFact) map[string]bool {
 	return out
 }
 
+// FormatEnsure returns a multi-line human-readable string for an unprovable postcondition,
+// framed for `ensure` (goal over result/old) rather than a precondition at a call site.
+func (d proofDiagnostic) FormatEnsure(funcName string) string {
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("ensure postcondition of %q could not be proven statically at this point\n", funcName))
+	b.WriteString(fmt.Sprintf("  goal: %s\n", d.Goal))
+	if len(d.RelevantFacts) > 0 {
+		b.WriteString("  known facts:\n")
+		for _, f := range d.RelevantFacts {
+			b.WriteString(fmt.Sprintf("    - %s\n", f))
+		}
+	}
+	b.WriteString(fmt.Sprintf("  suggestion: %s", d.Suggestion))
+	if d.Counterexample != "" {
+		b.WriteString(fmt.Sprintf("\n  (it can fail when %s)", d.Counterexample))
+	}
+	return b.String()
+}
+
+// buildEnsureFailureDiagnostic constructs a rich proof-failure diagnostic for an unprovable
+// `ensure` clause. It renders the postcondition goal (with `result` substituted by the return
+// expression where available), collects a short list of scope facts that touch the goal's
+// variables, and proposes a concrete fix. Like buildRequiresFailureDiagnostic this is purely
+// diagnostic — it changes nothing about the proof outcome and performs no solving.
+func (a *Analyzer) buildEnsureFailureDiagnostic(clause ast.Expr, subst map[string]ast.Expr, counterexample string) proofDiagnostic {
+	// 1. Render the goal with result/old substituted so the diagnostic shows the return-side form.
+	goal := renderSubstitutedGoal(clause, subst)
+
+	// 2. Collect variables that appear in the goal.
+	goalVars := collectExprIdents(clause, subst)
+
+	// 3. Gather relevant range facts.
+	var facts []string
+	seen := map[string]bool{}
+	rangeFacts := a.visibleRangeFacts()
+	for name, r := range rangeFacts {
+		if !goalVars[name] {
+			continue
+		}
+		rendered := renderRangeFact(name, r)
+		if rendered != "" && !seen[rendered] {
+			facts = append(facts, rendered)
+			seen[rendered] = true
+		}
+		if len(facts) >= 5 {
+			break
+		}
+	}
+
+	// 4. Gather relevant SMT assert facts (branch conditions, asserts) up to the cap.
+	if len(facts) < 5 && a.currentScope != nil {
+		for sc := a.currentScope; sc != nil; sc = sc.Parent {
+			for _, sf := range sc.smtAssertFacts {
+				if sf.Expr == nil {
+					continue
+				}
+				factVars := smtFactVars(sf)
+				relevant := false
+				for v := range factVars {
+					if goalVars[v] {
+						relevant = true
+						break
+					}
+				}
+				if !relevant {
+					continue
+				}
+				rendered := unparse.FormatExpr(sf.Expr)
+				if rendered != "" && !seen[rendered] {
+					facts = append(facts, rendered)
+					seen[rendered] = true
+				}
+				if len(facts) >= 5 {
+					break
+				}
+			}
+			if sc.closedWorld {
+				break
+			}
+			if len(facts) >= 5 {
+				break
+			}
+		}
+	}
+
+	// 5. Propose a suggestion framed for postconditions.
+	suggestion := buildEnsureSuggestion(clause, subst, counterexample)
+
+	return proofDiagnostic{
+		Goal:           goal,
+		RelevantFacts:  facts,
+		Suggestion:     suggestion,
+		Counterexample: counterexample,
+	}
+}
+
+// buildEnsureSuggestion returns a concrete, actionable suggestion for fixing an unprovable
+// ensure/postcondition obligation.
+func buildEnsureSuggestion(clause ast.Expr, subst map[string]ast.Expr, counterexample string) string {
+	goal := renderSubstitutedGoal(clause, subst)
+	if counterexample != "" {
+		return fmt.Sprintf("strengthen the function body so %q holds on all return paths, or add `requires` bounds to rule out the failing case", goal)
+	}
+	return fmt.Sprintf("add `assert %s` before the return to surface the fact to the prover, or strengthen the `requires` preconditions so the postcondition is reachable", goal)
+}
+
 // buildSuggestion returns a concrete, actionable suggestion for fixing the unprovable obligation.
 func buildSuggestion(req ast.Expr, subst map[string]ast.Expr, counterexample string) string {
 	// Build the caller-side goal text for the suggestion.

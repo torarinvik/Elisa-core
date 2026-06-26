@@ -631,7 +631,8 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 			continue
 		}
 		if proven, counterexample := a.trySMTProveRequires(clause, nil); !proven {
-			a.errorf(pos, "ensure postcondition of %q could not be proven statically at the function exit; make it provable, or drop -strict / use -permissive to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
+			diag := a.buildEnsureFailureDiagnostic(clause, nil, counterexample)
+			a.errorf(pos, "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
 		}
 	}
 }
@@ -918,7 +919,8 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "nullness-cast disjunct", ProofProvenSMT)
 			continue
 		}
-		a.errorf(n.Pos(), "ensure postcondition of %q could not be proven statically at this return; make it provable (e.g. give params refinement bounds), pass -nosmt off, or drop -strict to accept the debug runtime check%s", a.currentFuncDecl.Name, a.counterexampleSuffix(counterexample))
+		diag := a.buildEnsureFailureDiagnostic(clause, subst, counterexample)
+			a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
 	}
 }
 
