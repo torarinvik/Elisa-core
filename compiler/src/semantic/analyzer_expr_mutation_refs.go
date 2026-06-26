@@ -128,6 +128,13 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		if !ok {
 			return invalidType
 		}
+		if field.Ghost && a.ghostReadAllowed == 0 {
+			// SOUNDNESS: a ghost field is erased from codegen — it has no runtime storage
+			// and cannot be written by real code. Ghost-field writes are only meaningful in
+			// a contract/ghost context (e.g., inside a `ghost` declaration block).
+			a.errorf(n.Pos(), "ghost field %q is verification-only and cannot be written by real code: it is erased from codegen, so it may appear only in contracts (requires/ensure/invariant/assert) or `ghost` declarations", n.Field)
+			return invalidType
+		}
 		if !field.Mutable {
 			a.errorf(n.Pos(), "field %q is immutable", n.Field)
 		}

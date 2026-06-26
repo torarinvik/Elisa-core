@@ -1,7 +1,11 @@
 # 112 — Ghost model guide: abstract specification state
 
-> **(design / not yet implemented)** — everything in this document describes planned
-> language features. No compiler source has been modified.
+> **Implementation status** — the core ghost-model features (ghost field declaration,
+> layout erasure, read/write rejection in real code, struct invariants, and
+> contract-position access via `requires`/`ensure`/`where`/`assert`/`invariant`) are
+> **fully implemented** in the semantic analyzer. See the implementation status table at
+> the bottom of this document for exact per-feature status. Design-only features are
+> marked explicitly.
 
 Cross-references: docs/109 (unified refinement pipeline), docs/110 (progressive correctness
 ladder), docs/111 (ghost models, typestate, and named contracts: design and staging plan).
@@ -320,7 +324,7 @@ def g(self: mutable Stack[i64]&):
 
 ### Solution: explicit frame conditions
 
-**(design / not yet implemented)** The compiler uses **explicit frame conditions** to
+**(design)** The compiler uses **explicit frame conditions** to
 manage ghost-state invalidation. A function that mutates a ghost field must declare
 this via a `changes` clause (docs/87 frame conditions):
 
@@ -349,7 +353,7 @@ is straightforward and composable.
 
 ### Future optimization: ghost-frame inference
 
-**(research / stage 3+)** A more advanced option is to **infer** which ghost fields
+**(research / stage 3+, not yet designed)** A more advanced option is to **infer** which ghost fields
 a call touches by scanning the callee's postcondition and ghost invariant. Only ghost
 fields explicitly mentioned in those clauses would be invalidated. This reduces annotation
 burden but requires an interprocedural analysis pass not yet designed.
@@ -384,7 +388,7 @@ and the internal search logic.
 
 ### Ghost models + named contracts
 
-**(design / docs/111)** Ghost fields can appear in named contracts:
+**(design, docs/111)** Ghost fields can appear in named contracts:
 
 ```elisa
 contract QueueInvariant[T](q: RingBuf[T]&):
@@ -399,7 +403,7 @@ the function's spec before discharge.
 
 ### Ghost models + typestate
 
-**(design / docs/111)** A ghost invariant can mention a typestate index:
+**(design, docs/111)** A ghost invariant can mention a typestate index:
 
 ```elisa
 typestate Queue[T]:
@@ -498,17 +502,25 @@ def insert(self: mutable SortedList&, v: i64):
 
 ## Implementation status
 
-| Feature | Status | Docs |
+| Feature | Status | Notes |
 |---|---|---|
-| Ghost field parsing and erasure | Design | docs/111 §1.2–1.3 |
-| Ghost invariant obligation lowering | Design | docs/111 §1.4 |
-| Ghost-invariant discharge (ladder) | Design | docs/109 §4 (shared ladder) |
-| Ghost-local variables in specs | Design | docs/111 §1.5 |
-| Explicit ghost-frame conditions | Design | docs/111 §1.6, Option A |
+| Ghost field declaration (`ghost name: T`) | **Implemented** | `analyzer_decl_structs.go`; recorded in `GhostFieldOrder` |
+| Layout erasure (ghost → zero bytes) | **Implemented** | Ghost fields stripped from concrete field list before layout |
+| Read rejection in real code (`s.ghost` → error) | **Implemented** | `analyzer_expr_projection_*.go`; `ghostReadAllowed` gate |
+| Write rejection in real code (`s.ghost <- v` → error) | **Implemented** | `analyzer_expr_mutation_refs.go`; fixed on this branch |
+| Ghost field readable in `requires` | **Implemented** | `ghostReadAllowed` raised in `analyzer_functions.go` |
+| Ghost field readable in `ensure` | **Implemented** | `ghostReadAllowed` raised in `analyzer_functions.go` |
+| Ghost field readable in `where` param/return refinements | **Implemented** | `ghostReadAllowed` raised in `analyzer_where_refinements.go` |
+| Ghost field readable in `assert` | **Implemented** | `ghostReadAllowed` raised in `analyzer_flow.go` |
+| Ghost field readable in in-body `invariant` | **Implemented** | `ghostReadAllowed` raised in `analyzer_flow.go` |
+| Struct invariant referencing ghost field | **Implemented** | `ghostReadAllowed` raised during invariant analysis in `analyzer_decl_structs.go` |
+| Ghost invariant discharged under `-strict` + SMT | **Implemented** | Seeded as SMT fact; shared discharge ladder (docs/109) |
+| Ghost field in struct literal → rejected | **Implemented** | Ghost fields absent from concrete field set; struct literal lookup fails |
+| Ghost field default value → rejected | **Implemented** | Explicit check in `analyzer_decl_structs.go` |
+| Ghost-local variables in specs (`ghost let`) | Design | docs/111 §1.5 |
+| Explicit ghost-frame conditions (`changes self.model`) | Design | docs/111 §1.6, Option A; docs/87 |
 | Ghost-frame inference | Research | docs/111 §1.6, Option B |
 | Debug `-fghost-check` materialization | Design | docs/111 §1.3, §5 |
-
-All features are part of **Stage S0** of the staged rollout (docs/111 §5).
 
 ---
 
