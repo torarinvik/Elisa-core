@@ -255,3 +255,80 @@ func exprIdentNames(expr ast.Expr) []string {
 	walk(expr)
 	return out
 }
+
+// seedWhereRefinementFact records the where predicate of a local binding as an SMT assert-fact so
+// later obligations in the same scope can consume it. Only fires when the declared type is a
+// WhereRefinementTypeExpr; no-ops otherwise, so non-where locals are unaffected.
+//
+// The predicate is recorded as-is: it already references the bound name (e.g. `x > 0` for
+// `x: i64 where x > 0`), so smtFactDeps will include `x` and invalidateSMTAssertFactsForTarget will
+// drop the fact the moment `x` is mutated — precisely the invalidation-on-mutation behaviour required.
+// An immutable local is never mutated, so the fact lives for the binding's whole scope.
+func (a *Analyzer) seedWhereRefinementFact(n *ast.VarDeclStmt) {
+	if a == nil || n == nil || a.currentScope == nil {
+		return
+	}
+	wt, ok := n.Type.(*ast.WhereRefinementTypeExpr)
+	if !ok || wt == nil || wt.Predicate == nil {
+		return
+	}
+	// Record the predicate as an SMT assert-fact. The predicate already carries the bound variable's
+	// name as an identifier; smtFactDeps extracts it as a dependency root, and
+	// invalidateSMTAssertFactsForTarget drops the fact when that root is mutated.
+	a.recordSMTAssertFact(wt.Predicate)
+}
+
+// seedParamWhereRefinementFacts records the where-predicate of each immutable param as an SMT
+// assert-fact on function entry. This is the param-boundary analogue of seedWhereRefinementFact for
+// locals: parameters declared as `p: T where P(p)` are assumed to satisfy P on entry (the CALLER is
+// responsible for the discharge at the call site), so the body may use P as a proven hypothesis.
+//
+// Mutable params are skipped: a mutation of `p` inside the body would invalidate the fact, but we
+// must not confuse "invalidated by body mutation" with "the fact was never true". Skipping is always
+// sound (just means the body re-proves P via SMT if needed), and matches the conservatism of
+// seedParamRefinementFacts for the range-fact channel.
+func (a *Analyzer) seedParamWhereRefinementFacts(params []ast.ParamDecl) {
+	if a == nil || a.currentScope == nil {
+		return
+	}
+	for _, param := range params {
+		if a.paramIsMutable(param) {
+			continue
+		}
+		wt, ok := param.Type.(*ast.WhereRefinementTypeExpr)
+		if !ok || wt == nil || wt.Predicate == nil {
+			continue
+		}
+		a.recordSMTAssertFact(wt.Predicate)
+	}
+}
+
+// dischargeWhereRefinement checks that the value assigned to a where-typed local binding satisfies
+// the where predicate at the binding site. It routes through the shared proof ladder
+// (proveRequiresClause → trySMTProveRequires) rather than a parallel discharge path, so where
+// behaves like requires/ensure/is Law at the proof engine level.
+//
+// Returns true when the obligation is statically discharged (no runtime check needed). Returns false
+// when it is unknown — the caller should emit a runtime check and a diagnostic.
+//
+// The predicate is substituted: `x: i64 where P` at `x = expr` becomes `P[x ↦ expr]` as the goal.
+// Substitution is performed via the standard proveRequiresClause substitution map so the prover
+// never sees the binding name — only the initializer expression.
+func (a *Analyzer) dischargeWhereRefinement(wt *ast.WhereRefinementTypeExpr, bindingName string, initExpr ast.Expr) bool {
+	if a == nil || wt == nil || wt.Predicate == nil {
+		return true // nothing to prove
+	}
+	// Build a substitution: replace the binding name with the initializer expression so the predicate
+	// becomes a pure constraint over the call-site values. This is the same substitution that
+	// proveRequiresClause uses for `requires` clauses at call sites.
+	subst := map[string]ast.Expr{bindingName: initExpr}
+	// Tier 1: linear clause prover (interval arithmetic over known ranges / written-const facts).
+	if a.proveRequiresClause(wt.Predicate, subst) == requiresProven {
+		return true
+	}
+	// Tier 2: SMT solver (Z3 via SMT-LIB2 subprocess, only when -smt is active).
+	if proven, _ := a.trySMTProveRequires(wt.Predicate, subst); proven {
+		return true
+	}
+	return false
+}
