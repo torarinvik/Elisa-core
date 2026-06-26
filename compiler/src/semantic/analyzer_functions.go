@@ -618,7 +618,7 @@ func (a *Analyzer) analyzeRequiresClauses(fn *ast.FuncDecl) {
 		if req == nil {
 			continue
 		}
-		reqType := a.analyzeExpr(req)
+		reqType := a.analyzeSpecClauseExpr(req, "requires")
 		if reqType != nil && !IsBoolType(reqType) {
 			a.errorf(req.Pos(), "requires clause must be bool, got %s", reqType)
 		}
@@ -678,7 +678,7 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 		if e == nil {
 			continue
 		}
-		t := a.analyzeExpr(e)
+		t := a.analyzeSpecClauseExpr(e, "ensure")
 		if t != nil && !IsBoolType(t) {
 			a.errorf(e.Pos(), "ensure clause must be bool, got %s", t)
 		}
@@ -687,6 +687,36 @@ func (a *Analyzer) analyzeEnsureClauses(fn *ast.FuncDecl, fnType *FuncType) {
 		}
 	}
 	a.currentScope = saved
+}
+
+// analyzeSpecClauseExpr type-checks a `requires`/`ensure` clause expression AND enforces that it is
+// pure / side-effect-free — defense-in-depth mirroring the `where`/`refine` predicate and `law` body
+// purity checks. A spec-position call `p(x)` is canonicalized by the verifier to a single
+// deterministic uninterpreted symbol; that canonicalization is only SOUND when `p` is pure. An
+// effectful or non-deterministic call (reading a mutable global, `random()`, `time()`, IO, mutation,
+// allocation, …) would make the same syntactic clause denote different values at different points,
+// so it must be rejected.
+//
+// The check reuses the existing effect-accumulation machinery rather than re-deriving purity: every
+// effect a sub-expression performs is recorded into a.currentFunctionUsedPermissionRefs (the same set
+// the law-purity check and @hot contract are judged against). We snapshot that set, analyze the
+// clause, and reject if the clause introduced ANY effect. Pure user-helper calls (`ensure result ==
+// sorted(xs)`) record no effects and are therefore allowed — exactly the law-body rule. Spec-position
+// effects are not attributed to the enclosing function, so the snapshot is restored afterwards.
+func (a *Analyzer) analyzeSpecClauseExpr(expr ast.Expr, clause string) Type {
+	if expr == nil {
+		return nil
+	}
+	savedRefs := a.currentFunctionUsedPermissionRefs
+	start := len(savedRefs)
+	t := a.analyzeExpr(expr)
+	if introduced := a.currentFunctionUsedPermissionRefs[start:]; len(introduced) > 0 {
+		a.errorf(expr.Pos(), "%s clause must be pure but uses the `%s` effect; a contract may not perform effects (no IO, allocation, mutation, time, or randomness) — an effectful or non-deterministic clause is unsound because the verifier treats a spec-position call as a single deterministic value", clause, lawEffectName(introduced[0]))
+	}
+	// Spec-position effects are verification-only and must not leak into the enclosing function's
+	// inferred effect set; restore the snapshot regardless of outcome.
+	a.currentFunctionUsedPermissionRefs = savedRefs
+	return t
 }
 
 // exprReferencesGhostField reports whether an analyzed contract expression reads a `ghost` struct
