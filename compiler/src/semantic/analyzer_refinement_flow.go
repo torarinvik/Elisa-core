@@ -521,9 +521,17 @@ func (a *Analyzer) invalidateRangeFacts(name string) {
 	if name == "" {
 		return
 	}
+	// Consult each fact's own deps() via the unified predicate (analyzer_fact.go), mirroring assert-fact
+	// invalidation. A range fact's sole dep is its subject variable, so this deletes exactly `name`.
+	rootSet := map[string]bool{name: true}
 	for scope := a.currentScope; scope != nil; scope = scope.Parent {
-		if scope.rangeFacts != nil {
-			delete(scope.rangeFacts, name)
+		if scope.rangeFacts == nil {
+			continue
+		}
+		for n, r := range scope.rangeFacts {
+			if factInvalidatedBy(rangeHypothesisFact{name: n, r: r}, rootSet) {
+				delete(scope.rangeFacts, n)
+			}
 		}
 	}
 }

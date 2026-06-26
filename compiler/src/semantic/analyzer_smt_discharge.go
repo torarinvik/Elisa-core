@@ -1162,44 +1162,10 @@ func rewriteSelfFieldRoot(expr ast.Expr, paramName string) ast.Expr {
 // surfacing them to the SMT tier lets branchy and loop-exit reasoning discharge (docs/85 gap #3:
 // loop-carried/flow facts). A fact with no known bound contributes nothing.
 func (a *Analyzer) smtFlowFactHypotheses(tr *smtTranslator) string {
-	if a == nil || a.currentScope == nil || tr == nil {
-		return ""
-	}
-	var b strings.Builder
-	seen := map[string]bool{}
-	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		closedHere := sc.closedWorld // docs/99: include this scope's facts, then stop ascending.
-		// Emit in sorted name order: rangeFacts is a map, and its iteration order would otherwise make
-		// the hypothesis text (and thus the cache key — brick 5) nondeterministic, so two logically
-		// identical obligations could differ byte-for-byte and miss the cache.
-		names := make([]string, 0, len(sc.rangeFacts))
-		for name := range sc.rangeFacts {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		for _, name := range names {
-			if seen[name] {
-				continue // a closer scope's fact shadows an outer one
-			}
-			seen[name] = true
-			r := sc.rangeFacts[name]
-			if !r.loKnown && !r.hiKnown {
-				continue
-			}
-			v := smtVar(name)
-			tr.decls[name] = true
-			if r.loKnown {
-				b.WriteString("(assert (>= " + v + " " + smtInt(r.lo) + "))\n")
-			}
-			if r.hiKnown {
-				b.WriteString("(assert (<= " + v + " " + smtInt(r.hi) + "))\n")
-			}
-		}
-		if closedHere {
-			break
-		}
-	}
-	return b.String()
+	// Range facts flow through the unified hypothesis renderer (analyzer_fact.go). Emission stays in
+	// sorted name order with closer-scope shadowing so the hypothesis text (and thus the cache key —
+	// brick 5) is byte-identical to the previous hand-rolled walk.
+	return a.renderHypothesisFacts(tr, collectScopeRangeFacts, true)
 }
 
 type smtFact struct {
@@ -1211,24 +1177,9 @@ type smtFact struct {
 // branch guard, a proven invariant/assertion, or an exact assignment equality. Facts carry dependency
 // roots and are invalidated on mutation of any root; calls still clear them conservatively.
 func (a *Analyzer) smtAssertHypotheses(tr *smtTranslator) string {
-	if a == nil || a.currentScope == nil || tr == nil {
-		return ""
-	}
-	var b strings.Builder
-	for sc := a.currentScope; sc != nil; sc = sc.Parent {
-		for _, fact := range sc.smtAssertFacts {
-			if fact.Expr == nil {
-				continue
-			}
-			if h, ok := tr.boolTerm(fact.Expr, nil); ok {
-				b.WriteString("(assert " + h + ")\n")
-			}
-		}
-		if sc.closedWorld { // docs/99: this scope is a wall — its facts count, the parent's do not.
-			break
-		}
-	}
-	return b.String()
+	// Assert facts flow through the same unified renderer as range facts (analyzer_fact.go), with no
+	// name dedupe (assert facts are emitted per-occurrence). docs/99: a closed-world scope is a wall.
+	return a.renderHypothesisFacts(tr, collectScopeAssertFacts, false)
 }
 
 func (a *Analyzer) recordSMTAssertFact(expr ast.Expr) {
@@ -1286,7 +1237,8 @@ func (a *Analyzer) invalidateSMTAssertFactsForTarget(target ast.Expr) {
 		}
 		out := sc.smtAssertFacts[:0]
 		for _, fact := range sc.smtAssertFacts {
-			if fact.Deps != nil && depsIntersect(fact.Deps, rootSet) {
+			// Consult the fact's own deps() via the unified predicate, mirroring range-fact invalidation.
+			if factInvalidatedBy(assertHypothesisFact{fact: fact}, rootSet) {
 				continue
 			}
 			out = append(out, fact)
