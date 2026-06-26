@@ -285,7 +285,16 @@ func (a *Analyzer) validateConstantWhereRefinementPredicate(n *ast.WhereRefineme
 	}
 	t := a.analyzeExpr(n.Predicate)
 	if t != nil && !IsBoolType(t) {
-		a.errorf(n.Predicate.Pos(), "where refinement predicate must be bool, got %s", typeString(t))
+		// Emit the base type so the user knows what subject the predicate applies to.
+		baseDesc := "unknown"
+		if n.Base != nil {
+			if bt := a.resolveType(n.Base); bt != nil {
+				baseDesc = typeString(bt)
+			}
+		}
+		a.errorf(n.Predicate.Pos(),
+			"where refinement predicate must be bool, got %s (subject type is %s); write a bool expression such as `n where n > 0`",
+			typeString(t), baseDesc)
 	}
 }
 

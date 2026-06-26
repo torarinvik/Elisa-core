@@ -48,6 +48,59 @@ Compose **value-class** laws by conjunction or `self is A and self is B` — **n
 | `refinement RegIndex(self: u8): …` | no such keyword | `law reg(self: u8) = self < 16` + `type RegIndex = u8 is reg` |
 | `law Big includes Positive` | `includes` can't take a value law | `law Big(self: T) = self is Positive and …` |
 
+## Anonymous binder refinements: `T where <bool-expr>`
+
+`T where predicate` is **sugar for an inline anonymous law** applied at a single binder position.
+It is representation-erased (exactly like `T is Law`), but the predicate is preserved for proof
+obligations without requiring you to name a law first.
+
+### Spelling in each binder position
+
+```elisa
+# Parameter: predicate may reference that param + any earlier params in scope.
+def get(xs: darray[i64], i: i64 where 0 <= i and i < xs.count) -> i64:
+    return xs[i]
+
+# Return: predicate may reference `result` (the implicit return name) and all params.
+def abs(n: i64) -> i64 where result >= 0:
+    return if n >= 0: n else: -n
+
+# Local variable: predicate may reference the variable name + all in-scope values.
+def safe_index(xs: darray[i64]) -> i64:
+    i: i64 where 0 <= i and i < xs.count = 0
+    return xs[i]
+```
+
+### Rules and restrictions
+
+| Rule | Details |
+|---|---|
+| **Predicate must be a pure bool expression** | Any impure call (I/O, allocation, mutation) is rejected. |
+| **Scope of identifiers** | Param `where`: the param itself + params declared before it. Return `where`: params + implicit `result`. Local `where`: the declared name + any in-scope bindings. |
+| **Representation erasure** | `T where p` resolves to `T` for `SameType`, `AssignableTo`, ABI, layout, and monomorphization. The predicate is proof metadata only. |
+| **Discharge** | Same discharge ladder as `requires`/`ensure` (docs/85 §6): fact-lattice → tier-2 linear → SMT. Unprovable predicates emit a `proofLint` warning (runtime-checked in debug builds; a hard error under `-strict`). |
+
+### Relationship to `requires`, `ensure`, and `is Law`
+
+`T where p` is syntactic sugar — the compiler desugars it into the `requires`/`ensure`
+machinery used by named-law refinements:
+
+| Surface form | Desugars to |
+|---|---|
+| `def f(n: i64 where p(n))` | `def f(n: i64)` + `requires p(n)` |
+| `def f() -> i64 where p(result)` | `def f() -> i64` + `ensure p(result)` |
+| `x: i64 where p(x) = v` | local `x: i64 = v` + inline assertion that `p(x)` holds at declaration |
+
+Prefer named laws (`T is Law`) when the predicate is reused across multiple sites.
+Use `where` for one-off inline constraints that are too specific to name.
+
+### What does NOT change with `where`
+
+- `T where p` is assignable to and from `T` — there is no subtype relationship.
+- Passing a plain `T` value where `T where p` is expected is legal at the call site;
+  the proof obligation is discharged there (or runtime-checked).
+- `SameType(T where p, T)` is `true`. The predicate is invisible to monomorphization and generics.
+
 ## What proves (discharge ladder, docs/85 §6)
 Conjunctions of bounds → always-on. `implies` / multi-variable linear → tier-2 (budgeted).
 `forall`/`exists` and bit masks/shifts → the SMT tier (on by default; `-nosmt` to disable).
