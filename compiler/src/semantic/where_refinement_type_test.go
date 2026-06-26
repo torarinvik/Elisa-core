@@ -96,7 +96,7 @@ def bad(n: i64 where n >= 0) -> i64 where result > n:
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_return_ensure.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
 	all := allDiagnostics(result)
-	if !strings.Contains(all, "return where refinement could not be proven statically") {
+	if !strings.Contains(all, "return where refinement") || !strings.Contains(all, "could not be proven statically") {
 		t.Fatalf("bad return should produce an unproven return where obligation, got:\n%s", all)
 	}
 }

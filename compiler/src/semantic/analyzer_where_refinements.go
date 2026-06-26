@@ -86,9 +86,14 @@ func (a *Analyzer) dischargeLocalWhereRefinement(stmt *ast.VarDeclStmt) {
 	// Route the discharge through dischargeWhereRefinement so all local binding-site
 	// obligations use the shared prover ladder (linear → SMT → runtime).
 	if !a.dischargeWhereRefinement(rt, stmt.Name, stmt.Value, stmt.Pos(), "local where refinement") {
-		// Obligation unknown — record as runtime and emit the proof-lint diagnostic.
+		// Obligation unknown — record as runtime and emit the rich proof-lint diagnostic.
 		a.recordProof(stmt.Pos(), "local where refinement", "where", ProofRuntime)
-		a.proofLint(stmt.Pos(), "local where refinement could not be proven statically")
+		subst := map[string]ast.Expr{}
+		if stmt.Value != nil {
+			subst[stmt.Name] = stmt.Value
+		}
+		diag := a.buildRequiresFailureDiagnostic(rt.Predicate, subst, "")
+		a.proofLint(stmt.Pos(), "%s", diag.Format("local where refinement"))
 	}
 	a.seedRangeFactsFromCondition(rt.Predicate)
 	a.collectBoundEqualitiesForCondition(rt.Predicate, true)
@@ -128,11 +133,8 @@ func (a *Analyzer) dischargeWherePredicate(pred ast.Expr, subst map[string]ast.E
 			return
 		}
 		a.recordProof(pos, subject, "where", ProofRuntime)
-		if counterexample != "" {
-			a.proofLint(pos, "%s could not be proven statically; it can fail when %s", subject, counterexample)
-		} else {
-			a.proofLint(pos, "%s could not be proven statically", subject)
-		}
+		diag := a.buildRequiresFailureDiagnostic(pred, subst, counterexample)
+		a.proofLint(pos, "%s", diag.Format(subject))
 	}
 }
 
