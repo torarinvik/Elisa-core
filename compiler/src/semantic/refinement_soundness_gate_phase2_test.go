@@ -350,8 +350,7 @@ def f() -> i64:
 // value is provably out of range should be a hard error (mirrors the anonymous-where
 // ensure gate). This is not yet enforced at the alias-return-type level — only
 // anonymous `where result …` ensure paths fire.
-func TestSoundnessGateP2_TODO_AliasReturnViolationIsError(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: refine alias on return type — violated return value not yet a hard error")
+func TestSoundnessGateP2_AliasReturnViolationIsError(t *testing.T) {
 	src := `
 refine Positive = i64 where self > 0
 
