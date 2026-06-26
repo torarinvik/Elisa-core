@@ -86,6 +86,59 @@ def build() -> i64:
 	}
 }
 
+// A struct local initialized from a region-POLYMORPHIC builder CALL (not an inline literal) must
+// also carry its ambient region for downstream threading: `bag = make_bag()` returns a fresh
+// container-bearing struct allocated in the caller's ambient region, exactly like a struct literal.
+func TestRegionStructLocalFromBuilderCallThreadsRegionParam(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_builder.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def make_bag() -> Bag:
+    return Bag([])
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build() -> darray[i64]:
+    bag: mutable Bag = make_bag()
+    bag_push(bag, 1)
+    return bag.items
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("struct local from a region-poly builder call should thread its region; got: %s", all)
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a builder that is NOT region-polymorphic carrying ambient data must not have
+// its result threaded with the caller's ambient region. Here `make_bag` takes the container by
+// value and returns it inside a struct — the data lives wherever the CALLER built it, not in
+// make_bag's (or the outer) ambient region, so the region-poly gate
+// (exprIsRegionPolyResultCarryingRegionData) does not fire and the local is not recorded. The
+// downstream `bag_push` then conservatively re-rejects with "cannot infer region parameter" rather
+// than threading a wrong region (which would be a use-after-free).
+func TestRegionStructLocalFromNonRegionPolyBuilderNotThreaded(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_param_builder.elisa", `struct Bag:
+    items: mutable darray[i64]
+
+def wrap(xs: darray[i64]) -> Bag:
+    return Bag(xs)
+
+def bag_push(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+
+def build(seed: darray[i64]) -> i64:
+    bag: mutable Bag = wrap(seed)
+    bag_push(bag, 1)
+    return bag.items.count.i64()
+`)
+	all := strings.Join(res.Errors(), "\n")
+	// `wrap` is not region-polymorphic over an ambient region (it forwards a by-value param), so the
+	// ambient-region threading path must NOT fire. The downstream push therefore re-rejects.
+	if !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("non-region-poly builder result must not be threaded with the ambient region; got: %s", all)
+	}
+}
+
 // Reassigning a struct local across region scopes must NOT thread the stale declaration-time
 // region: a reassignment inside a `region inner:` then a use after `inner` dies would be a
 // use-after-free. The record is cleared on reassignment, so the later call conservatively

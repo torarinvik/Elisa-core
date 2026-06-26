@@ -52,8 +52,26 @@ func structHasRegionlessContainerField(st *StructType) bool {
 // recordStructLocalAllocRegion records the ambient region that backs a freshly-constructed
 // struct local's container fields, so call sites can thread it into a callee's region param.
 // No-ops unless there is an ambient region, the binding is a container-bearing struct, and the
-// initializer is a fresh struct construction (so the fields genuinely live in the ambient region).
-func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, value ast.Expr) {
+// initializer genuinely produces a struct whose container fields live in that ambient region.
+//
+// Two admissible initializer forms, both of which allocate the struct's container fields into the
+// caller's ambient region:
+//
+//   (1) a fresh struct literal — `bag: Bag = Bag([], [])` — the inline-construction case; or
+//   (2) a call to a region-POLYMORPHIC function returning container-bearing data —
+//       `bag: Bag = make_bag()`. A region-poly result is allocated in the ambient (threaded)
+//       region even though its type is region-less (the region rides the threaded arena, not the
+//       type), so it lives in EXACTLY the same region a struct-literal local would (see
+//       region_containers.go's region-poly carve-out / exprIsRegionPolyResultCarryingRegionData).
+//
+// SOUNDNESS: form (2) is gated on exprIsRegionPolyResultCarryingRegionData, which requires the
+// callee be RegionPolymorphic AND the result transitively carry region storage. A function that
+// returns a struct holding data from some OTHER region (e.g. a region-param it was handed) is NOT
+// region-polymorphic on that data, so it fails the gate and is not recorded — the local then falls
+// back to the conservative "cannot infer region parameter" rejection rather than being threaded
+// with a wrong region. Recording the AMBIENT region for a region-poly result is correct because
+// that is the very region the callee allocated into (it threaded the caller's `__region_auto`).
+func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, value ast.Expr, valueType Type) {
 	if a == nil || sym == nil || value == nil || a.currentStructLocalAllocRegion == nil {
 		return
 	}
@@ -61,14 +79,19 @@ func (a *Analyzer) recordStructLocalAllocRegion(sym *Symbol, bindingType Type, v
 	if region == "" {
 		return
 	}
-	if _, ok := stripParenExpr(value).(*ast.StructLitExpr); !ok {
-		return
-	}
 	st, ok := peelToStructType(bindingType)
 	if !ok || !structHasRegionlessContainerField(st) {
 		return
 	}
-	a.currentStructLocalAllocRegion[sym] = region
+	if _, isLit := stripParenExpr(value).(*ast.StructLitExpr); isLit {
+		a.currentStructLocalAllocRegion[sym] = region
+		return
+	}
+	// Region-poly builder call: result lives in the ambient region (same as a literal).
+	if a.exprIsRegionPolyResultCarryingRegionData(value, valueType) {
+		a.currentStructLocalAllocRegion[sym] = region
+		return
+	}
 }
 
 // invalidateStructLocalAllocRegionOnAssign drops the region recorded for a struct local when it

@@ -85,7 +85,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// A freshly-constructed struct local whose container fields are backed by the ambient
 		// region gets that region recorded, so a call site can thread it into a callee's
 		// struct-ref region param (see region_struct_local.go).
-		a.recordStructLocalAllocRegion(sym, bindingType, n.Value)
+		a.recordStructLocalAllocRegion(sym, bindingType, n.Value, valueType)
 		a.recordRefinementChecks(n)
 		a.seedWhereRefinementFact(n)
 		if n.Value != nil && isZeroedInitializer(n.Value) {
