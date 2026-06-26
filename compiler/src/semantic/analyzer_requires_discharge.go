@@ -106,6 +106,11 @@ func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
 	// caller cannot hand a callee an out-of-domain argument.
 	a.checkCalleeRequires(call, scheme.DeclName, scheme.Requires, scheme.Params, args)
 	a.checkCalleeParamWhereRefinements(call, scheme.DeclName, scheme.Params, args)
+	// SpecSignature-based where discharge: handles imported/cross-module callees whose AST is
+	// unavailable by reading the predicate from the canonical SpecSignature.ParamPredicates.
+	if ft, ok := a.callFuncType(call); ok && ft != nil && ft.SpecSignature != nil {
+		a.checkCalleeSpecSignatureWherePredicates(call, scheme.DeclName, ft.SpecSignature, scheme.Params, args)
+	}
 }
 
 // resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.
