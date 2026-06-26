@@ -134,6 +134,11 @@ func (a *Analyzer) expandOneUse(fn *ast.FuncDecl, use *ast.ContractStmt, contrac
 	for _, inc := range c.ContractIncludes {
 		a.expandContractInclude(fn, use, inc, subst, rootRebind)
 	}
+	// Observability: record that the named contract was applied here. The individual obligations it
+	// folds in (requires/ensure) discharge and record through the ordinary paths, but those entries are
+	// tagged generically ("precondition of <fn>"/"ensure") — this entry makes the contract NAME visible
+	// in the proof report so tooling (e.g. --explain) can attribute them to `uses <Name>`.
+	a.recordProofWithClass(use.Position, "uses "+use.UsesName, "uses", ProofProvenContract, ProofClassContract, nil, "")
 }
 
 func substituteProofBlock(proof *ast.ProofBlockStmt, goal ast.Expr, subst map[string]ast.Expr) *ast.ProofBlockStmt {
