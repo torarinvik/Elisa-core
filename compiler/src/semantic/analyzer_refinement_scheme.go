@@ -217,7 +217,7 @@ func (a *Analyzer) valueRefinementSchemeFromTypeExpr(te ast.TypeExpr) (ValueRefi
 
 func (a *Analyzer) valueRefinementSchemeEntails(s ValueRefinementScheme, pred ast.RefinementPredExpr) bool {
 	for _, have := range s.Preds {
-		if a.refinementPredEntails(have, pred) {
+		if a.refinementPredicatesEntail(have, pred) {
 			return true
 		}
 	}

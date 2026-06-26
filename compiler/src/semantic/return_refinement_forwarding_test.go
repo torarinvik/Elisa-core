@@ -36,6 +36,71 @@ def pipeline(x: i64, y: i64) -> i64 is Bounded[0, 255]:
 	}
 }
 
+func TestReturnForwardsAliasRefinement(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+type Byte = i64 is Bounded[0, 255]
+def clamp_byte(v: i64) -> Byte:
+    if v < 0:
+        return 0
+    if v > 255:
+        return 255
+    return v
+def pipeline(x: i64) -> i64 is Bounded[0, 255]:
+    return clamp_byte(x)
+`
+	result := analyzeContractStrict(t, "fwd_alias_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("alias return refinement should entail the explicit return refinement, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("alias-forwarded return should be statically discharged, got %d checks", len(result.ReturnRefinementChecks))
+	}
+}
+
+func TestReturnForwardsDifferentNamedIntervalRefinement(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+law Nat(self: i64) = self >= 0
+def clamp_byte(v: i64) -> i64 is Bounded[0, 255]:
+    if v < 0:
+        return 0
+    if v > 255:
+        return 255
+    return v
+def as_nat(x: i64) -> i64 is Nat:
+    return clamp_byte(x)
+`
+	result := analyzeContractStrict(t, "fwd_named_interval_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("Bounded[0,255] should entail differently named Nat via interval constraints, got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("named interval-forwarded return should be statically discharged, got %d checks", len(result.ReturnRefinementChecks))
+	}
+}
+
+func TestReturnForwardsTighterIntervalRefinement(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+def low_byte(v: i64) -> i64 is Bounded[0, 127]:
+    if v < 0:
+        return 0
+    if v > 127:
+        return 127
+    return v
+def byteish(x: i64) -> i64 is Bounded[0, 255]:
+    return low_byte(x)
+`
+	result := analyzeContractStrict(t, "fwd_tighter_interval_ok.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("Bounded[0,127] should entail Bounded[0,255], got: %v", errs)
+	}
+	if len(result.ReturnRefinementChecks) != 0 {
+		t.Fatalf("tighter interval-forwarded return should be statically discharged, got %d checks", len(result.ReturnRefinementChecks))
+	}
+}
+
 // SOUNDNESS: forwarding a call whose return refinement does NOT entail the required one (a wider bound
 // where a narrower is required) must still decline.
 func TestReturnForwardingNonEntailingDeclines(t *testing.T) {

@@ -386,11 +386,19 @@ func (a *Analyzer) argDeclaredRefinementEntails(value ast.Expr, pred ast.Refinem
 	return ok && a.valueRefinementSchemeEntails(s, pred)
 }
 
-// refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
-// identical constant arguments (the trivial, overwhelmingly common forward/wrap case). Returning a value
-// already refined `Bounded[0,255]` satisfies a required `Bounded[0,255]`. Conservative: a non-constant
-// or differing arg declines (no false entailment).
-func (a *Analyzer) refinementPredEntails(have, want ast.RefinementPredExpr) bool {
+// refinementPredicatesEntail reports whether predicate `have` guarantees `want`. This is the central
+// value-contract entailment hook used by local declarations, call arguments, return forwarding, field
+// forwarding, and declared-binding forwarding. It deliberately proves only small, sound fragments:
+// exact predicate applications, and interval inclusion for laws whose bodies already lower to the
+// existing `self OP const` constraint model. Future SMT-backed entailment belongs behind this helper.
+func (a *Analyzer) refinementPredicatesEntail(have, want ast.RefinementPredExpr) bool {
+	if a.refinementPredicatesExactlyMatch(have, want) {
+		return true
+	}
+	return a.refinementPredicateIntervalEntails(have, want)
+}
+
+func (a *Analyzer) refinementPredicatesExactlyMatch(have, want ast.RefinementPredExpr) bool {
 	if have.Name != want.Name || len(have.Args) != len(want.Args) {
 		return false
 	}
@@ -402,6 +410,103 @@ func (a *Analyzer) refinementPredEntails(have, want ast.RefinementPredExpr) bool
 		}
 	}
 	return true
+}
+
+func (a *Analyzer) refinementPredicateIntervalEntails(have, want ast.RefinementPredExpr) bool {
+	haveDecl, _, ok := a.lookupLaw(have.Name)
+	if !ok {
+		return false
+	}
+	wantDecl, _, ok := a.lookupLaw(want.Name)
+	if !ok {
+		return false
+	}
+	haveConstraints, ok := a.refinementPredicateConstraints(haveDecl, have.Args)
+	if !ok || len(haveConstraints) == 0 {
+		return false
+	}
+	wantConstraints, ok := a.refinementPredicateConstraints(wantDecl, want.Args)
+	if !ok || len(wantConstraints) == 0 {
+		return false
+	}
+	r, ok := rangeFromLawConstraints(haveConstraints)
+	if !ok {
+		return false
+	}
+	for _, k := range wantConstraints {
+		if !rangeEntailsConstraint(r, k) {
+			return false
+		}
+	}
+	return true
+}
+
+func (a *Analyzer) refinementPredicateConstraints(decl *ast.FuncDecl, args []ast.Expr) ([]lawConstraint, bool) {
+	if decl == nil || len(args) != len(decl.Params)-1 {
+		return nil, false
+	}
+	paramConsts := map[string]int64{}
+	for i, arg := range args {
+		c, ok := a.constIntValue(arg)
+		if !ok {
+			return nil, false
+		}
+		paramConsts[decl.Params[i+1].Name] = c
+	}
+	return a.lawConstraints(decl, paramConsts)
+}
+
+func rangeFromLawConstraints(constraints []lawConstraint) (numRange, bool) {
+	var r numRange
+	for _, k := range constraints {
+		switch k.op {
+		case lexer.TOKEN_GTEQ:
+			if !r.loKnown || k.c > r.lo {
+				r.loKnown = true
+				r.lo = k.c
+			}
+		case lexer.TOKEN_GT:
+			if k.c == int64(^uint64(0)>>1) {
+				return numRange{}, false
+			}
+			lo := k.c + 1
+			if !r.loKnown || lo > r.lo {
+				r.loKnown = true
+				r.lo = lo
+			}
+		case lexer.TOKEN_LTEQ:
+			if !r.hiKnown || k.c < r.hi {
+				r.hiKnown = true
+				r.hi = k.c
+			}
+		case lexer.TOKEN_LT:
+			if k.c == -int64(^uint64(0)>>1)-1 {
+				return numRange{}, false
+			}
+			hi := k.c - 1
+			if !r.hiKnown || hi < r.hi {
+				r.hiKnown = true
+				r.hi = hi
+			}
+		case lexer.TOKEN_EQEQ:
+			if r.loKnown && r.lo > k.c {
+				return numRange{}, false
+			}
+			if r.hiKnown && r.hi < k.c {
+				return numRange{}, false
+			}
+			r.loKnown = true
+			r.lo = k.c
+			r.hiKnown = true
+			r.hi = k.c
+		default:
+			return numRange{}, false
+		}
+	}
+	if r.loKnown && r.hiKnown && r.lo > r.hi {
+		return numRange{}, false
+	}
+	return r, true
 }
 
 func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
