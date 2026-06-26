@@ -258,7 +258,7 @@ func (a *Analyzer) contractFuncTypeForUse(use *ast.ContractStmt, c *ast.FuncDecl
 	if a == nil || use == nil || c == nil {
 		return nil
 	}
-	cft := a.funcTypeFromDecl("contract "+c.Name, c.TypeParams, c.GenericParams, c.RegionParams, c.PermissionParams, c.Permissions, nil, c.Params, nil, false)
+	cft := a.funcTypeFromDecl("contract "+c.Name, c.TypeParams, c.GenericParams, c.RegionParams, c.PermissionParams, c.Permissions, nil, c.Requires, c.EnsureValues, c.Params, nil, false)
 	if cft == nil {
 		return nil
 	}
@@ -336,7 +336,7 @@ func (a *Analyzer) expandContractInclude(fn *ast.FuncDecl, use *ast.ContractStmt
 		return
 	}
 	if ft == nil {
-		ft = a.funcTypeFromDecl("law "+decl.Name, decl.TypeParams, decl.GenericParams, decl.RegionParams, decl.PermissionParams, decl.Permissions, nil, decl.Params, decl.ReturnType, false)
+		ft = a.funcTypeFromDecl("law "+decl.Name, decl.TypeParams, decl.GenericParams, decl.RegionParams, decl.PermissionParams, decl.Permissions, nil, decl.Requires, decl.EnsureValues, decl.Params, decl.ReturnType, false)
 	}
 	if len(args) != len(decl.Params) {
 		a.errorf(inc.Position, "law `%s` takes %d argument(s), but contract `%s` includes supplied %d", inc.Law, len(decl.Params), use.UsesName, len(args))

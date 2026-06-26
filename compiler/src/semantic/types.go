@@ -376,10 +376,10 @@ type ConstEnumType struct {
 }
 
 type Field struct {
-	Name          string
-	Type          Type
-	Mutable       bool
-	IsTail        bool
+	Name    string
+	Type    Type
+	Mutable bool
+	IsTail  bool
 	// Ghost marks a verification-only model field (`ghost name: T`). It is readable only in a
 	// contract/ghost context and is erased from codegen (stripped from the struct's concrete
 	// field set, so it has zero layout/size/offset impact on the real fields).
@@ -580,21 +580,22 @@ type FuncType struct {
 	// arcp + contract), matching clang -ffast-math. Set by @fast_math. Enables FP reassociation and
 	// thus auto-vectorization of reduction/elementwise loops. Off by default; opt-in only because it
 	// reorders FP operations (results may differ by more than the contract/reciprocal tier).
-	FastMath                     bool
-	HasNoRecurse                 bool
-	HasAsyncEntry                bool
-	HasSegmentAgnostic           bool
-	HasSegmentEstablishing       bool
-	HasReentrantSafe             bool
-	SegmentTransition            FuncSegmentTransition
-	TemperatureMode              FuncTemperatureMode
-	HasTemperatureMode           bool
-	CallConv                     string
-	IntrinsicName                string
-	GuardEffects                 []FuncGuardEffect
-	BoundaryPointerParamIndices  []int
-	Poststates                   []FuncPoststate
-	RefinementEnsures            []RefinementEnsure
+	FastMath                    bool
+	HasNoRecurse                bool
+	HasAsyncEntry               bool
+	HasSegmentAgnostic          bool
+	HasSegmentEstablishing      bool
+	HasReentrantSafe            bool
+	SegmentTransition           FuncSegmentTransition
+	TemperatureMode             FuncTemperatureMode
+	HasTemperatureMode          bool
+	CallConv                    string
+	IntrinsicName               string
+	GuardEffects                []FuncGuardEffect
+	BoundaryPointerParamIndices []int
+	SpecSignature               *SpecSignature
+	Poststates                  []FuncPoststate
+	RefinementEnsures           []RefinementEnsure
 	// FrameWrites is the callee's EFFECTIVE frame (docs/87 87-3): every caller-visible place it may
 	// write, as a (param index, field suffix) pair — direct `changes` paths plus `fulfills`-expanded
 	// frame-law paths. FrameBounded reports whether the callee's writes are bounded at all (it has a

@@ -90,7 +90,7 @@ func (a *Analyzer) checkOneDefaultMethodContract(protocol string, def *ast.FuncD
 	// function: method calls on `Self`-typed values resolve through the protocol bound, and the
 	// ensure is discharged against the body (with the protocol's laws assumable).
 	a.withGenericParams(synth.GenericParams, nil, func() {
-		fnType := a.funcTypeFromDecl(protocol+".default."+synth.Name, synth.TypeParams, synth.GenericParams, synth.RegionParams, synth.PermissionParams, synth.Permissions, synth.Ensures, synth.Params, synth.ReturnType, false)
+		fnType := a.funcTypeFromDecl(protocol+".default."+synth.Name, synth.TypeParams, synth.GenericParams, synth.RegionParams, synth.PermissionParams, synth.Permissions, synth.Ensures, synth.Requires, synth.EnsureValues, synth.Params, synth.ReturnType, false)
 		if fnType == nil {
 			return
 		}
