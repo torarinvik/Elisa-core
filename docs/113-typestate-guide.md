@@ -1,7 +1,10 @@
 # 113 — Typestate: a user's guide
 
-> **(design / not yet implemented)** — everything in this document describes planned
-> language features.  No compiler source has been modified.
+> **Substantially implemented** — the core typestate system (state transitions,
+> illegal-operation rejection, phantom erasure, `terminal:`, `linear`) is enforced
+> today by the semantic analyzer.  The "(design / not yet implemented)" label that
+> appeared here previously was wrong.  The remaining gaps are narrow and documented
+> in §9.
 
 Cross-references: docs/110 (progressive correctness ladder), docs/111 (ghost models and
 typestate design), docs/96 (typestate protocols technical design).
@@ -252,10 +255,11 @@ This means:
 - No second borrower can witness the state mid-transition.
 - Immutable borrows (`File[Open]&` without `mutable`) are read-only and see only the pre-transition state.
 
-**Current limitation (design / not yet enforced):** if a transition function stores `f` into a shared
-data structure that is also readable by the caller, the caller could later observe the state
-change out-of-order.  This is addressed in docs/111 §2.2 as a future tightening of the storage-class
-UNION check.  Until then, the existing mutable-alias checker provides a conservative guard.
+**Current limitation:** if a transition function stores `f` into a shared data structure that is
+also readable by the caller, the caller could later observe the state change out-of-order.
+This is addressed in docs/111 §2.2 as a future tightening of the storage-class UNION check.
+Until then, the existing mutable-alias checker provides a conservative guard.
+See `TestTypestateAliasMutationTransitionsRoot` for the alias-through-ref case that IS caught.
 
 ---
 
@@ -417,14 +421,22 @@ Both mechanisms are sound in combination.
 
 ## 9. Current status and staged rollout
 
-Typestate is **(design / not yet implemented)**.  The staged rollout is in docs/111 §5:
+The staged rollout from docs/111 §5 and implementation status (as of 2026-06):
 
-| Stage | Deliverables |
-|---|---|
-| **S0** | `typestate` keyword; desugaring to `struct[state]` + phantom discriminant; `is State` operator for state checks |
-| **S1** | Transition functions (`transition` keyword); `ensures p => NewState` postcondition discharge |
-| **S2** | Affine typestate (`linear` flag); `(consumed)` pseudo-state for end-of-life values |
-| **S3** | Protocol composition (multiple independent state indices in one struct) |
+| Stage | Deliverables | Status |
+|---|---|---|
+| **S0** | `typestate` keyword; desugaring to `struct[state]` + phantom discriminant; `is State` operator for state checks | **DONE** |
+| **S1** | Transition functions (`transition` keyword); `ensures p => NewState` postcondition discharge; illegal-transition hard errors; `terminal:` keyword | **DONE** |
+| **S2** | Affine typestate (`linear` flag); leak detection at scope exit; double-transition error | **DONE** |
+| **S3** | Protocol composition (multiple independent state indices in one struct) | planned |
+
+### Known narrow gaps (not yet enforced)
+
+- **Linear by-value consume in callee**: passing a `linear typestate` value by move into a
+  callee that does `pass` (without itself consuming the linear param) leaves the callee's own
+  linear param un-discharged.  Workaround: the callee must either transition to a used state
+  or declare `ensures t => <final-state>` via a mutable ref.
+- **Shared-structure aliasing**: see §5.2 above.
 
 ---
 
@@ -434,5 +446,6 @@ Typestate is **(design / not yet implemented)**.  The staged rollout is in docs/
 - Read docs/111 for the integration with ghost models and named contracts.
 - Read docs/110 for where typestate fits in the correctness ladder.
 
-For now, model your state-dependent APIs using Elisa's existing refinement system (`where` + `requires` + `ensure`),
-optionally backed by affine ownership to control consumption order.
+The `typestate` keyword is the recommended way to model state-dependent APIs today.
+The refinement system (`where` + `requires` + `ensure`) remains available for numeric/algebraic
+invariants that typestate does not cover.
