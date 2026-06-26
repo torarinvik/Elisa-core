@@ -109,6 +109,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 							Mutable: field.Mutable,
 							IsTail:  field.IsTail,
 						}
+						a.analyzeStructFieldWhereRefinement(field, fieldType)
 					}
 					// Drop ghost fields from the concrete field list so codegen (and constructor
 					// arity) never see them — guaranteeing zero layout/size/offset impact.
@@ -331,4 +332,46 @@ func (a *Analyzer) isSupportedDerivedStateExpr(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+// analyzeStructFieldWhereRefinement validates the where predicate on a struct field declaration.
+// The predicate is analyzed in a scope where the field name is bound to the base type, so that
+// references like `field > 0` resolve correctly. Cross-field references produce a clear diagnostic.
+// The field's runtime type is the BASE type (erasure is already done by resolveType); this only
+// records the predicate for later discharge at construction sites.
+func (a *Analyzer) analyzeStructFieldWhereRefinement(field ast.FieldDecl, baseType Type) {
+	if field.Type == nil {
+		return
+	}
+	ft := field.Type
+	if mt, ok := ft.(*ast.MutableType); ok && mt != nil {
+		ft = mt.Elem
+	}
+	wt, ok := whereRefinementTypeExpr(ft)
+	if !ok || wt == nil || wt.Predicate == nil {
+		return
+	}
+	// Validate that the predicate only references the field name itself (self-only).
+	// Cross-field references are not yet supported; emit a clear diagnostic and skip.
+	for _, name := range exprIdentNames(wt.Predicate) {
+		if name == field.Name || name == "true" || name == "false" {
+			continue
+		}
+		if _, isType := a.namedTypes[name]; isType {
+			continue
+		}
+		a.errorf(wt.Predicate.Pos(), "struct field where refinement may only reference the field itself (%q); cross-field reference %q is not yet supported", field.Name, name)
+		return
+	}
+	// Analyze the predicate with the field name bound to the base type.
+	saved := a.currentScope
+	scope := NewScope(saved)
+	scope.Define(&Symbol{Name: field.Name, Kind: SymbolLocal, Type: baseType})
+	a.currentScope = scope
+	a.ghostReadAllowed++
+	defer func() {
+		a.currentScope = saved
+		a.ghostReadAllowed--
+	}()
+	a.analyzeWhereBoolPredicate(wt.Predicate)
 }

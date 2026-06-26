@@ -159,6 +159,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 			}
 			a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 			a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
+			a.dischargeStructFieldWhereRefinement(fieldDecl, expr.Args[i])
 			if prev, exists := seen[index]; exists {
 				a.errorf(expr.Args[i].Pos(), "struct literal %q field %q is specified more than once (first at %s:%d:%d)", expr.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
 				ok = false
@@ -263,6 +264,7 @@ func (a *Analyzer) analyzeStructLiteralArgs(expr *ast.StructLitExpr, base *Struc
 		}
 		a.consumeAffineValueExpr(expr.Args[i], expected, "move into struct literal field "+strconv.Quote(fieldDecl.Name))
 		a.dischargeStructFieldRefinement(fieldDecl, expr.Args[i])
+		a.dischargeStructFieldWhereRefinement(fieldDecl, expr.Args[i])
 	}
 	for i := limit; i < len(expr.Args); i++ {
 		a.analyzeExpr(expr.Args[i])
@@ -312,4 +314,26 @@ func (a *Analyzer) analyzeStructFieldDefaultExpr(base *StructType, field ast.Fie
 		ok = analyze()
 	}
 	return defaultExpr, ok
+}
+
+// dischargeStructFieldWhereRefinement checks that the value assigned to a where-typed struct field
+// at a construction site satisfies the field's where predicate. The field name is substituted by the
+// initializer expression before passing to the shared proof ladder.
+func (a *Analyzer) dischargeStructFieldWhereRefinement(field ast.FieldDecl, arg ast.Expr) {
+	if arg == nil || field.Type == nil {
+		return
+	}
+	ft := field.Type
+	if mt, ok := ft.(*ast.MutableType); ok && mt != nil {
+		ft = mt.Elem
+	}
+	wt, ok := whereRefinementTypeExpr(ft)
+	if !ok || wt == nil || wt.Predicate == nil {
+		return
+	}
+	subject := "where refinement on field " + strconv.Quote(field.Name)
+	if !a.dischargeWhereRefinement(wt, field.Name, arg, arg.Pos(), subject) {
+		a.recordProof(arg.Pos(), subject, "where", ProofRuntime)
+		a.proofLint(arg.Pos(), "%s could not be proven statically", subject)
+	}
 }
