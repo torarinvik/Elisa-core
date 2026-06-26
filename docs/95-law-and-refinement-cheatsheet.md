@@ -129,8 +129,17 @@ def get(xs: darray[i64], i: IndexOf[xs]) -> i64:
     return xs[i]
 ```
 
-At the call site the compiler substitutes the concrete `xs` argument into `self >= 0 and self <
-xs.count`, then discharges via the normal three-tier ladder.
+**Call-site enforcement:** at the call site, the compiler substitutes the concrete `xs` argument
+into `self >= 0 and self < xs.count`, and the proof obligation references the **actual argument**
+name. For list-literal locals, the predicate is provable from the literal count:
+
+```elisa
+def caller() -> i64:
+    xs: darray[i64] = [10, 20, 30]   # written count = 3
+    return get(xs, 1)                # 1 < xs.count is proven from [3-element list literal]
+```
+
+Then discharges via the normal three-tier ladder.
 
 ### Restrictions
 
@@ -156,7 +165,8 @@ hand-written `where`.
 ## `where` on struct fields
 
 A struct field may carry a `where` predicate.  The compiler discharges the predicate at every
-**struct construction** site, both named-argument and positional form.
+**struct construction** site (both named-argument and positional form) and at every **field-store**
+site (`recv.fieldName <- value`).
 
 ```elisa
 struct Pos:
@@ -166,18 +176,19 @@ def make_valid() -> Pos:
     return Pos(x: 5)     # proven: 5 > 0 ✓
 
 def make_pos() -> Pos:
-    return Pos(10)        # positional form also checked ✓
+    return Pos(10)       # positional form also checked ✓
 
-# Pos(x: -1) and Pos(0) are hard errors / proofLint violations.
+def mutate(p: mutable Pos, v: i64) -> void:
+    p.x <- v             # re-checks: v > 0 at the store site
 ```
 
 ### Rules and restrictions
 
 | Rule | Details |
 |---|---|
-| **Discharge site** | Each struct literal (named or positional) — not field reads or assignments to fields after construction. |
+| **Discharge sites** | Each struct literal (named or positional), and each field-store assignment (`recv.field <- value`). |
 | **Self-reference only (v1)** | The predicate may reference the field itself by its own name (`x > 0`).  Cross-field references (`hi > lo`) produce a clear diagnostic: *"cross-field refinement not supported"*. |
-| **Representation erasure** | Reading `p.x` yields plain `i64`, not a where-refined type.  The predicate is construction-time proof metadata only. |
+| **Representation erasure** | Reading `p.x` yields plain `i64`, not a where-refined type.  The predicate is proof metadata (construction and store time). |
 | **Same discharge ladder** | Fact-lattice → linear → SMT, with `proofLint` fallback (hard error under `-strict`). |
 
 ---
@@ -218,6 +229,27 @@ The entailment check is **sound-only**: the prover concludes "entailed" only whe
 the implication from the interval bounds.  It never falsely accepts.  If the bounds are too
 loose (e.g., `lo = 0` for a `> 0` goal), it falls through to the runtime-check tier rather
 than guessing.
+
+### Entailment v2 — arithmetic bounds inference
+
+Beyond raw interval subsumption, the prover applies two new inference rules:
+
+| Rule | Example |
+|---|---|
+| **Additive shift** | `x in [lo, hi]` ⇒ `x+c in [lo+c, hi+c]` |
+| **Monotonic scaling** | `x in [lo, hi]` with `lo ≥ 0, k > 0` ⇒ `x*k in [lo*k, hi*k]` |
+
+```elisa
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def need_bounded_5_15(v: i64 is Bounded[5, 15]) -> i64:
+    return v
+
+def test(x: i64 is Bounded[0, 10]) -> i64:
+    return need_bounded_5_15(x + 5)   # [0+5, 10+5] = [5, 15] ✓
+```
+
+These rules are **sound and complete** for interval arithmetic; they require no runtime check.
 
 ---
 

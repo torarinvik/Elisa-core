@@ -82,7 +82,8 @@ def get(xs: darray[i64], i: IndexOf[xs]) -> i64:
 
 ### Level 1b — Struct field invariants (`where` on fields)
 
-A struct field may carry a `where` predicate that is discharged at every construction site:
+A struct field may carry a `where` predicate that is discharged at every construction site and
+at every field-store site:
 
 ```elisa
 struct Pos:
@@ -90,10 +91,14 @@ struct Pos:
 
 def make() -> Pos:
     return Pos(x: 5)    # proven: 5 > 0 ✓
+
+def mutate(p: mutable Pos, v: i64) -> void:
+    p.x <- v            # re-checks: v > 0 at the store site
 ```
 
-Reading `p.x` yields plain `i64` (erasure preserved).  Cross-field predicates (`hi > lo`) are
-not yet supported in v1 and produce a diagnostic.
+Reading `p.x` yields plain `i64` (erasure preserved).  Storing into `p.x` via `<-` re-checks
+the field predicate against the stored value (same proof ladder as construction).  Cross-field
+predicates (`hi > lo`) are not yet supported in v1 and produce a diagnostic.
 
 ### Level 2 — Named laws and refinement types
 
@@ -111,7 +116,7 @@ def get(xs: darray[i64], i: Index[xs.count]) -> i64:
 `Index[xs.count]` is a refinement type — `i64` with a proven predicate attached.  The base type
 (`i64`) governs layout, ABI, and monomorphization.  The predicate is proof metadata only.
 
-#### Refinement subsumption
+#### Refinement subsumption and entailment
 
 When the compiler knows a value satisfies a **stronger** law (a narrower interval), it
 automatically concludes the value satisfies any **weaker** goal law, with no runtime check:
@@ -127,7 +132,21 @@ def caller(v: i64 is InRange[1, 100]) -> i64:
 ```
 
 The entailment check is **sound-only**: `InRange[0, 100]` does NOT entail `Positive` (lo=0 is
-not > 0) and falls through to a runtime check.  See docs/109 §6 for full rules.
+not > 0) and falls through to a runtime check.
+
+**Entailment v2** adds three new cases for bounds-arithmetic inference:
+
+```elisa
+# Case 1: additive shift — if x in [lo, hi], then x+c in [lo+c, hi+c]
+def caller(v: i64 is InRange[0, 10]) -> i64:
+    return need_bounded_5_15(v + 5)    # [0+5, 10+5] = [5, 15] ✓
+
+# Case 2: monotonic scaling — if x in [lo, hi] and lo >= 0 and k > 0, then x*k in [lo*k, hi*k]
+def caller(v: i64 is InRange[2, 5]) -> i64:
+    return need_bounded_6_15(v * 3)    # [2*3, 5*3] = [6, 15] ✓
+```
+
+See docs/109 §6 for full entailment rules.
 
 ### Level 3 — Explicit contracts (`requires` / `ensure`)
 
