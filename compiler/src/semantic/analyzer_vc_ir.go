@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"strings"
 )
 
 // Verification-condition intermediate language (Boogie/Why3-style), brick 1: the propositional layer.
@@ -32,6 +33,35 @@ type (
 	vcAtom struct{ SMT string }
 )
 
+// vcBinder is one quantifier-bound variable: its Elisa-level SMT symbol (e.g. `q_x`) and its sort
+// (e.g. `Int`). The binder shadows any same-symbol free occurrence inside the quantifier body.
+type vcBinder struct {
+	Sym  string
+	Sort string
+}
+
+// vcQuant is a first-class quantifier — `forall`/`exists` binder(s) + body + optional E-matching
+// triggers (brick 5: structural completeness for quantifiers). Previously every quantifier was a
+// vcAtom holding a pre-built SMT string, so the IR could not see inside it; this node makes the binder,
+// the body formula, and the trigger terms inspectable for future trigger management and
+// WP-through-quantifier transport. Emission is byte-identical to the opaque path (see emitVCFormula).
+type vcQuant struct {
+	Exists   bool
+	Binders  []vcBinder
+	Body     vcFormula
+	Triggers []vcTerm // optional `:pattern` terms; empty means no pattern (left to MBQI)
+}
+
+// vcApply is an uninterpreted function/predicate application — a symbol applied to argument terms,
+// e.g. `(select arr i)` or `(p x y)`. Brick 1 kept these as opaque leaves (vcAtom for predicates,
+// vcOpaque for functions); making them structural lets WP substitute into the arguments and lets future
+// passes rewrite the spine. A nullary application (no args) emits just the bare symbol, exactly as the
+// opaque leaf did.
+type vcApply struct {
+	Sym  string
+	Args []vcTerm
+}
+
 // vcCompare is an ordering comparison between two IR terms (brick 2). Equality/inequality and pointer
 // comparisons stay opaque atoms (their translation has null/bool-valued nuance brick 2 does not model).
 type vcCompare struct {
@@ -46,6 +76,13 @@ func (vcAnd) isVCFormula()     {}
 func (vcOr) isVCFormula()      {}
 func (vcAtom) isVCFormula()    {}
 func (vcCompare) isVCFormula() {}
+func (vcQuant) isVCFormula()   {}
+
+// vcApply is dual-sorted: it is a FORMULA when used as a predicate application and a TERM when used as
+// an uninterpreted-function application. Both interfaces are satisfied so the one node serves both roles
+// (the lowering picks the role by context), keeping emission identical to the two former opaque paths.
+func (vcApply) isVCFormula() {}
+func (vcApply) isVCTerm()    {}
 
 // Term-level IR (brick 2): the arithmetic substrate the comparisons compare and that future bricks
 // (weakest-precondition substitution, normalization) transform. Integer literals and the wrapping
@@ -134,6 +171,29 @@ func vcMkOr(l, r vcFormula) vcFormula {
 	return vcOr{L: l, R: r}
 }
 
+// vcMkQuant constructs a quantifier, constant-folding the trivially-valid cases: a body that is already
+// a boolean constant makes the quantifier that constant (`forall x. true` ≡ `true`, `forall x. false`
+// ≡ `false` over a non-empty sort — and SMT sorts here are non-empty; symmetrically for `exists`), and
+// an empty binder list degenerates to the body. These folds are sound regardless of triggers (a vacuous
+// body needs no instantiation) and match what z3 would conclude, so emission stays behavior-preserving.
+func vcMkQuant(exists bool, binders []vcBinder, body vcFormula, triggers []vcTerm) vcFormula {
+	if len(binders) == 0 {
+		return body
+	}
+	switch body.(type) {
+	case vcTrue, vcFalse:
+		return body
+	}
+	return vcQuant{Exists: exists, Binders: binders, Body: body, Triggers: triggers}
+}
+
+// vcMkApply constructs an uninterpreted application. There is nothing to fold (the symbol is
+// uninterpreted), so it always builds the node; it exists for constructor-style symmetry and as the one
+// place future argument normalization would hook in.
+func vcMkApply(sym string, args []vcTerm) vcApply {
+	return vcApply{Sym: sym, Args: args}
+}
+
 func isVCTrue(f vcFormula) bool  { _, ok := f.(vcTrue); return ok }
 func isVCFalse(f vcFormula) bool { _, ok := f.(vcFalse); return ok }
 
@@ -171,11 +231,51 @@ func emitVCFormula(f vcFormula) string {
 		return "(or " + emitVCFormula(ff.L) + " " + emitVCFormula(ff.R) + ")"
 	case vcCompare:
 		return smtCompare(ff.Op, emitVCTerm(ff.L), emitVCTerm(ff.R))
+	case vcQuant:
+		return emitVCQuant(ff)
+	case vcApply:
+		return emitVCApply(ff.Sym, ff.Args)
 	case vcAtom:
 		return ff.SMT
 	default:
 		return "true"
 	}
+}
+
+// emitVCQuant renders a quantifier to the SAME SMT-LIB the opaque path emitted: `(forall ((x T) …)
+// body)` with the body wrapped as `(! body :pattern (t1 t2 …))` when triggers are present. Binders are
+// space-joined in order; this is byte-identical to boolTerm's quantifier emission.
+func emitVCQuant(q vcQuant) string {
+	kw := "forall"
+	if q.Exists {
+		kw = "exists"
+	}
+	decls := make([]string, len(q.Binders))
+	for i, b := range q.Binders {
+		decls[i] = "(" + b.Sym + " " + b.Sort + ")"
+	}
+	body := emitVCFormula(q.Body)
+	if len(q.Triggers) > 0 {
+		pats := make([]string, len(q.Triggers))
+		for i, t := range q.Triggers {
+			pats[i] = emitVCTerm(t)
+		}
+		body = "(! " + body + " :pattern (" + strings.Join(pats, " ") + "))"
+	}
+	return "(" + kw + " (" + strings.Join(decls, " ") + ") " + body + ")"
+}
+
+// emitVCApply renders an uninterpreted application: `(sym a b …)`, or the bare `sym` when nullary —
+// identical to the opaque function/predicate leaf it replaces.
+func emitVCApply(sym string, args []vcTerm) string {
+	if len(args) == 0 {
+		return sym
+	}
+	parts := make([]string, len(args))
+	for i, a := range args {
+		parts[i] = emitVCTerm(a)
+	}
+	return "(" + sym + " " + strings.Join(parts, " ") + ")"
 }
 
 // vcMkNeg folds a negated literal and cancels double negation.
@@ -344,6 +444,8 @@ func emitVCTerm(t vcTerm) string {
 		return tt.SMT
 	case vcVar:
 		return tt.SMT
+	case vcApply:
+		return emitVCApply(tt.Sym, tt.Args)
 	case vcNeg:
 		return "(- " + emitVCTerm(tt.Arg) + ")"
 	case vcArith:
@@ -527,9 +629,26 @@ func substVCTerm(t vcTerm, name string, repl vcTerm) vcTerm {
 		return vcMkNeg(substVCTerm(tt.Arg, name, repl))
 	case vcArith:
 		return vcMkArith(tt.Op, substVCTerm(tt.L, name, repl), substVCTerm(tt.R, name, repl), tt.WrapBits, tt.SignedWrap)
+	case vcApply:
+		// An uninterpreted-function application is rewritten in its ARGUMENTS only (the head symbol is
+		// not a substitutable variable). The symbol `name` is a vcVar name; it cannot equal the head, so
+		// no shadowing concern arises.
+		return vcMkApply(tt.Sym, substVCTerms(tt.Args, name, repl))
 	default:
 		return t
 	}
+}
+
+// substVCTerms substitutes into each term of a slice.
+func substVCTerms(ts []vcTerm, name string, repl vcTerm) []vcTerm {
+	if len(ts) == 0 {
+		return ts
+	}
+	out := make([]vcTerm, len(ts))
+	for i, t := range ts {
+		out[i] = substVCTerm(t, name, repl)
+	}
+	return out
 }
 
 // substVCFormula pushes a substitution through the propositional structure and the comparison terms.
@@ -543,9 +662,53 @@ func substVCFormula(f vcFormula, name string, repl vcTerm) vcFormula {
 		return vcMkOr(substVCFormula(ff.L, name, repl), substVCFormula(ff.R, name, repl))
 	case vcCompare:
 		return vcMkCompare(ff.Op, substVCTerm(ff.L, name, repl), substVCTerm(ff.R, name, repl))
+	case vcApply:
+		// Predicate application: rewrite the argument terms (the head predicate symbol is fixed).
+		return vcMkApply(ff.Sym, substVCTerms(ff.Args, name, repl))
+	case vcQuant:
+		// The quantifier binder SHADOWS its body: if the replacement term mentions a bound symbol the
+		// substitution would CAPTURE it, so decline to descend and leave the quantifier intact (sound —
+		// WP only ever forgoes a rewrite). A free `name` (a vcVar Elisa name) and a binder `Sym` live in
+		// distinct namespaces, so capture is normally impossible, but the conservative guard keeps the
+		// transport safe if a future caller substitutes a symbol-bearing term. Triggers are NOT rewritten
+		// here: they are instantiation hints, not part of the logical content, and the conservative guard
+		// already keeps any binder-symbol-bearing replacement out of the whole quantifier.
+		for _, b := range ff.Binders {
+			if vcTermMentionsSym(repl, b.Sym) {
+				return f
+			}
+		}
+		return vcMkQuant(ff.Exists, ff.Binders, substVCFormula(ff.Body, name, repl), ff.Triggers)
 	default:
 		return f
 	}
+}
+
+// vcTermMentionsSym reports whether the emitted form of `t` would contain the SMT symbol `sym` — used as
+// the capture-avoidance guard before substituting under a quantifier binder.
+func vcTermMentionsSym(t vcTerm, sym string) bool {
+	switch tt := t.(type) {
+	case vcVar:
+		return tt.SMT == sym
+	case vcOpaque:
+		return strings.Contains(tt.SMT, sym)
+	case vcOldEntry:
+		return strings.Contains(tt.SMT, sym)
+	case vcApply:
+		if tt.Sym == sym {
+			return true
+		}
+		for _, a := range tt.Args {
+			if vcTermMentionsSym(a, sym) {
+				return true
+			}
+		}
+	case vcNeg:
+		return vcTermMentionsSym(tt.Arg, sym)
+	case vcArith:
+		return vcTermMentionsSym(tt.L, sym) || vcTermMentionsSym(tt.R, sym)
+	}
+	return false
 }
 
 // vcTermFullyStructural reports whether a term contains NO opaque leaf — every part is a literal, a

@@ -113,6 +113,78 @@ def always_ok(x: i64) -> i64:
 	}
 }
 
+// The structurally-complete quantifier node emits SMT-LIB byte-identical to the opaque boolTerm path:
+// `(forall ((q_k Int)) body)`, an `exists`, and the `(! body :pattern (...))` trigger wrapping. Smart-
+// constructor folding collapses a vacuous body and an empty binder list.
+func TestVCQuantEmitAndFold(t *testing.T) {
+	k := vcBinder{Sym: "q_k", Sort: "Int"}
+	// body: (and (>= q_k 0) (< q_k 10)) built from comparisons over an opaque bound var.
+	bk := vcOpaque{SMT: "q_k"}
+	body := vcMkAnd(vcMkCompare(lexer.TOKEN_GTEQ, bk, vcIntLit{0}), vcMkCompare(lexer.TOKEN_LT, bk, vcIntLit{10}))
+
+	// forall, no trigger — identical to boolTerm's `(forall (decls) body)`.
+	if got := emitVCFormula(vcMkQuant(false, []vcBinder{k}, body, nil)); got != "(forall ((q_k Int)) (and (>= q_k 0) (< q_k 10)))" {
+		t.Fatalf("forall emit = %q", got)
+	}
+	// exists.
+	if got := emitVCFormula(vcMkQuant(true, []vcBinder{k}, body, nil)); got != "(exists ((q_k Int)) (and (>= q_k 0) (< q_k 10)))" {
+		t.Fatalf("exists emit = %q", got)
+	}
+	// With an E-matching trigger — the `(! body :pattern (...))` wrapping boolTerm emits for array quants.
+	trig := vcMkApply("select", []vcTerm{vcOpaque{SMT: "v_a"}, bk})
+	want := "(forall ((q_k Int)) (! (and (>= q_k 0) (< q_k 10)) :pattern ((select v_a q_k))))"
+	if got := emitVCFormula(vcMkQuant(false, []vcBinder{k}, body, []vcTerm{trig})); got != want {
+		t.Fatalf("forall+trigger emit = %q, want %q", got, want)
+	}
+	// Folding: a vacuous body, and an empty binder list, degenerate.
+	if !isVCTrue(vcMkQuant(false, []vcBinder{k}, vcTrue{}, nil)) {
+		t.Fatal("forall x. true must fold to true")
+	}
+	if !isVCFalse(vcMkQuant(true, []vcBinder{k}, vcFalse{}, nil)) {
+		t.Fatal("exists x. false must fold to false")
+	}
+	if got := emitVCFormula(vcMkQuant(false, nil, body, nil)); got != "(and (>= q_k 0) (< q_k 10))" {
+		t.Fatalf("empty-binder quant must degenerate to body, got %q", got)
+	}
+}
+
+// The uninterpreted-application node emits `(sym args)` as both a predicate (formula) and a function
+// (term), and a nullary application emits the bare symbol — byte-identical to the former opaque leaves.
+// Substitution rewrites the arguments; substitution under a binder is capture-avoiding.
+func TestVCApplyEmitAndSubst(t *testing.T) {
+	i := vcVar{Name: "i", SMT: "v_i"}
+	// As a term: (select v_a v_i).
+	app := vcMkApply("select", []vcTerm{vcOpaque{SMT: "v_a"}, i})
+	if got := emitVCTerm(app); got != "(select v_a v_i)" {
+		t.Fatalf("apply-as-term emit = %q", got)
+	}
+	// As a predicate formula: (p v_i).
+	pred := vcMkApply("p", []vcTerm{i})
+	if got := emitVCFormula(pred); got != "(p v_i)" {
+		t.Fatalf("apply-as-formula emit = %q", got)
+	}
+	// Nullary application is the bare symbol.
+	if got := emitVCFormula(vcMkApply("flag", nil)); got != "flag" {
+		t.Fatalf("nullary apply emit = %q", got)
+	}
+	// Substitution rewrites the argument terms.
+	subst := substVCTerm(app, "i", vcMkArith("+", i, vcIntLit{1}, 0, false))
+	if got := emitVCTerm(subst); got != "(select v_a (+ v_i 1))" {
+		t.Fatalf("apply arg subst emit = %q", got)
+	}
+	// Capture avoidance: substituting a term that mentions the bound symbol leaves the quantifier intact.
+	q := vcMkQuant(false, []vcBinder{{Sym: "v_i", Sort: "Int"}}, vcMkCompare(lexer.TOKEN_GTEQ, i, vcIntLit{0}), nil)
+	if got := emitVCFormula(substVCFormula(q, "j", i)); got != "(forall ((v_i Int)) (>= v_i 0))" {
+		t.Fatalf("capture-avoiding subst changed the quantifier: %q", got)
+	}
+	// A free substitution that does NOT touch the binder descends into the body, re-running the smart
+	// constructors: `i >= 0` with i->5 folds to true, which collapses the whole quantifier.
+	q2 := vcMkQuant(false, []vcBinder{{Sym: "q_k", Sort: "Int"}}, vcMkCompare(lexer.TOKEN_GTEQ, i, vcIntLit{0}), nil)
+	if got := emitVCFormula(substVCFormula(q2, "i", vcIntLit{5})); got != "true" {
+		t.Fatalf("body subst under non-conflicting binder = %q", got)
+	}
+}
+
 // End-to-end through the term IR: `result + 0 >= result` folds to `result >= result` (the x+0 identity)
 // then to `true` by reflexivity — discharged with no solver call.
 func TestVCTermIdentityShortCircuits(t *testing.T) {
