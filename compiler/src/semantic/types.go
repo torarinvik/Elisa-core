@@ -383,7 +383,11 @@ type Field struct {
 	// Ghost marks a verification-only model field (`ghost name: T`). It is readable only in a
 	// contract/ghost context and is erased from codegen (stripped from the struct's concrete
 	// field set, so it has zero layout/size/offset impact on the real fields).
-	Ghost         bool
+	Ghost bool
+	// Phantom marks a compile-time-only field (e.g., the __typestate field in a typestate-bearing
+	// struct). Like Ghost, it is erased from codegen (stripped from layout) but differs in that it
+	// is not readable even in contract contexts (docs/111 S0). Used for S0 typestate state erasure.
+	Phantom       bool
 	PackedStorage PackedFieldStorageMode
 }
 
@@ -433,6 +437,13 @@ type StructType struct {
 	// for static discharge as method-entry assumptions. Decl.Invariants is stripped of ghost-reading
 	// invariants so the backend never emits a runtime check over an erased field.
 	Invariants []ast.Expr
+	// HasTypestate is true if this struct has a `state S1 | S2 | ...` generic parameter
+	// (the typestate marker from docs/111 S0). When true, the __typestate field is phantom.
+	HasTypestate bool
+	// TypestateStateField is the name of the phantom field that carries the typestate index
+	// (typically "__typestate"). Only set when HasTypestate is true. The field exists in Fields
+	// (for refinement analysis) but is erased from Decl.Fields and never included in layout.
+	TypestateStateField string
 }
 
 type OpaqueType struct {

@@ -651,6 +651,11 @@ func (g *llvmGenerator) ensureStructBody(name string, st *semantic.StructType) (
 		if !ok {
 			return nil, fmt.Errorf("missing semantic field %s.%s", name, fieldDecl.Name)
 		}
+		// Skip phantom fields (e.g., typestate __typestate field) from the runtime layout.
+		// Phantom fields are compile-time only and have zero layout impact (docs/111 S0).
+		if field.Phantom {
+			continue
+		}
 		fieldType, err := g.lowerType(field.Type)
 		if err != nil {
 			return nil, err

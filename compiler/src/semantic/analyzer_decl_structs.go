@@ -116,6 +116,11 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 					if len(st.GhostFieldOrder) != 0 {
 						stDecl.Fields = concreteFields
 					}
+					// Mark typestate state fields for erasure: if this struct has a `state` generic
+					// parameter, drop the __typestate field from the concrete field list so codegen never
+					// lays it out (docs/111 S0). This ensures the typestate-annotated struct has the same
+					// runtime layout as the non-typestate version.
+					a.markTypestateStateFieldsForErasure(stDecl, st)
 					a.validateStructDerivedStates(stDecl, st)
 					a.analyzeStructInvariants(stDecl, st)
 					a.checkPointerGraphStruct(stDecl, st)
