@@ -1485,6 +1485,54 @@ func addInt64Checked(a, b int64) (int64, bool) {
 	return s, true
 }
 
+// shiftRange shifts a known integer range [lo, hi] by a constant c, producing [lo+c, hi+c].
+// A bound is preserved only when the addition does not overflow int64; an overflowing bound is
+// dropped (open), so the result is always sound — never wider than the true shifted interval.
+// Used by tryProveRefinementByFlow to handle additive-shift subjects `x + c`.
+func shiftRange(r numRange, c int64) (numRange, bool) {
+	out := numRange{}
+	anyKnown := false
+	if r.loKnown {
+		if s, ok := addInt64Checked(r.lo, c); ok {
+			out.loKnown, out.lo = true, s
+			anyKnown = true
+		}
+	}
+	if r.hiKnown {
+		if s, ok := addInt64Checked(r.hi, c); ok {
+			out.hiKnown, out.hi = true, s
+			anyKnown = true
+		}
+	}
+	return out, anyKnown
+}
+
+// scaleRangePositive scales a known integer range [lo, hi] (with lo >= 0) by a positive constant k > 0,
+// producing [lo*k, hi*k]. Guard: lo must be >= 0 (monotonic scaling only applies to non-negative ranges),
+// and k must be > 0. Either bound that would overflow int64 is dropped (open), keeping the result sound.
+// Used by tryProveRefinementByFlow to handle scaling subjects `x * k` when x >= 0.
+func scaleRangePositive(r numRange, k int64) (numRange, bool) {
+	if k <= 0 {
+		return numRange{}, false
+	}
+	if !r.loKnown || r.lo < 0 {
+		return numRange{}, false // monotonic scaling requires a known non-negative lower bound
+	}
+	out := numRange{}
+	anyKnown := false
+	if lo, ok := mulInt64Checked(r.lo, k); ok {
+		out.loKnown, out.lo = true, lo
+		anyKnown = true
+	}
+	if r.hiKnown {
+		if hi, ok := mulInt64Checked(r.hi, k); ok {
+			out.hiKnown, out.hi = true, hi
+			anyKnown = true
+		}
+	}
+	return out, anyKnown
+}
+
 // tryProveRefinementByLinear discharges `value is law[args]` when `value` is an affine form over
 // immutable integer variables whose bounded range entails every law constraint. Reuses lawConstraints
 // (the law side is unchanged) and rangeEntailsConstraint (the entailment check). Sound: any leaf
@@ -1541,9 +1589,20 @@ func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl
 //     declared type is unsigned (e.g. u8, u16, u32, u64, usize), we seed a [0, typeMax] range from
 //     the declared type — which already provides non-negativity. This is sound because unsigned types
 //     cannot hold negative values; the type system enforces the lower bound at construction time.
+//  3. Additive shift: if `value` is `x + c` (or `x - c`) for an immutable integer `x` with a known
+//     range [lo, hi] and constant c, the shifted range [lo+c, hi+c] is derived (shiftRange) and
+//     checked against the law constraints. Overflow-safe: either bound that would overflow int64 is
+//     dropped (open), and the check then fails (sound). Integers only.
+//  4. Monotonic scaling: if `value` is `x * k` for an immutable integer `x` with known range
+//     [lo, hi] where lo >= 0, and constant k > 0, the scaled range [lo*k, hi*k] is derived
+//     (scaleRangePositive) and checked. Overflow-safe: overflowing bounds become open. Integers only.
 func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
+		// Cases 3 & 4: additive shift or monotonic scaling of an immutable integer variable.
+		if r, derived := a.tryDeriveShiftOrScaleRange(value); derived {
+			return a.proveConstraintsFromRange(r, decl, predArgs)
+		}
 		return false
 	}
 	r, ok := a.lookupRangeFact(ident.Name)
@@ -1566,7 +1625,12 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 	if !ok {
 		return false
 	}
-	// Bind the law's static params (decl.Params[1:]) to the refinement's bracket-arg constants.
+	return a.proveConstraintsFromRange(r, decl, predArgs)
+}
+
+// proveConstraintsFromRange checks whether the given known range entails all law constraints.
+// Shared by tryProveRefinementByFlow (bare identifier and derived-range cases).
+func (a *Analyzer) proveConstraintsFromRange(r numRange, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	if decl == nil || len(predArgs) != len(decl.Params)-1 {
 		return false
 	}
@@ -1588,4 +1652,100 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 		}
 	}
 	return true
+}
+
+// tryDeriveShiftOrScaleRange attempts to derive a numRange for a compound expression that is either:
+//   - an additive shift `x + c` or `x - c` (case 3): range [lo+c, hi+c] derived via shiftRange.
+//   - a monotonic scaling `x * k` with k > 0 and x >= 0 (case 4): range [lo*k, hi*k] via scaleRangePositive.
+//
+// `x` must be an immutable integer identifier with a known range fact (or written-const/declared-type
+// fallback). Returns ok=false for anything outside these two forms, or when overflow would occur on both
+// bounds, keeping the result sound (abstain rather than approximate unsoundly).
+func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
+	bin, ok := stripOptimizationParens(value).(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return numRange{}, false
+	}
+	switch bin.Op {
+	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
+		// x + c  or  x - c: the constant may be on either side.
+		name, xOk := a.immutableIntIdentNameFromScope(bin.Left)
+		var shift int64
+		if xOk {
+			c, cok := a.constIntValue(bin.Right)
+			if !cok {
+				return numRange{}, false
+			}
+			if bin.Op == lexer.TOKEN_MINUS {
+				c = -c
+			}
+			shift = c
+		} else {
+			name, xOk = a.immutableIntIdentNameFromScope(bin.Right)
+			if !xOk || bin.Op == lexer.TOKEN_MINUS {
+				// `c - x` is not a shift of x (it's a negation + shift); decline.
+				return numRange{}, false
+			}
+			c, cok := a.constIntValue(bin.Left)
+			if !cok {
+				return numRange{}, false
+			}
+			shift = c
+		}
+		r, rOk := a.lookupRangeFact(name)
+		if !rOk {
+			if c, known := a.writtenConstInt(name); known {
+				r, rOk = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		if !rOk {
+			return numRange{}, false
+		}
+		return shiftRange(r, shift)
+	case lexer.TOKEN_STAR:
+		// x * k  or  k * x: one side must be a positive constant; the other an immutable int with x >= 0.
+		name, xOk := a.immutableIntIdentNameFromScope(bin.Left)
+		var k int64
+		if xOk {
+			c, cok := a.constIntValue(bin.Right)
+			if !cok {
+				return numRange{}, false
+			}
+			k = c
+		} else {
+			name, xOk = a.immutableIntIdentNameFromScope(bin.Right)
+			if !xOk {
+				return numRange{}, false
+			}
+			c, cok := a.constIntValue(bin.Left)
+			if !cok {
+				return numRange{}, false
+			}
+			k = c
+		}
+		if k <= 0 {
+			return numRange{}, false // negative or zero scale: not monotonically increasing
+		}
+		r, rOk := a.lookupRangeFact(name)
+		if !rOk {
+			if c, known := a.writtenConstInt(name); known {
+				r, rOk = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		if !rOk {
+			return numRange{}, false
+		}
+		return scaleRangePositive(r, k)
+	default:
+		return numRange{}, false
+	}
+}
+
+// immutableIntIdentNameFromScope is a scope-aware wrapper for tryDeriveShiftOrScaleRange: looks up
+// `expr` as an immutable integer identifier in the current scope chain.
+func (a *Analyzer) immutableIntIdentNameFromScope(expr ast.Expr) (string, bool) {
+	if a == nil || a.currentScope == nil {
+		return "", false
+	}
+	return immutableIntIdentName(a, a.currentScope, expr)
 }
