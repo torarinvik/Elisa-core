@@ -162,15 +162,12 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 				continue
 			}
 			// Unknown: the callee still checks this at runtime (debug builds). Surface it so the user
-			// knows a static guarantee fell back, and let -strict escalate. A solver counterexample (an
-			// input the caller's facts permit that violates the precondition) sharpens the message.
+			// knows a static guarantee fell back, and let -strict escalate. Build a rich diagnostic
+			// (goal text, relevant scope facts, actionable suggestion) via buildRequiresFailureDiagnostic.
 			a.recordProof(call.Pos(), subject, clauseName, ProofRuntime)
 			a.recordRequiresReport(declName, req, call.Pos(), false)
-			if counterexample != "" {
-				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; it can fail when %s (or accept the runtime check)", declName, counterexample)
-			} else {
-				a.proofLint(call.Pos(), "precondition of %q could not be proven statically at this call; pass a provable value or accept the runtime check", declName)
-			}
+			diag := a.buildRequiresFailureDiagnostic(req, subst, counterexample)
+			a.proofLint(call.Pos(), "%s", diag.Format(declName))
 		}
 	}
 }
