@@ -13,6 +13,7 @@ func (n *ExternFuncDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExternVarDecl) Pos() lexer.Pos  { return n.Position }
 func (n *ExternTypeDecl) Pos() lexer.Pos { return n.Position }
 func (n *TypeAliasDecl) Pos() lexer.Pos  { return n.Position }
+func (n *RefineDecl) Pos() lexer.Pos     { return n.Position }
 func (n *ExportTypeDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExportFuncDecl) Pos() lexer.Pos { return n.Position }
 func (n *ExportGlobalDecl) Pos() lexer.Pos {
@@ -410,6 +411,7 @@ func (*ExternFuncDecl) declTag()                       {}
 func (*ExternVarDecl) declTag()                        {}
 func (*ExternTypeDecl) declTag()                       {}
 func (*TypeAliasDecl) declTag()                        {}
+func (*RefineDecl) declTag()                           {}
 func (*ExportTypeDecl) declTag()                       {}
 func (*ExportFuncDecl) declTag()                       {}
 func (*ExportGlobalDecl) declTag()                     {}
@@ -421,6 +423,7 @@ func (*StaticGenerateEmitDecl) staticGenerateStmtTag() {}
 func (*StaticGenerateForDecl) staticGenerateStmtTag()  {}
 func (*StaticGenerateIfDecl) staticGenerateStmtTag()   {}
 func (*TypeAliasDecl) nodeTag()                        {}
+func (*RefineDecl) nodeTag()                           {}
 func (*GrammarPassTerm) grammarTermTag()               {}
 func (*GrammarTokenTerm) grammarTermTag()              {}
 func (*GrammarTokenKindTerm) grammarTermTag()          {}

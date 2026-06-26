@@ -8,6 +8,10 @@ import (
 func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
+		// Expand a named refinement alias used in this local's binder (`x: Positive = ...`) into the
+		// equivalent anonymous `Base where Pred` in place, before its type is resolved, so the existing
+		// local where discharge handles it with no parallel path.
+		a.rewriteLocalRefineAlias(n)
 		if n.Ghost {
 			// A ghost decl is verification-only: record it for codegen erasure, and analyze its
 			// initializer in a ghost-read-allowed context (a ghost may be defined in terms of another

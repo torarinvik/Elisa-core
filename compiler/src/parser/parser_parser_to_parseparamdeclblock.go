@@ -327,6 +327,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("type") {
 		return p.parseTypeAliasDecl()
 	}
+	if p.peekIdentText("refine") && p.looksLikeRefineDecl() {
+		return p.parseRefineDecl()
+	}
 	if p.peekIdentText("law") && p.looksLikeLawDecl() {
 		return p.parseLawDecl()
 	}
@@ -678,6 +681,68 @@ func (p *Parser) parseLawDecl() ast.Decl {
 		ReturnType:       &ast.NamedType{Position: pos, Name: "bool"},
 		Body:             []ast.Stmt{&ast.ReturnStmt{Position: pos, Value: predicate}},
 		IsLaw:            true,
+	}
+}
+
+// looksLikeRefineDecl distinguishes a `refine` named-refinement-alias declaration from an identifier
+// merely spelled `refine` (contextual keyword, like `law`). At decl position a refine alias is
+// `refine <name> [generics]? (params)? = <base> where <pred>`, so require an identifier name followed
+// by `[`, `(`, or `=`.
+func (p *Parser) looksLikeRefineDecl() bool {
+	if p.pos+2 >= len(p.tokens) {
+		return false
+	}
+	if p.tokens[p.pos+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	switch p.tokens[p.pos+2].Kind {
+	case lexer.TOKEN_LBRACKET, lexer.TOKEN_LPAREN, lexer.TOKEN_ASSIGN:
+		return true
+	default:
+		return false
+	}
+}
+
+// parseRefineDecl parses a NAMED refinement alias (docs/85 "Level 2"):
+//
+//	refine Positive = i64 where self > 0
+//	refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
+//
+// It is pure desugaring sugar; the analyzer expands a binder-position use of `Name`/`Name[..](..)`
+// into the equivalent anonymous `Base where PRED` (a WhereRefinementTypeExpr). No new type family.
+func (p *Parser) parseRefineDecl() ast.Decl {
+	pos := p.cur().Pos
+	p.expectIdentText("refine")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeParams, _, _, _ := p.parseFuncGenericParams()
+	var params []ast.ParamDecl
+	if p.match(lexer.TOKEN_LPAREN) {
+		params, _ = p.parseExplicitSignatureParamList(false, false)
+		p.expect(lexer.TOKEN_RPAREN)
+	}
+	p.expect(lexer.TOKEN_ASSIGN)
+	savedQuant := p.allowQuantifiers
+	p.allowQuantifiers = true
+	// parseTypeExpr already folds a trailing `where <pred>` into a WhereRefinementTypeExpr, so the
+	// `= Base where Pred` body is parsed in one shot; unwrap it back into the RefineDecl's Base +
+	// Predicate fields. A base with no `where` suffix is a malformed refine alias.
+	parsed := p.parseTypeExpr()
+	p.allowQuantifiers = savedQuant
+	wt, ok := parsed.(*ast.WhereRefinementTypeExpr)
+	if !ok || wt == nil || wt.Predicate == nil {
+		p.errorf("a `refine` alias must be `refine Name[..](..) = Base where <predicate>`")
+		return &ast.RefineDecl{Position: pos, Name: name, TypeParams: typeParams, Params: params, Base: parsed}
+	}
+	base := wt.Base
+	predicate := wt.Predicate
+	p.expectNewline()
+	return &ast.RefineDecl{
+		Position:   pos,
+		Name:       name,
+		TypeParams: typeParams,
+		Params:     params,
+		Base:       base,
+		Predicate:  predicate,
 	}
 }
 

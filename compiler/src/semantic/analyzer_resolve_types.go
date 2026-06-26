@@ -53,6 +53,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if t, ok := a.resolveNamedVariantWitnessType(n); ok {
 			return t
 		}
+		if a.rejectRefineAliasAsOrdinaryType(n.Pos(), n.Name) {
+			return invalidType
+		}
 		if qualified, owner, ok := a.inaccessiblePrivateName(n.Name); ok {
 			a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
 		} else {
@@ -202,6 +205,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		lookupName := n.Name
 		base, canonical, ok := a.lookupVisibleType(lookupName)
 		if !ok {
+			if a.rejectRefineAliasAsOrdinaryType(n.Pos(), lookupName) {
+				return invalidType
+			}
 			if qualified, owner, privateHit := a.inaccessiblePrivateName(lookupName); privateHit {
 				a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
 			} else {

@@ -84,6 +84,11 @@ type Analyzer struct {
 	file        *ast.File
 	diagnostics []Diagnostic
 	namedTypes  map[string]Type
+	// refineAliases registers named refinement aliases (`refine Name(..) = Base where Pred`,
+	// docs/85 "Level 2") by qualified name. They are pure desugaring sugar: a binder-position use
+	// expands to the equivalent anonymous WhereRefinementTypeExpr (see
+	// analyzer_named_refinement_alias.go). Representation-erased — never in namedTypes.
+	refineAliases map[string]*ast.RefineDecl
 	// overlayLayouts registers the docs/107 typed guest-memory overlay layouts by name. A
 	// `GuestVAddr[L]` carrier whose L is a key here gets `base.field[mem]` field-access desugared
 	// to MemoryManager_ReadU<N>/WriteU<N> against L's declared field offsets/widths. Empty unless
@@ -797,6 +802,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectOverlayLayouts(activeDecls)
 	a.collectNamedTypes(activeDecls)
 	a.collectTypeAliases(activeDecls)
+	a.collectRefineAliases(activeDecls)
 	a.collectCapabilityAliases(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
@@ -823,6 +829,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectOverlayLayouts(generatedScopedDecls)
 		a.collectNamedTypes(generatedScopedDecls)
 		a.collectTypeAliases(generatedScopedDecls)
+		a.collectRefineAliases(generatedScopedDecls)
 		a.collectCapabilityAliases(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
 		a.populateConstEnumMembers(generatedScopedDecls)
@@ -831,6 +838,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.assignHierarchyEnumTags(generatedScopedDecls)
 		a.inheritHierarchyCommonFields(generatedScopedDecls)
 	}
+	// Expand named refinement aliases in binder positions (parameter / return types) in place, so all
+	// downstream where machinery sees a normal anonymous WhereRefinementTypeExpr. Runs after generated
+	// decls are merged into activeDecls so newly-synthesized functions are covered too.
+	a.rewriteBinderRefineAliases(activeDecls)
 	a.validatePermissionSubsumption()
 	// Protocol depth: fold base-protocol members into derived protocols (protocol inheritance),
 	// then synthesize inherited default-method bodies into impls that omit them. Both run before

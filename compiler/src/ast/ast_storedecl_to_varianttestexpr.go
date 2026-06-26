@@ -295,6 +295,26 @@ type TypeAliasDecl struct {
 	Name     string
 	Target   TypeExpr
 }
+
+// RefineDecl is a NAMED, reusable refinement alias (docs/85 "Level 2"):
+//
+//	refine Positive = i64 where self > 0
+//	refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
+//
+// It is purely a desugaring: a use of `Name` / `Name[..](..)` in a BINDER position
+// (param / return / local) expands to the equivalent anonymous `Base where PRED`
+// (a WhereRefinementTypeExpr) with the type-/value-parameters substituted, and the
+// bound value substituted for `self`. RefineDecl is representation-erased — it never
+// participates in SameType/AssignableTo and is rejected outside binder positions in
+// this first version.
+type RefineDecl struct {
+	Position   lexer.Pos
+	Name       string
+	TypeParams []string    // generic type parameters, e.g. `[T]`
+	Params     []ParamDecl // value parameters, e.g. `(xs: darray[T])`
+	Base       TypeExpr    // the erased representation type
+	Predicate  Expr        // the bool predicate; references `self` plus the params
+}
 type ExportTypeDecl struct {
 	Position     lexer.Pos
 	ExportedType TypeExpr

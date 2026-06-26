@@ -82,6 +82,7 @@ func registerBundleTypes() {
 		gob.Register(&ast.ExternVarDecl{})
 		gob.Register(&ast.ExternTypeDecl{})
 		gob.Register(&ast.TypeAliasDecl{})
+		gob.Register(&ast.RefineDecl{})
 		gob.Register(&ast.ExportTypeDecl{})
 		gob.Register(&ast.ExportFuncDecl{})
 		gob.Register(&ast.ExportGlobalDecl{})

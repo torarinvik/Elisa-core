@@ -518,6 +518,9 @@ func (g *llvmGenerator) predeclareDeclTypesInNamespace(decl ast.Decl, namespace 
 		return nil
 	case *ast.TypeAliasDecl:
 		return nil
+	case *ast.RefineDecl:
+		// Named refinement aliases are representation-erased desugaring sugar; consumed during analysis.
+		return nil
 	case *ast.AliasDecl:
 		return nil
 	case *ast.UsingDecl, *ast.ImportDecl:
@@ -713,6 +716,8 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 	case *ast.GrammarEnvDecl:
 		return nil
 	case *ast.TypeAliasDecl:
+		return nil
+	case *ast.RefineDecl:
 		return nil
 	case *ast.AliasDecl:
 		return nil
