@@ -167,11 +167,11 @@ func (a *Analyzer) recordRefinementChecks(n *ast.VarDeclStmt) {
 		if a.tryDischargeRefinementStatically(n.Value, "\""+n.Name+"\"", pred, lawDecl, n.Pos()) {
 			continue
 		}
-		// Contract composition: the initializer is itself a refinement-returning call (or a refined
-		// struct-field read) whose declared refinement entails this local's — its result satisfies the
-		// predicate on every callee exit, so the binding is proven without a runtime check. Mirrors the
-		// call-argument boundary, so `base: u64 is Aligned[4096] = page_align_down(raw)` discharges.
-		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) || a.argDeclaredRefinementEntails(n.Value, pred) {
+		// Contract composition: the initializer carries a refinement scheme (call return, refined
+		// field read, or immutable declared binding) whose predicates entail this local's. The scheme
+		// adapter keeps the three sources on one consumption path while preserving the existing
+		// per-source helper API.
+		if a.exprRefinementSchemeEntails(n.Value, pred) {
 			a.recordProof(n.Pos(), "\""+n.Name+"\"", pred.Name, ProofProvenContract)
 			continue
 		}
@@ -301,20 +301,17 @@ func (a *Analyzer) lawBodyContainsQuantifier(decl *ast.FuncDecl) bool {
 // discharge tiers as a var declaration. Runtime enforcement of an unproven arg at the call site is
 // a follow-up; under -strict an unproven arg is already a hard error.
 func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Expr) {
-	decl, ok := a.resolveDirectCallFuncDecl(call)
-	if !ok {
+	scheme, ok := a.callRefinementScheme(call)
+	if !ok || len(scheme.ParamRefinements) == 0 {
 		return
 	}
 	var checks []*ast.CallExpr
-	for i, param := range decl.Params {
+	for _, paramRefinement := range scheme.ParamRefinements {
+		i := paramRefinement.ParamIndex
 		if i >= len(args) || args[i] == nil {
-			break
-		}
-		rt, ok := a.paramRefinementTypeExpr(param.Type)
-		if !ok || rt == nil {
 			continue
 		}
-		for _, pred := range rt.Preds {
+		for _, pred := range paramRefinement.Preds {
 			lawDecl, _, ok := a.lookupLaw(pred.Name)
 			if !ok {
 				continue
@@ -325,16 +322,15 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 			if a.tryDischargeRefinementStaticallyOpt(args[i], name, pred, lawDecl, call.Pos(), false) {
 				continue
 			}
-			// Contract composition: the argument is itself a direct call (or a struct-field read) whose
-			// declared refinement entails this parameter's — its result already satisfies the predicate
-			// on every callee exit, so the obligation is discharged without a runtime check. This is what
-			// makes `map_fixed(page_align_down(raw), ..)` prove when `page_align_down -> u64 is Aligned[..]`.
-			if a.returnCallRefinementEntails(args[i], pred) || a.returnFieldRefinementEntails(args[i], pred) || a.argDeclaredRefinementEntails(args[i], pred) {
+			// Contract composition: the argument carries a refinement scheme whose predicates entail
+			// this parameter's. This is what makes `map_fixed(page_align_down(raw), ..)` prove when
+			// `page_align_down -> u64 is Aligned[..]`.
+			if a.exprRefinementSchemeEntails(args[i], pred) {
 				a.recordProof(call.Pos(), name, pred.Name, ProofProvenContract)
 				continue
 			}
 			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
-			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, name, decl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
+			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, name, scheme.DeclName, a.counterexampleSuffix(a.lastSMTCounterexample))
 			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
 			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
 			// double evaluation would change behavior), so the runtime tier stays sound.
@@ -362,29 +358,11 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 // hard error.
 // returnCallRefinementEntails reports whether `value` is a direct call whose declared return type
 // carries a refinement predicate that ENTAILS `pred` — so the function returning that call's result
-// inherits the guarantee. Entailment is recognized for an IDENTICAL predicate (same law, same constant
-// args) and, for the interval law family, a TIGHTER bound (callee `Bounded[clo,chi]` ⊆ required
-// `Bounded[rlo,rhi]`). Sound: the callee's return refinement is enforced on its every exit (statically
-// or by a debug runtime check), so its result already satisfies `pred`.
+// inherits the guarantee. Sound: the callee's return refinement is enforced on its every exit
+// (statically or by a debug runtime check), so its result already satisfies `pred`.
 func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
-	call, ok := stripOptimizationParens(value).(*ast.CallExpr)
-	if !ok || call == nil {
-		return false
-	}
-	decl, ok := a.resolveDirectCallFuncDecl(call)
-	if !ok || decl == nil {
-		return false
-	}
-	rt, ok := a.paramRefinementTypeExpr(decl.ReturnType)
-	if !ok || rt == nil {
-		return false
-	}
-	for _, cp := range rt.Preds {
-		if a.refinementPredEntails(cp, pred) {
-			return true
-		}
-	}
-	return false
+	s, ok := a.callReturnRefinementScheme(value)
+	return ok && a.valueRefinementSchemeEntails(s, pred)
 }
 
 // returnFieldRefinementEntails reports whether `value` is a struct FIELD read whose declared field
@@ -392,34 +370,8 @@ func (a *Analyzer) returnCallRefinementEntails(value ast.Expr, pred ast.Refineme
 // already satisfies its refinement, so reading it (`return d.sdst` where sdst is `is InRange[0,127]`)
 // inherits that guarantee — refinement types erase to their base on read, so this recovers the bound.
 func (a *Analyzer) returnFieldRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
-	fe, ok := stripOptimizationParens(value).(*ast.FieldExpr)
-	if !ok || fe == nil {
-		return false
-	}
-	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
-	if !ok || st == nil || st.Decl == nil {
-		return false
-	}
-	for _, fd := range st.Decl.Fields {
-		if fd.Name != fe.Field {
-			continue
-		}
-		ft := fd.Type
-		if mt, mok := ft.(*ast.MutableType); mok && mt != nil {
-			ft = mt.Elem
-		}
-		rt, rok := ft.(*ast.RefinementTypeExpr)
-		if !rok || rt == nil {
-			return false
-		}
-		for _, fp := range rt.Preds {
-			if a.refinementPredEntails(fp, pred) {
-				return true
-			}
-		}
-		return false
-	}
-	return false
+	s, ok := a.fieldReadRefinementScheme(value)
+	return ok && a.valueRefinementSchemeEntails(s, pred)
 }
 
 // argDeclaredRefinementEntails reports whether `value` is an identifier whose DECLARED type (an
@@ -430,36 +382,8 @@ func (a *Analyzer) returnFieldRefinementEntails(value ast.Expr, pred ast.Refinem
 // then `map_fixed(base)`. Gated to IMMUTABLE bindings: a mutable variable could be reassigned to a
 // non-conforming value after declaration, so its declared refinement is not a standing guarantee.
 func (a *Analyzer) argDeclaredRefinementEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
-	ident, ok := stripOptimizationParens(value).(*ast.Ident)
-	if !ok || ident == nil || a.currentScope == nil {
-		return false
-	}
-	sym, ok := a.currentScope.Lookup(ident.Name)
-	if !ok || sym == nil || sym.Mutable {
-		return false
-	}
-	var declType ast.TypeExpr
-	switch d := sym.Node.(type) {
-	case *ast.VarDeclStmt:
-		declType = d.Type
-	case *ast.FuncDecl:
-		if sym.Kind == SymbolParam && sym.ParamIndex >= 0 && sym.ParamIndex < len(d.Params) {
-			declType = d.Params[sym.ParamIndex].Type
-		}
-	}
-	if declType == nil {
-		return false
-	}
-	rt, ok := a.paramRefinementTypeExpr(declType)
-	if !ok || rt == nil {
-		return false
-	}
-	for _, cp := range rt.Preds {
-		if a.refinementPredEntails(cp, pred) {
-			return true
-		}
-	}
-	return false
+	s, ok := a.declaredBindingRefinementScheme(value)
+	return ok && a.valueRefinementSchemeEntails(s, pred)
 }
 
 // refinementPredEntails reports whether predicate `have` guarantees `want` — the same law applied to
@@ -501,7 +425,7 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
 		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
 		// function that returns another refinement-typed function's result paid a redundant runtime check.
-		if a.returnCallRefinementEntails(n.Value, pred) || a.returnFieldRefinementEntails(n.Value, pred) || a.argDeclaredRefinementEntails(n.Value, pred) {
+		if a.exprRefinementSchemeEntails(n.Value, pred) {
 			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}

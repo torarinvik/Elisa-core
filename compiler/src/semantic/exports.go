@@ -138,7 +138,7 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 
-	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
+	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
 	if !isCABICompatibleFuncType(signature) {
 		a.errorf(decl.Pos(), "export func %q is not C-ABI-compatible", decl.Name)
 		return
@@ -274,6 +274,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		TemperatureMode:             specialized.TemperatureMode,
 		HasTemperatureMode:          specialized.HasTemperatureMode,
 		BoundaryPointerParamIndices: append([]int(nil), specialized.BoundaryPointerParamIndices...),
+		SpecSignature:               cloneSpecSignature(specialized.SpecSignature),
 		Poststates:                  cloneFuncPoststates(specialized.Poststates),
 		RefinementEnsures:           append([]RefinementEnsure(nil), specialized.RefinementEnsures...),
 		FrameWrites:                 cloneFrameWrites(specialized.FrameWrites),

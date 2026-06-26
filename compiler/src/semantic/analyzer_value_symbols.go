@@ -78,7 +78,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						a.warnf(n.Pos(), "function %q shadows the builtin type name %q; a call `%s(...)` resolves to the type cast, not this function, so this function can never be called", n.Name, n.Name, n.Name)
 					}
 				}
-				fnType := a.funcTypeFromDeclWithFrame(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Changes, n.Fulfills, n.Params, n.ReturnType, false, false)
+				fnType := a.funcTypeFromDeclWithFrame(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Changes, n.Fulfills, n.Params, n.ReturnType, false, false)
 				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
 				symbolName := qualifiedName
@@ -118,7 +118,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							case *ast.FuncDecl:
 								visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 								qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
+								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType
 								a.funcDeclSymbols[fnDecl] = sym
@@ -127,7 +127,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							case *ast.ExternFuncDecl:
 								visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 								qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
 								a.applyExternFuncAnnotations(fnDecl, fnType)
 								a.markRawExternFuncType(fnDecl, fnType)
 								linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
@@ -152,14 +152,14 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							switch fnDecl := member.(type) {
 							case *ast.FuncDecl:
 								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
+								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, false, false)
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType
 								a.funcDeclSymbols[fnDecl] = sym
 								a.defineGlobal(sym, fnDecl.Pos())
 							case *ast.ExternFuncDecl:
 								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
 								a.applyExternFuncAnnotations(fnDecl, fnType)
 								a.markRawExternFuncType(fnDecl, fnType)
 								linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
@@ -173,7 +173,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				})
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
-				fnType := a.funcTypeFromExternDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Params, n.ReturnType, n.Variadic)
+				fnType := a.funcTypeFromExternDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Params, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				a.checkExternContractDiscipline(n)
 				a.markRawExternFuncType(n, fnType)

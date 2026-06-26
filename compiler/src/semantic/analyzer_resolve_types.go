@@ -15,6 +15,10 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		base := a.resolveType(n.Base)
 		a.validateRefinementPreds(n, base)
 		return base
+	case *ast.WhereRefinementTypeExpr:
+		base := a.resolveType(n.Base)
+		a.validateWhereRefinementPredicate(n)
+		return base
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":
@@ -273,6 +277,47 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 	default:
 		return invalidType
 	}
+}
+
+func (a *Analyzer) validateWhereRefinementPredicate(n *ast.WhereRefinementTypeExpr) {
+	if a == nil || n == nil || n.Predicate == nil || exprContainsIdent(n.Predicate) {
+		return
+	}
+	t := a.analyzeExpr(n.Predicate)
+	if t != nil && !IsBoolType(t) {
+		a.errorf(n.Predicate.Pos(), "where refinement predicate must be bool, got %s", typeString(t))
+	}
+}
+
+func exprContainsIdent(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case nil:
+		return false
+	case *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return exprContainsIdent(n.Inner)
+	case *ast.UnaryExpr:
+		return exprContainsIdent(n.Operand)
+	case *ast.BinaryExpr:
+		return exprContainsIdent(n.Left) || exprContainsIdent(n.Right)
+	case *ast.FieldExpr:
+		return exprContainsIdent(n.Object)
+	case *ast.IndexExpr:
+		return exprContainsIdent(n.Object) || exprContainsIdent(n.Index) || exprContainsIdent(n.Index2) || exprContainsIdent(n.Fallback)
+	case *ast.SliceExpr:
+		return exprContainsIdent(n.Object) || exprContainsIdent(n.Start) || exprContainsIdent(n.End)
+	case *ast.CallExpr:
+		if exprContainsIdent(n.Func) {
+			return true
+		}
+		for _, arg := range n.Args {
+			if exprContainsIdent(arg) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) resolveErrorSetExpr(expr *ast.ErrorSetExpr) Type {

@@ -7,22 +7,22 @@ import (
 	"strings"
 )
 
-func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
-	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic, false)
+func (a *Analyzer) funcTypeFromDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, requires []ast.Expr, ensureValues []ast.Expr, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, requires, ensureValues, nil, nil, params, ret, variadic, false)
 }
 
 // funcTypeFromExternDecl builds the signature of an `extern` function. It is identical to
 // funcTypeFromDecl except that no implicit `preserve` poststates are synthesized: the native body is
 // unverifiable, so callers must keep widening a borrowed stateful argument across the call.
-func (a *Analyzer) funcTypeFromExternDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
-	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, nil, nil, params, ret, variadic, true)
+func (a *Analyzer) funcTypeFromExternDecl(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, requires []ast.Expr, ensureValues []ast.Expr, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool) *FuncType {
+	return a.funcTypeFromDeclWithFrame(name, typeParams, genericParams, regionParams, permissionParams, permissionRefs, ensures, requires, ensureValues, nil, nil, params, ret, variadic, true)
 }
 
 // funcTypeFromDeclWithFrame is funcTypeFromDecl plus the callee's frame clauses (docs/87 87-3), so
 // the resulting FuncType carries an effective-frame summary call sites use to refine mutable-ref
 // arguments. `changes` and `fulfills` are the only clauses that BOUND writes; `preserves` is a
 // blacklist that does not, so it is not threaded here.
-func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool, isExtern bool) *FuncType {
+func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, genericParams []ast.GenericParam, regionParams []string, permissionParams []string, permissionRefs []ast.PermissionRef, ensures []ast.EnsuresClause, requires []ast.Expr, ensureValues []ast.Expr, changes []ast.EnsuresPath, fulfills []ast.FulfillsClause, params []ast.ParamDecl, ret ast.TypeExpr, variadic bool, isExtern bool) *FuncType {
 	resolvedGenericParams := append([]ast.GenericParam(nil), genericParams...)
 	for _, param := range resolvedGenericParams {
 		if param.Kind != ast.GenericParamErrorSet {
@@ -58,6 +58,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 	var permissions []string
 	var poststates []FuncPoststate
 	var refinementEnsures []RefinementEnsure
+	var specSignature *SpecSignature
 	defaultExprs := make([]ast.Expr, len(expandedExplicitParams))
 	hasDefaults := make([]bool, len(expandedExplicitParams))
 	a.withGenericParams(resolvedGenericParams, nil, func() {
@@ -78,6 +79,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 					}
 					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
 					refinementEnsures = a.resolveRefinementEnsures(name, allParams, ptypes, ensures)
+					specSignature = a.buildSpecSignature(name, allParams, ptypes, ret, retType, requires, ensureValues, refinementEnsures)
 					defaultExprs, hasDefaults = a.validateExpandedFuncParamDefaults(name, explicitSpecs, ptypes[:len(expandedExplicitParams)])
 				})
 			})
@@ -104,6 +106,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		TemperatureMode:           FuncTemperatureModeDefault,
 		Poststates:                poststates,
 		RefinementEnsures:         refinementEnsures,
+		SpecSignature:             specSignature,
 		Params:                    ptypes,
 		ExplicitParamCount:        len(expandedExplicitParams),
 		ExplicitParamNames:        explicitNames,

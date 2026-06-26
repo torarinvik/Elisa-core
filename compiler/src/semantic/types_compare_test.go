@@ -38,3 +38,31 @@ func TestAssignableToFuncTypesIsCovariantInReturn(t *testing.T) {
 		t.Fatalf("expected func() -> Box&? not to be assignable to func() -> Box&")
 	}
 }
+
+func TestFuncTypeProofMetadataDoesNotAffectTypeIdentity(t *testing.T) {
+	intType := &BuiltinType{Name: "int"}
+	plain := &FuncType{
+		Params:             []Type{intType},
+		ExplicitParamCount: 1,
+		Return:             intType,
+	}
+	refined := &FuncType{
+		Params:             []Type{intType},
+		ExplicitParamCount: 1,
+		Return:             intType,
+		RefinementEnsures: []RefinementEnsure{{
+			ParamIndex: 0,
+			LawName:    "Positive",
+		}},
+	}
+
+	if len(refined.RefinementEnsures) == 0 {
+		t.Fatal("test setup must keep proof metadata on the function signature")
+	}
+	if !SameType(plain, refined) || !SameType(refined, plain) {
+		t.Fatalf("refinement proof metadata must survive on FuncType without entering SameType")
+	}
+	if !AssignableTo(plain, refined) || !AssignableTo(refined, plain) {
+		t.Fatalf("refinement proof metadata must not make SMT/contract entailment part of AssignableTo")
+	}
+}

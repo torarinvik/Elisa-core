@@ -521,7 +521,7 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
 							continue
 						}
-						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
+						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
 						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
 					case *ast.FuncDecl:
 						if methodDecl.IsLaw {
@@ -537,7 +537,7 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
 							continue
 						}
-						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Params, methodDecl.ReturnType, false)
+						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, false)
 						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: nil, Default: methodDecl}
 					}
 				}

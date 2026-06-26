@@ -858,9 +858,16 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 // substitutes `n` → `100` and yields `[0, 100]` in the caller. A law arg that does not reduce to a
 // constant after substitution drops that predicate — fails closed, never widens.
 func (a *Analyzer) rangeFromRefinementTypeExpr(rt *ast.RefinementTypeExpr, subst map[string]ast.Expr) (numRange, bool) {
+	if rt == nil {
+		return numRange{}, false
+	}
+	return a.rangeFromRefinementPreds(rt.Preds, subst)
+}
+
+func (a *Analyzer) rangeFromRefinementPreds(preds []ast.RefinementPredExpr, subst map[string]ast.Expr) (numRange, bool) {
 	fact := numRange{}
 	any := false
-	for _, pred := range rt.Preds {
+	for _, pred := range preds {
 		r, ok := a.rangeFromLawApplication(pred.Name, pred.Args, subst)
 		if !ok {
 			continue
@@ -1032,8 +1039,8 @@ func (a *Analyzer) seedReturnRefinementFacts(name string, value ast.Expr, bindin
 	fact := numRange{}
 	any := false
 	// (1) The refined return type (`-> i64 is Bounded[..]`) — bricks 90-7/8/9.
-	if rt, ok := decl.ReturnType.(*ast.RefinementTypeExpr); ok && rt != nil {
-		if r, found := a.rangeFromRefinementTypeExpr(rt, subst); found {
+	if s, ok := a.valueRefinementSchemeFromTypeExpr(decl.ReturnType); ok {
+		if r, found := a.rangeFromRefinementPreds(s.Preds, subst); found {
 			fact = fact.intersect(r)
 			any = true
 		}

@@ -132,7 +132,18 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	if p.peek() == lexer.TOKEN_IS && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
 		typ = p.parseRefinementTypeSuffix(typ)
 	}
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
+		typ = p.parseWhereRefinementTypeSuffix(typ)
+	}
 	return typ
+}
+
+// parseWhereRefinementTypeSuffix parses `where <bool-expr>` after a type. It deliberately lives after
+// named `is Law` refinements, so existing law syntax keeps its precedence and behavior.
+func (p *Parser) parseWhereRefinementTypeSuffix(base ast.TypeExpr) ast.TypeExpr {
+	pos := p.cur().Pos
+	p.expectIdentText("where")
+	return &ast.WhereRefinementTypeExpr{Position: pos, Base: base, Predicate: p.parseExpr()}
 }
 
 // parseRefinementTypeSuffix parses `is Pred[…]` (and `, Pred` / `and Pred`) after a base type.
@@ -1005,7 +1016,7 @@ func (p *Parser) parseRefStorageQualifier() (ast.RefStorage, bool, string, strin
 		tok := p.advance()
 		return ast.RefStorageStatic, true, tok.Text, ""
 	default:
-		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && !isPostReturnClauseKeyword(p.tokens[p.pos+1].Text) {
+		if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "any" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "where" && !isPostReturnClauseKeyword(p.tokens[p.pos+1].Text) {
 			// The legacy `<ident> T&` region prefix is removed (docs/68 §7): use the
 			// canonical `T& @r` suffix. Now that refstorage params are gone this prefix is
 			// unambiguously a region, so we can reject it. Recover by treating the ident as

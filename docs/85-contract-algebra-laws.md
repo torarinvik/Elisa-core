@@ -141,6 +141,11 @@ This kills the category error of treating "this loop is fast" as a local proof.
    one keeps exactly one. Never double-instrument.
 7. **Refutation is conservative** (§6) — incomplete analysis warns, does not reject.
 
+Corollary for the refinement-scheme work: verification signatures may carry proof metadata, but
+ordinary type identity remains representation identity. Do not route `SameType`/`AssignableTo`
+through SMT or law entailment. Likewise, an SMT-proven value refinement is not automatically a
+proof-indexed storage fact: bounds-check elision stays on the dedicated index-bounds channel.
+
 ## 10. Non-goals
 
 - No separate "law runtime" — everything desugars to existing contracts/effects/analyses.

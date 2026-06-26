@@ -455,6 +455,15 @@ type RefinementTypeExpr struct {
 	Preds    []RefinementPredExpr
 }
 
+// WhereRefinementTypeExpr is `Base where <bool-expr>`: anonymous binder refinement syntax. Like
+// named law refinements, it is representation-erased; the predicate is preserved for later contract
+// lowering/proof obligations.
+type WhereRefinementTypeExpr struct {
+	Position  lexer.Pos
+	Base      TypeExpr
+	Predicate Expr
+}
+
 // RefinementPredExpr is one predicate application in a refinement type: a law name plus optional
 // static `[..]` args (e.g. `Bounded[0..500]`). `self` is bound to the refined value.
 type RefinementPredExpr struct {

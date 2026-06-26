@@ -92,22 +92,19 @@ func (a *Analyzer) requiresReportEntries() []RequiresReportEntry {
 // Mirrors dischargeCallArgRefinements (refinement-typed params); this covers arbitrary boolean
 // preconditions in the bounded-linear fragment.
 func (a *Analyzer) dischargeCallRequires(call *ast.CallExpr, args []ast.Expr) {
-	if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl != nil && len(decl.Requires) > 0 {
-		if decl.IsLemma {
-			// A lemma's preconditions are handled by assumeLemmaEnsures with hard-error semantics (a
-			// lemma is erased, so an unmet `requires` has no runtime check and cannot be tolerated as a
-			// lint). Don't run the ordinary lint/strict path for it.
-			return
-		}
-		a.checkCalleeRequires(call, decl.Name, decl.Requires, decl.Params, args)
+	scheme, ok := a.callRefinementScheme(call)
+	if !ok || len(scheme.Requires) == 0 {
 		return
 	}
-	// Boundary preconditions: an `extern f(...) requires <bool>` is checked at every call site so the
-	// caller cannot hand native code an out-of-domain argument (docs/85 gap #4 — the FFI boundary made
-	// a checked contract). The native body is trusted to honour its `ensures`.
-	if ext, ok := a.resolveDirectCallExternFuncDecl(call); ok && ext != nil && len(ext.Requires) > 0 {
-		a.checkCalleeRequires(call, ext.Name, ext.Requires, ext.Params, args)
+	if scheme.IsLemma {
+		// A lemma's preconditions are handled by assumeLemmaEnsures with hard-error semantics (a
+		// lemma is erased, so an unmet `requires` has no runtime check and cannot be tolerated as a
+		// lint). Don't run the ordinary lint/strict path for it.
+		return
 	}
+	// Boundary preconditions, including extern FFI contracts, are checked at every call site so the
+	// caller cannot hand a callee an out-of-domain argument.
+	a.checkCalleeRequires(call, scheme.DeclName, scheme.Requires, scheme.Params, args)
 }
 
 // resolveDirectCallExternFuncDecl resolves a direct `name(...)` call to its extern declaration.
