@@ -355,23 +355,89 @@ def f(n: i64 is NonNeg) -> i64:
 // SOUNDNESS TODOs — gaps not yet enforced; skipped so they are visible
 // ---------------------------------------------------------------------------
 
-// SOUNDNESS TODO: ensure clauses whose postcondition is refuted at the return
-// site must be hard errors. Currently not tested end-to-end at the gate level.
-func TestSoundnessGate_TODO_RefutedEnsureIsError(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: verify that a refuted `ensure` postcondition is a hard error at the return site")
+// A `ensure` postcondition that is PROVABLY refuted on a reachable return path
+// must be a HARD ERROR (not a warning), independent of -strict. Closed by the
+// ensure-refutation gate (analyzer_law_is.go: ensureClauseRefuted /
+// reportRefutedEnsure). See ensure_refuted_soundness_test.go for the unit-level
+// coverage; this is the gate-level guarantee.
+func TestSoundnessGate_RefutedEnsureIsError(t *testing.T) {
+	src := `
+def f() -> i64:
+    ensure result > 0
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "soundness_refuted_ensure.elisa", src, AnalyzeOptions{})
+
+	if len(result.Errors()) == 0 {
+		t.Fatalf("SOUNDNESS VIOLATION: returning 0 for `ensure result > 0` must be a hard error; "+
+			"errors=%v warnings=%v proof=%v", result.Errors(), result.Warnings(), result.ProofReport)
+	}
+	refuted := false
+	for _, p := range result.ProofReport {
+		if p.Outcome == ProofRefuted && strings.HasPrefix(p.Subject, "ensure ") {
+			refuted = true
+			break
+		}
+	}
+	if !refuted {
+		t.Errorf("expected a ProofRefuted ensure entry; got %v", result.ProofReport)
+	}
 }
 
-// SOUNDNESS TODO: a `where`-refined local variable that is mutated to a value
-// outside the predicate range must invalidate the refinement fact and re-require
-// a check at next use. Gate test for mutation-invalidation soundness.
-func TestSoundnessGate_TODO_MutationInvalidatesWhereFactAtUse(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: verify that mutating a local `where`-refined binding out of range " +
-		"forces a fresh obligation at the next use site (not silently carried forward)")
+// A `where`-refined local REASSIGNED to a provably out-of-range value must be
+// re-discharged at the assignment (refuted -> hard error), not silently carried
+// forward on the stale fact. Closed by the reassignment re-discharge in
+// analyzer_flow.go via whereTypeForReassignTarget + dischargeWhereRefinement.
+func TestSoundnessGate_MutationInvalidatesWhereFactAtUse(t *testing.T) {
+	src := `
+def f() -> i64:
+    x: i64 where x > 0 = 5
+    x <- -1
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "soundness_where_reassign.elisa", src, AnalyzeOptions{})
+
+	refuted := false
+	for _, p := range result.ProofReport {
+		if p.Predicate == "where" && p.Outcome == ProofRefuted {
+			refuted = true
+			break
+		}
+	}
+	if !refuted && len(result.Errors()) == 0 {
+		t.Errorf("SOUNDNESS VIOLATION: reassigning a `where x > 0` local to -1 must re-discharge "+
+			"and refute; proof=%v errors=%v", result.ProofReport, result.Errors())
+	}
 }
 
-// SOUNDNESS TODO: cross-module callee where-precondition discharge. When a
-// callee imported from another module has a `where` param, the caller-side
-// obligation must be checked even without access to the callee body.
-func TestSoundnessGate_TODO_CrossModuleWhereDischarge(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: cross-module where-precondition discharge not yet gate-tested")
+// A callee's `where` precondition must be discharged at the call site even when
+// it would only be visible via the canonical SpecSignature (the imported/
+// cross-module case). A provably-violated precondition is a hard error; the
+// SpecSignature-only path (no callee AST) is covered in
+// crossmodule_where_soundness_test.go. This gate asserts the violated case is
+// not silently accepted.
+func TestSoundnessGate_CrossModuleWhereDischarge(t *testing.T) {
+	src := `
+def need_positive(x: i64 where x > 0) -> i64:
+    return x
+
+def bad() -> i64:
+    return need_positive(-1)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "soundness_crossmodule_where.elisa", src, AnalyzeOptions{})
+
+	refuted := false
+	for _, p := range result.ProofReport {
+		if p.Predicate == "where" && p.Outcome == ProofRefuted {
+			refuted = true
+			break
+		}
+	}
+	if !refuted && len(result.Errors()) == 0 {
+		t.Errorf("SOUNDNESS VIOLATION: a violated where-precondition must not be silently accepted; "+
+			"proof=%v errors=%v", result.ProofReport, result.Errors())
+	}
 }
