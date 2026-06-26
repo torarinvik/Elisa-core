@@ -168,10 +168,12 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 			}
 			// Unknown: the callee still checks this at runtime (debug builds). Surface it so the user
 			// knows a static guarantee fell back, and let -strict escalate. Build a rich diagnostic
-			// (goal text, relevant scope facts, actionable suggestion) via buildRequiresFailureDiagnostic.
+			// (goal text, relevant scope facts, actionable suggestion) via
+			// buildRequiresFailureDiagnosticWithProvenance so each known fact is annotated with its
+			// origin (requires hypothesis, where refinement, branch guard, etc.).
 			a.recordProof(call.Pos(), subject, clauseName, ProofRuntime)
 			a.recordRequiresReport(declName, req, call.Pos(), false)
-			diag := a.buildRequiresFailureDiagnostic(req, subst, counterexample)
+			diag := a.buildRequiresFailureDiagnosticWithProvenance(req, subst, counterexample)
 			a.proofLint(call.Pos(), "%s", diag.Format(declName))
 		}
 	}
