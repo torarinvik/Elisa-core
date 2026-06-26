@@ -458,8 +458,152 @@ func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMV
 	if err != nil {
 		return nil, nil, true, err
 	}
+	// The bump allocator does not zero, so growing count past the old length would
+	// otherwise expose recycled (non-zero) heap bytes as live elements. For element
+	// types whose uninitialized bytes are unsafe to observe as a valid value
+	// (references, handles, nested dynamic containers, enum payloads) this is a
+	// no-Unsafe-needed use of uninitialized memory — a wild pointer/handle (deep
+	// audit #9). Zero-fill the newly-live tail so any read-before-write sees a
+	// null/empty value (trap-on-deref) rather than stale garbage. Plain POD element
+	// types keep the fast path (no fill); their fill-by-index loop initializes them.
+	if darrayElemNeedsZeroInit(darrayType.Elem, map[semantic.Type]bool{}) {
+		if err := s.emitDArrayResizeZeroFillTail(darrayPtr, darrayType, countPtr, neededValue); err != nil {
+			return nil, nil, true, err
+		}
+	}
 	C.LLVMBuildStore(s.builder, neededValue, countPtr)
 	return darrayPtr, resultType, true, nil
+}
+
+// darrayElemNeedsZeroInit reports whether an uninitialized value of t is unsafe to
+// observe — i.e. it contains a reference, handle, or dynamic-container header whose
+// stale bytes would be interpreted as a valid pointer. Pure numeric/bool aggregates
+// return false (their uninitialized bytes are a benign garbage scalar, and resize is
+// always paired with an index-fill that writes them).
+func darrayElemNeedsZeroInit(t semantic.Type, seen map[semantic.Type]bool) bool {
+	if t == nil {
+		return false
+	}
+	switch tt := t.(type) {
+	case *semantic.RefType, *semantic.PackedEnumStoreType,
+		*semantic.DArrayType, *semantic.DictType, *semantic.SetType,
+		*semantic.ViewType, *semantic.SViewType, *semantic.DStrType,
+		*semantic.PackedVariantViewType:
+		return true
+	case *semantic.OptionalType:
+		return darrayElemNeedsZeroInit(tt.Value, seen)
+	case *semantic.ArrayType:
+		return darrayElemNeedsZeroInit(tt.Elem, seen)
+	case *semantic.StructType:
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		for _, field := range tt.Fields {
+			if darrayElemNeedsZeroInit(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *semantic.EnumType:
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		if tt.Packed {
+			return true
+		}
+		for _, field := range tt.Common {
+			if darrayElemNeedsZeroInit(field.Type, seen) {
+				return true
+			}
+		}
+		for _, variant := range tt.Variants {
+			for _, payload := range variant.Payload {
+				if darrayElemNeedsZeroInit(payload, seen) {
+					return true
+				}
+			}
+		}
+		return false
+	case *semantic.GenericInstanceType:
+		if seen[t] {
+			return false
+		}
+		seen[t] = true
+		if base, ok := tt.Base.(*semantic.StructType); ok {
+			for _, field := range base.Fields {
+				if darrayElemNeedsZeroInit(field.Type, seen) {
+					return true
+				}
+			}
+			return false
+		}
+		// Unresolved generics may hide a pointer — zero-fill conservatively.
+		return true
+	case *semantic.TypeParamType:
+		return true
+	}
+	return false
+}
+
+// emitDArrayResizeZeroFillTail zeroes the byte range [oldCount, neededCount) of a
+// darray's backing store. The capacity is already >= neededCount (caller ran
+// emitBuiltinDArrayEnsureCapacity). A memset of a zero-length tail (shrink/no-op) is
+// harmless, so the only guard needed is a saturating subtraction.
+func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, darrayType *semantic.DArrayType, countPtr C.LLVMValueRef, neededValue C.LLVMValueRef) error {
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	oldCount := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.resize.oldcount"))
+	grows := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), neededValue, oldCount, cStringFree("darray.resize.grows"))
+	rawDelta := C.LLVMBuildSub(s.builder, neededValue, oldCount, cStringFree("darray.resize.rawdelta"))
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	deltaCount := C.LLVMBuildSelect(s.builder, grows, rawDelta, zero, cStringFree("darray.resize.delta"))
+
+	elemSize, err := s.sizeOfType(darrayType.Elem)
+	if err != nil {
+		return err
+	}
+	offsetBytes, err := s.emitCheckedElemByteCount(oldCount, elemSize, "darray.resize.offset")
+	if err != nil {
+		return err
+	}
+	tailBytes, err := s.emitCheckedElemByteCount(deltaCount, elemSize, "darray.resize.tail")
+	if err != nil {
+		return err
+	}
+
+	itemsPtr, err := s.emitBuiltinDArrayItemsPtr(darrayPtr, darrayType)
+	if err != nil {
+		return err
+	}
+	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.resize.items"))
+	i8Type := C.LLVMInt8TypeInContext(s.g.context)
+	tailPtr := C.LLVMBuildGEP2(s.builder, i8Type, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{offsetBytes}), 1, cStringFree("darray.resize.tailptr"))
+
+	voidType := s.g.result.NamedTypes["void"]
+	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	memsetValueType := s.g.result.NamedTypes["int"]
+	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, usizeType}, Return: voidRefType}
+	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
+	if err != nil {
+		return err
+	}
+	memsetLLVMType, err := s.g.lowerFunctionType(memsetType)
+	if err != nil {
+		return err
+	}
+	fillZero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+	fillValue, err := s.coerceValue(fillZero, s.g.result.NamedTypes["i32"], memsetValueType)
+	if err != nil {
+		return err
+	}
+	_ = s.buildCall(memsetLLVMType, memsetCallee, []C.LLVMValueRef{tailPtr, fillValue, tailBytes}, "darray.resize.zerofill")
+	return nil
 }
 func (s *functionState) emitBuiltinDArrayClearCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if expr == nil {

@@ -143,8 +143,10 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	elemSizeValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(elemSize), 0)
-	byteCount := C.LLVMBuildMul(s.builder, viewLen, elemSizeValue, cStringFree("view.materialize.bytes"))
+	byteCount, err := s.emitCheckedElemByteCount(viewLen, elemSize, "view.materialize")
+	if err != nil {
+		return nil, nil, true, err
+	}
 	zeroBytes := C.LLVMConstInt(usizeLLVMType, 0, 0)
 	zeroCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), byteCount, zeroBytes, cStringFree("view.materialize.bytes.zero"))
 	entryBlock := C.LLVMGetInsertBlock(s.builder)

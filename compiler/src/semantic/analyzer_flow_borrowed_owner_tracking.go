@@ -49,6 +49,8 @@ func (a *Analyzer) containsBorrowedOwnerRefValuesWithSeen(t Type, seen map[Type]
 		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *DictType:
 		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Key, seen, depth+1) || a.containsBorrowedOwnerRefValuesWithSeen(tt.Value, seen, depth+1)
+	case *SetType:
+		return a.containsBorrowedOwnerRefValuesWithSeen(tt.Elem, seen, depth+1)
 	case *PackedVariantViewType:
 		for _, field := range tt.Enum.Common {
 			if a.containsBorrowedOwnerRefValuesWithSeen(field.Type, seen, depth+1) {

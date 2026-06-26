@@ -74,10 +74,14 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 	case *ast.ListLitExpr:
 		elems := cloneDefaultArgExprs(n.Elems)
 		owner := cloneDefaultArgExpr(n.Owner)
-		if (len(n.Elems) != 0 && elems == nil) || (n.Owner != nil && owner == nil) {
+		// Keys must be cloned too: a brace DICT literal carries its keys in Keys[i]
+		// paired with value Elems[i]. Dropping Keys silently turns a `{k: v}` dict
+		// default-arg into a `{v}` set literal (deep audit #15).
+		keys := cloneDefaultArgExprs(n.Keys)
+		if (len(n.Elems) != 0 && elems == nil) || (n.Owner != nil && owner == nil) || (len(n.Keys) != 0 && keys == nil) {
 			return nil
 		}
-		return &ast.ListLitExpr{Position: n.Position, Elems: elems, Spreads: append([]bool(nil), n.Spreads...), Brace: n.Brace, Owner: owner}
+		return &ast.ListLitExpr{Position: n.Position, Elems: elems, Spreads: append([]bool(nil), n.Spreads...), Brace: n.Brace, Owner: owner, Keys: keys}
 	case *ast.CallExpr:
 		fn := cloneDefaultArgExpr(n.Func)
 		safeReceiver := cloneDefaultArgExpr(n.SafeReceiver)

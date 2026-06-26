@@ -199,6 +199,27 @@ func (a *Analyzer) borrowedOwnerRefStateForExpr(expr ast.Expr) (borrowedOwnerRef
 				state.Fields[regionAnyIndexFieldKey()] = cloneBorrowedOwnerRefState(elemState)
 			}
 		}
+		// Dict-literal keys (`{k: v}`) are borrowed-owner carriers too; they are not
+		// positionally index-addressable like values, so fold their state into the
+		// wildcard element bucket (deep audit #14).
+		for _, keyExpr := range n.Keys {
+			keyState, ok := a.borrowedOwnerRefStateForExpr(keyExpr)
+			if !ok || !hasBorrowedOwnerRefState(keyState) {
+				continue
+			}
+			if state.Fields == nil {
+				state.Fields = map[string]borrowedOwnerRefState{}
+			}
+			if anyState, ok := state.Fields[regionAnyIndexFieldKey()]; ok {
+				if merged, ok := mergeBorrowedOwnerRefState(anyState, keyState); ok {
+					state.Fields[regionAnyIndexFieldKey()] = merged
+				} else {
+					delete(state.Fields, regionAnyIndexFieldKey())
+				}
+			} else {
+				state.Fields[regionAnyIndexFieldKey()] = cloneBorrowedOwnerRefState(keyState)
+			}
+		}
 		if !hasBorrowedOwnerRefState(state) {
 			return borrowedOwnerRefState{}, false
 		}

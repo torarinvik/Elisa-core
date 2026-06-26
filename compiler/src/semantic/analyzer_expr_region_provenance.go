@@ -175,6 +175,14 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 				fieldStates[regionIndexFieldKey(int64(i))] = state
 			}
 		}
+		// Dict-literal keys (`{k: v}`) can carry region provenance too; they are not
+		// positionally index-addressable, so fold them into the union (and thus the
+		// wildcard element bucket) rather than a numbered slot (deep audit #16).
+		for _, keyExpr := range n.Keys {
+			if state, ok := a.regionRefStateForExpr(keyExpr); ok && hasRegionProvenance(state) {
+				elemStates = append(elemStates, state)
+			}
+		}
 		merged, ok := mergeRegionRefStates(elemStates...)
 		if !ok {
 			return regionRefState{}, false

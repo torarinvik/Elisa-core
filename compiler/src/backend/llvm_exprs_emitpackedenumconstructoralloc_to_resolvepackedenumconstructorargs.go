@@ -320,7 +320,10 @@ func (s *functionState) preparePackedEnumTailPayloadPlan(variant *semantic.EnumV
 	}
 	lenValue := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("packed.tail.src.len"))
 	sourceData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("packed.tail.src.data"))
-	byteCount := C.LLVMBuildMul(s.builder, lenValue, elemSizeValue, cStringFree("packed.tail.bytes"))
+	byteCount, err := s.emitCheckedElemByteCount(lenValue, elemSize, "packed.tail")
+	if err != nil {
+		return nil, err
+	}
 	return &packedEnumTailPayloadPlan{index: tailIndex, viewType: viewType, elemSizeValue: elemSizeValue, lenValue: lenValue, byteCount: byteCount, sourceData: sourceData}, nil
 }
 func (s *functionState) emitPackedEnumTailDataPtr(allocPtr C.LLVMValueRef, rowSizeValue C.LLVMValueRef) (C.LLVMValueRef, error) {
