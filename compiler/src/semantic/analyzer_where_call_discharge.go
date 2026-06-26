@@ -54,9 +54,17 @@ func (a *Analyzer) checkCalleeSpecSignatureWherePredicates(call *ast.CallExpr, d
 		}
 
 		// Deduplication: if the scheme's AST param at this position already carries a
-		// WhereRefinementTypeExpr, checkCalleeParamWhereRefinements handles it — skip.
-		if paramIdx < len(schemeParams) {
-			if _, isWhere := whereRefinementTypeExpr(schemeParams[paramIdx].Type); isWhere {
+		// WhereRefinementTypeExpr WITH a real predicate, checkCalleeParamWhereRefinements
+		// discharges that obligation — skip here to avoid double-reporting.
+		//
+		// Soundness note: we must only skip when the AST path will ACTUALLY fire. The AST path
+		// (checkCalleeParamWhereRefinements) bails out when rt.Predicate == nil, so a where-type
+		// carrying a nil predicate is NOT covered there. Skipping on a bare `isWhere` would drop
+		// the obligation entirely (the SpecSignature carries the live predicate). Require a
+		// non-nil AST predicate before deferring. For an imported callee the SourceType is nil or
+		// stripped, so this never matches and the SpecSignature path remains fully in force.
+		if paramIdx >= 0 && paramIdx < len(schemeParams) {
+			if rt, isWhere := whereRefinementTypeExpr(schemeParams[paramIdx].Type); isWhere && rt != nil && rt.Predicate != nil {
 				continue
 			}
 		}
