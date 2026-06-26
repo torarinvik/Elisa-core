@@ -106,6 +106,12 @@ func refineAliasNameAndArgs(te ast.TypeExpr) (string, []ast.TypeExpr, bool) {
 // alias use, or (nil,false) when te is not a refine alias. It performs the value-parameter
 // substitution into the predicate; `self` is left intact (the where machinery binds it to the bound
 // value's name at the discharge site, exactly like an anonymous `where`).
+//
+// Two enhancements over the initial version:
+//  1. Richer use-site args: bracket args may be arbitrary pure value expressions (dotted paths,
+//     GenericValueArgTypeExpr wrappers). Impure args emit a clear diagnostic and are skipped.
+//  2. Alias-composing-alias: if the alias's Base names another refine alias, resolveRefineAliasFully
+//     flattens it transitively (cycle guard included).
 func (a *Analyzer) expandRefineAliasType(te ast.TypeExpr, selfName string) (*ast.WhereRefinementTypeExpr, bool) {
 	name, args, ok := refineAliasNameAndArgs(te)
 	if !ok {
@@ -115,6 +121,8 @@ func (a *Analyzer) expandRefineAliasType(te ast.TypeExpr, selfName string) (*ast
 	if !found || rd == nil || rd.Base == nil || rd.Predicate == nil {
 		return nil, false
 	}
+	// Transitively resolve if the base itself is a refine alias (alias-composing-alias).
+	base, pred := a.resolveRefineAliasFully(rd, nil)
 	// Map the alias's value parameters onto the use-site bracket arguments positionally. Type-params
 	// (if any) precede value-params in the bracket list; they only affect Base resolution (handled by
 	// the surrounding scope) and never appear in the predicate, so they are skipped for substitution.
@@ -132,34 +140,79 @@ func (a *Analyzer) expandRefineAliasType(te ast.TypeExpr, selfName string) (*ast
 		if i >= len(valueArgs) {
 			break
 		}
-		if argExpr, okArg := typeExprAsValueExpr(valueArgs[i]); okArg {
-			subst[param.Name] = argExpr
+		argExpr, okArg := typeExprAsValueExpr(valueArgs[i])
+		if !okArg {
+			a.errorf(valueArgs[i].Pos(), "refine alias argument must be a pure value expression (identifier or field path), not an impure or complex type expression")
+			continue
 		}
+		subst[param.Name] = argExpr
 	}
-	pred := rd.Predicate
 	if len(subst) > 0 {
 		pred = substituteIdents(pred, subst)
 	}
 	return &ast.WhereRefinementTypeExpr{
 		Position:  te.Pos(),
-		Base:      rd.Base,
+		Base:      base,
 		Predicate: pred,
 	}, true
 }
 
-// typeExprAsValueExpr converts a refine use-site bracket argument (a TypeExpr) into the value
-// expression it denotes. A bare name (`xs`) is treated as an Ident value; anything else is rejected
-// for this first version.
-func typeExprAsValueExpr(te ast.TypeExpr) (ast.Expr, bool) {
-	switch n := te.(type) {
-	case *ast.NamedType:
-		return &ast.Ident{Position: n.Position, Name: n.Name}, true
-	case *ast.GenericType:
-		if len(n.Args) == 0 {
-			return &ast.Ident{Position: n.Position, Name: n.Name}, true
+// resolveRefineAliasFully flattens a refine-alias chain: if rd.Base names another refine alias,
+// it recurses into that alias and AND-combines the predicates. visiting tracks aliases in the current
+// chain to detect cycles.
+//
+// Cycle detection: if we reach an alias already in visiting, we emit a diagnostic and stop recursion,
+// returning the innermost non-recursive base/predicate seen so far.
+func (a *Analyzer) resolveRefineAliasFully(rd *ast.RefineDecl, visiting map[string]bool) (ast.TypeExpr, ast.Expr) {
+	if visiting == nil {
+		visiting = map[string]bool{}
+	}
+	visiting[rd.Name] = true
+	base := rd.Base
+	pred := rd.Predicate
+	// Check if the base type itself is a refine alias.
+	if baseName, _, baseIsAlias := refineAliasNameAndArgs(base); baseIsAlias {
+		innerRD, found := a.lookupRefineAlias(baseName)
+		if found && innerRD != nil && innerRD.Base != nil && innerRD.Predicate != nil {
+			if visiting[innerRD.Name] {
+				a.errorf(rd.Pos(), "refine alias %q has a recursive or mutually-recursive base (cycle through %q)", rd.Name, innerRD.Name)
+				// Return what we have rather than looping.
+				return base, pred
+			}
+			innerBase, innerPred := a.resolveRefineAliasFully(innerRD, visiting)
+			base = innerBase
+			// Combine predicates: outer AND inner (both must hold).
+			pred = &ast.BinaryExpr{
+				Position: rd.Predicate.Pos(),
+				Op:       lexer.TOKEN_AND,
+				Left:     pred,
+				Right:    innerPred,
+			}
 		}
 	}
-	return nil, false
+	delete(visiting, rd.Name)
+	return base, pred
+}
+
+// typeExprAsValueExpr converts a refine use-site bracket argument (a TypeExpr) into the value
+// expression it denotes. It accepts any pure value expression encoded as a TypeExpr:
+//   - a bare name (`xs`) → Ident
+//   - a dotted path (`xs.count`, `a.b`) → FieldExpr chain (via dottedNameAsValueExpr)
+//   - a GenericValueArgTypeExpr wrapping an arbitrary pure Expr → the inner Expr
+//
+// Returns (nil, false) for real generic instantiations (e.g. `Foo[i64]`) or expressions
+// that fail the side-effect-free check. The caller emits the diagnostic.
+func typeExprAsValueExpr(te ast.TypeExpr) (ast.Expr, bool) {
+	// Use the richer converter already present in the law-is machinery.
+	expr, ok := typeArgAsValueExpr(te)
+	if !ok {
+		return nil, false
+	}
+	// Purity gate: reuse the same predicate-purity checker used by anonymous where refinements.
+	if !wherePredicateIsSideEffectFree(expr) {
+		return nil, false
+	}
+	return expr, true
 }
 
 // rewriteBinderRefineAliases expands refine-alias uses in every binder position (function parameter
