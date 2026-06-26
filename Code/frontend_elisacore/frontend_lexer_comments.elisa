@@ -1,7 +1,0 @@
-def frontend_skip_line_comment(lexer: mutable FrontendLexer&):
-    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) != FRONTEND_CH_NL:
-        _ = frontend_advance_char(lexer)
-@inline(always)
-def frontend_skip_spaces(lexer: mutable FrontendLexer&):
-    while not frontend_is_eof(lexer) and frontend_cur_char(lexer) in {FRONTEND_CH_SPACE, FRONTEND_CH_TAB}:
-        _ = frontend_advance_char(lexer)

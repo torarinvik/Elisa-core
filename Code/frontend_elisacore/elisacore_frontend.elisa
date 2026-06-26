@@ -1,7 +1,0 @@
-# ============================================================
-# Self-hosted Elisa core frontend
-# ============================================================
-
-include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
-include "frontend_tokens.elisa"
-include "frontend_lexer.elisa"
