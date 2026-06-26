@@ -83,11 +83,13 @@ func (a *Analyzer) dischargeLocalWhereRefinement(stmt *ast.VarDeclStmt) {
 	a.validateWhereLocalReferences(rt.Predicate, stmt.Name)
 	a.analyzeWhereBoolPredicate(rt.Predicate)
 	a.ghostReadAllowed--
-	subst := map[string]ast.Expr{}
-	if stmt.Value != nil {
-		subst[stmt.Name] = stmt.Value
+	// Route the discharge through dischargeWhereRefinement so all local binding-site
+	// obligations use the shared prover ladder (linear → SMT → runtime).
+	if !a.dischargeWhereRefinement(rt, stmt.Name, stmt.Value, stmt.Pos(), "local where refinement") {
+		// Obligation unknown — record as runtime and emit the proof-lint diagnostic.
+		a.recordProof(stmt.Pos(), "local where refinement", "where", ProofRuntime)
+		a.proofLint(stmt.Pos(), "local where refinement could not be proven statically")
 	}
-	a.dischargeWherePredicate(rt.Predicate, subst, stmt.Pos(), "local where refinement")
 	a.seedRangeFactsFromCondition(rt.Predicate)
 	a.collectBoundEqualitiesForCondition(rt.Predicate, true)
 }
@@ -308,27 +310,42 @@ func (a *Analyzer) seedParamWhereRefinementFacts(params []ast.ParamDecl) {
 // (proveRequiresClause → trySMTProveRequires) rather than a parallel discharge path, so where
 // behaves like requires/ensure/is Law at the proof engine level.
 //
-// Returns true when the obligation is statically discharged (no runtime check needed). Returns false
-// when it is unknown — the caller should emit a runtime check and a diagnostic.
+// pos and subject are used for diagnostics and proof recording. When initExpr is nil (no
+// initializer), a no-op substitution is used and the obligation is still attempted.
 //
 // The predicate is substituted: `x: i64 where P` at `x = expr` becomes `P[x ↦ expr]` as the goal.
 // Substitution is performed via the standard proveRequiresClause substitution map so the prover
 // never sees the binding name — only the initializer expression.
-func (a *Analyzer) dischargeWhereRefinement(wt *ast.WhereRefinementTypeExpr, bindingName string, initExpr ast.Expr) bool {
+//
+// Returns true when the obligation was statically discharged (proved or refuted — refuted also emits
+// an error). Returns false when the obligation is unknown and a runtime check is warranted.
+func (a *Analyzer) dischargeWhereRefinement(wt *ast.WhereRefinementTypeExpr, bindingName string, initExpr ast.Expr, pos lexer.Pos, subject string) bool {
 	if a == nil || wt == nil || wt.Predicate == nil {
 		return true // nothing to prove
 	}
-	// Build a substitution: replace the binding name with the initializer expression so the predicate
-	// becomes a pure constraint over the call-site values. This is the same substitution that
-	// proveRequiresClause uses for `requires` clauses at call sites.
-	subst := map[string]ast.Expr{bindingName: initExpr}
+	// Build a substitution: replace the binding name with the initializer expression so the
+	// predicate becomes a pure constraint over the initializer values. This is the same
+	// substitution that proveRequiresClause uses for `requires` clauses at call sites.
+	subst := map[string]ast.Expr{}
+	if initExpr != nil {
+		subst[bindingName] = initExpr
+	}
 	// Tier 1: linear clause prover (interval arithmetic over known ranges / written-const facts).
-	if a.proveRequiresClause(wt.Predicate, subst) == requiresProven {
+	switch a.proveRequiresClause(wt.Predicate, subst) {
+	case requiresProven:
+		a.recordProof(pos, subject, "where", ProofProvenLinear)
+		return true
+	case requiresRefuted:
+		// Statically refuted — emit a hard error; do not fall through to a runtime check.
+		a.recordProof(pos, subject, "where", ProofRefuted)
+		a.errorf(pos, "%s is violated", subject)
 		return true
 	}
 	// Tier 2: SMT solver (Z3 via SMT-LIB2 subprocess, only when -smt is active).
 	if proven, _ := a.trySMTProveRequires(wt.Predicate, subst); proven {
+		a.recordProof(pos, subject, "where", ProofProvenSMT)
 		return true
 	}
+	// Unknown — caller should emit a runtime check diagnostic.
 	return false
 }

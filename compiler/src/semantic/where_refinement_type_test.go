@@ -288,3 +288,57 @@ def f(n: i64) -> i64:
 		t.Fatalf("where binding with trivially-true predicate should analyze cleanly, got: %v", errs)
 	}
 }
+
+// TestLocalWhereDischargeStaticProvable verifies that a local where obligation whose predicate is
+// statically provable via the linear prover (constant 5 > 0) is discharged without any diagnostic.
+// This specifically exercises the new dischargeWhereRefinement wiring in dischargeLocalWhereRefinement.
+func TestLocalWhereDischargeStaticProvable(t *testing.T) {
+	src := `
+def f() -> i64:
+    x: i64 where x > 0 = 5
+    return x
+`
+	result := analyzeTreeTestSource(t, "where_local_static_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("statically provable where binding should be clean, got: %v", errs)
+	}
+}
+
+// TestLocalWhereDischargeRefutedErrors verifies that a local where obligation whose predicate is
+// statically REFUTED (constant -1 > 0 is false) produces a hard error, not a runtime-check lint.
+// The refuted path in dischargeWhereRefinement must not silently downgrade to a runtime check.
+func TestLocalWhereDischargeRefutedErrors(t *testing.T) {
+	src := `
+def f() -> i64:
+    x: i64 where x > 0 = -1
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_local_refuted.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "is violated") {
+		t.Fatalf("refuted local where refinement should produce 'is violated' error, got:\n%s", all)
+	}
+}
+
+// TestLocalWhereDischargeUnknownEmitsRuntimeCheck verifies that a local where obligation that
+// cannot be statically proven or refuted (predicate depends on an opaque function call) emits a
+// proof-lint diagnostic indicating a runtime check, not a hard error.
+func TestLocalWhereDischargeUnknownEmitsRuntimeCheck(t *testing.T) {
+	src := `
+def opaque() -> i64:
+    return 1
+
+def f() -> i64:
+    x: i64 where x > 0 = opaque()
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "where_local_unknown.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	all := allDiagnostics(result)
+	// Should emit a proof-lint (runtime check), not a hard "is violated" error.
+	if strings.Contains(all, "is violated") {
+		t.Fatalf("unknown local where should not error as violated, got:\n%s", all)
+	}
+	if !strings.Contains(all, "could not be proven statically") {
+		t.Fatalf("unknown local where should emit runtime-check diagnostic, got:\n%s", all)
+	}
+}
