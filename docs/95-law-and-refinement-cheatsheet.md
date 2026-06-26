@@ -53,3 +53,12 @@ Conjunctions of bounds → always-on. `implies` / multi-variable linear → tier
 `forall`/`exists` and bit masks/shifts → the SMT tier (on by default; `-nosmt` to disable).
 Bit-level decode reasoning (masks, runtime shifts, sign-extension, refined-index elision) is
 covered in docs/94.
+
+## Guardrails for the refinement-scheme direction
+The next consolidation should preserve these invariants:
+
+- Refinements erase for runtime representation, ABI/layout, monomorphization, `SameType`, and ordinary `AssignableTo`.
+- Proof metadata still survives in verification signatures: refined params/returns, `requires`, `ensure`, and `ensures p is Law` are obligations and reusable facts, not runtime type constructors.
+- SMT is a discharge tier only. It may prove verification obligations, but it must not participate in type equality/assignability and must not feed proof-indexed storage or bounds-check elision.
+- Dependent facts are frozen to the values they mention. Mutating `xs` invalidates facts such as `i is Bounded[0, xs.count]`.
+- Proof-indexed APIs come before proof-indexed storage. Prefer refined parameters, return contracts, and explicit witnesses before making container element layout depend on proofs.

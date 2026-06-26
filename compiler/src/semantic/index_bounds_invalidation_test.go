@@ -46,3 +46,20 @@ func TestIndexBoundsSurviveWithoutMutation(t *testing.T) {
 		t.Fatalf("expected a clean proven index to stay proven, got:\n%s", allDiagnostics(result))
 	}
 }
+
+// SMT-proven VALUE refinements are verification facts, not storage-layout or bounds-elision facts.
+// Even when the optional SMT tier proves `i is Bounded[0, xs.count]`, @inbounds must still require
+// the separate syntactic/linear index-bounds channel before suppressing the runtime watchdog.
+func TestSMTRefinementFactDoesNotElideIndexBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_refinement_not_bounds.elisa", `
+law Bounded(self: usize, lo: usize, hi: usize) = self >= lo and self < hi
+
+@inbounds
+def read_at(xs: darray[u8]&, i: usize is Bounded[0, xs.count]) -> u8:
+    return xs[i]
+`, AnalyzeOptions{EnableSMT: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, "@inbounds function \"read_at\" has an index access that is not statically proven in-bounds") {
+		t.Fatalf("SMT/refinement facts must not feed bounds-check elision; expected @inbounds error, got:\n%s", all)
+	}
+}
