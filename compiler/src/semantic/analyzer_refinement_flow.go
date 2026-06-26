@@ -1337,8 +1337,14 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 		if !ok || base == nil {
 			return affineForm{}, false
 		}
-		fieldVal, ok := a.lookupWrittenStructField(base.Name, n.Field)
-		if !ok {
+		// `xs.count` where `xs` is an immutable darray local initialised from a list literal.
+		if n.Field == "count" {
+			if cnt, ok2 := a.lookupWrittenListCount(base.Name); ok2 {
+				return affineForm{c: cnt, terms: map[string]int64{}}, true
+			}
+		}
+		fieldVal, ok2 := a.lookupWrittenStructField(base.Name, n.Field)
+		if !ok2 {
 			return affineForm{}, false
 		}
 		return a.affineOf(fieldVal, scope)

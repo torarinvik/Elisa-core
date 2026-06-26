@@ -115,6 +115,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// bound to this immutable binding) as a flow fact — the caller half of behavioral subtyping.
 			// Sound for an immutable binding: the fact is never invalidated by a later reassignment.
 			a.seedProtocolEnsureFacts(n.Name, n.Value)
+			// Parametric alias call-site discharge: an immutable darray initialised from a list
+			// literal has a statically-known element count.  Record it so `xs.count` resolves to
+			// that constant in affineOf / substitutedAffine when a callee's where-predicate
+			// (produced by expanding e.g. `IndexOf[xs]`) references `xs.count`.
+			if list, ok := unwrapParen(n.Value).(*ast.ListLitExpr); ok && list != nil {
+				a.recordWrittenListCount(n.Name, int64(len(list.Elems)))
+			}
 		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)

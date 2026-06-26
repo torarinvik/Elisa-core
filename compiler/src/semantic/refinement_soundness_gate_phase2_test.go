@@ -385,11 +385,10 @@ def f(p: mutable Pos) -> i64:
 	}
 }
 
-// SOUNDNESS TODO: A parametric refine alias whose argument is a provably-violating
-// constant should produce a refutation at the call site. Currently parametric alias
-// discharge may be weaker than the non-parametric path.
+// A parametric refine alias whose argument is a provably-violating constant must produce a
+// refutation at the call site (gap closed: affineOf / substitutedAffine now resolve xs.count from
+// list-literal initialisers via writtenListCount).
 func TestSoundnessGateP2_TODO_ParametricRefineAliasViolationIsError(t *testing.T) {
-	t.Skip("SOUNDNESS TODO: parametric refine alias violation not yet fully discharged at call site")
 	src := `
 refine IndexOf[T](xs: darray[T]) = i64 where self >= 0 and self < xs.count
 

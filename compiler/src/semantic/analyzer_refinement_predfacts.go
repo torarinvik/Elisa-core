@@ -355,6 +355,9 @@ func (a *Analyzer) invalidateWrittenConst(name string) {
 		if scope.writtenStruct != nil {
 			delete(scope.writtenStruct, name)
 		}
+		if scope.writtenListCount != nil {
+			delete(scope.writtenListCount, name)
+		}
 	}
 	// Field facts (`self.f <- v`) under this root are dropped via the dedicated root-escape path
 	// (invalidateWrittenFieldsForRoot), NOT here: a sibling field write (`self.b <- …`) routes through
@@ -529,6 +532,36 @@ func (a *Analyzer) lookupWrittenStructField(name, field string) (ast.Expr, bool)
 		return nil, false
 	}
 	return nil, false
+}
+
+// recordWrittenListCount records, for an immutable local initialised from a list literal, the number
+// of elements as a compile-time fact.  Only call for immutable bindings; mutable darrays must not
+// be recorded because push/pop invalidation is not tracked here.
+func (a *Analyzer) recordWrittenListCount(name string, count int64) {
+	if name == "" || a.currentScope == nil {
+		return
+	}
+	if a.currentScope.writtenListCount == nil {
+		a.currentScope.writtenListCount = map[string]int64{}
+	}
+	a.currentScope.writtenListCount[name] = count
+}
+
+// lookupWrittenListCount returns the known element count of an immutable darray local whose
+// initialiser was a list literal, searching the scope chain.  Used by affineOf / substitutedAffine
+// to resolve `xs.count` in parametric alias preconditions.
+func (a *Analyzer) lookupWrittenListCount(name string) (int64, bool) {
+	if name == "" {
+		return 0, false
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.writtenListCount != nil {
+			if n, ok := scope.writtenListCount[name]; ok {
+				return n, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // lookupWrittenConst returns the known constant-value expr of a variable, if a written-constant fact

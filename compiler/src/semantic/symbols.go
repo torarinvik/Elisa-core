@@ -449,6 +449,12 @@ type Scope struct {
 	// writtenConst (invalidateWrittenConst), so a field write, reassignment, or mutable-borrow escape of
 	// `v` drops it; it can never go stale.
 	writtenStruct map[string]*ast.StructLitExpr
+	// writtenListCount records, for an immutable local whose initializer is a darray list literal
+	// `xs: darray[T] = [v1, v2, …]`, the element count as a compile-time integer.  Used to prove
+	// preconditions of the form `self < xs.count` that arise from parametric refine aliases
+	// (e.g. `IndexOf[xs]` desugars to `i64 where self >= 0 and self < xs.count`).  Invalidated
+	// alongside writtenConst/writtenStruct via invalidateWrittenConst so it can never go stale.
+	writtenListCount map[string]int64
 	// writtenField records the last value written to a STRUCT-FIELD place via `self.f <- value`
 	// (`root.field`), keyed by the field path's canonical projection name (smtProjectionName, e.g.
 	// `self__field__pool_budget`). Used to discharge an `ensure self.f == E` postcondition over fields

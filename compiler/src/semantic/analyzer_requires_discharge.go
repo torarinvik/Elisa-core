@@ -352,12 +352,25 @@ func (a *Analyzer) substitutedAffine(expr ast.Expr, subst map[string]ast.Expr) (
 		if arg, ok := subst[base.Name]; ok {
 			argIdent, ok2 := unwrapParen(arg).(*ast.Ident)
 			if !ok2 || argIdent == nil {
+				// The caller argument is not a bare ident (e.g. an inline literal).  For the
+				// `.count` field specifically, try to evaluate the count directly from the arg.
+				if n.Field == "count" {
+					if list, ok3 := unwrapParen(arg).(*ast.ListLitExpr); ok3 && list != nil {
+						return affineForm{c: int64(len(list.Elems)), terms: map[string]int64{}}, true
+					}
+				}
 				return affineForm{}, false
 			}
 			argName = argIdent.Name
 		}
-		fieldVal, ok := a.lookupWrittenStructField(argName, n.Field)
-		if !ok {
+		// `xs.count` where `xs` is an immutable darray local initialised from a list literal.
+		if n.Field == "count" {
+			if cnt, ok2 := a.lookupWrittenListCount(argName); ok2 {
+				return affineForm{c: cnt, terms: map[string]int64{}}, true
+			}
+		}
+		fieldVal, ok2 := a.lookupWrittenStructField(argName, n.Field)
+		if !ok2 {
 			return affineForm{}, false
 		}
 		return a.affineOf(fieldVal, a.currentScope)
