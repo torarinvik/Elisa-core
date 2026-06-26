@@ -304,6 +304,11 @@ func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extr
 // smtDischargeFormula discharges a lowered VC-IR formula, splitting a top-level conjunction into
 // independent sub-goals (vcConjuncts) batched over a shared hypothesis context (brick 4). A formula
 // that folds entirely to `true` is valid under any hypotheses and concludes with NO solver call.
+// Before the solver query, we register the comparison sub-terms of each conjunct as ce-expressions so
+// that a refuting model shows concrete values for compound sub-expressions (e.g. "x/2=-1") in addition
+// to the free variables already shown via tr.decls ("x=-2"). This is additive: free variables remain
+// the primary counterexample content; the sub-term values appear only when they differ from what the
+// free-variable assignments already make obvious.
 func (a *Analyzer) smtDischargeFormula(tr *smtTranslator, goal vcFormula, extraHyps string) (bool, string) {
 	conjuncts := vcConjuncts(goal)
 	if len(conjuncts) == 0 { // the whole obligation folded to true
@@ -311,11 +316,162 @@ func (a *Analyzer) smtDischargeFormula(tr *smtTranslator, goal vcFormula, extraH
 		a.smtStats.Proven++
 		return true, ""
 	}
+	// Register compound sub-terms from every conjunct as counterexample expressions BEFORE the query,
+	// so their values are read back from a Sat model and appear in the diagnostic alongside the free
+	// variables. A term that is already a simple variable (already in tr.decls) is skipped to avoid
+	// duplicate output; only non-trivial computed sub-expressions add new information.
+	for _, c := range conjuncts {
+		vcRegisterCompareSubtermsAsCE(tr, c)
+	}
 	obligations := make([]string, len(conjuncts))
 	for i, c := range conjuncts {
 		obligations[i] = emitVCFormula(c)
 	}
 	return a.smtCheckVCMulti(tr, obligations, extraHyps)
+}
+
+// vcRegisterCompareSubtermsAsCE walks a vcFormula looking for vcCompare nodes and registers each
+// non-trivial operand (not a literal, not a plain free variable) as a ceExpr in the translator so the
+// Sat model read-back can report the concrete computed value. For example, a conjunct `x/2 >= 0`
+// registers the LHS `(div v_x 2)` under the label "x/2" so the counterexample prints "x/2=-1, x=-2"
+// rather than only "x=-2". Literals and simple variables are skipped (they add no new information).
+func vcRegisterCompareSubtermsAsCE(tr *smtTranslator, f vcFormula) {
+	switch ff := f.(type) {
+	case vcCompare:
+		vcRegisterTermAsCE(tr, ff.L)
+		vcRegisterTermAsCE(tr, ff.R)
+	case vcAnd:
+		vcRegisterCompareSubtermsAsCE(tr, ff.L)
+		vcRegisterCompareSubtermsAsCE(tr, ff.R)
+	case vcNot:
+		vcRegisterCompareSubtermsAsCE(tr, ff.Arg)
+	}
+}
+
+// vcRegisterTermAsCE registers a single vcTerm as a ceExpr when it carries new information:
+// literals and plain free variables already appear in the model (as declared SMT vars), so they are
+// skipped. Compound terms (arithmetic, opaque sub-expressions) are registered under a readable label
+// derived from the Elisa-level names of the operands. vcArith is handled structurally (before
+// emitting the potentially-wrapped SMT form) so we can derive a clean "x+offset" label even when the
+// emitted SMT is a complex wrapped expression.
+func vcRegisterTermAsCE(tr *smtTranslator, t vcTerm) {
+	switch tt := t.(type) {
+	case vcIntLit:
+		return // constant — no new information
+	case vcVar:
+		return // plain free variable — already in tr.decls, already rendered
+	case vcOldEntry:
+		return // entry-value snapshot — not a computed result
+	case vcArith:
+		// Derive a readable label from the Elisa names of the operands (before the wrap is applied).
+		lName := vcTermElisaName(tr, tt.L)
+		rName := vcTermElisaName(tr, tt.R)
+		elisa := ceOpElisa(tt.Op)
+		if elisa != "" && (lName != "" || rName != "") {
+			if lName == "" {
+				lName = emitVCTerm(tt.L) // fall back to the SMT literal (e.g. "3")
+			}
+			if rName == "" {
+				rName = emitVCTerm(tt.R)
+			}
+			label := lName + elisa + rName
+			smt := emitVCTerm(t)
+			if tr.ceExprs[label] == "" {
+				tr.ceExprs[label] = smt
+			}
+		}
+	case vcOpaque:
+		smt := tt.SMT
+		if tr.counterexampleLabelForTerm(smt) != "" {
+			return // the opaque term IS a known decl — skip to avoid duplication
+		}
+		label := ceTermLabel(smt, tr)
+		if label != "" && tr.ceExprs[label] == "" {
+			tr.ceExprs[label] = smt
+		}
+	default:
+		smt := emitVCTerm(t)
+		if tr.counterexampleLabelForTerm(smt) != "" {
+			return
+		}
+		label := ceTermLabel(smt, tr)
+		if label != "" && tr.ceExprs[label] == "" {
+			tr.ceExprs[label] = smt
+		}
+	}
+}
+
+// vcTermElisaName returns the Elisa source name of a term when it is a simple variable (vcVar) or an
+// opaque term that maps back to a known decl, or "" when the term is composite/unknown. Used to
+// construct readable "x+offset" labels for vcArith sub-expressions.
+func vcTermElisaName(tr *smtTranslator, t vcTerm) string {
+	switch tt := t.(type) {
+	case vcVar:
+		return tt.Name
+	case vcOpaque:
+		return tr.counterexampleLabelForTerm(tt.SMT)
+	default:
+		return ""
+	}
+}
+
+// ceTermLabel derives a short, readable label for an SMT sub-term to use as a counterexample key.
+// We look for the pattern "(<op> <var> <const>)" or "(div v_x 2)" and produce "x/2", "x*3", etc.
+// For unrecognized patterns we fall back to a short prefix of the SMT text (capped to keep the
+// diagnostic compact). The label is sanitised so it round-trips through smtCounterexampleExprVar.
+// Returns "" when the term is too short/simple to warrant a separate label.
+func ceTermLabel(smt string, tr *smtTranslator) string {
+	if len(smt) <= 3 || smt == "0" || smt == "1" {
+		return "" // too trivial
+	}
+	// Try "(op L R)" where one operand is a simple SMT variable that maps back to an Elisa name.
+	if len(smt) > 2 && smt[0] == '(' && smt[len(smt)-1] == ')' {
+		inner := smt[1 : len(smt)-1]
+		fields := strings.Fields(inner)
+		if len(fields) == 3 {
+			op, l, r := fields[0], fields[1], fields[2]
+			lLabel := tr.counterexampleLabelForTerm(l)
+			rLabel := tr.counterexampleLabelForTerm(r)
+			elisa := ceOpElisa(op)
+			if elisa != "" {
+				lName := lLabel
+				if lName == "" {
+					lName = l // keep raw (e.g. a literal constant)
+				}
+				rName := rLabel
+				if rName == "" {
+					rName = r
+				}
+				// Only emit a label when at least one operand maps to an Elisa name, so the label
+				// is meaningful rather than a raw SMT term ("v_x+v_offset" is useful; "3+5" is not).
+				if lLabel != "" || rLabel != "" {
+					return lName + elisa + rName
+				}
+			}
+		}
+	}
+	// The term is a complex expression we cannot label readably — skip it.
+	// Only readable labels (derived from known Elisa variable names) add diagnostic value;
+	// a raw SMT string as a label would confuse rather than help.
+	return ""
+}
+
+// ceOpElisa maps an SMT arithmetic operator to its Elisa infix symbol for readable labels.
+func ceOpElisa(op string) string {
+	switch op {
+	case "div":
+		return "/"
+	case "mod":
+		return "%"
+	case "*":
+		return "*"
+	case "+":
+		return "+"
+	case "-":
+		return "-"
+	default:
+		return ""
+	}
 }
 
 // smtCheckGoal lowers a boolean obligation expression into the VC IR, then discharges it via the brick-4
@@ -471,6 +627,14 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	if !ok {
 		return false, ""
 	}
+	// Register compound substituted expressions as counterexample readbacks so a Sat model reports
+	// the CONCRETE VALUE of each callee parameter at the refuting input, not only the free caller
+	// variables that compose it. For example, when `result` is substituted with `x + offset` (SMT:
+	// the wrapped sum), the diagnostic shows "result=-1, offset=-1, x=0" instead of only
+	// "offset=-1, x=0" — naming the callee-parameter expression that actually violates the clause.
+	// Simple bindings (where the SMT term is already a declared free variable) are skipped because
+	// they duplicate an entry already in tr.decls.
+	trRegisterSubstCEExprs(tr, env)
 	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
 	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
 	// assert-facts, and range facts). On sat the returned model is an input permitted by the caller's
@@ -480,6 +644,89 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 		return false, ""
 	}
 	return proven, counterexample
+}
+
+// trRegisterSubstCEExprs registers env entries whose SMT value is a compound expression (not a plain
+// declared free variable) as ceExprs in `tr`, so that a Sat model read-back reports the concrete
+// computed value for each substituted callee parameter. This enriches the diagnostic beyond the bare
+// caller free-variable assignments: instead of only "x=0, offset=-1", it also shows "result=-1".
+// Entries already in tr.decls (plain `v_<name>` symbols) are skipped to avoid duplicate output.
+// Only integer-typed entries can be ceExprs (the define-fun emits `() Int`); boolean or array terms
+// are silently skipped (they cannot be defined as Int constants).
+func trRegisterSubstCEExprs(tr *smtTranslator, env map[string]string) {
+	if tr == nil || len(env) == 0 {
+		return
+	}
+	// Sort for deterministic output (env iteration order varies).
+	labels := make([]string, 0, len(env))
+	for k := range env {
+		labels = append(labels, k)
+	}
+	sort.Strings(labels)
+	for _, label := range labels {
+		smt := env[label]
+		if smt == "" {
+			continue
+		}
+		// Only register compound integer-valued SMT expressions. We must avoid:
+		//   - dtToken markers (internal, not valid SMT): start with __dt__
+		//   - boolean-valued terms (define-fun uses Int; Bool would be a type error)
+		//   - array/set/dict-sorted terms (they are Array-sorted in SMT, not Int)
+		//   - simple variable names (already in tr.decls output — would duplicate)
+		//   - numeric integer literals (trivial, no added information)
+		// The safest positive criterion: the value must start with `(` (is a compound SMT s-expr)
+		// and must NOT start with a known boolean-connective or comparison prefix.
+		if !strings.HasPrefix(smt, "(") {
+			continue // simple var, literal, token — skip
+		}
+		if strings.HasPrefix(smt, "(and ") || strings.HasPrefix(smt, "(or ") ||
+			strings.HasPrefix(smt, "(not ") || strings.HasPrefix(smt, "(= ") ||
+			strings.HasPrefix(smt, "(distinct ") || strings.HasPrefix(smt, "(< ") ||
+			strings.HasPrefix(smt, "(> ") || strings.HasPrefix(smt, "(<= ") ||
+			strings.HasPrefix(smt, "(>= ") || strings.HasPrefix(smt, "(ite ") {
+			continue // boolean or conditional — skip (ite can return Int but is too complex to type)
+		}
+		// Skip array/set/dict terms: they are Array-sorted, not Int.
+		isArrayLike := false
+		for arrName := range tr.arrayDecls {
+			if smt == smtVar(arrName) {
+				isArrayLike = true
+				break
+			}
+		}
+		if !isArrayLike {
+			for sym := range tr.setDecls {
+				if smt == sym {
+					isArrayLike = true
+					break
+				}
+			}
+		}
+		if !isArrayLike {
+			for sym := range tr.dictDecls {
+				if smt == sym || smt == sym+"_vals" {
+					isArrayLike = true
+					break
+				}
+			}
+		}
+		if isArrayLike {
+			continue
+		}
+		// If the term IS the SMT variable for a declared name (already in tr.decls), skip — it
+		// would duplicate the decl output in counterexample().
+		if tr.counterexampleLabelForTerm(smt) != "" {
+			continue
+		}
+		// Only register when the label is a simple Elisa identifier (no struct-field suffix), to keep
+		// the output readable. The __field__ key used for struct-field bindings is not shown.
+		if strings.Contains(label, "__field__") || strings.HasPrefix(label, "__") {
+			continue
+		}
+		if _, alreadyPresent := tr.ceExprs[label]; !alreadyPresent {
+			tr.ceExprs[label] = smt
+		}
+	}
 }
 
 func (a *Analyzer) trySMTProveEnsureFromReturnCall(clause ast.Expr, call *ast.CallExpr) bool {
