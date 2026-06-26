@@ -113,11 +113,7 @@ func (a *Analyzer) callRefinementScheme(call *ast.CallExpr) (RefinementScheme, b
 			scheme.Requires = append([]ast.Expr(nil), ext.Requires...)
 			return scheme, true
 		}
-		return RefinementScheme{
-			DeclName: ext.Name,
-			Params:   ext.Params,
-			Requires: ext.Requires,
-		}, true
+		return a.refinementSchemeFromSignature(ext.Name, ext.Params, ext.ReturnType, ext.Requires, ext.EnsureValues, nil, false), true
 	}
 	return canonical, hasCanonical
 }
@@ -167,7 +163,23 @@ func (a *Analyzer) refinementSchemeFromSpecSignature(sig *SpecSignature, refinem
 			Args:     append([]ast.Expr(nil), pred.Args...),
 		})
 	}
+	for _, pred := range sig.Requires {
+		if pred.Kind != RefinementPredicateRequires {
+			continue
+		}
+		if expr, ok := pred.SourceExpr.(ast.Expr); ok && expr != nil {
+			scheme.Requires = append(scheme.Requires, expr)
+		}
+	}
 	for _, pred := range sig.Ensures {
+		if pred.Kind != RefinementPredicateEnsures {
+			continue
+		}
+		if expr, ok := pred.SourceExpr.(ast.Expr); ok && expr != nil {
+			scheme.EnsureValues = append(scheme.EnsureValues, expr)
+		}
+	}
+	for _, pred := range sig.ParamPostconditionLaws {
 		if pred.Subject.Kind != SpecBinderParam || pred.Subject.Position < 0 {
 			continue
 		}

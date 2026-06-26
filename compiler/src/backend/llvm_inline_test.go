@@ -88,6 +88,36 @@ def helper[T](value: T) -> T:
 	}
 }
 
+func TestSpecializeFuncTypePreservesSpecSignature(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "specialize_spec_signature.elisa", `
+law Positive(self: i64) = self > 0
+
+def helper[T](value: i64 is Positive) -> i64 is Positive:
+	return value
+`)
+	sym, ok := result.GlobalScope.Lookup("helper")
+	if !ok {
+		t.Fatal("expected helper to be defined")
+	}
+	fnType, ok := sym.Type.(*semantic.FuncType)
+	if !ok || fnType == nil || fnType.SpecSignature == nil {
+		t.Fatalf("expected helper to resolve to semantic.FuncType with SpecSignature, got %#v", sym.Type)
+	}
+	specialized := specializeFuncType(fnType, map[string]semantic.Type{"T": result.NamedTypes["int"]}, nil)
+	if specialized == nil {
+		t.Fatal("expected specializeFuncType to produce a function type")
+	}
+	if specialized.SpecSignature == nil {
+		t.Fatal("expected specialized helper to preserve SpecSignature")
+	}
+	if specialized.SpecSignature == fnType.SpecSignature {
+		t.Fatal("expected specialized helper to clone SpecSignature, not alias it")
+	}
+	if len(specialized.SpecSignature.ParamPredicates) != 1 || len(specialized.SpecSignature.ResultPredicates) != 1 {
+		t.Fatalf("specialized helper lost refinement predicates: params=%d results=%d", len(specialized.SpecSignature.ParamPredicates), len(specialized.SpecSignature.ResultPredicates))
+	}
+}
+
 func TestAnalyzeNoRecurseAnnotationSetsFunctionMetadata(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "norecurse_semantics.elisa", `@norecurse
 def helper[T](value: T) -> T:

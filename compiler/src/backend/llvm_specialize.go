@@ -153,6 +153,8 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		CallConv:                    base.CallConv,
 		IntrinsicName:               base.IntrinsicName,
 		BoundaryPointerParamIndices: append([]int(nil), base.BoundaryPointerParamIndices...),
+		SpecSignature:               semantic.CloneSpecSignature(base.SpecSignature),
+		RefinementEnsures:           append([]semantic.RefinementEnsure(nil), base.RefinementEnsures...),
 		Params:                      params,
 		ExplicitParamCount:          base.ExplicitParamCount,
 		ExplicitParamNames:          append([]string(nil), base.ExplicitParamNames...),

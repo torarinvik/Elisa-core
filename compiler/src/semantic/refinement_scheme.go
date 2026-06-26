@@ -16,9 +16,11 @@ type SpecSignature struct {
 	Params   []SpecBinder
 	Result   *SpecBinder
 
-	ParamPredicates  []RefinementPredicate
-	ResultPredicates []RefinementPredicate
-	Ensures          []RefinementPredicate
+	ParamPredicates        []RefinementPredicate
+	ResultPredicates       []RefinementPredicate
+	Requires               []RefinementPredicate
+	Ensures                []RefinementPredicate
+	ParamPostconditionLaws []RefinementPredicate
 }
 
 // SpecBinderKind identifies the verifier-visible role of a stable binder.
@@ -126,7 +128,7 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 	}
 	for _, req := range requires {
 		deps := specDependencies([]ast.Expr{req}, nameRefs, BinderRef{})
-		sig.Ensures = append(sig.Ensures, NewRefinementPredicate(RefinementPredicateRequires, BinderRef{}, "", nil, deps, req, req.Pos()))
+		sig.Requires = append(sig.Requires, NewRefinementPredicate(RefinementPredicateRequires, BinderRef{}, "", nil, deps, req, req.Pos()))
 	}
 	for _, ens := range ensureValues {
 		subject := BinderRef{}
@@ -142,7 +144,7 @@ func (a *Analyzer) buildSpecSignature(name string, params []ast.ParamDecl, param
 		}
 		subject := binders[re.ParamIndex].Ref()
 		deps := specDependencies(re.Args, nameRefs, subject)
-		sig.Ensures = append(sig.Ensures, NewRefinementPredicate(RefinementPredicateLaw, subject, re.LawName, re.Args, deps, nil, re.Position))
+		sig.ParamPostconditionLaws = append(sig.ParamPostconditionLaws, NewRefinementPredicate(RefinementPredicateLaw, subject, re.LawName, re.Args, deps, nil, re.Position))
 	}
 	return sig
 }
@@ -299,15 +301,23 @@ func cloneSpecSignature(sig *SpecSignature) *SpecSignature {
 		return nil
 	}
 	out := &SpecSignature{
-		Position:         sig.Position,
-		Name:             sig.Name,
-		Params:           append([]SpecBinder(nil), sig.Params...),
-		Result:           cloneSpecBinderPtr(sig.Result),
-		ParamPredicates:  cloneRefinementPredicates(sig.ParamPredicates),
-		ResultPredicates: cloneRefinementPredicates(sig.ResultPredicates),
-		Ensures:          cloneRefinementPredicates(sig.Ensures),
+		Position:               sig.Position,
+		Name:                   sig.Name,
+		Params:                 append([]SpecBinder(nil), sig.Params...),
+		Result:                 cloneSpecBinderPtr(sig.Result),
+		ParamPredicates:        cloneRefinementPredicates(sig.ParamPredicates),
+		ResultPredicates:       cloneRefinementPredicates(sig.ResultPredicates),
+		Requires:               cloneRefinementPredicates(sig.Requires),
+		Ensures:                cloneRefinementPredicates(sig.Ensures),
+		ParamPostconditionLaws: cloneRefinementPredicates(sig.ParamPostconditionLaws),
 	}
 	return out
+}
+
+// CloneSpecSignature returns a detached copy of a canonical verification signature for code outside
+// the semantic package that has to rebuild/specialize FuncType values.
+func CloneSpecSignature(sig *SpecSignature) *SpecSignature {
+	return cloneSpecSignature(sig)
 }
 
 func cloneSpecBinderPtr(b *SpecBinder) *SpecBinder {
