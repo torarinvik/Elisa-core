@@ -1,7 +1,8 @@
 # 111 — Ghost models, typestate, and named contracts: a unified staging plan
 
-> **(design / not yet implemented)** — everything in this document describes planned
-> language features.  No compiler source has been modified.
+> **Status: PARTIALLY IMPLEMENTED** — significant portions of this design are already
+> in the compiler.  The staging table in Part 5 has been updated to reflect the actual
+> implementation state.  See each section and the table for evidence (file / test references).
 
 Cross-references: docs/109 (unified refinement pipeline), docs/110 (progressive correctness
 ladder), docs/96 (typestate protocols), docs/97 (named composable contracts).
@@ -53,6 +54,23 @@ The `model` field carries abstract logical content that is **not part of the C-l
 It exists only in spec annotations; the compiler erases it from `sizeof`, pointer arithmetic,
 and code generation.  It lets a callee's postcondition describe *what happened logically*
 without committing to the concrete layout.
+
+### 1.1a Implementation status — Ghost model fields
+
+**DONE (S0 core):** `ghost` fields are parsed, recorded in `StructType.GhostFieldOrder`, and erased
+from the concrete (codegen) field list.  Reading a ghost field in ordinary runtime code is a hard
+compiler error.  Ghost fields in struct invariants are legal and the invariant-entry fact is seeded
+at function boundaries.  Default values on ghost fields are rejected.  A field literally named
+`ghost` is still an ordinary field.
+
+Evidence: `src/semantic/analyzer_decl_structs.go` (field registration + erasure + default-value
+rejection), `src/semantic/analyzer_expr_projection_*.go` (read-in-real-code rejection),
+`src/semantic/analyzer_functions.go` (`exprReferencesGhostField`, `stripGhostFieldContractsForRuntime`),
+`src/semantic/ghost_field_test.go` (6 tests covering parse+erase, invariant hold/fail, real-code
+read rejection, default-value rejection, and field-named-`ghost` compatibility).
+
+**NOT YET DONE:** Ghost-local `ghost let` witnesses in spec blocks (S1); `-fghost-check` runtime
+materialisation (S2); ghost-frame inference (S3).
 
 ### 1.2 Syntax
 
@@ -157,6 +175,35 @@ Ghost fields are proof-only iff:
 docs/96 contains the complete design.  This section adds the staged implementation plan and
 the aliasing interaction analysis.
 
+### 2.0a Implementation status — Typestate
+
+**DONE (S0 — struct[state] desugaring + phantom erasure):** The parser desugars `typestate T:` into
+a struct with a `GenericParamState` generic parameter and a `__typestate` field.  The semantic layer
+(`analyzer_typestate_state.go`) detects the `GenericParamState` marker, sets `StructType.HasTypestate`,
+and marks `__typestate` as `Phantom` so the LLVM backend omits it from struct layout.
+
+Evidence: `src/semantic/analyzer_typestate_state.go`, `src/parser/parser_typestate_protocol.go`,
+`src/backend/llvm_*` files checking `GenericParamState`.
+
+**DONE (S1 — transition functions + state-poststate discharge):** Transition functions are enforced
+at call sites.  Calling a transition from the wrong source state is a hard error.  `ensures s => State`
+postconditions are checked.  Constructor `T.new(...)` produces the initial state.  Method-call
+transition syntax (`s.connect()`) compiles.
+
+Evidence: `src/semantic/typestate_protocol_runtime_test.go` — 13 tests covering legal sequences,
+method-call transitions, initial constructors, illegal transitions, double-close, terminal-state
+enforcement, transition parameters + return values.
+
+**DONE (S2 — affine/linear typestate):** `linear typestate` declarations are supported.  A linear
+typestate binding must be consumed before scope exit; a second transition on a consumed value is a
+hard error; a binding that escapes scope without being consumed is a leak error.
+
+Evidence: `src/semantic/typestate_protocol_runtime_test.go` — `TestLinearTypestateBindingMustBeConsumed`,
+`TestLinearTypestateTransitionConsumesOnce`, `TestLinearTypestateTransitionLeakIsError`.
+
+**NOT YET DONE:** Protocol composition (`struct[s1, s2]`, S3); typestate index as a generic
+parameter in fully generic functions (open question §2.2).
+
 ### 2.1 Staging plan (S0..S3)
 
 **S0 — struct[state] desugaring (no new surface syntax)**
@@ -232,6 +279,24 @@ cover typestate transitions.  This is flagged as an open item for S1 review.
 
 docs/97 contains the complete design.  This section adds the staged implementation plan and
 the discharge-path analysis.
+
+### 3.0a Implementation status — Named contracts
+
+**DONE (S0 — declaration + inline expansion):** `contract Name(params): requires/ensure/changes/preserves`
+declarations are parsed, stored in the AST (`ast.FuncDecl.IsContract`), and expanded by
+`expandUsesContracts` before body analysis runs.  `uses Name(args)` at a function site folds the
+contract's clauses (with formal→argument substitution) into the applying function's own
+`Requires`/`EnsureValues`/`Changes`/`Preserves` slices, including frame-condition rebinding and
+transitive `includes` expansion.  Type-checking of `uses` arguments is enforced by
+`validateUsesContractArgumentTypes`.  Empty contracts and contracts with no parameters are rejected.
+`uses` on `extern` functions is also supported.
+
+Evidence: `src/semantic/analyzer_named_contracts.go` (full implementation including
+`expandUsesContracts`, `expandOneUse`, `validateUsesContractArgumentTypes`, `expandContractInclude`),
+`src/semantic/named_contract_test.go` (6 tests: parse+register, frame conditions, no-params error,
+generic params, multiple params, uses expansion).
+
+**NOT YET DONE:** `@satisfies` conformance check (S1); parameterised / higher-order contracts (S2).
 
 ### 3.1 Staging plan (S0..S2)
 
@@ -335,10 +400,10 @@ the same prover language as `where` and `requires`.
 
 | Stage | Ghost model | Typestate | Named contracts |
 |---|---|---|---|
-| S0 | `ghost` field parse + erasure; ghost-inv obligations at public boundaries; Option A framing | `typestate` desugars to `struct[state]` + `derive state` | `contract` decl + `uses` inline expansion |
-| S1 | Ghost-local `ghost let` witness in specs | Transition functions + `ensures p => NewState` discharge | `@satisfies` conformance check |
-| S2 | `-fghost-check` runtime materialisation | Affine/linear typestate (`linear` flag, `(consumed)`) | (deferred: parameterised contracts) |
-| S3 | Ghost-frame inference (Option B, research) | Protocol composition (`struct[s1, s2]`) | (deferred: higher-order `uses`) |
+| S0 | **DONE** — `ghost` field parse + erasure from layout; ghost-inv seeded as entry fact; read-in-real-code rejected; default-value rejected. (`analyzer_decl_structs.go`, `ghost_field_test.go`) | **DONE** — `typestate` desugars to `struct[GenericParamState]` + `__typestate` phantom field erased from LLVM layout. (`analyzer_typestate_state.go`, `parser_typestate_protocol.go`) | **DONE** — `contract` decl + `uses` inline expansion with formal→arg substitution, frame rebinding, transitive `includes`, type-checking of args. (`analyzer_named_contracts.go`, `named_contract_test.go`) |
+| S1 | PLANNED — Ghost-local `ghost let` witness in specs | **DONE** — Transition functions + state-poststate (`ensures s => State`) discharge; illegal transitions are hard errors; method-call form works. (`typestate_protocol_runtime_test.go`) | PLANNED — `@satisfies` conformance check |
+| S2 | PLANNED — `-fghost-check` runtime materialisation | **DONE** — `linear typestate`; must-consume enforcement; double-transition and leak-at-scope-exit are hard errors. (`typestate_protocol_runtime_test.go`) | PLANNED — parameterised / higher-order contracts |
+| S3 | PLANNED — Ghost-frame inference (Option B, research) | PLANNED — Protocol composition (`struct[s1, s2]`) | PLANNED — higher-order `uses` |
 
 ---
 

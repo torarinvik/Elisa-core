@@ -213,6 +213,15 @@ can verify it via the frame lattice.
 See docs/87 (frame conditions) and docs/96 (typestate protocols) for the current implementation
 status.  Cross-family effect subsumption is **(planned)**.
 
+> **Implementation note (docs/111):** As of the `work` branch the three Level-5 sub-features
+> described in docs/111 are not "all planned" — most of S0–S2 is already shipped.  Ghost model
+> fields (parse, erasure, read-rejection, invariant seeding) are **done** (`ghost_field_test.go`).
+> Typestate including transition enforcement, terminal-state checks, and `linear` must-consume are
+> **done** (`typestate_protocol_runtime_test.go`).  Named contracts (`contract`/`uses` expansion
+> with substitution and frame rebinding) are **done** (`analyzer_named_contracts.go`,
+> `named_contract_test.go`).  Remaining gaps: `ghost let` spec witnesses, `-fghost-check` runtime
+> mode, `@satisfies` conformance, and protocol composition (S3).
+
 ### Level 6 — Strict mode (unknown = error)
 
 `-strict` / `EnforceStrictProofs` turns every `proofLint` into a hard compile-time error.
