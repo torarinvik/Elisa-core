@@ -534,6 +534,15 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
 			continue
 		}
+		// Refutation gate: the linear prover may refute a return-refinement obligation that the
+		// const-eval tier missed (e.g. an affine expression whose bounded range excludes the law).
+		// Mirror the ensure/where/requires refutation gate: a PROVABLY false postcondition is a hard
+		// error independent of -strict; merely-unprovable stays a lint.
+		if a.returnRefinementPredRefuted(n.Value, lawDecl, pred) {
+			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRefuted)
+			a.errorf(n.Pos(), "return refinement %q is provably violated: the returned value does not satisfy it", pred.Name)
+			continue
+		}
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check%s", pred.Name, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 		if isBuiltinModularLawName(pred.Name) || !a.isSideEffectFreeRefinementArg(n.Value) {
@@ -550,6 +559,30 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 	if len(checks) != 0 && a.returnRefinementChecks != nil {
 		a.returnRefinementChecks[n] = checks
 	}
+}
+
+// returnRefinementPredRefuted reports whether a return-position refinement predicate is PROVABLY
+// FALSE for the given return value, using the linear prover. Returns true only when the prover
+// verdict is requiresRefuted — the negation of the predicate is entailed by the value's bounds.
+// Returns false for unknown or proven (the caller handles those). Sound: only a definite
+// refutation verdict escalates; an unknown verdict stays a lint (the existing fallback path).
+func (a *Analyzer) returnRefinementPredRefuted(value ast.Expr, lawDecl *ast.FuncDecl, pred ast.RefinementPredExpr) bool {
+	if a == nil || lawDecl == nil || len(lawDecl.Params) == 0 {
+		return false
+	}
+	body, ok := a.lawBodyExpr(lawDecl)
+	if !ok || body == nil {
+		return false
+	}
+	// Build subst: law subject param → return value; law value params → predicate args.
+	subst := map[string]ast.Expr{lawDecl.Params[0].Name: value}
+	for i, arg := range pred.Args {
+		if i+1 >= len(lawDecl.Params) {
+			return false
+		}
+		subst[lawDecl.Params[i+1].Name] = arg
+	}
+	return a.proveRequiresClause(body, subst) == requiresRefuted
 }
 
 // dischargeEnsuresRefinements discharges `ensures <param> is Law` postconditions (docs/85 brick 2,
@@ -912,18 +945,22 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 		}
 		proven, counterexample := a.trySMTProveRequires(clause, subst)
 		if proven {
+			a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 			continue
 		}
 		if call, ok := a.proofCallExpr(n.Value); ok {
 			if a.tryProveEnsureByReturnCallRange(clause, call) {
+				a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 				continue
 			}
 			// docs/101: `return f(x)` where `f` is a contracted function-typed parameter — assume the
 			// parameter contract's predicate on the call result (discharged at every call site).
 			if a.tryProveEnsureByParamContract(clause, call) {
+				a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenContract)
 				continue
 			}
 			if a.trySMTProveEnsureFromReturnCall(clause, call) {
+				a.recordProof(n.Pos(), "ensure "+a.currentFuncDecl.Name, "ensure", ProofProvenSMT)
 				continue
 			}
 		}
