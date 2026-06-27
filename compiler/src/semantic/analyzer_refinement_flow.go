@@ -1018,6 +1018,33 @@ func (a *Analyzer) recordCastRangeFact(target ast.Expr, value ast.Expr) {
 	a.currentScope.rangeFacts[targetName] = r
 }
 
+// seedIntegerMatchArmFact seeds the range fact `scrutinee == literal` into an integer match arm's
+// scope when the scrutinee is an immutable integer variable and the arm pattern is a literal.
+// This lets the flow prover discharge refinement obligations (e.g. `x is Five`) inside the arm
+// body — `match k: 5:` knows `k ∈ [5,5]` for the arm body, just like `if k == 5:` does.
+// The fact is scoped to the arm scope and therefore cannot leak to other arms or past the match.
+func (a *Analyzer) seedIntegerMatchArmFact(scrutineeExpr ast.Expr, pattern ast.MatchPattern, armScope *Scope) {
+	if a == nil || armScope == nil {
+		return
+	}
+	litPat, ok := pattern.(*ast.MatchLiteralPattern)
+	if !ok {
+		return
+	}
+	name, ok := immutableIntIdentName(a, a.currentScope, scrutineeExpr)
+	if !ok {
+		return
+	}
+	c, ok := a.constIntValue(litPat.Value)
+	if !ok {
+		return
+	}
+	if armScope.rangeFacts == nil {
+		armScope.rangeFacts = map[string]numRange{}
+	}
+	armScope.rangeFacts[name] = armScope.rangeFacts[name].intersect(numRange{loKnown: true, lo: c, hiKnown: true, hi: c})
+}
+
 func declaredTypeRange(t Type) (numRange, bool) {
 	signed, width, ok := BitIntInfo(t)
 	if !ok || width <= 0 || width >= 63 {
