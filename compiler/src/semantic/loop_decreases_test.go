@@ -181,6 +181,24 @@ def loop(n: i64):
 	}
 }
 
+// When a loop `decreases` measure cannot be proven, the diagnostic should include z3's counterexample
+// witness (the variable assignment that breaks the obligation), mirroring how invariant-preservation
+// failures surface a witness via counterexampleSuffix / lastSMTCounterexample.
+func TestLoopDecreasesFailureSurfacesCounterexample(t *testing.T) {
+	src := `def bad(n: i64):
+    requires n >= 0
+    i: mutable i64 = 0
+    while i < n:
+        decreases i
+        i <- i + 1
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ce_loop.elisa", src, AnalyzeOptions{EnableSMT: true})
+	warnings := strings.Join(result.Warnings(), "\n")
+	if !strings.Contains(warnings, "it can fail when") {
+		t.Fatalf("expected decreases failure to include a z3 counterexample witness (\"it can fail when ...\"), got warnings:\n%s", warnings)
+	}
+}
+
 // A scoped, auditable `can Unsafe.AssumeProgress:` wrapping the loop discharges the unprovable
 // `decreases` termination lint even under strict proofs (the author asserts progress this analyzer
 // cannot model), AND — unlike `trusted` — surfaces Unsafe.AssumeProgress in the function's effect

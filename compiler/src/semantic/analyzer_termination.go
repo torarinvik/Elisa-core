@@ -353,7 +353,8 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	// proof, never fabricates a decrease).
 	a.typeLoopSubstCastsForSMT(subst)
 	invs := leadingInvariants(stmt.Body)
-	if a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst) {
+	proven, smtCE := a.proveLoopMeasureDecreases(stmt.Cond, invs, measures, subst)
+	if proven {
 		a.recordProof(decs[0].Pos(), "termination of loop", "decreases", ProofProvenSMT)
 		return
 	}
@@ -365,7 +366,7 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	if witness != "" {
 		witness = " — " + witness
 	}
-	a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven to strictly decrease and stay >= 0 on every iteration; falling back to the runtime loop-progress check%s", witness)
+	a.proofLint(decs[0].Pos(), "loop `decreases` measure could not be proven to strictly decrease and stay >= 0 on every iteration; falling back to the runtime loop-progress check%s%s", witness, a.counterexampleSuffix(smtCE))
 }
 
 // loopLexicographicDecreaseDiagnostic mirrors proveLoopMeasureDecreases to name the deciding
@@ -391,7 +392,7 @@ func (a *Analyzer) loopLexicographicDecreaseDiagnostic(cond ast.Expr, invs []*as
 		if !isLast && a.proveLoopMeasureUnchanged(cond, invs, measure, subst) {
 			continue
 		}
-		if a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst) {
+		if proven, _ := a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst); proven {
 			continue
 		}
 		comp := unparse.FormatExpr(measure)
@@ -409,7 +410,9 @@ func (a *Analyzer) loopLexicographicDecreaseDiagnostic(cond ast.Expr, invs []*as
 
 // proveLoopMeasureDecreases proves the lexicographic measure tuple strictly decreases across one loop
 // iteration under `cond ∧ invariants`, with the loop variables free and the body effect substituted.
-func (a *Analyzer) proveLoopMeasureDecreases(cond ast.Expr, invs []*ast.ContractStmt, measures []ast.Expr, subst map[string]ast.Expr) bool {
+// On success it returns (true, ""). On failure it returns (false, ce) where ce is z3's counterexample
+// string for the first component that could not be proven (empty when no SMT counterexample is available).
+func (a *Analyzer) proveLoopMeasureDecreases(cond ast.Expr, invs []*ast.ContractStmt, measures []ast.Expr, subst map[string]ast.Expr) (bool, string) {
 	for k, measure := range measures {
 		earlierUnchanged := true
 		for j := 0; j < k; j++ {
@@ -421,28 +424,32 @@ func (a *Analyzer) proveLoopMeasureDecreases(cond ast.Expr, invs []*ast.Contract
 		if !earlierUnchanged {
 			continue
 		}
-		if a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst) {
-			return true
+		if proven, ce := a.proveLoopMeasureComponentDecreases(cond, invs, measure, subst); proven {
+			return true, ""
+		} else {
+			return false, ce
 		}
 	}
-	return false
+	return false, ""
 }
 
 // proveLoopMeasureComponentDecreases proves `cond ∧ invs ⊢ measure > measure[body]` AND
 // `cond ∧ invs ⊢ measure >= 0` — one component strictly decreasing and bounded below.
-func (a *Analyzer) proveLoopMeasureComponentDecreases(cond ast.Expr, invs []*ast.ContractStmt, measure ast.Expr, subst map[string]ast.Expr) bool {
+// Returns (true, "") on success. On failure returns (false, ce) where ce is z3's counterexample
+// string for the failing obligation (empty when SMT was not reached or produced no model).
+func (a *Analyzer) proveLoopMeasureComponentDecreases(cond ast.Expr, invs []*ast.ContractStmt, measure ast.Expr, subst map[string]ast.Expr) (bool, string) {
 	post, ok := substituteLemmaEnsure(measure, subst)
 	if !ok {
-		return false
+		return false, ""
 	}
 	decrease := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GT, Left: measure, Right: post}
 	bounded := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GTEQ, Left: measure, Right: &ast.IntLit{Position: measure.Pos(), Value: "0"}}
 	empty := map[string]ast.Expr{}
-	if dec, _ := a.proveLoopPreservationSMT(cond, invs, decrease, empty, nil); !dec {
-		return false
+	if dec, ce := a.proveLoopPreservationSMT(cond, invs, decrease, empty, nil); !dec {
+		return false, ce
 	}
-	bnd, _ := a.proveLoopPreservationSMT(cond, invs, bounded, empty, nil)
-	return bnd
+	bnd, ce := a.proveLoopPreservationSMT(cond, invs, bounded, empty, nil)
+	return bnd, ce
 }
 
 // proveLoopMeasureUnchanged proves an earlier lexicographic component is invariant across the body:

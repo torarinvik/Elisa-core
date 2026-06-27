@@ -366,7 +366,7 @@ func (a *Analyzer) proveLoopMeasureDecreasesAllPaths(loopCond ast.Expr, invs []*
 			continue // loop terminates on this path — no decrease obligation
 		}
 		pathCond := buildPathCond(loopCond, p.conds)
-		if !a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst) {
+		if proven, _ := a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst); !proven {
 			return false // this non-exit path does not provably decrease → reject the whole loop
 		}
 		provedAny = true
