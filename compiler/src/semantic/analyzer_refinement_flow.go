@@ -1668,6 +1668,213 @@ func (a *Analyzer) proveConstraintsFromRange(r numRange, decl *ast.FuncDecl, pre
 	return true
 }
 
+// tryProveRefinementByRelational discharges `subject is law[args]` when one or more bracket args are
+// non-constant immutable-integer identifiers whose relationship to the subject is directly stated by
+// a `requires` clause of the enclosing function (docs/85 dependent-arg extension).
+//
+// Example: `raw is InRange[0, cap]` with law `self >= 0 and self < cap` proves when:
+//   - `raw` is an immutable integer param of unsigned type (giving self >= 0 via declared-type range), AND
+//   - `requires raw < cap` is a precondition of the enclosing function (giving self < cap relationally).
+//
+// Sound design: BOTH the subject and every non-const bracket arg must be immutable integer
+// identifiers (sym.Mutable == false). Immutable params cannot be reassigned, so the `requires` fact
+// holds throughout the entire body — no mutation-invalidation tracking is needed. Any mutable
+// subject or mutable bracket arg causes an immediate decline. A constant bracket arg is resolved
+// through the normal paramConsts path; only non-const bracket args use the relational channel.
+func (a *Analyzer) tryProveRefinementByRelational(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
+	if a == nil || decl == nil || a.currentFuncDecl == nil || a.currentScope == nil {
+		return false
+	}
+	if len(predArgs) != len(decl.Params)-1 {
+		return false
+	}
+	// Subject must be an immutable integer identifier.
+	subjectName, subjectOk := immutableIntIdentName(a, a.currentScope, value)
+	if !subjectOk || subjectName == "" {
+		return false
+	}
+	// Partition bracket args into constants and relational (immutable-ident) entries.
+	paramConsts := map[string]int64{}
+	paramRelNames := map[string]string{} // law-param-name → caller-side variable name
+	anyRelational := false
+	for i, arg := range predArgs {
+		lawParamName := decl.Params[i+1].Name
+		if c, cok := a.constIntValue(arg); cok {
+			paramConsts[lawParamName] = c
+			continue
+		}
+		argName, argOk := immutableIntIdentName(a, a.currentScope, arg)
+		if !argOk || argName == "" {
+			return false // outside the relational fragment — decline soundly
+		}
+		paramRelNames[lawParamName] = argName
+		anyRelational = true
+	}
+	if !anyRelational {
+		// All args were constant: the existing proveConstraintsFromRange handles this.
+		return false
+	}
+	// Build the subject's range from live range facts and declared-type bounds (for channel A).
+	// We use smtIntWidthSign (rather than BitIntInfo/declaredTypeRange) so that wide unsigned types
+	// such as usize/uintptr (64-bit, excluded by BitIntInfo's width>=63 guard) also contribute their
+	// non-negativity lower bound.
+	subjectRange := numRange{}
+	subjectRangeOk := false
+	if r, found := a.lookupRangeFact(subjectName); found {
+		subjectRange = r
+		subjectRangeOk = true
+	}
+	if sym, found := a.currentScope.Lookup(subjectName); found && sym != nil {
+		// First, try declaredTypeRange for exact-width types (u8/u16/u32, i8/…).
+		if tr, found := declaredTypeRange(sym.Type); found {
+			if subjectRangeOk {
+				subjectRange = subjectRange.intersect(tr)
+			} else {
+				subjectRange = tr
+				subjectRangeOk = true
+			}
+		} else if signed, _, ok := smtIntWidthSign(sym.Type); ok && !signed {
+			// Wide unsigned (usize/uintptr/u64): declaredTypeRange declined (width>=63), but we
+			// can still supply the non-negativity lower bound lo=0 soundly. The upper bound is
+			// left open (unknown) — we only assert what we know for certain.
+			unsignedNonneg := numRange{loKnown: true, lo: 0}
+			if subjectRangeOk {
+				subjectRange = subjectRange.intersect(unsignedNonneg)
+			} else {
+				subjectRange = unsignedNonneg
+				subjectRangeOk = true
+			}
+		}
+	}
+	// Walk the law body and prove each atom via either:
+	//   A) constant operand (paramConsts or literal) → range entailment on subjectRange
+	//   B) relational operand (paramRelNames → callerVarName) → live requires clause
+	return a.proveRelationalLawBody(decl, subjectName, paramConsts, paramRelNames, subjectRange, subjectRangeOk)
+}
+
+// proveRelationalLawBody extracts the single-return law body and walks it as a conjunction.
+func (a *Analyzer) proveRelationalLawBody(decl *ast.FuncDecl, subjectName string, paramConsts map[string]int64, paramRelNames map[string]string, subjectRange numRange, subjectRangeOk bool) bool {
+	if decl == nil || len(decl.Params) == 0 || len(decl.Body) != 1 {
+		return false
+	}
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
+	if !ok || ret == nil || ret.Value == nil {
+		return false
+	}
+	self := decl.Params[0].Name
+	return a.proveRelationalLawExpr(ret.Value, self, subjectName, paramConsts, paramRelNames, subjectRange, subjectRangeOk)
+}
+
+// proveRelationalLawExpr proves a single law body expression using the mixed const+relational
+// strategy. Returns false (decline) if any atom is undecidable or unprovable.
+func (a *Analyzer) proveRelationalLawExpr(expr ast.Expr, self string, subjectName string, paramConsts map[string]int64, paramRelNames map[string]string, subjectRange numRange, subjectRangeOk bool) bool {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.proveRelationalLawExpr(n.Inner, self, subjectName, paramConsts, paramRelNames, subjectRange, subjectRangeOk)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			return a.proveRelationalLawExpr(n.Left, self, subjectName, paramConsts, paramRelNames, subjectRange, subjectRangeOk) &&
+				a.proveRelationalLawExpr(n.Right, self, subjectName, paramConsts, paramRelNames, subjectRange, subjectRangeOk)
+		}
+		// Normalize to `self OP operand`.
+		var operand ast.Expr
+		var op lexer.TokenKind
+		switch {
+		case isSelfIdent(n.Left, self):
+			operand, op = n.Right, n.Op
+		case isSelfIdent(n.Right, self):
+			operand, op = n.Left, flipComparison(n.Op)
+		default:
+			return false // non-self atom — undecidable in this tier, decline
+		}
+		// Channel A: operand resolves to a constant (literal or paramConsts).
+		if c, cok := a.operandConst(operand, paramConsts); cok {
+			if !subjectRangeOk {
+				return false
+			}
+			return rangeEntailsConstraint(subjectRange, lawConstraint{op: op, c: c})
+		}
+		// Channel B: operand is a law param bound to a caller-side variable via paramRelNames.
+		opIdent, identOk := operand.(*ast.Ident)
+		if !identOk || opIdent == nil {
+			return false
+		}
+		callerVarName, relOk := paramRelNames[opIdent.Name]
+		if !relOk {
+			return false // operand is not a known law param — undecidable, decline
+		}
+		return a.requiresClauseProves(subjectName, op, callerVarName)
+	default:
+		return false
+	}
+}
+
+// requiresClauseProves reports whether the enclosing function's `requires` clauses contain a
+// precondition that entails `subjectName OP argName`. Both variables must be immutable integer
+// identifiers (enforced by the caller); since they cannot be reassigned, the requires fact is valid
+// throughout the entire body without mutation-invalidation tracking.
+//
+// Sound: we only conclude when the requires clause's normalized operator is at least as strong as
+// the wanted operator (see relationalOpProves). We scan ALL requires clauses and return true on the
+// first match; if none match, we decline (return false).
+func (a *Analyzer) requiresClauseProves(subjectName string, op lexer.TokenKind, argName string) bool {
+	if a == nil || a.currentFuncDecl == nil || subjectName == "" || argName == "" {
+		return false
+	}
+	for _, req := range a.currentFuncDecl.Requires {
+		if a.requiresClauseMatchesRelational(req, subjectName, op, argName) {
+			return true
+		}
+	}
+	return false
+}
+
+// requiresClauseMatchesRelational reports whether the clause `expr` normalizes to a fact
+// `subjectName clauseOp argName` where clauseOp proves wantOp (see relationalOpProves).
+// The normalization flips the operator when identifiers appear in reversed order.
+func (a *Analyzer) requiresClauseMatchesRelational(expr ast.Expr, subjectName string, wantOp lexer.TokenKind, argName string) bool {
+	bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+	if !ok || bin == nil {
+		return false
+	}
+	var clauseOp lexer.TokenKind
+	switch {
+	case isIdentNamed(bin.Left, subjectName) && isIdentNamed(bin.Right, argName):
+		clauseOp = bin.Op
+	case isIdentNamed(bin.Right, subjectName) && isIdentNamed(bin.Left, argName):
+		clauseOp = flipComparison(bin.Op)
+	default:
+		return false
+	}
+	return relationalOpProves(clauseOp, wantOp)
+}
+
+// relationalOpProves reports whether having a `requires` clause with operator `have` (in normalized
+// `subject OP arg` form) is sufficient to prove a law constraint with operator `want`.
+//
+// Sound entailment rules:
+//
+//	have=LT  proves want=LT (exact) and want=LTEQ  (x<y ⇒ x≤y, integer semantics)
+//	have=LTEQ proves want=LTEQ only
+//	have=GT  proves want=GT and want=GTEQ
+//	have=GTEQ proves want=GTEQ only
+//	have=EQEQ proves want=EQEQ, LTEQ, GTEQ
+//	anything else: decline
+func relationalOpProves(have, want lexer.TokenKind) bool {
+	if have == want {
+		return true
+	}
+	switch have {
+	case lexer.TOKEN_LT:
+		return want == lexer.TOKEN_LTEQ
+	case lexer.TOKEN_GT:
+		return want == lexer.TOKEN_GTEQ
+	case lexer.TOKEN_EQEQ:
+		return want == lexer.TOKEN_LTEQ || want == lexer.TOKEN_GTEQ
+	}
+	return false
+}
+
 // tryDeriveShiftOrScaleRange attempts to derive a numRange for a compound expression that is either:
 //   - an additive shift `x + c` or `x - c` (case 3): range [lo+c, hi+c] derived via shiftRange.
 //   - a monotonic scaling `x * k` with k > 0 and x >= 0 (case 4): range [lo*k, hi*k] via scaleRangePositive.

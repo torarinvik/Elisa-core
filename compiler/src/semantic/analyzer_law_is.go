@@ -238,6 +238,15 @@ func (a *Analyzer) tryDischargeRefinementStaticallyOpt(value ast.Expr, valueName
 		a.recordProof(pos, valueName, pred.Name, ProofProvenLinear)
 		return true
 	}
+	// Relational tier (docs/85 dependent-arg): discharges `subject is law[args]` when one or more
+	// bracket args are non-constant immutable identifiers whose relationship to the subject is
+	// established by a `requires` clause of the enclosing function. E.g. `raw is InRange[0, cap]`
+	// with `requires raw < cap` proves without SMT. Sound: both subject and bracket-arg identifiers
+	// must be immutable so the requires fact is valid throughout the body.
+	if a.tryProveRefinementByRelational(value, lawDecl, pred.Args) {
+		a.recordProof(pos, valueName, pred.Name, ProofProvenLinear)
+		return true
+	}
 	// SMT tier (docs/90): the last prove-step before the runtime fallback. Only reached when the
 	// linear tier declined, so the subject is genuinely outside the affine fragment (e.g. a var*var
 	// product). Off unless -smt; sound regardless (only `unsat` of the negation concludes).
