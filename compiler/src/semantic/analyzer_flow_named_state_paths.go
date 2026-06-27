@@ -337,9 +337,21 @@ func (a *Analyzer) inferDirectFieldAssignedNamedState(pos lexer.Pos, root *Symbo
 			continue
 		}
 		constDecidedAll = false
-		// Const-eval could not decide this state. Try to PROVE it impossible under the entry hypothesis;
-		// a state we cannot exclude is kept (sound — the result set only ever over-approximates).
-		if hypExpr != nil && a.derivedStateProvablyExcluded(base, stateName, fieldValues, hypExpr) {
+		// Const-eval could not decide this state. Try to PROVE it impossible; a state we cannot exclude
+		// is kept (sound — the result set only ever over-approximates).
+		//
+		// Two hypothesis sources are available:
+		//   • hypExpr: the single-state entry condition on the OLD field values (non-nil only when the
+		//     current type is pinned to exactly one derived state). It narrows the prover's view of the
+		//     pre-mutation values, e.g. `health > 0` before `health <- health + 1`.
+		//   • `requires` clauses / flow facts: always present in the standard SMT hypothesis block that
+		//     smtCheckVC adds regardless of hypExpr. When hypExpr is nil (multi-state entry or no pinned
+		//     state), these alone may still suffice — for example a `requires g.value + amount <
+		//     g.cap / 2` guarantees the post-state stays Low without needing to know the entry state.
+		//
+		// Passing nil for hyp skips the `(assert hypTerm)` extra-hyp line; the standard requires/flow-
+		// fact block still fires, so the prover is strictly weaker than the hypExpr case but still sound.
+		if a.derivedStateProvablyExcluded(base, stateName, fieldValues, hypExpr) {
 			continue
 		}
 		possible = append(possible, stateName)
@@ -388,10 +400,16 @@ func peelNamedStateRefs(t Type) Type {
 	}
 }
 
-// derivedStateProvablyExcluded proves that, under the entry hypothesis `hyp` (the current single state's
-// condition on the old field values), the candidate state's condition CANNOT hold on the post-assignment
-// field values — i.e. the assignment provably leaves that state behind. Only `unsat` of `hyp ∧ condition`
-// concludes (sound; an undecidable state is never excluded). Off (declines) unless -smt.
+// derivedStateProvablyExcluded proves that the candidate state's condition CANNOT hold on the
+// post-assignment field values — i.e. the assignment provably leaves that state behind.
+// Only `unsat` concludes (sound; an undecidable state is never excluded). Off (declines) unless -smt.
+//
+// hyp is an OPTIONAL entry hypothesis: when the current type is pinned to a single derived state,
+// hyp is that state's condition on the OLD field values (e.g. `health > 0` before a health mutation).
+// When hyp is nil — e.g. the entry type is multi-state — the function still runs, relying solely on
+// the standard requires/flow-fact hypotheses that smtCheckVC always includes. This covers the case
+// where a `requires` clause alone is sufficient to exclude the state (e.g. `requires g.value + amt <
+// g.cap / 2` guaranteeing the post-value stays below the Low/High threshold).
 func (a *Analyzer) derivedStateProvablyExcluded(base *StructType, stateName string, fieldValues map[string]ast.Expr, hyp ast.Expr) bool {
 	derived := base.DerivedStateMap[stateName]
 	if derived == nil || derived.Condition == nil {
@@ -406,13 +424,18 @@ func (a *Analyzer) derivedStateProvablyExcluded(base *StructType, stateName stri
 	if !ok {
 		return false
 	}
-	hypTerm, ok := tr.boolTerm(hyp, nil)
-	if !ok {
-		return false
+	// Prove `¬condition` under the hypothesis. smtCheckVC always includes the standard requires/flow-fact
+	// block; extraHyps carries the optional entry-state hypothesis on top of that. When hyp is nil (no
+	// pinned single state), the entry hypothesis is absent but requires clauses can still exclude states.
+	extraHyps := ""
+	if hyp != nil {
+		hypTerm, ok := tr.boolTerm(hyp, nil)
+		if !ok {
+			return false
+		}
+		// unsat of `hyp ∧ condition` means the state is impossible after the assignment.
+		extraHyps = "(assert " + hypTerm + ")\n"
 	}
-	// Prove `¬condition` under the hypothesis: smtCheckVC negates the obligation (asserting `condition`)
-	// alongside `hyp`; unsat means `hyp ∧ condition` is contradictory, so the state is impossible after
-	// the assignment.
-	proven, _ := a.smtCheckVC(tr, "(not "+condTerm+")", "(assert "+hypTerm+")\n")
+	proven, _ := a.smtCheckVC(tr, "(not "+condTerm+")", extraHyps)
 	return proven
 }
