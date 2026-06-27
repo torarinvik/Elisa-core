@@ -408,6 +408,10 @@ func (a *Analyzer) protocolLeakDescription(t Type) string {
 	if kind := directProtocolLeakKind(t); kind != "" {
 		return kind
 	}
+	// A darray of affine elements must be drained before scope exit.
+	if tt, ok := t.(*DArrayType); ok && a.containsAffineHandleValues(tt.Elem, map[string]bool{}) {
+		return "darray of must-consume elements (drain with `for x in move c:`)"
+	}
 	hasThread, hasTask, hasGuard := a.protocolKindsInType(t, map[string]bool{})
 	parts := make([]string, 0, 3)
 	if hasThread {
@@ -498,6 +502,17 @@ func (a *Analyzer) protocolLiveLeafPaths(t Type, prefix string, seen map[string]
 				}
 			}
 			return paths
+		}
+	// A darray whose elements contain must-consume values is itself must-drain:
+	// dropping it at scope exit without a `for ... in move` drain would silently
+	// leak all contained affine handles. Treat the container as an opaque leaf —
+	// individual elements cannot be named statically. The drain (`for g in move c:`)
+	// consumes the container symbol via recordAffineConsumption, which clears the
+	// leaf entry and satisfies the scope-exit check.
+	// Note: dict/set drain is not yet implemented, so they are not enforced here.
+	case *DArrayType:
+		if a.containsAffineHandleValues(tt.Elem, map[string]bool{}) {
+			return map[string]Type{prefix: t}
 		}
 	}
 	if a.containsProtocolLeakValues(t) {
