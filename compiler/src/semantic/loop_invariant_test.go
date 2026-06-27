@@ -221,6 +221,81 @@ def scan(name: usize[16]) -> usize:
 	}
 }
 
+// TestLoopInvariantModularEstablishedBySMT is the completeness-positive test for SMT-tier
+// establishment. The invariant `i % 2 == 0` cannot be established by the affine prover alone (modular
+// arithmetic is outside its fragment), but the SMT tier can use the function's `requires n % 2 == 0`
+// together with the entry-value fact `i == n` (recorded when the mutable local is initialized) to
+// prove it holds at loop entry. The invariant is also preserved by `i <- i - 2`, so both obligations
+// must be proven by the SMT tier.
+func TestLoopInvariantModularEstablishedBySMT(t *testing.T) {
+	src := `
+def step(n: usize) -> usize:
+    requires n % 2 == 0
+    i: mutable usize = n
+    while i > 0:
+        invariant i % 2 == 0
+        i <- i - 2
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_establish_smt_modular.elisa", src, false)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	if got := countLoopInvariantProof(result, "establish", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the modular invariant to be established by the SMT tier, got %d: %+v", got, result.ProofReport)
+	}
+	if got := countLoopInvariantProof(result, "preserve", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the modular invariant to be preserved by the SMT tier, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+// TestLoopInvariantNonlinearEstablishedBySMT is a second completeness-positive test for SMT
+// establishment, using a NONLINEAR invariant `i * i < 10000` that the affine prover cannot touch.
+// The function's `requires n < 100` together with `i == n` at entry implies `i < 100`, so `i * i < 10000`
+// (for non-negative i) follows by nonlinear arithmetic — the domain z3 handles via `bv` or integer
+// reasoning. Both establishment and preservation must be proven by the SMT tier.
+func TestLoopInvariantNonlinearEstablishedBySMT(t *testing.T) {
+	src := `
+def step(n: usize) -> usize:
+    requires n < 100
+    i: mutable usize = n
+    while i > 0:
+        invariant i * i < 10000
+        i <- i - 1
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_establish_smt_nonlinear.elisa", src, false)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a clean analysis, got: %v", errs)
+	}
+	if got := countLoopInvariantProof(result, "establish", ProofProvenSMT); got != 1 {
+		t.Fatalf("expected the nonlinear invariant to be established by the SMT tier, got %d: %+v", got, result.ProofReport)
+	}
+}
+
+// TestLoopInvariantNonEstablishableRejectedBySMT is the SOUNDNESS-NEGATIVE test for SMT-tier
+// establishment. An invariant `i % 2 == 0` where `i` starts at 3 is FALSE at loop entry — the SMT
+// tier must not prove it established. The obligation negation `i % 2 != 0` is satisfiable (take i=3),
+// so z3 returns Sat and the establishment falls back to a runtime check. This guards against the SMT
+// tier ever accepting a non-established invariant.
+func TestLoopInvariantNonEstablishableRejectedBySMT(t *testing.T) {
+	src := `
+def step(n: usize) -> usize:
+    i: mutable usize = 3
+    while i > 0:
+        invariant i % 2 == 0
+        i <- i - 2
+    return i
+`
+	result := analyzeLoopInvariantWithSMT(t, "loop_inv_establish_smt_unsound_guard.elisa", src, false)
+	if got := countLoopInvariantProof(result, "establish", ProofProvenSMT); got != 0 {
+		t.Fatalf("SMT must not prove a non-established invariant (i=3 is a counterexample to i%%2==0): %+v", result.ProofReport)
+	}
+	if got := countLoopInvariantProof(result, "establish", ProofRuntime); got != 1 {
+		t.Fatalf("expected the non-established invariant to fall back to a runtime establishment check, got %d: %+v", got, result.ProofReport)
+	}
+}
+
 func parseFileForTest(t *testing.T, filename, src string) *ast.File {
 	t.Helper()
 	l := lexer.New(filename, []byte(src))
