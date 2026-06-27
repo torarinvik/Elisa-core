@@ -169,7 +169,56 @@ func (a *Analyzer) indexExprRefinementBounds(idx ast.Expr) (lo int64, hi int64, 
 		}
 		return 0, 0, false
 	}
+	// Plain-enum tag cast: `e.u32()` for a non-packed root enum → [0, variantCount-1].
+	if lo, hi, ok := a.plainEnumTagInterval(idx); ok {
+		return lo, hi, true
+	}
 	return a.refinementCarriedInterval(idx)
+}
+
+// plainEnumTagInterval returns [0, variantCount-1] when idx is a postfix unsigned-integer cast of a
+// plain (non-packed, root) enum value: e.g. `color.u32()` for a 3-variant enum gives [0, 2].
+//
+// Soundness: every plain-enum value carries one of the N variants with sequential tags 0..N-1,
+// so the tag is always in [0, N-1]. Two classes are declined to stay conservative:
+//   - Packed enums: the tag is embedded in a bitfield word; its numeric value is NOT the sequential
+//     ordinal and may exceed N-1.
+//   - Child enums in a sealed hierarchy: their tags occupy a slice of the parent's dense space, not
+//     [0, childVariantCount-1].
+//
+// Only postfix-shorthand casts to unsigned integer types are recognized; explicit `.cast[T]` and
+// signed casts are left to refinement types or the SMT tier.
+func (a *Analyzer) plainEnumTagInterval(idx ast.Expr) (lo int64, hi int64, ok bool) {
+	cast, isCast := stripOptimizationParens(idx).(*ast.CastExpr)
+	if !isCast || cast == nil || cast.Origin != ast.CastExprOriginPostfixShorthand {
+		return 0, 0, false
+	}
+	named, isNamed := cast.Target.(*ast.NamedType)
+	if !isNamed || named == nil {
+		return 0, 0, false
+	}
+	switch named.Name {
+	case "u8", "u16", "u32", "u64", "usize":
+		// accepted unsigned integer targets
+	default:
+		return 0, 0, false
+	}
+	operandType := stripRefForBounds(a.exprTypes[cast.Operand])
+	et, isEnum := operandType.(*EnumType)
+	if !isEnum || et == nil {
+		return 0, 0, false
+	}
+	if et.Packed {
+		return 0, 0, false // packed enum tag is NOT the sequential ordinal
+	}
+	if et.Parent != nil {
+		return 0, 0, false // child enum tags live in the parent's dense space
+	}
+	n := int64(len(et.Variants))
+	if n == 0 {
+		return 0, 0, false
+	}
+	return 0, n - 1, true
 }
 
 // shiftInterval offsets a sub-expression's proven interval by a constant (`expr + delta`).

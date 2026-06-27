@@ -180,6 +180,22 @@ func IsNumericType(t Type) bool {
 	}
 }
 
+// isUnsignedIntegerType reports whether t is a plain unsigned integer builtin — the only valid
+// target types for a plain-enum tag ordinal cast (`.u32()` etc.). Floats and signed integers are
+// excluded because the tag range guarantee `[0, N-1]` is only meaningful for unsigned arithmetic.
+func isUnsignedIntegerType(t Type) bool {
+	b, ok := t.(*BuiltinType)
+	if !ok {
+		return false
+	}
+	switch b.Name {
+	case "u8", "u16", "u32", "u64", "usize", "uintptr":
+		return true
+	default:
+		return false
+	}
+}
+
 func IsFloatType(t Type) bool {
 	b, ok := t.(*BuiltinType)
 	if !ok {

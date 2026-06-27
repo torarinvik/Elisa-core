@@ -51,6 +51,12 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	if _, ok := dst.(*ConstEnumType); ok {
 		return IsNumericType(src)
 	}
+	// A plain (non-packed) enum value may be postfix-cast to an unsigned integer type to obtain its
+	// sequential tag ordinal. Packed enums are excluded: their runtime tag is NOT the sequential
+	// ordinal (it is embedded in a bitfield word). The cast is a value extraction, not a reinterpret.
+	if src, ok := src.(*EnumType); ok && src != nil && !src.Packed {
+		return isUnsignedIntegerType(dst)
+	}
 	if _, ok := src.(*TypeParamType); ok {
 		return true
 	}
@@ -126,6 +132,10 @@ func (a *Analyzer) isValueConversion(src, dst Type) bool {
 	}
 	if _, ok := dst.(*ConstEnumType); ok {
 		return IsNumericType(src)
+	}
+	// Plain enum → unsigned integer: a value extraction (tag ordinal), not a bit reinterpret.
+	if src, ok := src.(*EnumType); ok && src != nil && !src.Packed {
+		return isUnsignedIntegerType(dst)
 	}
 	return IsNumericType(src) && IsNumericType(dst)
 }
