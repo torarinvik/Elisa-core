@@ -1758,3 +1758,58 @@ def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) 
 		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
 	}
 }
+
+// POSITIVE: a string literal's `.len` is known at compile time, so a refinement
+// bound on it proves at the const tier — no runtime check emitted.
+func TestStringLiteralLenProvesConst(t *testing.T) {
+	src := `
+law AtLeast3(self: i64) = self >= 3
+
+def f() -> i64 is AtLeast3:
+    return "abc".len
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "strlit_len_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`\"abc\".len` is 3, should prove AtLeast3 statically (no error under -strict), got: %v", result.Errors())
+	}
+	// Verify the proof was recorded as const-tier, not runtime.
+	var constCount int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenConst {
+			constCount++
+		}
+	}
+	if constCount == 0 {
+		t.Fatalf("`\"abc\".len >= 3` should discharge at const tier, proof report: %+v", result.ProofReport)
+	}
+}
+
+// POSITIVE: empty string literal `.len` == 0 — the zero case proves correctly.
+func TestStringLiteralEmptyLenIsZero(t *testing.T) {
+	src := `
+law IsZero(self: i64) = self == 0
+
+def f() -> i64 is IsZero:
+    return "".len
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "strlit_empty_len.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`\"\".len` is 0, should prove IsZero statically, got: %v", result.Errors())
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a non-literal (parameter) string's length must NOT be
+// fabricated as a constant — the length stays opaque and a strict upper bound
+// cannot be proved, so EnforceStrictProofs must produce an error.
+func TestNonLiteralStringLenIsOpaque(t *testing.T) {
+	src := `
+law AtLeast3(self: i64) = self >= 3
+
+def f(s: cstr) -> i64 is AtLeast3:
+    return s.len
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "strlit_len_opaque.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatal("a parameter string's length is opaque — prover must NOT assume it satisfies AtLeast3 (should error under -strict)")
+	}
+}

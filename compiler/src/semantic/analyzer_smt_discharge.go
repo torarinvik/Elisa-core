@@ -2137,7 +2137,13 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 		}
 		// `arr.count` / `arr.len` → a per-array length Int symbol (derived from the array's SMT symbol,
 		// so it resolves through `env` for `self.count`), asserted >= 0 in the preamble.
+		// SPECIAL CASE: if the entire field expression evaluates to a compile-time constant (e.g.
+		// `"abc".len == 3`), emit the integer directly so the proof discharges at the const tier
+		// rather than introducing an opaque length symbol.
 		if n.Field == "count" || n.Field == "len" {
+			if c, ok := tr.a.constIntValue(n); ok {
+				return smtInt(c), true
+			}
 			arr, ok := tr.arrayTermEnv(n.Object, env)
 			if !ok {
 				// `arrayTermEnv` models only INTEGER-element arrays (it lowers `arr[k]` to a `(select …)`),

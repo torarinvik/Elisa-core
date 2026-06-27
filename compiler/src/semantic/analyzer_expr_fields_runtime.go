@@ -279,6 +279,12 @@ func cstrSyntheticField(t Type, fieldName string) (Field, bool) {
 	if _, ok := ref.Elem.(*DStrType); ok {
 		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 	}
+	// A string literal has type RefType{Elem: u8, Static}. Allow `.len` on it so
+	// `"abc".len` type-checks — the const-eval layer resolves this to an integer
+	// constant, and the prover then discharges length bounds at the const tier.
+	if u8Ref, ok := ref.Elem.(*BuiltinType); ok && u8Ref.Name == "u8" {
+		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
+	}
 	return Field{}, false
 }
 
