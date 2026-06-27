@@ -2094,5 +2094,58 @@ def caller(a: i64, b: i64, c: i64) -> i64:
 	)
 	if len(result.Errors()) == 0 {
 		t.Fatalf("`a<=b, b<c` must NOT prove `a>=c` (opposite direction); got no error under -strict")
+// --- in-loop monotonic counter bound (docs/85 Fallback 3) ------------------------------------
+//
+// Inside `while i < K:` the loop body sees `i < K` as a live smtAssertFact (seeded by
+// analyzeBlockWithConditionAffineClone). The Fallback-3 path in tryProveRefinementByFlow
+// harvests constant comparisons from those facts to build a range for the mutable counter,
+// letting tier-1 discharge a refinement on `i` without the SMT tier.
+// Soundness is inherited from smtAssertFacts invalidation: `i <- i + 1` drops the `i < K`
+// fact, so after the increment the stale `i < K` fact is gone and the proof does not carry.
+
+// COMPLETENESS-POSITIVE: inside `while i >= 0 and i < 10:` with a signed counter `i` seeded
+// from a parameter (not a compile-time constant, so writtenConst and Fallback 2 do not apply),
+// a binding `x: i64 is Bounded[0..=9] = i` must be proven statically (no runtime check, no
+// error under -strict). Fallback 3 harvests the constant comparisons from the live smtAssertFacts
+// seeded by the two-sided loop condition and derives the range [0, 9] for the mutable counter.
+func TestLoopCounterBoundInBodyProven(t *testing.T) {
+	src := boundedLaw + `
+def f(start: i64) -> i64:
+    i: mutable i64 = start
+    while i >= 0 and i < 10:
+        x: i64 is Bounded[0..=9] = i
+        i <- i + 1
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "loop_counter_in_body.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("inside `while i >= 0 and i < 10:` body, `i is Bounded[0..=9]` should prove via in-body range facts (no error under -strict), got:\n%s", allDiagnostics(result))
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("loop-condition fact should prove without a runtime check, got %d runtime check(s)", len(result.RefinementChecks))
+	}
+}
+
+// SOUNDNESS-NEGATIVE: after `i <- i + 1` inside the body, the smtAssertFacts seeded by the
+// loop condition (`i >= 0`, `i < 10`) are invalidated via invalidateSMTAssertFactsForTarget,
+// so the obligation `i is Bounded[0..=9]` MUST NOT still be assumed proved — it must fall
+// back to a warning (runtime check). This verifies Fallback 3 does not carry a stale range
+// past a mutation of the counter.
+func TestLoopCounterBoundAfterIncrementNotAssumed(t *testing.T) {
+	src := boundedLaw + `
+def f(start: i64) -> i64:
+    i: mutable i64 = start
+    while i >= 0 and i < 10:
+        i <- i + 1
+        x: i64 is Bounded[0..=9] = i
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "loop_counter_after_inc.elisa", src, AnalyzeOptions{})
+	// After the increment `i <- i + 1`, the smtAssertFacts `i >= 0` and `i < 10` are
+	// invalidated. The obligation `i is Bounded[0..=9]` cannot be proven statically.
+	if len(result.RefinementChecks) == 0 && !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("after `i <- i + 1`, the in-body range facts are invalidated; `i is Bounded[0..=9]` must NOT be statically proven (expected runtime check or proof warning), got:\n%s", allDiagnostics(result))
 	}
 }
