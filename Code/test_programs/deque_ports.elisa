@@ -34,8 +34,8 @@ def deque_basic_smoke() -> void:
         assert front_opt != null
         assert back_opt != null
 
-        front_ref: i64& = front_opt.cast[i64&]
-        back_ref: i64& = back_opt.cast[i64&]
+        front_ref: i64& = front_opt
+        back_ref: i64& = back_opt
         assert_eq(front_ref[0], 0)
         assert_eq(back_ref[0], 2)
 
@@ -86,8 +86,8 @@ def deque_wraparound_smoke() -> void:
         back_opt: i64&? = arena_deque_back(&d)
         assert front_opt != null
         assert back_opt != null
-        assert_eq(front_opt.cast[i64&][0], 2)
-        assert_eq(back_opt.cast[i64&][0], 5)
+        assert_eq(front_opt[0], 2)
+        assert_eq(back_opt[0], 5)
 
 def deque_resize_smoke() -> void:
     can Memory.Allocate, Memory.Release, Abort.Panic:

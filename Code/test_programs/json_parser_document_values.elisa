@@ -40,7 +40,7 @@ def json_parser_value_index_impl(value: JsonParserValue&, index: usize, out: mut
 def json_parser_value_index_node(value: JsonParserValue&, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_value_index_node_ref(value, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_parser_value_object_key_at_impl(value: JsonParserValue&, index: usize, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:

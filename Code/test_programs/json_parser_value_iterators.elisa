@@ -16,7 +16,7 @@ def json_parser_value_field_node_ref(value: JsonParserValue&, key: u8&, store: J
 def json_parser_value_field_node(value: JsonParserValue&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_value_field_node_ref(value, key, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_parser_value_index_node_ref(value: JsonParserValue&, index: usize, store: JsonNode.Store[Local]) -> JsonNode&?:
     if not json_parser_value_is_live(value):
@@ -29,7 +29,7 @@ def json_parser_array_iter_value_node_ref(iter: JsonParserArrayIter&, store: Jso
 def json_parser_array_iter_value_node(iter: JsonParserArrayIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_array_iter_value_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_parser_object_iter_key_node_ref(iter: JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode&?:
     if not json_parser_object_iter_is_live(iter):
@@ -38,7 +38,7 @@ def json_parser_object_iter_key_node_ref(iter: JsonParserObjectIter&, store: Jso
 def json_parser_object_iter_key_node(iter: JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_object_iter_key_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_parser_object_iter_value_node_ref(iter: JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode&?:
     if not json_parser_object_iter_is_live(iter):
@@ -47,7 +47,7 @@ def json_parser_object_iter_value_node_ref(iter: JsonParserObjectIter&, store: J
 def json_parser_object_iter_value_node(iter: JsonParserObjectIter&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_object_iter_value_node_ref(iter, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_parser_value_field_kind_impl(value: JsonParserValue&, key: u8&) -> i64:
     if not json_parser_value_is_live(value):

@@ -145,7 +145,7 @@ def json_ast_array_nth_ref(node: JsonNode, index: usize, store: JsonNode.Store[L
 def json_ast_array_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_array_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_array_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
     items: view[JsonNode] = json_ast_array_items_view(node, store)
@@ -159,7 +159,7 @@ def json_ast_array_iter_value_ref(cursor: JsonAstArrayIterCursor, store: JsonNod
 def json_ast_array_iter_value(cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_array_iter_value_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_array_iter_next(cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonAstArrayIterCursor:
     if json_ast_array_iter_is_valid(cursor) and cursor.index + 1 < cursor.items.len:
@@ -176,7 +176,7 @@ def json_ast_object_get_ref(node: JsonNode, source: u8&, key: u8&, store: JsonNo
 def json_ast_object_get(node: JsonNode, source: u8&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_object_get_ref(node, source, key, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_object_iter_first(node: JsonNode, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
     fields: view[JsonField] = json_ast_object_fields_view(node, store)
@@ -191,7 +191,7 @@ def json_ast_object_iter_key_ref(cursor: JsonAstObjectIterCursor, store: JsonNod
 def json_ast_object_iter_key(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_object_iter_key_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_object_iter_value_ref(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonNode&?:
     if not json_ast_object_iter_is_valid(cursor):
@@ -201,7 +201,7 @@ def json_ast_object_iter_value_ref(cursor: JsonAstObjectIterCursor, store: JsonN
 def json_ast_object_iter_value(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_object_iter_value_ref(cursor, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_object_iter_next(cursor: JsonAstObjectIterCursor, store: JsonNode.Store[Local]) -> JsonAstObjectIterCursor:
     if json_ast_object_iter_is_valid(cursor) and cursor.index + 1 < cursor.fields.len:
@@ -222,12 +222,12 @@ def json_ast_object_key_nth_ref(node: JsonNode, index: usize, store: JsonNode.St
 def json_ast_object_key_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_object_key_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
 def json_ast_object_value_nth_ref(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode&?:
     return json_ast_object_iter_value_ref(json_ast_object_iter_nth(node, index, store), store)
 def json_ast_object_value_nth(node: JsonNode, index: usize, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_ast_object_value_nth_ref(node, index, store)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     return json_node_invalid(store)

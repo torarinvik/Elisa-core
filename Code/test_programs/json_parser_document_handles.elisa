@@ -28,7 +28,7 @@ def json_parser_value_doc_impl(value: JsonParserValue&) -> heap JsonParserDocume
 def json_parser_value_node(value: JsonParserValue&) -> JsonNode:
     node_ref: JsonNode&? = json_parser_value_node_ref(value)
     if node_ref != null:
-        return json_node_copy_ref(node_ref.cast[JsonNode&])
+        return json_node_copy_ref(node_ref)
     out: mutable JsonNode = zeroed
     return move out
 def json_parser_document_source(impl: heap JsonParserDocumentInternal&) -> u8&:

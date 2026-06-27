@@ -68,7 +68,7 @@ grammar ArithmeticBase over Token using ParserState:
     recovery ExprRecovery:
         message "expected expression"
         until .SEMICOLON, token(TokenKind.EOF)
-        fallback zeroed.cast[Token]
+        fallback zeroed
     infix table ExprTable(compare):
         atom = token(TokenKind.INT)
         additive(add_left = atom()):
