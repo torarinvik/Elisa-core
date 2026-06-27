@@ -8,8 +8,8 @@
 
 def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
     can Memory.Allocate, Abort.Panic:
-        left: u8& = lhs.cast[u8&] if lhs != null else ""
-        right: u8& = rhs.cast[u8&] if rhs != null else ""
+        left: u8& = lhs if lhs != null else ""
+        right: u8& = rhs if rhs != null else ""
 
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)
@@ -34,8 +34,8 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
 
 def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
     can Memory.Allocate, Abort.Panic:
-        left: u8& = lhs.cast[u8&] if lhs != null else ""
-        right: u8& = rhs.cast[u8&] if rhs != null else ""
+        left: u8& = lhs if lhs != null else ""
+        right: u8& = rhs if rhs != null else ""
 
         left_len: usize = runtime_strlen(left)
         right_len: usize = runtime_strlen(right)

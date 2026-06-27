@@ -6,7 +6,7 @@ include "./heap.elisa"
 const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 @inline(always)
 def packed_store_region_data(r: heap Region&) -> heap u8&:
-    return (r.cast[heap u8&] + size_of(Region)).cast[heap u8&]
+    return (r.cast[heap u8&] + size_of(Region))
 def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darray[heap Region&?]&:
     return &state.regions
 def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:

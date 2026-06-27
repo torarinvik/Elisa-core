@@ -585,7 +585,7 @@ def ctx_sync_handle(p: void&?) -> void&:
 	can Abort.Panic:
 		if p == null:
 			panic("null sync handle")
-		return p.cast[void&]
+		return p
 
 # Pool-internal lock/notify helpers. These DROP the Sync.* effect via `trusted`: the
 # persistent pool's synchronization is an encapsulated implementation detail (verified
@@ -784,7 +784,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		# which the type system cannot verify here. The trusted runtime owns it.
 		trusted Unsafe.StaleRef:
 			rec.entry <- entry
-			rec.arg <- arg.cast[void&]
+			rec.arg <- arg
 		rec.done <- 0
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -903,7 +903,7 @@ def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 	can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		if state_bits == null:
 			panic("concurrency work returned no state")
-		live_bits: void& = state_bits.cast[void&]
+		live_bits: void& = state_bits
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
 		result: R = result_box.value
@@ -952,7 +952,7 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 		# state_bits is a caller-provided pointer recorded in a heap cleanup node;
 		# its lifetime is the caller's contract, unverifiable by the type system.
 		trusted Unsafe.StaleRef:
-			node.state_bits <- state_bits.cast[void&]
+			node.state_bits <- state_bits
 		group.cleanup <- node.cast[void&]
 
 def ctx_task_group_release_all(group: mutable TaskGroup&):
@@ -964,7 +964,7 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 		trusted Unsafe.AssumeProgress:
 			while current != null:
 				next: mutable heap ConcurrencyTaskGroupNode&? = current.next
-				ctx_concurrency_work1_release(current.state_bits.cast[mutable void&])
+				ctx_concurrency_work1_release(current.state_bits)
 				free(current.cast[heap void&])
 				current <- next
 

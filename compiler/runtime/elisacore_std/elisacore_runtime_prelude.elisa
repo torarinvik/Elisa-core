@@ -146,12 +146,12 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 		if ptr == null or len == 0:
 			return
 
-		bucket: usize = string_len_bucket(ptr.cast[u8&])
+		bucket: usize = string_len_bucket(ptr)
 
 		entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
 		trusted Unsafe.AssumeProgress:
 			while entry != null:
-				if entry.ptr.cast[uintptr] == ptr.cast[u8&].cast[uintptr]:
+				if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
 					entry.len <- len
 					return
 				entry <- entry.next
@@ -162,7 +162,7 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 		# pass stable (static/interned) string data, a contract the type system can't
 		# see on a bare `u8&`. The trusted runtime takes responsibility for it.
 		trusted Unsafe.StaleRef:
-			new_entry.ptr <- ptr.cast[u8&]
+			new_entry.ptr <- ptr
 		new_entry.len <- len
 		string_len_cache[bucket] <- new_entry
 
@@ -170,14 +170,14 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 	if ptr == null:
 		return 0
 
-	bucket: usize = string_len_bucket(ptr.cast[u8&])
+	bucket: usize = string_len_bucket(ptr)
 
 	prev: mutable heap StringLenCacheEntry&? = null
 	entry: mutable heap StringLenCacheEntry&? = string_len_cache[bucket]
 
 	trusted Unsafe.AssumeProgress:
 		while entry != null:
-			if entry.ptr.cast[uintptr] == ptr.cast[u8&].cast[uintptr]:
+			if entry.ptr.cast[uintptr] == ptr.cast[uintptr]:
 				# Move-to-front heuristic
 				if prev != null:
 					prev.next <- entry.next
