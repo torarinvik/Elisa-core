@@ -2437,3 +2437,102 @@ def sign_change(x: i64) -> u64 is Bounded[-10, 10]:
 		t.Fatalf("SOUNDNESS: sign-changing cast i64→u64 with range [-10,10] must NOT prove Bounded[-10,10] (negative values do not fit u64), but no error was reported")
 	}
 }
+
+// --- min/max/clamp range facts via ensures (roi/minmax-clamp-range) ---
+func TestMinEnsuresUpperBound(t *testing.T) {
+	src := `
+law AtMost50(self: i64) = self <= 50
+
+def min(a: i64, b: i64) -> i64:
+    ensure result <= a
+    ensure result <= b
+    return a if a < b else b
+
+def use() -> i64:
+    x = min(50, 100)
+    y: i64 is AtMost50 = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "min_upper_bound.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("min ensure result<=a should let AtMost50 prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("min(50,100)<=50 seeded by ensure: expected 0 runtime checks, got %d", len(result.RefinementChecks))
+	}
+}
+
+func TestMaxEnsuresLowerBound(t *testing.T) {
+	src := `
+law AtLeast100(self: i64) = self >= 100
+
+def max(a: i64, b: i64) -> i64:
+    ensure result >= a
+    ensure result >= b
+    return a if a > b else b
+
+def use() -> i64:
+    x = max(50, 100)
+    y: i64 is AtLeast100 = x
+    return y
+`
+	result := analyzeTreeTestSource(t, "max_lower_bound.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("max ensure result>=b should let AtLeast100 prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("max(50,100)>=100 seeded by ensure: expected 0 runtime checks, got %d", len(result.RefinementChecks))
+	}
+}
+
+func TestClampEnsuresInRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def clamp(x: i64, lo: i64, hi: i64) -> i64:
+    ensure result >= lo
+    ensure result <= hi
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
+
+def use(x: i64) -> i64:
+    c = clamp(x, 0, 100)
+    y: i64 is Bounded[0, 100] = c
+    return y
+`
+	result := analyzeTreeTestSource(t, "clamp_in_range.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("clamp ensure result in [lo,hi] should let Bounded[0,100] prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("clamp(x,0,100) in [0,100] seeded by ensures: expected 0 runtime checks, got %d", len(result.RefinementChecks))
+	}
+}
+
+func TestClampDoesNotProveTighterRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def clamp(x: i64, lo: i64, hi: i64) -> i64:
+    ensure result >= lo
+    ensure result <= hi
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
+
+def use(x: i64) -> i64:
+    c = clamp(x, 0, 100)
+    y: i64 is Bounded[1, 100] = c
+    return y
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "clamp_no_tighter_range.elisa", src)
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("clamp(x,0,100) must NOT prove Bounded[1,100] (tighter than [0,100]): expected a runtime check")
+	}
+}
+

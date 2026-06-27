@@ -156,7 +156,23 @@ def assert(condition: bool):
             panic("assert failed")
 
 def max(a: usize, b: usize) -> usize:
+    ensure result >= a
+    ensure result >= b
     return a if a > b else b
+
+def min(a: usize, b: usize) -> usize:
+    ensure result <= a
+    ensure result <= b
+    return a if a < b else b
+
+def clamp(x: usize, lo: usize, hi: usize) -> usize:
+    ensure result >= lo
+    ensure result <= hi
+    if x < lo:
+        return lo
+    if x > hi:
+        return hi
+    return x
 
 def inv_handle(ptr: heap void&?) -> bool:
     return ptr == null
