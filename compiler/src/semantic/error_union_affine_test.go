@@ -82,7 +82,7 @@ linear struct Guard:
     open: bool
 
 def make() -> Guard:
-    return Guard(true)
+    return Guard{open: true}
 
 def wrap() -> Guard error[E]:
     g: mutable Guard = make()
@@ -102,7 +102,7 @@ linear struct Guard:
     open: bool
 
 def make() -> Guard:
-    return Guard(true)
+    return Guard{open: true}
 
 def wrap() -> Guard error[E]:
     g: mutable Guard = make()

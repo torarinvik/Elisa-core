@@ -18,7 +18,7 @@ func TestConstructedLocalBuilderForwardedInferred(t *testing.T) {
 		`struct Bag:
     items: mutable darray[i64]
 def Bag_new() -> Bag:
-    return Bag(zeroed)
+    return Bag{items: zeroed}
 def grow(b: mutable Bag&, v: i64) -> void:
     b.items.push(v)
 def use() -> void:
@@ -38,7 +38,7 @@ func TestConstructedLocalLiteralForwardedInferred(t *testing.T) {
 def grow(b: mutable Bag&, v: i64) -> void:
     b.items.push(v)
 def use() -> void:
-    bag: mutable Bag = Bag(zeroed)
+    bag: mutable Bag = Bag{items: zeroed}
     grow(&bag, 7)
 `).Errors(), " | ")
 	if errs != "" {
@@ -53,7 +53,7 @@ func TestConstructedLocalGrownBorrowEscapeStillRejected(t *testing.T) {
 		`struct Bag:
     items: mutable darray[i64]
 def Bag_new() -> Bag:
-    return Bag(zeroed)
+    return Bag{items: zeroed}
 def grow(b: mutable Bag&, v: i64) -> view[i64]:
     b.items.push(v)
     return b.items[0:1]

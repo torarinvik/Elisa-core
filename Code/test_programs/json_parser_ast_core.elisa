@@ -59,7 +59,7 @@ def json_node_is_invalid(node: JsonNode, store: JsonNode.Store[Local]) -> bool:
         return true
     return false
 def json_parse_node_result(node: JsonNode, checksum: i64) -> JsonParseNodeResult:
-    return JsonParseNodeResult(node, checksum)
+    return JsonParseNodeResult{node: node, checksum: checksum}
 def json_ast_nodes_count(items: view[JsonNode], store: JsonNode.Store[Local]) -> i64:
     readonly_items: view[JsonNode] = readonly(items)
     total: mutable i64 = 0

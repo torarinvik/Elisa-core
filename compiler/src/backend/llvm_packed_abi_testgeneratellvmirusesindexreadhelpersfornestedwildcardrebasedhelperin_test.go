@@ -34,7 +34,7 @@ def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(span: 2, value: 1)}, Box{node: new[store] Expr.Wrap(span: 9, child: held)}]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0].node in frozen:

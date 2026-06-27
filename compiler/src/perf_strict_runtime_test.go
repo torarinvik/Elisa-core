@@ -39,7 +39,7 @@ def main() -> i64:
         region r:
             acc: mutable i64 = 0
             for i in 0..<4:
-                n: Node& @r = new[r] Node(i.i64())
+                n: Node& @r = new[r] Node{v: i.i64()}
                 acc <- acc + n.v
             return acc
 `,

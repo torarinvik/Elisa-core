@@ -26,7 +26,7 @@ impl Builder for BuilderTag:
     type Node = AstNode
 
     def make(value: int) -> AstNode:
-        return AstNode(value)
+        return AstNode{value: value}
 
     def value_of(node: AstNode) -> int:
         return node.value

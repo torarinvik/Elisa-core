@@ -533,9 +533,9 @@ struct Box:
 def make(depth: i64) -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         if depth <= 0:
-            return new[auto] Box(1)
+            return new[auto] Box{value: 1}
         inner: Box& = make(depth - 1)
-        return new[auto] Box(inner.value + 1)
+        return new[auto] Box{value: inner.value + 1}
 
 @test
 def bt() -> void:

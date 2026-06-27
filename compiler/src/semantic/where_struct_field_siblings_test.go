@@ -15,7 +15,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(lo: 3, hi: 10)
+    return Range{lo: 3, hi: 10}
 `
 	result := analyzeContractStrict(t, "where_sibling_named_clean.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -31,7 +31,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(lo: 10, hi: 3)
+    return Range{lo: 10, hi: 3}
 `
 	result := analyzeContractStrict(t, "where_sibling_named_bad.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -48,7 +48,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(2, 5)
+    return Range{lo: 2, hi: 5}
 `
 	result := analyzeContractStrict(t, "where_sibling_pos_clean.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -64,7 +64,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(5, 2)
+    return Range{lo: 5, hi: 2}
 `
 	result := analyzeContractStrict(t, "where_sibling_pos_bad.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")

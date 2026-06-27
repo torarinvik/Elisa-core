@@ -204,7 +204,7 @@ def sview(value: u8&?, start: i64, end: i64) -> sview:
     if hi < lo:
         hi <- lo
 
-    return StringView(src + lo, (hi - lo).i64())
+    return StringView{data: src + lo, len: (hi - lo).i64()}
 
 # Ergonomic cast: a raw C-string (u8&?) -> borrowed string view, so content
 # equality works directly (`bytes.sview() == "x86_64"`) instead of streq().
@@ -231,7 +231,7 @@ def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     if hi < lo:
         hi <- lo
 
-    return StringView(view.data + lo.usize(), hi - lo)
+    return StringView{data: view.data + lo.usize(), len: hi - lo}
 
 def string_view_prefix(view: sview, end: i64) -> sview:
     return string_view_slice(view, 0, end)
@@ -357,7 +357,7 @@ def bytes_view(buf: darray[u8]) -> sview:
     if n == 0:
         return sview("", 0, 0)
     trusted Unsafe.UncheckedIndex:
-        return StringView(&buf[0], n.i64())
+        return StringView{data: &buf[0], len: n.i64()}
 
 # FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
 # and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.

@@ -42,6 +42,18 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		if resultType, handled := a.analyzeInitHookStructConstructor(expr, targetType); handled {
 			return resultType
 		}
+		// Paren-form `Name(...)` is reserved for constructors. Plain field-wise
+		// construction must use the brace form `Name{...}`, so a reader can tell
+		// default construction (braces — guaranteed to just pack fields) from a
+		// custom constructor (parens — a `def Name(...) -> Name` that may run logic)
+		// at a glance. We only reach here when no constructor overload matched, so
+		// reject the implicit positional all-fields form rather than silently
+		// accepting it.
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "positional construction %s(...) is not allowed; use the brace form %s{...} for default field initialization, or define a constructor `def %s(...) -> %s`", expr.Name, expr.Name, expr.Name, base.Name)
+		return targetType
 	}
 	for i, spreadExpr := range expr.Spreads {
 		spread, actual := a.analyzeCallLikeValueExpr(spreadExpr, targetType)

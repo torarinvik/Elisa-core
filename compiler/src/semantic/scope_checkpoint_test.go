@@ -501,7 +501,7 @@ func TestAnalyzeNamedFunctionCallArgsThroughGlobalFieldAlias(t *testing.T) {
 def add(x: i64, y: i64) -> i64:
     return x + y
 
-global BOX: CallbackBox = CallbackBox(add)
+global BOX: CallbackBox = CallbackBox{run: add}
 
 def build() -> i64:
     can Global.Read:

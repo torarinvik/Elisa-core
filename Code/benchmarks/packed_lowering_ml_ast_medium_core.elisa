@@ -330,7 +330,7 @@ def build_ml_ast_forest(
     frozen_decls: Decl.Store[Frozen] = freeze(move decl_store)
     frozen_modules: Module.Store[Frozen] = freeze(move module_store)
     frozen_roots: Root.Store[Frozen] = freeze(move root_store)
-    return FrozenMlAstForest(frozen_types, frozen_patterns, frozen_exprs, frozen_clauses, frozen_stmts, frozen_decls, frozen_modules, frozen_roots)
+    return FrozenMlAstForest{types: frozen_types, patterns: frozen_patterns, exprs: frozen_exprs, clauses: frozen_clauses, stmts: frozen_stmts, decls: frozen_decls, modules: frozen_modules, roots: frozen_roots}
 
 def packed_ml_ast_checksum_impl() -> i64:
     return packed_ml_ast_repeated_checksum_impl(1)
@@ -405,7 +405,7 @@ def packed_ml_ast_parallel_checksum_impl(worker_count: usize, iterations: usize)
                 end: usize = start + span
                 forest_bits: uintptr = (&forest).uintptr()
                 result_bits: uintptr = (&partials[slot]).uintptr()
-                job: MlAstParallelJob = MlAstParallelJob(forest_bits, start, end, iterations, result_bits)
+                job: MlAstParallelJob = MlAstParallelJob{forest_bits: forest_bits, start: start, end: end, repeats: iterations, result_bits: result_bits}
                 task: Task[i64, Pending] = submit ml_ast_parallel_worker(job)
                 task_group_add(&group, move task)
                 start <- end

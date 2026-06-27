@@ -48,8 +48,8 @@ def build(start: i64) -> i64:
 }
 
 // A custom `def Type(...)` constructor COEXISTS with the implicit all-fields
-// positional form instead of shadowing it: defining `def P()` must not break
-// `P(a, b)`. (Previously `P(3, 4)` reported "no matching __init__ overload".)
+// brace form instead of shadowing it: defining `def P()` must not break
+// `P{x: a, y: b}`. (Previously `P{3, 4}` reported "no matching __init__ overload".)
 func TestAnalyzePositionalConstructionCoexistsWithCustomConstructor(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ctor_coexist.elisa", `struct P:
     x: i64
@@ -60,7 +60,7 @@ def P() -> P:
 
 def build() -> i64:
     a: P = P()
-    b: P = P(3, 4)
+    b: P = P{x: 3, y: 4}
     return a.x + b.x + b.y
 `)
 	if errs := result.Errors(); len(errs) != 0 {

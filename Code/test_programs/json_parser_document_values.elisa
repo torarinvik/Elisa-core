@@ -227,7 +227,7 @@ def json_parser_value_index_object_len_impl(value: JsonParserValue&, index: usiz
         return -1
     return json_ast_object_len(child_node, store)
 def json_parser_value_number_data_impl(value: JsonParserValue&, out: mutable JsonParserNumberData&) -> i64:
-    out[0] <- JsonParserNumberData(-1, 0, 0, 0.0)
+    out[0] <- JsonParserNumberData{kind: -1, unsigned_value: 0, signed_value: 0, float_value: 0.0}
     if not json_parser_value_is_live(value):
         return 0
 

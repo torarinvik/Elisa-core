@@ -33,7 +33,7 @@ def window_end(self: MappedWindow&) -> u64:
 @test
 def ghost_ensure_runs() -> void:
     can Abort.Panic:
-        w: MappedWindow = MappedWindow(0x1000, 0x2000)
+        w: MappedWindow = MappedWindow{base: 0x1000, size: 0x2000}
         if window_end(&w) != 0x3000:
             panic("ghost-modeled end-address wrong")
 `

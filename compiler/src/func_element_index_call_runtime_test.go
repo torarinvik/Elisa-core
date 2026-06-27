@@ -42,7 +42,7 @@ def func_element_index_call_test() -> void:
             panic("fs[1]() != 2")
         if applyAt(fs, 1) != 2:
             panic("applyAt(fs, 1) != 2")
-        d: Dispatch = Dispatch(handlers: [two, one])
+        d: Dispatch = Dispatch{handlers: [two, one]}
         if d.handlers[0]() != 2:
             panic("d.handlers[0]() != 2")
 `

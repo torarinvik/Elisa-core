@@ -688,9 +688,9 @@ def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap vo
 def arena_snapshot(a: Arena&) -> ArenaMark:
     if a.end == null:
         assert a.begin == null
-        return ArenaMark(null, 0)
+        return ArenaMark{region: null, count: 0}
 
-    return ArenaMark(a.end, a.end.count)
+    return ArenaMark{region: a.end, count: a.end.count}
 
 def arena_reset(a: mutable Arena&):
     r: mutable heap Region&? = a.begin

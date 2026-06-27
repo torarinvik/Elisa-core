@@ -21,7 +21,7 @@ def compute(a: i32, b: i32) -> i32:
 	return s * 2
 
 def main() -> i32:
-	p: Point = Point(3, 4)
+	p: Point = Point{x: 3, y: 4}
 	return compute(p.x, p.y)
 `)
 

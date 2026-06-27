@@ -353,7 +353,7 @@ def read_two[R: ByteReader](r: mutable R&) -> u64:
     return a
 
 def main() -> int:
-    c: mutable Cursor = Cursor(0, 4)
+    c: mutable Cursor = Cursor{cursor: 0, len: 4}
     v: u64 = by_value(c)
     n: u64 = read_two(&c)
     return 0

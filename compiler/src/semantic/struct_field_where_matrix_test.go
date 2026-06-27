@@ -16,7 +16,7 @@ func TestWhereFieldSelfRefSatisfied(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: 5)
+    return Pos{x: 5}
 `
 	result := analyzeContractStrict(t, "self_ref_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -30,7 +30,7 @@ func TestWhereFieldSelfRefViolated(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: 0)
+    return Pos{x: 0}
 `
 	result := analyzeContractStrict(t, "self_ref_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -45,7 +45,7 @@ func TestWhereFieldSelfRefBoundary(t *testing.T) {
 struct Count:
     n: i64 where n >= 0
 def make() -> Count:
-    return Count(n: 0)
+    return Count{n: 0}
 `
 	result := analyzeContractStrict(t, "self_ref_boundary.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -61,7 +61,7 @@ func TestWhereFieldNamedArgSatisfied(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: 42)
+    return Pos{x: 42}
 `
 	result := analyzeContractStrict(t, "named_arg_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -75,7 +75,7 @@ func TestWhereFieldNamedArgViolated(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: -5)
+    return Pos{x: -5}
 `
 	result := analyzeContractStrict(t, "named_arg_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -92,7 +92,7 @@ func TestWhereFieldPositionalArgSatisfied(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(10)
+    return Pos{x: 10}
 `
 	result := analyzeContractStrict(t, "positional_arg_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -106,7 +106,7 @@ func TestWhereFieldPositionalArgViolated(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(-1)
+    return Pos{x: -1}
 `
 	result := analyzeContractStrict(t, "positional_arg_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -125,7 +125,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(lo: 3, hi: 10)
+    return Range{lo: 3, hi: 10}
 `
 	result := analyzeContractStrict(t, "earlier_sibling_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -140,7 +140,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(lo: 15, hi: 5)
+    return Range{lo: 15, hi: 5}
 `
 	result := analyzeContractStrict(t, "earlier_sibling_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -156,7 +156,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(2, 8)
+    return Range{lo: 2, hi: 8}
 `
 	result := analyzeContractStrict(t, "earlier_sibling_positional.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -171,7 +171,7 @@ struct Range:
     lo: i64
     hi: i64 where hi >= lo
 def make() -> Range:
-    return Range(lo: 5, hi: 5)
+    return Range{lo: 5, hi: 5}
 `
 	result := analyzeContractStrict(t, "earlier_sibling_boundary.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -368,7 +368,7 @@ struct Point:
     x: i64 where x > 0
     y: i64 where y > 0
 def make() -> Point:
-    return Point(x: 10, y: 20)
+    return Point{x: 10, y: 20}
 `
 	result := analyzeContractStrict(t, "complex_predicate_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -383,7 +383,7 @@ struct Point:
     x: i64 where x > 0
     y: i64 where y > 0
 def make() -> Point:
-    return Point(x: -1, y: 20)
+    return Point{x: -1, y: 20}
 `
 	result := analyzeContractStrict(t, "complex_predicate_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -402,7 +402,7 @@ struct Box:
     y: i64 where y > 0
     z: i64 where z > y
 def make() -> Box:
-    return Box(x: 0, y: 5, z: 10)
+    return Box{x: 0, y: 5, z: 10}
 `
 	result := analyzeContractStrict(t, "multiple_crossref_satisfied.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -418,7 +418,7 @@ struct Box:
     y: i64 where y > 0
     z: i64 where z > y
 def make() -> Box:
-    return Box(x: 0, y: 5, z: 2)
+    return Box{x: 0, y: 5, z: 2}
 `
 	result := analyzeContractStrict(t, "multiple_crossref_violated.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -468,7 +468,7 @@ func TestWhereFieldSmokeSimple(t *testing.T) {
 struct Size:
     width: i64 where width > 0
 def new_size() -> Size:
-    return Size(width: 100)
+    return Size{width: 100}
 `
 	result := analyzeContractStrict(t, "smoke_simple.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -483,7 +483,7 @@ struct Interval:
     start: i64 where start >= 0
     length: i64 where length > 0
 def new_interval() -> Interval:
-    return Interval(start: 10, length: 50)
+    return Interval{start: 10, length: 50}
 `
 	result := analyzeContractStrict(t, "smoke_complex.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

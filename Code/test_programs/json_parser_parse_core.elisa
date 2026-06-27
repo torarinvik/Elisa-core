@@ -21,7 +21,7 @@ def json_expect_literal_with_len(cursor: mutable JsonCursor&, literal: u8&, lite
 def json_expect_literal(cursor: mutable JsonCursor&, literal: u8&) -> bool:
     return json_expect_literal_with_len(cursor, literal, runtime_strlen(literal))
 def json_invalid_lexeme() -> JsonLexemeResult:
-    return JsonLexemeResult(-1, 0, 0)
+    return JsonLexemeResult{checksum: -1, source_offset: 0, source_len: 0}
 def json_parse_string_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
     start: usize = cursor.pos
     if json_advance_char(cursor) != JSON_CH_DQUOTE:
@@ -34,7 +34,7 @@ def json_parse_string_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
 
         ch: i64 = json_advance_char(cursor)
         if ch == JSON_CH_DQUOTE:
-            return JsonLexemeResult(17 + length, start, cursor.pos - start)
+            return JsonLexemeResult{checksum: 17 + length, source_offset: start, source_len: cursor.pos - start}
 
         if likely ch != JSON_CH_BSLASH:
             if ch < JSON_CH_SPACE:
@@ -79,7 +79,7 @@ def json_parse_number_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
         while json_is_digit(json_cur_char(cursor)):
             _ = json_advance_char(cursor)
 
-    return JsonLexemeResult(23 + (cursor.pos - start).i64(), start, cursor.pos - start)
+    return JsonLexemeResult{checksum: 23 + (cursor.pos - start).i64(), source_offset: start, source_len: cursor.pos - start}
 def json_parse_number(cursor: mutable JsonCursor&) -> i64:
     return json_parse_number_lexeme(cursor).checksum
 def json_parse_string_lexeme_at(source: u8&, source_len: usize, source_offset: u32) -> JsonLexemeResult:
@@ -291,7 +291,7 @@ def json_parse_value_node_after_ws(cursor: mutable JsonCursor&, arena: mutable A
             return json_parse_null_node(cursor, store, invalid_node)
         if ch == JSON_CH_MINUS or json_is_digit(ch):
             return json_parse_number_node(cursor, store, invalid_node)
-        return JsonParseNodeResult(invalid_node, -1)
+        return JsonParseNodeResult{node: invalid_node, checksum: -1}
 def json_parse_array_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
     can Memory.Allocate, Abort.Panic:
         in arena:
@@ -349,13 +349,13 @@ def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, s
                 key_lexeme <- json_parse_string_lexeme(cursor)
                 key_checksum <- key_lexeme.checksum
                 if key_checksum < 0:
-                    return JsonParseNodeResult(invalid_node, -1)
+                    return JsonParseNodeResult{node: invalid_node, checksum: -1}
 
                 key_node <- JsonNode.Text(source_offset: key_lexeme.source_offset.u32())
 
                 json_skip_ws(cursor)
                 if json_advance_char(cursor) != JSON_CH_COLON:
-                    return JsonParseNodeResult(invalid_node, -1)
+                    return JsonParseNodeResult{node: invalid_node, checksum: -1}
                 json_skip_ws(cursor)
 
                 value_result: JsonParseNodeResult = json_parse_value_node_after_ws(cursor, arena, store, invalid_node)
@@ -363,7 +363,7 @@ def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, s
                     return value_result
 
                 field_value <- value_result.node
-                field_entry <- JsonField(key_node, field_value)
+                field_entry <- JsonField{key: key_node, value: field_value}
                 fields.push(field_entry)
                 fields_checksum <- fields_checksum + key_checksum + value_result.checksum
 
@@ -376,7 +376,7 @@ def json_parse_object_node(cursor: mutable JsonCursor&, arena: mutable Arena&, s
                     _ = json_advance_char(cursor)
                     done <- true
                 else:
-                    return JsonParseNodeResult(invalid_node, -1)
+                    return JsonParseNodeResult{node: invalid_node, checksum: -1}
 
             return json_parse_node_result(JsonNode.Object(fields_ptr: fields.items, field_count: fields.count), 47 + fields_checksum)
 def json_parse_value_node(cursor: mutable JsonCursor&, arena: mutable Arena&, store: JsonNode.Store[Local], invalid_node: JsonNode) -> JsonParseNodeResult:
@@ -409,7 +409,7 @@ def json_parse_number_value(source: u8&, source_offset: usize, source_len: usize
     i64_max_u64: u64 = 9223372036854775807
     i64_min_abs_u64: u64 = 9223372036854775808
     if json_number_has_fraction_or_exponent(source, source_offset, source_len):
-        return JsonNumberValue(JsonNumberKind.NON_INTEGRAL, 0, 0)
+        return JsonNumberValue{kind: JsonNumberKind.NON_INTEGRAL, unsigned_value: 0, signed_value: 0}
 
     negative: bool = source[source_offset].i64() == JSON_CH_MINUS
     digits_offset: mutable usize = source_offset
@@ -418,23 +418,23 @@ def json_parse_number_value(source: u8&, source_offset: usize, source_len: usize
 
     digits_end: usize = source_offset + source_len
     if json_u64_digits_exceed_max(source, digits_offset, digits_end):
-        return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0, 0)
+        return JsonNumberValue{kind: JsonNumberKind.OUT_OF_RANGE, unsigned_value: 0, signed_value: 0}
 
     parsed: u64 = try json_parse_u64_digits(source, digits_offset, digits_end) else 0
 
     magnitude: u64 = parsed
     if negative:
         if magnitude > i64_min_abs_u64:
-            return JsonNumberValue(JsonNumberKind.OUT_OF_RANGE, 0, 0)
+            return JsonNumberValue{kind: JsonNumberKind.OUT_OF_RANGE, unsigned_value: 0, signed_value: 0}
         if magnitude == i64_min_abs_u64:
             min_value: i64 = -9223372036854775807 - 1
-            return JsonNumberValue(JsonNumberKind.SIGNED, 0, min_value)
-        return JsonNumberValue(JsonNumberKind.SIGNED, 0, -magnitude.i64())
+            return JsonNumberValue{kind: JsonNumberKind.SIGNED, unsigned_value: 0, signed_value: min_value}
+        return JsonNumberValue{kind: JsonNumberKind.SIGNED, unsigned_value: 0, signed_value: -magnitude.i64()}
 
     signed_value: mutable i64 = 0
     if magnitude <= i64_max_u64:
         signed_value <- magnitude.i64()
-    return JsonNumberValue(JsonNumberKind.UNSIGNED, magnitude, signed_value)
+    return JsonNumberValue{kind: JsonNumberKind.UNSIGNED, unsigned_value: magnitude, signed_value: signed_value}
 def json_parser_document_node_count_impl(doc: JsonParserDocument&) -> i64:
     if doc[0].impl_bits == 0.uintptr():
         return -1

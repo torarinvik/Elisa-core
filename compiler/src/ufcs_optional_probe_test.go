@@ -14,7 +14,7 @@ def score(counter: Counter, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def main() -> i64:
-    counter: Counter = Counter(40)
+    counter: Counter = Counter{value: 40}
     return counter.score()
 `)
 
@@ -37,7 +37,7 @@ def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def main() -> i64:
-    counter: mutable Counter = Counter(40)
+    counter: mutable Counter = Counter{value: 40}
     return score_ref((&counter).cast[Counter&], 2)
 `)
 
@@ -60,7 +60,7 @@ def score_ref(counter: Counter&, delta: i64 = 1) -> i64:
     return counter.value + delta
 
 def main() -> i64:
-    counter: mutable Counter = Counter(40)
+    counter: mutable Counter = Counter{value: 40}
     return counter.score_ref()
 `)
 
@@ -88,7 +88,7 @@ def read(maybe_counter: Counter&?) -> i64:
     return 0
 
 def main() -> i64:
-    counter: mutable Counter = Counter(40)
+    counter: mutable Counter = Counter{value: 40}
     counter_ref: Counter& = (&counter).cast[Counter&]
     maybe_counter: Counter&? = counter_ref
     return read(maybe_counter)
@@ -145,7 +145,7 @@ def read(self: Checker&, maybe_value: i64?) -> i64:
     return 0
 
 def main() -> i64:
-    checker: mutable Checker = Checker(2)
+    checker: mutable Checker = Checker{delta: 2}
     checker_ref: Checker& = (&checker).cast[Checker&]
     return checker_ref.read(40)
 `)
@@ -171,7 +171,7 @@ def read(maybe_counter: Counter?) -> i64:
     return 0
 
 def main() -> i64:
-    return read(Counter(40))
+    return read(Counter{value: 40})
 `)
 
 	var stdout bytes.Buffer
@@ -214,7 +214,7 @@ def write(maybe_counter: mutable Counter&?) -> i64:
     return 0
 
 def main() -> i64:
-    counter: mutable Counter = Counter(0)
+    counter: mutable Counter = Counter{value: 0}
     counter_ref: mutable Counter& = (&counter).cast[mutable Counter&]
     maybe_counter: mutable Counter&? = counter_ref
     return write(maybe_counter)

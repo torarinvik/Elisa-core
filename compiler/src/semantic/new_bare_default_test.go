@@ -13,7 +13,7 @@ func TestBareNewDefaultsToRegionInference(t *testing.T) {
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new Box(7)
+        b: Box& = new Box{value: 7}
         return b.value
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
@@ -29,7 +29,7 @@ func TestBareNewReturnIsRegionPolymorphic(t *testing.T) {
     value: i64
 def f() -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new Box(7)
+        b: Box& = new Box{value: 7}
         return b
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {

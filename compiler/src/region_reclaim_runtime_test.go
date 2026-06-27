@@ -471,7 +471,7 @@ def go() -> i64:
         total: mutable i64 = 0
         i: mutable i64 = 0
         while i < 100000:
-            b: Box& = new[auto] Box(7)
+            b: Box& = new[auto] Box{value: 7}
             total <- total + b.value
             i <- i + 1
         return total

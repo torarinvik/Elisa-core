@@ -16,7 +16,7 @@ import (
 const drainEdgePrelude = `linear struct Guard:
     active: bool
 def make_guard() -> Guard:
-    return Guard(true)
+    return Guard{active: true}
 def release_guard(g: Guard) -> void:
     _ = move g
 `

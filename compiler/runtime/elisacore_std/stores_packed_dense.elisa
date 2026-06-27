@@ -132,7 +132,7 @@ def ctx_packed_store_alloc_fixed_tagged_index_result(a: mutable Arena&, state_bi
         assert state.indices.items != null
         assert state.indices.count > 0
         indices: u32& = state.indices.items
-        return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1])
+        return PackedStoreIndexAllocResult{row: result.row, index: indices[state.indices.count - 1]}
 def ctx_packed_store_record_side_words(a: mutable Arena&, words: void&, state_bits: mutable void&):
     can Memory.Allocate, Abort.Panic:
         assert state_bits != null

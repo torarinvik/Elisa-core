@@ -436,8 +436,8 @@ def pool_backed_case() -> void:
 			group: mutable TaskGroup = task_group_new()
 			first_bits: uintptr = (&partials[0]).cast[i64&].uintptr()
 			second_bits: uintptr = (&partials[1]).cast[i64&].uintptr()
-			first: Task[i64, Pending] = submit write_slot(WriteJob(first_bits, 1))
-			second: Task[i64, Pending] = submit write_slot(WriteJob(second_bits, 2))
+			first: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: first_bits, value: 1})
+			second: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: second_bits, value: 2})
 			task_group_add((&group).cast[TaskGroup&], move first)
 			task_group_add((&group).cast[TaskGroup&], move second)
 			wait all group

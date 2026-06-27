@@ -50,7 +50,7 @@ struct Box:
     invariant self.v >= 0
 
 def make() -> Box:
-    return Box(v: 42)
+    return Box{v: 42}
 `
 	result := analyzeContractStrict(t, "adv_obs_struct_inv_accepted.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -79,7 +79,7 @@ struct Positive:
     invariant self.v > 0
 
 def make() -> Positive:
-    return Positive(v: 5)
+    return Positive{v: 5}
 `
 	result := analyzeContractStrict(t, "adv_obs_struct_inv_ctor.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

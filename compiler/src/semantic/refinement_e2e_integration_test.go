@@ -122,7 +122,7 @@ struct Coord:
     y: i64 where y >= 0
 
 def make_coord() -> Coord:
-    return Coord(x: 10, y: 20)
+    return Coord{x: 10, y: 20}
 
 def read_x(c: Coord) -> i64:
     return c.x
@@ -164,7 +164,7 @@ struct Triple:
     c: i64 where c > b
 
 def make_triple() -> Triple:
-    return Triple(a: 1, b: 2, c: 3)
+    return Triple{a: 1, b: 2, c: 3}
 `
 	result := analyzeContractStrict(t, "multiple_where_constraints.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -216,7 +216,7 @@ def get_value(n: Node) -> i64:
     return n.value
 
 def make_node() -> Node:
-    return Node(value: 42)
+    return Node{value: 42}
 `
 	result := analyzeTreeTestSource(t, "where_field_in_function.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -334,7 +334,7 @@ struct Box:
 
 def make_box() -> Box:
     ensure result.val > 0
-    return Box(val: 5)
+    return Box{val: 5}
 `
 	result := analyzeContractStrict(t, "struct_where_ensure_return.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -352,7 +352,7 @@ struct Item:
     count: i64 where count > 0
 
 def process(items: i64 where items > 0) -> Item:
-    return Item(count: items)
+    return Item{count: items}
 `
 	result := analyzeContractStrict(t, "anon_where_struct_where.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

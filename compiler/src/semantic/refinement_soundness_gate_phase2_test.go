@@ -201,7 +201,7 @@ func TestSoundnessGateP2_StructFieldWhereViolatedAtConstruction(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: -1)
+    return Pos{x: -1}
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
 		t, "soundness_p2_struct_field_violated.elisa", src, AnalyzeOptions{})
@@ -230,7 +230,7 @@ func TestSoundnessGateP2_StructFieldWhereSatisfiedAtConstruction(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: 5)
+    return Pos{x: 5}
 `
 	result := analyzeContractStrict(t, "soundness_p2_struct_field_ok.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

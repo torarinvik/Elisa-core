@@ -504,8 +504,8 @@ def run(owner: Arena) -> i64 can[Abort.Panic, Memory.Allocate]:
         src: mutable darray[Box] = []
         in alloc:
             src <- []
-            src.push(Box(4, 2))
-            src.push(Box(1, 7))
+            src.push(Box{a: 4, b: 2})
+            src.push(Box{a: 1, b: 7})
         out: darray[Box] = copy_list(alloc, src)
         return out[0].a * 10 + out[1].b
 
@@ -621,7 +621,7 @@ def allocator_interface_test() -> void:
             again: u64 = fill_and_sum[BumpAllocator](alloc, 10)
             if again != 55:
                 panic("bump after rewind: expected 55")
-        m: mutable MallocAllocator = MallocAllocator(0)
+        m: mutable MallocAllocator = MallocAllocator{tag: 0}
         malloc_sum: u64 = fill_and_sum[MallocAllocator](&m, 10)
         if malloc_sum != 55:
             panic("malloc: expected 55 (1..10)")

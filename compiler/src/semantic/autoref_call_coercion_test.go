@@ -254,7 +254,7 @@ struct Holder:
 
 def build() -> i64:
     owner: mutable ScratchArena = zeroed
-    holder = Holder(owner)
+    holder = Holder{arena: owner}
     return holder.arena.value
 `)
 

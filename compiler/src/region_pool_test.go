@@ -291,7 +291,7 @@ def struct_store_valid() -> void:
             owner: mutable Arena& = &scratch
             pool: mutable RegionPool[PoolNode] = region_pool_new[PoolNode](owner)
             h: Pooled[PoolNode] = pool.acquire()
-            holder: mutable Holder = Holder(h.ptr)
+            holder: mutable Holder = Holder{p: h.ptr}
             holder.p.left <- 5
             pool.release(move h)
 `

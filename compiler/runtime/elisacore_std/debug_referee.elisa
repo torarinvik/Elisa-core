@@ -242,7 +242,7 @@ def debug_referee_set_trace_enabled(enabled: bool) can[Debug.Referee]:
 def debug_referee_reset() can[Debug.Referee]:
     debug_referee_sequence <- 0
     debug_referee_event_count <- 0
-    debug_referee_last_event <- DebugRefereeEvent(0, 0, 0, 0, "")
+    debug_referee_last_event <- DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""}
 
 def debug_referee_last_reason() -> int:
     return debug_referee_last_event.reason
@@ -258,7 +258,7 @@ def debug_referee_trace_count() -> usize:
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
     if index >= DEBUG_REFEREE_TRACE_CAP:
-        return DebugRefereeEvent(0, 0, 0, 0, "")
+        return DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""}
     return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
@@ -295,7 +295,7 @@ def debug_referee_pointer_reason(value: uintptr) -> int:
 
 def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) can[Debug.Referee]:
     debug_referee_sequence <- debug_referee_sequence + 1
-    event: DebugRefereeEvent = DebugRefereeEvent(debug_referee_sequence, kind, reason, value, label)
+    event: DebugRefereeEvent = DebugRefereeEvent{sequence: debug_referee_sequence, kind: kind, reason: reason, value: value, label: label}
     debug_referee_last_event <- event
 
     if debug_referee_trace_enabled:
@@ -357,7 +357,7 @@ def debug_trace_reset() can[Debug.Trace]:
     debug_trace_event_count <- 0
     debug_trace_overflowed <- false
     debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
-    debug_trace_last_event <- DebugTraceEvent(0, 0, 0, 0, 0, "")
+    debug_trace_last_event <- DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""}
 
 def debug_trace_count() -> usize:
     return debug_trace_event_count
@@ -370,7 +370,7 @@ def debug_trace_did_overflow() -> bool:
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
     if index >= DEBUG_TRACE_TAPE_CAP:
-        return DebugTraceEvent(0, 0, 0, 0, 0, "")
+        return DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""}
     return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:
@@ -405,7 +405,7 @@ def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintpt
             return
 
         debug_trace_sequence <- debug_trace_sequence + 1
-        event: DebugTraceEvent = DebugTraceEvent(debug_trace_sequence, kind, a, b, c, label)
+        event: DebugTraceEvent = DebugTraceEvent{sequence: debug_trace_sequence, kind: kind, a: a, b: b, c: c, label: label}
         debug_trace_last_event <- event
 
         debug_trace_mix_word(debug_trace_sequence.uintptr())

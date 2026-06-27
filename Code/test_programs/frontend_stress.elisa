@@ -70,7 +70,7 @@ def parser_advance(state: mutable ParserState&) -> TokenKind:
     return head
 
 def scope_define(a: Arena&, scope: mutable Scope&, name: cstr, kind: SymbolKind, first_kind: TokenKind) -> bool error[RuntimeError]:
-    entry: Symbol = Symbol(name, kind, scope.depth, first_kind)
+    entry: Symbol = Symbol{name: name, kind: kind, depth: scope.depth, first_kind: first_kind}
     slot: Symbol&? = try arena_dict_put__Symbol(a, &scope.symbols, name, entry) else null
     return slot != null
 
@@ -83,16 +83,16 @@ def scope_contains(scope: Scope&, name: cstr) -> bool:
     return false
 
 def make_tokens() -> view[Token]:
-    values: Token[2] = [Token(TokenKind.Def, SourceSpan(1, 1), "def"), Token(TokenKind.Ident, SourceSpan(1, 5), "parse_file")]
+    values: Token[2] = [Token{kind: TokenKind.Def, span: SourceSpan{line: 1, column: 1}, text: "def"}, Token{kind: TokenKind.Ident, span: SourceSpan{line: 1, column: 5}, text: "parse_file"}]
     return values[0:2]
 
 def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[RuntimeError]:
     region parse(4096)
     parse_arena: Arena& = &parse
 
-    root: mutable Scope& @parse = new[parse] Scope(null, arena_dict_new__Symbol(parse_arena, 8), 0)
-    child: mutable Scope& @parse = new[parse] Scope(root.cast[Scope&?], arena_dict_new__Symbol(parse_arena, 8), root.depth + 1)
-    parser: mutable ParserState& @parse = new[parse] ParserState(tokens, 0, child.cast[Scope&?])
+    root: mutable Scope& @parse = new[parse] Scope{parent: null, symbols: arena_dict_new__Symbol(parse_arena, 8), depth: 0}
+    child: mutable Scope& @parse = new[parse] Scope{parent: root.cast[Scope&?], symbols: arena_dict_new__Symbol(parse_arena, 8), depth: root.depth + 1}
+    parser: mutable ParserState& @parse = new[parse] ParserState{tokens: tokens, cursor: 0, current_scope: child.cast[Scope&?]}
 
     match parser_peek(parser.cast[ParserState&]):
         TokenKind.Eof:
@@ -113,7 +113,7 @@ def frontend_scope_stress(tokens: view[Token], local_name: cstr) -> bool error[R
 
 def frontend_region_token(line: int, column: int) -> int:
     region scratch(2048)
-    token: Token& @scratch = new[scratch] Token(TokenKind.Ident, SourceSpan(line, column), "token")
+    token: Token& @scratch = new[scratch] Token{kind: TokenKind.Ident, span: SourceSpan{line: line, column: column}, text: "token"}
     out: int = token.span.column
     destroy scratch
     return out

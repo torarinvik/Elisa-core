@@ -15,7 +15,7 @@ extern new_arena(cap: usize) -> Arena
 struct Node[@owner]:
     value: i32
 def worker(r: owned Arena) -> i64:
-    n: Node[r]& @r = new[r] Node(7)
+    n: Node[r]& @r = new[r] Node{value: 7}
     out: i64 = n.value.i64()
     destroy r
     return out

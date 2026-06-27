@@ -62,7 +62,7 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
             state.tags.push(tag)
             state.variant_slots.push(slot)
 
-        return PackedStoreIndexAllocResult(row, global_index)
+        return PackedStoreIndexAllocResult{row: row, index: global_index}
 def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         assert state_bits != null

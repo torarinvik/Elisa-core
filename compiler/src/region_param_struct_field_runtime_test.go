@@ -71,7 +71,7 @@ func TestS4FieldGrowthRunsEndToEnd(t *testing.T) {
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(4096):
-        m: mutable Mod& @a = new[a] Mod(bits: [])
+        m: mutable Mod& @a = new[a] Mod{bits: []}
         fill(m) can Memory.Allocate, Abort.Panic
         print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     return 0`)
@@ -90,7 +90,7 @@ func TestS4Stage1ZeroAnnotationRunsEndToEnd(t *testing.T) {
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(4096):
-        m: mutable Mod& @a = new[a] Mod(bits: [])
+        m: mutable Mod& @a = new[a] Mod{bits: []}
         fill(m) can Memory.Allocate, Abort.Panic
         print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     return 0`)
@@ -107,7 +107,7 @@ func TestS4Stage2ByValueSameRegionCohortRuns(t *testing.T) {
 	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(8192):
         mods: mutable darray[Mod] = []
-        m: mutable Mod = Mod(bits: [])
+        m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         mods.push(m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -126,7 +126,7 @@ func TestS4Stage2ByValueInnerToOuterUAFRejected(t *testing.T) {
     region outer(8192):
         mods: mutable darray[Mod] = []
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             mods.push(m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -143,7 +143,7 @@ func TestS4Stage2ByValueDictPutInnerToOuterUAFRejected(t *testing.T) {
     region outer(8192):
         d: mutable dict[i64, Mod] = {}
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             d.put(1, m) can Memory.Allocate, Abort.Panic
         if d.get(1) is hit:
@@ -160,7 +160,7 @@ func TestS4Stage2ReturnByValueTaintedStructRejected(t *testing.T) {
 	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> Mod can[Memory.Allocate, Abort.Panic]:
     region inner(4096):
-        m: mutable Mod = Mod(bits: [])
+        m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         return m
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
@@ -178,7 +178,7 @@ func TestS4Stage2ReturnListOfTaintedStructRejected(t *testing.T) {
 	t.Parallel()
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def leak() -> darray[Mod] can[Memory.Allocate, Abort.Panic]:
     region inner(4096):
-        m: mutable Mod = Mod(bits: [])
+        m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         return [m]
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
@@ -203,7 +203,7 @@ def caller(self: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(4096):
-        m: mutable Mod& @a = new[a] Mod(bits: [])
+        m: mutable Mod& @a = new[a] Mod{bits: []}
         caller(m) can Memory.Allocate, Abort.Panic
         print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     return 0`)
@@ -223,7 +223,7 @@ func TestS4Stage3NestedFieldGrowthSingleHopRuns(t *testing.T) {
     m.inner.items.push(65)
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    m: mutable Mod = Mod(inner: Inner(items: []))
+    m: mutable Mod = Mod{inner: Inner{items: []}}
     in perm:
         fill((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
     print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -244,7 +244,7 @@ def mid(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
     grow((&m).cast[mutable Mod&])
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    m: mutable Mod = Mod(inner: Inner(items: []))
+    m: mutable Mod = Mod{inner: Inner{items: []}}
     in perm:
         mid((&m).cast[mutable Mod&]) can Memory.Allocate, Abort.Panic
     print(m.inner.items[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -265,7 +265,7 @@ func TestS4Stage3PermAmbientThreadsAndRuns(t *testing.T) {
     self.bits.push(65)
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
-    m: mutable Mod = Mod(bits: [])
+    m: mutable Mod = Mod{bits: []}
     in perm:
         Grow((&m).cast[mutable Mod&])
     print(m.bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -288,7 +288,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     region outer(8192):
         mods: mutable darray[Mod] = []
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             in inner:
                 Grow((&m).cast[mutable Mod&])
             mods.push(m) can Memory.Allocate, Abort.Panic
@@ -327,7 +327,7 @@ def mid(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Pa
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(8192):
         mods: mutable darray[Mod] = []
-        m: mutable Mod = Mod(bits: [])
+        m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         mid(mods, m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -350,7 +350,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     region outer(8192):
         mods: mutable darray[Mod] = []
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             stash(mods, m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -370,7 +370,7 @@ func TestS4W5InterprocSameRegionCohortRuns(t *testing.T) {
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region a(8192):
         mods: mutable darray[Mod] = []
-        m: mutable Mod = Mod(bits: [])
+        m: mutable Mod = Mod{bits: []}
         m.bits.push(65) can Memory.Allocate, Abort.Panic
         stash(mods, m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -388,7 +388,7 @@ func TestS4W5InterprocReadOnlyPassRuns(t *testing.T) {
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region outer(8192):
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             print(peek(m).i64()) can Console.Write, Console.Format, Abort.Panic
     return 0`)
@@ -413,7 +413,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     region outer(8192):
         mods: mutable darray[Mod] = []
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             mid(mods, m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -430,9 +430,9 @@ func TestS4W5NestedFieldStoreEscapeRejected(t *testing.T) {
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     region outer(8192):
-        box: mutable Box& @outer = new[outer] Box(items: [])
+        box: mutable Box& @outer = new[outer] Box{items: []}
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             stash(box, m) can Memory.Allocate, Abort.Panic
         print(box.items[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -454,7 +454,7 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
     region outer(8192):
         mods: mutable darray[Mod] = []
         region inner(4096):
-            m: mutable Mod = Mod(bits: [])
+            m: mutable Mod = Mod{bits: []}
             m.bits.push(65) can Memory.Allocate, Abort.Panic
             stash(doStore, mods, m) can Memory.Allocate, Abort.Panic
         print(mods[0].bits[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
@@ -472,7 +472,7 @@ func TestS4ReturnViewUAFRejectedNotSegfault(t *testing.T) {
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     escaped: mutable view[u8] = zeroed
     region inner(64):
-        m: mutable Mod& @inner = new[inner] Mod(bits: [])
+        m: mutable Mod& @inner = new[inner] Mod{bits: []}
         escaped <- leak(m) can Memory.Allocate, Abort.Panic
     print(escaped[0].i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     return 0`)
@@ -489,7 +489,7 @@ func TestS4ReturnRefUAFRejectedNotSegfault(t *testing.T) {
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
     escaped: mutable u8& = zeroed
     region inner(64):
-        m: mutable Mod& @inner = new[inner] Mod(bits: [])
+        m: mutable Mod& @inner = new[inner] Mod{bits: []}
         escaped <- leak(m) can Memory.Allocate, Abort.Panic
     print(escaped.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
     return 0`)

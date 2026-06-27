@@ -27,7 +27,7 @@ struct Node[@owner]:
 
 def f() -> void:
     r: owned Arena = new_arena(64)
-    n: Node[r]& @r = new[r] Node(7)
+    n: Node[r]& @r = new[r] Node{value: 7}
     _ = n.value
     destroy r
 `)
@@ -50,7 +50,7 @@ func TestOwnedArenaParamDestroyedIsClean(t *testing.T) {
     value: i32
 
 def worker(r: owned Arena) -> void:
-    n: Node[r]& @r = new[r] Node(7)
+    n: Node[r]& @r = new[r] Node{value: 7}
     _ = n.value
     destroy r
 `)
@@ -106,7 +106,7 @@ struct Node[@owner]:
 
 def f() -> i32:
     r: owned Arena = new_arena(64)
-    first: Node[r]& @r = new[r] Node(7)
+    first: Node[r]& @r = new[r] Node{value: 7}
     g: func() -> i32 = lambda () => first.value
     destroy r
     return g()

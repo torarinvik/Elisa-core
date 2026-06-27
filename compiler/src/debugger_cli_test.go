@@ -13,7 +13,7 @@ const debuggerCLIFixture = `struct Player:
     dead: mutable bool
 
 def main() -> i64:
-    player: Player = Player(false)
+    player: Player = Player{dead: false}
     player.dead <- true
     return 0
 `

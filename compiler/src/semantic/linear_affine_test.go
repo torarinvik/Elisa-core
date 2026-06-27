@@ -26,7 +26,7 @@ func TestAffineKeywordIsDroppable(t *testing.T) {
     x: bool
 
 def f() -> void:
-    a: A = A(true)
+    a: A = A{x: true}
 `)
 }
 
@@ -41,7 +41,7 @@ def take(v: A) -> void:
     _ = move v
 
 def f() -> void:
-    a: A = A(true)
+    a: A = A{x: true}
     take(move a)
     take(move a)
 `)

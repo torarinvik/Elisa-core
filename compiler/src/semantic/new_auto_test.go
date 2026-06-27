@@ -13,7 +13,7 @@ func TestNewAutoAllocatesInInferredRegionCleanly(t *testing.T) {
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new[auto] Box(7)
+        b: Box& = new[auto] Box{value: 7}
         return b.value
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
@@ -30,7 +30,7 @@ func TestNewAutoReturnIsRegionPolymorphic(t *testing.T) {
     value: i64
 def f() -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new[auto] Box(7)
+        b: Box& = new[auto] Box{value: 7}
         return b
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
@@ -51,7 +51,7 @@ func TestNamedLocalRegionEscapeStillRejected(t *testing.T) {
 def f() -> Box&:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         region scratch(reserve_commit):
-            b: Box& = new[scratch] Box(7)
+            b: Box& = new[scratch] Box{value: 7}
             return b
 `, AnalyzeOptions{})
 	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "cannot return reference") {
@@ -68,7 +68,7 @@ func TestNewAutoInfersRegionWithoutExplicitBlock(t *testing.T) {
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new[auto] Box(7)
+        b: Box& = new[auto] Box{value: 7}
         return b.value
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
@@ -84,8 +84,8 @@ func TestNewAutoTrackedAsFixedFootprintMember(t *testing.T) {
     value: i64
 def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        b: Box& = new[auto] Box(7)
-        c: Box& = new[auto] Box(8)
+        b: Box& = new[auto] Box{value: 7}
+        c: Box& = new[auto] Box{value: 8}
         return b.value + c.value
 `, AnalyzeOptions{})
 	asn := onlyRegionStack(t, result)

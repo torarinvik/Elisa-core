@@ -1,5 +1,5 @@
 def json_invalid_number_value() -> JsonNumberValue:
-    return JsonNumberValue(JsonNumberKind.INVALID, 0, 0)
+    return JsonNumberValue{kind: JsonNumberKind.INVALID, unsigned_value: 0, signed_value: 0}
 def json_number_value_can_materialize_u64(value: JsonNumberValue) -> bool:
     return value.kind == JsonNumberKind.UNSIGNED
 def json_number_value_can_materialize_i64(value: JsonNumberValue) -> bool:
@@ -17,7 +17,7 @@ def json_parser_checksum_impl(source: u8&) -> i64:
 def json_parse_document_node(source: u8&, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
     return json_parse_document_node_with_len(source, runtime_strlen(source), arena, store) can Memory.Allocate, Abort.Panic
 def json_parser_document_null() -> JsonParserDocument:
-    return JsonParserDocument(0.uintptr())
+    return JsonParserDocument{impl_bits: 0.uintptr()}
 def json_parser_value_null() -> JsonParserValue:
     out: mutable JsonParserValue = zeroed
     return move out
@@ -58,7 +58,7 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
         first_region.count <- internal_words
 
         internal: mutable heap JsonParserDocumentInternal& = packed_store_region_data(first_region).cast[mutable heap JsonParserDocumentInternal&]
-        arena_owner: mutable Arena = Arena(first_region, first_region, 0, 0)
+        arena_owner: mutable Arena = Arena{begin: first_region, end: first_region, end_index: 0, strategy: 0}
         source_copy: heap u8& = arena_alloc(&arena_owner, source_len + 1).cast[heap u8&]
         if source_len > 0:
             memcpy(source_copy.cast[void&], source.cast[void&], source_len)
@@ -81,7 +81,7 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
         internal.store_state_bits <- json_node_store_state_bits((&store).cast[JsonNode.Store[Local]&])
         internal.root <- result.node
         internal.checksum <- result.checksum
-        out[0] <- JsonParserDocument(internal.uintptr())
+        out[0] <- JsonParserDocument{impl_bits: internal.uintptr()}
         return 1
 def json_parser_document_parse_impl(source: u8&, out: mutable JsonParserDocument&) -> i64:
     return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out) can Memory.Allocate, Memory.Release, Abort.Panic

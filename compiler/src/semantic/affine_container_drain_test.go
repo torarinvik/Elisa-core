@@ -8,7 +8,7 @@ import (
 const affineDrainPrelude = `linear struct Guard:
     active: bool
 def make() -> Guard:
-    return Guard(true)
+    return Guard{active: true}
 def release(g: Guard) -> void:
     _ = move g
 `

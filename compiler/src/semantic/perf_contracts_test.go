@@ -28,7 +28,7 @@ def sum(xs: int[4]&) -> int:
 
 @noalloc
 def region_alloc_ok() -> int:
-	n = new Node(5)
+	n = new Node{v: 5}
 	return n.v
 `)
 	if errs != "" {

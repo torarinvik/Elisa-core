@@ -14,7 +14,7 @@ def fallback_value(flag: bool) -> int:
 
 def maybe_box(flag: bool) -> Box?:
 	if flag:
-		return Box(7)
+		return Box{value: 7}
 	return null
 
 

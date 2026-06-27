@@ -21,7 +21,7 @@ struct MemoryPool[T]:
     free_list: mutable heap MemoryPoolFreeNode&?
 
 def fixed_buffer_allocator_init(buffer: u8&, size: usize) -> FixedBufferAllocator:
-    return FixedBufferAllocator(buffer, size, 0)
+    return FixedBufferAllocator{data: buffer, capacity: size, end_index: 0}
 
 def fixed_buffer_align_forward(value: usize, alignment: usize) -> usize:
     value return if alignment <= 1
@@ -58,7 +58,7 @@ def fixed_buffer_is_last_allocation(a: FixedBufferAllocator&, ptr: void&, size_b
         return end_raw == base + a.end_index.uintptr()
 
 def fixed_buffer_snapshot(a: FixedBufferAllocator&) -> FixedBufferMark:
-    return FixedBufferMark(a.end_index)
+    return FixedBufferMark{end_index: a.end_index}
 
 def fixed_buffer_rewind(a: mutable FixedBufferAllocator&, mark: FixedBufferMark):
     can Abort.Panic:
@@ -258,7 +258,7 @@ affine struct Pooled[T]:
     ptr: mutable heap T&
 
 def region_pool_acquire[T](pool: mutable RegionPool[T]&) -> Pooled[T]:
-    return Pooled[T](region_pool_create[T](pool)) can Memory.Allocate, Abort.Panic
+    return Pooled[T]{ptr: region_pool_create[T](pool)} can Memory.Allocate, Abort.Panic
 
 def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
     # Recycle inline (rather than calling region_pool_free) so we never hand the handle's

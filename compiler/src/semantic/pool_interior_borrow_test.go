@@ -84,7 +84,7 @@ struct Wrapper:
     p: mutable heap Node&
 
 def wrap(p: mutable heap Node&) -> Wrapper:
-    return Wrapper(p)
+    return Wrapper{p: p}
 
 def return_struct_uaf() -> void:
     h: Pooled[Node] = zeroed
@@ -101,7 +101,7 @@ struct Wrapper:
     p: mutable heap Node&
 
 def wrap(p: mutable heap Node&) -> Wrapper:
-    return Wrapper(p)
+    return Wrapper{p: p}
 
 def return_struct_valid() -> void:
     h: Pooled[Node] = zeroed

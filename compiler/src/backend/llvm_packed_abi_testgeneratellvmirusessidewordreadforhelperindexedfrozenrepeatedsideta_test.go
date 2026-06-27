@@ -63,7 +63,7 @@ struct Box:
 def fold_common_frozen_wrapped_reassign() -> int:
 	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	boxed: Box = Box(new[store] Expr.Lit(span: 7, value: 5))
+	boxed: Box = Box{node: new[store] Expr.Lit(span: 7, value: 5)}
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	first: int = boxed.node.span
@@ -153,7 +153,7 @@ extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 def fold_common_frozen_nested_helper_indexed_direct() -> int:
 	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Lit(span: 3, value: 1)}, Box{node: new[store] Expr.Lit(span: 7, value: 5)}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	out: int = wrapped.meta.items[0].node.span + wrapped.meta.items[0].node.span
@@ -196,7 +196,7 @@ extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrap
 def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
 	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Lit(span: 3, value: 1)}, Box{node: new[store] Expr.Lit(span: 7, value: 5)}]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	out: int = wrapped.meta.items[0].node.span + wrapped.meta.items[0].node.span
@@ -239,7 +239,7 @@ extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrap
 def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
 	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Lit(span: 3, value: 1)}, Box{node: new[store] Expr.Lit(span: 7, value: 5)}]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -286,7 +286,7 @@ extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 def fold_common_frozen_nested_helper_indexed_reassign() -> int:
 	region scratch(256)
 	store: Expr.Store[Local] = Expr.Store(scratch)
-	items: array[Box, 2] = [Box(new[store] Expr.Lit(span: 3, value: 1)), Box(new[store] Expr.Lit(span: 7, value: 5))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Lit(span: 3, value: 1)}, Box{node: new[store] Expr.Lit(span: 7, value: 5)}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	other: Expr = new[store] Expr.Lit(span: 11, value: 9)
 	frozen: Expr.Store[Frozen] = freeze(move store)
@@ -365,7 +365,7 @@ def make_box(owner: Arena) -> FrozenBox:
 		right: Expr = new Expr.Lit(span: 2, value: 4)
 		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return FrozenBox(frozen)
+	return FrozenBox{store: frozen}
 
 def read(owner: Arena) -> int:
 	box: FrozenBox = make_box(owner)
@@ -549,7 +549,7 @@ def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:
 	store: Expr.Store[Local] = Expr.Store(scratch)
 	local_ref: i32& @scratch = new[scratch] 7
 	held: Expr = new[store] Expr.Hold(span: 5, value: local_ref)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(span: 2, value: 1)), Box(new[store] Expr.Wrap(span: 9, child: held))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(span: 2, value: 1)}, Box{node: new[store] Expr.Wrap(span: 9, child: held)}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0].node in frozen:

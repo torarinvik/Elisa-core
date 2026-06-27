@@ -19,7 +19,7 @@ struct DynArrayView:
     len: mutable usize
 
 def view_from_parts[T](data: void&?, len: usize) -> view[T]:
-    return DynArrayView(data, len)
+    return DynArrayView{data: data, len: len}
 
 # Open-addressing slot: `state` is 0=empty, 1=occupied, 2=tombstone (deleted, but probing
 # must continue past it). A zeroed bucket is therefore an empty slot.
@@ -91,9 +91,9 @@ struct FlagsNamespace:
     _unused: u8
 
 
-global indexmap: IndexMapNamespace = IndexMapNamespace(0)
-global inlinevec: InlineVecNamespace = InlineVecNamespace(0)
-global flags: FlagsNamespace = FlagsNamespace(0)
+global indexmap: IndexMapNamespace = IndexMapNamespace{_unused: 0}
+global inlinevec: InlineVecNamespace = InlineVecNamespace{_unused: 0}
+global flags: FlagsNamespace = FlagsNamespace{_unused: 0}
 
 @internal
 def collections_items_from_alloc[T](ptr: heap void&) -> mutable T&:
@@ -187,33 +187,33 @@ def arena_da_reserve[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, nee
         return da
 
 def arena_da_view[T](da: darray[T, shape_in]&, start: usize, end: usize) -> view[T]:
-    DynArrayView(null, 0) return if da.items == null or da.count == 0
+    DynArrayView{data: null, len: 0} return if da.items == null or da.count == 0
 
     lo: mutable usize = start if start < da.count else da.count
     hi: mutable usize = end if end < da.count else da.count
     if hi < lo:
         hi <- lo
 
-    DynArrayView(null, 0) return if hi == lo
+    DynArrayView{data: null, len: 0} return if hi == lo
 
-    return DynArrayView(collections_void_from_items_at[T](da.items, lo), hi - lo)
+    return DynArrayView{data: collections_void_from_items_at[T](da.items, lo), len: hi - lo}
 
 def arena_da_view_len[T](view: view[T]) -> usize:
     return view.len
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
     elem_size: usize = size_of(T)
-    DynArrayView(null, 0) return if view.data == null or view.len == 0
+    DynArrayView{data: null, len: 0} return if view.data == null or view.len == 0
 
     lo: mutable usize = start if start < view.len else view.len
     hi: mutable usize = end if end < view.len else view.len
     if hi < lo:
         hi <- lo
 
-    DynArrayView(null, 0) return if hi == lo
+    DynArrayView{data: null, len: 0} return if hi == lo
 
     offset: usize = lo * elem_size
-    return DynArrayView(collections_void_from_data_at(view.data, offset), hi - lo)
+    return DynArrayView{data: collections_void_from_data_at(view.data, offset), len: hi - lo}
 
 def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
     return arena_da_view_slice(view, 0, end)
@@ -278,8 +278,8 @@ def arena_da_from_view[T](a: mutable Arena&, view: view[T]) -> darray[T, shape_o
 
 
 def darray_view[T](da: darray[T]) -> view[T]:
-    DynArrayView(null, 0) return if da.items == null or da.count == 0
-    return DynArrayView(collections_void_from_items[T](da.items), da.count)
+    DynArrayView{data: null, len: 0} return if da.items == null or da.count == 0
+    return DynArrayView{data: collections_void_from_items[T](da.items), len: da.count}
 
 
 def view[T](da: darray[T]) -> view[T]:
@@ -292,9 +292,9 @@ def view[T](da: darray[T]) -> view[T]:
 # globals), so a static table can be handed out as a zero-copy slice. Mirrors
 # inline_vec_view's inline-buffer path.
 def array_view[T, N: usize](arr: T[N]&) -> view[T]:
-    DynArrayView(null, 0) return if N == 0
+    DynArrayView{data: null, len: 0} return if N == 0
     trusted Unsafe.UncheckedIndex:
-        return DynArrayView(collections_void_from_items[T](&arr[0]), N)
+        return DynArrayView{data: collections_void_from_items[T](&arr[0]), len: N}
 
 
 # ------------------------------------------------------------
@@ -433,12 +433,12 @@ def last[T, N: usize](vec: InlineVec[T, N]&) -> T:
 
 
 def inline_vec_view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
-    DynArrayView(null, 0) return if vec.len == 0
+    DynArrayView{data: null, len: 0} return if vec.len == 0
     if vec.is_spilled:
         assert vec.overflow.items != null
-        return DynArrayView(collections_void_from_items[T](vec.overflow.items), vec.len)
+        return DynArrayView{data: collections_void_from_items[T](vec.overflow.items), len: vec.len}
     trusted Unsafe.UncheckedIndex:
-        return DynArrayView(collections_void_from_items[T](&vec.inline_items[0]), vec.len)
+        return DynArrayView{data: collections_void_from_items[T](&vec.inline_items[0]), len: vec.len}
 
 
 def view[T, N: usize](vec: InlineVec[T, N]&) -> view[T]:
@@ -826,7 +826,7 @@ def ctx_hash_u64(value: u64) -> u64:
 # slot of the matching occupied entry, or found=false with the slot to insert at: the first
 # tombstone seen (slot reuse), else the terminating empty slot. O(1) expected with load < 3/4.
 def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
-    DictProbeResult(0, false) return if m.capacity == 0 or m.items == null
+    DictProbeResult{index: 0, found: false} return if m.capacity == 0 or m.items == null
 
     assert m.items != null
     items: DictBucket[K, T]& = m.items
@@ -839,15 +839,15 @@ def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
             st: u8 = items[slot].state
             if st == 0:
                 final_slot: usize = slot if insert_slot == m.capacity else insert_slot
-                return DictProbeResult(final_slot, false)
+                return DictProbeResult{index: final_slot, found: false}
             if st == 1 and items[slot].key == key:
-                return DictProbeResult(slot, true)
+                return DictProbeResult{index: slot, found: true}
             if st == 2 and insert_slot == m.capacity:
                 insert_slot <- slot
             slot <- (slot + 1.usize()) & mask
             probed <- probed + 1.usize()
-    DictProbeResult(insert_slot, false) return if insert_slot != m.capacity
-    return DictProbeResult(0, false)
+    DictProbeResult{index: insert_slot, found: false} return if insert_slot != m.capacity
+    return DictProbeResult{index: 0, found: false}
 
 # Place (key, value) into a table that is known to have room and to not already contain `key`
 # (used by rehash). The probe terminates at an empty slot since the fresh table has no tombstones.
@@ -862,7 +862,7 @@ def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> vo
     m.used <- m.used + 1.usize()
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
-    view: view[DictBucket[K, T]] = DynArrayView(collections_void_from_items[DictBucket[K, T]](items), capacity)
+    view: view[DictBucket[K, T]] = DynArrayView{data: collections_void_from_items[DictBucket[K, T]](items), len: capacity}
     arena_da_fill(view, zeroed)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
@@ -1075,7 +1075,7 @@ def arena_dict_clear__i64(m: mutable dict[cstr[key_shape], i64]&):
 # ------------------------------------------------------------
 
 def arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult:
-    DictProbeResult(0, false) return if s.capacity == 0 or s.items == null
+    DictProbeResult{index: 0, found: false} return if s.capacity == 0 or s.items == null
 
     assert s.items != null
     items: SetBucket[T]& = s.items
@@ -1088,15 +1088,15 @@ def arena_set_find_index[T](s: set[T]&, key: T) -> DictProbeResult:
             st: u8 = items[slot].state
             if st == 0:
                 final_slot: usize = slot if insert_slot == s.capacity else insert_slot
-                return DictProbeResult(final_slot, false)
+                return DictProbeResult{index: final_slot, found: false}
             if st == 1 and items[slot].key == key:
-                return DictProbeResult(slot, true)
+                return DictProbeResult{index: slot, found: true}
             if st == 2 and insert_slot == s.capacity:
                 insert_slot <- slot
             slot <- (slot + 1.usize()) & mask
             probed <- probed + 1.usize()
-    DictProbeResult(insert_slot, false) return if insert_slot != s.capacity
-    return DictProbeResult(0, false)
+    DictProbeResult{index: insert_slot, found: false} return if insert_slot != s.capacity
+    return DictProbeResult{index: 0, found: false}
 
 def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
     assert s.items != null
@@ -1108,7 +1108,7 @@ def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
     s.used <- s.used + 1.usize()
 
 def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
-    view: view[SetBucket[T]] = DynArrayView(collections_void_from_items[SetBucket[T]](items), capacity)
+    view: view[SetBucket[T]] = DynArrayView{data: collections_void_from_items[SetBucket[T]](items), len: capacity}
     arena_da_fill(view, zeroed)
 
 def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:

@@ -2338,7 +2338,7 @@ struct Pos:
     invariant self.x >= 0
 
 def make_pos() -> Pos:
-    return Pos(x: 5)
+    return Pos{x: 5}
 
 def use() -> i64:
     s = make_pos()
@@ -2365,7 +2365,7 @@ struct AnyInt:
     x: i64
 
 def make_any() -> AnyInt:
-    return AnyInt(x: 5)
+    return AnyInt{x: 5}
 
 def use() -> i64:
     s = make_any()

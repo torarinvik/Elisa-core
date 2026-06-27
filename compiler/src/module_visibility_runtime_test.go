@@ -50,7 +50,7 @@ def metric(f: Form) -> i64:
 @test
 def module_visibility_runtime_test() -> void:
     can Abort.Panic:
-        p: Geo::Point = Geo::Point(3, 4)
+        p: Geo::Point = Geo::Point{x: 3, y: 4}
         if Geo::dist2(p) != 25:
             panic("qualified positional construction wrong")
         q: Geo::Point = Geo::Point{x: 6, y: 8}

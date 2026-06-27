@@ -315,7 +315,7 @@ def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable v
         in a:
             state.handles.push(handle)
             state.indices.push(global_index)
-        return PackedStoreAllocResult(ptr, handle)
+        return PackedStoreAllocResult{row: ptr, handle: handle}
 def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> PackedStoreAllocResult:
     can Memory.Allocate, Abort.Panic:
         assert state_bits != null
@@ -358,7 +358,7 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
         in a:
             state.handles.push(handle)
             state.indices.push(global_index)
-        return PackedStoreAllocResult(ptr, handle)
+        return PackedStoreAllocResult{row: ptr, handle: handle}
 def ctx_packed_store_alloc_fixed_index_result(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         result: PackedStoreAllocResult = ctx_packed_store_alloc_fixed_result(a, state_bits)
@@ -366,7 +366,7 @@ def ctx_packed_store_alloc_fixed_index_result(a: mutable Arena&, state_bits: mut
         assert state.indices.items != null
         assert state.indices.count > 0
         indices: u32& = state.indices.items
-        return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1])
+        return PackedStoreIndexAllocResult{row: result.row, index: indices[state.indices.count - 1]}
 def ctx_packed_store_alloc_index_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         result: PackedStoreAllocResult = ctx_packed_store_alloc_result(a, size_bytes, state_bits)
@@ -374,7 +374,7 @@ def ctx_packed_store_alloc_index_result(a: mutable Arena&, size_bytes: usize, st
         assert state.indices.items != null
         assert state.indices.count > 0
         indices: u32& = state.indices.items
-        return PackedStoreIndexAllocResult(result.row, indices[state.indices.count - 1])
+        return PackedStoreIndexAllocResult{row: result.row, index: indices[state.indices.count - 1]}
 def ctx_packed_store_count(state_bits: mutable void&) -> usize:
     assert state_bits != null
     state: PackedStoreState& = state_bits.cast[PackedStoreState&]

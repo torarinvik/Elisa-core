@@ -10,5 +10,5 @@ def checked_stack_slot(slot: stack ScratchSlot&) -> int error[StackError]:
     return slot.value
 
 def stack_slot_or_zero() -> int:
-    scratch: ScratchSlot = ScratchSlot(7)
+    scratch: ScratchSlot = ScratchSlot{value: 7}
     return try checked_stack_slot(&scratch) else 0

@@ -755,7 +755,7 @@ struct Pair:
 def mk() -> Pair:
     ensure result.a == 1
     ensure result.b == 2
-    return Pair(1, 2)
+    return Pair{a: 1, b: 2}
 `, true},
 		{"struct_result_field_wrong", `
 struct Pair:
@@ -763,7 +763,7 @@ struct Pair:
     b: i64
 def bad() -> Pair:
     ensure result.a == 9
-    return Pair(1, 2)
+    return Pair{a: 1, b: 2}
 `, false},
 	}
 	for _, tc := range cases {

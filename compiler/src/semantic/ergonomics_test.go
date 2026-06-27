@@ -65,7 +65,7 @@ func TestAnalyzeStructFieldDefaultsFillTrailingPositionalFields(t *testing.T) {
     right: i64 = 5
 
 def build() -> Pair:
-    return Pair(3)
+    return Pair{left: 3}
 `)
 	buildSym, _ := result.GlobalScope.Lookup("build")
 	buildDecl := buildSym.Node.(*ast.FuncDecl)

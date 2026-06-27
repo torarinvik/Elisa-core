@@ -17,7 +17,7 @@ func TestAffineConsumedOnAllBranchesIsClean(t *testing.T) {
     active: bool
 
 def make() -> Guard:
-    return Guard(true)
+    return Guard{active: true}
 
 def release(g: Guard) -> void:
     _ = move g
@@ -39,7 +39,7 @@ func TestAffinePartialConsumeStillErrors(t *testing.T) {
     active: bool
 
 def make() -> Guard:
-    return Guard(true)
+    return Guard{active: true}
 
 def release(g: Guard) -> void:
     _ = move g

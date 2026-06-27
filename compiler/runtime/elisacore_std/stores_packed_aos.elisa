@@ -68,7 +68,7 @@ def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedS
         row: mutable heap u8& = (chunk_base + offset_in_chunk).cast[mutable heap u8&]
         index: usize = state.count
         state.count <- index + 1
-        return PackedStoreIndexAllocResult(row: row.cast[mutable heap void&], index: index.u32())
+        return PackedStoreIndexAllocResult{row: row.cast[mutable heap void&], index: index.u32()}
 
 # Resolve a node index handle to its (stable) record address.
 def ctx_aos_store_record(state_bits: mutable void&, index: usize) -> mutable heap void&:

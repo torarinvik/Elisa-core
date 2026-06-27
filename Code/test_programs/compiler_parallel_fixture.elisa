@@ -21,15 +21,15 @@ def build_frozen_expr_graph(owner: Arena) -> FrozenExprGraph:
 		root <- new Expr.Add(span: 3, left: left, right: right)
 
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return FrozenExprGraph(frozen, root)
+	return FrozenExprGraph{store: frozen, root: root}
 
 def expr_sum(graph: FrozenExprGraph) -> i64:
 	match graph.root in graph.store:
 		Expr.Int(value: value):
 			return value.i64() + graph.root.span.i64()
 		Expr.Add(left: left, right: right):
-			left_sum: i64 = expr_sum(FrozenExprGraph(graph.store, left))
-			right_sum: i64 = expr_sum(FrozenExprGraph(graph.store, right))
+			left_sum: i64 = expr_sum(FrozenExprGraph{store: graph.store, root: left})
+			right_sum: i64 = expr_sum(FrozenExprGraph{store: graph.store, root: right})
 			return graph.root.span.i64() + left_sum + right_sum
 	return 0
 
@@ -38,8 +38,8 @@ def expr_depth(graph: FrozenExprGraph) -> i64:
 		Expr.Int(value: _):
 			return 1
 		Expr.Add(left: left, right: right):
-			left_depth: i64 = expr_depth(FrozenExprGraph(graph.store, left))
-			right_depth: i64 = expr_depth(FrozenExprGraph(graph.store, right))
+			left_depth: i64 = expr_depth(FrozenExprGraph{store: graph.store, root: left})
+			right_depth: i64 = expr_depth(FrozenExprGraph{store: graph.store, root: right})
 			return 1 + max(left_depth, right_depth)
 	return 0
 

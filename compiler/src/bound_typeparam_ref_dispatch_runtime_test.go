@@ -39,7 +39,7 @@ def get[R: Reader](r: mutable R&) -> u64:
 @test
 def bound_typeparam_ref_dispatch_test() -> void:
     can Abort.Panic:
-        b: mutable Box = Box(7)
+        b: mutable Box = Box{n: 7}
         if get(&b) != 7:
             panic("by-ref to value-self dispatch wrong")
 `

@@ -14,7 +14,7 @@ func TestDebuggerBreaksOnConditionAndTimeTravels(t *testing.T) {
     dead: mutable bool
 
 def run() -> i64:
-    player: Player = Player(false)
+    player: Player = Player{dead: false}
     player.dead <- true
     return 0
 `
@@ -181,7 +181,7 @@ func TestDebuggerExpressionBreakpointAndFormats(t *testing.T) {
     dead: mutable bool
 
 def run() -> i64:
-    player: Player = Player(false)
+    player: Player = Player{dead: false}
     player.dead <- true
     return 0
 `
@@ -372,7 +372,7 @@ func TestDebugREPLCommandsAndTraceImport(t *testing.T) {
     dead: mutable bool
 
 def run() -> i64:
-    player: Player = Player(false)
+    player: Player = Player{dead: false}
     player.dead <- true
     return 0
 `

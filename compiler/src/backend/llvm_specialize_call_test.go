@@ -27,7 +27,7 @@ def use_int() -> i64:
     return run_pair(work_int, 7)
 
 def use_gate() -> i64:
-    gate: SharedGate = SharedGate(1)
+    gate: SharedGate = SharedGate{handle: 1}
     return run_pair(work_gate, gate)
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_generic_call_binding_specializations.elisa", src)

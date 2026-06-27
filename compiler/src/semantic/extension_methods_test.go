@@ -299,7 +299,7 @@ struct Registry[K, T]:
 extern RegistrySlot
 type RegistryId = id[RegistrySlot]
 
-global registry: RegistryNamespace = RegistryNamespace(0)
+global registry: RegistryNamespace = RegistryNamespace{marker: 0}
 
 def new[K, T](api: RegistryNamespace, owner: mutable Arena&) -> Registry[K, T]:
     _ = api
@@ -431,7 +431,7 @@ struct IndexMapNamespace:
 struct IndexMap[K, T]:
     marker: u8
 
-global indexmap: IndexMapNamespace = IndexMapNamespace(0)
+global indexmap: IndexMapNamespace = IndexMapNamespace{marker: 0}
 
 def new[K, T](api: IndexMapNamespace, owner: mutable Arena&) -> IndexMap[K, T]:
     _ = api

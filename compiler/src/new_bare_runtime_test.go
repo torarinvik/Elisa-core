@@ -25,12 +25,12 @@ func TestRunCLIBareNewDefaultsToInferredRegion(t *testing.T) {
     y: i64
 
 def make_point(x: i64, y: i64) -> Point&:
-    return new Point(x: x, y: y)
+    return new Point{x: x, y: y}
 
 @test
 def bare_new_runtime_test() -> void:
     can Abort.Panic, Memory.Allocate:
-        p: Point& = new Point(x: 3, y: 4)
+        p: Point& = new Point{x: 3, y: 4}
         if p.x + p.y != 7:
             panic("bare new: local alloc wrong")
         q: Point& = make_point(10, 20)

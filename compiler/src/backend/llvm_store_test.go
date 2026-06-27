@@ -436,7 +436,7 @@ def add(x: i64, y: i64) -> i64:
     return x + y
 
 def build() -> i64:
-    box: CallbackBox = CallbackBox(add)
+    box: CallbackBox = CallbackBox{run: add}
     return box.run(y: 7, x: do:
         seed = 3
         seed

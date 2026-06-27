@@ -111,7 +111,7 @@ func TestRegionPolyStructResultStoredThroughRefParamRejected(t *testing.T) {
 struct Mgr:
     users: mutable Users
 def make_users() -> Users:
-    return Users([1, 2, 3])
+    return Users{user: [1, 2, 3]}
 def bad_store(dst: mutable Mgr&) -> void:
     dst.users <- make_users()
 `)
@@ -126,7 +126,7 @@ func TestRegionPolyResultReturnAndLocalBindStillAccepted(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "rp_store_ok.elisa", `struct Users:
     user: mutable darray[i64]
 def make_users() -> Users:
-    return Users([1, 2, 3])
+    return Users{user: [1, 2, 3]}
 def forward() -> Users:
     return make_users()
 def use_local() -> i64:

@@ -25,7 +25,7 @@ func TestRunCLIAffineMoveDrainConsumesElements(t *testing.T) {
     token: i64
 
 def make(n: i64) -> Guard:
-    return Guard(n)
+    return Guard{token: n}
 
 global mutable g_sum: i64 = 0
 

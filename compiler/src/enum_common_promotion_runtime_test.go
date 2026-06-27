@@ -28,7 +28,7 @@ def make_atom(p: P, k: i64) -> Form:
 @test
 def bt() -> void:
     can Abort.Panic, Memory.Allocate:
-        a: Form = make_atom(P(7), 3)
+        a: Form = make_atom(P{offset: 7}, 3)
         assert_eq(a.pos.offset, 7)
 `)
 }
@@ -52,7 +52,7 @@ def make_atom(p: P, k: i64) -> Form:
 @test
 def bt() -> void:
     can Abort.Panic, Memory.Allocate:
-        a: Form = make_atom(P(7), 3)
+        a: Form = make_atom(P{offset: 7}, 3)
         assert_eq(a.pos.offset, 7)
         xs: mutable darray[Form] = []
         xs.push(a)
@@ -117,12 +117,12 @@ def build_seq(owner: mutable Arena&) -> Seq:
     can Abort.Panic, Memory.Allocate:
         items: mutable darray[F] = []
         items_ref: mutable darray[F]& = &items
-        _ = arena_da_append(owner, items_ref, F.Atom(pos: P(1), k: 4))
-        return Seq(P(0), items)
+        _ = arena_da_append(owner, items_ref, F.Atom(pos: P{offset: 1}, k: 4))
+        return Seq{pos: P{offset: 0}, items: items}
 
 def build_e(owner: mutable Arena&) -> E:
     can Abort.Panic, Memory.Allocate:
-        return E.Add(pos: P(9), a: E.Num(pos: P(2), x: 1), b: E.Syn(pos: P(3), raw: build_seq(owner)))
+        return E.Add(pos: P{offset: 9}, a: E.Num(pos: P{offset: 2}, x: 1), b: E.Syn(pos: P{offset: 3}, raw: build_seq(owner)))
 
 @test
 def bt() -> void:
@@ -155,11 +155,11 @@ def build_n(owner: mutable Arena&, fail: bool) -> N error[ProbeError]:
     can Abort.Panic, Memory.Allocate:
         if fail:
             raise ProbeError.Boom
-        return N.Lit(pos: P(2), x: 21)
+        return N.Lit(pos: P{offset: 2}, x: 21)
 
 def fallback_n(owner: mutable Arena&) -> N:
     can Abort.Panic, Memory.Allocate:
-        return N.Lit(pos: P(5), x: 1)
+        return N.Lit(pos: P{offset: 5}, x: 1)
 
 def read_n(n: N) -> i64:
     match n:

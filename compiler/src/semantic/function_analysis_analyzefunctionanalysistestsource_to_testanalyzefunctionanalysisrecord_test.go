@@ -390,7 +390,7 @@ packed enum Expr:
 
 def build_region(seed: i32) -> i32:
 	region scratch(1024)
-	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
 	out: i32 = first.value
 	destroy scratch
 	return out
@@ -499,7 +499,7 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassTransforms(t *testing.T) {
 
 def alias_region_ref(seed: i32) -> i32:
 	region scratch(1024)
-	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
 	alias: mutable RegionNode[scratch]& @scratch = first
 	out: i32 = alias.value
 	destroy scratch
@@ -523,7 +523,7 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T
 
 def alias_region_mutation(seed: i32) -> i32:
 	region scratch(1024)
-	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch](null, seed)
+	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
 	alias: mutable RegionNode[scratch]& @scratch = first
 	alias.value <- alias.value + 1
 	out: i32 = first.value

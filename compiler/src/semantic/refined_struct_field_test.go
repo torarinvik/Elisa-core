@@ -18,7 +18,7 @@ struct Sop2:
 def sop2_op(inst: u32) -> u32 is UB[0, 127]:
     return (inst >> 23) & 0x7f
 def decode(inst: u32) -> Sop2:
-    return Sop2(sop2_op(inst))
+    return Sop2{op: sop2_op(inst)}
 `
 	result := analyzeContractStrict(t, "refined_field.elisa", src)
 	for _, e := range result.Errors() {
@@ -36,7 +36,7 @@ law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
 struct Sop2:
     op: mutable u32 is UB[0, 127]
 def f() -> Sop2:
-    return Sop2(999)
+    return Sop2{op: 999}
 `
 	errs := strings.Join(analyzeContractStrict(t, "rf_bad.elisa", bad).Errors(), "\n")
 	if !strings.Contains(errs, "is violated") && !strings.Contains(errs, "could not be proven") {
@@ -89,7 +89,7 @@ struct Src:
 struct Dst:
     op: mutable u32 is UB[0, 127]
 def copy(s: Src&) -> Dst:
-    return Dst(s.v)
+    return Dst{op: s.v}
 `
 	if errs := analyzeContractStrict(t, "ctor_fld_ok.elisa", ok).Errors(); len(errs) != 0 {
 		t.Fatalf("routing a UB[0,127] field into a UB[0,127] field should prove by composition, got: %v", errs)
@@ -106,7 +106,7 @@ struct Src:
 struct Dst:
     op: mutable u32 is UB[0, 127]
 def copy(s: Src&) -> Dst:
-    return Dst(s.v)
+    return Dst{op: s.v}
 `
 	if !strings.Contains(strings.Join(analyzeContractStrict(t, "ctor_fld_wide.elisa", wider).Errors(), "\n"), "could not be proven") {
 		t.Fatalf("a UB[0,1000] source field does not entail a UB[0,127] target field; must decline")
@@ -116,7 +116,7 @@ law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
 struct Dst:
     op: mutable u32 is UB[0, 127]
 def bad() -> Dst:
-    return Dst(999)
+    return Dst{op: 999}
 `
 	if !strings.Contains(strings.Join(analyzeContractStrict(t, "ctor_fld_const.elisa", badConst).Errors(), "\n"), "is violated") {
 		t.Fatalf("Dst(999) violates op's UB[0,127]; construction must be rejected")

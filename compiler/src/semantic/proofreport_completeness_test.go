@@ -153,7 +153,7 @@ struct Box:
     v: i64 where v > 0
 
 def make() -> Box:
-    return Box(v: 42)
+    return Box{v: 42}
 `
 	result := analyzeContractStrict(t, "completeness_struct_field_where.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

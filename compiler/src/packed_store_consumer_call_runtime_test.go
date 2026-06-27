@@ -46,7 +46,7 @@ def check_leaf(e: E, expected: i64) -> void:
 
 def build() -> E:
     can Memory.Allocate:
-        return new E.Pair(span: Span(lo: 0, hi: 9), left: new E.Leaf(span: Span(lo: 0, hi: 1), value: 42), right: new E.Leaf(span: Span(lo: 2, hi: 3), value: 7))
+        return new E.Pair(span: Span{lo: 0, hi: 9}, left: new E.Leaf(span: Span{lo: 0, hi: 1}, value: 42), right: new E.Leaf(span: Span{lo: 2, hi: 3}, value: 7))
 
 @test
 def consumer_across_regions() -> void:

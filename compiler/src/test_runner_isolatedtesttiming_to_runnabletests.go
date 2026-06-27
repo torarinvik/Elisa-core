@@ -402,13 +402,15 @@ func buildLawFuzzHarnesses(result *semantic.Result) string {
 			for _, f := range p.Fields {
 				pn := "__law_" + p.Name + "_" + f.Name
 				params = append(params, pn+": "+f.Type)
-				r.args = append(r.args, pn)
+				// Brace-form field initializer: `field: value`. Default construction must
+				// use `Type{...}` (paren-form positional construction is rejected).
+				r.args = append(r.args, f.Name+": "+pn)
 			}
 			recons = append(recons, r)
 		}
 		fmt.Fprintf(&b, "\n@property\ndef %s(%s) -> bool:\n", name, strings.Join(params, ", "))
 		for _, r := range recons {
-			fmt.Fprintf(&b, "\t%s: %s = %s(%s)\n", r.param, ob.TypeName, ob.TypeName, strings.Join(r.args, ", "))
+			fmt.Fprintf(&b, "\t%s: %s = %s{%s}\n", r.param, ob.TypeName, ob.TypeName, strings.Join(r.args, ", "))
 		}
 		fmt.Fprintf(&b, "\treturn %s\n", ob.BodySource)
 	}

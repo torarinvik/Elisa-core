@@ -28,7 +28,7 @@ struct Box:
     v: i64 where v > 0
 
 def make(n: i64) -> Box:
-    return Box(v: n)
+    return Box{v: n}
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
 		t, "struct_field_obs_runtime.elisa", src,
@@ -59,7 +59,7 @@ struct Box:
     v: i64 where v > 0
 
 def make() -> Box:
-    return Box(v: -7)
+    return Box{v: -7}
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
 		t, "struct_field_obs_refuted.elisa", src,
@@ -90,7 +90,7 @@ struct Box:
     v: i64 where v > 0
 
 def make() -> Box:
-    return Box(v: 42)
+    return Box{v: 42}
 `
 	result := analyzeContractStrict(t, "struct_field_obs_proven.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -123,7 +123,7 @@ struct Range:
     hi: i64 where hi >= lo
 
 def make(a: i64, b: i64) -> Range:
-    return Range(lo: a, hi: b)
+    return Range{lo: a, hi: b}
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
 		t, "struct_field_obs_structname.elisa", src,

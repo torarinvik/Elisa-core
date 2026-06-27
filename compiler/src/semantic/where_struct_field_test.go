@@ -14,7 +14,7 @@ func TestWhereStructFieldClean(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: 5)
+    return Pos{x: 5}
 `
 	result := analyzeContractStrict(t, "where_field_clean.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -29,7 +29,7 @@ func TestWhereStructFieldViolated(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(x: -1)
+    return Pos{x: -1}
 `
 	result := analyzeContractStrict(t, "where_field_bad.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")
@@ -75,7 +75,7 @@ func TestWhereStructFieldPositionalClean(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(10)
+    return Pos{x: 10}
 `
 	result := analyzeContractStrict(t, "where_field_pos_clean.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -88,7 +88,7 @@ func TestWhereStructFieldPositionalViolated(t *testing.T) {
 struct Pos:
     x: i64 where x > 0
 def make() -> Pos:
-    return Pos(0)
+    return Pos{x: 0}
 `
 	result := analyzeContractStrict(t, "where_field_pos_bad.elisa", src)
 	errs := strings.Join(result.Errors(), "\n")

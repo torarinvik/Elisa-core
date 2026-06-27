@@ -36,7 +36,7 @@ def main() -> int can[Console.Write]:
 	print(true) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	printr(false) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(" bool") can Console.Write
-	print(Label("tagged")) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+	print(Label{text: "tagged"}) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print('Z') can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(42) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
 	print(-9) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic

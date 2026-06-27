@@ -1,7 +1,7 @@
 def json_invalid_array_iter_cursor() -> JsonAstArrayIterCursor:
-    return JsonAstArrayIterCursor(json_empty_node_view(), 0)
+    return JsonAstArrayIterCursor{items: json_empty_node_view(), index: 0}
 def json_invalid_object_iter_cursor() -> JsonAstObjectIterCursor:
-    return JsonAstObjectIterCursor(json_empty_field_view(), 0)
+    return JsonAstObjectIterCursor{fields: json_empty_field_view(), index: 0}
 def json_ast_string_view_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
@@ -84,14 +84,14 @@ def json_parser_array_iter_cursor(iter: JsonParserArrayIter&) -> JsonAstArrayIte
         return json_invalid_array_iter_cursor()
     items: view[JsonNode] = json_node_items_view(iter[0].items_ptr.cast[JsonNode&?], iter[0].item_count)
     if iter[0].index < items.len:
-        return JsonAstArrayIterCursor(items, iter[0].index)
+        return JsonAstArrayIterCursor{items: items, index: iter[0].index}
     return json_invalid_array_iter_cursor()
 def json_parser_object_iter_cursor(iter: JsonParserObjectIter&) -> JsonAstObjectIterCursor:
     if not json_parser_object_iter_is_live(iter):
         return json_invalid_object_iter_cursor()
     fields: view[JsonField] = json_field_items_view(iter[0].fields_ptr.cast[JsonField&?], iter[0].field_count)
     if iter[0].index < fields.len:
-        return JsonAstObjectIterCursor(fields, iter[0].index)
+        return JsonAstObjectIterCursor{fields: fields, index: iter[0].index}
     return json_invalid_object_iter_cursor()
 def json_parser_array_iter_from_cursor(impl: heap JsonParserDocumentInternal&, cursor: JsonAstArrayIterCursor, store: JsonNode.Store[Local]) -> JsonParserArrayIter:
     can Memory.Allocate, Abort.Panic:

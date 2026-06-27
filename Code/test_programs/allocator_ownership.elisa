@@ -75,8 +75,8 @@ def build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetE
         first_live: mutable heap HeapPairNode& = try require_heap_pair_node()
         first <- first_live
         second_live: mutable heap HeapPairNode& = try require_heap_pair_node()
-        first_live.pair <- FuzzPair(301, 302)
-        second_live.pair <- FuzzPair(303, 304)
+        first_live.pair <- FuzzPair{left: 301, right: 302}
+        second_live.pair <- FuzzPair{left: 303, right: 304}
         first_live.next <- second_live
         total: int = try recursive_pair_node_sum(first_live)
         return total
@@ -90,7 +90,7 @@ def borrow_then_release_single_pair() -> int error[MemoryError, DiskError, NetEr
 
         live: mutable heap HeapPairNode& = try require_heap_pair_node()
         handle <- live
-        live.pair <- FuzzPair(11, 12)
+        live.pair <- FuzzPair{left: 11, right: 12}
         total: int = try checked_heap_pair(&live.pair)
         return total
 

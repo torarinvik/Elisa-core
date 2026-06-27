@@ -951,9 +951,9 @@ def autoref_write(cell: mutable AutoRefCell&) -> void:
 @test
 def autoref_value_to_reference_param_test() -> void:
     can Abort.Panic:
-        immutable_cell: AutoRefCell = AutoRefCell(value: 5)
+        immutable_cell: AutoRefCell = AutoRefCell{value: 5}
         assert_eq(autoref_read(immutable_cell), 5)
-        mutable_cell: mutable AutoRefCell = AutoRefCell(value: 1)
+        mutable_cell: mutable AutoRefCell = AutoRefCell{value: 1}
         autoref_write(mutable_cell)
         assert_eq(autoref_read(mutable_cell), 99)
 `, runtimeInclude)
@@ -999,7 +999,7 @@ def autoref_write(cell: mutable AutoRefCell&) -> void:
 
 @test
 def autoref_immutable_reject_test() -> void:
-    immutable_cell: AutoRefCell = AutoRefCell(value: 5)
+    immutable_cell: AutoRefCell = AutoRefCell{value: 5}
     autoref_write(immutable_cell)
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
