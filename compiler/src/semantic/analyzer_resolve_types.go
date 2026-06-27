@@ -200,6 +200,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return a.resolveArrayType(arrayExpr)
 		}
 		a.maybeRejectRuntimeCarrierTypeUse(n.Pos(), n.Name)
+		// Parametric refinement alias (`type SlotIndex[cap] = u32 is InRange[0, cap]`): the alias is NOT
+		// in namedTypes, but its base type IS concrete. Resolve to the base so callers see a concrete type.
+		if rt := a.lookupParametricAliasRefinement(n.Name, n.Args); rt != nil {
+			return a.resolveType(rt.Base)
+		}
 		args := make([]Type, 0, len(n.Args))
 		surfaceName := n.Name
 		lookupName := n.Name

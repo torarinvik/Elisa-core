@@ -42,6 +42,42 @@ func (a *Analyzer) collectTypeAliases(decls []scopedDecl) {
 			if refinement != nil {
 				target = refinement.Base
 			}
+			// Parametric refinement aliases (`type SlotIndex[cap] = u32 is InRange[0, cap]`) are stored
+			// in parametricAliasRefinements for instantiation at use sites; they are NOT entered into
+			// namedTypes (the base type is concrete but the predicate has free parameter names). The
+			// base type is still resolved and validated for concreteness here.
+			if len(aliasDecl.TypeParams) > 0 {
+				if refinement == nil {
+					a.errorf(aliasDecl.Pos(), "parametric type alias %q must have a refinement predicate (`is Law[..]`)", qualifiedName)
+					return
+				}
+				resolved := a.resolveType(target)
+				if IsInvalidType(resolved) {
+					return
+				}
+				if containsTypeParam(resolved) {
+					a.errorf(aliasDecl.Pos(), "type alias %q must resolve to a concrete type in v1", qualifiedName)
+					return
+				}
+				if _, exists := a.parametricAliasRefinements[qualifiedName]; exists {
+					a.errorf(aliasDecl.Pos(), "%s", DuplicateTypeMessage(qualifiedName))
+					return
+				}
+				a.parametricAliasRefinements[qualifiedName] = parametricAliasEntry{
+					TypeParams: aliasDecl.TypeParams,
+					Template:   refinement,
+					Namespace:  scoped.Namespace,
+					Usings:     scoped.Usings,
+				}
+				// Deferred predicate validation still runs (laws may not exist yet).
+				a.deferredAliasRefinements = append(a.deferredAliasRefinements, deferredAliasRefinement{
+					rt:        refinement,
+					base:      resolved,
+					namespace: scoped.Namespace,
+					usings:    scoped.Usings,
+				})
+				return
+			}
 			resolved := a.resolveType(target)
 			if IsInvalidType(resolved) {
 				return

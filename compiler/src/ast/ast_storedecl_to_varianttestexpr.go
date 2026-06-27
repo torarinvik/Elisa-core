@@ -291,9 +291,10 @@ type ExternTypeDecl struct {
 	Name        string
 }
 type TypeAliasDecl struct {
-	Position lexer.Pos
-	Name     string
-	Target   TypeExpr
+	Position   lexer.Pos
+	Name       string
+	TypeParams []string // value parameters for parametric refinement aliases, e.g. `[cap]` in `type SlotIndex[cap] = u32 is InRange[0, cap]`
+	Target     TypeExpr
 }
 
 // RefineDecl is a NAMED, reusable refinement alias (docs/85 "Level 2"):

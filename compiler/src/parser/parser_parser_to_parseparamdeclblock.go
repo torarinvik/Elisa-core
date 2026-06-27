@@ -964,10 +964,13 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	// Optional `[param, ...]` for parametric refinement aliases: `type Name[cap] = base is Law[..cap..]`.
+	// parseFuncGenericParams already peeks for `[` itself, so call it unconditionally.
+	typeParams, _, _, _ := p.parseFuncGenericParams()
 	p.expect(lexer.TOKEN_ASSIGN)
 	target := p.parseTypeExpr()
 	p.expectNewline()
-	return &ast.TypeAliasDecl{Position: pos, Name: name, Target: target}
+	return &ast.TypeAliasDecl{Position: pos, Name: name, TypeParams: typeParams, Target: target}
 }
 func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
 	pos := p.cur().Pos
