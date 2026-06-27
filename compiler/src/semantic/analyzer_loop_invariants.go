@@ -467,10 +467,24 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 	// hypotheses below and with capture's guarantee that they reference only pre-body values — so the
 	// invariant's `arr[k]` becomes `(select (store arr idx val) k)` after substitution, and z3's array
 	// theory proves the inductive step (the just-written cell plus the IH on the rest).
+	//
+	// MULTI-STORE: when the same array has multiple element stores (captured in body order), we compose
+	// them as nested `(store BASE idx val)` with the LATER store outermost. The base for the first store
+	// is the free pre-body array constant; the base for each subsequent store is the already-composed
+	// term. This faithfully models `arr[i] <- a; arr[i+1] <- b` as `(store (store arr i a) (i+1) b)`,
+	// which z3's array theory reads element-wise correctly for the inductive step.
 	for _, st := range arrayStores {
-		arrTerm, ok := tr.arrayTermEnv(st.array, nil)
-		if !ok {
-			return false, ""
+		// Base: if a prior store to this array already built a composed term, use it; otherwise start
+		// from the free pre-body array constant.
+		var baseTerm string
+		if prior, exists := env[st.arrayName]; exists {
+			baseTerm = prior
+		} else {
+			var ok bool
+			baseTerm, ok = tr.arrayTermEnv(st.array, nil)
+			if !ok {
+				return false, ""
+			}
 		}
 		idxTerm, ok := tr.termEnv(st.index, nil)
 		if !ok {
@@ -480,7 +494,7 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		if !ok {
 			return false, ""
 		}
-		env[st.arrayName] = "(store " + arrTerm + " " + idxTerm + " " + valTerm + ")"
+		env[st.arrayName] = "(store " + baseTerm + " " + idxTerm + " " + valTerm + ")"
 	}
 	// Lower the obligation into the central VC IR (shared folder + smart constructors) so a
 	// preservation/termination goal that constant-folds to `true` is discharged with NO solver call and
@@ -612,22 +626,34 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 				// Array-element store `arr[idx] <- val`, modeled as `(store arr idx val)`. Sound only when
 				// arr is a bare array variable; idx and val are pure arithmetic; and idx/val reference only
 				// PRE-body values (no variable assigned EARLIER in this body — else the store would observe
-				// a post-assignment value, breaking the simultaneous-substitution model). The array is
-				// element-stored at most once and never also whole-reassigned.
+				// a post-assignment value, breaking the simultaneous-substitution model). The array must
+				// never be whole-reassigned in the same body.
+				//
+				// MULTI-STORE: two or more stores to the SAME array are supported on the strict invariant
+				// path. The SMT model composes them as nested `(store (store arr idx1 val1) idx2 val2)` in
+				// body order (later store outermost). Sound because exprIsPureArith forbids array reads, so
+				// each store's idx/val can only reference PRE-body scalar values; the ordering hazard
+				// (store2 observing store1's result) cannot occur. The usual `assigned[r]` check blocks
+				// idx/val from reading a scalar assigned earlier in the same body.
 				//
 				// On the TERMINATION path only, the array base may also be a stable struct-FIELD path
 				// rooted at a single receiver identifier through `.field` hops (`self.xs`, `self.a.b`).
 				// Such an element store changes the field array's CONTENTS but no scalar counter and not
 				// its `.count`, so it is irrelevant to a scalar / field-count measure decrease and is
 				// discarded exactly like the bare-array case. The "stored-once / not-also-reassigned"
-				// tracking is keyed by the NORMALIZED field-path string so two stores to the same path —
-				// or a store plus a whole-field reassignment — are still rejected. The strict invariant
-				// path keeps requiring a bare-Ident base (no field key produced there).
+				// tracking is keyed by the NORMALIZED field-path string so a store plus a whole-field
+				// reassignment is still rejected. The strict invariant path keeps requiring a bare-Ident
+				// base (no field key produced there).
 				arrKey, arrOK := loopStoreTargetBaseKey(target, forTermination)
 				if !arrOK {
 					return nil, nil, false
 				}
-				if storedArrays[arrKey] || assigned[arrKey] {
+				// Reject whole-reassignment of an array that has been element-stored (and vice versa via
+				// the `storedArrays[arrKey]` check in the scalar-Ident branch above). Multiple element
+				// stores to the same array are allowed on the strict invariant path (composed as nested
+				// stores in SMT), but still rejected on the termination path (field arrays; double stores
+				// don't affect scalar measures and the termination prover already declines on them).
+				if assigned[arrKey] || (forTermination && storedArrays[arrKey]) {
 					return nil, nil, false
 				}
 				if !storeOperandPure(target.Index) || !storeOperandPure(n.Value) {
@@ -642,9 +668,8 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 					}
 				}
 				// The termination prover proves only the scalar measure and discards stores, so recording
-				// them is unnecessary there; on the invariant path the store IS modeled in SMT. Either way
-				// the array is still marked stored so a later whole-reassignment or double element-store is
-				// rejected (the simultaneous-substitution invariant must hold regardless of mode).
+				// them is unnecessary there; on the invariant path each store is appended in body order so
+				// the SMT tier can fold them into a left-nested (store ...) chain, outer = last write.
 				if !forTermination {
 					stores = append(stores, loopArrayStore{arrayName: arrKey, array: target.Object, index: target.Index, value: n.Value})
 				}
