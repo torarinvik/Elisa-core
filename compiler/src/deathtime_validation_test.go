@@ -25,6 +25,7 @@ import (
 //     death point (so a later cohort exists whose stacks they could hand off to — a reuse win)
 //   - multi-cohort functions (>1 distinct death point): distinct lifetimes were resolved
 func TestDeathTimeTightnessReport(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	corpus := filepath.Join(repoRoot, "Code", "test_programs")
 	entries, err := filepath.Glob(filepath.Join(corpus, "*.elisa"))
@@ -34,11 +35,11 @@ func TestDeathTimeTightnessReport(t *testing.T) {
 	sort.Strings(entries)
 
 	var (
-		analyzed, skipped               int
-		totalAllocs, escaping, inFunc   int
-		earlyDying, multiCohortFuncs    int
-		funcsWithAllocs                 int
-		returnEscapes, argEscapes       int
+		analyzed, skipped             int
+		totalAllocs, escaping, inFunc int
+		earlyDying, multiCohortFuncs  int
+		funcsWithAllocs               int
+		returnEscapes, argEscapes     int
 	)
 	for _, path := range entries {
 		src, err := os.ReadFile(path)

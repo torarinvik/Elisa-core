@@ -12,6 +12,7 @@ import (
 // reconstructible element type, so the parallel decomposition is well-defined. Ineligible maps are a
 // clear error, not a silent sequential fallback.
 func TestByParMapRejectsIneligible(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"filter": "out: darray[i64] = [x for x in a if x > 0 by par]",
 		"range":  "out: darray[i64] = [i*2 for i in 0..<10 by par]",
@@ -37,6 +38,7 @@ func TestByParMapRejectsIneligible(t *testing.T) {
 // by_par_map_smoke proves a `by par` map computes the same result as the sequential map across an
 // identity-ish, a type-changing, and a struct-element transform.
 func TestRunCLIByParMapSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "by_par_map_smoke.elisa")
 

@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated.elisa")
 	src := "@test\ndef sample_case() -> void:\n    pass\n"
@@ -33,6 +34,7 @@ func TestRunCLIPrintsAnnotatedFunctionsInAST(t *testing.T) {
 	}
 }
 func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated_extern.elisa")
 	src := "struct Holder:\n    value: i32&\n\nstruct Window:\n    items: view[Holder]\n\n@borrows_return(window.items[*])\nextern borrow_value(window: Window) -> view[Holder]\n"
@@ -62,6 +64,7 @@ func TestRunCLIPrintsAnnotatedExternFunctionsInAST(t *testing.T) {
 	}
 }
 func TestRunCLIPrintsConstEnumInAST(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_ast.elisa")
 	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\ndef current_kind() -> JsonNodeKind:\n    return JsonNodeKind.String\n"
@@ -86,6 +89,7 @@ func TestRunCLIPrintsConstEnumInAST(t *testing.T) {
 	}
 }
 func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_llvm.elisa")
 	src := "const enum JsonNodeKind of i8:\n    Invalid = -1\n    Null\n    Bool = 1\n    String\n\nconst DEFAULT_KIND: JsonNodeKind = JsonNodeKind.String\n\ndef kind_raw(kind: JsonNodeKind) -> i8:\n    return kind.i8()\n\ndef is_string(kind: JsonNodeKind) -> bool:\n    return kind == JsonNodeKind.String\n\ndef default_kind() -> JsonNodeKind:\n    return DEFAULT_KIND\n\ndef make_kind() -> JsonNodeKind:\n    return 1.i8().JsonNodeKind()\n"
@@ -111,6 +115,7 @@ func TestRunCLICompilesConstEnumSourceToLLVM(t *testing.T) {
 }
 
 func TestRunCLICompilesConstEnumFlagsToLLVM(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir, err := os.MkdirTemp(repoRoot, ".tmp-const-enum-flags-*")
 	if err != nil {
@@ -141,6 +146,7 @@ func TestRunCLICompilesConstEnumFlagsToLLVM(t *testing.T) {
 }
 
 func TestRunCLICompilesConstEnumBitwiseOpsToLLVM(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_bitwise.elisa")
 	src := "const enum CpuFlag of u8:\n    C = 1\n    Z = 2\n    I = 4\n    N = 128\n\n\ndef mask() -> u8:\n    return CpuFlag.C | CpuFlag.I\n\n\ndef has_zero(p: u8) -> bool:\n    return (p & CpuFlag.Z) != 0\n\n\ndef clear_negative(p: u8) -> u8:\n    return p & (CpuFlag.N ^ 0xFF)\n"
@@ -166,6 +172,7 @@ func TestRunCLICompilesConstEnumBitwiseOpsToLLVM(t *testing.T) {
 }
 
 func TestRunCLIRejectsLegacyCastSyntax(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_cast_error.elisa")
 	src := "const VALUE: i64 = 1.cast[i64]()\n"
@@ -184,6 +191,7 @@ func TestRunCLIRejectsLegacyCastSyntax(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_reverse_iter_error.elisa")
 	src := "def walk(items: darray[int]) -> void:\n    for rev value in items:\n        pass\n"
@@ -205,6 +213,7 @@ func TestRunCLIRejectsLegacyReverseIterableLoopSyntax(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsLegacyReprCStructSyntax(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "legacy_repr_c_struct_error.elisa")
 	src := "repr(c) struct Holder:\n    value: i32&\n"
@@ -260,6 +269,7 @@ func TestRunCLIRejectsInternalRuntimeCarrierTypes(t *testing.T) {
 	}
 }
 func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_single_use.elisa")
 	src := "def write_once(text: u8&) -> int:\n    can Console.Write:\n        return puts(text)\n\ndef assign_once(target: mutable i64&):\n    can Memory.Allocate:\n        target <- alloc_value()\n"
@@ -292,6 +302,7 @@ func TestRunCLIFmtNormalizesSingleStatementGrantBlocks(t *testing.T) {
 	}
 }
 func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_panic.elisa")
 	src := "def boom():\n    can Abort.Panic:\n        panic(\"boom\")\n"
@@ -317,6 +328,7 @@ func TestRunCLIFmtKeepsPanicGrantBlocksInSurfaceSyntax(t *testing.T) {
 	}
 }
 func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_signal.elisa")
 	src := "permission FooEffect:\n    pass\n\npermission ConsoleEffect:\n    Write\n\ndef run() -> void:\n    can FooEffect, ConsoleEffect.Write:\n        signal FooEffect\n        signal ConsoleEffect.Write\n"
@@ -359,6 +371,7 @@ func TestRunCLIFmtKeepsSignalSurfaceSyntax(t *testing.T) {
 	}
 }
 func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grant_fmt_try_return.elisa")
 	src := "error FormatError:\n    WriteFailed\n\nextern checked() -> int error[FormatError] can[Console.Format]\n\ndef run() -> int:\n    can Console.Format:\n        return try checked() else 1\n"
@@ -396,6 +409,7 @@ func TestRunCLIFmtRoundTripsTryReturnGrantBlocks(t *testing.T) {
 	}
 }
 func TestRunCLIPrintsPostfixCastHookSyntaxAsPostfixShorthandInAST(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_ast.elisa")
 	src := "const VALUE: i64 = 1.i64()\n"
@@ -420,6 +434,7 @@ func TestRunCLIPrintsPostfixCastHookSyntaxAsPostfixShorthandInAST(t *testing.T) 
 	}
 }
 func TestRunCLICompilesBuiltinPostfixCastWithoutHook(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "builtin_postfix_cast_llvm.elisa")
 	src := "def via_postfix() -> i64:\n    return 21.i64()\n"
@@ -446,6 +461,7 @@ func TestRunCLICompilesBuiltinPostfixCastWithoutHook(t *testing.T) {
 }
 
 func TestRunCLICompilesBuiltinTypeConstructorCastWithoutHook(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "builtin_type_constructor_cast_llvm.elisa")
 	src := "def via_constructor() -> i64:\n    return i64(21)\n"
@@ -472,6 +488,7 @@ func TestRunCLICompilesBuiltinTypeConstructorCastWithoutHook(t *testing.T) {
 }
 
 func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_llvm.elisa")
 	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64:\n    if op == Op.Add:\n        return 10\n    return 20\n\ndef via_postfix(op: Op) -> i64:\n    return op.i64()\n"
@@ -501,6 +518,7 @@ func TestRunCLICompilesPostfixCastHookToHookCall(t *testing.T) {
 }
 
 func TestRunCLICompilesTypeConstructorCastHookToHookCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "type_constructor_cast_hook_llvm.elisa")
 	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64:\n    if op == Op.Add:\n        return 10\n    return 20\n\ndef via_constructor(op: Op) -> i64:\n    return i64(op)\n"
@@ -530,6 +548,7 @@ func TestRunCLICompilesTypeConstructorCastHookToHookCall(t *testing.T) {
 }
 
 func TestRunCLICompilesOptionalPostfixCastHookToHookCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "optional_postfix_cast_hook_llvm.elisa")
 	src := "enum Op:\n    Add\n    Sub\n\ndef __cast__(op: Op) -> i64?:\n    if op == Op.Add:\n        return 10\n    return null\n\ndef via_optional_postfix(op: Op) -> i64?:\n    return op.i64?()\n"
@@ -558,6 +577,7 @@ func TestRunCLICompilesOptionalPostfixCastHookToHookCall(t *testing.T) {
 	}
 }
 func TestRunCLICompilesMultiplePostfixCastHooksInOneFile(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "multiple_postfix_cast_hooks.elisa")
 	src := "const enum LuaUnaryOp of i8:\n    NEGATE = 0\n    NOT = 1\n\nconst enum LuaBinaryOp of i8:\n    ADD = 0\n    SUB = 1\n\ndef __cast__(op: LuaBinaryOp) -> i64:\n    if op == LuaBinaryOp.ADD:\n        return 3\n    return i64(op) + 5\n\ndef __cast__(op: LuaUnaryOp) -> i64:\n    if op == LuaUnaryOp.NEGATE:\n        return 29\n    return 31\n\ndef binary_score(op: LuaBinaryOp) -> i64:\n    return op.i64()\n\ndef unary_score(op: LuaUnaryOp) -> i64:\n    return op.i64()\n"
@@ -587,6 +607,7 @@ func TestRunCLICompilesMultiplePostfixCastHooksInOneFile(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_reject_arrow.elisa")
 	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef bad(op: Op) -> i64:\n    return op -> i64\n"
@@ -605,6 +626,7 @@ func TestRunCLIRejectsArrowCastWhenOnlyPostfixHookExists(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsDotCastSyntaxWhenOnlyPostfixHookExists(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "postfix_cast_hook_reject_dot_cast.elisa")
 	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef bad(op: Op) -> i64:\n    return op.cast[i64]\n"
@@ -623,6 +645,7 @@ func TestRunCLIRejectsDotCastSyntaxWhenOnlyPostfixHookExists(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsDuplicatePostfixCastHooksForSamePair(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "duplicate_postfix_cast_hooks.elisa")
 	src := "enum Op:\n    Add\n\ndef __cast__(op: Op) -> i64:\n    return 10\n\ndef __cast__(op: Op) -> i64:\n    return 20\n"
@@ -641,6 +664,7 @@ func TestRunCLIRejectsDuplicatePostfixCastHooksForSamePair(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsPostfixCastHookWithWrongArity(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_postfix_cast_hook_arity.elisa")
 	src := "enum Op:\n    Add\n\ndef __cast__(op: Op, extra: i64) -> i64:\n    return extra\n"
@@ -659,6 +683,7 @@ func TestRunCLIRejectsPostfixCastHookWithWrongArity(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsImplicitIntReturnToConstEnum(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "const_enum_reject.elisa")
 	src := "const enum Kind of i8:\n    A\n\ndef bad() -> Kind:\n    return 0\n"

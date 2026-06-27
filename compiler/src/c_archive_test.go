@@ -11,6 +11,7 @@ import (
 )
 
 func TestEmitCArchiveBuildsLinkableArchiveWithRuntime(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

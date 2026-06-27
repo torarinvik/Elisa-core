@@ -12,6 +12,7 @@ import (
 // runtime `for_indices_par` combinator over disjoint index bands) produces results bit-identical to
 // the equivalent sequential loop, for both a 0-based and a non-zero-based range.
 func TestRunCLIByParLoopSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "by_par_loop_smoke.elisa")
 
@@ -28,6 +29,7 @@ func TestRunCLIByParLoopSmoke(t *testing.T) {
 // shared backing buffer), so it must be a hard error -- not a silent sequential fallback. The
 // race-safe form addresses the output through a thread-shareable Slice band instead.
 func TestByParLoopRejectsSharedDarray(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := "include \"" + filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa") + "\"\n" +
 		"def t() -> void:\n" +
@@ -52,6 +54,7 @@ func TestByParLoopRejectsSharedDarray(t *testing.T) {
 // `by simd` on a range loop is rejected (recognized loop shapes vectorize by default), and a `by`
 // marker that is neither `par` nor `simd` is a clear error.
 func TestByParLoopRejectsBadMarkers(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"simd":    "for i in 0 ..< 10 by simd:\n\t\tconsume(i)\n",
 		"unknown": "for i in 0 ..< 10 by wat:\n\t\tconsume(i)\n",

@@ -18,6 +18,7 @@ import (
 // init on an unresolved symbol. region(2) is one i64-sized block, so the 4-element darray forces a
 // block growth through new_region_backend(MALLOC), and destroy frees via free_region_backend(MALLOC).
 func TestRunCLIRegionUsingMallocBacksBlocksAcrossRuntimeObject(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -86,6 +87,7 @@ def region_default_and_malloc_agree() -> void:
 // TestRunCLIRegionRejectsUnknownAllocator confirms the `using <allocator>` surface only accepts the
 // supported allocator names; an unknown one is a semantic error rather than silently ignored.
 func TestRunCLIRegionRejectsUnknownAllocator(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_unknown_allocator_fixture.elisa")
 	src := `def f() -> i32:

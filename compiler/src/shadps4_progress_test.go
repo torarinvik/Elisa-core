@@ -9,6 +9,7 @@ import (
 )
 
 func TestShadPS4ElisaHarnessProgressClean(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	tests := []struct {
 		name string

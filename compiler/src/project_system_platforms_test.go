@@ -8,6 +8,7 @@ import (
 // platformLinkFlagsFor selects the host platform's link flags from a per-target
 // "platforms" map, normalizing "darwin" -> "macos". A nil/empty map yields no flags.
 func TestPlatformLinkFlagsForSelectsHostOS(t *testing.T) {
+	t.Parallel()
 	platforms := map[string]projectPlatformOverride{
 		"macos": {LinkFlags: []string{"-lZydis"}},
 		"linux": {LinkFlags: []string{"-Wl,--no-as-needed", "-lZydis", "-Wl,--as-needed"}},
@@ -33,6 +34,7 @@ func TestPlatformLinkFlagsForSelectsHostOS(t *testing.T) {
 }
 
 func TestPlatformLinkFlagsForEmptyAndUnmatched(t *testing.T) {
+	t.Parallel()
 	if got := platformLinkFlagsFor(nil); got != nil {
 		t.Fatalf("nil platforms map must yield nil, got %v", got)
 	}

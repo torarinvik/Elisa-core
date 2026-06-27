@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunCLIStdPredicateWaitAcceptedUnderConcurrencyStrict(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "predicate_wait_strict.elisa")

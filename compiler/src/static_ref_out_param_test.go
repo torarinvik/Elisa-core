@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunCLIStaticStringRefOutParamRebindsCallerSlot(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "static_ref_out_param_fixture.elisa")

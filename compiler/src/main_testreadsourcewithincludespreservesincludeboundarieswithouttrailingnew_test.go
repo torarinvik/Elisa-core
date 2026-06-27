@@ -26,6 +26,7 @@ func stripLineDirectives(s string) string {
 }
 
 func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
 	midPath := filepath.Join(dir, "mid.elisa")
@@ -53,6 +54,7 @@ func TestReadSourceWithIncludesPreservesIncludeBoundariesWithoutTrailingNewlines
 	}
 }
 func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
 	midPath := filepath.Join(dir, "mid.elisa")
@@ -85,6 +87,7 @@ func TestReadSourceWithIncludesAcceptsBareIncludeDirective(t *testing.T) {
 // absolute second arg as absolute (it concatenates), which previously made
 // `include "/abs/path.elisa"` resolve to `<dir>/abs/path.elisa` and fail.
 func TestReadSourceWithIncludesAcceptsAbsoluteIncludePath(t *testing.T) {
+	t.Parallel()
 	leafDir := t.TempDir()
 	rootDir := t.TempDir() // a DIFFERENT directory, so only an absolute path resolves
 	leafPath := filepath.Join(leafDir, "leaf.elisa")
@@ -109,6 +112,7 @@ func TestReadSourceWithIncludesAcceptsAbsoluteIncludePath(t *testing.T) {
 	}
 }
 func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
 	midPath := filepath.Join(dir, "mid.elisa")
@@ -137,6 +141,7 @@ func TestReadSourceWithIncludesAcceptsPascalIncludeDirectives(t *testing.T) {
 }
 
 func TestReadSourceWithIncludesPreservesIndentedIncludeContext(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
 	rootPath := filepath.Join(dir, "root.elisa")
@@ -161,6 +166,7 @@ func TestReadSourceWithIncludesPreservesIndentedIncludeContext(t *testing.T) {
 }
 
 func TestRunCLICompilesIndentedIncludeInsideModule(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	leafPath := filepath.Join(dir, "leaf.elisa")
 	rootPath := filepath.Join(dir, "root.elisa")
@@ -184,6 +190,7 @@ func TestRunCLICompilesIndentedIncludeInsideModule(t *testing.T) {
 }
 
 func TestRunCLICompilesModuleLocalConstLookup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	rootPath := filepath.Join(dir, "module_const.elisa")
 	src := "module M:\n    const ANSWER: int = 7\n\n    def answer() -> int:\n        return ANSWER\n\ndef main() -> int:\n    return M::answer()\n"
@@ -203,6 +210,7 @@ func TestRunCLICompilesModuleLocalConstLookup(t *testing.T) {
 }
 
 func TestRunCLICompilesModuleLocalGlobalLookup(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	rootPath := filepath.Join(dir, "module_global.elisa")
 	src := "module M:\n    global mutable counter: int = 5\n\n    def value() -> int:\n        return counter\n\ndef main() -> int:\n    return M::value()\n"
@@ -221,6 +229,7 @@ func TestRunCLICompilesModuleLocalGlobalLookup(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.elisa")
 	outputDir := t.TempDir()
@@ -284,6 +293,7 @@ func TestRunCLIEmitsBitcodeAndObjectForFixtureProgram(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "export_vec2i.elisa")
 	outputPath := filepath.Join(t.TempDir(), "export_vec2i.h")
@@ -320,6 +330,7 @@ func TestRunCLIEmitsHeaderForExportFixture(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsModuleInterface(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_interface_fixture.elisa")
 	interfacePath := filepath.Join(fixtureDir, "module_interface_fixture.elisai")
@@ -382,6 +393,7 @@ func TestRunCLIEmitsModuleInterface(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	leafPath := filepath.Join(fixtureDir, "leaf.elisa")
 	midPath := filepath.Join(fixtureDir, "mid.elisa")
@@ -426,6 +438,7 @@ func TestRunCLIEmitsSourceDependenciesJSON(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsSourceDependenciesJSONForBareInclude(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	leafPath := filepath.Join(fixtureDir, "leaf.elisa")
 	midPath := filepath.Join(fixtureDir, "mid.elisa")
@@ -496,6 +509,7 @@ func TestParseArgsAcceptsOptimizationShorthands(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsLinkerFlags(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-L", "/opt/example/lib", "-lLLVM-C", "-link", "-Wl,-rpath,/opt/example/lib", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -512,6 +526,7 @@ func TestParseArgsAcceptsLinkerFlags(t *testing.T) {
 }
 
 func TestParseArgsAcceptsConcurrencyStrictFlag(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-Wconcurrency", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -529,6 +544,7 @@ func TestParseArgsAcceptsConcurrencyStrictFlag(t *testing.T) {
 }
 
 func TestParseArgsAcceptsUnifiedStrictFlag(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-Wstrict", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -554,6 +570,7 @@ func TestParseArgsAcceptsUnifiedStrictFlag(t *testing.T) {
 // docs/102: -Wprogress activates the (already-built, dormant) progress-safety obligation checker
 // on its own dial, without dragging in the rest of -Wstrict.
 func TestParseArgsProgressDialIsIsolated(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-Wprogress", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -576,6 +593,7 @@ func TestParseArgsProgressDialIsIsolated(t *testing.T) {
 // docs/90: the SMT discharge tier is ON by default; `-nosmt` opts out. (A missing
 // solver latches off and falls back to the runtime check, so default-on is safe.)
 func TestParseArgsEnablesSMTByDefault(t *testing.T) {
+	t.Parallel()
 	def, err := parseArgs([]string{"fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -593,6 +611,7 @@ func TestParseArgsEnablesSMTByDefault(t *testing.T) {
 }
 
 func TestParseArgsExplainHoleEnablesProofHoleHints(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"--explain-hole", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -658,6 +677,7 @@ def use_raw(slot: mutable atomic[i64]&) -> i64:
 }
 
 func TestRunCLIUnifiedStrictEnforcesUnsafePermissions(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "strict_unsafe_index.elisa")
 	src := `def read_at(xs: darray[u8], i: int) -> u8:
@@ -681,6 +701,7 @@ func TestRunCLIUnifiedStrictEnforcesUnsafePermissions(t *testing.T) {
 }
 
 func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		args []string
@@ -702,6 +723,7 @@ func TestParseArgsRejectsRemovedPackedABI(t *testing.T) {
 	}
 }
 func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -714,6 +736,7 @@ func TestParseArgsDefaultsPackedLoweringToCanonicalProfile(t *testing.T) {
 	}
 }
 func TestResolveProjectTargetRejectsRemovedPackedABI(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	project := &resolvedProject{
 		root:     projectRoot,
@@ -737,6 +760,7 @@ func TestResolveProjectTargetRejectsRemovedPackedABI(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-emit", "packed-info", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -746,6 +770,7 @@ func TestParseArgsAcceptsPackedInspectEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsLoweredEmitAlias(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-emit", "lower", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -755,6 +780,7 @@ func TestParseArgsAcceptsLoweredEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-emit", "sema", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -764,6 +790,7 @@ func TestParseArgsAcceptsSemanticEmitAlias(t *testing.T) {
 	}
 }
 func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
+	t.Parallel()
 	options, err := parseArgs([]string{"-emit", "fact-trace", "fixture.elisa"})
 	if err != nil {
 		t.Fatalf("parseArgs returned error: %v", err)
@@ -773,6 +800,7 @@ func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
 	}
 }
 func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.elisa")
 	src := "grammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
@@ -812,6 +840,7 @@ func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsSemanticReport(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "semantic_fixture.elisa")
 	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
@@ -848,6 +877,7 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "grammar_fact_fixture.elisa")
 	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
@@ -869,6 +899,7 @@ func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceReport(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 

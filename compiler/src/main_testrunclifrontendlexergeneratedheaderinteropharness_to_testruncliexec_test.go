@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -55,6 +56,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	}
 }
 func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -144,6 +146,7 @@ func TestRunCLIPackedMLASTUltraBenchSmoke(t *testing.T) {
 	runPackedMLASTBenchSmoke(t, exePath)
 }
 func TestRunCLIPackedMLExprReproSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	exePath := buildPackedMLExprReproExecutable(t, repoRoot, "-O0")
 
@@ -161,6 +164,7 @@ func TestRunCLIPackedMLExprReproSmoke(t *testing.T) {
 	}
 }
 func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -237,6 +241,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -272,6 +277,7 @@ func TestRunCLIExecutesJSONParserSelfHostedTests(t *testing.T) {
 	}
 }
 func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 
@@ -327,6 +333,7 @@ func TestRunCLICompilesStage1RuntimeToLLVM(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_escape.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def bad() -> u8&:\n    return \"oops\\q\".cast[u8&]\n"), 0o644); err != nil {
@@ -344,6 +351,7 @@ func TestRunCLIRejectsInvalidStringEscape(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "invalid_char.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def bad() -> i64:\n    return '\\u0080'.i64()\n"), 0o644); err != nil {
@@ -361,6 +369,7 @@ func TestRunCLIRejectsInvalidCharLiteral(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.elisa")
 	// Integral keys are now supported; a float key (no safe value equality) is still rejected.
@@ -380,6 +389,7 @@ func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -424,6 +434,7 @@ func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -468,6 +479,7 @@ func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesDequePortSmokeProgram(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")

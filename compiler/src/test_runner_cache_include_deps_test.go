@@ -9,6 +9,7 @@ import (
 )
 
 func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	includedPath := filepath.Join(dir, "runtime.inc")
 	bridgePath := filepath.Join(dir, "runtime_bridge.cpp")
@@ -58,6 +59,7 @@ func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludes(t *testing.T) {
 }
 
 func TestTestRunnerCacheArtifactForHashesQuotedForeignIncludesFromIncludeDirs(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	nativeDir := filepath.Join(dir, "native")
 	includeRoot := filepath.Join(dir, "include")

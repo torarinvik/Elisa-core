@@ -15,6 +15,7 @@ import (
 )
 
 func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
@@ -34,6 +35,7 @@ func TestRunCLIEmitsFilteredFactTraceReport(t *testing.T) {
 }
 
 func TestRunCLIExplainProofReportShowsClassesAndClosedWorld(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("z3"); err != nil {
 		t.Skip("z3 not on PATH; explain proof report test skipped")
 	}
@@ -80,6 +82,7 @@ def scoped_decline(n: i64):
 }
 
 func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
@@ -97,6 +100,7 @@ func TestRunCLIEmitsInterfaceFactTraceReport(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
@@ -122,6 +126,7 @@ func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	coreFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 	interfaceFixture := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
@@ -165,6 +170,7 @@ func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
@@ -183,6 +189,7 @@ func TestRunCLIEmitsFactTraceFilterIntersections(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
@@ -200,6 +207,7 @@ func TestRunCLIEmitsFactTraceSnapshotOnlyFilter(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
@@ -217,6 +225,7 @@ func TestRunCLIEmitsMixedRequireFactTrace(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.elisa")
 
@@ -234,6 +243,7 @@ func TestRunCLIEmitsPackedTreeStoreProvenanceFacts(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 
@@ -295,6 +305,7 @@ func TestRunCLIEmitsFactTraceJSONShape(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsFactTraceJSONStructuredSourcePos(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 
@@ -326,6 +337,7 @@ func TestRunCLIEmitsFactTraceJSONStructuredSourcePos(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsMalformedFactTraceFilters(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa")
 	cases := []string{"kind=", "=eq:widen", "unknown=eq:widen", "kind=widen", "fact_core_rules"}
@@ -410,6 +422,7 @@ func syntheticFactTraceResultForBenchmark(count int) *semantic.Result {
 	}
 }
 func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 
@@ -456,6 +469,7 @@ func TestRunCLICompilesJSONParserWithEnumDenseFixedOverrideByDefault(t *testing.
 	}
 }
 func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "packed_info.elisa")
 	src := "@packed_profile(build_heavy)\npacked enum Expr:\n    common:\n        @storage(side_table)\n        span: i64\n        @storage(inline)\n        kind: u32\n    Lit(value: i64)\n    End\n"
@@ -491,6 +505,7 @@ func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsRemovedPackedABIFlag(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "json_parser.elisa")
 
@@ -508,6 +523,7 @@ func TestRunCLIRejectsRemovedPackedABIFlag(t *testing.T) {
 	}
 }
 func TestEffectiveOptimizationLevelDefaultsByEmitMode(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name     string
 		emit     string
@@ -535,6 +551,7 @@ func TestEffectiveOptimizationLevelDefaultsByEmitMode(t *testing.T) {
 	}
 }
 func TestRunCLIGeneratedHeaderInteropHarness(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")

@@ -8,6 +8,7 @@ import (
 )
 
 func TestProgressPressureFixtures(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := filepath.Join(repoRoot, "compiler", "test", "progress")
 	tests := []struct {

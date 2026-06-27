@@ -73,6 +73,7 @@ func runATPLCLI(t *testing.T, args []string, stdin string) (string, string, erro
 }
 
 func TestATPLCLIExecutesFile(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "sample.atpl")
@@ -99,6 +100,7 @@ func TestATPLCLIExecutesFile(t *testing.T) {
 }
 
 func TestATPLCLIExecutesSTDIN(t *testing.T) {
+	t.Parallel()
 	stdout, stderr, err := runATPLCLI(t, nil, "x = 20\nx + 22\n")
 	if err != nil {
 		t.Fatalf("ATPL CLI stdin run failed: %v\nstdout:\n%s\nstderr:\n%s", err, stdout, stderr)
@@ -112,6 +114,7 @@ func TestATPLCLIExecutesSTDIN(t *testing.T) {
 }
 
 func TestATPLCLIReplCommandsAndState(t *testing.T) {
+	t.Parallel()
 	stdin := strings.Join([]string{
 		"x = 40",
 		"",
@@ -145,6 +148,7 @@ func TestATPLCLIReplCommandsAndState(t *testing.T) {
 }
 
 func TestATPLCLIReplLoadAndOpenFiles(t *testing.T) {
+	t.Parallel()
 	fixtureRoot := filepath.Join(t.TempDir(), "fixtures with spaces")
 	if err := os.MkdirAll(fixtureRoot, 0o755); err != nil {
 		t.Fatalf("failed to create ATPL REPL fixture dir: %v", err)
@@ -187,6 +191,7 @@ func TestATPLCLIReplLoadAndOpenFiles(t *testing.T) {
 }
 
 func TestATPLCLIReplReloadResetsLastLoadedFile(t *testing.T) {
+	t.Parallel()
 	fixturePath := filepath.Join(t.TempDir(), "reload.atpl")
 	if err := os.WriteFile(fixturePath, []byte("loaded = 40\nloaded\n"), 0o644); err != nil {
 		t.Fatalf("failed to write ATPL reload fixture: %v", err)
@@ -221,6 +226,7 @@ func TestATPLCLIReplReloadResetsLastLoadedFile(t *testing.T) {
 }
 
 func TestATPLCLIReportsDetailedSTDINErrors(t *testing.T) {
+	t.Parallel()
 	stdout, stderr, err := runATPLCLI(t, nil, "x\n")
 	if err == nil {
 		t.Fatalf("expected ATPL CLI stdin run to fail\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
@@ -234,6 +240,7 @@ func TestATPLCLIReportsDetailedSTDINErrors(t *testing.T) {
 }
 
 func TestATPLExamplesMatchGoldenViaSelfHostedCLI(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	binPath := buildATPLCLI(t)
 	examplesRoot := filepath.Join(repoRoot, "Code", "elisacore_atpl", "examples")

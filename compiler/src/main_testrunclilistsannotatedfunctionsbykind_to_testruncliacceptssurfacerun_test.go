@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "annotated_lists.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@fixture\ndef shared_seed() -> int:\n    return 7\n\n@bench\ndef bench_hot_loop() -> void:\n    pass\n"
@@ -88,6 +89,7 @@ func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 	}
 }
 func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "filter_reject.elisa")
 	if err := os.WriteFile(fixturePath, []byte("def sample_case() -> void:\n    pass\n"), 0o644); err != nil {
@@ -105,6 +107,7 @@ func TestRunCLIRejectsFilterOutsideAnnotationListModes(t *testing.T) {
 	}
 }
 func TestRunCLIFormatsSourceCanonically(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "format_fixture.elisa")
 	src := "@test\ndef sample_case(value: i64) -> i64:\n    values=[1,2,3]\n    if likely value > 0:\n        return (value)\n    return 0\n"
@@ -148,6 +151,7 @@ func TestRunCLIFormatsSourceCanonically(t *testing.T) {
 	}
 }
 func TestRunCLIEmitsReferenceDocs(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "reference_fixture.elisa")
 	src := "struct Pair:\n    left: i64\n    right: i64\n\n@test\ndef build_pair(value: i64) -> Pair:\n    return Pair(value, value)\n"
@@ -182,6 +186,7 @@ func TestRunCLIEmitsReferenceDocs(t *testing.T) {
 	}
 }
 func TestRunCLIGeneratesSkippedTestRunnerSource(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "skipped_test_runner_fixture.elisa")
 	src := "@skip(todo)\n@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
@@ -210,6 +215,7 @@ func TestRunCLIGeneratesSkippedTestRunnerSource(t *testing.T) {
 	}
 }
 func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "test_runner_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n\ndef helper() -> void:\n    pass\n"
@@ -244,6 +250,7 @@ func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 	}
 }
 func TestRunCLIGeneratesFilteredTestRunnerSource(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "filtered_test_runner_fixture.elisa")
 	src := "@test\ndef alpha_case() -> void:\n    pass\n\n@test\ndef beta_case() -> void:\n    pass\n"
@@ -272,6 +279,7 @@ func TestRunCLIGeneratesFilteredTestRunnerSource(t *testing.T) {
 	}
 }
 func TestRunCLIRunsGeneratedTestRunner(t *testing.T) {
+	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {
 		t.Skip("clang not available")
@@ -338,6 +346,7 @@ func TestRunCLIRunsGeneratedTestRunner(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesSelectedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -372,6 +381,7 @@ func TestRunCLIExecutesSelectedTests(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -404,6 +414,7 @@ func TestRunCLIExecutesEffectfulSelectedTests(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesPoolBackedSelectedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -469,6 +480,7 @@ def pool_backed_case() -> void:
 	}
 }
 func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -504,6 +516,7 @@ def local_view(src: u8&) -> i64:
 	}
 }
 func TestRunCLIAcceptsSurfaceRuntimeBackedLocalAnnotationsInObjectBuild(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

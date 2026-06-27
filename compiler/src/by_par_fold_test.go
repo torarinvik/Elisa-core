@@ -11,6 +11,7 @@ import (
 // by_par_fold_smoke proves a `by par` fold (lowered to the runtime parallel `reduce` combinator)
 // produces a result identical to the sequential fold, for + and * over large inputs.
 func TestRunCLIByParFoldSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "by_par_fold_smoke.elisa")
 
@@ -27,6 +28,7 @@ func TestRunCLIByParFoldSmoke(t *testing.T) {
 // filter/bindings/range) so the parallel reduction's reordering is never silently incorrect.
 // Ineligible folds are a clear parser error, not a sequential fallback.
 func TestByParFoldRejectsIneligibleFolds(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"filter":                  "return (acc + x for x in a if x > 0 with acc: i64 = 0 by par)",
 		"non-assoc op":            "return (acc - x for x in a with acc: i64 = 0 by par)",

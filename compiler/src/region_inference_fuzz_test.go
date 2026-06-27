@@ -110,6 +110,7 @@ func generateRegionProgram(seed int64) (string, int64) {
 // filled, summed, and freed. If the inner region's teardown corrupted the surviving outer darray (or
 // the outer darray were grown from the wrong/short-lived arena), the checksum breaks.
 func TestRegionInferenceDifferingLifetimes(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("native build; skipped under -short")
 	}
@@ -143,6 +144,7 @@ def differing_lifetimes() -> void:
 // `__auto_*` region is threaded+adopted from the caller; see TestBuildLocalReturnAdoptedNoUAF.
 // Only the synthesized-auto-region return is adopted; an explicit named local region is not.)
 func TestRegionInferenceRejectsEscape(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("native build; skipped under -short")
 	}
@@ -166,16 +168,24 @@ def leak() -> darray[i64]:
 // TestRegionInferenceFuzz generates randomized nested-region programs, compiles each
 // to native, runs it, and asserts the runtime checksum matches the Go-computed one.
 func TestRegionInferenceFuzz(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("heavy fuzz test; skipped under -short")
 	}
+	// Each seed compiles+runs an independent generated program, so fan the 16 seeds
+	// out as parallel subtests instead of a serial loop — this is the single longest
+	// test in the package (~36s serial), and parallelizing its seeds shaves the
+	// suite's tail when the rest of the package has drained the cores.
 	for seed := int64(1); seed <= 16; seed++ {
-		body, expected := generateRegionProgram(seed)
-		exit, stdout, stderr := runStressProgram(t, fmt.Sprintf("region_fuzz_%d", seed), body)
-		if exit != 0 || !strings.Contains(stdout, "failed=0") {
-			t.Fatalf("seed %d: region-inference fuzz FAILED (exit %d, expected sum %d)\n"+
-				"--- generated program ---\n%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
-				seed, exit, expected, body, stdout, stderr)
-		}
+		t.Run(fmt.Sprintf("seed_%d", seed), func(t *testing.T) {
+			t.Parallel()
+			body, expected := generateRegionProgram(seed)
+			exit, stdout, stderr := runStressProgram(t, fmt.Sprintf("region_fuzz_%d", seed), body)
+			if exit != 0 || !strings.Contains(stdout, "failed=0") {
+				t.Fatalf("seed %d: region-inference fuzz FAILED (exit %d, expected sum %d)\n"+
+					"--- generated program ---\n%s\n--- stdout ---\n%s\n--- stderr ---\n%s",
+					seed, exit, expected, body, stdout, stderr)
+			}
+		})
 	}
 }

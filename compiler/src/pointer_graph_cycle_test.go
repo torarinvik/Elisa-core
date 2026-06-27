@@ -10,6 +10,7 @@ const pointerGraphCycleWarning = "raw pointer-graph cycle"
 // A raw mutual-recursion cycle (A → B → A, both edges bare `heap _&?` refs) is the
 // pointer-jungle anti-pattern spread across types — flagged, same as a direct self-ref.
 func TestRunCLIPointerGraphLintFlagsRawMutualCycle(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "mutual_cycle.elisa", `struct A:
     next: heap B&?
 
@@ -27,6 +28,7 @@ def main() -> i64:
 // The same A <-> B cycle made sound with `@owner`/`[@owner]` provenance is a single-region
 // graph whose lifetime is one decision — NOT flagged.
 func TestRunCLIPointerGraphLintAllowsRegionUnifiedCycle(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "region_cycle.elisa", `struct A[@owner]:
     next: B&? @owner
 
@@ -44,6 +46,7 @@ def main() -> i64:
 // `@intrusive` on one node is an acknowledged boundary that breaks the cycle for all
 // participants — the loop can only close through the intrusive node, so nothing is flagged.
 func TestRunCLIPointerGraphLintIntrusiveBreaksCycle(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "intrusive_cycle.elisa", `@intrusive
 struct A:
     next: heap B&?
@@ -61,6 +64,7 @@ def main() -> i64:
 
 // A non-cyclic raw chain (A → B, but B has no ref back) is not a cycle — NOT flagged.
 func TestRunCLIPointerGraphLintAllowsAcyclicRawChain(t *testing.T) {
+	t.Parallel()
 	out := compileAndCaptureStderr(t, "acyclic_chain.elisa", `struct A:
     next: heap B&?
 

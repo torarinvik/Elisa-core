@@ -13,6 +13,7 @@ import (
 // a thread-shareable Slice) produces results bit-identical to the equivalent sequential loop, for
 // both a darray source and a Slice source.
 func TestRunCLIByParCollectionSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "by_par_collection_smoke.elisa")
 
@@ -29,6 +30,7 @@ func TestRunCLIByParCollectionSmoke(t *testing.T) {
 // header aliases the shared backing buffer), so it must be a hard error -- not a silent sequential
 // fallback. The read source is fine because the lowering indexes it through a thread-shareable Slice.
 func TestByParCollectionRejectsSharedDarray(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	rt := filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
 	src := "include \"" + rt + "\"\n" +
@@ -55,6 +57,7 @@ func TestByParCollectionRejectsSharedDarray(t *testing.T) {
 // `by simd` on a collection loop is rejected, and a `by` marker that is neither `par` nor `simd` is a
 // clear error -- the same diagnostics as the range form.
 func TestByParCollectionRejectsBadMarkers(t *testing.T) {
+	t.Parallel()
 	cases := map[string]struct{ loop, want string }{
 		"simd":    {"for x in xs by simd:\n\t\tconsume(x)\n", "by simd"},
 		"unknown": {"for x in xs by wat:\n\t\tconsume(x)\n", "expected `par` after `by`"},

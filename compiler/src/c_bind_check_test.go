@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunCLIEmitsCBindLayoutCheck(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not available")
 	}
@@ -51,6 +52,7 @@ struct Header layout c:
 }
 
 func TestRunCLIEmitsCBindLayoutMismatch(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not available")
 	}
@@ -87,6 +89,7 @@ struct Header layout c:
 }
 
 func TestRunCLIEmitsCBindPrefixLayoutCheck(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not available")
 	}
@@ -126,6 +129,7 @@ struct HeaderPrefix layout c:
 }
 
 func TestRunCLIEmitsCBindLayoutManifestJSON(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not available")
 	}
@@ -197,6 +201,7 @@ struct Header layout c:
 }
 
 func TestRunCLIEmitsCBindLayoutCheckForTargetTriple(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("cc"); err != nil {
 		t.Skip("cc not available")
 	}
@@ -238,6 +243,7 @@ struct Header layout c:
 }
 
 func TestCBindShellFieldsPreserveQuotedIncludePaths(t *testing.T) {
+	t.Parallel()
 	got := shellFields(`-I"/tmp/path with spaces/include" -DNAME=value -iquote '/tmp/quoted path' escaped\\ value`)
 	want := []string{
 		"-I/tmp/path with spaces/include",

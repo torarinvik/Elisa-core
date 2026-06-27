@@ -8,6 +8,7 @@ import (
 // Mirrors `nm -m` output: the CUSA07399 hazard is the `_mprotect.1` undefined,
 // dynamically-looked-up duplicate that sits next to the real two-level `_mprotect`.
 func TestFindSplitNullBoundSymbols(t *testing.T) {
+	t.Parallel()
 	nmOut := `                 (undefined) external _mprotect (from libSystem)
                  (undefined) external _mprotect.1 (dynamically looked up)
 0000000100003f00 (__TEXT,__text) external _main
@@ -22,6 +23,7 @@ func TestFindSplitNullBoundSymbols(t *testing.T) {
 
 // A clean binary (no `.N` split symbols) must produce no warnings.
 func TestFindSplitNullBoundSymbolsClean(t *testing.T) {
+	t.Parallel()
 	nmOut := `                 (undefined) external _mprotect (from libSystem)
 0000000100003f00 (__TEXT,__text) external _main
                  (undefined) external _malloc (from libSystem)`
@@ -35,6 +37,7 @@ func TestFindSplitNullBoundSymbolsClean(t *testing.T) {
 // the first call segfaults (e.g. ctx_aos_store_new missing from the default runtime export
 // whitelist). System symbols resolved from libSystem must not be flagged.
 func TestFindNullBoundRuntimeHelperSymbols(t *testing.T) {
+	t.Parallel()
 	nmOut := `                 (undefined) external _ctx_aos_store_new (dynamically looked up)
                  (undefined) external _ctx_aos_store_alloc (dynamically looked up)
                  (undefined) external _arena_alloc (from libSystem)
@@ -50,6 +53,7 @@ func TestFindNullBoundRuntimeHelperSymbols(t *testing.T) {
 
 // Defined helpers and non-helper dynamic lookups must not be flagged.
 func TestFindNullBoundRuntimeHelperSymbolsClean(t *testing.T) {
+	t.Parallel()
 	nmOut := `0000000100001000 (__TEXT,__text) external _ctx_aos_store_new
                  (undefined) external _some_user_extern (dynamically looked up)
                  (undefined) external _malloc (from libSystem)`

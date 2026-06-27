@@ -12,6 +12,7 @@ import (
 // optionally-filtered numeric elements. This pins their value semantics (unconditional, filtered,
 // product, and an f64 reduction) against the equivalent fold.
 func TestRunCLINamedReducerSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "named_reducer_smoke.elisa")
 
@@ -27,6 +28,7 @@ func TestRunCLINamedReducerSmoke(t *testing.T) {
 // `min`/`max` have no identity element, so they return T? (null over empty/fully-filtered),
 // consumed by matching the optional. Pins min/max/filtered/empty/f64 value semantics.
 func TestRunCLINamedReducerMinMaxSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "named_reducer_minmax_smoke.elisa")
 
@@ -41,6 +43,7 @@ func TestRunCLINamedReducerMinMaxSmoke(t *testing.T) {
 
 // `sum`/`product` require a numeric element; a non-numeric source is a clear error.
 func TestNamedReducerRejectsNonNumeric(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	src := "include \"" + filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa") + "\"\n" +
 		"def t(a: darray[cstr]&) -> cstr:\n\tcan Memory.Allocate, Abort.Panic:\n\t\treturn sum x in a\n"

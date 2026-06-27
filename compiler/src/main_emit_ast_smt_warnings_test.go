@@ -14,6 +14,7 @@ import (
 // (`a*b is Bounded[4,100]` for a,b in [2,10]) must NOT surface a spurious "could not be proven
 // statically" warning here. (Regression: previously this path ran analysis without SMT, so it warned.)
 func TestEmitASTUsesSMTForRefinementWarnings(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("z3"); err != nil {
 		t.Skip("z3 not on PATH; SMT-backed inspection warning test skipped")
 	}
@@ -40,6 +41,7 @@ def mul(a: Small, b: Small) -> i64 is Bounded[4, 100]:
 // The counterpart: a genuinely FALSE refinement still warns under `-emit ast` (the SMT tier declines,
 // it is not silently dropped). So the fix made the warning ACCURATE, not absent.
 func TestEmitASTStillWarnsOnFalseRefinement(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("z3"); err != nil {
 		t.Skip("z3 not on PATH; SMT-backed inspection warning test skipped")
 	}

@@ -8,6 +8,7 @@ import (
 )
 
 func TestPerformanceFrictionDocsCoverConcurrencyRemediation(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(repoRootFromMainTest(t), "docs", "70-performance-friction.md")
 	data, err := os.ReadFile(path)
 	if err != nil {

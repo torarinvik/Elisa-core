@@ -9,6 +9,7 @@ import (
 )
 
 func TestRunCLIStdAtomicCellAcceptedUnderConcurrencyStrict(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "atomic_cell_strict.elisa")

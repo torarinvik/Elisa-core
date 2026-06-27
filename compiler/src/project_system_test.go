@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
+	t.Parallel()
 	baseDir := t.TempDir()
 
 	var stdout bytes.Buffer
@@ -74,6 +75,7 @@ func TestRunCLIInitScaffoldsProjectAndLibrary(t *testing.T) {
 }
 
 func TestRunCLIInitStrictScaffoldsStrictProjectPolicy(t *testing.T) {
+	t.Parallel()
 	baseDir := t.TempDir()
 
 	var stdout bytes.Buffer
@@ -101,6 +103,7 @@ func TestRunCLIInitStrictScaffoldsStrictProjectPolicy(t *testing.T) {
 }
 
 func TestRunCLIProjectBuildRunTestBenchAndView(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -187,6 +190,7 @@ func TestRunCLIProjectBuildRunTestBenchAndView(t *testing.T) {
 }
 
 func TestRunCLIProjectRejectsExecHookWithoutTrust(t *testing.T) {
+	t.Parallel()
 	projectRoot := writeProjectFixture(t, projectFixtureOptions{targetHook: "echo blocked-hook"})
 
 	var stdout bytes.Buffer
@@ -201,6 +205,7 @@ func TestRunCLIProjectRejectsExecHookWithoutTrust(t *testing.T) {
 }
 
 func TestRunCLIProjectRunsExecHookWithTrustFull(t *testing.T) {
+	t.Parallel()
 	projectRoot := writeProjectFixture(t, projectFixtureOptions{targetHook: "echo trusted-hook"})
 
 	var stdout bytes.Buffer
@@ -221,6 +226,7 @@ func TestRunCLIProjectRunsExecHookWithTrustFull(t *testing.T) {
 }
 
 func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
+	t.Parallel()
 	projectRoot := writeProjectFixture(t, projectFixtureOptions{})
 
 	var stdout bytes.Buffer
@@ -269,6 +275,7 @@ func TestRunCLIProjectDepsReportsInterfacesAndForeignSources(t *testing.T) {
 }
 
 func TestRunCLIProjectABILintFlagsGuestEntryAsmHazards(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -337,6 +344,7 @@ func TestRunCLIProjectABILintFlagsGuestEntryAsmHazards(t *testing.T) {
 }
 
 func TestRunCLIProjectABILintScansQuotedNativeIncludes(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -386,6 +394,7 @@ func TestRunCLIProjectABILintScansQuotedNativeIncludes(t *testing.T) {
 }
 
 func TestRunCLIProjectABILintStrictContractsRequireGuestEntryIntent(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "native")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -430,6 +439,7 @@ func TestRunCLIProjectABILintStrictContractsRequireGuestEntryIntent(t *testing.T
 }
 
 func TestRunCLIProjectEASMLintReportsProjectAndDependencySources(t *testing.T) {
+	t.Parallel()
 	projectRoot := writeProjectFixture(t, projectFixtureOptions{})
 	if err := os.MkdirAll(filepath.Join(projectRoot, "easm"), 0o755); err != nil {
 		t.Fatal(err)
@@ -506,6 +516,7 @@ export def easm_debug_trap() -> void abi c:
 }
 
 func TestRunCLIProjectBuildEmitsEASMWrapper(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -560,6 +571,7 @@ export def easm_identity(value: i64) -> i64 abi c:
 }
 
 func TestRunCLIProjectBuildEmitsShadPS4StyleEASMWrappers(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -651,6 +663,7 @@ export def shadps4_debug_trap() -> void abi c:
 }
 
 func TestRunCLIProjectBuildRequiresEASMEffectsOnExternSurface(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -709,6 +722,7 @@ def main() -> int:
 }
 
 func TestRunCLIProjectBuildRequiresEASMSegmentMutationOnExternSurface(t *testing.T) {
+	t.Parallel()
 	projectRoot := t.TempDir()
 	for _, dir := range []string{filepath.Join(projectRoot, "src"), filepath.Join(projectRoot, "easm")} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -782,6 +796,7 @@ def main() -> int:
 }
 
 func TestRunCLIProjectRunSupportsDirectLibraryLinkFlags(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -811,6 +826,7 @@ func TestRunCLIProjectRunSupportsDirectLibraryLinkFlags(t *testing.T) {
 	}
 }
 func TestRunCLIProjectRunSupportsLinkNameExternFFI(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -831,6 +847,7 @@ func TestRunCLIProjectRunSupportsLinkNameExternFFI(t *testing.T) {
 }
 
 func TestRunCLIProjectNativeBuildAndRunWithForeignSources(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -876,6 +893,7 @@ func TestRunCLIProjectNativeBuildAndRunWithForeignSources(t *testing.T) {
 }
 
 func TestRunCLIProjectTestLinksForeignSources(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -898,6 +916,7 @@ func TestRunCLIProjectTestLinksForeignSources(t *testing.T) {
 }
 
 func TestRunCLIProjectTargetCanOptOutOfProjectNativeInputs(t *testing.T) {
+	t.Parallel()
 	projectRoot := writeNativeForeignProjectFixture(t)
 	projectJSON := `{
   "version": "0.1.0",

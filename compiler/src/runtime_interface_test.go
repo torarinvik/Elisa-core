@@ -9,6 +9,7 @@ import (
 )
 
 func TestRuntimeCollectionsInterfaceMatchesImplementation(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	implPath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "collections.elisa")
 	ifacePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "collections.elisai")

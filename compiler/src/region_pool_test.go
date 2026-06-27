@@ -33,6 +33,7 @@ func regionPoolFixturePreamble(t *testing.T, fixtureDir string) string {
 // affine handle end to end: acquire a Pooled[T], mutate through the borrow, release it (move),
 // then re-acquire and confirm the freed slot is reused and zeroed.
 func TestRunCLIRegionPoolAcquireReuseRelease(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -80,6 +81,7 @@ def region_pool_acquire_reuse_release() -> void:
 // TestRunCLIRegionPoolRejectsUseAfterRelease confirms the affine handle makes use-after-release a
 // compile error (the core safety guarantee).
 func TestRunCLIRegionPoolRejectsUseAfterRelease(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_uaf_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -112,6 +114,7 @@ def use_after_release() -> void:
 // TestRunCLIRegionPoolRejectsDoubleRelease confirms releasing the same handle twice is a compile
 // error.
 func TestRunCLIRegionPoolRejectsDoubleRelease(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_double_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -177,6 +180,7 @@ def interior_borrow_uaf(flag: bool) -> void:
 // TestRunCLIRegionPoolRejectsStashedInteriorBorrowAfterRelease covers the core hole: a raw
 // interior pointer copied out of the handle (`b = h.ptr`) and written through after release.
 func TestRunCLIRegionPoolRejectsStashedInteriorBorrowAfterRelease(t *testing.T) {
+	t.Parallel()
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_stash_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
             pool.release(move h)
             b.left <- 99`)
@@ -185,6 +189,7 @@ func TestRunCLIRegionPoolRejectsStashedInteriorBorrowAfterRelease(t *testing.T) 
 // TestRunCLIRegionPoolRejectsCopyHopInteriorBorrowAfterRelease covers a copy-hop: the alias
 // is copied into a second local (`c = b`) before the release, and used through `c` after.
 func TestRunCLIRegionPoolRejectsCopyHopInteriorBorrowAfterRelease(t *testing.T) {
+	t.Parallel()
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_copyhop_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
             c: mutable heap PoolNode& = b
             pool.release(move h)
@@ -195,6 +200,7 @@ func TestRunCLIRegionPoolRejectsCopyHopInteriorBorrowAfterRelease(t *testing.T) 
 // handle is released on only one branch, so the alias must stay tainted at the merge point
 // (conservative union, not the intersection used for genuine owner borrows).
 func TestRunCLIRegionPoolRejectsInteriorBorrowAfterConditionalRelease(t *testing.T) {
+	t.Parallel()
 	expectRegionPoolInteriorBorrowRejected(t, "region_pool_cf_fixture.elisa", `            b: mutable heap PoolNode& = h.ptr
             if flag:
                 pool.release(move h)
@@ -205,6 +211,7 @@ func TestRunCLIRegionPoolRejectsInteriorBorrowAfterConditionalRelease(t *testing
 // does not over-reject: using the interior borrow BEFORE release is fine, and a `uintptr`
 // address snapshot (a copied integer, not a live reference) may be read after release.
 func TestRunCLIRegionPoolAllowsInteriorBorrowBeforeReleaseAndAddressSnapshot(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_valid_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -241,6 +248,7 @@ def interior_borrow_valid() -> void:
 // used through that field after release. This exercises the nested-Fields tracking that
 // composes the alias fact through struct-literal construction and field projection.
 func TestRunCLIRegionPoolRejectsStructStoredInteriorBorrowAfterRelease(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_struct_store_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -276,6 +284,7 @@ def struct_store_uaf() -> void:
 // TestRunCLIRegionPoolAllowsStructStoredInteriorBorrowBeforeRelease confirms the struct-store
 // tracking does not over-reject: using the field before release compiles cleanly.
 func TestRunCLIRegionPoolAllowsStructStoredInteriorBorrowBeforeRelease(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_struct_valid_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -313,6 +322,7 @@ def struct_store_valid() -> void:
 // return-borrow summary ("returns param 0") is instantiated against the actual argument at the
 // call site, recovering the alias. Includes a nested-call variant to confirm summaries compose.
 func TestRunCLIRegionPoolRejectsCrossFunctionPassthroughBorrowAfterRelease(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		bind string
@@ -359,6 +369,7 @@ def xfn_uaf() -> void:
 // cross-function tracking does not over-reject: using the laundered borrow before release
 // compiles cleanly (the summary instantiates to a live alias, not a consumed one).
 func TestRunCLIRegionPoolAllowsCrossFunctionPassthroughBorrowBeforeRelease(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_pool_xfn_valid_fixture.elisa")
 	src := regionPoolFixturePreamble(t, fixtureDir) + `
@@ -396,6 +407,7 @@ def xfn_valid() -> void:
 // binding (no repeated `[T]`). It confirms the freed slot is reused and zeroed, and that an
 // acquire left un-released (dropped) is safe — the region reclaims the slab at teardown.
 func TestRunCLIRegionPoolIdiomaticUsageRunsAndReuses(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

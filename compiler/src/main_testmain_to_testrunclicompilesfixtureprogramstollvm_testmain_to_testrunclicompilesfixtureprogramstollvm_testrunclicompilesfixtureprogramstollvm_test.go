@@ -8,6 +8,7 @@ import (
 )
 
 func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtures := []struct {
 		name   string

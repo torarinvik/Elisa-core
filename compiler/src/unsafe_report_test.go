@@ -12,6 +12,7 @@ import (
 )
 
 func TestRunCLIEmitsUnsafeSummary(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fixturePath := filepath.Join(dir, "unsafe_summary.elisa")
 	src := `
@@ -69,6 +70,7 @@ def safe_ffi_wrapper() -> i64:
 }
 
 func TestRunCLIEnforcesUnsafeBudget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	fixturePath := filepath.Join(dir, "unsafe_budget.elisa")
 	src := `
@@ -98,6 +100,7 @@ def safe_wrapper(value: uintptr) -> heap u8&:
 }
 
 func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
+	t.Parallel()
 	report := generateUnsafeReport(&semantic.Result{
 		GlobalScope: semantic.NewScope(nil),
 		EASMModules: []*easm.Module{
@@ -124,6 +127,7 @@ func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
 }
 
 func TestUnsafeSummaryReportsBoundaryInvariantTrinity(t *testing.T) {
+	t.Parallel()
 	report := generateUnsafeReport(&semantic.Result{
 		GlobalScope: semantic.NewScope(nil),
 		EASMModules: []*easm.Module{
@@ -151,6 +155,7 @@ func TestUnsafeSummaryReportsBoundaryInvariantTrinity(t *testing.T) {
 }
 
 func TestUnsafeSummaryCountsEASMTinyTargetEscapeHatch(t *testing.T) {
+	t.Parallel()
 	report := generateUnsafeReport(&semantic.Result{
 		GlobalScope: semantic.NewScope(nil),
 		EASMModules: []*easm.Module{
@@ -174,6 +179,7 @@ func TestUnsafeSummaryCountsEASMTinyTargetEscapeHatch(t *testing.T) {
 }
 
 func TestUnsafeSummaryCountsEASMPoisonTargetEscapeHatch(t *testing.T) {
+	t.Parallel()
 	report := generateUnsafeReport(&semantic.Result{
 		GlobalScope: semantic.NewScope(nil),
 		EASMModules: []*easm.Module{

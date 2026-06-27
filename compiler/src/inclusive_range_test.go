@@ -12,6 +12,7 @@ import (
 // (1..=4 sums to 10), leaves the half-open `..<` unchanged (1..<4 sums to 6), and a single-element
 // `n ..= n` runs exactly once. `..=` desugars to the half-open `lo ..< (hi + 1)` at parse time.
 func TestRunCLIInclusiveRangeSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "inclusive_range_smoke.elisa")
 

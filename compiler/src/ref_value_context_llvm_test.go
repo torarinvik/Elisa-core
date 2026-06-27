@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunCLIEmitsRefValueContextsToLLVM(t *testing.T) {
+	t.Parallel()
 	sourcePath := writeImplicitContextFixture(t, "ref_value_context_llvm.elisa", `def next(index: mutable usize&) -> usize:
     if index >= 2:
         return index + 1
@@ -41,6 +42,7 @@ def read(text: static u8&) -> u8:
 // `r + n` for `r: i64&` (e.g. the binding from `for ref x in nums`) silently did
 // pointer arithmetic on the address — a silent wrong-result. Byte-correct check.
 func TestRunCLIImmutableScalarRefArithmeticUsesValue(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}

@@ -11,6 +11,7 @@ import (
 )
 
 func TestRunCLIEmitsFrontendIRAndLoadsLLVMFromBundle(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "sample.elisa")
 	bundlePath := filepath.Join(fixtureDir, "sample.elisair")
@@ -44,6 +45,7 @@ func TestRunCLIEmitsFrontendIRAndLoadsLLVMFromBundle(t *testing.T) {
 }
 
 func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_sample.elisa")
 	src := "def add_twice(x: i64) -> i64:\n    acc: mutable i64 = x\n    acc += x\n    return acc\n\ndef main() -> i64:\n    seed: i64 = 20\n    value: i64 = seed + 1\n    if value == 21:\n        return add_twice(value)\n    return 0\n"
@@ -63,6 +65,7 @@ func TestRunCLIInterpretsSimpleProgram(t *testing.T) {
 }
 
 func TestRunCLIInterpretsTypedZeroedValues(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_zeroed.elisa")
 	src := `type VAddr = uintptr
@@ -105,6 +108,7 @@ def main() -> i64:
 }
 
 func TestRunCLIInterpretsModuleScopedConstantsAndGlobals(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_module_consts.elisa")
 	src := `module PlayGoHle:
@@ -156,6 +160,7 @@ def main() -> i64:
 }
 
 func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_active.elisa")
 	bundlePath := filepath.Join(fixtureDir, "grammar_active.elisair")
@@ -193,6 +198,7 @@ func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T)
 }
 
 func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_standalone.elisa")
 	loweredPath := filepath.Join(fixtureDir, "grammar_standalone.lowered.elisa")
@@ -220,6 +226,7 @@ func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
 }
 
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "contextual_ternary_darray.elisa")
 	src := "def main() -> i64:\n    region scratch(4096)\n    in scratch:\n        xs: darray[i64] = ([1] if true else [])\n        out: i64 = xs.count.i64()\n        destroy scratch\n        return out\n"
@@ -236,6 +243,7 @@ func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) 
 }
 
 func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
+	t.Parallel()
 	sourcePath := filepath.Join(repoRootFromMainTest(t), "Code", "test_programs", "region_owned_structs.elisa")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -252,6 +260,7 @@ func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
 }
 
 func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "region_owned_struct_ast.elisa")
 	src := "struct Expr[@owner]:\n    next: Expr&? @owner\n\nstruct Explicit[@arena]:\n    next: Explicit&? @arena\n\nlayout soa struct Rows[@owner]:\n    value: i64\n"
@@ -276,6 +285,7 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 }
 
 func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "grammar_return.elisa")
 	bundlePath := filepath.Join(fixtureDir, "grammar_return.elisair")
@@ -313,6 +323,7 @@ func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
 }
 
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_runtime_call.elisa")
 	src := "extern puts(text: u8&) -> int\nextern assert(cond: bool) -> void\n\ndef main() -> int:\n    printed: int = puts(text: do:\n        prefix: static u8& = \"hi\"\n        prefix.cast[u8&]\n    )\n    assert(cond: printed == 2)\n    return printed\n"
@@ -335,6 +346,7 @@ func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 }
 
 func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_bad_named_runtime_call.elisa")
 	src := "extern assert(cond: bool) -> void\n\ndef main() -> int:\n    assert(value: true)\n    return 0\n"
@@ -354,6 +366,7 @@ func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
 }
 
 func TestRunCLIInterpretsNamedLocalFunctionAliasCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_local_function_alias.elisa")
 	src := "def add(x: int, y: int) -> int:\n    return x + y\n\ndef main() -> int:\n    f = add\n    return f(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
@@ -373,6 +386,7 @@ func TestRunCLIInterpretsNamedLocalFunctionAliasCall(t *testing.T) {
 }
 
 func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_function_alias.elisa")
 	src := "def add(x: int, y: int) -> int:\n    return x + y\n\nglobal runner: func(int, int) -> int = add\n\ndef main() -> int:\n    return runner(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
@@ -392,6 +406,7 @@ func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
 }
 
 func TestRunCLIInterpretsNamedGlobalFieldFunctionAliasCall(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_field_function_alias.elisa")
 	src := "struct CallbackBox:\n    run: func(int, int) -> int\n\ndef add(x: int, y: int) -> int:\n    return x + y\n\nglobal BOX: CallbackBox = CallbackBox{run: add}\n\ndef main() -> int:\n    return BOX.run(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
@@ -411,6 +426,7 @@ func TestRunCLIInterpretsNamedGlobalFieldFunctionAliasCall(t *testing.T) {
 }
 
 func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
+	t.Parallel()
 	src := "def add_twice(x: i64) -> i64:\n    return x + x\n\ndef main() -> i64:\n    return add_twice(21)\n"
 	buildResp, status := executeCompileServerRequest(compileServerRequest{
 		Mode:     "ir",
@@ -448,6 +464,7 @@ func TestCompileServerRequestSupportsIRInterpretAndLLVM(t *testing.T) {
 }
 
 func TestCompileServerRequestSupportsFactTraceV2Filter(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa")
 	source, err := os.ReadFile(fixturePath)

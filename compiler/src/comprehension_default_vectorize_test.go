@@ -12,6 +12,7 @@ import (
 // removed. Both a fold and a map that carry it are a clear parser error pointing at the new default,
 // not a silently-ignored token.
 func TestBySimdMarkerRemoved(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"fold": "s: f64 = (acc + x for x in a with acc: f64 = 0.0 by simd)",
 		"map":  "out: darray[f64] = [x * 2.0 for x in a by simd]",
@@ -37,6 +38,7 @@ func TestBySimdMarkerRemoved(t *testing.T) {
 // fold_default_smoke pins that comprehension folds parse across every shape (plain, filtered,
 // head-binding, range) and compute correct results with the default tree reduction order.
 func TestRunCLIDefaultFoldSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "fold_default_smoke.elisa")
 
@@ -52,6 +54,7 @@ func TestRunCLIDefaultFoldSmoke(t *testing.T) {
 // map_default_smoke pins that list-map comprehensions compute correct values by default (indexed
 // store over a darray source, and a range source).
 func TestRunCLIDefaultMapSmoke(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixturePath := filepath.Join(repoRoot, "compiler", "map_default_smoke.elisa")
 

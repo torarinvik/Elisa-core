@@ -10,6 +10,7 @@ import (
 )
 
 func TestRunCLIEmitProgressReportsLoopAndRecursionPressure(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "progress_pressure.elisa")
 	src := `
@@ -51,6 +52,7 @@ def pong() -> void:
 }
 
 func TestRunCLIEmitProgressAcceptsExplicitEvidence(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "progress_safe.elisa")
 	src := `
@@ -84,6 +86,7 @@ def spin(flag: bool) -> void:
 }
 
 func TestRunCLIEmitProgressRecognizesRuntimeProgressTickEvidence(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "progress_runtime_tick.elisa")
@@ -125,6 +128,7 @@ def spin(flag: bool) -> void:
 }
 
 func TestRunCLIEmitProgressReportsBlockingFunctions(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "progress_blocking.elisa")
 	src := `

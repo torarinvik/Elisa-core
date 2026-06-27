@@ -28,6 +28,7 @@ func writeDebuggerCLIFixture(t *testing.T) string {
 }
 
 func TestRunCLIInterpretDebugBreakHuman(t *testing.T) {
+	t.Parallel()
 	fixture := writeDebuggerCLIFixture(t)
 	var stdout, stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "interpret", "-debug-break", "player.dead == true", fixture}, &stdout, &stderr)
@@ -43,6 +44,7 @@ func TestRunCLIInterpretDebugBreakHuman(t *testing.T) {
 }
 
 func TestRunCLIInterpretDebugBreakJSONL(t *testing.T) {
+	t.Parallel()
 	fixture := writeDebuggerCLIFixture(t)
 	var stdout, stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "interpret", "-debug-break", "player.dead == true", "-debug-format", "jsonl", fixture}, &stdout, &stderr)
@@ -75,6 +77,7 @@ func TestRunCLIInterpretDebugBreakJSONL(t *testing.T) {
 }
 
 func TestRunCLIInterpretDebugSavesTrace(t *testing.T) {
+	t.Parallel()
 	fixture := writeDebuggerCLIFixture(t)
 	tracePath := filepath.Join(t.TempDir(), "trace.json")
 	var stdout, stderr bytes.Buffer
@@ -96,6 +99,7 @@ func TestRunCLIInterpretDebugSavesTrace(t *testing.T) {
 }
 
 func TestRunCLIInterpretWithoutDebugUnchanged(t *testing.T) {
+	t.Parallel()
 	fixture := writeDebuggerCLIFixture(t)
 	var stdout, stderr bytes.Buffer
 	exitCode := runCLI([]string{"-emit", "interpret", fixture}, &stdout, &stderr)

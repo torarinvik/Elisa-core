@@ -7,6 +7,7 @@ import (
 )
 
 func TestRunCLIInterpretsDefaultArgs(t *testing.T) {
+	t.Parallel()
 	sourcePath := writeImplicitContextFixture(t, "default_args_interpret.elisa", `def add(x: i64, y: i64 = 7) -> i64:
     return x + y
 

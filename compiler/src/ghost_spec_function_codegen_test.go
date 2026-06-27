@@ -10,6 +10,7 @@ import (
 )
 
 func TestGhostFunctionErasedFromLLVM(t *testing.T) {
+	t.Parallel()
 	src := `
 ghost def abs(x: i64) -> i64:
     if x < 0:

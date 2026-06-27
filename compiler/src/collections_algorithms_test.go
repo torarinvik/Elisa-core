@@ -13,6 +13,7 @@ import (
 // added to collections.elisa (any_of / all_of / count_if / find_if) end to end via UFCS,
 // confirming they transliterate the C++ std algorithms and run correctly.
 func TestRunCLICollectionsRangeAlgorithms(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -71,6 +72,7 @@ def range_algorithms() -> void:
 // (sort / reverse / is_sorted / min_element / max_element) end to end, including ascending
 // and descending comparators and the empty-range edge case.
 func TestRunCLICollectionsSortAndOrdering(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -137,6 +139,7 @@ def sort_and_ordering() -> void:
 // TestRunCLICollectionsBinarySearch exercises lower_bound / binary_search over a sorted
 // range, covering hits, misses, and the below-first / past-last boundary positions.
 func TestRunCLICollectionsBinarySearch(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -192,6 +195,7 @@ def binary_search_lookups() -> void:
 // position (a fold call passed directly to a generic assert_eq) that previously failed to
 // infer the accumulator type param. Regression guard for the collectTypeBindings fix.
 func TestRunCLICollectionsFold(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -241,6 +245,7 @@ def fold_reduce() -> void:
 // TestRunCLIStringsHashSview verifies the FNV-1a hash_sview (std::hash<string_view>):
 // determinism, sensitivity to a one-byte change, and the empty-string FNV offset basis.
 func TestRunCLIStringsHashSview(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -287,6 +292,7 @@ def hash_sview_fnv1a() -> void:
 // TestRunCLIFsPathOps verifies the Fs:: path-decomposition module (filename / parent /
 // extension / stem) over normal, bare, hidden-file, and dot-in-parent paths.
 func TestRunCLIFsPathOps(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()
@@ -338,6 +344,7 @@ def fs_path_ops() -> void:
 // TestRunCLIFsJoin verifies Fs::join (path concatenation into an arena): separator
 // insertion, no doubled slash when base ends with one, and absolute-leaf replacement.
 func TestRunCLIFsJoin(t *testing.T) {
+	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
 	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
 	fixtureDir := t.TempDir()

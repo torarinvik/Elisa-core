@@ -44,6 +44,7 @@ func TestRunCLIEmitsSelectedTestPhaseDebug(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -79,6 +80,7 @@ func TestRunCLIExecutesFilteredSelectedTests(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesSelectedTestsWithGlobFilter(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -114,6 +116,7 @@ func TestRunCLIExecutesSelectedTestsWithGlobFilter(t *testing.T) {
 	}
 }
 func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -153,6 +156,7 @@ func TestRunCLIContinuesAfterFailingAndSkippedTests(t *testing.T) {
 	}
 }
 func TestRunCLIExecutesTupleMatchStatement(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
@@ -185,6 +189,7 @@ func TestRunCLIExecutesTupleMatchStatement(t *testing.T) {
 	}
 }
 func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
+	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "panic_backtrace_fixture.elisa")
 	src := "def main() -> int:\n    can Abort.Panic:\n        panic(\"boom\")\n"
@@ -218,6 +223,7 @@ func TestRunCLICompilesPanicToBacktraceAwareLLVM(t *testing.T) {
 	}
 }
 func TestRunCLIReturnsNonZeroWhenNoTestsMatchExecutionFilter(t *testing.T) {
+	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
 		t.Skip("clang not available")
 	}
