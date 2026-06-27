@@ -2004,6 +2004,9 @@ def wrap_varmod(x: u64, m: u64) -> u64 is InRange[0, 7]:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_varmod.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "could not be proven statically") {
 		t.Fatalf("x %% m (variable m) must NOT prove InRange[0,7]; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // --- Transitive ordering (linear/flow tier, docs/85) ---
 // Given `requires a <= b` and `requires b <= c` on immutable integer params, the linear tier
 // must prove `a <= c` without invoking SMT. This is the "transitive-chain" gap: a two-hop
@@ -2094,6 +2097,9 @@ def caller(a: i64, b: i64, c: i64) -> i64:
 	)
 	if len(result.Errors()) == 0 {
 		t.Fatalf("`a<=b, b<c` must NOT prove `a>=c` (opposite direction); got no error under -strict")
+	}
+}
+
 // --- in-loop monotonic counter bound (docs/85 Fallback 3) ------------------------------------
 //
 // Inside `while i < K:` the loop body sees `i < K` as a live smtAssertFact (seeded by
@@ -2147,6 +2153,9 @@ def f(start: i64) -> i64:
 	// invalidated. The obligation `i is Bounded[0..=9]` cannot be proven statically.
 	if len(result.RefinementChecks) == 0 && !contains(allDiagnostics(result), "could not be proven statically") {
 		t.Fatalf("after `i <- i + 1`, the in-body range facts are invalidated; `i is Bounded[0..=9]` must NOT be statically proven (expected runtime check or proof warning), got:\n%s", allDiagnostics(result))
+	}
+}
+
 // ── if/ternary range-merge ────────────────────────────────────────────────────
 
 // Completeness: both branches of a ternary produce values in [0,100], so
@@ -2178,6 +2187,9 @@ def f(a: i64 is Bounded[0, 100], b: i64 is Bounded[0, 200], cond: bool) -> i64 i
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ternary_range_one_out.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "could not be proven statically") {
 		t.Fatalf("one branch out of [0,100] must NOT prove the return bound; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
 // POSITIVE: A struct field invariant (`invariant self.x >= 0`) is established at every construction
 // and after every mutation, so a caller that reads the field from a value returned by a builder may
 // ASSUME the invariant holds. Reading `s.x` where `s` has `invariant self.x >= 0` must therefore

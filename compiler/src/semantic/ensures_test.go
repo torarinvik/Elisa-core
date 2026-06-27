@@ -689,6 +689,7 @@ struct Foo:
 def maybe_get(p: Foo&?) -> Foo&?:
     ensure result != null
     return p
+`, false},
 		// Gap C: two-pointer conjunction — `(p != null) and (q != null)` in the ensure must discharge
 		// when both pointers are independently established non-null via `requires`.
 		{"two_pointer_conjunction_both_requires", `
