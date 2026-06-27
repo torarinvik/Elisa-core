@@ -566,6 +566,77 @@ func (a *Analyzer) recordConstAssignmentRangeFact(target ast.Expr, value ast.Exp
 	a.currentScope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
 }
 
+// recordWideningCastRangeFact seeds a range fact for `target` when `value` is a chain of
+// value-preserving widening casts from a source variable whose range is already known. For
+// example, given `y: u64 = x.u64()` where `x` has proven range [0, 100], this records [0, 100]
+// for `y` so that tier-2 proofs over `y` (or further casts of `y`) can carry the range
+// through without re-doing the guard analysis.
+//
+// Sound: the same value-preservation check used by affineOf/CastExpr is applied here —
+// IntegerTypeFitsValue on both bounds. A narrowing cast, sign-changing cast, or any cast
+// whose source range is not fully known leaves no fact (fail-closed). Only immutable integer
+// targets are handled, since a mutable target can be reassigned and would need invalidation.
+func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, mutable bool) {
+	if a == nil || a.currentScope == nil || mutable {
+		return // mutable targets need invalidation; skip to avoid stale facts
+	}
+	name, ok := rootIdentName(target)
+	if !ok || name == "" {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil {
+		return
+	}
+	if IsFloatType(sym.Type) {
+		return
+	}
+	if _, _, isInt := BitIntInfo(sym.Type); !isInt {
+		return
+	}
+	// Peel the cast chain, collecting each intermediate target type for value-preservation checks.
+	expr := value
+	var castTypes []Type
+	for {
+		ce, ok := expr.(*ast.CastExpr)
+		if !ok {
+			break
+		}
+		t := a.resolveType(ce.Target)
+		if _, _, isInt := BitIntInfo(t); !isInt {
+			return // non-integer intermediate — cannot reason about value preservation
+		}
+		castTypes = append(castTypes, t)
+		expr = ce.Operand
+	}
+	if len(castTypes) == 0 {
+		return // value is not a cast at all
+	}
+	// The innermost expr must be an immutable integer identifier with a known range.
+	ident, ok := expr.(*ast.Ident)
+	if !ok || ident == nil {
+		return
+	}
+	r, ok := a.lookupRangeFact(ident.Name)
+	if !ok {
+		return // source has no known range — nothing to transfer
+	}
+	if !r.loKnown || !r.hiKnown {
+		return // open source range — unsafe to transfer
+	}
+	// Validate that every cast in the chain is value-preserving (range fits in each target type).
+	for _, t := range castTypes {
+		if !IntegerTypeFitsValue(t, r.lo) || !IntegerTypeFitsValue(t, r.hi) {
+			return // narrowing or sign-changing cast somewhere in the chain — decline
+		}
+	}
+	// All casts are value-preserving: record the source range for the target variable.
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = r
+}
+
 func declaredTypeRange(t Type) (numRange, bool) {
 	signed, width, ok := BitIntInfo(t)
 	if !ok || width <= 0 || width >= 63 {

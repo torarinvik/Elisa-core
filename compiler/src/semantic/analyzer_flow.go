@@ -95,6 +95,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 			a.recordConstAssignmentRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 		}
+		// Transfer range facts through value-preserving widening cast chains for immutable integer
+		// locals (`y: u64 = x.u64()` where `x` has range [lo,hi]). Mutable targets are excluded
+		// (their range can be invalidated by reassignment; the check inside no-ops on mutable=true).
+		if n.Value != nil {
+			a.recordWideningCastRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, n.Mutable)
+		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
 		// that value for its whole lifetime — record it as a written-constant so the interval prover
