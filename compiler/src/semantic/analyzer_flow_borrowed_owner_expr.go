@@ -341,6 +341,15 @@ func (a *Analyzer) borrowedOwnerRefStateForRecoveredExpr(value ast.Expr, fallbac
 	}
 	fallbackState, fallbackOK := a.borrowedOwnerRefStateForExpr(fallback)
 	if !valueOK || !fallbackOK {
+		// For raw interior-alias taint (e.g. a Pooled[T] borrow stored in a container),
+		// apply conservative union semantics: if the value path carries a dangling-slot
+		// alias, propagate it even when the fallback path is clean. This mirrors the same
+		// asymmetry in mergeBorrowedOwnerRefBindings where RawInteriorAffineAlias states
+		// survive one-sided if/else branch merges. Genuine owner borrows still use
+		// intersection (returned as no-state when one side is absent).
+		if valueOK && borrowedOwnerRefStateHasRawInteriorAlias(valueState) {
+			return cloneBorrowedOwnerRefState(valueState), true
+		}
 		return borrowedOwnerRefState{}, false
 	}
 	return mergeBorrowedOwnerRefState(valueState, fallbackState)
