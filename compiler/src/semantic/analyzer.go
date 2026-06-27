@@ -441,6 +441,12 @@ type Analyzer struct {
 	// cross-function key collision means a byte-identical proof).
 	smtQueryCache                    map[string]smtQueryResult
 	proofReport                      []ProofFact
+	// zeroedStructLocals tracks locals declared `= zeroed` whose type is a struct and whose root has
+	// not been wholesale-replaced since declaration. Cleared for a root in invalidateWrittenFieldsForRoot
+	// when called for a non-field write (a root reassignment, borrow, or mutating-callee escape).
+	// Used by zeroedStructLocalFieldMap to supply zero as the baseline value for unwritten struct fields
+	// in `ensure result.f == v` postcondition proofs where `result` is a zeroed-then-mutated local.
+	zeroedStructLocals map[string]bool
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool

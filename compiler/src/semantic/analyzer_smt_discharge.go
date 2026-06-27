@@ -611,10 +611,21 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// When `result` is bound to a struct literal (`return Pair(1, 2)`), it has no scalar SMT term, so
 	// drop it from the env subst (which would otherwise decline) and instead resolve each `result.field`
 	// read to that field's construction argument — so `ensure result.a == 1` discharges.
+	//
+	// The same treatment applies when `result` is a zeroed-then-mutated local: `out: T = zeroed; out.f <- v;
+	// return out` — each field resolves to its last written value (from writtenField) or 0 (unwritten fields
+	// are still zeroed since the root was not wholesale-replaced, tracked by a.zeroedStructLocals).
 	substForEnv := subst
 	if res, ok := subst["result"]; ok {
-		if sl, ok := stripOptimizationParens(res).(*ast.StructLitExpr); ok {
-			tr.resultFields = a.structLitFieldMap(sl)
+		res = stripOptimizationParens(res)
+		var fieldMap map[string]ast.Expr
+		if sl, ok := res.(*ast.StructLitExpr); ok {
+			fieldMap = a.structLitFieldMap(sl)
+		} else if id, ok := res.(*ast.Ident); ok {
+			fieldMap = a.zeroedStructLocalFieldMap(id)
+		}
+		if fieldMap != nil {
+			tr.resultFields = fieldMap
 			substForEnv = map[string]ast.Expr{}
 			for k, v := range subst {
 				if k != "result" {
@@ -4375,6 +4386,54 @@ func (a *Analyzer) structLitFieldMap(sl *ast.StructLitExpr) map[string]ast.Expr 
 		}
 		if name != "" && arg != nil {
 			out[name] = arg
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// zeroedStructLocalFieldMap builds a field→expr map for a `= zeroed` struct local whose root has not
+// been wholesale-replaced since declaration (tracked by a.zeroedStructLocals). It is the zeroed-local
+// analogue of structLitFieldMap: rather than reading construction arguments, it reads the last value
+// written to each field from the live writtenField scope chain, and falls back to the integer literal
+// `0` for fields that were never written (sound because `zeroed` zero-initializes every field and the
+// root has not been replaced). Returns nil when the local is unknown, the type is not a resolved struct,
+// or no struct type declaration is available (so the field set cannot be enumerated).
+//
+// Soundness argument:
+//   - a.zeroedStructLocals[name] is set at `name: T = zeroed` and cleared in
+//     invalidateWrittenFieldsForRoot(name) — which fires on whole-root reassignment, mutable borrow,
+//     or escape to a mutating callee. So if the entry is present, every field not in writtenField has
+//     never been touched, hence still holds the zeroed initial value.
+//   - writtenField entries for `name__field__f` are dropped by invalidateWrittenField or
+//     invalidateWrittenFieldsForRoot at every mutation/escape of root or field, so a stale fact can
+//     never persist.
+//   - We only use isStableWrittenFieldValue-passing values (recorded by recordWrittenFieldForTarget),
+//     so the stored expressions are either constants or pure ident/field projections — re-evaluation
+//     is safe and cannot introduce side-effects.
+func (a *Analyzer) zeroedStructLocalFieldMap(id *ast.Ident) map[string]ast.Expr {
+	if id == nil || !a.zeroedStructLocals[id.Name] {
+		return nil
+	}
+	sym, ok := a.currentScope.Lookup(id.Name)
+	if !ok || sym == nil {
+		return nil
+	}
+	st, ok := stripRefForBounds(sym.Type).(*StructType)
+	if !ok || st == nil || st.Decl == nil {
+		return nil
+	}
+	zeroLit := &ast.IntLit{Value: "0"}
+	out := make(map[string]ast.Expr, len(st.Decl.Fields))
+	for _, fd := range st.Decl.Fields {
+		key := id.Name + "__field__" + fd.Name
+		if v, found := a.lookupWrittenField(key); found {
+			out[fd.Name] = v
+		} else {
+			// Field was never written after zeroed initialization — still holds 0.
+			out[fd.Name] = zeroLit
 		}
 	}
 	if len(out) == 0 {

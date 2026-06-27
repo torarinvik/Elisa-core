@@ -90,6 +90,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.seedWhereRefinementFact(n)
 		if n.Value != nil && isZeroedInitializer(n.Value) {
 			a.markZeroedUninitialized(sym)
+			// Track zeroed struct locals for `ensure result.f` postcondition proofs: an unwritten field
+			// on a zeroed local is definitively zero until the root is invalidated.
+			if _, ok := stripRefForBounds(bindingType).(*StructType); ok {
+				if a.zeroedStructLocals == nil {
+					a.zeroedStructLocals = map[string]bool{}
+				}
+				a.zeroedStructLocals[n.Name] = true
+			}
 		}
 		if n.Mutable && n.Value != nil {
 			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
