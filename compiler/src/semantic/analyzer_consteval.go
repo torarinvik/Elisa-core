@@ -649,6 +649,13 @@ func (a *Analyzer) evalConstAggregateFieldExpr(expr *ast.FieldExpr) (ConstValue,
 		if object.Kind == ConstList || object.Kind == ConstTuple {
 			return ConstValue{Kind: ConstInt, Int: int64(len(object.Elems))}, true
 		}
+	case "len":
+		// A string LITERAL has a compile-time-known byte length: `"abc".len == 3`.
+		// We deliberately restrict this to ConstString only — a non-literal string's
+		// length is opaque and must not be fabricated as a constant.
+		if object.Kind == ConstString {
+			return ConstValue{Kind: ConstInt, Int: int64(len(object.String))}, true
+		}
 	default:
 		if value, ok := ConstReflectionRecordField(object, expr.Field); ok {
 			return value, true
