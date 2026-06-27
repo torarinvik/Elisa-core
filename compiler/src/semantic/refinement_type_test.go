@@ -1675,3 +1675,60 @@ def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) 
 		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
 	}
 }
+
+// POSITIVE: A struct field invariant (`invariant self.x >= 0`) is established at every construction
+// and after every mutation, so a caller that reads the field from a value returned by a builder may
+// ASSUME the invariant holds. Reading `s.x` where `s` has `invariant self.x >= 0` must therefore
+// let `y: i64 is Nat = s.x` discharge statically with NO runtime check — the struct-level invariant
+// is the postcondition of the builder, analogous to a function-level return refinement.
+func TestStructInvariantFieldReadDischargesRefinement(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+struct Pos:
+    x: i64
+    invariant self.x >= 0
+
+def make_pos() -> Pos:
+    return Pos(x: 5)
+
+def use() -> i64:
+    s = make_pos()
+    y: i64 is Nat = s.x
+    return y
+`
+	result := analyzeTreeTestSource(t, "struct_invariant_field_refine.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("struct invariant `self.x >= 0` must let `s.x is Nat` prove, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("struct invariant covers the field: expected NO runtime check, got %d", len(result.RefinementChecks))
+	}
+}
+
+// SOUNDNESS NEGATIVE: a struct WITHOUT a field invariant gives no static guarantee on the field —
+// the caller must fall back to a runtime check. This is the soundness floor: the positive test above
+// must not be caused by an over-approximation that also fires here.
+func TestStructNoInvariantFieldReadRequiresRuntimeCheck(t *testing.T) {
+	src := `
+law Nat(self: i64) = self >= 0
+
+struct AnyInt:
+    x: i64
+
+def make_any() -> AnyInt:
+    return AnyInt(x: 5)
+
+def use() -> i64:
+    s = make_any()
+    y: i64 is Nat = s.x
+    return y
+`
+	result := analyzeTreeTestSource(t, "struct_no_invariant_field_refine.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a struct without an invariant should still analyze (runtime fallback), got: %v", errs)
+	}
+	if len(result.RefinementChecks) == 0 {
+		t.Fatalf("without a struct invariant there is no static guarantee: expected a runtime check")
+	}
+}
