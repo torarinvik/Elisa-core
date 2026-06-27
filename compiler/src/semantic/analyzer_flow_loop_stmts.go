@@ -220,6 +220,43 @@ func (a *Analyzer) analyzeForStmt(stmt *ast.ForStmt) {
 	loopSym := &Symbol{Name: stmt.Name, Kind: SymbolLocal, Type: loopType, Node: stmt, Mutable: false}
 	a.defineLocalInScope(loopScope, loopSym, stmt.Pos())
 
+	// Seed a numRange fact for the loop variable in the loop body scope so that
+	// refinement proofs (law constraints, where-predicates) over the loop variable
+	// can discharge statically. For `for i in s..<e:` the loop variable satisfies
+	// the closed interval [s, e-1]; we record whatever const-evaluable portion of
+	// that interval we can prove:
+	//   - both bounds known  → tight [s, e-1] fact
+	//   - only start known   → half-open [s, ∞) lo-only fact
+	//   - only end known     → half-open (-∞, e-1] hi-only fact
+	//
+	// Sound because the loop variable is immutable so it cannot be re-assigned in
+	// the body, and the loop body only executes when start < end (empty range →
+	// body never runs), so the body always sees a value in [s, e-1].
+	//
+	// Note: `..=` (inclusive) desugars to `..<(end+1)` at parse time, so by the
+	// time we get here it is always TOKEN_RANGE_LT.  The hi fact will be
+	// `(orig_end+1)-1 = orig_end`, which is the correct inclusive upper bound.
+	if stmt.Op == lexer.TOKEN_RANGE_LT {
+		var rf numRange
+		hasRf := false
+		if sv, startConst := a.constIntValue(stmt.Start); startConst {
+			rf.loKnown = true
+			rf.lo = sv
+			hasRf = true
+		}
+		if ev, endConst := a.constIntValue(stmt.End); endConst {
+			rf.hiKnown = true
+			rf.hi = ev - 1
+			hasRf = true
+		}
+		if hasRf {
+			if loopScope.rangeFacts == nil {
+				loopScope.rangeFacts = map[string]numRange{}
+			}
+			loopScope.rangeFacts[stmt.Name] = rf
+		}
+	}
+
 	savedIndexBounds := a.currentIndexBounds
 	savedBoundEqual := a.currentBoundEqual
 	savedViewStaticLen := a.currentViewStaticLen
