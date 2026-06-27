@@ -258,9 +258,12 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 		// Bare expr-lambda with no annotated/contextual error-union return (docs/64 Phase 5b): infer the
 		// error return from the body. `try`-without-else / `raise` accumulate their propagated sets into
 		// lambdaErrorAccum instead of checking a return type that isn't an error union yet.
+		// Extended: also infer when the annotation is a plain value type (not an error union), so
+		// `lambda() -> i64: raise IoErr.Bad` infers `-> i64 error[IoErr]` rather than erroring.
 		savedAccumulate := a.lambdaErrorAccumulate
 		savedAccum := a.lambdaErrorAccum
-		inferErrorReturn := expr.ReturnType == nil
+		_, annotatedReturnIsUnion := returnType.(*ErrorUnionType)
+		inferErrorReturn := expr.ReturnType == nil || (!annotatedReturnIsUnion && !IsInvalidType(returnType) && returnType != nil)
 		if _, ctxIsUnion := expectedReturn.(*ErrorUnionType); ctxIsUnion {
 			inferErrorReturn = false // a concrete contextual error union already drives the check.
 		}
@@ -312,9 +315,32 @@ func (a *Analyzer) analyzeLambdaExpr(expr *ast.LambdaExpr, expected Type) Type {
 			a.errorf(expr.BodyExpr.Pos(), "return type expects %s, got %s", a.matchReturnType(bodyType), bodyType)
 		}
 	} else {
+		// Block-lambda error inference (Phase 5b, block variant): mirror the bare
+		// expr-lambda accumulation path. When the declared/contextual return is a
+		// plain value type (not already an error union), enable lambdaErrorAccumulate
+		// so that `raise` / `try`-without-else inside the body accumulate their error
+		// sets instead of immediately erroring. After the body we upgrade fnType.Return
+		// and a.currentReturn to the inferred error union.
+		savedAccumulateBlock := a.lambdaErrorAccumulate
+		savedAccumBlock := a.lambdaErrorAccum
+		_, blockReturnIsUnion := fnType.Return.(*ErrorUnionType)
+		blockInferError := !blockReturnIsUnion && !isVoidType(fnType.Return) && fnType.Return != nil && !IsInvalidType(fnType.Return)
+		if blockInferError {
+			a.lambdaErrorAccumulate = true
+			a.lambdaErrorAccum = nil
+		}
 		for _, stmt := range expr.Body {
 			a.analyzeStmt(stmt)
 		}
+		if blockInferError && a.lambdaErrorAccum != nil && !a.lambdaErrorAccum.IsEmpty() {
+			// Upgrade the return type to an error union carrying the accumulated set.
+			inferredReturn := &ErrorUnionType{Value: fnType.Return, Errors: a.lambdaErrorAccum}
+			fnType.Return = inferredReturn
+			a.currentReturn = inferredReturn
+			returnType = inferredReturn
+		}
+		a.lambdaErrorAccumulate = savedAccumulateBlock
+		a.lambdaErrorAccum = savedAccumBlock
 		if !isVoidType(fnType.Return) && !blockDefinitelyExits(expr.Body) {
 			a.errorf(expr.Pos(), "lambda body may reach the end without returning %s", fnType.Return)
 		}
