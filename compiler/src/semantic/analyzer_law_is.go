@@ -562,6 +562,12 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		a.currentProofCategory = ProofCatReturnRefinement
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check%s", pred.Name, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
+		// Opt-in lint: when the return subject is a field or index access, check whether binding it
+		// to a local first would allow the flow tier to prove the refinement statically via the
+		// declared type range. Only fires when the local-bound form is provably dischargeable.
+		if a.returnSubjectLocalBindingWouldProve(n.Value, lawDecl, pred) {
+			a.proofLint(n.Pos(), "hint: binding %s to a local before returning would let the flow prover discharge %q statically (zero-cost runtime-check elision)", a.returnSubjectDescription(n.Value), pred.Name)
+		}
 		if isBuiltinModularLawName(pred.Name) || !a.isSideEffectFreeRefinementArg(n.Value) {
 			continue
 		}
@@ -1379,6 +1385,85 @@ func (a *Analyzer) gatherLawIsSMTFact(scope *Scope, n *ast.BinaryExpr, truthy bo
 	}
 	// ELSE branch: the law is decidable (quantifier-free, clonable), so its negation is a sound fact.
 	a.recordSMTAssertFactInScope(scope, &ast.UnaryExpr{Position: n.Pos(), Op: lexer.TOKEN_NOT, Operand: instantiated})
+}
+
+// returnSubjectLocalBindingWouldProve reports whether binding the return subject to a local variable
+// first would allow the flow tier to prove the refinement `pred` statically. This is true when:
+//
+//  1. The subject is a field access (`value.f`) or index access (`arr[i]`) — bare locals are already
+//     handled by the flow tier and would not benefit from re-binding.
+//  2. The resolved type of the expression has a numeric range (from primitive width, e.g. u8→[0,255],
+//     or from a declared refinement on the field's type expr) that entails all the law's constraints.
+//
+// The soundness guarantee: we ONLY return true when `proveConstraintsFromRange` succeeds, which means
+// the proof would genuinely discharge for a fresh local of that type. No false positives.
+func (a *Analyzer) returnSubjectLocalBindingWouldProve(value ast.Expr, lawDecl *ast.FuncDecl, pred ast.RefinementPredExpr) bool {
+	stripped := stripOptimizationParens(value)
+	switch stripped.(type) {
+	case *ast.FieldExpr, *ast.IndexExpr:
+		// subject is a field or index read — proceed
+	default:
+		return false
+	}
+	// Derive the best available range for the expression's resolved type.
+	// First try: primitive-width range (e.g. u8 → [0, 255], i16 → [-32768, 32767]).
+	resolvedType := a.exprTypes[stripped]
+	r, ok := declaredTypeRange(resolvedType)
+	// Second try: if the field has a declared refinement (e.g. `u32 is InRange[0,127]`), extract the
+	// implied range from the refinement's law constraints and intersect with any primitive-width range.
+	if fe, isFE := stripped.(*ast.FieldExpr); isFE && fe != nil {
+		st, stOk := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+		if stOk && st != nil && st.Decl != nil {
+			for _, fd := range st.Decl.Fields {
+				if fd.Name != fe.Field {
+					continue
+				}
+				ft := fd.Type
+				if mt, mok := ft.(*ast.MutableType); mok && mt != nil {
+					ft = mt.Elem
+				}
+				if rt, rtOk := a.paramRefinementTypeExpr(ft); rtOk {
+					if fact, fok := a.rangeFromRefinementTypeExpr(rt, nil); fok {
+						if ok {
+							r = r.intersect(fact)
+						} else {
+							r = fact
+							ok = true
+						}
+					}
+				}
+				break
+			}
+		}
+	}
+	if !ok {
+		return false
+	}
+	return a.proveConstraintsFromRange(r, lawDecl, pred.Args)
+}
+
+// returnSubjectDescription returns a short human-readable description of the return subject expression
+// for use in lint messages. For field/index accesses it returns the sub-expression text; otherwise it
+// returns a generic placeholder.
+func (a *Analyzer) returnSubjectDescription(value ast.Expr) string {
+	stripped := stripOptimizationParens(value)
+	switch n := stripped.(type) {
+	case *ast.FieldExpr:
+		if n != nil {
+			if base, ok := n.Object.(*ast.Ident); ok && base != nil {
+				return "\"" + base.Name + "." + n.Field + "\""
+			}
+			return "\"<expr>." + n.Field + "\""
+		}
+	case *ast.IndexExpr:
+		if n != nil {
+			if base, ok := n.Object.(*ast.Ident); ok && base != nil {
+				return "\"" + base.Name + "[…]\""
+			}
+			return "\"<expr>[…]\""
+		}
+	}
+	return "the returned value"
 }
 
 // bareTargetName extracts a plain name from an `is` target that is a bare identifier or named
