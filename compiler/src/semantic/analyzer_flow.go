@@ -94,6 +94,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Mutable && n.Value != nil {
 			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 			a.recordConstAssignmentRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			a.recordCastRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
@@ -102,6 +103,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// never invalidated. recordWrittenConstForTarget no-ops for a non-const RHS.
 		if !n.Mutable && n.Value != nil {
 			a.recordWrittenConstForTarget(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			a.recordCastRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 			// An immutable integer binding to a length-ish expression (`n = xs.count`) makes `n`
 			// provably equal to that expression for the binding's lifetime — a cross-variable bound
 			// equality (docs/86 brick 86-6) that lets `for i in 0..<n: xs[i]` discharge. Invalidated if
@@ -423,6 +425,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordWrittenConstForTarget(n.Target, n.Value)
 			a.recordWrittenFieldForTarget(n.Target, n.Value)
 			a.recordConstAssignmentRangeFact(n.Target, n.Value)
+			a.recordCastRangeFact(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
 			a.rejectAffineIndexOverwrite(n.Target)
 			a.clearAffineValueTarget(n.Target)
@@ -515,6 +518,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// stable field value — just drop the affected field fact so nothing stale survives.
 		a.invalidateWrittenFieldForWrite(n.Target)
 		a.recordConstAssignmentRangeFact(n.Target, n.Value)
+		a.recordCastRangeFact(n.Target, n.Value)
 		a.clearZeroedUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
