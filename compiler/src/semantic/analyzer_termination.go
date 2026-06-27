@@ -438,10 +438,10 @@ func (a *Analyzer) proveLoopMeasureComponentDecreases(cond ast.Expr, invs []*ast
 	decrease := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GT, Left: measure, Right: post}
 	bounded := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_GTEQ, Left: measure, Right: &ast.IntLit{Position: measure.Pos(), Value: "0"}}
 	empty := map[string]ast.Expr{}
-	if dec, _ := a.proveLoopPreservationSMT(cond, invs, decrease, empty, nil); !dec {
+	if dec, _ := a.proveLoopPreservationSMT(cond, invs, decrease, empty, nil, nil); !dec {
 		return false
 	}
-	bnd, _ := a.proveLoopPreservationSMT(cond, invs, bounded, empty, nil)
+	bnd, _ := a.proveLoopPreservationSMT(cond, invs, bounded, empty, nil, nil)
 	return bnd
 }
 
@@ -453,7 +453,7 @@ func (a *Analyzer) proveLoopMeasureUnchanged(cond ast.Expr, invs []*ast.Contract
 		return false
 	}
 	eq := &ast.BinaryExpr{Position: measure.Pos(), Op: lexer.TOKEN_EQEQ, Left: measure, Right: post}
-	same, _ := a.proveLoopPreservationSMT(cond, invs, eq, map[string]ast.Expr{}, nil)
+	same, _ := a.proveLoopPreservationSMT(cond, invs, eq, map[string]ast.Expr{}, nil, nil)
 	return same
 }
 

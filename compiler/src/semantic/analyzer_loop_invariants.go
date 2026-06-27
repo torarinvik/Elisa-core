@@ -44,15 +44,35 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 	// exit fact is exported.
 	subst, arrayStores, captured := a.captureLoopBodyEffect(stmt.Body)
 
+	// Collect outer proven invariants that are DISJOINT from this inner loop's assigned variables —
+	// the conservative check that makes it sound to carry an outer invariant into the inner proof.
+	// If the inner body mutates any variable the outer invariant depends on, that outer invariant is
+	// excluded (it may have been invalidated). Only identifiers in the substitution keys count as
+	// "assigned" for this purpose; variables the inner loop reads but doesn't write are not excluded.
+	outerSafeInvs := outerLoopInvariantsDisjointFrom(a.activeOuterLoopInvariants, subst)
+
 	// Establishment scope: a child of the live pre-loop scope additionally carrying POINT range facts
 	// for any loop variable pinned to a compile-time constant at entry (`n: usize = 0` records the
 	// assert fact `n == 0`, which we lift to the range `[0,0]`). This lets the affine prover establish a
 	// constant-bounded invariant (`n <= MAX` from `n == 0`) with no solver. It is local to
 	// establishment — the entry value is NEVER admitted into the preservation proof (the body runs on an
 	// arbitrary iteration), preserving the inductive-step isolation.
+	//
+	// Outer proven invariants that are disjoint from this inner loop's mutations are also seeded as
+	// assert facts here: they held throughout the outer loop's arbitrary iteration, so they hold at
+	// the start of any inner-loop execution too. This lets the inner establishment proof use `j <= n`
+	// (for example) when the outer loop already proved `j <= n` inductively.
 	establishScope := NewScope(a.currentScope)
 	a.seedLoopEntryRangeFacts(establishScope, subst)
+	for _, outerInv := range outerSafeInvs {
+		a.recordSMTAssertFactInScope(establishScope, outerInv.Cond)
+	}
 
+	// inductiveInvs collects the invariants for which BOTH establishment AND preservation were proven
+	// statically. These are the ones that are valid as outer-loop hypotheses for nested inner loops
+	// and that qualify for seeding exit facts (inv ∧ ¬cond). An invariant whose body capture is
+	// unavailable (captured=false) or whose preservation falls back to runtime is NOT included.
+	var inductiveInvs []*ast.ContractStmt
 	allProven := true
 	for _, inv := range invs {
 		// Establishment: prove from the pre-loop facts (plus the entry-value point ranges). The body has
@@ -79,6 +99,7 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		// and the affine difference is bounded conservatively (open/decline on any unknown bound).
 		if a.proveLoopPreservationAffine(stmt.Cond, inv.Cond, subst) {
 			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofProvenLinear)
+			inductiveInvs = append(inductiveInvs, inv)
 			continue
 		}
 		// SMT fallback (off unless -smt): a dedicated implication where the loop variables are FREE —
@@ -87,19 +108,26 @@ func (a *Analyzer) proveLoopInvariants(stmt *ast.WhileStmt) (proven []*ast.Contr
 		// loop-variable facts (range-fact lookup intersects the whole chain), so reusing the ambient
 		// fact set would let a false invariant like `i < 5` "prove" preserved off the entry value
 		// `i == 0`.
-		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst, arrayStores); !preserved {
+		// The outer-loop safe invariants are also passed as additional SMT hypotheses — they are proven
+		// inductive by the outer loop and hold throughout its execution, so they are valid assumptions
+		// for any inner-loop preservation obligation that doesn't mutate the variables they depend on.
+		if preserved, counterexample := a.proveLoopPreservationSMT(stmt.Cond, invs, inv.Cond, subst, arrayStores, outerSafeInvs); !preserved {
 			a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofRuntime)
 			a.proofLint(inv.Pos(), "loop invariant is established on entry but could not be proven preserved by the loop body; it is only checked at runtime%s", a.counterexampleSuffix(counterexample))
 			allProven = false
 			continue
 		}
 		a.recordProof(inv.Pos(), "loop invariant", "preserve", ProofProvenSMT)
+		inductiveInvs = append(inductiveInvs, inv)
 	}
 
 	// Sound exit facts require EVERY invariant proven inductive on a body we fully captured. A
 	// captured body is straight-line (only assignments and invariant decls), so it has no `break`
 	// that could leave the loop with the condition still true — `¬cond` therefore holds at exit.
-	return invs, allProven && captured
+	// inductiveInvs (not invs) is returned so the caller only pushes PROVEN invariants onto the
+	// outer-loop stack — an invariant whose preservation fell back to runtime is NOT admitted as a
+	// hypothesis in nested inner loops (it is not guaranteed to hold at every iteration boundary).
+	return inductiveInvs, allProven && captured
 }
 
 // seedLoopExitFacts records `inv ∧ ¬cond` as after-loop facts on the current scope. Called only with
@@ -445,7 +473,7 @@ func loopIntIdentName(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 //
 // The invariants may be assumed as hypotheses because establishment (checked separately) covers the
 // base case, so at the top of an arbitrary iteration every invariant holds.
-func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr, arrayStores []loopArrayStore) (bool, string) {
+func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractStmt, target ast.Expr, subst map[string]ast.Expr, arrayStores []loopArrayStore, outerInvs []*ast.ContractStmt) (bool, string) {
 	solver := a.openSMT()
 	if solver == nil || target == nil {
 		return false, ""
@@ -522,6 +550,13 @@ func (a *Analyzer) proveLoopPreservationSMT(cond ast.Expr, invs []*ast.ContractS
 		if !addHyp(inv.Cond) {
 			return false, ""
 		}
+	}
+	// Outer-loop proven invariants that are disjoint from this loop's mutations are additional sound
+	// hypotheses: they were proven inductive by the outer loop, so they hold at the top of every outer
+	// iteration, which includes the top of every inner iteration. A translation failure for an outer
+	// invariant is non-fatal — skip that fact and continue (decline is always sound here).
+	for _, outerInv := range outerInvs {
+		addHyp(outerInv.Cond) // ignore bool return — optional hypothesis, decline is safe
 	}
 	// Hypotheses are ONLY the enclosing preconditions plus the chosen cond/invariant clauses (hypSB) —
 	// deliberately NOT the ambient assert/flow facts the standard set carries, so the loop variables stay
@@ -873,4 +908,39 @@ func collectArithIdents(expr ast.Expr, out map[string]bool) {
 	case *ast.FieldExpr:
 		collectArithIdents(n.Object, out)
 	}
+}
+
+// outerLoopInvariantsDisjointFrom filters outer proven loop invariants to those whose dependency
+// variables are disjoint from the inner loop's assigned variables (the keys of subst). This is the
+// conservative soundness gate: if the inner loop body writes ANY variable that appears in an outer
+// invariant, that invariant is excluded — it may have been invalidated by the write. Only invariants
+// whose every referenced name is untouched by the inner body are admitted as additional hypotheses.
+//
+// Empty subst (inner body not captured) returns nil — no outer facts are admitted for an inner loop
+// whose body cannot be fully modeled, since we have no proof the inner body doesn't mutate the
+// outer invariant's variables.
+func outerLoopInvariantsDisjointFrom(outers []*ast.ContractStmt, innerSubst map[string]ast.Expr) []*ast.ContractStmt {
+	if len(outers) == 0 || len(innerSubst) == 0 {
+		// len(innerSubst)==0 means capture failed (no body effect recorded); decline all outer facts
+		// since we cannot verify disjointness without knowing what the inner body writes.
+		return nil
+	}
+	var out []*ast.ContractStmt
+	for _, inv := range outers {
+		if inv == nil || inv.Cond == nil {
+			continue
+		}
+		deps := smtFactDeps(inv.Cond)
+		disjoint := true
+		for name := range deps {
+			if _, mutated := innerSubst[name]; mutated {
+				disjoint = false
+				break
+			}
+		}
+		if disjoint {
+			out = append(out, inv)
+		}
+	}
+	return out
 }
