@@ -122,3 +122,62 @@ def bad() -> Dst:
 		t.Fatalf("Dst(999) violates op's UB[0,127]; construction must be rejected")
 	}
 }
+
+// --- darray/array element refinement (docs/85 element-read channel) --------------------------------
+
+// Reading an element of a darray whose element type is refined inherits the element's refinement.
+// `xs: darray[u32 is UB[0,127]]`, then `e = xs[i]` gives `e` the UB[0,127] guarantee, so returning
+// `e` from a `-> u32 is UB[0,127]` function discharges with no runtime check.
+// Sound: element refinements are enforced on every push/store (parallel to struct-field refinement
+// enforcement at construction), so reading xs[i] can safely inherit the bound.
+func TestDArrayElemRefinementInherited(t *testing.T) {
+	src := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def f(xs: darray[u32 is UB[0, 127]]&, i: usize) -> u32 is UB[0, 127]:
+    return xs[i]
+`
+	if errs := analyzeContractStrict(t, "darray_elem_refine_ok.elisa", src).Errors(); len(errs) != 0 {
+		t.Fatalf("reading a refined darray element should inherit UB[0,127] and prove the return, got: %v", errs)
+	}
+}
+
+// Static array: same guarantee — element type refinement is enforced at construction, so reading
+// arr[i] inherits it.
+func TestArrayElemRefinementInherited(t *testing.T) {
+	src := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def f(xs: array[u32 is UB[0, 127], 8]&, i: usize) -> u32 is UB[0, 127]:
+    return xs[i]
+`
+	if errs := analyzeContractStrict(t, "array_elem_refine_ok.elisa", src).Errors(); len(errs) != 0 {
+		t.Fatalf("reading a refined array element should inherit UB[0,127] and prove the return, got: %v", errs)
+	}
+}
+
+// SOUNDNESS: a darray with a NON-refined element type gives no bound. Returning xs[i] as a
+// `u32 is UB[0,127]` must decline (runtime check or error under -strict).
+func TestDArrayUnrefinedElemGivesNoBound(t *testing.T) {
+	src := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def f(xs: darray[u32]&, i: usize) -> u32 is UB[0, 127]:
+    return xs[i]
+`
+	result := analyzeContractStrict(t, "darray_elem_unrefined.elisa", src)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("an unrefined darray element must NOT prove UB[0,127]; return should be declined under -strict")
+	}
+}
+
+// SOUNDNESS: a wider element refinement does NOT entail a narrower return refinement.
+// darray[u32 is UB[0,1000]] does not prove the return UB[0,127] — the element might be 500.
+func TestDArrayWiderElemDoesNotProveNarrower(t *testing.T) {
+	src := `
+law UB(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+def f(xs: darray[u32 is UB[0, 1000]]&, i: usize) -> u32 is UB[0, 127]:
+    return xs[i]
+`
+	result := analyzeContractStrict(t, "darray_elem_wide.elisa", src)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("UB[0,1000] element does not entail UB[0,127] return; must decline under -strict")
+	}
+}

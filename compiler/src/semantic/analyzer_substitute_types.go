@@ -108,11 +108,11 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if n.ConstParam != "" {
 			if resolved, ok := bindings[n.ConstParam]; ok {
 				if value, valueOK := resolved.(*ConstValueType); valueOK && value.Value.Kind == ConstInt {
-					return &ArrayType{Elem: elem, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: n.SurfaceName}
+					return &ArrayType{Elem: elem, ElemTypeExpr: n.ElemTypeExpr, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: n.SurfaceName}
 				}
 			}
 		}
-		return &ArrayType{Elem: elem, Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, ConstParam: n.ConstParam, SurfaceName: n.SurfaceName}
+		return &ArrayType{Elem: elem, ElemTypeExpr: n.ElemTypeExpr, Size: n.Size, HasConstSize: n.HasConstSize, ConstSize: n.ConstSize, ConstParam: n.ConstParam, SurfaceName: n.SurfaceName}
 	case *DArrayType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {
@@ -122,7 +122,7 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if bound, ok := regionBindings[n.Region]; ok {
 			region = bound
 		}
-		return &DArrayType{Elem: elem, Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName, Region: region}
+		return &DArrayType{Elem: elem, ElemTypeExpr: n.ElemTypeExpr, Shape: a.substituteShape(n.Shape, shapeBindings), SurfaceName: n.SurfaceName, Region: region}
 	case *ViewType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {
