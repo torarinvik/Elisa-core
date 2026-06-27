@@ -554,16 +554,26 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		// for ref args. Conservative on two axes (any ref, not just mutable; no `ensures`-preserve
 		// credit yet); both only add runtime checks, never remove them, so the drop stays sound. A
 		// callee that re-establishes the predicate via `ensures` is a later refinement.
+		//
+		// Frame-aware survival (docs/87): when the callee declares a bounding frame AND writes nothing
+		// through this particular parameter (calleeFrameSuffixesForParam returns an empty non-nil slice),
+		// the argument is provably untouched — so pred, range, writtenConst, and writtenField facts survive.
+		// Mirrors the smtAssertFacts path in invalidateSMTAssertFactsFramed. Soundness: an unframed callee
+		// or one that writes through this param falls back to the conservative whole-argument drop.
 		if rt, ok := paramType.(*RefType); ok && rt != nil && !a.callPreservesArgRefinements(expr, appliedType, i) {
-			a.invalidatePredFactsForTarget(loweredArgs[i])
-			a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
-			// A mutating ref to `self` (or any struct) lets the callee write ANY field, so every
-			// written-field fact under that root is stale — drop them all (mirrors the writtenConst drop
-			// above). An immutable borrow took the preserve credit and never reached this branch.
-			a.invalidateWrittenFieldsForRoot(rootIdentNameOrEmpty(loweredArgs[i]))
-			// docs/90 brick 90-11: a ref call may write the arg, so any range fact about it is stale too —
-			// dropped here so a postcondition seed (below) is the only interval that survives the call.
-			a.invalidateRangeFactsForTarget(loweredArgs[i])
+			frameSuffixes := calleeFrameSuffixesForParam(appliedType, i)
+			frameWritesNothingThroughParam := frameSuffixes != nil && len(frameSuffixes) == 0
+			if !frameWritesNothingThroughParam {
+				a.invalidatePredFactsForTarget(loweredArgs[i])
+				a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
+				// A mutating ref to `self` (or any struct) lets the callee write ANY field, so every
+				// written-field fact under that root is stale — drop them all (mirrors the writtenConst drop
+				// above). An immutable borrow took the preserve credit and never reached this branch.
+				a.invalidateWrittenFieldsForRoot(rootIdentNameOrEmpty(loweredArgs[i]))
+				// docs/90 brick 90-11: a ref call may write the arg, so any range fact about it is stale too —
+				// dropped here so a postcondition seed (below) is the only interval that survives the call.
+				a.invalidateRangeFactsForTarget(loweredArgs[i])
+			}
 		}
 		// Frame enforcement (docs/87 channel 2): passing a place by MUTABLE ref means the callee may
 		// write it, so it counts as a write to that place. An immutable borrow cannot write — skip it.
