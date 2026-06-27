@@ -81,3 +81,32 @@ func TestDerivedStatePreservedByGuardedDecrement(t *testing.T) {
 		t.Fatalf("a decrement guarded by `health > amt` provably stays Alive, got: %v", errs)
 	}
 }
+
+// Multi-state entry with a requires-only guarantee: the entry type is multi-state (Alive | Dead), so
+// no single-state hypothesis exists. But a `requires starting_health > 0` clause alone is enough
+// for SMT to exclude Dead from the post-assignment value — the fix lets derivedStateProvablyExcluded
+// run without a hypExpr, falling back to the standard requires hypotheses.
+func TestDerivedStateNarrowedByRequiresWithNoEntryHypothesis(t *testing.T) {
+	src := derivedStatePlayerPreamble + `def init_player(p: mutable Player&, starting_health: i64):
+	requires starting_health > 0
+	p.health <- starting_health
+	expect_alive(p)
+`
+	result := analyzeDerivedStatePrecision(t, "ds_init_player.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("requires starting_health > 0 should let SMT exclude Dead from the post-value, preserving Alive; got: %v", errs)
+	}
+}
+
+// Soundness-negative for the multi-state requires-only path: assigning an unconstrained value to
+// health must NOT yield a narrowed Alive state — the prover cannot exclude Dead (val could be <= 0).
+func TestDerivedStateNotNarrowedByUnconstainedAssign(t *testing.T) {
+	src := derivedStatePlayerPreamble + `def reset_player(p: mutable Player&, val: i64):
+	p.health <- val
+	expect_alive(p)
+`
+	result := analyzeDerivedStatePrecision(t, "ds_reset_player.elisa", src)
+	if !strings.Contains(allDiagnostics(result), "Player[Alive | Dead]") {
+		t.Fatalf("assigning an unconstrained value must widen state to Alive | Dead; got: %s", allDiagnostics(result))
+	}
+}
