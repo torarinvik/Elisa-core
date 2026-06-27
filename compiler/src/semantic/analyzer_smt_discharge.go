@@ -1371,6 +1371,17 @@ func collectSMTFactDeps(expr ast.Expr, out map[string]bool) {
 		if n != nil {
 			collectSMTFactDeps(n.Operand, out)
 		}
+	case *ast.QuantifierExpr:
+		// Collect deps from the body, then remove bound variables — they are local to the quantifier and
+		// not free names. This is required so `exprReferencesResult` correctly detects a `result`
+		// reference inside a quantified body (e.g. `ensure forall k: result[k] == 0` references `result`)
+		// and skips the clause at void-exit where `result` is unbound.
+		if n != nil {
+			collectSMTFactDeps(n.Body, out)
+			for _, v := range n.Vars {
+				delete(out, v)
+			}
+		}
 	}
 }
 

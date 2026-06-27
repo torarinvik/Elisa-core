@@ -117,6 +117,22 @@ func (a *Analyzer) seedLoopExitFacts(stmt *ast.WhileStmt, invs []*ast.ContractSt
 		a.recordSMTAssertFact(inv.Cond)
 	}
 	a.applyConditionRefinements(a.currentScope, stmt.Cond, false)
+	// Also seed the negated loop condition as a direct SMT assert fact. applyConditionRefinements only
+	// records CONSTANT-bound range facts (e.g. `i >= 5`); a symbolic guard like `i < n` (n = parameter)
+	// produces no range fact, so the post-loop bound `i >= n` is invisible to the SMT tier. Recording
+	// `not(cond)` explicitly lets a quantified ensure that bridges the loop's proven invariant to the
+	// return site discharge: the solver sees `inv ∧ (i >= n)` and can prove `forall k < n: arr[k]==0`
+	// from `forall k < i: arr[k]==0` (docs/90 brick 90-17).
+	//
+	// Before seeding, drop the STALE range fact for the loop variable (e.g. `i == 0` from its
+	// initialisation), which is restored by analyzeBlockWithConditionAffineClone after the body. A stale
+	// `i == 0` together with the new `i >= n` is contradictory when n > 0: from a contradiction Z3
+	// proves any goal, including false ones. invalidateRangeFacts(condVar) removes the stale entry-point
+	// bound; the negated-cond assert fact is the ONLY post-loop bound seeded for the symbolic case.
+	if condVar := loopCondMutableVar(stmt.Cond); condVar != "" {
+		a.invalidateRangeFacts(condVar)
+	}
+	a.recordSMTAssertFact(&ast.UnaryExpr{Position: stmt.Cond.Pos(), Op: lexer.TOKEN_NOT, Operand: stmt.Cond})
 }
 
 func provenTier(viaSMT bool) ProofOutcome {
@@ -124,6 +140,35 @@ func provenTier(viaSMT bool) ProofOutcome {
 		return ProofProvenSMT
 	}
 	return ProofProvenLinear
+}
+
+// loopCondMutableVar extracts the name of a mutable loop variable from a simple loop condition of
+// the form `ident OP expr` (e.g. `i < n`, `i < 10`, `i <= max`). Returns "" for any other form.
+// Used by seedLoopExitFacts to identify which variable's stale entry-point range fact to drop before
+// seeding `not(cond)` as an SMT assert: a restored `i==0` range contradicts `i>=n` when n>0.
+func loopCondMutableVar(cond ast.Expr) string {
+	if cond == nil {
+		return ""
+	}
+	// Strip a top-level `and`: `i < n and name[i] != 0` — take only the outermost left-hand comparison.
+	expr := cond
+	if bin, ok := expr.(*ast.BinaryExpr); ok && bin.Op == lexer.TOKEN_AND {
+		expr = bin.Left
+	}
+	bin, ok := expr.(*ast.BinaryExpr)
+	if !ok {
+		return ""
+	}
+	switch bin.Op {
+	case lexer.TOKEN_LT, lexer.TOKEN_LTEQ, lexer.TOKEN_GT, lexer.TOKEN_GTEQ:
+	default:
+		return ""
+	}
+	id, ok := bin.Left.(*ast.Ident)
+	if !ok {
+		return ""
+	}
+	return id.Name
 }
 
 // leadingInvariants returns the `invariant` contract statements that lead the loop body (up to the
