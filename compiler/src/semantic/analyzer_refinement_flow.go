@@ -87,15 +87,18 @@ func (r numRange) intersect(o numRange) numRange {
 	return out
 }
 
-// gatherNumericRangeRefinement records integer-bound facts for an IMMUTABLE identifier compared
-// against a compile-time-constant in a (truthy) branch condition: `a > 5`, `a >= 0`, `a < n`,
-// `5 < a`, `a == k`, etc. Immutable-only so the fact holds for the whole branch with no
-// invalidation. Called from applyConditionRefinementsInternal for comparison operators.
+// gatherNumericRangeRefinement records integer-bound facts for an IMMUTABLE identifier or immutable
+// struct field path compared against a compile-time-constant in a (truthy) branch condition:
+// `a > 5`, `a >= 0`, `s.n <= 103`, `5 < a`, `a == k`, etc. Immutable-only so the fact holds for
+// the whole branch with no invalidation. Field-path keys ("s.n") are invalidated by
+// invalidateRangeFactsForTarget on any write to s.n or s. Called from
+// applyConditionRefinementsInternal for comparison operators.
 func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr, truthy bool) {
 	if scope == nil || n == nil {
 		return
 	}
-	// Normalize to `ident OP const`. If the constant is on the left (`5 < a`), flip the operator.
+	// Normalize to `subject OP const`. If the constant is on the left (`5 < a`), flip the operator.
+	// Try bare identifier first; fall back to a one-level field-path subject ("s.n").
 	op := n.Op
 	name, ok := immutableIntIdentName(a, scope, n.Left)
 	identExpr := n.Left
@@ -104,6 +107,14 @@ func (a *Analyzer) gatherNumericRangeRefinement(scope *Scope, n *ast.BinaryExpr,
 	if ok {
 		c, cok = a.constIntValue(n.Right)
 	} else if name, ok = immutableIntIdentName(a, scope, n.Right); ok {
+		identExpr = n.Right
+		c, cok = a.constIntValue(n.Left)
+		op = flipComparison(op)
+	} else if name, ok = fieldPathKey(a, scope, n.Left); ok {
+		// `s.n OP const`
+		c, cok = a.constIntValue(n.Right)
+	} else if name, ok = fieldPathKey(a, scope, n.Right); ok {
+		// `const OP s.n` — flip so subject is on the left
 		identExpr = n.Right
 		c, cok = a.constIntValue(n.Left)
 		op = flipComparison(op)
@@ -440,6 +451,35 @@ func immutableIntIdentName(a *Analyzer, scope *Scope, expr ast.Expr) (string, bo
 	return ident.Name, true
 }
 
+// fieldPathKey returns a dotted key like "s.n" when `expr` is a field-access expression whose
+// object is an immutable local variable and whose resolved integer field type is non-float. This
+// lets guard facts like `if s.n <= 103:` be keyed on the path "s.n" and used inside the branch.
+// The object must be a bare immutable local so the struct itself cannot be reassigned; only a
+// direct mutation of `s.n` or `s` can stale the fact (invalidateRangeFactsForTarget handles both).
+// Mutable-root structs are excluded conservatively: any field write would require invalidation of
+// all sibling paths, so we only track paths rooted at immutable locals (sound, not complete).
+func fieldPathKey(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
+	fe, ok := expr.(*ast.FieldExpr)
+	if !ok || fe == nil {
+		return "", false
+	}
+	// Only one-level `s.field` where `s` is an immutable local.
+	rootIdent, ok := fe.Object.(*ast.Ident)
+	if !ok || rootIdent == nil {
+		return "", false
+	}
+	sym, ok := scope.Lookup(rootIdent.Name)
+	if !ok || sym == nil || sym.Mutable {
+		return "", false
+	}
+	// The field's resolved type must be an integer (non-float numeric).
+	ft := a.exprTypes[expr]
+	if ft == nil || !IsNumericType(ft) || IsFloatType(ft) {
+		return "", false
+	}
+	return rootIdent.Name + "." + fe.Field, true
+}
+
 // constIntValue extracts a compile-time integer constant from an expression.
 func (a *Analyzer) constIntValue(expr ast.Expr) (int64, bool) {
 	cv, ok := a.evalConstExpr(expr)
@@ -547,11 +587,59 @@ func (a *Analyzer) invalidateRangeFacts(name string) {
 	}
 }
 
+// invalidateRangeFactsForFieldPath drops any range fact keyed on the exact path `path` (e.g.
+// "s.n") across the active scope chain. Used when a direct field mutation `s.n <- …` occurs.
+func (a *Analyzer) invalidateRangeFactsForFieldPath(path string) {
+	if path == "" {
+		return
+	}
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.rangeFacts != nil {
+			delete(scope.rangeFacts, path)
+		}
+	}
+}
+
+// invalidateRangeFactsWithRootPrefix drops every range fact whose key equals `root` OR starts with
+// `root + "."` — covering both a plain-ident fact and any field-path facts whose struct root is
+// `root`. Called when the struct variable itself is mutated or reassigned (a write to `s` stales
+// all "s.f" facts).
+func (a *Analyzer) invalidateRangeFactsWithRootPrefix(root string) {
+	if root == "" {
+		return
+	}
+	prefix := root + "."
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		if scope.rangeFacts == nil {
+			continue
+		}
+		for k := range scope.rangeFacts {
+			if k == root || len(k) > len(prefix) && k[:len(prefix)] == prefix {
+				delete(scope.rangeFacts, k)
+			}
+		}
+	}
+}
+
 // invalidateRangeFactsForTarget drops the range fact about the root variable of a mutation target
 // expression (an identifier, or a field/index path rooted at one), mirroring invalidatePredFactsForTarget.
+// For a field-path target `s.n`, it drops the exact path fact "s.n". For any mutation whose root
+// is a plain identifier `s`, it drops `s` AND all field-path facts of the form "s.*" (because a
+// write to the struct as a whole stales every field fact).
 func (a *Analyzer) invalidateRangeFactsForTarget(target ast.Expr) {
+	// If the target is a direct field expression `s.field`, drop only that exact path fact as well as
+	// the root ident (via the existing plain-ident invalidation below). This is tighter than dropping
+	// all "s.*" paths on a field write — only "s.field" is stale.
+	if fe, ok := target.(*ast.FieldExpr); ok && fe != nil {
+		if rootIdent, ok := fe.Object.(*ast.Ident); ok && rootIdent != nil {
+			a.invalidateRangeFactsForFieldPath(rootIdent.Name + "." + fe.Field)
+		}
+	}
 	for _, name := range a.mutationRootsForTarget(target) {
 		a.invalidateRangeFacts(name)
+		// Also invalidate any field-path facts keyed on this root (e.g. "name.f"), in case the
+		// mutation target is the struct itself (not a specific field).
+		a.invalidateRangeFactsWithRootPrefix(name)
 	}
 }
 
@@ -1757,6 +1845,21 @@ func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl
 func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
+		// Field-path case: `s.n` where a guard established a range fact keyed on "s.n".
+		if fe, isFE := value.(*ast.FieldExpr); isFE && fe != nil && a.currentScope != nil {
+			if pathKey, pkOk := fieldPathKey(a, a.currentScope, fe); pkOk {
+				if r, rOk := a.lookupRangeFact(pathKey); rOk {
+					// Also intersect with the declared type bounds (unsigned non-negativity, etc.),
+					// mirroring the bare-ident path below.
+					if ft := a.exprTypes[value]; ft != nil {
+						if tr, trOk := declaredTypeRange(ft); trOk {
+							r = r.intersect(tr)
+						}
+					}
+					return a.proveConstraintsFromRange(r, decl, predArgs)
+				}
+			}
+		}
 		// Cases 3 & 4: additive shift or monotonic scaling of an immutable integer variable.
 		if r, derived := a.tryDeriveShiftOrScaleRange(value); derived {
 			return a.proveConstraintsFromRange(r, decl, predArgs)
