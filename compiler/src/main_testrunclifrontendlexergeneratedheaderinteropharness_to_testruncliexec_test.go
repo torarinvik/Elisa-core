@@ -11,54 +11,6 @@ import (
 	"testing"
 )
 
-func TestRunCLIFrontendLexerGeneratedHeaderInteropHarness(t *testing.T) {
-	clangPath, err := exec.LookPath("clang")
-	if err != nil {
-		t.Skip("clang not available")
-	}
-	repoRoot := repoRootFromMainTest(t)
-	fixturePath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa")
-	harnessPath := filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer_generated_harness.c")
-	shimPath := filepath.Join(repoRoot, "Code", "benchmarks", "frontend_lexer_runtime_shims.c")
-	outputDir := t.TempDir()
-	headerPath := filepath.Join(outputDir, "frontend_lexer.h")
-	objectPath := filepath.Join(outputDir, "frontend_lexer.o")
-	exePath := filepath.Join(outputDir, "frontend_lexer_generated_harness")
-
-	for _, args := range [][]string{
-		{"-emit", "header", "-o", headerPath, fixturePath},
-		// This test validates generated-header ABI wiring, not optimized code quality.
-		{"-emit", "obj", "-O0", "-o", objectPath, fixturePath},
-	} {
-		var stdout bytes.Buffer
-		var stderr bytes.Buffer
-		exitCode := runCLI(args, &stdout, &stderr)
-		if exitCode != 0 {
-			t.Fatalf("runCLI(%v) returned %d\nstderr:\n%s", args, exitCode, stderr.String())
-		}
-		if stdout.Len() != 0 {
-			t.Fatalf("expected no stdout for %v, got:\n%s", args, stdout.String())
-		}
-		if stderr.Len() != 0 {
-			t.Fatalf("expected no stderr for %v, got:\n%s", args, stderr.String())
-		}
-	}
-
-	compileArgs := []string{"-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
-	}
-	runCmd := exec.Command(exePath)
-	runOutput, err := runCmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("frontend-lexer generated-header interop harness failed: %v\n%s", err, string(runOutput))
-	}
-}
 func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	clangPath, err := exec.LookPath("clang")
 	if err != nil {

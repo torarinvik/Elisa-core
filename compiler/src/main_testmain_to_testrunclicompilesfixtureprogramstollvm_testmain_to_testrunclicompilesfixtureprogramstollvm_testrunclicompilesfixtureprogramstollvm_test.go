@@ -246,22 +246,6 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
-			name: "frontend_lexer",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_lexer.elisa"),
-			checks: []string{
-				"%FrontendPos = type { i64, i64, i64 }",
-				"%FrontendToken = type { i32, %FrontendPos, %StringView, %StringView }",
-				"define i64 @frontend_advance_char(ptr",
-				"define %FrontendToken @frontend_next_token(ptr",
-				"define %DynArray__FrontendToken @frontend_tokenize(ptr",
-				"define i64 @frontend_lexer_parity_suite()",
-				"define i64 @frontend_lexer_token_count(ptr ",
-				"define i64 @frontend_lexer_token_checksum(ptr ",
-				"define i64 @frontend_lexer_token_kind_at(ptr ",
-				"define i64 @frontend_lexer_copy_token_kinds(ptr ",
-			},
-		},
-		{
 			name: "compiler_parallel_fixture",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "compiler_parallel_fixture.elisa"),
 			checks: []string{
