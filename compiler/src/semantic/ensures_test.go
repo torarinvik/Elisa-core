@@ -672,6 +672,24 @@ def bad_nonnull(ev: void&?, fallback: void&?) -> void&?:
         return fallback
     return e.udata
 `, false},
+		// COMPLETENESS: `ensure result != null` over a fn that returns a T& (non-optional ref) param
+		// must discharge: T& is structurally non-null in Elisa's type system, so isnull_result is false.
+		{"nonnull_ref_result_nonnull_postcondition", `
+struct Foo:
+    x: i64
+def get_it(p: Foo&) -> Foo&:
+    ensure result != null
+    return p
+`, true},
+		// SOUNDNESS: `ensure result != null` over a fn that returns an OPTIONAL (T&?) param must NOT
+		// discharge: the optional may be null. Accepting this would be unsound.
+		{"optional_result_nonnull_postcondition_rejected", `
+struct Foo:
+    x: i64
+def maybe_get(p: Foo&?) -> Foo&?:
+    ensure result != null
+    return p
+`, false},
 		{"struct_result_field", `
 struct Pair:
     a: i64

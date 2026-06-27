@@ -230,6 +230,42 @@ func (a *Analyzer) smtParamRefinementHypotheses(tr *smtTranslator) string {
 	return b.String()
 }
 
+// smtNonNullRefParamHypotheses asserts `(= isnull_<param> false)` for every immutable param whose
+// declared type is a non-nullable reference (`T&`, i.e. `RefType{State: RefStateNonNull}`). A T&
+// param is structurally non-null in Elisa's type system: the language prohibits null T& values.
+// This fact is NOT derived from flow guards, so it never appears in smtAssertHypotheses; this
+// helper is the only channel that makes it available to the solver. The `isnull_` predicate key
+// mirrors exactly what nullComparePointer+boolTerm produce for `p == null` / `p != null`, so the
+// prover can use it for any goal involving the null-ness of a T& param.
+// SOUND: only RefStateNonNull triggers the assertion. Nullable refs (T&?, RefStateNullable),
+// null literals (RefStateNull), and T? (OptionalType) are left unconstrained — they fail to prove
+// non-null postconditions unless a flow guard surfaces the non-null fact via smtAssertHypotheses.
+func (a *Analyzer) smtNonNullRefParamHypotheses(tr *smtTranslator) string {
+	if a == nil || a.currentFuncDecl == nil || tr == nil {
+		return ""
+	}
+	var b strings.Builder
+	for _, param := range a.currentFuncDecl.Params {
+		if a.paramIsMutable(param) {
+			continue
+		}
+		// Resolve the declared type through any alias chain.
+		t := a.resolveType(param.Type)
+		if t == nil {
+			continue
+		}
+		rt, ok := IsRefType(t)
+		if !ok || rt.State != RefStateNonNull {
+			// Not a non-optional RefType → may be nullable; skip.
+			continue
+		}
+		pred := "isnull_" + param.Name
+		tr.boolDecls[pred] = true
+		b.WriteString("(assert (= " + pred + " false))\n")
+	}
+	return b.String()
+}
+
 // fieldReadResolvedType resolves the type of a struct-field read `obj.field` from the object's type,
 // for synthetic/cloned FieldExpr nodes whose per-node exprTypes entry was never populated. It tries
 // the object's recorded type, then a scope lookup for a bare identifier, then recurses for a nested
@@ -292,7 +328,7 @@ func (a *Analyzer) smtCheckVC(tr *smtTranslator, obligation string, extraHyps st
 // the now-complete tr.decls (the obligations were already lowered, so all their symbols are declared),
 // so every query is self-contained.
 func (a *Analyzer) smtCheckVCMulti(tr *smtTranslator, obligations []string, extraHyps string) (bool, string) {
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	for _, obligation := range obligations {
 		if proven, ce := a.smtCheckQuery(tr, hyps, obligation); !proven {
 			return false, ce
@@ -512,7 +548,7 @@ func (a *Analyzer) smtQuantifierCounterexample(tr *smtTranslator, goalExpr ast.E
 	if !ok {
 		return ""
 	}
-	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + extraHyps
+	hyps := a.smtRequiresHypotheses(tr) + a.smtImmutableLocalHypotheses(tr) + a.smtAssertHypotheses(tr) + a.smtFlowFactHypotheses(tr) + a.smtProtocolLawHypotheses(tr) + a.smtNonNullRefParamHypotheses(tr) + extraHyps
 	proven, ce := a.smtCheckQuery(tr, hyps, body)
 	if proven {
 		return ""
@@ -635,11 +671,16 @@ func (a *Analyzer) trySMTProveRequires(clause ast.Expr, subst map[string]ast.Exp
 	// Simple bindings (where the SMT term is already a declared free variable) are skipped because
 	// they duplicate an entry already in tr.decls.
 	trRegisterSubstCEExprs(tr, env)
+	// Emit a structural null-ness fact for `result` when its null-ness is definitively known from the
+	// return expression's type or value. This is EXTRA (not in the standard hypothesis set) because it
+	// is substitution-specific: on a literal-null return `isnull_result` is true, on a T& (non-optional
+	// ref) return it is false. The standard set does not know which return site is active.
+	extra := a.smtResultNullnessHypothesis(tr, substForEnv)
 	// Lower the clause to the VC IR and discharge against the standard hypothesis set (the enclosing
 	// function's `requires` — docs/90 brick 90-13 — its immutable-local defining equalities, flow
 	// assert-facts, and range facts). On sat the returned model is an input permitted by the caller's
 	// known facts that violates the precondition — a concrete witness for the diagnostic.
-	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, "")
+	proven, counterexample, ok := a.smtCheckGoal(tr, clause, env, extra)
 	if !ok {
 		return false, ""
 	}
