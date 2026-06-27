@@ -119,6 +119,20 @@ const (
 	ProofClassMeasured  ProofDischargeClass = "measured"
 )
 
+// ProofObligationCategory classifies a ProofFact into one of the four elision-telemetry buckets
+// used by the --explain proof-elision summary: refinement returns, call-arg refinements, array
+// bounds, and contract ensures. All other obligations (assert-by, frame laws, typestate, …) use
+// ProofCatOther and are excluded from the per-category elision counts.
+type ProofObligationCategory string
+
+const (
+	ProofCatReturnRefinement  ProofObligationCategory = "return-refinement"  // return value satisfies refinement type
+	ProofCatCallArgRefinement ProofObligationCategory = "call-arg-refinement" // argument satisfies callee param refinement
+	ProofCatArrayBounds       ProofObligationCategory = "array-bounds"        // index expression proved in-bounds
+	ProofCatContractEnsures   ProofObligationCategory = "contract-ensures"    // postcondition (ensure) clause
+	ProofCatOther             ProofObligationCategory = "other"               // all other obligations
+)
+
 // ProofFact is one entry in the --explain proof report: where a refinement was discharged, on what
 // subject, by which law, and with what outcome.
 type ProofFact struct {
@@ -127,14 +141,37 @@ type ProofFact struct {
 	Predicate        string
 	Outcome          ProofOutcome
 	Class            ProofDischargeClass
+	Category         ProofObligationCategory // elision-telemetry bucket; zero value treated as ProofCatOther
 	KnownFacts       []string
 	ClosedWorldFacts []string
 	Missing          string
 }
 
 // recordProof appends one discharge decision to the proof report (docs/85 observability).
+// It consumes and clears a.currentProofCategory so callers can set a category before entering
+// the discharge ladder without threading it through every helper.
 func (a *Analyzer) recordProof(pos lexer.Pos, subject, predicate string, outcome ProofOutcome) {
 	a.recordProofWithClass(pos, subject, predicate, outcome, defaultProofClass(outcome), nil, "")
+}
+
+// recordProofCat is like recordProof but explicitly stamps the elision-telemetry category.
+// Use it when the category is known at the call site (e.g. return-refinement, call-arg-refinement,
+// contract-ensures). For call paths that go through tryDischargeRefinementStatically set
+// a.currentProofCategory before the call; recordProofWithClass will consume and clear it.
+func (a *Analyzer) recordProofCat(pos lexer.Pos, subject, predicate string, outcome ProofOutcome, cat ProofObligationCategory) {
+	var known []string
+	if a != nil {
+		known = append([]string(nil), a.inScopeKnownFacts()...)
+	}
+	a.proofReport = append(a.proofReport, ProofFact{
+		Pos:        pos,
+		Subject:    subject,
+		Predicate:  predicate,
+		Outcome:    outcome,
+		Class:      defaultProofClass(outcome),
+		Category:   cat,
+		KnownFacts: known,
+	})
 }
 
 func (a *Analyzer) recordProofWithClass(pos lexer.Pos, subject, predicate string, outcome ProofOutcome, class ProofDischargeClass, closedWorldFacts []string, missing string) {
@@ -142,12 +179,15 @@ func (a *Analyzer) recordProofWithClass(pos lexer.Pos, subject, predicate string
 	if a != nil {
 		known = append([]string(nil), a.inScopeKnownFacts()...)
 	}
+	cat := a.currentProofCategory
+	a.currentProofCategory = "" // consume
 	a.proofReport = append(a.proofReport, ProofFact{
 		Pos:              pos,
 		Subject:          subject,
 		Predicate:        predicate,
 		Outcome:          outcome,
 		Class:            class,
+		Category:         cat,
 		KnownFacts:       known,
 		ClosedWorldFacts: append([]string(nil), closedWorldFacts...),
 		Missing:          missing,
@@ -173,6 +213,70 @@ func defaultProofClass(outcome ProofOutcome) ProofDischargeClass {
 	default:
 		return ProofClassRuntime
 	}
+}
+
+// ProofElisionCounts is the (elided, runtime) pair for one obligation category.
+// Elided = statically proven (no runtime check needed); Runtime = fell back to a debug check.
+type ProofElisionCounts struct {
+	Elided  int // statically proven (ProofProven* outcomes)
+	Runtime int // fell back to a runtime check (ProofRuntime outcome)
+}
+
+// ProofElisionSummary is the per-category breakdown of check elision computed from the ProofReport
+// and IndexBoundsProven map. Printed as a one-liner under --explain to make the dogfooding payoff
+// immediately scannable ("emulator: N bounds checks elided").
+type ProofElisionSummary struct {
+	ReturnRefinements  ProofElisionCounts
+	CallArgRefinements ProofElisionCounts
+	ArrayBounds        ProofElisionCounts
+	ContractEnsures    ProofElisionCounts
+}
+
+// ComputeElisionSummary builds a ProofElisionSummary from a proof report and the proven/total
+// array-bounds counts (caller computes those from IndexBoundsProven). The three refinement
+// categories come from ProofFact.Category tags; the array-bounds category is passed directly so
+// this function does not need to import ast.
+func ComputeElisionSummary(report []ProofFact, arrayBoundsElided, arrayBoundsRuntime int) ProofElisionSummary {
+	var s ProofElisionSummary
+	s.ArrayBounds = ProofElisionCounts{Elided: arrayBoundsElided, Runtime: arrayBoundsRuntime}
+	for _, f := range report {
+		cat := f.Category
+		if cat == "" {
+			cat = ProofCatOther
+		}
+		proven := isProofProven(f.Outcome)
+		runtime := f.Outcome == ProofRuntime
+		switch cat {
+		case ProofCatReturnRefinement:
+			if proven {
+				s.ReturnRefinements.Elided++
+			} else if runtime {
+				s.ReturnRefinements.Runtime++
+			}
+		case ProofCatCallArgRefinement:
+			if proven {
+				s.CallArgRefinements.Elided++
+			} else if runtime {
+				s.CallArgRefinements.Runtime++
+			}
+		case ProofCatContractEnsures:
+			if proven {
+				s.ContractEnsures.Elided++
+			} else if runtime {
+				s.ContractEnsures.Runtime++
+			}
+		}
+	}
+	return s
+}
+
+// isProofProven reports whether the outcome is any of the statically-proven variants.
+func isProofProven(o ProofOutcome) bool {
+	switch o {
+	case ProofProvenFlow, ProofProvenLinear, ProofProvenConst, ProofProvenSMT, ProofProvenContract:
+		return true
+	}
+	return false
 }
 
 // proofLint reports that a refinement obligation was not statically discharged. It is a WARNING by

@@ -78,6 +78,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		// A bounds-requiring access that is not statically proven would emit a runtime bounds check;
 		// record it for the `NoBoundsChecks` shape law (docs/89). Independent of enforceUnsafePermissions
 		// (the shape audit is about what the backend emits, not the unsafe-permission policy).
+		a.indexBoundsRuntimeCount++ // elision telemetry: this site needs a runtime guard
 		a.currentFunctionGuardedIndexes = append(a.currentFunctionGuardedIndexes, expr.Position)
 		if a.enforceUnsafePermissions {
 			a.recordFunctionPermissionRefs(unsafeUncheckedIndexRefs(expr.Position))
