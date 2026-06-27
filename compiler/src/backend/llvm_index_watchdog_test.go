@@ -165,3 +165,67 @@ func TestIndexWatchdogNotSubsumedWithoutEquality(t *testing.T) {
 		t.Fatalf("an unrelated loop bound must NOT be subsumed (would be unsound), got:\n%s", output)
 	}
 }
+
+// IR-level inbounds GEP: a statically-proven loop index (`for i in 0..<xs.count`)
+// must emit `getelementptr inbounds` so LLVM can apply no-wrap optimizations. Verified
+// at -O0 so no IR is elided by the optimizer.
+func TestProvenIndexEmitsInboundsGEP(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "proven_inbounds_gep.elisa", `def sum(xs: darray[i32]&) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<xs.count:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	// The element GEP for xs[i] (idx.ptr) must carry inbounds: the analyzer proved the index
+	// is in [0, xs.count), so LLVM is allowed to assume no pointer wrap.
+	if !strings.Contains(output, "getelementptr inbounds") {
+		t.Fatalf("proven loop index must emit getelementptr inbounds, got:\n%s", output)
+	}
+}
+
+// IR-level inbounds GEP: a refined fixed-array index (register file, interval fits array
+// size) must also emit `getelementptr inbounds` — the semantic proof carries to the GEP.
+func TestRefinedIndexEmitsInboundsGEP(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "refined_inbounds_gep.elisa", `law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+type GcnScalarRegisterIndex = u32 is InRange[0, 127]
+
+def read_sgpr(idx: GcnScalarRegisterIndex, sgprs: array[u32, 128]&) -> u32:
+    return sgprs[idx]
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if !strings.Contains(output, "getelementptr inbounds") {
+		t.Fatalf("refined-interval index must emit getelementptr inbounds, got:\n%s", output)
+	}
+}
+
+// IR-level inbounds GEP negative: an unproven index (loop bound unrelated to xs.count)
+// must NOT emit `getelementptr inbounds` — claiming inbounds without a proof is unsound.
+func TestUnprovenIndexDoesNotEmitInboundsGEP(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "unproven_no_inbounds_gep.elisa", `def sum(xs: darray[i32]&, n: usize) -> i32:
+    total: mutable i32 = 0
+    for i in 0..<n:
+        total <- total + xs[i]
+    return total
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	// Verify the element GEP (idx.ptr line) is plain getelementptr, not inbounds.
+	for _, line := range strings.Split(output, "\n") {
+		if strings.Contains(line, "idx.ptr") && strings.Contains(line, "inbounds") {
+			t.Fatalf("unproven index must NOT emit getelementptr inbounds, got line:\n%s\nfull IR:\n%s", line, output)
+		}
+	}
+	// Also confirm the watchdog IS present (regression guard: unproven → guarded).
+	if !strings.Contains(output, "wd.in_bounds") {
+		t.Fatalf("unproven index must keep debug watchdog, got:\n%s", output)
+	}
+}
