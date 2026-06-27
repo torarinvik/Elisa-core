@@ -814,7 +814,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// pristine pre-loop scope, since the body's `i <- i + 1` mutates i's tracked value below.
 		countUpExitSound := a.countUpExitFactSound(n)
 		a.loopDepth++
+		// Push the proven outer-loop invariants onto the stack so that nested inner-loop invariant
+		// proofs can use them as additional hypotheses (for variables the inner loop doesn't mutate).
+		outerBase := len(a.activeOuterLoopInvariants)
+		a.activeOuterLoopInvariants = append(a.activeOuterLoopInvariants, provenInvariants...)
 		bodySnapshot := a.analyzeBlockWithConditionAffineClone(n.Body, a.currentScope, n.Cond, true)
+		a.activeOuterLoopInvariants = a.activeOuterLoopInvariants[:outerBase]
 		a.loopDepth--
 		a.finishProgressLoopObligation(progressObligationIndex, a.currentFunctionUsedPermissionRefs[bodyPermissionRefStart:])
 		if !blockDefinitelyExits(n.Body) {

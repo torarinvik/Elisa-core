@@ -376,6 +376,13 @@ type Analyzer struct {
 	currentFunctionExpectsVectorize   bool
 	currentProgressSummary            *FunctionProgressSummary
 	loopDepth                         int
+	// activeOuterLoopInvariants is a stack of proven outer-loop invariant clauses accumulated as the
+	// analyzer descends into nested loops. Each push corresponds to one WhileStmt whose invariants were
+	// fully proven; each pop happens after the body is analyzed. The inner-loop invariant prover reads
+	// this stack to use outer invariants as additional hypotheses when the outer invariant's dependency
+	// variables are disjoint from the inner loop's assigned variables (conservative: if the inner loop
+	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
+	activeOuterLoopInvariants []*ast.ContractStmt
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int
