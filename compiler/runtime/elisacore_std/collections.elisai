@@ -87,6 +87,10 @@ extern assert(condition: bool)
 
 extern max(a: usize, b: usize) -> usize
 
+extern min(a: usize, b: usize) -> usize
+
+extern clamp(x: usize, lo: usize, hi: usize) -> usize
+
 extern inv_handle(ptr: heap void&?) -> bool
 
 extern sfree[T](ptr: heap T&) -> heap T!
