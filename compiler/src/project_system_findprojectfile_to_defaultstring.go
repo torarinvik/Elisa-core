@@ -131,6 +131,7 @@ func resolveProjectTarget(project *resolvedProject, options projectCLIOptions) (
 	linkFlags := make([]string, 0, len(projectLinkFlags)+len(definition.LinkFlags)+len(options.linkFlags))
 	linkFlags = append(linkFlags, projectLinkFlags...)
 	linkFlags = append(linkFlags, definition.LinkFlags...)
+	linkFlags = append(linkFlags, platformLinkFlagsFor(definition.Platforms)...)
 	linkFlags = append(linkFlags, options.linkFlags...)
 	for _, manifest := range dependencyOrder {
 		includeDirs = append(includeDirs, manifest.includeDirs...)

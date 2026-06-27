@@ -7,8 +7,26 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
+
+// platformLinkFlagsFor returns the link flags for the current host platform from a
+// per-target "platforms" map. The host GOOS is normalized to the project.json platform
+// keys ("darwin" -> "macos"). Returns nil when no entry matches.
+func platformLinkFlagsFor(platforms map[string]projectPlatformOverride) []string {
+	if len(platforms) == 0 {
+		return nil
+	}
+	key := runtime.GOOS
+	if key == "darwin" {
+		key = "macos"
+	}
+	if override, ok := platforms[key]; ok {
+		return override.LinkFlags
+	}
+	return nil
+}
 
 const (
 	projectFileName  = "project.json"
@@ -93,6 +111,14 @@ type projectTargetDefinition struct {
 	TargetTriple         string                 `json:"target-triple,omitempty"`
 	PackedABI            string                 `json:"packed-abi,omitempty"`
 	Warnings             *projectTargetWarnings `json:"warnings,omitempty"`
+	Platforms            map[string]projectPlatformOverride `json:"platforms,omitempty"`
+}
+
+// projectPlatformOverride carries host-platform-specific build settings selected at
+// resolve time by the host GOOS (e.g. "macos"/"linux"/"windows"). Only the matching
+// platform's settings are applied; others are ignored.
+type projectPlatformOverride struct {
+	LinkFlags []string `json:"link-flags,omitempty"`
 }
 type projectTargetWarnings struct {
 	Strict      bool `json:"strict,omitempty"`
