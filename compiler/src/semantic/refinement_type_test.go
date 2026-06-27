@@ -1656,6 +1656,69 @@ def narrow(n: i64 is Bounded[0, 1000]) -> i64 is Bounded[0, 100]:
 	}
 }
 
+// --- module-level const resolution in refinements (docs/85 const-global range) -----
+
+// A top-level `const LIMIT: i64 = 500` used as a bracket arg in `Bounded[0, LIMIT]`
+// resolves to its concrete value via constIntValue → evalConstExpr → lookupVisibleConst,
+// so the refinement proves WITHOUT z3 (const tier only).
+func TestRefinementBracketArgResolvesModuleLevelConst(t *testing.T) {
+	src := boundedLaw + `
+const LIMIT: i64 = 500
+
+def f() -> i64:
+    x: i64 is Bounded[0, LIMIT] = 42
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_bracket_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("42 ∈ [0, LIMIT=500] should prove via const-fold (no z3), got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("const-proven bracket refinement should emit no runtime check")
+	}
+}
+
+// `requires x < K` where K is a module-level const resolves to a concrete bound;
+// a guard `if a < LIMIT` should satisfy it at the flow tier — no z3 needed.
+func TestRefinementRequiresDischargesFromModuleLevelConst(t *testing.T) {
+	src := `
+const LIMIT: i64 = 100
+
+def needs_small(x: i64) -> i64:
+    requires x < LIMIT
+    return x
+
+def caller(a: i64) -> i64:
+    if a < LIMIT:
+        return needs_small(a)
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_requires_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`a < LIMIT` guard should satisfy `requires x < LIMIT` via const-fold, got: %v", result.Errors())
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a `global mutable` variable must NOT be treated as a constant bound.
+// `requires x < mutableCap` cannot be discharged at compile time — the value changes at
+// runtime. Under -strict the prover must reject this as unprovable.
+func TestRefinementMutableGlobalIsNotConstBound(t *testing.T) {
+	src := `
+global mutable mutableCap: i64 = 100
+
+def needs_small(x: i64) -> i64:
+    requires x < mutableCap
+    return x
+
+def caller(a: i64) -> i64:
+    return needs_small(a)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "refine_mutable_global_not_const.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatal("mutable global must NOT be treated as a constant bound — strict mode must reject unprovable requires")
+	}
+}
+
 // Two parameters, each carrying a parametric refinement, must PARSE (the `,` in
 // `Bounded[lo, hi]` previously collided with the parameter separator, breaking the
 // param list) AND statically discharge a multiplicative return bound from both
