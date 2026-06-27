@@ -1956,6 +1956,14 @@ def lookup(x: u64, table: array[u64, 8]&) -> u64:
 	proven := 0
 	for _, ok := range result.IndexBoundsProven {
 		if ok {
+			proven++
+		}
+	}
+	if proven == 0 {
+		t.Fatalf("x %% 8 into array[_,8] must record the index in IndexBoundsProven (bounds elided)")
+	}
+}
+
 // --- cast chain range propagation (docs/85 §cast-widening) ------------------------------------
 
 // A WIDENING cast (u32 → u64) must carry the range fact through: a u32 parameter bounded
@@ -1981,7 +1989,7 @@ def widen(x: u32) -> u64 is Bounded[0, 100]:
 		}
 	}
 	if proven == 0 {
-		t.Fatalf("x %% 8 into array[_,8] must record the index in IndexBoundsProven (bounds elided)")
+		t.Fatalf("widening cast should preserve the range and prove via flow/linear tier")
 	}
 }
 
