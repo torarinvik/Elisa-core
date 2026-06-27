@@ -94,6 +94,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if n.Mutable && n.Value != nil {
 			a.recordSMTAssignmentFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
 			a.recordConstAssignmentRangeFact(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			a.recordMatchExprRangeFact(n.Name, n.Value, bindingType)
 		}
 		a.recordSpecializedValueTypeBinding(sym, valueType)
 		// An immutable local with a compile-time-constant initializer (`k: i32 = 5`) is pinned to
@@ -102,6 +103,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// never invalidated. recordWrittenConstForTarget no-ops for a non-const RHS.
 		if !n.Mutable && n.Value != nil {
 			a.recordWrittenConstForTarget(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value)
+			// An immutable integer local assigned from a match expression in value position gets a
+			// range fact that is the JOIN of all arm-body ranges, so downstream refinement discharge
+			// (tryProveRefinementByFlow) can prove `x is SomeLaw` without a runtime check (docs/85).
+			a.recordMatchExprRangeFact(n.Name, n.Value, bindingType)
 			// An immutable integer binding to a length-ish expression (`n = xs.count`) makes `n`
 			// provably equal to that expression for the binding's lifetime — a cross-variable bound
 			// equality (docs/86 brick 86-6) that lets `for i in 0..<n: xs[i]` discharge. Invalidated if
