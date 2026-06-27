@@ -322,13 +322,13 @@ func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPre
 		}
 		for _, fd := range st.Decl.Fields {
 			if fd.Name == n.Field {
-				return refinementPredsOfTypeExpr(fd.Type)
+				return a.refinementPredsOfTypeExpr(fd.Type)
 			}
 		}
 	case *ast.CallExpr:
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if ok && decl != nil {
-			return refinementPredsOfTypeExpr(decl.ReturnType)
+			return a.refinementPredsOfTypeExpr(decl.ReturnType)
 		}
 		// P2: a generic protocol method call (`D.decode(d, w)` / `d.decode(w)`) whose result type is
 		// an unresolved associated-type projection `D.Field`. Every conforming impl that binds Field
@@ -353,7 +353,7 @@ func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPre
 			if _, isMut := p.Type.(*ast.MutableType); isMut {
 				return nil
 			}
-			return refinementPredsOfTypeExpr(p.Type)
+			return a.refinementPredsOfTypeExpr(p.Type)
 		}
 	}
 	return nil
@@ -477,6 +477,19 @@ func refinementPredsOfTypeExpr(te ast.TypeExpr) []ast.RefinementPredExpr {
 		te = mt.Elem
 	}
 	if rt, ok := te.(*ast.RefinementTypeExpr); ok && rt != nil {
+		return rt.Preds
+	}
+	return nil
+}
+
+// refinementPredsOfTypeExpr is the alias-aware analyzer variant used by index-bounds elision. It
+// mirrors paramRefinementTypeExpr so shader-style aliases such as
+// `type GcnScalarRegisterIndex = u32 is InRange[0, 127]` carry their interval at index sites.
+func (a *Analyzer) refinementPredsOfTypeExpr(te ast.TypeExpr) []ast.RefinementPredExpr {
+	if mt, ok := te.(*ast.MutableType); ok && mt != nil {
+		te = mt.Elem
+	}
+	if rt, ok := a.paramRefinementTypeExpr(te); ok && rt != nil {
 		return rt.Preds
 	}
 	return nil
