@@ -443,6 +443,12 @@ type Analyzer struct {
 	proofReport                      []ProofFact
 	currentProofCategory             ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
 	indexBoundsRuntimeCount          int                     // elision telemetry: index expressions that are NOT statically proven in-bounds
+	// zeroedStructLocals tracks locals declared `= zeroed` whose type is a struct and whose root has
+	// not been wholesale-replaced since declaration. Cleared for a root in invalidateWrittenFieldsForRoot
+	// when called for a non-field write (a root reassignment, borrow, or mutating-callee escape).
+	// Used by zeroedStructLocalFieldMap to supply zero as the baseline value for unwritten struct fields
+	// in `ensure result.f == v` postcondition proofs where `result` is a zeroed-then-mutated local.
+	zeroedStructLocals map[string]bool
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool

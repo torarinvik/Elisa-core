@@ -384,6 +384,10 @@ func (a *Analyzer) invalidateWrittenFieldsForRoot(name string) {
 			}
 		}
 	}
+	// A whole-root invalidation also retires the zeroed-struct-local tracking entry: the zeroed-fields
+	// baseline is no longer sound once the root is reassigned, borrowed mutably, or escapes to a
+	// mutating callee. Over-dropping is safe — it forces a runtime check rather than a false proof.
+	delete(a.zeroedStructLocals, name)
 }
 
 // recordWrittenFieldForTarget records (or clears) the last-written value of a struct-field place
