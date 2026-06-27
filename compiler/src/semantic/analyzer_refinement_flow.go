@@ -1582,9 +1582,17 @@ func (a *Analyzer) boundAffine(f affineForm, scope *Scope) numRange {
 }
 
 // mulInt64Checked multiplies with overflow detection (ok=false on overflow).
+// Special-cases: minInt64 * -1 overflows (result would be maxInt64+1) but the division
+// check p/b==a wraps back to minInt64 in two's complement and gives a false "ok" result,
+// so we guard that explicitly.
 func mulInt64Checked(a, b int64) (int64, bool) {
 	if a == 0 || b == 0 {
 		return 0, true
+	}
+	const minI64 = -int64(^uint64(0)>>1) - 1
+	// minInt64 * -1 would be maxInt64+1 which does not fit in int64.
+	if (a == minI64 && b == -1) || (b == minI64 && a == -1) {
+		return 0, false
 	}
 	p := a * b
 	if p/b != a {
@@ -1643,6 +1651,35 @@ func scaleRangePositive(r numRange, k int64) (numRange, bool) {
 	}
 	if r.hiKnown {
 		if hi, ok := mulInt64Checked(r.hi, k); ok {
+			out.hiKnown, out.hi = true, hi
+			anyKnown = true
+		}
+	}
+	return out, anyKnown
+}
+
+// scaleRangeNegative scales a known integer range [lo, hi] by a negative constant k < 0,
+// producing [hi*k, lo*k]. Multiplication by a negative number reverses order: the new lower
+// bound is the old hi scaled by k, and the new upper bound is the old lo scaled by k.
+// Either bound that would overflow int64 is dropped (open), keeping the result sound (never
+// asserts a tighter bound than the true interval). k must be < 0.
+// Used by tryDeriveShiftOrScaleRange to handle scaling subjects `x * k` when k < 0.
+func scaleRangeNegative(r numRange, k int64) (numRange, bool) {
+	if k >= 0 {
+		return numRange{}, false
+	}
+	out := numRange{}
+	anyKnown := false
+	// new lo = hi * k  (hi is the largest; multiplied by negative k gives the smallest product)
+	if r.hiKnown {
+		if lo, ok := mulInt64Checked(r.hi, k); ok {
+			out.loKnown, out.lo = true, lo
+			anyKnown = true
+		}
+	}
+	// new hi = lo * k  (lo is the smallest; multiplied by negative k gives the largest product)
+	if r.loKnown {
+		if hi, ok := mulInt64Checked(r.lo, k); ok {
 			out.hiKnown, out.hi = true, hi
 			anyKnown = true
 		}
@@ -1713,6 +1750,10 @@ func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl
 //  4. Monotonic scaling: if `value` is `x * k` for an immutable integer `x` with known range
 //     [lo, hi] where lo >= 0, and constant k > 0, the scaled range [lo*k, hi*k] is derived
 //     (scaleRangePositive) and checked. Overflow-safe: overflowing bounds become open. Integers only.
+//  4a. Negating scale: if `value` is `x * k` with k < 0, the range flips to [hi*k, lo*k]
+//     (scaleRangeNegative). Overflow-safe: overflowing bounds become open. Integers only.
+//  4b. Unary negation: if `value` is `-x`, treated as x * -1 via scaleRangeNegative, yielding
+//     range [-hi, -lo]. Overflow-safe: overflowing bounds become open. Integers only.
 func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)
 	if !ok || ident == nil {
@@ -1781,12 +1822,34 @@ func (a *Analyzer) proveConstraintsFromRange(r numRange, decl *ast.FuncDecl, pre
 // tryDeriveShiftOrScaleRange attempts to derive a numRange for a compound expression that is either:
 //   - an additive shift `x + c` or `x - c` (case 3): range [lo+c, hi+c] derived via shiftRange.
 //   - a monotonic scaling `x * k` with k > 0 and x >= 0 (case 4): range [lo*k, hi*k] via scaleRangePositive.
+//   - a negating scale `x * k` with k < 0 (case 4a): range [hi*k, lo*k] via scaleRangeNegative.
+//   - a unary negation `-x` (case 4b): range [-hi, -lo] (equivalent to x * -1 via scaleRangeNegative).
 //
 // `x` must be an immutable integer identifier with a known range fact (or written-const/declared-type
-// fallback). Returns ok=false for anything outside these two forms, or when overflow would occur on both
+// fallback). Returns ok=false for anything outside these forms, or when overflow would occur on both
 // bounds, keeping the result sound (abstain rather than approximate unsoundly).
 func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
-	bin, ok := stripOptimizationParens(value).(*ast.BinaryExpr)
+	stripped := stripOptimizationParens(value)
+
+	// Case 4b: unary negation `-x` — treat as x * -1.
+	if unary, ok := stripped.(*ast.UnaryExpr); ok && unary != nil && unary.Op == lexer.TOKEN_MINUS {
+		name, xOk := a.immutableIntIdentNameFromScope(unary.Operand)
+		if !xOk {
+			return numRange{}, false
+		}
+		r, rOk := a.lookupRangeFact(name)
+		if !rOk {
+			if c, known := a.writtenConstInt(name); known {
+				r, rOk = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		if !rOk {
+			return numRange{}, false
+		}
+		return scaleRangeNegative(r, -1)
+	}
+
+	bin, ok := stripped.(*ast.BinaryExpr)
 	if !ok || bin == nil {
 		return numRange{}, false
 	}
@@ -1827,7 +1890,9 @@ func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
 		}
 		return shiftRange(r, shift)
 	case lexer.TOKEN_STAR:
-		// x * k  or  k * x: one side must be a positive constant; the other an immutable int with x >= 0.
+		// x * k  or  k * x: one side must be a non-zero constant; the other an immutable int identifier.
+		// For k > 0 and x >= 0: monotonic scaling via scaleRangePositive.
+		// For k < 0: range-flipping via scaleRangeNegative (overflow-safe, always sound).
 		name, xOk := a.immutableIntIdentNameFromScope(bin.Left)
 		var k int64
 		if xOk {
@@ -1847,8 +1912,8 @@ func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
 			}
 			k = c
 		}
-		if k <= 0 {
-			return numRange{}, false // negative or zero scale: not monotonically increasing
+		if k == 0 {
+			return numRange{}, false // zero scale collapses to a constant; not a range-form
 		}
 		r, rOk := a.lookupRangeFact(name)
 		if !rOk {
@@ -1859,7 +1924,11 @@ func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
 		if !rOk {
 			return numRange{}, false
 		}
-		return scaleRangePositive(r, k)
+		if k > 0 {
+			return scaleRangePositive(r, k)
+		}
+		// k < 0: flip the range via scaleRangeNegative.
+		return scaleRangeNegative(r, k)
 	default:
 		return numRange{}, false
 	}
