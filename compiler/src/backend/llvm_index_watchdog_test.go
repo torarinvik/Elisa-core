@@ -148,6 +148,82 @@ def write_vdst_pair(idx: GcnVectorRegisterPairIndex, vgprs: mutable array[u32, 2
 	}
 }
 
+// Refined-alias frontier: named refine aliases erase to their base type, but their interval facts
+// must still suppress debug watchdogs. This covers both direct register-array access and an affine
+// pair offset through a composed alias.
+func TestIndexWatchdogSubsumedForRefinedAliasRegisterAccess(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_refined_alias_register_access.elisa", `refine RegisterIndex = u32 where self >= 0 and self <= 127
+refine RegisterPairIndex = RegisterIndex where self <= 126
+
+def read_alias(idx: RegisterIndex, regs: array[u32, 128]&) -> u32:
+    return regs[idx]
+
+def read_alias_pair(idx: RegisterPairIndex, regs: array[u32, 128]&) -> u32:
+    return regs[idx] + regs[idx + 1]
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") || strings.Contains(output, "wd.fail") {
+		t.Fatalf("refined aliases and composed affine pair offsets should be subsumed (no debug watchdog), got:\n%s", output)
+	}
+}
+
+// Register arrays frequently hide behind wrapper structs in decoder backends. A refined index should
+// suppress watchdogs when indexing the array field directly, including pair writes through idx+1.
+func TestIndexWatchdogSubsumedForRefinedRegisterArrayField(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_refined_register_array_field.elisa", `law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+type GcnScalarRegisterIndex = u32 is InRange[0, 127]
+type GcnScalarRegisterPairIndex = u32 is InRange[0, 126]
+
+struct RegisterFile:
+    sgprs: mutable array[u32, 128]
+
+def read_reg_file(rf: RegisterFile&, idx: GcnScalarRegisterIndex) -> u32:
+    return rf.sgprs[idx]
+
+def write_reg_pair(rf: mutable RegisterFile&, idx: GcnScalarRegisterPairIndex, lo: u32, hi: u32) -> void:
+    rf.sgprs[idx] <- lo
+    rf.sgprs[idx + 1] <- hi
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") || strings.Contains(output, "wd.fail") {
+		t.Fatalf("refined register-array field accesses should be subsumed (no debug watchdog), got:\n%s", output)
+	}
+}
+
+// Vector-lane frontier: lane refinements are much smaller than register-file extents, but they still
+// travel through the same index-proof path. Field and parameter lanes into fixed vector arrays must
+// not grow redundant debug watchdogs.
+func TestIndexWatchdogSubsumedForRefinedVectorLane(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "watchdog_refined_vector_lane.elisa", `law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+type Lane4 = u32 is InRange[0, 3]
+
+struct Vec4:
+    lanes: mutable array[u32, 4]
+
+struct LaneSelect:
+    lane: mutable Lane4
+
+def read_lane(v: Vec4&, lane: Lane4) -> u32:
+    return v.lanes[lane]
+
+def read_selected_lane(v: Vec4&, sel: LaneSelect&) -> u32:
+    return v.lanes[sel.lane]
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "wd.in_bounds") || strings.Contains(output, "wd.fail") {
+		t.Fatalf("refined vector lanes should be subsumed (no debug watchdog), got:\n%s", output)
+	}
+}
+
 // Negative control: a loop bound `n` with NO known relation to `xs.count` must NOT be subsumed —
 // the access keeps its debug watchdog. Confirms the equality layer doesn't over-prove.
 func TestIndexWatchdogNotSubsumedWithoutEquality(t *testing.T) {

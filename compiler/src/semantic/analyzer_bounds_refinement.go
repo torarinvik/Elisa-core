@@ -287,59 +287,37 @@ func (a *Analyzer) requiresClauseLowerBound(expr ast.Expr, target string) (int64
 //   - an IMMUTABLE refined parameter `idx: u32 is InRange[..]` (enforced at the call boundary; immutable
 //     so it cannot drift out of range inside the body).
 func (a *Analyzer) refinementCarriedInterval(idx ast.Expr) (lo int64, hi int64, ok bool) {
-	preds := a.refinementPredsForIndexExpr(idx)
-	for _, pred := range preds {
-		lawDecl, _, lok := a.lookupLaw(pred.Name)
-		if !lok || lawDecl == nil {
-			continue
-		}
-		l, h, rok := a.lawRangeBounds(lawDecl, pred.Args)
-		if !rok {
-			continue
-		}
-		if !ok {
-			lo, hi, ok = l, h, true
-			continue
-		}
-		// Intersect when several refinements apply — the tightest interval is still sound.
-		if l > lo {
-			lo = l
-		}
-		if h < hi {
-			hi = h
-		}
-	}
-	return lo, hi, ok
+	return a.refinementIntervalForIndexExpr(idx)
 }
 
-// refinementPredsForIndexExpr collects the refinement predicates an index expression provably carries.
-func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPredExpr {
+// refinementIntervalForIndexExpr returns the closed interval an index expression provably carries.
+func (a *Analyzer) refinementIntervalForIndexExpr(idx ast.Expr) (lo int64, hi int64, ok bool) {
 	switch n := stripOptimizationParens(idx).(type) {
 	case *ast.FieldExpr:
 		st, ok := stripRefForBounds(a.exprTypes[n.Object]).(*StructType)
 		if !ok || st == nil || st.Decl == nil {
-			return nil
+			return 0, 0, false
 		}
 		for _, fd := range st.Decl.Fields {
 			if fd.Name == n.Field {
-				return a.refinementPredsOfTypeExpr(fd.Type)
+				return a.refinementIntervalOfTypeExpr(fd.Type, "self")
 			}
 		}
 	case *ast.CallExpr:
 		decl, ok := a.resolveDirectCallFuncDecl(n)
 		if ok && decl != nil {
-			return a.refinementPredsOfTypeExpr(decl.ReturnType)
+			return a.refinementIntervalOfTypeExpr(decl.ReturnType, "result")
 		}
 		// P2: a generic protocol method call (`D.decode(d, w)` / `d.decode(w)`) whose result type is
 		// an unresolved associated-type projection `D.Field`. Every conforming impl that binds Field
 		// to a refined type carries that refinement; the bound a generic caller may rely on is the
 		// INTERSECTION across all impls (so one non-refined impl correctly forfeits elision).
 		if preds, ok := a.associatedTypeProjectionRefinement(a.exprTypes[n]); ok {
-			return preds
+			return a.predsInterval(preds)
 		}
 	case *ast.Ident:
 		if a.currentFuncDecl == nil {
-			return nil
+			return 0, 0, false
 		}
 		for _, p := range a.currentFuncDecl.Params {
 			if p.Name != n.Name {
@@ -348,15 +326,74 @@ func (a *Analyzer) refinementPredsForIndexExpr(idx ast.Expr) []ast.RefinementPre
 			// Only an IMMUTABLE refined param keeps its boundary guarantee body-wide. A `mutable`
 			// param could be reassigned out of range, so it carries no static interval here.
 			if p.Mutable {
-				return nil
+				return 0, 0, false
 			}
 			if _, isMut := p.Type.(*ast.MutableType); isMut {
-				return nil
+				return 0, 0, false
 			}
-			return a.refinementPredsOfTypeExpr(p.Type)
+			return a.refinementIntervalOfTypeExpr(p.Type, p.Name)
 		}
 	}
-	return nil
+	return 0, 0, false
+}
+
+// refinementIntervalOfTypeExpr extracts the tight interval carried by a refinement-typed expression.
+// It covers both law-backed `type R = u32 is InRange[...]` aliases and `refine R = u32 where ...`
+// aliases after paramRefinementTypeExpr has expanded them to a where-refinement binder.
+func (a *Analyzer) refinementIntervalOfTypeExpr(te ast.TypeExpr, subjectName string) (lo int64, hi int64, ok bool) {
+	if mt, ok := te.(*ast.MutableType); ok && mt != nil {
+		te = mt.Elem
+	}
+	if l, h, pok := a.predsInterval(a.refinementPredsOfTypeExpr(te)); pok {
+		lo, hi, ok = l, h, true
+	}
+	if expanded, eok := a.expandRefineAliasType(te, subjectName); eok && expanded != nil {
+		te = expanded
+	}
+	if wt, wok := whereRefinementTypeExpr(te); wok && wt != nil && wt.Predicate != nil {
+		if l, h, pok := a.whereRangeBounds(wt.Predicate, subjectName); pok {
+			if !ok {
+				return l, h, true
+			}
+			if l > lo {
+				lo = l
+			}
+			if h < hi {
+				hi = h
+			}
+		}
+	}
+	return lo, hi, ok
+}
+
+// whereRangeBounds recognizes the same decidable interval fragment as lawRangeBounds, but directly
+// over a `where self ...` predicate from named refine aliases.
+func (a *Analyzer) whereRangeBounds(pred ast.Expr, subjectName string) (lo int64, hi int64, ok bool) {
+	if subjectName == "" {
+		subjectName = "self"
+	}
+	haveLo, haveHi := false, false
+	for _, conj := range splitConjuncts(pred) {
+		bound, _, kind := a.rangeConjunctBound(conj, subjectName, nil)
+		switch kind {
+		case rangeLower:
+			if !haveLo || bound > lo {
+				lo = bound
+			}
+			haveLo = true
+		case rangeUpper:
+			if !haveHi || bound < hi {
+				hi = bound
+			}
+			haveHi = true
+		default:
+			return 0, 0, false
+		}
+	}
+	if !haveLo || !haveHi || lo > hi {
+		return 0, 0, false
+	}
+	return lo, hi, true
 }
 
 // associatedTypeProjectionRefinement returns the refinement predicates a generic protocol-method call
