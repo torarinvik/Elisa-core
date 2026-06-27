@@ -1675,3 +1675,47 @@ def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) 
 		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
 	}
 }
+
+// --- cross-module tail-call return-refinement passthrough (docs/90 brick 90-7 cross-module) ---
+
+// Positive case: `return M::clamp()` where `M::clamp -> i64 is Bounded[0,100]` must discharge
+// the caller's own `-> i64 is Bounded[0,100]` by composition, without a runtime check.
+func TestCrossModuleTailCallReturnRefinementPassthrough(t *testing.T) {
+	src := boundedLaw + `
+module M:
+    def clamp() -> i64 is Bounded[0, 100]:
+        return 50
+
+def wrapper() -> i64 is Bounded[0, 100]:
+    return M::clamp()
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cross_module_tail_call.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("cross-module tail-call return refinement should discharge by composition, got: %v", errs)
+	}
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofRuntime {
+			t.Fatalf("cross-module tail-call should not fall back to runtime check, got ProofReport=%+v", result.ProofReport)
+		}
+	}
+}
+
+// Soundness-negative: callee return refinement Bounded[0,200] does NOT entail caller's Bounded[0,100].
+// A callee returning Bounded[0,200] does NOT entail Bounded[0,100]; the caller must still check.
+func TestCrossModuleTailCallReturnRefinementNonEntailmentFails(t *testing.T) {
+	src := boundedLaw + `
+module M:
+    def wide() -> i64 is Bounded[0, 200]:
+        return 150
+
+def wrapper() -> i64 is Bounded[0, 100]:
+    return M::wide()
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cross_module_tail_call_neg.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	// Must NOT prove statically via composition — callee bound is wider than caller's.
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenContract {
+			t.Fatalf("callee Bounded[0,200] must NOT entail caller Bounded[0,100]; got contract-proven in ProofReport=%+v", result.ProofReport)
+		}
+	}
+}
