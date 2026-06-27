@@ -527,6 +527,10 @@ func negateComparison(op lexer.TokenKind) lexer.TokenKind {
 }
 
 // lookupRangeFact walks the current scope chain for a known integer range about `name`.
+// After the direct range-fact walk, it attempts one round of transitive-closure over
+// relational facts (`smtAssertFacts` of the form `X OP Y` between two immutable integer
+// idents) to derive tighter bounds — e.g. given live facts `a <= b` and `b <= c`, it
+// can derive that `a` has an upper bound of whatever `c`'s range says, without SMT.
 func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 	acc := numRange{}
 	found := false
@@ -541,7 +545,253 @@ func (a *Analyzer) lookupRangeFact(name string) (numRange, bool) {
 			break
 		}
 	}
+	// Transitive-closure enrichment: collect relational facts and try to derive tighter bounds
+	// by chaining through intermediate immutable-integer variables. This lets `a <= b, b <= c`
+	// prove `a <= c` without SMT. Sound: only adds bounds that follow from valid relational edges;
+	// unknown/open sides are left open (fail-closed, sound).
+	if tr, trFound := a.transitiveRangeFact(name); trFound {
+		acc = acc.intersect(tr)
+		found = true
+	}
 	return acc, found
+}
+
+// relationalEdge represents one live relational fact `left OP right` between two immutable
+// integer idents (collected from smtAssertFacts for the transitive-closure walk).
+type relationalEdge struct {
+	left  string
+	op    lexer.TokenKind // one of <=, <, >=, >
+	right string
+}
+
+// collectRelationalEdges gathers all live relational ordering facts (ident OP ident, for
+// immutable integer idents) from two sources:
+//
+//  1. smtAssertFacts in the visible scope chain (flow-local facts seeded from branch conditions,
+//     proven assertions, etc.). Respects the closedWorld proof-wall.
+//  2. The enclosing function's `requires` clauses that reference only immutable roots — these
+//     are always-valid (entry-time) preconditions on the function's immutable parameters, exactly
+//     as smtRequiresHypotheses treats them for the SMT tier. Clauses over mutable roots are
+//     excluded (they are seeded as smtAssertFacts via seedRequiresAsAssertFacts and tracked
+//     through standard mutation-invalidation; picking them up here too would be redundant and
+//     potentially stale after a mutation of the root).
+//
+// Only the four ordering operators (<=, <, >=, >) are admitted; == and != are not monotone
+// chains and are skipped (sound).
+func (a *Analyzer) collectRelationalEdges() []relationalEdge {
+	if a == nil || a.currentScope == nil {
+		return nil
+	}
+	var edges []relationalEdge
+
+	addBinaryEdge := func(scope *Scope, expr ast.Expr) {
+		bin, ok := stripOptimizationParens(expr).(*ast.BinaryExpr)
+		if !ok || bin == nil {
+			return
+		}
+		switch bin.Op {
+		case lexer.TOKEN_LTEQ, lexer.TOKEN_LT, lexer.TOKEN_GTEQ, lexer.TOKEN_GT:
+		default:
+			return
+		}
+		lName, lOk := immutableIntIdentName(a, scope, bin.Left)
+		rName, rOk := immutableIntIdentName(a, scope, bin.Right)
+		if !lOk || !rOk {
+			return
+		}
+		edges = append(edges, relationalEdge{left: lName, op: bin.Op, right: rName})
+	}
+
+	// Source 1: flow-local smtAssertFacts (branch conditions, etc.)
+	closedWorld := false
+	for scope := a.currentScope; scope != nil; scope = scope.Parent {
+		for _, fact := range scope.smtAssertFacts {
+			addBinaryEdge(scope, fact.Expr)
+		}
+		if scope.closedWorld {
+			closedWorld = true
+			break
+		}
+	}
+
+	// Source 2: enclosing function's `requires` over IMMUTABLE roots (always-valid entry facts).
+	// Skipped inside a closedWorld proof wall (docs/99: ambient facts are walled out).
+	if !closedWorld && a.currentFuncDecl != nil {
+		for _, req := range a.currentFuncDecl.Requires {
+			if req == nil || a.requiresReferencesMutableRoot(req) {
+				continue // mutable-root clauses live in smtAssertFacts already
+			}
+			addBinaryEdge(a.currentScope, req)
+		}
+	}
+
+	return edges
+}
+
+// transitiveRangeFact attempts to derive a numRange for `name` by chaining relational edges
+// (from collectRelationalEdges) through intermediate immutable-integer variables. The walk is
+// a BFS that propagates upper-bound and lower-bound information separately:
+//
+//   - Upper bound: an edge `name <= b` means name <= b's hi; if b has an upper bound via
+//     further edges, that propagates. Strict `<` contributes -1 (integers are discrete).
+//   - Lower bound: symmetric via >= / >.
+//
+// The BFS is bounded to maxTransitiveDepth hops to stay O(small) and avoid cycles.
+// Only bounds that reach a variable with a known direct range (or written-const) are
+// admitted — a chain that terminates in another un-anchored variable stays open (fail-closed).
+func (a *Analyzer) transitiveRangeFact(name string) (numRange, bool) {
+	edges := a.collectRelationalEdges()
+	if len(edges) == 0 {
+		return numRange{}, false
+	}
+	const maxTransitiveDepth = 8
+
+	// directRange is the direct (non-transitive) range for a variable: rangeFacts only, no
+	// recursion, to avoid infinite recursion from inside lookupRangeFact.
+	directRange := func(n string) (numRange, bool) {
+		acc := numRange{}
+		found := false
+		for scope := a.currentScope; scope != nil; scope = scope.Parent {
+			if scope.rangeFacts != nil {
+				if r, ok := scope.rangeFacts[n]; ok {
+					acc = acc.intersect(r)
+					found = true
+				}
+			}
+			if scope.closedWorld {
+				break
+			}
+		}
+		if !found {
+			if c, known := a.writtenConstInt(n); known {
+				return numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		return acc, found
+	}
+
+	result := numRange{}
+	improved := false
+
+	// BFS for upper-bound derivation: follow edges that carry upper-bound constraints on name.
+	{
+		type bfsState struct {
+			node string
+			adj  int64 // cumulative offset: result_hi = peer_hi + adj
+			depth int
+		}
+		visited := map[string]bool{name: true}
+		queue := []bfsState{{node: name}}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if cur.depth >= maxTransitiveDepth {
+				continue
+			}
+			for _, e := range edges {
+				// An edge that gives an UPPER bound on cur.node:
+				//   cur.node <= e.right  (LTEQ)  →  peer=e.right, edgeAdj=0
+				//   cur.node <  e.right  (LT)    →  peer=e.right, edgeAdj=-1 (a<b ⟹ a<=b-1)
+				//   e.right >= cur.node  (GTEQ)  →  peer=e.right, edgeAdj=0
+				//   e.right >  cur.node  (GT)    →  peer=e.right, edgeAdj=-1
+				var peer string
+				var edgeAdj int64
+				switch e.op {
+				case lexer.TOKEN_LTEQ:
+					if e.left == cur.node {
+						peer, edgeAdj = e.right, 0
+					}
+				case lexer.TOKEN_LT:
+					if e.left == cur.node {
+						peer, edgeAdj = e.right, -1
+					}
+				case lexer.TOKEN_GTEQ:
+					if e.right == cur.node {
+						peer, edgeAdj = e.left, 0
+					}
+				case lexer.TOKEN_GT:
+					if e.right == cur.node {
+						peer, edgeAdj = e.left, -1
+					}
+				}
+				if peer == "" || visited[peer] {
+					continue
+				}
+				totalAdj := cur.adj + edgeAdj
+				if pr, ok := directRange(peer); ok && pr.hiKnown {
+					derivedHi := pr.hi + totalAdj
+					if !result.hiKnown || derivedHi < result.hi {
+						result.hi = derivedHi
+						result.hiKnown = true
+						improved = true
+					}
+				}
+				visited[peer] = true
+				queue = append(queue, bfsState{node: peer, adj: totalAdj, depth: cur.depth + 1})
+			}
+		}
+	}
+
+	// BFS for lower-bound derivation: symmetric.
+	{
+		type bfsState struct {
+			node  string
+			adj   int64 // cumulative offset: result_lo = peer_lo + adj
+			depth int
+		}
+		visited := map[string]bool{name: true}
+		queue := []bfsState{{node: name}}
+		for len(queue) > 0 {
+			cur := queue[0]
+			queue = queue[1:]
+			if cur.depth >= maxTransitiveDepth {
+				continue
+			}
+			for _, e := range edges {
+				// An edge that gives a LOWER bound on cur.node:
+				//   cur.node >= e.right  (GTEQ)  →  peer=e.right, edgeAdj=0
+				//   cur.node >  e.right  (GT)    →  peer=e.right, edgeAdj=+1 (a>b ⟹ a>=b+1)
+				//   e.right <= cur.node  (LTEQ)  →  peer=e.right, edgeAdj=0
+				//   e.right <  cur.node  (LT)    →  peer=e.right, edgeAdj=+1
+				var peer string
+				var edgeAdj int64
+				switch e.op {
+				case lexer.TOKEN_GTEQ:
+					if e.left == cur.node {
+						peer, edgeAdj = e.right, 0
+					}
+				case lexer.TOKEN_GT:
+					if e.left == cur.node {
+						peer, edgeAdj = e.right, 1
+					}
+				case lexer.TOKEN_LTEQ:
+					if e.right == cur.node {
+						peer, edgeAdj = e.left, 0
+					}
+				case lexer.TOKEN_LT:
+					if e.right == cur.node {
+						peer, edgeAdj = e.left, 1
+					}
+				}
+				if peer == "" || visited[peer] {
+					continue
+				}
+				totalAdj := cur.adj + edgeAdj
+				if pr, ok := directRange(peer); ok && pr.loKnown {
+					derivedLo := pr.lo + totalAdj
+					if !result.loKnown || derivedLo > result.lo {
+						result.lo = derivedLo
+						result.loKnown = true
+						improved = true
+					}
+				}
+				visited[peer] = true
+				queue = append(queue, bfsState{node: peer, adj: totalAdj, depth: cur.depth + 1})
+			}
+		}
+	}
+
+	return result, improved
 }
 
 func (a *Analyzer) visibleRangeFacts() map[string]numRange {

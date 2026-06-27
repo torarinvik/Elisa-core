@@ -2004,5 +2004,95 @@ def wrap_varmod(x: u64, m: u64) -> u64 is InRange[0, 7]:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_varmod.elisa", src, AnalyzeOptions{})
 	if !contains(allDiagnostics(result), "could not be proven statically") {
 		t.Fatalf("x %% m (variable m) must NOT prove InRange[0,7]; must stay unproven, got:\n%s", allDiagnostics(result))
+// --- Transitive ordering (linear/flow tier, docs/85) ---
+// Given `requires a <= b` and `requires b <= c` on immutable integer params, the linear tier
+// must prove `a <= c` without invoking SMT. This is the "transitive-chain" gap: a two-hop
+// relational path through an intermediate variable that has no concrete constant range.
+
+// Completeness-positive: `a <= b, b <= c` transitively proves `a <= c` under -strict (no SMT).
+// The callee sink(lo, hi) has `requires lo <= hi`; the caller proves it from the chain.
+func TestTransitiveOrderingLeqLeqProvenNoSMT(t *testing.T) {
+	src := `
+def sink(lo: i64, hi: i64) -> i64:
+    requires lo <= hi
+    return hi
+
+def caller(a: i64, b: i64, c: i64) -> i64:
+    requires a <= b
+    requires b <= c
+    return sink(a, c)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "transitive_leq.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: false},
+	)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`a<=b, b<=c` should transitively prove `a<=c` (no error under -strict/no-smt), got: %v", result.Errors())
+	}
+}
+
+// Completeness-positive (mixed strict): `a <= b, b < c` transitively proves `a < c` (strictly
+// less, since at least one edge is strict). The callee requires `lo < hi`.
+func TestTransitiveOrderingLeqLtProvenNoSMT(t *testing.T) {
+	src := `
+def sink_strict(lo: i64, hi: i64) -> i64:
+    requires lo < hi
+    return hi
+
+def caller(a: i64, b: i64, c: i64) -> i64:
+    requires a <= b
+    requires b < c
+    return sink_strict(a, c)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "transitive_leq_lt.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: false},
+	)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`a<=b, b<c` should transitively prove `a<c` (no error under -strict/no-smt), got: %v", result.Errors())
+	}
+}
+
+// Soundness-negative (missing link): only `a <= b` is known, with no fact connecting b to c.
+// The goal `a <= c` must NOT be proven — the prover must decline (requiresUnknown → runtime).
+func TestTransitiveOrderingMissingLinkDeclines(t *testing.T) {
+	src := `
+def sink(lo: i64, hi: i64) -> i64:
+    requires lo <= hi
+    return hi
+
+def caller(a: i64, b: i64, c: i64) -> i64:
+    requires a <= b
+    return sink(a, c)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "transitive_missing_link.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: false},
+	)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("without `b<=c` the goal `a<=c` must NOT be proven (missing link must decline); got no error under -strict")
+	}
+}
+
+// Soundness-negative (wrong direction): `a <= b, b < c` must NOT prove `a >= c`.
+// The callee sink_geq requires `lo >= hi`; the prover must refute or decline — never conclude
+// `a >= c` from evidence that proves `a < c`.
+func TestTransitiveOrderingOppositeDirectionNotProven(t *testing.T) {
+	src := `
+def sink_geq(lo: i64, hi: i64) -> i64:
+    requires lo >= hi
+    return lo
+
+def caller(a: i64, b: i64, c: i64) -> i64:
+    requires a <= b
+    requires b < c
+    return sink_geq(a, c)
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(
+		t, "transitive_wrong_dir.elisa", src,
+		AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: false},
+	)
+	if len(result.Errors()) == 0 {
+		t.Fatalf("`a<=b, b<c` must NOT prove `a>=c` (opposite direction); got no error under -strict")
 	}
 }
