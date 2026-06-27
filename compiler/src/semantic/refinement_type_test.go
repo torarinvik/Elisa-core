@@ -1956,6 +1956,27 @@ def lookup(x: u64, table: array[u64, 8]&) -> u64:
 	proven := 0
 	for _, ok := range result.IndexBoundsProven {
 		if ok {
+// --- cast chain range propagation (docs/85 §cast-widening) ------------------------------------
+
+// A WIDENING cast (u32 → u64) must carry the range fact through: a u32 parameter bounded
+// [0, 100] widened to u64 should discharge `is Bounded[0, 100]` on the widened result via
+// tier-2 (no runtime check). This is value-preserving: [0,100] fits in u64.
+func TestCastWideningU32ToU64PreservesRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def widen(x: u32) -> u64 is Bounded[0, 100]:
+    if x >= 0 and x <= 100:
+        return x.u64()
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cast_widen_u32_u64.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("widening u32→u64 of [0,100] should prove the return, got: %s", allDiagnostics(result))
+	}
+	var proven int
+	for _, f := range result.ProofReport {
+		if f.Outcome == ProofProvenLinear || f.Outcome == ProofProvenFlow {
 			proven++
 		}
 	}
@@ -2244,5 +2265,62 @@ def use() -> i64:
 	}
 	if len(result.RefinementChecks) == 0 {
 		t.Fatalf("without a struct invariant there is no static guarantee: expected a runtime check")
+		t.Fatalf("widening cast should be statically proven (not runtime), report=%+v", result.ProofReport)
+	}
+}
+
+// A chained widening cast (u32 bounded [0,100], cast .u64() which is itself cast .u64() again
+// — same-width identity) must still carry the range through.
+func TestCastChainU32ToU64PreservesRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def widen_chain(x: u32) -> u64 is Bounded[0, 100]:
+    if x >= 0 and x <= 100:
+        y: u64 = x.u64()
+        return y.u64()
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cast_chain_u32_u64.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("chained widening u32→u64→u64 should prove return, got: %s", allDiagnostics(result))
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a NARROWING cast (u32 → u8 where x may exceed 255) must NOT carry the
+// wider range. The tier-2 prover must decline, leaving a runtime check (or strict error).
+func TestCastNarrowingU32ToU8DoesNotCarryRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def narrow(x: u32) -> u8 is Bounded[0, 1000]:
+    if x >= 0 and x <= 1000:
+        return x.u8()
+    return 0
+`
+	// Under strict: x.u8() with proven range [0,1000] cannot fit u8 (max 255); the narrowing
+	// cast must be declined — the refinement on the return should fail to prove statically.
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cast_narrow_u32_u8.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatalf("SOUNDNESS: narrowing u32→u8 with range [0,1000] must NOT prove Bounded[0,1000] (range does not fit u8), but no error was reported")
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a sign-changing cast (i64 with proven negative range → u64) must NOT
+// carry the range, since negative values cannot be represented in u64.
+func TestCastSignChangeI64ToU64DoesNotCarryNegativeRange(t *testing.T) {
+	src := `
+law Bounded(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def sign_change(x: i64) -> u64 is Bounded[-10, 10]:
+    if x >= -10 and x <= 10:
+        return x.u64()
+    return 0
+`
+	// Under strict: x.u64() on a value in [-10,10] is sign-changing (negatives would wrap).
+	// The refinement Bounded[-10,10] on the u64 result must not prove statically.
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cast_sign_change.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatalf("SOUNDNESS: sign-changing cast i64→u64 with range [-10,10] must NOT prove Bounded[-10,10] (negative values do not fit u64), but no error was reported")
 	}
 }
