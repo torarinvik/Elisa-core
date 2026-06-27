@@ -279,6 +279,158 @@ func (a *Analyzer) proveRequiresComparison(n *ast.BinaryExpr, subst map[string]a
 			return requiresRefuted
 		}
 	}
+	// Transitive-relational fallback: when the affine-bound tier cannot resolve the goal via
+	// constant ranges, try to prove/refute a simple `L OP R` comparison (where both L and R
+	// reduce to a single immutable-integer variable) by checking reachability in the relational-
+	// edge graph (collectRelationalEdges). E.g. `a <= b, b <= c` can prove `a <= c` and refute
+	// `a > c`. Only ident-vs-ident goals with a single term on each side are admitted (sound:
+	// a more complex affine expression would require the general arithmetic path above).
+	if v := a.transitiveRelationalProof(left, right, n.Op); v != requiresUnknown {
+		return v
+	}
+	return requiresUnknown
+}
+
+// transitiveRelationalProof attempts to prove or refute a comparison `leftAffine OP rightAffine`
+// by transitive closure over the relational-edge graph (requires-clauses and flow-local
+// assert-facts between immutable integer idents). Both sides must reduce to a single immutable
+// integer variable (affine form with exactly one term of coefficient +1 and constant=0); any
+// more complex form is outside this tier and returns requiresUnknown (sound: we only conclude
+// when we can chain a witnessed path).
+//
+// Sound: a path of `<=` edges witnesses `a <= c`; a path with at least one `<` edge witnesses
+// `a < c` (which also proves `a <= c`). Refutation of `a >= c` follows from proof of `a < c`.
+// A missing link returns requiresUnknown (declines, never fabricates).
+func (a *Analyzer) transitiveRelationalProof(leftAff, rightAff affineForm, op lexer.TokenKind) requiresVerdict {
+	// Only ident-vs-ident with unit coefficient and zero constant.
+	if leftAff.c != 0 || len(leftAff.terms) != 1 {
+		return requiresUnknown
+	}
+	if rightAff.c != 0 || len(rightAff.terms) != 1 {
+		return requiresUnknown
+	}
+	var lName, rName string
+	for k, v := range leftAff.terms {
+		if v != 1 {
+			return requiresUnknown
+		}
+		lName = k
+	}
+	for k, v := range rightAff.terms {
+		if v != 1 {
+			return requiresUnknown
+		}
+		rName = k
+	}
+	if lName == "" || rName == "" {
+		return requiresUnknown
+	}
+
+	// Build the relational-edge graph.
+	edges := a.collectRelationalEdges()
+	if len(edges) == 0 {
+		return requiresUnknown
+	}
+
+	// BFS from lName, following edges that give UPPER bounds (lName <= ... <= rName), to see if
+	// rName is reachable with a path consisting of <= or < edges. We also track whether any edge
+	// on the path is strict (< rather than <=) so we know if we proved `lName < rName` or just
+	// `lName <= rName`.
+	//
+	// Edge direction: for `a <= b` (LTEQ with left=a), following from a reaches b with `<=` weight.
+	//                 for `a < b`  (LT   with left=a), following from a reaches b with `<`  weight.
+	//                 for `b >= a` (GTEQ with right=a), following from a reaches b with `<=` weight.
+	//                 for `b > a`  (GT   with right=a), following from a reaches b with `<`  weight.
+	type bfsState struct {
+		node   string
+		strict bool // at least one < edge on the path so far
+		depth  int
+	}
+	const maxDepth = 8
+	// visited tracks (node, strict) — once we've seen a node with strict=false, we need not
+	// revisit with strict=true (it's a tighter result either way, and we take the best we find).
+	visitedNonStrict := map[string]bool{}
+	visitedStrict := map[string]bool{}
+	queue := []bfsState{{node: lName, strict: false, depth: 0}}
+	foundStrict := false
+	foundNonStrict := false
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		if cur.depth >= maxDepth {
+			continue
+		}
+		for _, e := range edges {
+			var peer string
+			var edgeStrict bool
+			switch e.op {
+			case lexer.TOKEN_LTEQ:
+				if e.left == cur.node {
+					peer, edgeStrict = e.right, false
+				}
+			case lexer.TOKEN_LT:
+				if e.left == cur.node {
+					peer, edgeStrict = e.right, true
+				}
+			case lexer.TOKEN_GTEQ:
+				if e.right == cur.node {
+					peer, edgeStrict = e.left, false
+				}
+			case lexer.TOKEN_GT:
+				if e.right == cur.node {
+					peer, edgeStrict = e.left, true
+				}
+			}
+			if peer == "" {
+				continue
+			}
+			pathStrict := cur.strict || edgeStrict
+			if peer == rName {
+				if pathStrict {
+					foundStrict = true
+				} else {
+					foundNonStrict = true
+				}
+				continue
+			}
+			// Avoid revisiting a node on a path that is not more informative.
+			if pathStrict {
+				if visitedStrict[peer] {
+					continue
+				}
+				visitedStrict[peer] = true
+			} else {
+				if visitedNonStrict[peer] {
+					continue
+				}
+				visitedNonStrict[peer] = true
+			}
+			queue = append(queue, bfsState{node: peer, strict: pathStrict, depth: cur.depth + 1})
+		}
+	}
+
+	// Interpret the reachability results against the requested operator.
+	// foundStrict implies lName < rName; foundNonStrict implies lName <= rName (not necessarily <).
+	provenLT := foundStrict
+	provenLTEQ := foundStrict || foundNonStrict
+	switch op {
+	case lexer.TOKEN_LTEQ: // want lName <= rName
+		if provenLTEQ {
+			return requiresProven
+		}
+	case lexer.TOKEN_LT: // want lName < rName
+		if provenLT {
+			return requiresProven
+		}
+	case lexer.TOKEN_GTEQ: // want lName >= rName — provably FALSE if lName < rName
+		if provenLT {
+			return requiresRefuted
+		}
+	case lexer.TOKEN_GT: // want lName > rName — provably FALSE if lName <= rName
+		if provenLTEQ {
+			return requiresRefuted
+		}
+	}
 	return requiresUnknown
 }
 
