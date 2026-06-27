@@ -1420,6 +1420,12 @@ func (a *Analyzer) paramRefinementTypeExpr(te ast.TypeExpr) (*ast.RefinementType
 		if rt, found := a.aliasRefinements[n.Name]; found {
 			return rt, true
 		}
+	case *ast.GenericType:
+		// Parametric refinement alias use site: `x: SlotIndex[128]`. Look up the template
+		// and instantiate by substituting the use-site args for the declared type params.
+		if rt := a.lookupParametricAliasRefinement(n.Name, n.Args); rt != nil {
+			return rt, true
+		}
 	}
 	return nil, false
 }
@@ -1465,6 +1471,30 @@ func (a *Analyzer) paramRefinementRangeFact(te ast.TypeExpr, subjectName string)
 		return numRange{}, false
 	}
 	return a.rangeFromRefinementTypeExpr(rt, nil)
+}
+
+// lookupParametricAliasRefinement resolves and instantiates a parametric alias use site,
+// e.g. `SlotIndex[128]` → concrete `RefinementTypeExpr{u32, [InRange[0,128]]}`.
+// Returns nil when the name is not a parametric alias or instantiation fails.
+func (a *Analyzer) lookupParametricAliasRefinement(name string, args []ast.TypeExpr) *ast.RefinementTypeExpr {
+	if a == nil || a.parametricAliasRefinements == nil {
+		return nil
+	}
+	entry, found := a.parametricAliasRefinements[name]
+	if !found {
+		// Try namespace-qualified candidates (mirrors lookupRefineAlias).
+		for _, candidate := range a.qualifiedNameCandidates(name) {
+			if e, ok := a.parametricAliasRefinements[candidate]; ok {
+				entry = e
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		return nil
+	}
+	return instantiateParametricAlias(entry, args)
 }
 
 // seedParamRefinementFacts records, on the function entry scope, the integer range implied by each

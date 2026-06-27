@@ -457,6 +457,111 @@ def f(n: i64) -> i64:
 	}
 }
 
+// ── Parametric type-alias refinements ────────────────────────────────────────────────────────────
+//
+// `type Name[param] = base is Law[..param..]` declares a reusable bounded-index type where the
+// bound is a value parameter. A use site `Name[N]` (GenericType) substitutes N→param in the
+// predicate args and yields the concrete refinement.
+//
+// PARSER CONSTRAINT: due to the existing parser disambiguation between `Name[int_literal]`
+// (= array type) and `Name[Ident]` (= generic type), parametric alias use sites must supply
+// a CONSTANT IDENTIFIER or a function-parameter name, not an integer literal directly. For
+// concrete instantiation with a known integer use a named constant:
+//   cap128: i64 = 128    (const)
+//   x: SlotIndex[cap128] = 64
+// or a function generic-type param name `[N]` in a generic function context.
+
+// COMPLETENESS-POSITIVE: `SlotIndex[cap128]` where cap128 is a known constant declares a value
+// in [0, 128]; a constant 64 satisfies InRange[0,128] — proven statically with no runtime check.
+func TestParametricTypeAliasRefinementConstProven(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+
+def f() -> u32:
+    x: SlotIndex[cap128] = 64
+    return x
+`
+	result := analyzeTreeTestSource(t, "param_alias_const_proven.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("parametric alias SlotIndex[cap128] (cap128=128) with constant 64 should prove statically, got: %v", errs)
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("constant 64 satisfies InRange[0,128] — no runtime check expected, got %d", len(result.RefinementChecks))
+	}
+}
+
+// COMPLETENESS-POSITIVE: two differently-instantiated aliases (`SlotIndex[cap128]` and
+// `SlotIndex[cap256]`) are independent; values within their respective bounds prove statically.
+func TestParametricTypeAliasRefinementTwoInstances(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+const cap256: u32 = 256
+
+def f() -> u32:
+    a: SlotIndex[cap128] = 10
+    b: SlotIndex[cap256] = 200
+    return a + b
+`
+	result := analyzeTreeTestSource(t, "param_alias_two_instances.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("two independently-instantiated parametric aliases should analyze cleanly, got: %v", errs)
+	}
+}
+
+// SOUNDNESS-NEGATIVE: a constant that is OUT of the instantiated range is a compile-time refutation,
+// not silently accepted. `SlotIndex[cap128]` (cap128=128) with value 200 must be rejected.
+func TestParametricTypeAliasRefinementConstRefuted(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+
+def f() -> u32:
+    x: SlotIndex[cap128] = 200
+    return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "param_alias_const_refuted.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "is violated") && len(result.RefinementChecks) == 0 {
+		t.Fatalf("constant 200 violates InRange[0,128]: expected refutation or runtime check, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// SOUNDNESS-NEGATIVE: `SlotIndex[cap128]` (cap128=128) does NOT prove `InRange[0,127]` — the
+// instantiated hi bound is 128, so a value at exactly 128 would violate the tighter bound. A
+// non-const value typed as `SlotIndex[cap128]` may be in [0,128]; discharging `InRange[0,127]`
+// requires a runtime check.
+func TestParametricTypeAliasDoesNotOverproveNarrower(t *testing.T) {
+	src := `
+law InRange(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+
+type SlotIndex[cap] = u32 is InRange[0, cap]
+
+const cap128: u32 = 128
+
+def needs_127(x: u32 is InRange[0, 127]) -> u32: return x
+
+def f(n: SlotIndex[cap128]) -> u32:
+    return needs_127(n)
+`
+	result := analyzeTreeTestSource(t, "param_alias_no_overprove.elisa", src)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a SlotIndex[cap128] param should parse and typecheck, got: %v", errs)
+	}
+	if len(result.CallArgRefinementChecks) == 0 {
+		t.Fatalf("SlotIndex[cap128] (bound [0,128]) must NOT statically prove InRange[0,127] — runtime check expected")
+	}
+}
+
 // A refuted refinement is recorded as such in the report.
 func TestProofReportRecordsRefutation(t *testing.T) {
 	src := `

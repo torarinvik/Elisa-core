@@ -109,6 +109,10 @@ type Analyzer struct {
 	// keyed by qualified name. namedTypes erases the refinement to the base, so this is the only
 	// channel by which the tier-2 prover can recover a refinement-typed param's entry bound (docs/86).
 	aliasRefinements map[string]*ast.RefinementTypeExpr
+	// parametricAliasRefinements keeps PARAMETRIC refinement aliases (`type SlotIndex[cap] = u32 is InRange[0, cap]`)
+	// keyed by qualified name. A use site `x: SlotIndex[128]` (a GenericType) is instantiated by
+	// substituting 128→cap in the template's predicate Args to yield a concrete RefinementTypeExpr.
+	parametricAliasRefinements map[string]parametricAliasEntry
 	// deferredAliasRefinements holds alias refinements whose predicate validation is postponed until
 	// after law symbols are collected (aliases are resolved long before functions/laws exist).
 	deferredAliasRefinements []deferredAliasRefinement
@@ -757,6 +761,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
 		aliasRefinements:                  map[string]*ast.RefinementTypeExpr{},
+		parametricAliasRefinements:        map[string]parametricAliasEntry{},
 		capabilityAliases:                 map[string][]ast.PermissionRef{},
 		globalScope:                       NewScope(nil),
 		functionTypes:                     map[string]*FuncType{},

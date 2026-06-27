@@ -5,6 +5,58 @@ import (
 	"elisacore/src/lexer"
 )
 
+// parametricAliasEntry holds the template for a parametric type-alias refinement
+// (`type SlotIndex[cap] = u32 is InRange[0, cap]`). The TypeParams are the declared
+// parameter names; Template is the RefinementTypeExpr with those names as free Idents
+// in its Preds[*].Args. A use site `SlotIndex[128]` (GenericType) substitutes 128→cap
+// in every Pred's Args to produce a concrete RefinementTypeExpr.
+type parametricAliasEntry struct {
+	TypeParams []string
+	Template   *ast.RefinementTypeExpr
+	Namespace  string
+	Usings     []string
+}
+
+// instantiateParametricAlias substitutes concrete use-site arguments into the
+// parametric alias template and returns a fresh RefinementTypeExpr. The base type
+// is preserved as-is (it must already be concrete). Each Pred's Args slice is
+// deep-copied with substituteIdents applied.
+//
+// Soundness: only the Pred Args (Expr values) are substituted; the law name and base
+// type are unchanged. The resulting RefinementTypeExpr passes through the existing
+// discharge path without modification.
+func instantiateParametricAlias(entry parametricAliasEntry, useSiteArgs []ast.TypeExpr) *ast.RefinementTypeExpr {
+	if len(useSiteArgs) < len(entry.TypeParams) {
+		return nil
+	}
+	subst := make(map[string]ast.Expr, len(entry.TypeParams))
+	for i, param := range entry.TypeParams {
+		argExpr, ok := typeArgAsValueExpr(useSiteArgs[i])
+		if !ok {
+			return nil
+		}
+		subst[param] = argExpr
+	}
+	// Deep-copy preds with substitution applied to each Arg.
+	newPreds := make([]ast.RefinementPredExpr, len(entry.Template.Preds))
+	for i, pred := range entry.Template.Preds {
+		newArgs := make([]ast.Expr, len(pred.Args))
+		for j, arg := range pred.Args {
+			newArgs[j] = substituteIdents(arg, subst)
+		}
+		newPreds[i] = ast.RefinementPredExpr{
+			Position: pred.Position,
+			Name:     pred.Name,
+			Args:     newArgs,
+		}
+	}
+	return &ast.RefinementTypeExpr{
+		Position: entry.Template.Position,
+		Base:     entry.Template.Base,
+		Preds:    newPreds,
+	}
+}
+
 // Named refinement aliases (docs/85 "Level 2").
 //
 // `refine NAME[type-params](value-params) = BASE where PRED` is PURE desugaring: a use of
