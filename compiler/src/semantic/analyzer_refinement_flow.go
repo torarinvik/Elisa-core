@@ -1730,10 +1730,17 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 			ok = true
 		}
 	}
-	if !ok {
-		// Fallback 2: declared unsigned type → [0, typeMax] non-negativity range.
-		if sym, found := a.currentScope.Lookup(ident.Name); found && sym != nil {
-			if tr, found := declaredTypeRange(sym.Type); found {
+	// Declared-type bounds (e.g. unsigned non-negativity) always apply and only tighten the range,
+	// so merge them in whether or not a range fact already exists. A guard/assert like `x <= 103`
+	// records hi=103 but leaves the lower bound open; for an unsigned `x` the declared type supplies
+	// lo=0, which the law's `self >= 0` conjunct needs. Without this merge, `if x <= 103: return x`
+	// fails to discharge `is InRange[0, 103]` because non-negativity was only consulted as a fallback
+	// for a missing range fact (Fallback 2), never combined with a present one.
+	if sym, found := a.currentScope.Lookup(ident.Name); found && sym != nil {
+		if tr, found := declaredTypeRange(sym.Type); found {
+			if ok {
+				r = r.intersect(tr)
+			} else {
 				r = tr
 				ok = true
 			}

@@ -1535,6 +1535,62 @@ def get(value: u32) -> Small:
 	}
 }
 
+// A guard or assert that bounds an UNSIGNED integer from above (`x <= 103`) supplies the upper
+// bound; the variable's unsigned declared type supplies non-negativity (lo=0). The flow prover must
+// MERGE the two so `return x` discharges `is Bounded[0, 103]` with no runtime check. Before the
+// merge, a present guard range fact (hi=103, lo open) shadowed the declared-type non-negativity
+// fallback, so the law's `self >= 0` conjunct was never entailed and the return paid a runtime check.
+func TestGuardUpperBoundMergesUnsignedNonNegativityForReturn(t *testing.T) {
+	law := "law Bounded(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi\ntype Small = u32 is Bounded[0, 103]\n"
+	cases := map[string]string{
+		"if_guard": law + `def f(x: u32) -> Small:
+    if x <= 103:
+        return x
+    return 0
+`,
+		"assert":   law + `def f(x: u32) -> Small:
+    can Abort.Panic:
+        assert x <= 103
+        return x
+`,
+		// The bind-a-field-to-a-local idiom: a refined accessor reads a raw u32 field, asserts the
+		// in-range bound, and returns the local. This is the shader register-index accessor shape.
+		"field_via_local": law + `struct V:
+    reg: mutable u32
+def f(v: V) -> Small:
+    can Abort.Panic:
+        r: u32 = v.reg
+        assert r <= 103
+        return r
+`,
+	}
+	for name, src := range cases {
+		result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, name+"_merge.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+		if len(result.Errors()) != 0 {
+			t.Fatalf("case %s: upper-bound guard + unsigned non-negativity should prove the return, got:\n%s", name, allDiagnostics(result))
+		}
+		if len(result.RefinementChecks) != 0 {
+			t.Fatalf("case %s: return should be proven without a runtime check, got %d", name, len(result.RefinementChecks))
+		}
+	}
+}
+
+// Soundness guard for the non-negativity merge: a SIGNED integer bounded only from above (`x <= 103`)
+// must NOT discharge `is Bounded[0, 103]`, because the lower bound `x >= 0` is not entailed (x may be
+// negative). The merge only adds declared-type bounds, which for a signed type do not include lo=0.
+func TestSignedUpperBoundDoesNotProveLowerBound(t *testing.T) {
+	src := "law Bounded(self: i32, lo: i32, hi: i32) = self >= lo and self <= hi\ntype SmallI = i32 is Bounded[0, 103]\n" +
+		`def f(x: i32) -> SmallI:
+    can Abort.Panic:
+        assert x <= 103
+        return x
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "signed_upper_only.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) == 0 {
+		t.Fatalf("a signed value bounded only from above must NOT prove the [0,103] return refinement")
+	}
+}
+
 // A PLAIN (non-packed) enum written constant proves the law: plain enum variants without payloads
 // are now const-folded (their tag value), so the written-const channel reasons about them too.
 func TestEnsuresRefinementProvenByWrittenPlainEnum(t *testing.T) {
