@@ -1353,6 +1353,19 @@ func (a *Analyzer) affineOf(expr ast.Expr, scope *Scope) (affineForm, bool) {
 		}
 		fieldVal, ok2 := a.lookupWrittenStructField(base.Name, n.Field)
 		if !ok2 {
+			// Fall back to the written-field channel: a direct `s.f <- <const>` assignment on a straight-line
+			// path records a compile-time constant in writtenField keyed by smtProjectionName(s.f). Consult
+			// that fact here so `s.f <- 5; check(s.f)` proves `requires x >= 5` from the written constant.
+			// Sound: writtenField is invalidated on every write to s.f, to s, or on a mutable-ref escape of s
+			// (see recordWrittenFieldForTarget / invalidateWrittenFieldsForRoot).
+			key := smtProjectionName(n)
+			if isPureProjectionKey(key) {
+				if wfVal, ok3 := a.lookupWrittenField(key); ok3 && wfVal != nil {
+					fieldVal, ok2 = wfVal, true
+				}
+			}
+		}
+		if !ok2 {
 			return affineForm{}, false
 		}
 		return a.affineOf(fieldVal, scope)
