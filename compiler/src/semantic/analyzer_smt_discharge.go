@@ -1730,6 +1730,17 @@ func (tr *smtTranslator) arrayTermEnv(expr ast.Expr, env map[string]string) (str
 		// as a stable array symbol keyed by its syntactic path, so two reads of the same path share the
 		// symbol (and thus its `.count`/`.len`). This is what lets `ensure result <= r.data.count;
 		// return r.data.count` discharge — both sides resolve to the same length symbol.
+		//
+		// Check env FIRST: the loop-preservation prover injects a path-keyed (store …) substitution
+		// for struct-field array stores (`s.data[i] <- v` → env["s__field__data"] = "(store …)").
+		// The env key is the same normalizedFieldPath / smtProjectionName, so picking it up here
+		// lets `s.data[k]` in a quantified invariant resolve to the post-body array term — which is
+		// exactly what the bare-array Ident case does for `arr[k]`.
+		if env != nil {
+			if bound, ok := env[smtProjectionName(n)]; ok {
+				return bound, true
+			}
+		}
 		// Resolve the field's array type from exprTypes (set once analyzed) OR — when the node is
 		// synthetic/cloned (e.g. the loop-termination prover's measure[body], whose field reads were
 		// produced by substitution and never analyzed) — from the object's struct type, mirroring the

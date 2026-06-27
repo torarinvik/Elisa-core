@@ -730,9 +730,13 @@ func loopStoreTargetBaseKey(target *ast.IndexExpr, forTermination bool) (string,
 	if arrIdent, ok := target.Object.(*ast.Ident); ok && arrIdent != nil {
 		return arrIdent.Name, true
 	}
-	if !forTermination {
-		return "", false // strict path: only a bare array variable base
-	}
+	// Struct-field array paths (`s.data[i] <- v`) are admitted on BOTH the invariant path and the
+	// termination path. The normalized path key (e.g. `s__field__data`) matches the projection name
+	// that smtProjectionName / arrayTermEnv uses, so proveLoopPreservationSMT injects
+	//   env["s__field__data"] = "(store v_s__field__data i v)"
+	// and arrayTermEnv's FieldExpr env-lookup picks it up when translating `s.data[k]` in the
+	// quantified invariant. Soundness constraints remain identical: stored-once per path,
+	// never whole-reassigned, pure-arith index/value.
 	key, ok := normalizeFieldPathLValue(target.Object)
 	return key, ok
 }
