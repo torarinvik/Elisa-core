@@ -1031,6 +1031,16 @@ func (a *Analyzer) seedRequiresAsAssertFacts(fn *ast.FuncDecl) {
 			a.recordSMTAssertFact(req)
 		}
 	}
+	// Seed index-bound facts from `requires` clauses so that a precondition like
+	// `requires i < xs.count` elides the runtime check at `xs[i]` when both xs and i
+	// are immutable params. Mutable-root clauses are also seeded here; the existing
+	// mutation-invalidation machinery (invalidateIndexBoundsForContainer / ForAssigned­Target)
+	// will drop the fact the moment xs or i is mutated, preserving soundness.
+	for _, req := range fn.Requires {
+		if req != nil {
+			a.applyIndexBoundsFactsForCondition(req, true)
+		}
+	}
 	a.seedSelfStructInvariantsAsAssertFacts(fn)
 	a.checkRequiresVacuity(fn)
 }
