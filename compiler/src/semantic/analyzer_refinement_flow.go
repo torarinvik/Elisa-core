@@ -1116,6 +1116,42 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 	a.currentScope.rangeFacts[name] = r
 }
 
+// matchArmBodyExpr returns the single expression at the end of a match-arm body (the yield value),
+// or nil when the body is empty, multi-statement (and the last isn't an ExprStmt), or definitely
+// exits. Used by exprResultRange to compute the union of arm-value ranges.
+func matchArmBodyExpr(body []ast.Stmt) ast.Expr {
+	if len(body) == 0 {
+		return nil
+	}
+	last := body[len(body)-1]
+	if exprStmt, ok := last.(*ast.ExprStmt); ok {
+		return exprStmt.Expr
+	}
+	return nil
+}
+
+// recordMatchExprRangeFact records a range fact for an integer local variable whose initializer is a
+// match expression in value position. It calls exprResultRange (which now handles *ast.MatchExpr) to
+// compute the JOIN of all arm-body ranges; if successful the fact is stored in the current scope so
+// downstream refinement discharge (tryProveRefinementByFlow) can prove `x is SomeLaw`. Sound:
+// exprResultRange is fail-closed (returns ok=false when any arm is outside the decidable fragment).
+func (a *Analyzer) recordMatchExprRangeFact(name string, rhs ast.Expr, typ Type) {
+	if a == nil || a.currentScope == nil || name == "" || rhs == nil {
+		return
+	}
+	if !IsNumericType(typ) || IsFloatType(typ) {
+		return
+	}
+	r, ok := a.exprResultRange(rhs, nil)
+	if !ok {
+		return
+	}
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[name] = r
+}
+
 func declaredTypeRange(t Type) (numRange, bool) {
 	signed, width, ok := BitIntInfo(t)
 	if !ok || width <= 0 || width >= 63 {
@@ -2328,9 +2364,19 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 		if r, derived := a.tryDeriveShiftOrScaleRange(value); derived {
 			return a.proveConstraintsFromRange(r, decl, predArgs)
 		}
-		// Case 5: ternary/if-expression — join the branch ranges and check the union.
+		// Case 5a: ternary/if-expression — join the branch ranges and check the union.
 		if tern, isTern := value.(*ast.TernaryExpr); isTern {
 			if r, derived := a.tryDeriveTernaryRange(tern); derived {
+				return a.proveConstraintsFromRange(r, decl, predArgs)
+			}
+		}
+		// Case 5b: a match expression in value position — the result range is the JOIN of arm ranges.
+		// Only attempted here for *ast.MatchExpr to preserve the existing const-eval priority for
+		// literal and other constant expressions (which are handled by the const-eval tier after this
+		// function returns false). Fail-closed: if any arm is outside the decidable fragment,
+		// exprResultRange returns ok=false and we decline.
+		if _, isMatch := value.(*ast.MatchExpr); isMatch {
+			if r, ranged := a.exprResultRange(value, nil); ranged {
 				return a.proveConstraintsFromRange(r, decl, predArgs)
 			}
 		}

@@ -393,6 +393,36 @@ func (a *Analyzer) exprResultRange(expr ast.Expr, guards map[string]numRange) (n
 			return numRange{}, false
 		}
 		return vr.join(ar), true
+	case *ast.MatchExpr:
+		// Integer match expression in value position: the result is the JOIN of each arm's body
+		// expression range. Every arm must be rangeable; if any arm is outside the fragment we
+		// decline (fail-closed). The scrutinee guard per arm (arm matches literal k → scrutinee==k)
+		// is not threaded into the arm range here because the arm body is typically a plain literal,
+		// not a function of the scrutinee; arms that need guard narrowing fall back to the runtime tier.
+		if len(n.Arms) == 0 {
+			return numRange{}, false
+		}
+		var joined numRange
+		joinedSet := false
+		for _, arm := range n.Arms {
+			armExpr := matchArmBodyExpr(arm.Body)
+			if armExpr == nil {
+				return numRange{}, false
+			}
+			r, ok := a.exprResultRange(armExpr, guards)
+			if !ok {
+				return numRange{}, false
+			}
+			if !joinedSet {
+				joined, joinedSet = r, true
+			} else {
+				joined = joined.join(r)
+			}
+		}
+		if !joinedSet {
+			return numRange{}, false
+		}
+		return joined, true
 	default:
 		if c, ok := a.constIntValue(expr); ok {
 			return numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
