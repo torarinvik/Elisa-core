@@ -52,6 +52,16 @@ import (
 	"fmt"
 )
 
+// indexBoundsProven reports whether the semantic analyzer proved expr's index in-bounds,
+// allowing the backend to stamp the resulting GEP with the LLVM `inbounds` keyword.
+// This is sound: the analyzer only sets IndexBoundsProven when it has a complete proof
+// (loop-range containment, refinement interval, or const-index check), and inbounds
+// is only an optimization hint — a wrong inbounds flag would produce undefined behaviour,
+// so we only set it when the proof is complete.
+func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
+	return expr != nil && s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr]
+}
+
 // emitIndexAddress computes the address of an indexed element. userFacing marks
 // a genuine user `arr[i]` access (vs compiler-internal carrier reads): only such
 // accesses receive the debug-mode bounds watchdog, so debug verification stays
@@ -92,6 +102,9 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		}
 		indices := []C.LLVMValueRef{zero, indexValue}
 		ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, arrayPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+		if s.indexBoundsProven(expr) {
+			C.LLVMSetIsInBounds(ptr, 1)
+		}
 		return ptr, t.Elem, nil
 	case *semantic.DArrayType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
@@ -103,7 +116,14 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 				return nil, nil, err
 			}
 		}
-		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+		ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		if s.indexBoundsProven(expr) {
+			C.LLVMSetIsInBounds(ptr, 1)
+		}
+		return ptr, elemType, nil
 	case *semantic.ViewType:
 		containerPtr, _, err := s.emitAddressOrTemp(expr.Object)
 		if err != nil {
@@ -114,7 +134,14 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 				return nil, nil, err
 			}
 		}
-		return s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+		ptr, elemType, err := s.emitRuntimeIndexedAddress(containerPtr, t, t.Elem, indexValue)
+		if err != nil {
+			return nil, nil, err
+		}
+		if s.indexBoundsProven(expr) {
+			C.LLVMSetIsInBounds(ptr, 1)
+		}
+		return ptr, elemType, nil
 	case *semantic.RefType:
 		basePtr, _, err := s.emitExpr(expr.Object, nil)
 		if err != nil {
@@ -137,6 +164,9 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			}
 			indices := []C.LLVMValueRef{zero, indexValue}
 			ptr := C.LLVMBuildGEP2(s.builder, arrayLLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+			if s.indexBoundsProven(expr) {
+				C.LLVMSetIsInBounds(ptr, 1)
+			}
 			return ptr, arrayElem.Elem, nil
 		}
 		if elemType, ok := runtimeIndexedElemType(t.Elem); ok {
@@ -145,7 +175,14 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 					return nil, nil, err
 				}
 			}
-			return s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
+			ptr, _, err := s.emitRuntimeIndexedAddress(basePtr, t.Elem, elemType, indexValue)
+			if err != nil {
+				return nil, nil, err
+			}
+			if s.indexBoundsProven(expr) {
+				C.LLVMSetIsInBounds(ptr, 1)
+			}
+			return ptr, elemType, nil
 		}
 		elemLLVMType, err := s.g.lowerType(t.Elem)
 		if err != nil {
@@ -153,6 +190,9 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		}
 		indices := []C.LLVMValueRef{indexValue}
 		ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, basePtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("idx.ptr"))
+		if s.indexBoundsProven(expr) {
+			C.LLVMSetIsInBounds(ptr, 1)
+		}
 		return ptr, t.Elem, nil
 	default:
 		return nil, nil, fmt.Errorf("indexing is not implemented for %s", objType.String())
