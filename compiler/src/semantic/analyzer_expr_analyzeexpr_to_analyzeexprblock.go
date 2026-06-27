@@ -535,7 +535,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// mutability, region, and storage all match (SameType is exact, so a genuine
 			// mutability/region/lifetime-changing cast is not flagged here). Almost always left
 			// over after a refactor (e.g. the operand was narrowed or its type changed). Lint it.
-			a.warnf(n.Pos(), "redundant `.cast[%s]`: the operand already has type %s; remove the cast", dst, dst)
+			a.warnOncef(n.Pos(), "redundant `.cast[%s]`: the operand already has type %s; remove the cast", dst, dst)
 		}
 		// A cast is the explicit way to truncate, so runtime narrowing stays silent. But a
 		// cast of a compile-time constant that cannot fit the (sub-64-bit) target type
