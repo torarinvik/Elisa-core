@@ -581,6 +581,14 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if i < len(appliedType.Params) {
 			if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
 				a.checkFrameMutableRefArg(loweredArgs[i], calleeFrameSuffixesForParam(appliedType, i))
+				// Iterator invalidation across a callee boundary: passing an actively-iterated
+				// relocatable container by MUTABLE ref lets the callee push/clear/relocate its
+				// buffer mid-iteration, which the function-local lock cannot see (the callee is
+				// analyzed in its own scope). Conservatively reject any mutable-ref pass of an
+				// iterated container (or a borrow alias of one) — the callee MIGHT relocate it.
+				if _, isDArray := stripRefForBounds(rt.Elem).(*DArrayType); isDArray {
+					a.checkIteratorInvalidationForMutableRefArg(loweredArgs[i])
+				}
 			}
 		}
 		// docs/85 brick 2 (A): a callee postcondition `ensures <param i> is Law` lets the caller GAIN

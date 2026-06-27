@@ -314,6 +314,39 @@ func storageViewDependencyFromSource(source ast.Expr) (storageViewDependencyStat
 	return storageViewDependencyState{Source: key, Valid: true}, true
 }
 
+// checkIteratorInvalidationForMutableRefArg rejects passing an actively-iterated relocatable
+// container (or a borrow alias of one) to a callee by MUTABLE reference. The function-local
+// iteration lock cannot see a push/clear the callee performs through that ref (the callee is
+// analyzed in its own scope), so this is the conservative-but-sound call-site guard: any
+// mutable-ref pass of an iterated container is rejected, since the callee MIGHT relocate it.
+// Immutable-ref args are never routed here (the caller gates on a mutable RefType param), so a
+// read-only `count_it(&xs)` during iteration stays allowed.
+func (a *Analyzer) checkIteratorInvalidationForMutableRefArg(arg ast.Expr) {
+	if a == nil || arg == nil || len(a.currentIteratedSources) == 0 {
+		return
+	}
+	place := arg
+	if addr, ok := stripOptimizationParens(arg).(*ast.AddrOfExpr); ok {
+		place = addr.Operand
+	}
+	key := optimizationExprString(place)
+	if key != "" {
+		if _, iterated := a.currentIteratedSources[key]; iterated {
+			a.errorf(arg.Pos(), "cannot pass %q by mutable reference while it is being iterated: the callee may push/clear/relocate its buffer out from under the loop. Iterate by index up to a saved count, or collect into a separate darray first", key)
+			return
+		}
+	}
+	for _, root := range a.mutationRootsForTarget(place) {
+		if root == key {
+			continue
+		}
+		if _, iterated := a.currentIteratedSources[root]; iterated {
+			a.errorf(arg.Pos(), "cannot pass %q (a borrow of %q) by mutable reference while %q is being iterated: the callee may relocate its buffer out from under the loop. Iterate by index up to a saved count, or collect into a separate darray first", key, root, root)
+			return
+		}
+	}
+}
+
 func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason string) {
 	key := optimizationExprString(source)
 	if key == "" {
@@ -325,6 +358,21 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 	// through — the same machinery that invalidates interior references.
 	if _, iterated := a.currentIteratedSources[key]; iterated {
 		a.errorf(source.Pos(), "cannot mutate %q while it is being iterated: %s would move its buffer out from under the loop. Iterate by index up to a saved count, collect into a separate darray, or back it with a stable region (reserve_commit/fixed)", key, reason)
+	} else {
+		// Alias vector: the mutation reaches an iterated container THROUGH a borrow local
+		// (`ys: mutable darray[T]& = &xs; for v in xs: ys.push(v)`). The lock keys on the
+		// iterand's own spelling ("xs"), but the relocating push is emitted against "ys".
+		// Resolve the mutation's laundered roots (the same alias-binding machinery the
+		// mutable-alias checker uses) and reject if any of them is the locked iterand.
+		for _, root := range a.mutationRootsForTarget(source) {
+			if root == key {
+				continue
+			}
+			if _, iterated := a.currentIteratedSources[root]; iterated {
+				a.errorf(source.Pos(), "cannot mutate %q through borrow %q while %q is being iterated: %s would move its buffer out from under the loop. Iterate by index up to a saved count, collect into a separate darray, or back it with a stable region (reserve_commit/fixed)", root, key, root, reason)
+				break
+			}
+		}
 	}
 	if len(a.currentStorageViewDeps) == 0 {
 		return
