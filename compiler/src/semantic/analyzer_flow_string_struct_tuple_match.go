@@ -219,8 +219,13 @@ func (a *Analyzer) analyzeIntegerMatchStmt(stmt *ast.MatchStmt, valueType Type) 
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(stmt.Arms)) {
+		isWildcard := a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(stmt.Arms))
+		if isWildcard {
 			hasWildcard = true
+		} else {
+			// Seed the equality range fact for literal arms so the arm body can prove
+			// refinement obligations that follow from the matched value (docs/85 1d-2).
+			a.seedIntegerMatchArmFact(stmt.Value, arm.Pattern, scope)
 		}
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
@@ -301,8 +306,11 @@ func (a *Analyzer) analyzeIntegerMatchExpr(expr *ast.MatchExpr, valueType Type) 
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(expr.Arms)) {
+		isWildcard := a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(expr.Arms))
+		if isWildcard {
 			hasWildcard = true
+		} else {
+			a.seedIntegerMatchArmFact(expr.Value, arm.Pattern, scope)
 		}
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
