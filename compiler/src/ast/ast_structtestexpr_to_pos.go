@@ -386,6 +386,13 @@ type IterForStmt struct {
 	// by the analyzer, emitted by codegen; nil when the loop is not an eligible fill.
 	PreReserve  Stmt
 	PreReserves []Stmt
+	// MovedSource marks a consuming move-drain: `for x in move c:`. Each element is moved OUT of
+	// the owned container `c` (binds by value, like IterBindValue — codegen is identical), the
+	// loop body must consume each moved element, and the container's must-consume obligation is
+	// discharged after the loop. This is the ONLY sanctioned way to drain a container of affine
+	// (must-consume) handles; non-consuming removal (clear/truncate/remove) is rejected for such
+	// element types. Mode stays IterBindValue so backend value-binding lowering is reused verbatim.
+	MovedSource bool
 }
 type ParallelForStmt struct {
 	Position  lexer.Pos

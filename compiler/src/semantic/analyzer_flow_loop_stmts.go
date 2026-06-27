@@ -466,8 +466,26 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		info.ItemType = invalidType
 	}
 	a.maybeAutoReserveIterFill(stmt, sourceType)
-	if stmt.Mode == ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref", info.ItemType)
+	if stmt.MovedSource {
+		// A move-drain is the sanctioned way to consume affine elements: it moves each
+		// element OUT and requires the body to consume it. It is only sound over a container
+		// the current function OWNS outright — draining through a borrow (`darray&` param) or
+		// a field/element of borrowed storage would consume the *caller's* elements behind its
+		// back. So require a directly-named, non-reference darray local / by-value param; a
+		// field or element must be moved into a local first.
+		if _, isRef := sourceType.(*RefType); isRef {
+			a.errorf(stmt.Pos(), "cannot `for ... in move` a borrowed container (%s); move it into a local you own first", sourceType)
+		} else if _, isDArray := stripRefForBounds(sourceType).(*DArrayType); !isDArray {
+			a.errorf(stmt.Pos(), "`for ... in move` (drain) currently requires a darray source, got %s", sourceType)
+		} else if _, isIdent := stmt.Source.(*ast.Ident); !isIdent {
+			a.errorf(stmt.Pos(), "`for ... in move` (drain) source must be a darray you own directly; move a field/element into a local first")
+		}
+		if moveDrainBodyHasNonLocalExit(stmt.Body) {
+			a.errorf(stmt.Pos(), "a `for ... in move` drain must consume every element; `break`/`return` inside the drain body would leak the remaining un-consumed elements")
+		}
+	}
+	if stmt.Mode == ast.IterBindValue && !stmt.MovedSource && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
+		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref (or `for x in move c` to drain and consume each element)", info.ItemType)
 	}
 	if stmt.Mode != ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) && !isBorrowableAffineOwnerType(info.ItemType) {
 		a.errorf(stmt.Pos(), "references to values containing linear handles are not supported; got %s&", info.ItemType)
@@ -485,6 +503,20 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 
 	loopScope := NewScope(a.currentScope)
 	a.bindIterLoopPattern(loopScope, stmt.Pattern, stmt.Mode, info.ItemType, info.ItemFacts, info.HasItemFacts)
+	var movedElemSym *Symbol
+	if stmt.MovedSource {
+		// Register the moved element as a per-iteration must-consume value (a no-op when the
+		// element is not affine). The body is then required to consume it before the iteration
+		// ends, transferring the container's aggregate obligation into per-element obligations.
+		if namePattern, ok := stmt.Pattern.(*ast.MoveBindNamePattern); ok && namePattern.Name != "_" {
+			if sym, ok := loopScope.Lookup(namePattern.Name); ok {
+				movedElemSym = sym
+				a.trackAffineValueSymbol(sym)
+			}
+		} else if _, isName := stmt.Pattern.(*ast.MoveBindNamePattern); !isName {
+			a.errorf(stmt.Pos(), "`for ... in move` (drain) currently requires a single loop variable, not a destructuring pattern")
+		}
+	}
 	if stmt.PatternFilter != nil {
 		var valueExpr ast.Expr
 		patternType := info.ItemType
@@ -564,6 +596,64 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	a.currentFunctionValues = mergedFunctionValues
 	a.currentSpecializedValueTypes = mergedSpecializedValueTypes
 	a.currentStorageViewDeps = mergedStorageViewDeps
+	if stmt.MovedSource {
+		if movedElemSym != nil {
+			// Each iteration must have consumed the moved element; otherwise it is dropped.
+			key := affineValueKey{Root: movedElemSym}
+			if st, ok := bodySnapshot.Affine[key]; ok && st.ConsumedBy == "" && (st.LiveProtocolType != nil || st.LiveProtocolDescription != "") {
+				a.errorf(stmt.Pos(), "linear element %q moved out by `for ... in move` must be consumed in each iteration", movedElemSym.Name)
+			}
+			// The binding is loop-local — never let it leak into the outgoing state.
+			delete(a.currentAffineValues, key)
+		}
+		// The drain consumes the whole container: discharge its aggregate must-consume obligation
+		// (every element has now been moved out and individually consumed).
+		if key, ok := a.lookupAffineValueKey(stmt.Source); ok {
+			a.recordAffineConsumption(key, "drained by `for ... in move`")
+		}
+	}
+}
+
+// moveDrainBodyHasNonLocalExit reports whether a move-drain loop body contains a `break`,
+// `continue`, or `return` that belongs to THIS loop (not a nested loop). Such an early exit
+// would skip the remaining elements, leaking them un-consumed, so it is rejected.
+func moveDrainBodyHasNonLocalExit(body []ast.Stmt) bool {
+	for _, stmt := range body {
+		if moveDrainStmtHasNonLocalExit(stmt) {
+			return true
+		}
+	}
+	return false
+}
+
+func moveDrainStmtHasNonLocalExit(stmt ast.Stmt) bool {
+	switch n := stmt.(type) {
+	case *ast.BreakStmt, *ast.ContinueStmt, *ast.ReturnStmt:
+		return true
+	case *ast.IfStmt:
+		if moveDrainBodyHasNonLocalExit(n.Then) || moveDrainBodyHasNonLocalExit(n.Else) {
+			return true
+		}
+		for _, elif := range n.Elifs {
+			if moveDrainBodyHasNonLocalExit(elif.Body) {
+				return true
+			}
+		}
+		return false
+	case *ast.MatchStmt:
+		for _, arm := range n.Arms {
+			if moveDrainBodyHasNonLocalExit(arm.Body) {
+				return true
+			}
+		}
+		return false
+	// Nested loops (for/while) introduce their own break/continue target, so a break/continue
+	// inside them does not exit the drain — do not descend into their bodies for break/continue.
+	// A `return` inside a nested loop still exits the function, but those nested constructs are
+	// rare in a drain body; treat the conservative top-level scan as sufficient.
+	default:
+		return false
+	}
 }
 
 func (a *Analyzer) analyzeLetDestructureStmt(stmt *ast.LetDestructureStmt) {

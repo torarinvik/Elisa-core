@@ -469,6 +469,21 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 	return resultType, true
 }
 
+// rejectAffineElementDrop reports an error when a container operation would discard
+// must-consume (affine) elements without consuming them. Silently dropping such a value is
+// exactly the leak the affine system exists to prevent; the only sound way to remove affine
+// elements is a consuming move-drain (`for x in move c:`), which moves each element out and
+// forces the body to consume it.
+func (a *Analyzer) rejectAffineElementDrop(obj ast.Expr, elemType Type, op string) {
+	if a == nil || obj == nil || elemType == nil {
+		return
+	}
+	if !a.containsAffineHandleValues(elemType, map[string]bool{}) {
+		return
+	}
+	a.errorf(obj.Pos(), "%s would drop must-consume element(s) of type %s without consuming them; drain the container with `for x in move c:` and consume each element instead", op, elemType)
+}
+
 // analyzeBuiltinDarrayResizeCall handles `da.resize(n)`: presize to exactly n live
 // elements in one allocation (capacity >= n, count := n), so a fill loop writes by
 // index with no per-element push/capacity-check. Mirrors reserve, then seals the length.
@@ -505,6 +520,9 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 		a.errorf(expr.Pos(), "darray resize requires an active in <arena>: scope")
 	}
+	// resize can shrink (dropping the tail) and, when growing, exposes zero-filled slots as live
+	// elements — both unsound for must-consume element types. Reject affine-element resize.
+	a.rejectAffineElementDrop(fieldExpr.Object, darrayType.Elem, "darray resize")
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "resize")
 	usizeType := a.namedTypes["usize"]
 	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
@@ -559,6 +577,7 @@ func (a *Analyzer) analyzeBuiltinDarrayClearCall(expr *ast.CallExpr) (Type, bool
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray clear requires a mutable darray receiver")
 	}
+	a.rejectAffineElementDrop(fieldExpr.Object, darrayType.Elem, "darray clear")
 	resultType := receiverRefType
 	if resultType == nil {
 		resultType = &RefType{
@@ -603,6 +622,7 @@ func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, b
 	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
 		a.errorf(fieldExpr.Object.Pos(), "darray truncate requires a mutable darray receiver")
 	}
+	a.rejectAffineElementDrop(fieldExpr.Object, darrayType.Elem, "darray truncate")
 	usizeType := a.namedTypes["usize"]
 	argType := a.analyzeValueExpr(expr.Args[0], usizeType)
 	if !AssignableTo(usizeType, argType) {

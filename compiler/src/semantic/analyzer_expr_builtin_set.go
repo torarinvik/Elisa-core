@@ -101,9 +101,11 @@ func (a *Analyzer) rewriteBuiltinSetMethodCall(expr *ast.CallExpr) builtinDictMe
 	case "remove":
 		helperName = "arena_set_remove"
 		mutates = true
+		a.rejectAffineElementDrop(fieldExpr.Object, setType.Elem, "set remove")
 	case "clear":
 		helperName = "arena_set_clear"
 		mutates = true
+		a.rejectAffineElementDrop(fieldExpr.Object, setType.Elem, "set clear")
 	case "reserve":
 		helperName = "arena_set_reserve"
 		mutates = true

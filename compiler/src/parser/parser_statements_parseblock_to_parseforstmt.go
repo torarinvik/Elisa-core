@@ -1098,7 +1098,20 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		}
 	}
 	body := p.parseForStmtBody()
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: startOrSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body}
+	// `for x in move c:` is a consuming move-drain. The `move c` source parses as a MoveExpr;
+	// unwrap it to the container and flag MovedSource (Mode stays IterBindValue so the binding is
+	// by value and backend lowering is reused). Only the value-binding form supports a moved
+	// source — `for ref x in move c` / `for mutable x in move c` is contradictory.
+	source := startOrSource
+	movedSource := false
+	if moveExpr, ok := source.(*ast.MoveExpr); ok {
+		if mode != ast.IterBindValue {
+			p.errorAt(moveExpr.Pos(), "`for ref`/`for mutable` cannot bind a moved source; `move` requires a by-value drain")
+		}
+		source = moveExpr.Operand
+		movedSource = true
+	}
+	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: source, MovedSource: movedSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body}
 }
 
 func (p *Parser) peekForWhereSubjectPattern(pattern ast.MoveBindPattern) (string, bool) {

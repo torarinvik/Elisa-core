@@ -184,9 +184,13 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 	case "remove":
 		helperName = "arena_dict_remove"
 		mutates = true
+		a.rejectAffineElementDrop(fieldExpr.Object, dictType.Value, "dict remove")
+		a.rejectAffineElementDrop(fieldExpr.Object, dictType.Key, "dict remove")
 	case "clear":
 		helperName = "arena_dict_clear"
 		mutates = true
+		a.rejectAffineElementDrop(fieldExpr.Object, dictType.Value, "dict clear")
+		a.rejectAffineElementDrop(fieldExpr.Object, dictType.Key, "dict clear")
 	case "reserve":
 		helperName = "arena_dict_reserve"
 		mutates = true

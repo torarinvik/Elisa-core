@@ -424,6 +424,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordWrittenFieldForTarget(n.Target, n.Value)
 			a.recordConstAssignmentRangeFact(n.Target, n.Value)
 			a.clearZeroedUninitializedForExpr(n.Target)
+			a.rejectAffineIndexOverwrite(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
 			a.markCreatedProtocolTarget(n.Target, n.Value, targetType)

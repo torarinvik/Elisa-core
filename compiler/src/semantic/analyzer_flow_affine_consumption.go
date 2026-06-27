@@ -292,6 +292,27 @@ func affinePathContains(ancestor, descendant string) bool {
 	return false
 }
 
+// rejectAffineIndexOverwrite catches `c[i] <- v` where c's element type contains affine
+// handles: the OLD element at index i is overwritten (dropped) without being consumed. Since
+// affine containers are tracked at root granularity, the dropped element silently escapes its
+// must-consume obligation. (Compiler-internal index-fill lowerings live in the backend and are
+// never re-analyzed here, so this only constrains user-written indexed assignment.)
+func (a *Analyzer) rejectAffineIndexOverwrite(target ast.Expr) {
+	idx, ok := target.(*ast.IndexExpr)
+	if !ok || idx.Object == nil || idx.Fallback != nil {
+		return
+	}
+	objType := a.exprTypes[idx.Object]
+	if objType == nil {
+		objType = a.analyzeExpr(idx.Object)
+	}
+	elemType, ok := affineIndexedElemType(objType)
+	if !ok {
+		return
+	}
+	a.rejectAffineElementDrop(idx.Object, elemType, "indexed assignment")
+}
+
 func affineIndexedElemType(t Type) (Type, bool) {
 	switch tt := t.(type) {
 	case *ArrayType:
