@@ -209,6 +209,31 @@ def read(box: Box) -> i64:
 	}
 }
 
+// A PascalCase UFCS method called on a struct FIELD and bound into a typed local
+// (`size: u64 = self.f.GetSize()`) must resolve as the call `GetSize(self.f)`, NOT be
+// misread as a cast to a type named GetSize. Regression: the widening-cast range-fact
+// pass (recordWideningCastRangeFact) peeled the postfix-shorthand CastExpr and resolved
+// its target ("GetSize") as a type un-suppressed, emitting a spurious `unknown type
+// "GetSize"`. Only triggered in a var-decl whose RHS is a *bare* postfix call (a
+// parenthesized RHS, a `return`, or a `_ =` discard dodged the pass).
+func TestAnalyzeUFCSPascalCaseMethodOnFieldInTypedVarDecl(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "ufcs_pascalcase_field_vardecl.elisa", `
+struct Thing:
+    n: i64
+
+def GetSize(self: Thing&) -> u64:
+    return 0
+
+struct Box:
+    f: mutable Thing
+
+def use(self: mutable Box&) -> u64:
+    size: u64 = self.f.GetSize()
+    inferred = self.f.GetSize()
+    return size + inferred
+`)
+}
+
 func TestAnalyzeUFCSFreeFunctionAutorefRewrite(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ufcs_free_function_autoref.elisa", `
 struct Box:

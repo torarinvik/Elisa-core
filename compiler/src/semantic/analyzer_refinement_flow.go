@@ -1081,7 +1081,15 @@ func (a *Analyzer) recordWideningCastRangeFact(target ast.Expr, value ast.Expr, 
 		if !ok {
 			break
 		}
+		// Resolving the cast target is speculative here (we are only seeding an optimization
+		// range fact). A postfix-shorthand cast `recv.Name()` whose `Name` is NOT a type is
+		// really the UFCS call `Name(recv)` (re-interpreted later in analyzeExpr); resolving
+		// `Name` as a type would emit a spurious "unknown type" error. Suppress diagnostics so
+		// the non-integer/invalid result simply bails below, fail-closed, with no error.
+		savedSuppress := a.suppressDiagnostics
+		a.suppressDiagnostics = true
 		t := a.resolveType(ce.Target)
+		a.suppressDiagnostics = savedSuppress
 		if _, _, isInt := BitIntInfo(t); !isInt {
 			return // non-integer intermediate — cannot reason about value preservation
 		}
