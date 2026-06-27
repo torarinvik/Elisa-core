@@ -689,6 +689,63 @@ struct Foo:
 def maybe_get(p: Foo&?) -> Foo&?:
     ensure result != null
     return p
+		// Gap C: two-pointer conjunction — `(p != null) and (q != null)` in the ensure must discharge
+		// when both pointers are independently established non-null via `requires`.
+		{"two_pointer_conjunction_both_requires", `
+def f(p: void&?, q: void&?) -> bool:
+    requires p != null
+    requires q != null
+    ensure (p != null) and (q != null)
+    return true
+`, true},
+		// Soundness-negative: `requires p != null` alone must NOT prove `q != null`.
+		{"two_pointer_conjunction_only_p_requires", `
+def bad(p: void&?, q: void&?) -> bool:
+    requires p != null
+    ensure (p != null) and (q != null)
+    return true
+`, false},
+		// Disjunction: `(p != null) or (q != null)` discharges when `requires p != null` is established.
+		{"two_pointer_disjunction_p_requires", `
+def either(p: void&?, q: void&?) -> bool:
+    requires p != null
+    ensure (p != null) or (q != null)
+    return true
+`, true},
+		// Gap C guard-path: conjunction of two per-pointer nullness facts from fallthrough guards.
+		// At `return true`, both `not(p==null)` and `not(q==null)` are scope facts. The ensure
+		// uses `result` to make the obligation trivial at the early-exit `return false` sites.
+		{"two_pointer_conjunction_via_guards", `
+def check_both(p: void&?, q: void&?) -> bool:
+    ensure (not result) or ((p != null) and (q != null))
+    if p == null:
+        return false
+    if q == null:
+        return false
+    return true
+`, true},
+		// Soundness-negative for the guard path: `q != null` must NOT be provable without the second guard.
+		{"two_pointer_conjunction_via_guards_only_p", `
+def bad_guard(p: void&?, q: void&?) -> bool:
+    ensure (not result) or ((p != null) and (q != null))
+    if p == null:
+        return false
+    return true
+`, false},
+		// Pointer-equality implication: `(p == q) implies (p != null == q != null)`.
+		// boolTerm lowers `p == q` for pointer types to `(= isnull_p isnull_q)` — Gap C fix.
+		// This discharges the null-equivalence postcondition from the p==q requires hypothesis.
+		{"pointer_eq_implies_null_equiv", `
+def eq_null_equiv(p: void&?, q: void&?) -> bool:
+    requires p == q
+    ensure (p != null) == (q != null)
+    return true
+`, true},
+		// Soundness-negative: WITHOUT p==q requires, null equivalence must NOT discharge.
+		{"pointer_eq_implies_null_equiv_unsound", `
+def bad_no_eq(p: void&?, q: void&?) -> bool:
+    ensure (p != null) == (q != null)
+    return true
 `, false},
 		{"struct_result_field", `
 struct Pair:

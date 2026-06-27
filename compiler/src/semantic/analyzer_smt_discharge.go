@@ -3113,6 +3113,26 @@ func (tr *smtTranslator) boolTerm(expr ast.Expr, env map[string]string) (string,
 				}
 				return "(not " + pred + ")", true
 			}
+			// Pointer-pointer equality (`p == q` / `p != q` where both sides are nullable pointers and
+			// neither is null). Equal pointers have the same nullness, so `(p == q)` discharges as
+			// `(= isnull_p isnull_q)`. This lets `requires p == q; ensure (p != null) == (q != null)`
+			// discharge, and `(p == q) implies (p != null)` follow from `q != null`.
+			// Sound: two equal nullable references have identical null-ness by definition.
+			if tr.a != nil {
+				leftType := tr.a.exprTypes[n.Left]
+				rightType := tr.a.exprTypes[n.Right]
+				if tr.a.exprIsPointerLike(leftType) && tr.a.exprIsPointerLike(rightType) {
+					lPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Left))
+					rPred := "isnull_" + smtProjectionName(stripOptimizationParens(n.Right))
+					tr.boolDecls[lPred] = true
+					tr.boolDecls[rPred] = true
+					eq := "(= " + lPred + " " + rPred + ")"
+					if n.Op == lexer.TOKEN_BANGEQ {
+						return "(not " + eq + ")", true
+					}
+					return eq, true
+				}
+			}
 			// Numeric equality is the common case; try integer terms first.
 			if l, lok := tr.termEnv(n.Left, env); lok {
 				if r, rok := tr.termEnv(n.Right, env); rok {
