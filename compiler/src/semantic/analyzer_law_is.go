@@ -1071,11 +1071,22 @@ func (a *Analyzer) tryProveEnsureNullnessCastDisjunct(clause ast.Expr, subst map
 	return lowered && proven
 }
 
-// smtResultNullnessHypothesis emits `(= isnull_result true)` when the substitution binds `result` to a
-// literal null return value, mirroring exactly the predicate key the null-compare lowering produces for
-// `result == null` (`isnull_` + smtProjectionName(result) == "isnull_result"). Returns "" otherwise —
-// in particular it asserts NOTHING for a non-null return, so an unsound `ensure result == null` over a
-// non-null return path is still rejected. Kept as a self-contained helper for clean merges.
+// smtResultNullnessHypothesis emits an `isnull_result` assertion when the substitution binds
+// `result` to a value whose null-ness is statically determined:
+//   - `return null`   → `(= isnull_result true)`  (the literal is definitionally null)
+//   - `return <T&>`   → `(= isnull_result false)` (a non-optional ref is structurally non-null)
+//
+// The `isnull_` predicate key mirrors exactly what nullComparePointer+boolTerm produce for
+// `result == null` / `result != null`, so the asserted fact is immediately consumed by the solver
+// when the obligation contains either comparison.
+// SOUND:
+//   - null branch: asserted only when ret is a NullLit — the compiler already type-checks that
+//     the nil literal is assignable to the return type, so the assertion is true by construction.
+//   - non-null branch: asserted only when the return expression's type is a `RefType` (T&, the
+//     non-optional reference). In Elisa's type system T& cannot hold null (only T&?/T? can), so
+//     the assertion is a structural guarantee, not a flow inference. OptionalType returns are left
+//     unconstrained; they do NOT trigger this path, so `ensure result != null` over an optional
+//     return still fails unless a flow guard proves non-nullness via smtAssertHypotheses.
 func (a *Analyzer) smtResultNullnessHypothesis(tr *smtTranslator, subst map[string]ast.Expr) string {
 	if a == nil || tr == nil || subst == nil {
 		return ""
@@ -1084,12 +1095,24 @@ func (a *Analyzer) smtResultNullnessHypothesis(tr *smtTranslator, subst map[stri
 	if !ok || ret == nil {
 		return ""
 	}
-	if _, isNull := stripOptimizationParens(ret).(*ast.NullLit); !isNull {
+	pred := "isnull_result"
+	// Case 1: literal null return → isnull_result is true.
+	if _, isNull := stripOptimizationParens(ret).(*ast.NullLit); isNull {
+		tr.boolDecls[pred] = true
+		return "(assert (= " + pred + " true))\n"
+	}
+	// Case 2: the return expression has type T& (non-optional reference) → structurally non-null.
+	retType := a.exprTypes[ret]
+	if retType == nil {
 		return ""
 	}
-	pred := "isnull_result"
-	tr.boolDecls[pred] = true
-	return "(assert (= " + pred + " true))\n"
+	// A non-nullable reference (T&, RefStateNonNull) is structurally non-null.
+	// A nullable reference (T&?, RefStateNullable) or an OptionalType (T?) may be null — skip.
+	if rt, isRef := IsRefType(retType); isRef && rt.State == RefStateNonNull {
+		tr.boolDecls[pred] = true
+		return "(assert (= " + pred + " false))\n"
+	}
+	return ""
 }
 
 // smtNullnessCastLinkHypotheses emits `(= isnull_<local> isnull_<source>)` for each immutable local in
