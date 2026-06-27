@@ -1637,9 +1637,81 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 		}
 	}
 	if !ok {
+		// Fallback 3 — in-body monotonic counter bound: for a MUTABLE integer identifier, harvest
+		// constant-comparison facts from live smtAssertFacts. When the analyzer enters
+		// `while i < n:` (or any branch), it seeds the raw condition as an smtAssertFact in the
+		// body scope, and drops that fact whenever `i` is mutated
+		// (invalidateSMTAssertFactsForTarget). Reading those facts here is therefore as sound as
+		// reading rangeFacts for an immutable identifier: the invalidation guarantee is the same.
+		// This lets the tier-1 flow prover handle simple laws like `i is Nat` inside
+		// `while i >= 0:`, or `i is Bounded[0..=9]` inside `while i < 10:`, without SMT.
+		if sym, found := a.currentScope.Lookup(ident.Name); found && sym != nil &&
+			sym.Mutable && IsNumericType(sym.Type) && !IsFloatType(sym.Type) {
+			if mr, mok := a.rangeFromSMTAssertFacts(ident.Name); mok {
+				if tr, found := declaredTypeRange(sym.Type); found {
+					mr = mr.intersect(tr)
+				}
+				return a.proveConstraintsFromRange(mr, decl, predArgs)
+			}
+		}
 		return false
 	}
 	return a.proveConstraintsFromRange(r, decl, predArgs)
+}
+
+// rangeFromSMTAssertFacts scans the live smtAssertFacts in the current scope chain for
+// constant-comparison facts about a named variable and returns their conjunction as a numRange.
+// Used by tryProveRefinementByFlow Fallback 3 to derive a provable range for MUTABLE integer
+// identifiers that are excluded from the immutable-only rangeFacts map. Soundness holds because
+// smtAssertFacts is invalidated at every mutation of the variable — the same guarantee that
+// makes rangeFacts sound for immutables (docs/85 §5.3 monotonic counter bound).
+// Only constant-RHS (or constant-LHS) comparisons contribute; variable-bound facts are skipped.
+func (a *Analyzer) rangeFromSMTAssertFacts(name string) (numRange, bool) {
+	r := numRange{}
+	found := false
+	for sc := a.currentScope; sc != nil; sc = sc.Parent {
+		for _, fact := range sc.smtAssertFacts {
+			bin, ok := stripOptimizationParens(fact.Expr).(*ast.BinaryExpr)
+			if !ok || bin == nil {
+				continue
+			}
+			op := bin.Op
+			var c int64
+			var cok bool
+			leftIsName := isIdentNamed(bin.Left, name)
+			if leftIsName {
+				// name OP const
+				c, cok = a.constIntValue(bin.Right)
+			} else if isIdentNamed(bin.Right, name) {
+				// const OP name — flip operator to normalize to name flipOp const
+				c, cok = a.constIntValue(bin.Left)
+				op = flipComparison(op)
+			} else {
+				continue
+			}
+			if !cok {
+				continue
+			}
+			var fact numRange
+			switch op {
+			case lexer.TOKEN_GT:
+				fact = numRange{loKnown: true, lo: c + 1}
+			case lexer.TOKEN_GTEQ:
+				fact = numRange{loKnown: true, lo: c}
+			case lexer.TOKEN_LT:
+				fact = numRange{hiKnown: true, hi: c - 1}
+			case lexer.TOKEN_LTEQ:
+				fact = numRange{hiKnown: true, hi: c}
+			case lexer.TOKEN_EQEQ:
+				fact = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
+			default:
+				continue
+			}
+			r = r.intersect(fact)
+			found = true
+		}
+	}
+	return r, found
 }
 
 // proveConstraintsFromRange checks whether the given known range entails all law constraints.
