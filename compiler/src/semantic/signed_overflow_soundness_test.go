@@ -53,6 +53,44 @@ def f(x: i64) -> i64:
 	}
 }
 
+// SOUNDNESS (audit roi/signed-arith-overflow-audit): canonical fabrication case — x + 1 where the
+// prover's ℤ model would say "result > x" (true in ℤ) but INT_MAX + 1 wraps to INT_MIN < INT_MAX.
+// The wrap MUST prevent the proof from discharging. Pins the wrapMachineArith / smtSignedWrap path.
+func TestSignedAddOneCannotFabricatePostcondition(t *testing.T) {
+	cases := []struct{ name, src string }{
+		{"x_plus_1_i64", `
+def f(x: i64) -> i64:
+    ensure result > x
+    return x + 1
+`},
+		{"x_plus_1_i32", `
+def f(x: i32) -> i32:
+    ensure result > x
+    return x + 1
+`},
+		{"x_mul_2_positive", `
+def f(x: i64) -> i64:
+    requires x > 0
+    ensure result > x
+    return x * 2
+`},
+		{"x_minus_neg1", `
+def f(x: i64) -> i64:
+    requires x > 0
+    ensure result > x
+    return x - (-1)
+`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			errs := strings.Join(analyzeContractStrict(t, "sao_"+tc.name+".elisa", tc.src).Errors(), "\n")
+			if !strings.Contains(errs, "could not be proven statically") {
+				t.Fatalf("signed overflow can make result > x false for %s — must NOT prove, got: %v", tc.name, errs)
+			}
+		})
+	}
+}
+
 // COMPLETENESS: when the operands are bounded so the result provably cannot overflow, the postcondition
 // still proves — the wrap model only declines what can actually wrap.
 func TestSignedArithBoundedStillProves(t *testing.T) {
