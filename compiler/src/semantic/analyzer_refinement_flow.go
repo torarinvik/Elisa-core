@@ -557,13 +557,23 @@ func (a *Analyzer) recordConstAssignmentRangeFact(target ast.Expr, value ast.Exp
 		return
 	}
 	c, ok := a.constIntValue(value)
-	if !ok {
+	if ok {
+		if a.currentScope.rangeFacts == nil {
+			a.currentScope.rangeFacts = map[string]numRange{}
+		}
+		a.currentScope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
 		return
 	}
-	if a.currentScope.rangeFacts == nil {
-		a.currentScope.rangeFacts = map[string]numRange{}
+	// Ternary RHS: seed the join of the two branch ranges so that downstream proofs on `name`
+	// can discharge bounds without re-examining the ternary expression structure.
+	if tern, isTern := value.(*ast.TernaryExpr); isTern {
+		if r, derived := a.tryDeriveTernaryRange(tern); derived {
+			if a.currentScope.rangeFacts == nil {
+				a.currentScope.rangeFacts = map[string]numRange{}
+			}
+			a.currentScope.rangeFacts[name] = r
+		}
 	}
-	a.currentScope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
 }
 
 func declaredTypeRange(t Type) (numRange, bool) {
@@ -1617,6 +1627,12 @@ func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, 
 		if r, derived := a.tryDeriveShiftOrScaleRange(value); derived {
 			return a.proveConstraintsFromRange(r, decl, predArgs)
 		}
+		// Case 5: ternary/if-expression — join the branch ranges and check the union.
+		if tern, isTern := value.(*ast.TernaryExpr); isTern {
+			if r, derived := a.tryDeriveTernaryRange(tern); derived {
+				return a.proveConstraintsFromRange(r, decl, predArgs)
+			}
+		}
 		return false
 	}
 	r, ok := a.lookupRangeFact(ident.Name)
@@ -1762,4 +1778,75 @@ func (a *Analyzer) immutableIntIdentNameFromScope(expr ast.Expr) (string, bool) 
 		return "", false
 	}
 	return immutableIntIdentName(a, a.currentScope, expr)
+}
+
+// tryDeriveTernaryRange attempts to derive a numRange for a ternary expression `value if cond else alt`
+// by computing the range of each branch in its condition-refined scope and joining them (union).
+// This is the range-merge rule for conditional expressions: a value produced by a ternary is bounded
+// by the union of the two branch bounds, which is sound because exactly one branch executes.
+// Returns ok=false when no useful range can be derived from either branch.
+func (a *Analyzer) tryDeriveTernaryRange(expr *ast.TernaryExpr) (numRange, bool) {
+	if a == nil || a.currentScope == nil || expr == nil {
+		return numRange{}, false
+	}
+	savedScope := a.currentScope
+
+	// Compute range of the truthy branch (expr.Value) in the truthy refined scope.
+	truthyScope := a.refinedScopeForCondition(savedScope, expr.Cond, true)
+	a.currentScope = truthyScope
+	leftRange, leftOk := a.rangeForBranchExpr(expr.Value)
+	a.currentScope = savedScope
+
+	// Compute range of the falsy branch (expr.Alt) in the falsy refined scope.
+	falsyScope := a.refinedScopeForCondition(savedScope, expr.Cond, false)
+	a.currentScope = falsyScope
+	rightRange, rightOk := a.rangeForBranchExpr(expr.Alt)
+	a.currentScope = savedScope
+
+	if !leftOk && !rightOk {
+		return numRange{}, false
+	}
+	if !leftOk {
+		return rightRange, true
+	}
+	if !rightOk {
+		return leftRange, true
+	}
+	return leftRange.join(rightRange), true
+}
+
+// rangeForBranchExpr attempts to derive a numRange for an expression appearing as a ternary branch.
+// It supports:
+//   - bare immutable integer identifiers (via lookupRangeFact + written-const + declared-type)
+//   - additive shift / monotonic scaling (via tryDeriveShiftOrScaleRange)
+//
+// Called with a.currentScope already set to the condition-refined branch scope.
+func (a *Analyzer) rangeForBranchExpr(expr ast.Expr) (numRange, bool) {
+	if expr == nil {
+		return numRange{}, false
+	}
+	ident, ok := expr.(*ast.Ident)
+	if ok && ident != nil {
+		r, found := a.lookupRangeFact(ident.Name)
+		if !found {
+			if c, known := a.writtenConstInt(ident.Name); known {
+				r, found = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}, true
+			}
+		}
+		if sym, symFound := a.currentScope.Lookup(ident.Name); symFound && sym != nil {
+			if tr, typeFound := declaredTypeRange(sym.Type); typeFound {
+				if found {
+					r = r.intersect(tr)
+				} else {
+					r, found = tr, true
+				}
+			}
+		}
+		return r, found
+	}
+	// Additive shift / scaling.
+	if r, derived := a.tryDeriveShiftOrScaleRange(expr); derived {
+		return r, true
+	}
+	return numRange{}, false
 }

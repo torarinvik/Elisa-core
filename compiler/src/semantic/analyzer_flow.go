@@ -126,6 +126,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if list, ok := unwrapParen(n.Value).(*ast.ListLitExpr); ok && list != nil {
 				a.recordWrittenListCount(n.Name, int64(len(list.Elems)))
 			}
+			// If the initializer is a ternary/if-expression over integer values, seed the binding's
+			// range fact with the union of the two branch ranges (docs/85 ternary range-merge).
+			// Sound: immutable binding is never invalidated, so the joined range holds for the
+			// binding's whole lifetime.
+			if IsNumericType(bindingType) && !IsFloatType(bindingType) {
+				if tern, isTern := unwrapParen(n.Value).(*ast.TernaryExpr); isTern {
+					if r, derived := a.tryDeriveTernaryRange(tern); derived {
+						if a.currentScope.rangeFacts == nil {
+							a.currentScope.rangeFacts = map[string]numRange{}
+						}
+						a.currentScope.rangeFacts[n.Name] = r
+					}
+				}
+			}
 		}
 		a.recordValueBinding(sym, n.Value)
 		a.recordViewStaticLenBinding(n.Name, n.Value, bindingType)

@@ -1675,3 +1675,37 @@ def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) 
 		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
 	}
 }
+
+// ── if/ternary range-merge ────────────────────────────────────────────────────
+
+// Completeness: both branches of a ternary produce values in [0,100], so
+// r = (a if cond else b) must carry that range and prove `r is Bounded[0,100]`
+// statically without a runtime check.
+func TestTernaryRangeBothBranchesInBound(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64 is Bounded[0, 100], b: i64 is Bounded[0, 100], cond: bool) -> i64 is Bounded[0, 100]:
+    r: i64 = a if cond else b
+    return r
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ternary_range_both.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("both branches in [0,100] must prove the return bound statically, got errors: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("both branches in [0,100] must NOT emit a runtime check, got %d check(s)", len(result.RefinementChecks))
+	}
+}
+
+// Soundness: ONE branch is out of range ([0,200] vs [0,100]) so the union is
+// [0,200] which does NOT entail [0,100]. The bound MUST NOT prove statically.
+func TestTernaryRangeOneBranchOutOfBoundDoesNotProve(t *testing.T) {
+	src := boundedLaw + `
+def f(a: i64 is Bounded[0, 100], b: i64 is Bounded[0, 200], cond: bool) -> i64 is Bounded[0, 100]:
+    r: i64 = a if cond else b
+    return r
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "ternary_range_one_out.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("one branch out of [0,100] must NOT prove the return bound; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
