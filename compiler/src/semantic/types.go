@@ -204,12 +204,19 @@ type ArrayType struct {
 	ConstSize    int64
 	ConstParam   string
 	SurfaceName  string
+	// ElemTypeExpr is the source-level TypeExpr for the element type, preserved to
+	// recover element refinement predicates at index-read sites (refinements are
+	// representation-erased on resolve, so Elem cannot carry them). Nil when the
+	// array is synthesised internally or no element-type source is available.
+	ElemTypeExpr ast.TypeExpr
 }
 
 type DArrayType struct {
 	Elem        Type
 	Shape       Shape
 	SurfaceName string
+	// ElemTypeExpr is the source-level TypeExpr for the element type. See ArrayType.ElemTypeExpr.
+	ElemTypeExpr ast.TypeExpr
 	// Region is the (string-named) region this darray was allocated in, inferred
 	// from the enclosing `in <region>:` scope at creation. Phase 1 of
 	// region-parameterized containers: carried on the type but NOT yet consulted

@@ -270,6 +270,38 @@ func (a *Analyzer) fieldReadRefinementScheme(value ast.Expr) (ValueRefinementSch
 	return ValueRefinementScheme{}, false
 }
 
+// indexElemReadRefinementScheme reports whether `value` is a darray or array INDEX read whose
+// container element type carries a refinement — e.g. `xs[i]` where xs is `darray[u32 is InRange[0,127]]`.
+// Sound: element refinements are enforced at every push/store site (like struct-field refinements at
+// construction), so reading xs[i] inherits the InRange guarantee. Representation-erased on resolve,
+// so ElemTypeExpr on DArrayType/ArrayType carries the source-level predicate.
+func (a *Analyzer) indexElemReadRefinementScheme(value ast.Expr) (ValueRefinementScheme, bool) {
+	idx, ok := stripOptimizationParens(value).(*ast.IndexExpr)
+	if !ok || idx == nil || idx.Object == nil {
+		return ValueRefinementScheme{}, false
+	}
+	objType := stripRefForBounds(a.exprTypes[idx.Object])
+	var elemTypeExpr ast.TypeExpr
+	switch at := objType.(type) {
+	case *DArrayType:
+		if at == nil {
+			return ValueRefinementScheme{}, false
+		}
+		elemTypeExpr = at.ElemTypeExpr
+	case *ArrayType:
+		if at == nil {
+			return ValueRefinementScheme{}, false
+		}
+		elemTypeExpr = at.ElemTypeExpr
+	default:
+		return ValueRefinementScheme{}, false
+	}
+	if elemTypeExpr == nil {
+		return ValueRefinementScheme{}, false
+	}
+	return a.valueRefinementSchemeFromTypeExpr(elemTypeExpr)
+}
+
 func (a *Analyzer) declaredBindingRefinementScheme(value ast.Expr) (ValueRefinementScheme, bool) {
 	ident, ok := stripOptimizationParens(value).(*ast.Ident)
 	if !ok || ident == nil || a.currentScope == nil {
@@ -299,6 +331,9 @@ func (a *Analyzer) exprRefinementScheme(value ast.Expr) (ValueRefinementScheme, 
 		return s, true
 	}
 	if s, ok := a.fieldReadRefinementScheme(value); ok {
+		return s, true
+	}
+	if s, ok := a.indexElemReadRefinementScheme(value); ok {
 		return s, true
 	}
 	return a.declaredBindingRefinementScheme(value)

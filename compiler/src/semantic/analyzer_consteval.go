@@ -14,7 +14,7 @@ const StaticEvalCallDepthLimit = 64
 const staticEvalLoopIterationLimit = 100000
 
 func (a *Analyzer) resolveArrayType(expr *ast.ArrayType) Type {
-	arr := &ArrayType{Elem: a.resolveType(expr.Elem), Size: a.exprSummary(expr.Size)}
+	arr := &ArrayType{Elem: a.resolveType(expr.Elem), ElemTypeExpr: expr.Elem, Size: a.exprSummary(expr.Size)}
 	value, ok := a.evalConstExpr(expr.Size)
 	if !ok || value.Kind != ConstInt {
 		if ident, identOK := expr.Size.(*ast.Ident); identOK {
