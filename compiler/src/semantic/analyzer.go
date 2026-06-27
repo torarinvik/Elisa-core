@@ -441,6 +441,8 @@ type Analyzer struct {
 	// cross-function key collision means a byte-identical proof).
 	smtQueryCache                    map[string]smtQueryResult
 	proofReport                      []ProofFact
+	currentProofCategory             ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
+	indexBoundsRuntimeCount          int                     // elision telemetry: index expressions that are NOT statically proven in-bounds
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
@@ -960,6 +962,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ReturnRefinementChecks:  a.returnRefinementChecks,
 		IndexBoundsProven:       a.indexBoundsProven,
 		ProofReport:             a.proofReport,
+		ElisionSummary:          ComputeElisionSummary(a.proofReport, len(a.indexBoundsProven), a.indexBoundsRuntimeCount),
 		RequiresReport:          a.requiresReportEntries(),
 		Defer:                   a.deferInfo,
 		Fold:                    a.foldInfo,

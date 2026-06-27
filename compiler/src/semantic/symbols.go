@@ -110,6 +110,11 @@ type Result struct {
 	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —
 	// one entry per refinement obligation).
 	ProofReport       []ProofFact
+	// ElisionSummary is the per-category proof-elision telemetry (docs/85 §elision-summary):
+	// counts of statically-elided vs runtime-fallback checks, broken down by the four obligation
+	// categories. Populated alongside ProofReport; printed under --explain as a one-liner summary
+	// so the dogfooding payoff is immediately scannable ("N bounds checks elided").
+	ElisionSummary    ProofElisionSummary
 	// RequiresReport is the docs c3 -requires-report aggregation: one entry per (requires-bearing
 	// function, clause) with the provable/unprovable call-site split. Empty unless -requires-report
 	// is on. The CLI prints it.

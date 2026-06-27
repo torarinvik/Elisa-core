@@ -317,6 +317,8 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 				continue
 			}
 			name := "argument " + itoaParam(i+1)
+			// Tag all proof records in this obligation as call-arg-refinement for elision telemetry.
+			a.currentProofCategory = ProofCatCallArgRefinement
 			// Cross-function boundary: a dependent fact's names belong to the callee's scope, so they
 			// must not discharge a caller-site argument obligation (allowDependentFacts=false).
 			if a.tryDischargeRefinementStaticallyOpt(args[i], name, pred, lawDecl, call.Pos(), false) {
@@ -325,11 +327,12 @@ func (a *Analyzer) dischargeCallArgRefinements(call *ast.CallExpr, args []ast.Ex
 			// Contract composition: the argument carries a refinement scheme whose predicates entail
 			// this parameter's. This is what makes `map_fixed(page_align_down(raw), ..)` prove when
 			// `page_align_down -> u64 is Aligned[..]`.
+			a.currentProofCategory = ProofCatCallArgRefinement
 			if a.exprRefinementSchemeEntails(args[i], pred) {
-				a.recordProof(call.Pos(), name, pred.Name, ProofProvenContract)
+				a.recordProofCat(call.Pos(), name, pred.Name, ProofProvenContract, ProofCatCallArgRefinement)
 				continue
 			}
-			a.recordProof(call.Pos(), name, pred.Name, ProofRuntime)
+			a.recordProofCat(call.Pos(), name, pred.Name, ProofRuntime, ProofCatCallArgRefinement)
 			a.proofLint(call.Pos(), "refinement %q on %s of %q could not be proven statically; pass a provable value or accept the runtime check%s", pred.Name, name, scheme.DeclName, a.counterexampleSuffix(a.lastSMTCounterexample))
 			// Fall back to a runtime debug-check at the call site — but only for a side-effect-free
 			// argument, since the predicate re-evaluates it. An impure arg keeps the warning only (a
@@ -523,6 +526,8 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		if !ok {
 			continue
 		}
+		// Tag all proof records in this obligation as return-refinement for elision telemetry.
+		a.currentProofCategory = ProofCatReturnRefinement
 		if a.tryDischargeRefinementStatically(n.Value, "the returned value", pred, lawDecl, n.Pos()) {
 			continue
 		}
@@ -530,19 +535,22 @@ func (a *Analyzer) dischargeReturnRefinements(n *ast.ReturnStmt) {
 		// that entails this one is satisfied by the callee's contract (its return value is checked/proven
 		// against that refinement on every exit). This is the common forward/wrap pattern — without it a
 		// function that returns another refinement-typed function's result paid a redundant runtime check.
+		a.currentProofCategory = ProofCatReturnRefinement
 		if a.exprRefinementSchemeEntails(n.Value, pred) {
-			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofProvenContract)
+			a.recordProofCat(n.Pos(), "the returned value", pred.Name, ProofProvenContract, ProofCatReturnRefinement)
 			continue
 		}
 		// Refutation gate: the linear prover may refute a return-refinement obligation that the
 		// const-eval tier missed (e.g. an affine expression whose bounded range excludes the law).
 		// Mirror the ensure/where/requires refutation gate: a PROVABLY false postcondition is a hard
 		// error independent of -strict; merely-unprovable stays a lint.
+		a.currentProofCategory = ProofCatReturnRefinement
 		if a.returnRefinementPredRefuted(n.Value, lawDecl, pred) {
-			a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRefuted)
+			a.recordProofCat(n.Pos(), "the returned value", pred.Name, ProofRefuted, ProofCatReturnRefinement)
 			a.errorf(n.Pos(), "return refinement %q is provably violated: the returned value does not satisfy it", pred.Name)
 			continue
 		}
+		a.currentProofCategory = ProofCatReturnRefinement
 		a.recordProof(n.Pos(), "the returned value", pred.Name, ProofRuntime)
 		a.proofLint(n.Pos(), "refinement %q on the return of %q could not be proven statically; return a provable value or accept the runtime check%s", pred.Name, a.currentFuncDecl.Name, a.counterexampleSuffix(a.lastSMTCounterexample))
 		if isBuiltinModularLawName(pred.Name) || !a.isSideEffectFreeRefinementArg(n.Value) {
@@ -596,6 +604,9 @@ func (a *Analyzer) dischargeEnsuresRefinements(n *ast.ReturnStmt) {
 	if a == nil || n == nil || a.currentFuncType == nil || a.currentFuncDecl == nil {
 		return
 	}
+	// All proof records in this function are contract-ensures obligations (elision telemetry).
+	defer func(prev ProofObligationCategory) { a.currentProofCategory = prev }(a.currentProofCategory)
+	a.currentProofCategory = ProofCatContractEnsures
 	for _, re := range a.currentFuncType.RefinementEnsures {
 		if re.ParamIndex < 0 || re.ParamIndex >= len(a.currentFuncDecl.Params) {
 			continue
@@ -639,6 +650,9 @@ func (a *Analyzer) dischargeEnsureBooleansAtVoidExit(pos lexer.Pos) {
 	if a == nil || a.currentFuncDecl == nil {
 		return
 	}
+	// All proof records in this function are contract-ensures obligations (elision telemetry).
+	defer func(prev ProofObligationCategory) { a.currentProofCategory = prev }(a.currentProofCategory)
+	a.currentProofCategory = ProofCatContractEnsures
 	for i, clause := range a.currentFuncDecl.EnsureValues {
 		if clause == nil || exprReferencesResult(clause) {
 			continue
@@ -903,6 +917,9 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 	if len(a.currentFuncDecl.EnsureValues) == 0 {
 		return
 	}
+	// All proof records in this function are contract-ensures obligations (elision telemetry).
+	defer func(prev ProofObligationCategory) { a.currentProofCategory = prev }(a.currentProofCategory)
+	a.currentProofCategory = ProofCatContractEnsures
 	subst := map[string]ast.Expr{"result": n.Value}
 	for i, clause := range a.currentFuncDecl.EnsureValues {
 		if clause == nil {

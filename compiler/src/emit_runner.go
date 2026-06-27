@@ -237,6 +237,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 	}
 	if options.explainProofs {
 		printProofReport(stderr, result.ProofReport, options.explainHole)
+		printElisionSummary(stderr, result.ElisionSummary)
 		if line := result.SMTProfile.String(); line != "" {
 			fmt.Fprintf(stderr, "  %s\n", line)
 		}
@@ -607,6 +608,30 @@ func printProofReport(stderr io.Writer, report []semantic.ProofFact, explainHole
 		}
 	}
 	fmt.Fprintf(stderr, "  %d proven statically, %d assumed, %d runtime-checked, %d measured, %d refuted\n", proven, assumed, runtime, measured, refuted)
+}
+
+// printElisionSummary renders the per-category proof-elision telemetry under --explain (docs/85
+// §elision-summary). One line per category shows how many checks were ELIDED by static proof vs
+// how many fall back to a runtime guard, making the dogfooding payoff immediately scannable.
+func printElisionSummary(stderr io.Writer, s semantic.ProofElisionSummary) {
+	fmt.Fprintln(stderr, "── proof-elision summary (--explain) ──")
+	printElisionLine(stderr, "return refinements ", s.ReturnRefinements)
+	printElisionLine(stderr, "call-arg refinements", s.CallArgRefinements)
+	printElisionLine(stderr, "array bounds        ", s.ArrayBounds)
+	printElisionLine(stderr, "contract ensures    ", s.ContractEnsures)
+}
+
+func printElisionLine(stderr io.Writer, label string, c semantic.ProofElisionCounts) {
+	total := c.Elided + c.Runtime
+	if total == 0 {
+		fmt.Fprintf(stderr, "  %s  —  (none)\n", label)
+		return
+	}
+	pct := 0
+	if total > 0 {
+		pct = (c.Elided * 100) / total
+	}
+	fmt.Fprintf(stderr, "  %s  %d/%d elided (%d%% static)\n", label, c.Elided, total, pct)
 }
 
 // printRequiresReport renders the -requires-report blast-radius report (docs c3): one entry per
