@@ -40,7 +40,8 @@ test-full:
 # build: build + install the elisac binary.
 .PHONY: build
 build:
-	go build -o $${HOME}/.local/bin/elisac ./src
+	mkdir -p $${HOME}/.elisac
+	go build -o $${HOME}/.elisac/elisac ./src
 
 .PHONY: help
 help:
