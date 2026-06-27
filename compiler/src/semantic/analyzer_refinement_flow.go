@@ -1750,6 +1750,33 @@ func (a *Analyzer) tryDeriveShiftOrScaleRange(value ast.Expr) (numRange, bool) {
 			return numRange{}, false
 		}
 		return scaleRangePositive(r, k)
+	case lexer.TOKEN_PERCENT:
+		// x % m  (unsigned dividend, positive constant modulus): range is [0, m-1].
+		//
+		// Soundness conditions (all must hold; any failure → decline, not unsound):
+		//  1. Modulus `m` must be a compile-time positive constant (variable modulus: decline).
+		//  2. The dividend must be unsigned (non-negative by declared type); signed remainder
+		//     can be negative in C-style truncating semantics, so [0, m-1] would be unsound.
+		//  3. m must be > 0 (zero modulus is UB; decline to avoid div-by-zero assumptions).
+		//
+		// Result: hi = m-1 (not m-2). `x % m` can equal m-1 when x ≡ m-1 (mod m), so
+		// this proves `<= m-1` but NOT `< m-1` — the required soundness-negative distinction.
+		m, mok := a.constIntValue(bin.Right)
+		if !mok || m <= 0 {
+			return numRange{}, false // non-const or non-positive modulus: decline (sound)
+		}
+		// Dividend must have a non-negative declared type (unsigned). We check the left
+		// operand's type via the immutable-ident lookup (covers the common `x % m` form).
+		// Complex sub-expressions that aren't bare identifiers are declined conservatively.
+		name, xOk := a.immutableIntIdentNameFromScope(bin.Left)
+		if !xOk {
+			return numRange{}, false // non-identifier dividend: decline conservatively
+		}
+		sym, found := a.currentScope.Lookup(name)
+		if !found || sym == nil || !smtTypeNonNegative(sym.Type) {
+			return numRange{}, false // signed or unknown type: decline (sound)
+		}
+		return numRange{loKnown: true, lo: 0, hiKnown: true, hi: m - 1}, true
 	default:
 		return numRange{}, false
 	}

@@ -1675,3 +1675,89 @@ def slot_index(rack: usize is Bounded[0, 31], voice: usize is Bounded[0, 4095]) 
 		t.Fatalf("the multiplicative return bound should be PROVEN from the input bounds (no runtime check), got %d", len(result.RefinementChecks))
 	}
 }
+
+// --- modulo range derivation (docs task: x % m → [0, m-1]) ------------------------------------
+
+// COMPLETENESS-POSITIVE: `x % m` for an unsigned x and positive constant m proves `is InRange[0, m-1]`
+// via the flow/linear tier WITHOUT needing SMT. The return refinement must discharge with no runtime check.
+func TestModuloRangeProvenForUnsignedDividend(t *testing.T) {
+	src := `
+law InRange(self: u64, lo: u64, hi: u64) = self >= lo and self <= hi
+
+def wrap(x: u64) -> u64 is InRange[0, 7]:
+    return x % 8
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_range.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("x %% 8 (unsigned) should prove is InRange[0,7] via flow tier, got: %v", result.Errors())
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("modulo range should be proven statically (no runtime check), got %d checks", len(result.RefinementChecks))
+	}
+}
+
+// COMPLETENESS-POSITIVE (array index elision): `xs[x % N]` for unsigned x and array[T,N] must
+// record the index as proven-in-bounds so codegen can elide the runtime guard.
+func TestModuloIndexBoundsElided(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptions(t, "modulo_index_elide.elisa", `
+law InRange(self: u64, lo: u64, hi: u64) = self >= lo and self <= hi
+
+def lookup(x: u64, table: array[u64, 8]&) -> u64:
+    return table[x % 8]
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("table[x %% 8] into array[u64,8] should have no errors, got: %v", errs)
+	}
+	proven := 0
+	for _, ok := range result.IndexBoundsProven {
+		if ok {
+			proven++
+		}
+	}
+	if proven == 0 {
+		t.Fatalf("x %% 8 into array[_,8] must record the index in IndexBoundsProven (bounds elided)")
+	}
+}
+
+// SOUNDNESS-NEGATIVE #1: `x % m` must NOT prove `< m-1` (only `<= m-1`).
+// `x % 8 is InRange[0, 6]` requires hi < 7 but the proven hi is 7 — must stay unproven.
+func TestModuloRangeDoesNotOverproveTight(t *testing.T) {
+	src := `
+law InRange(self: u64, lo: u64, hi: u64) = self >= lo and self <= hi
+
+def wrap_tight(x: u64) -> u64 is InRange[0, 6]:
+    return x % 8
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_tight.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("x %% 8 must NOT prove InRange[0,6] (hi=6 < m-1=7); must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// SOUNDNESS-NEGATIVE #2: a SIGNED dividend must not derive [0, m-1] (signed remainder can be negative).
+func TestModuloRangeSignedDividendDeclines(t *testing.T) {
+	src := `
+law InRange(self: i64, lo: i64, hi: i64) = self >= lo and self <= hi
+
+def wrap_signed(x: i64) -> i64 is InRange[0, 7]:
+    return x % 8
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_signed.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("signed x %% 8 must NOT prove InRange[0,7] (signed remainder can be negative); must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
+
+// SOUNDNESS-NEGATIVE #3: a VARIABLE modulus must not derive a range (non-const divisor).
+func TestModuloRangeVariableModulusDeclines(t *testing.T) {
+	src := `
+law InRange(self: u64, lo: u64, hi: u64) = self >= lo and self <= hi
+
+def wrap_varmod(x: u64, m: u64) -> u64 is InRange[0, 7]:
+    return x % m
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "modulo_varmod.elisa", src, AnalyzeOptions{})
+	if !contains(allDiagnostics(result), "could not be proven statically") {
+		t.Fatalf("x %% m (variable m) must NOT prove InRange[0,7]; must stay unproven, got:\n%s", allDiagnostics(result))
+	}
+}
