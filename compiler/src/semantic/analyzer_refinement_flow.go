@@ -566,6 +566,99 @@ func (a *Analyzer) recordConstAssignmentRangeFact(target ast.Expr, value ast.Exp
 	a.currentScope.rangeFacts[name] = numRange{loKnown: true, lo: c, hiKnown: true, hi: c}
 }
 
+// recordCastRangeFact propagates integer range facts from the source of a `.cast[T]` assignment
+// `target = src.cast[T]` to `target` when the cast is provably value-preserving.
+//
+// `.cast[T]` is a bitwise reinterpretation (not a value conversion). For the range of `src` to
+// be valid for `target` after the cast, the bit pattern must encode the same numeric value in T.
+// This holds in two cases:
+//
+//   (a) Identity cast (src type == T): the bits are unchanged, so the range carries exactly.
+//   (b) Sign-flip cast (same bit width, different sign, e.g. i64↔u64): value-preserving only
+//       when the proven range is fully bounded ([lo, hi] both known) and BOTH endpoints fit T.
+//       An open bound over a sign-flip means values in the out-of-range half could exist and
+//       would reinterpret to negative/positive values, so we decline.
+//
+// Any other integer cast is rejected by the compiler as a value conversion (must use constructors),
+// so this function only needs to handle (a) and (b).
+func (a *Analyzer) recordCastRangeFact(target ast.Expr, value ast.Expr) {
+	if a == nil || a.currentScope == nil {
+		return
+	}
+	castExpr, ok := unwrapParen(value).(*ast.CastExpr)
+	if !ok || castExpr == nil {
+		return
+	}
+	targetName, ok := rootIdentName(target)
+	if !ok || targetName == "" {
+		return
+	}
+	sym, ok := a.currentScope.Lookup(targetName)
+	if !ok || sym == nil || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
+		return
+	}
+	// Resolve the source operand to an identifier we can look up.
+	srcIdent, ok := unwrapParen(castExpr.Operand).(*ast.Ident)
+	if !ok || srcIdent == nil {
+		return
+	}
+	// Look up the source variable's range fact (walks the full scope chain).
+	srcRange, found := a.lookupRangeFact(srcIdent.Name)
+	if !found || (!srcRange.loKnown && !srcRange.hiKnown) {
+		return
+	}
+	// Resolve the destination type of the cast.
+	dstType := a.resolveType(castExpr.Target)
+	if dstType == nil {
+		return
+	}
+	dstSigned, dstWidth, dstOk := BitIntInfo(dstType)
+	if !dstOk {
+		return
+	}
+	// Resolve the source variable's declared type to check cast kind.
+	srcSym, srcFound := a.currentScope.Lookup(srcIdent.Name)
+	if !srcFound || srcSym == nil {
+		return
+	}
+	srcSigned, srcWidth, srcOk := BitIntInfo(srcSym.Type)
+	if !srcOk {
+		return
+	}
+	var r numRange
+	if srcSigned == dstSigned && srcWidth == dstWidth {
+		// Case (a): identity cast — bit pattern identical, range carries exactly.
+		r = srcRange
+	} else if srcWidth == dstWidth {
+		// Case (b): sign-flip, same width (e.g. i64↔u64). Value-preserving only when the
+		// proven range is fully bounded AND both endpoints fit T (no out-of-range half).
+		if !srcRange.loKnown || !srcRange.hiKnown {
+			return // open bound over a sign-flip: cannot guarantee fitness
+		}
+		if !IntegerTypeFitsValue(dstType, srcRange.lo) || !IntegerTypeFitsValue(dstType, srcRange.hi) {
+			return // at least one endpoint wraps — range would be unsound
+		}
+		r = srcRange
+	} else {
+		// Different width: a narrowing numeric cast would be a value conversion (rejected by the
+		// compiler), so this branch is only reachable for exotic non-integer or special casts that
+		// are not numeric — decline conservatively.
+		return
+	}
+	// Tighten by the target variable's declared type range (adds non-negativity etc.).
+	if tr, ok2 := declaredTypeRange(sym.Type); ok2 {
+		r = r.intersect(tr)
+	}
+	if !r.loKnown && !r.hiKnown {
+		return
+	}
+	_ = dstSigned // both dstSigned and dstWidth were used in the case analysis above
+	if a.currentScope.rangeFacts == nil {
+		a.currentScope.rangeFacts = map[string]numRange{}
+	}
+	a.currentScope.rangeFacts[targetName] = r
+}
+
 func declaredTypeRange(t Type) (numRange, bool) {
 	signed, width, ok := BitIntInfo(t)
 	if !ok || width <= 0 || width >= 63 {
