@@ -340,6 +340,129 @@ func (a *Analyzer) exprRefinementScheme(value ast.Expr) (ValueRefinementScheme, 
 }
 
 func (a *Analyzer) exprRefinementSchemeEntails(value ast.Expr, pred ast.RefinementPredExpr) bool {
-	s, ok := a.exprRefinementScheme(value)
-	return ok && a.valueRefinementSchemeEntails(s, pred)
+	if s, ok := a.exprRefinementScheme(value); ok && a.valueRefinementSchemeEntails(s, pred) {
+		return true
+	}
+	// Struct-invariant composition: if `value` is a field read `s.x` and the struct type has
+	// invariants that constrain `x` (e.g. `invariant self.x >= 0`), the invariant is an established
+	// postcondition of every construction and every mutating method — callers may assume it. Extract
+	// a numeric range from the field-specific invariant clauses and check if it entails `pred`.
+	// Sound: struct invariants are enforced at construction (statically or by a debug runtime check)
+	// and seeded at every method entry, so assuming them here is no stronger than the existing
+	// method-entry assumption.
+	return a.structInvariantEntailsFieldRefinement(value, pred)
+}
+
+// structInvariantEntailsFieldRefinement reports whether `value` is a field read `s.x` whose
+// enclosing struct type has an invariant that constrains `x` in a way that entails `pred`.
+// For example, a struct with `invariant self.x >= 0` lets `s.x is Nat` (where `Nat` reduces to
+// `self >= 0`) discharge statically at any call site — without a runtime re-check — because the
+// invariant is verified at every construction and after every field mutation.
+//
+// Sound: only the fragment `self.<field> OP <const>` (and conjunctions thereof) is extracted;
+// anything outside that fragment is ignored, so the entailment can only succeed when the invariant
+// genuinely implies the predicate. A struct WITHOUT a relevant invariant returns false, so this
+// path never fabricates a guarantee.
+func (a *Analyzer) structInvariantEntailsFieldRefinement(value ast.Expr, pred ast.RefinementPredExpr) bool {
+	fe, ok := stripOptimizationParens(value).(*ast.FieldExpr)
+	if !ok || fe == nil {
+		return false
+	}
+	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	if !ok || st == nil || len(st.Invariants) == 0 {
+		return false
+	}
+	// Build a range from all invariant clauses that constrain this specific field.
+	fieldRange := numRange{}
+	any := false
+	for _, inv := range st.Invariants {
+		if inv == nil {
+			continue
+		}
+		r, ok := a.rangeFromStructInvariantForField(inv, fe.Field)
+		if !ok {
+			continue
+		}
+		fieldRange = fieldRange.intersect(r)
+		any = true
+	}
+	if !any {
+		return false
+	}
+	// Check that the extracted range entails the predicate.
+	lawDecl, _, ok := a.lookupLaw(pred.Name)
+	if !ok {
+		return false
+	}
+	constraints, ok := a.refinementPredicateConstraints(lawDecl, pred.Args)
+	if !ok || len(constraints) == 0 {
+		return false
+	}
+	for _, k := range constraints {
+		if !rangeEntailsConstraint(fieldRange, k) {
+			return false
+		}
+	}
+	return true
+}
+
+// rangeFromStructInvariantForField extracts a numeric interval from an invariant expression for a
+// specific struct field. It recognises the simple fragments used by the range prover:
+//
+//   - `self.<field> OP <const>` — a direct constraint on the field
+//   - `<const> OP self.<field>` — the symmetric form (operands swapped)
+//   - `<left> and <right>` — conjunction: both halves are collected
+//
+// Everything else returns ok=false (fails closed — the caller just skips that clause).
+func (a *Analyzer) rangeFromStructInvariantForField(expr ast.Expr, fieldName string) (numRange, bool) {
+	var constraints []lawConstraint
+	a.collectInvariantFieldConstraints(expr, fieldName, &constraints)
+	if len(constraints) == 0 {
+		return numRange{}, false
+	}
+	r, ok := rangeFromLawConstraints(constraints)
+	return r, ok
+}
+
+// collectInvariantFieldConstraints walks an invariant expression collecting `self.<fieldName> OP
+// const` comparisons into `out`. Conjunctions are processed recursively; clauses that do not
+// involve the target field are silently skipped (not a failure).
+func (a *Analyzer) collectInvariantFieldConstraints(expr ast.Expr, fieldName string, out *[]lawConstraint) {
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		a.collectInvariantFieldConstraints(n.Inner, fieldName, out)
+	case *ast.BinaryExpr:
+		if n.Op == lexer.TOKEN_AND {
+			a.collectInvariantFieldConstraints(n.Left, fieldName, out)
+			a.collectInvariantFieldConstraints(n.Right, fieldName, out)
+			return
+		}
+		// Comparison: normalise to `field OP operand`.
+		var operand ast.Expr
+		var op lexer.TokenKind
+		switch {
+		case isSelfFieldExpr(n.Left, fieldName):
+			operand, op = n.Right, n.Op
+		case isSelfFieldExpr(n.Right, fieldName):
+			operand, op = n.Left, flipComparison(n.Op)
+		default:
+			return // Clause does not involve this field — skip.
+		}
+		c, ok := a.operandConst(operand, nil)
+		if !ok {
+			return
+		}
+		*out = append(*out, lawConstraint{op: op, c: c})
+	}
+}
+
+// isSelfFieldExpr reports whether expr is `self.<fieldName>` (an implicit-receiver field read
+// from inside a struct invariant). The root of a struct invariant is always `self`.
+func isSelfFieldExpr(expr ast.Expr, fieldName string) bool {
+	fe, ok := expr.(*ast.FieldExpr)
+	if !ok || fe == nil || fe.Field != fieldName {
+		return false
+	}
+	root, ok := fe.Object.(*ast.Ident)
+	return ok && root != nil && root.Name == "self"
 }
