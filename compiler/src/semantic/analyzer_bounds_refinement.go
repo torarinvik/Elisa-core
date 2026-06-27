@@ -166,6 +166,16 @@ func (a *Analyzer) indexExprRefinementBounds(idx ast.Expr) (lo int64, hi int64, 
 			if c, cok := a.constIntValue(n.Left); cok && c > 0 {
 				return a.scaleInterval(n.Right, c)
 			}
+		case lexer.TOKEN_PERCENT:
+			// x % m  (unsigned dividend, positive constant modulus): [0, m-1].
+			// Mirrors tryDeriveShiftOrScaleRange: only sound for unsigned x and const m > 0.
+			if m, mok := a.constIntValue(n.Right); mok && m > 0 {
+				if name, xOk := a.immutableIntIdentNameFromScope(n.Left); xOk {
+					if sym, found := a.currentScope.Lookup(name); found && sym != nil && smtTypeNonNegative(sym.Type) {
+						return 0, m - 1, true
+					}
+				}
+			}
 		}
 		return 0, 0, false
 	}
