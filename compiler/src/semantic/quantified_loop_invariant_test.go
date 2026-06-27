@@ -42,6 +42,65 @@ def fill_seven(arr: darray[i64], n: usize):
 	}
 }
 
+// The headline: a quantified ENSURE postcondition `ensure forall k: (0 <= k and k < n) implies
+// result[k] == 0` discharges from the loop's proven invariant at the return site. The loop's proven
+// inductive invariant `forall k: 0<=k<i implies arr[k]==0` is seeded as a post-loop assert fact via
+// seedLoopExitFacts, together with the exit condition `not (i < n)` (i.e. i >= n). At `return arr`
+// the ensure discharges: `result` substitutes to `arr`, so the goal is `forall k: 0<=k<n => arr[k]==0`,
+// which follows from the seeded fact `forall k: 0<=k<i => arr[k]==0` plus `i >= n` (n <= i).
+func TestQuantifiedEnsureOverResultArrayDischargesFromLoopInvariant(t *testing.T) {
+	src := `
+def fill_zero(arr: darray[i64], n: usize) -> darray[i64]:
+    ensure forall k: (0 <= k and k < n) implies result[k] == 0
+    i: mutable usize = 0
+    while i < n:
+        invariant forall k: (0 <= k and k < i) implies arr[k] == 0
+        arr[i] <- 0
+        i <- i + 1
+    return arr
+`
+	result := analyzeLoopInvariantWithSMT(t, "quant_ensure_result.elisa", src, true)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected no errors: quantified ensure should discharge from loop's proven invariant; got:\n%s\nproof report: %+v", errs, result.ProofReport)
+	}
+	// The ensure must be proven (not left as a runtime check) by the SMT tier.
+	provenCount := 0
+	for _, f := range result.ProofReport {
+		if f.Subject == "ensure fill_zero" && (f.Outcome == ProofProvenSMT || f.Outcome == ProofProvenLinear) {
+			provenCount++
+		}
+	}
+	if provenCount == 0 {
+		t.Fatalf("expected the quantified ensure to be proven statically (SMT), not left as runtime check; proof report: %+v", result.ProofReport)
+	}
+}
+
+// Soundness: a FALSE quantified ensure (claims result[k] == 1 but body fills with 0) must NOT
+// discharge. Under -strict it must be a hard error (refuted or unprovable).
+func TestQuantifiedEnsureOverResultArrayFalseRejected(t *testing.T) {
+	src := `
+def fill_zero_bad(arr: darray[i64], n: usize) -> darray[i64]:
+    ensure forall k: (0 <= k and k < n) implies result[k] == 1
+    i: mutable usize = 0
+    while i < n:
+        invariant forall k: (0 <= k and k < i) implies arr[k] == 0
+        arr[i] <- 0
+        i <- i + 1
+    return arr
+`
+	result := analyzeLoopInvariantWithSMT(t, "quant_ensure_result_false.elisa", src, true)
+	// Under -strict the unprovable/refuted ensure must be an error.
+	if len(result.Errors()) == 0 {
+		t.Fatalf("expected -strict to reject a false quantified ensure (body fills 0, ensure claims 1); proof report: %+v", result.ProofReport)
+	}
+	// The ensure must NOT be proven.
+	for _, f := range result.ProofReport {
+		if f.Subject == "ensure fill_zero_bad" && (f.Outcome == ProofProvenSMT || f.Outcome == ProofProvenLinear) {
+			t.Fatalf("false quantified ensure must not be proven; proof report: %+v", result.ProofReport)
+		}
+	}
+}
+
 // Soundness: a FALSE quantified invariant over a fill must NOT be proven. The body writes 0 but the
 // invariant claims every filled cell is 1 — z3 finds a counterexample (the just-written cell is 0),
 // so preservation declines to the runtime check.
