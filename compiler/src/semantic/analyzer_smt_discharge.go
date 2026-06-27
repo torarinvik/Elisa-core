@@ -2406,6 +2406,14 @@ func (tr *smtTranslator) bitwiseTerm(n *ast.BinaryExpr, env map[string]string) (
 				return tr.maskBoundAux(c), true
 			}
 		}
+		// Operand-independent shift bound (see shiftRightBoundAux): `X >> k` (unsigned, constant k)
+		// ∈ [0, 2^(bits-k)-1] regardless of X — so a goal like `unknownExpr >> 4 < 2^(bits-4)` proves
+		// on the pure Int side even when X is outside the bitvector fragment.
+		if n.Op == lexer.TOKEN_RSHIFT && !signed {
+			if c, isC := tr.a.constIntValue(n.Right); isC && c >= 0 && c < int64(bits) {
+				return tr.shiftRightBoundAux(bits, int(c)), true
+			}
+		}
 		return "", false
 	}
 	lbv := "((_ int2bv " + width + ") " + l + ")"
@@ -3399,6 +3407,24 @@ func (tr *smtTranslator) maskBoundAux(c int64) string {
 	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
 	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
 	tr.auxDecls = append(tr.auxDecls, "(assert (<= "+v+" "+smtInt(c)+"))\n")
+	return v
+}
+
+// shiftRightBoundAux models `X >> k` for an unsigned W-bit value X and a constant k when X's exact
+// bitvector term is unavailable. A logical right shift by k can only produce values in [0, 2^(W-k)-1]:
+// it discards the low k bits and shifts in zeros at the top, so the result fits in W-k bits. A fresh
+// integer bounded to [0, 2^(W-k)-1] is a sound OVER-approximation. Soundness: the prover concludes
+// only on `unsat` of the negated goal; widening to all of [0, 2^(W-k)-1] can only make unsat harder
+// (decline), never fabricate one. This lets goals like `unknownExpr >> 12 < 2^52` prove on the pure
+// Int side without bitvector theory, avoiding the BV timeout on relational goals.
+func (tr *smtTranslator) shiftRightBoundAux(bits, k int) string {
+	tr.auxSeq++
+	v := "aux_" + smtInt(int64(tr.auxSeq))
+	tr.auxVars = append(tr.auxVars, v)
+	hi := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), uint(bits-k)), big.NewInt(1)) // 2^(bits-k) - 1
+	tr.auxDecls = append(tr.auxDecls, "(declare-const "+v+" Int)\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (>= "+v+" 0))\n")
+	tr.auxDecls = append(tr.auxDecls, "(assert (<= "+v+" "+hi.String()+"))\n")
 	return v
 }
 
