@@ -530,6 +530,12 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			a.errorf(n.Pos(), "`.cast[%s]` is a value conversion, not a reinterpret; use a constructor `%s(x)` or `x.%s()`", dst, dst, dst)
 		} else if !a.validCast(src, dst) {
 			a.errorf(n.Pos(), "invalid cast from %s to %s", src, dst)
+		} else if n.Origin == ast.CastExprOriginExplicitCast && !IsInvalidType(src) && SameType(src, dst) {
+			// A reinterpret `.cast[T]` whose operand already HAS type T does nothing — the bits,
+			// mutability, region, and storage all match (SameType is exact, so a genuine
+			// mutability/region/lifetime-changing cast is not flagged here). Almost always left
+			// over after a refactor (e.g. the operand was narrowed or its type changed). Lint it.
+			a.warnf(n.Pos(), "redundant `.cast[%s]`: the operand already has type %s; remove the cast", dst, dst)
 		}
 		// A cast is the explicit way to truncate, so runtime narrowing stays silent. But a
 		// cast of a compile-time constant that cannot fit the (sub-64-bit) target type
