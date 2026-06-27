@@ -166,6 +166,7 @@ def min(a: usize, b: usize) -> usize:
     return a if a < b else b
 
 def clamp(x: usize, lo: usize, hi: usize) -> usize:
+    requires lo <= hi
     ensure result >= lo
     ensure result <= hi
     if x < lo:
