@@ -1508,6 +1508,33 @@ def caller() -> void:
 	}
 }
 
+func TestMutableRefinedOutParamSeedsReturnRefinement(t *testing.T) {
+	src := `
+law Bounded(self: u32, lo: u32, hi: u32) = self >= lo and self <= hi
+type Small = u32 is Bounded[0, 103]
+
+def TrySmall(value: u32, out: mutable Small&) -> bool:
+    if value <= 103:
+        out <- value
+        return true
+    return false
+
+def get(value: u32) -> Small:
+    out: mutable Small = 0
+    if TrySmall(value, &out):
+        return out
+    assert false
+    return 0
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "mutable_refined_out_param_return.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("mutable refined out-param should seed the returned local's range, got:\n%s", allDiagnostics(result))
+	}
+	if len(result.RefinementChecks) != 0 {
+		t.Fatalf("returning the refined out-param should be proven without runtime checks, got %d", len(result.RefinementChecks))
+	}
+}
+
 // A PLAIN (non-packed) enum written constant proves the law: plain enum variants without payloads
 // are now const-folded (their tag value), so the written-const channel reasons about them too.
 func TestEnsuresRefinementProvenByWrittenPlainEnum(t *testing.T) {

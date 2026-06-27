@@ -600,6 +600,17 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				}
 			}
 		}
+		// A mutable-ref parameter whose declared type is itself refined (`out: mutable Small&`)
+		// re-establishes that refined type for the caller's out argument after the call. This mirrors
+		// the explicit `ensures p is Law[...]` reseed above, but comes from the callee's parameter type:
+		// the body can only write values that satisfy that declared refined slot.
+		if i < len(appliedType.Params) {
+			if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
+				if fact, ok := appliedType.ParamRefinementRanges[i]; ok {
+					a.seedMutableRefParamRefinementRangeFact(loweredArgs[i], fact)
+				}
+			}
+		}
 	}
 	// Hand the deferred SMT-fact invalidation (analyzeCallExprWithExpected) the resolved callee frame
 	// and position-aligned arguments, so facts about places this call provably does not write survive.

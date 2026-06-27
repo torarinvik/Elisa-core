@@ -58,6 +58,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 	var permissions []string
 	var poststates []FuncPoststate
 	var refinementEnsures []RefinementEnsure
+	var paramRefinementRanges map[int]numRange
 	var specSignature *SpecSignature
 	defaultExprs := make([]ast.Expr, len(expandedExplicitParams))
 	hasDefaults := make([]bool, len(expandedExplicitParams))
@@ -77,6 +78,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 					if ret != nil {
 						retType = a.resolveType(ret)
 					}
+					paramRefinementRanges = a.paramRefinementRangeFacts(allParams)
 					poststates = a.resolveFuncPoststates(name, allParams, ptypes, retType, ensures)
 					refinementEnsures = a.resolveRefinementEnsures(name, allParams, ptypes, ensures)
 					specSignature = a.buildSpecSignature(name, allParams, ptypes, ret, retType, requires, ensureValues, refinementEnsures)
@@ -106,6 +108,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		TemperatureMode:           FuncTemperatureModeDefault,
 		Poststates:                poststates,
 		RefinementEnsures:         refinementEnsures,
+		ParamRefinementRanges:     paramRefinementRanges,
 		SpecSignature:             specSignature,
 		Params:                    ptypes,
 		ExplicitParamCount:        len(expandedExplicitParams),

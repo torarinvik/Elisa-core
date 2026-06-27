@@ -277,6 +277,7 @@ func specializeExportFuncType(a *Analyzer, base *FuncType, bindings map[string]T
 		SpecSignature:               cloneSpecSignature(specialized.SpecSignature),
 		Poststates:                  cloneFuncPoststates(specialized.Poststates),
 		RefinementEnsures:           append([]RefinementEnsure(nil), specialized.RefinementEnsures...),
+		ParamRefinementRanges:       cloneNumRangeMapByIndex(specialized.ParamRefinementRanges),
 		FrameWrites:                 cloneFrameWrites(specialized.FrameWrites),
 		FrameBounded:                specialized.FrameBounded,
 		Params:                      append([]Type(nil), specialized.Params...),

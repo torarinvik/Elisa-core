@@ -607,6 +607,7 @@ type FuncType struct {
 	SpecSignature               *SpecSignature
 	Poststates                  []FuncPoststate
 	RefinementEnsures           []RefinementEnsure
+	ParamRefinementRanges       map[int]numRange
 	// FrameWrites is the callee's EFFECTIVE frame (docs/87 87-3): every caller-visible place it may
 	// write, as a (param index, field suffix) pair — direct `changes` paths plus `fulfills`-expanded
 	// frame-law paths. FrameBounded reports whether the callee's writes are bounded at all (it has a

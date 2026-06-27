@@ -75,10 +75,71 @@ func (a *Analyzer) applyConditionRefinementsInternal(scope *Scope, expr ast.Expr
 	case *ast.CallExpr:
 		a.applyGuardCallConditionRefinements(scope, n, truthy)
 		a.applyConditionalCallConditionRefinements(scope, n, truthy, persistTracked)
+		a.applyMutableRefinedOutParamConditionRefinements(scope, n, truthy)
+	case *ast.StructLitExpr:
+		if call, ok := a.structLiteralAsGenericFunctionCall(n); ok {
+			a.applyMutableRefinedOutParamConditionRefinements(scope, call, truthy)
+		} else if call, ok := a.structLiteralAsPascalCaseFunctionCall(n); ok {
+			a.applyMutableRefinedOutParamConditionRefinements(scope, call, truthy)
+		}
 	case *ast.ParenExpr:
 		a.applyConditionRefinementsInternal(scope, n.Inner, truthy, persistTracked)
 	}
 }
+
+func (a *Analyzer) applyMutableRefinedOutParamConditionRefinements(scope *Scope, call *ast.CallExpr, truthy bool) {
+	if a == nil || scope == nil || call == nil || !truthy {
+		return
+	}
+	ft := a.directCallFuncType(call)
+	if ft == nil {
+		ft, _ = a.exprTypes[call.Func].(*FuncType)
+	}
+	if ft == nil || len(ft.ParamRefinementRanges) == 0 {
+		return
+	}
+	args, ok := a.resolveFunctionCallArgs(call, ft)
+	if !ok {
+		args = call.Args
+	}
+	limit := len(args)
+	if len(ft.Params) < limit {
+		limit = len(ft.Params)
+	}
+	for i := 0; i < limit; i++ {
+		rt, ok := ft.Params[i].(*RefType)
+		if !ok || rt == nil || !rt.Mutable {
+			continue
+		}
+		fact, ok := ft.ParamRefinementRanges[i]
+		if !ok {
+			continue
+		}
+		a.seedMutableRefParamRefinementRangeFactInScope(scope, args[i], fact)
+	}
+}
+
+func (a *Analyzer) directCallFuncType(call *ast.CallExpr) *FuncType {
+	if a == nil || call == nil || a.currentScope == nil {
+		return nil
+	}
+	ident, ok := call.Func.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return nil
+	}
+	if ft, ok := sym.Type.(*FuncType); ok {
+		return ft
+	}
+	if ft := a.functionTypes[sym.Name]; ft != nil {
+		return ft
+	}
+	return nil
+}
+
 func refinedExprNullState(expr *ast.BinaryExpr, truthy bool) (ast.Expr, bool, bool) {
 	_, leftNull := expr.Left.(*ast.NullLit)
 	_, rightNull := expr.Right.(*ast.NullLit)

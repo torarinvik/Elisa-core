@@ -26,6 +26,17 @@ func cloneNumRangeMap(in map[string]numRange) map[string]numRange {
 	return out
 }
 
+func cloneNumRangeMapByIndex(in map[int]numRange) map[int]numRange {
+	if in == nil {
+		return nil
+	}
+	out := make(map[int]numRange, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
 func cloneScopeRangeFacts(scope *Scope) map[*Scope]map[string]numRange {
 	out := map[*Scope]map[string]numRange{}
 	for sc := scope; sc != nil; sc = sc.Parent {
@@ -838,6 +849,49 @@ func (a *Analyzer) paramRefinementTypeExpr(te ast.TypeExpr) (*ast.RefinementType
 	return nil, false
 }
 
+func (a *Analyzer) paramRefinementRangeFacts(params []ast.ParamDecl) map[int]numRange {
+	var out map[int]numRange
+	for i, param := range params {
+		fact, any := a.paramRefinementRangeFact(param.Type, param.Name)
+		if !any {
+			continue
+		}
+		if out == nil {
+			out = map[int]numRange{}
+		}
+		out[i] = fact
+	}
+	return out
+}
+
+func (a *Analyzer) paramRefinementRangeFact(te ast.TypeExpr, subjectName string) (numRange, bool) {
+	switch n := te.(type) {
+	case *ast.RefType:
+		if n == nil {
+			return numRange{}, false
+		}
+		return a.paramRefinementRangeFact(n.Elem, subjectName)
+	case *ast.MutableType:
+		if n == nil {
+			return numRange{}, false
+		}
+		return a.paramRefinementRangeFact(n.Elem, subjectName)
+	case *ast.OwnedType:
+		if n == nil {
+			return numRange{}, false
+		}
+		return a.paramRefinementRangeFact(n.Elem, subjectName)
+	}
+	if lo, hi, ok := a.refinementIntervalOfTypeExpr(te, subjectName); ok {
+		return numRange{loKnown: true, lo: lo, hiKnown: true, hi: hi}, true
+	}
+	rt, ok := a.paramRefinementTypeExpr(te)
+	if !ok {
+		return numRange{}, false
+	}
+	return a.rangeFromRefinementTypeExpr(rt, nil)
+}
+
 // seedParamRefinementFacts records, on the function entry scope, the integer range implied by each
 // IMMUTABLE integer param's declared refinement (docs/86 brick 86-2). This is what lets the docs/85
 // §13 form `def tile_index(tx: TileX, ty: TileY) -> usize is Bounded[..]` prove with NO body guard:
@@ -867,6 +921,55 @@ func (a *Analyzer) seedParamRefinementFacts(params []ast.ParamDecl) {
 			a.currentScope.rangeFacts = map[string]numRange{}
 		}
 		a.currentScope.rangeFacts[param.Name] = a.currentScope.rangeFacts[param.Name].intersect(fact)
+	}
+}
+
+func (a *Analyzer) seedMutableRefParamRefinementRangeFact(arg ast.Expr, fact numRange) {
+	a.seedMutableRefParamRefinementRangeFactInScope(a.currentScope, arg, fact)
+}
+
+func (a *Analyzer) seedMutableRefParamRefinementRangeFactInScope(scope *Scope, arg ast.Expr, fact numRange) {
+	if scope == nil || arg == nil {
+		return
+	}
+	name, ok := directIdentName(arg)
+	if !ok {
+		return
+	}
+	sym, ok := scope.Lookup(name)
+	if !ok || sym == nil || !IsNumericType(sym.Type) || IsFloatType(sym.Type) {
+		return
+	}
+	if scope.rangeFacts == nil {
+		scope.rangeFacts = map[string]numRange{}
+	}
+	scope.rangeFacts[name] = scope.rangeFacts[name].intersect(fact)
+}
+
+func directIdentName(expr ast.Expr) (string, bool) {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n == nil {
+			return "", false
+		}
+		return n.Name, true
+	case *ast.ParenExpr:
+		if n == nil {
+			return "", false
+		}
+		return directIdentName(n.Inner)
+	case *ast.UnaryExpr:
+		if n == nil || n.Op != lexer.TOKEN_AMPERSAND {
+			return "", false
+		}
+		return directIdentName(n.Operand)
+	case *ast.AddrOfExpr:
+		if n == nil {
+			return "", false
+		}
+		return directIdentName(n.Operand)
+	default:
+		return "", false
 	}
 }
 
