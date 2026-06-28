@@ -172,7 +172,7 @@ func (s *functionState) emitEnumIsTest(leftExpr ast.Expr, enumType *semantic.Enu
 	if err != nil {
 		return nil, nil, err
 	}
-	tagConst, err := s.enumTagConstant(variant.Tag)
+	tagConst, err := s.enumTagConstant(enumType, variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -204,14 +204,17 @@ func (s *functionState) emitEnumCategoryIsTest(leftExpr ast.Expr, scrutinee *sem
 	if err != nil {
 		return nil, nil, err
 	}
-	return s.emitTagRangeTest(tagValue, category.LeafTagLo, category.LeafTagCount)
+	return s.emitTagRangeTest(tagValue, scrutinee, category.LeafTagLo, category.LeafTagCount)
 }
 
 // emitTagRangeTest emits the docs/81 category-membership primitive: matches ⇔ tag - lo <u count.
 // count==1 folds to plain equality (a leaf is a range of size 1), lo==0 skips the subtract.
-func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, lo uint32, count uint32) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, enumType *semantic.EnumType, lo uint32, count uint32) (C.LLVMValueRef, semantic.Type, error) {
 	boolType := s.g.result.NamedTypes["bool"]
-	loConst, err := s.enumTagConstant(lo)
+	if lo == 0 && uint64(count) == enumTagValueCapacity(enumType) {
+		return C.LLVMConstInt(C.LLVMInt1TypeInContext(s.g.context), 1, 0), boolType, nil
+	}
+	loConst, err := s.enumTagConstant(enumType, lo)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -222,7 +225,7 @@ func (s *functionState) emitTagRangeTest(tagValue C.LLVMValueRef, lo uint32, cou
 	if lo != 0 {
 		relative = C.LLVMBuildSub(s.builder, tagValue, loConst, cStringFree("istag.rel"))
 	}
-	countConst, err := s.enumTagConstant(count)
+	countConst, err := s.enumTagConstant(enumType, count)
 	if err != nil {
 		return nil, nil, err
 	}

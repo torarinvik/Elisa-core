@@ -138,7 +138,7 @@ func (s *functionState) emitEnumColumnScanCategoryFilter(colExpr *ast.EnumColumn
 	if err != nil {
 		return false, err
 	}
-	inRange, _, err := s.emitTagRangeTest(tagValue, enumType.LeafTagLo, enumType.LeafTagCount)
+	inRange, _, err := s.emitTagRangeTest(tagValue, enumType, enumType.LeafTagLo, enumType.LeafTagCount)
 	if err != nil {
 		return false, err
 	}

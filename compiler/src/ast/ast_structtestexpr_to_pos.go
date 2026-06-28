@@ -98,10 +98,13 @@ type AllocExpr struct {
 	Position lexer.Pos
 	Owner    Expr
 	Value    Expr
-	// AutoRegion is set for `new[auto] T(...)`: allocate into the innermost active INFERRED region
-	// (the native stack arena), no explicit region/pool. Owner is left nil (so passes that resolve
-	// an explicit owner skip it); AutoRegion distinguishes it from the bracket-less packed-store new.
+	// AutoRegion is set for inferred-region allocations: explicit legacy `new[auto] T(...)`,
+	// canonical bare `new T(...)` after semantic normalization, and implicit packed enum
+	// constructors. Owner is left nil (so passes that resolve an explicit owner skip it).
 	AutoRegion bool
+	// ExplicitAutoRegion remembers that the source wrote the deprecated `new[auto]` spelling.
+	// Bare `new` normalizes to AutoRegion too, but must not emit this deprecation.
+	ExplicitAutoRegion bool
 }
 type CanExpr struct {
 	Position                    lexer.Pos

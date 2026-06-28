@@ -66,10 +66,45 @@ func enumLeavesAreTagOnly(leaves []*semantic.EnumVariant) bool {
 	return true
 }
 
+func enumTagBuiltinName(enum *semantic.EnumType) string {
+	if enum == nil || enum.Packed || !enumLeavesAreTagOnly(enumLayoutLeaves(enum)) {
+		return "u32"
+	}
+	maxTag := uint32(0)
+	for _, variant := range enumLayoutLeaves(enum) {
+		if variant != nil && variant.Tag > maxTag {
+			maxTag = variant.Tag
+		}
+	}
+	switch {
+	case maxTag <= 0xff:
+		return "u8"
+	case maxTag <= 0xffff:
+		return "u16"
+	default:
+		return "u32"
+	}
+}
+
+func enumTagValueCapacity(enum *semantic.EnumType) uint64 {
+	switch enumTagBuiltinName(enum) {
+	case "u8":
+		return 1 << 8
+	case "u16":
+		return 1 << 16
+	default:
+		return 1 << 32
+	}
+}
+
+func (g *llvmGenerator) lowerEnumTagType(enum *semantic.EnumType) (C.LLVMTypeRef, error) {
+	return g.lowerBuiltin(enumTagBuiltinName(enum))
+}
+
 func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.LLVMTypeRef, error) {
 	leaves := enumLayoutLeaves(enum)
 	if enumLeavesAreTagOnly(leaves) {
-		return g.lowerBuiltin("u32")
+		return g.lowerEnumTagType(enum)
 	}
 	ty, err := g.ensureNamedStructType(name)
 	if err != nil {
@@ -78,7 +113,7 @@ func (g *llvmGenerator) ensureEnumBody(name string, enum *semantic.EnumType) (C.
 	if g.structBodies[name] || enum == nil {
 		return ty, nil
 	}
-	tagType, err := g.lowerBuiltin("u32")
+	tagType, err := g.lowerEnumTagType(enum)
 	if err != nil {
 		return nil, err
 	}

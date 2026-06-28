@@ -193,7 +193,7 @@ def new_scalar(value: Expr) -> bool:
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
-	for _, check := range []string{"define i1 @grouped_scalar(", "define i1 @new_scalar(", "icmp eq i32", "istest.or"} {
+	for _, check := range []string{"define i1 @grouped_scalar(", "define i1 @new_scalar(", "icmp eq i8", "istest.or"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected qualified alternative is lowering to include %q, got:\n%s", check, output)
 		}

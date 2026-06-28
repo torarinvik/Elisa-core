@@ -126,6 +126,37 @@ func TestAnalyzeBraceMembershipRangeAcceptsCharBounds(t *testing.T) {
 	}
 }
 
+func TestAnalyzeDirectMembershipRangeAcceptsCharBounds(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "direct_membership_range_char.elisa", `def is_digit(ch: char) -> bool:
+    return ch in '0'..'9'
+
+def is_lower(ch: char) -> bool:
+    return ch in 'a'..'z'
+
+def is_upper(ch: char) -> bool:
+    return ch in 'A'..'Z'
+`)
+
+	for i, declNode := range result.File.Decls {
+		decl := declNode.(*ast.FuncDecl)
+		ret := decl.Body[0].(*ast.ReturnStmt)
+		inExpr, ok := ret.Value.(*ast.BinaryExpr)
+		if !ok {
+			t.Fatalf("decl %d: expected membership binary expr, got %T", i, ret.Value)
+		}
+		if got := result.ExprTypes[inExpr].String(); got != "bool" {
+			t.Fatalf("decl %d: expected membership expr type bool, got %s", i, got)
+		}
+		list, ok := inExpr.Right.(*ast.ListLitExpr)
+		if !ok || len(list.Elems) != 1 {
+			t.Fatalf("decl %d: expected direct range normalized to one membership candidate, got %T %#v", i, inExpr.Right, inExpr.Right)
+		}
+		if _, ok := list.Elems[0].(*ast.MembershipRangeExpr); !ok {
+			t.Fatalf("decl %d: expected range candidate, got %T", i, list.Elems[0])
+		}
+	}
+}
+
 func TestAnalyzeBraceMembershipRangeAcceptsConstEnumBounds(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "brace_membership_range_enum.elisa", `const enum TokenKind of u32:
     IF

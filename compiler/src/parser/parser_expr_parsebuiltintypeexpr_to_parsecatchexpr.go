@@ -708,7 +708,7 @@ func (p *Parser) parseComparison() ast.Expr {
 		if p.notInMembershipAhead() {
 			p.advance()
 			inToken := p.advance()
-			right := p.parseAs()
+			right := p.parseMembershipRight()
 			membership := &ast.BinaryExpr{Position: inToken.Pos, Op: lexer.TOKEN_IN, Left: left, Right: right}
 			left = &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: membership}
 			continue
@@ -734,6 +734,8 @@ func (p *Parser) parseComparison() ast.Expr {
 				continue
 			}
 			right = p.parseIsTestExpr()
+		} else if op.Kind == lexer.TOKEN_IN {
+			right = p.parseMembershipRight()
 		} else {
 			right = p.parseAs()
 		}
@@ -746,6 +748,23 @@ func (p *Parser) membershipLiteralAhead() bool {
 }
 func (p *Parser) notInMembershipAhead() bool {
 	return p.allowInMembership && p.peek() == lexer.TOKEN_NOT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IN
+}
+func (p *Parser) parseMembershipRight() ast.Expr {
+	start := p.parseAs()
+	if !p.membershipRangeOpAhead() {
+		return start
+	}
+	opKind, opPos := p.consumeMembershipRangeOp()
+	end := p.parseAs()
+	return &ast.MembershipRangeExpr{Position: opPos, Start: start, End: end, Op: opKind}
+}
+func (p *Parser) membershipRangeOpAhead() bool {
+	switch p.peek() {
+	case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE:
+		return true
+	default:
+		return false
+	}
 }
 func (p *Parser) parseAs() ast.Expr {
 	return p.parseBitwiseOr()
@@ -1097,6 +1116,7 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 	p.expect(lexer.TOKEN_IDENT)
 	var owner ast.Expr
 	autoRegion := false
+	explicitAutoRegion := false
 	if p.match(lexer.TOKEN_LBRACKET) {
 		owner = p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
@@ -1106,10 +1126,11 @@ func (p *Parser) parseAllocExpr() ast.Expr {
 		if ident, ok := owner.(*ast.Ident); ok && ident != nil && ident.Name == "auto" {
 			owner = nil
 			autoRegion = true
+			explicitAutoRegion = true
 		}
 	}
 	value := p.parseExpr()
-	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value, AutoRegion: autoRegion}
+	return &ast.AllocExpr{Position: pos, Owner: owner, Value: value, AutoRegion: autoRegion, ExplicitAutoRegion: explicitAutoRegion}
 }
 func (p *Parser) looksLikeNodeAllocExpr() bool {
 	if p.pos+1 >= len(p.tokens) {

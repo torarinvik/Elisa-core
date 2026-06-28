@@ -19,8 +19,8 @@ import (
 
 const backendStaticEvalLoopIterationLimit = 100000
 
-func (s *functionState) enumTagConstant(tag uint32) (C.LLVMValueRef, error) {
-	tagType, err := s.g.lowerBuiltin("u32")
+func (s *functionState) enumTagConstant(enumType *semantic.EnumType, tag uint32) (C.LLVMValueRef, error) {
+	tagType, err := s.g.lowerEnumTagType(enumType)
 	if err != nil {
 		return nil, err
 	}

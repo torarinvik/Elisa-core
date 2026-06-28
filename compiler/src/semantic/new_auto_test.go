@@ -19,6 +19,9 @@ def f() -> i64:
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("new[auto] in an inferred region must compile cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
+	if deps := strings.Join(result.Deprecations(), "\n"); !strings.Contains(deps, "`new[auto]` is deprecated; use `new` instead") {
+		t.Fatalf("expected new[auto] deprecation, got:\n%s", deps)
+	}
 }
 
 // docs/75: returning a new[auto] value is NOT an escape — it makes the function region-polymorphic.

@@ -91,7 +91,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 	if len(orderedArgs) != len(variant.Payload) {
 		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
 	}
-	tagValue, err := s.enumTagConstant(variant.Tag)
+	tagValue, err := s.enumTagConstant(enumType, variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}

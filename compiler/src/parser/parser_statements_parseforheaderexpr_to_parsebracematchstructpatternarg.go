@@ -602,10 +602,10 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 // bodyForwardsConstructedStructLocal reports whether the body declares a local from a struct
 // construction (`x: T = T(...)` or `x = Builder()` — both parse as *ast.StructLitExpr with
 // Brace==false, as does the brace form `T{...}`) and later passes `&x` (or the bare `x`) as a call
-// argument. That local's region-less container fields are grown interprocedurally by the callee, so
-// the function needs an ambient auto region for the call to thread into the callee's struct-ref
-// region param. CONSERVATIVE + SAFE: a non-allocating match gets a harmless lazy no-op region and
-// the escape checker is the hard backstop against a too-eager wrap.
+// argument, including as a UFCS receiver (`x.grow(...)`). That local's region-less container fields
+// are grown interprocedurally by the callee, so the function needs an ambient auto region for the call
+// to thread into the callee's struct-ref region param. CONSERVATIVE + SAFE: a non-allocating match
+// gets a harmless lazy no-op region and the escape checker is the hard backstop against a too-eager wrap.
 func unwrapParenExprAST(e ast.Expr) ast.Expr {
 	for {
 		paren, ok := e.(*ast.ParenExpr)
@@ -676,14 +676,9 @@ func bodyForwardsConstructedStructLocal(stmts []ast.Stmt) bool {
 			if v.IsNil() {
 				return
 			}
-			switch n := v.Interface().(type) {
-			case *ast.CallExpr:
-				if n != nil && argForwardsConstructed(n.Args) {
-					found = true
-					return
-				}
-			case *ast.StructLitExpr:
-				if n != nil && !n.Brace && argForwardsConstructed(n.Args) {
+			if expr, ok := v.Interface().(ast.Expr); ok {
+				_, args, isCall := ast.PrepassCallShape(expr)
+				if isCall && argForwardsConstructed(args) {
 					found = true
 					return
 				}

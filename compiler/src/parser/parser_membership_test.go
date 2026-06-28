@@ -123,6 +123,44 @@ func TestParseBraceMembershipRangeExpr(t *testing.T) {
 	}
 }
 
+func TestParseDirectMembershipRangeExpr(t *testing.T) {
+	cases := []struct {
+		name          string
+		source        string
+		wantOp        lexer.TokenKind
+		wantFormatted string
+	}{
+		{name: "bare-inclusive", source: "return ch in '0'..'9'", wantOp: lexer.TOKEN_RANGE, wantFormatted: "ch in '0' ..= '9'"},
+		{name: "explicit-inclusive", source: "return ch in 'a'..='z'", wantOp: lexer.TOKEN_RANGE, wantFormatted: "ch in 'a' ..= 'z'"},
+		{name: "upper-exclusive", source: "return ch in 'A'..<'Z'", wantOp: lexer.TOKEN_RANGE_LT, wantFormatted: "ch in 'A' ..< 'Z'"},
+		{name: "upper-open", source: "return ch in 'A'..>'Z'", wantOp: lexer.TOKEN_RANGE_GT, wantFormatted: "ch in 'A' ..> 'Z'"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			file, errs := parseSourceFile(t, "def keep(ch: char) -> bool:\n    "+tc.source+"\n")
+			if len(errs) != 0 {
+				t.Fatalf("unexpected parser errors: %v", errs)
+			}
+			decl := file.Decls[0].(*ast.FuncDecl)
+			ret, ok := decl.Body[0].(*ast.ReturnStmt)
+			if !ok {
+				t.Fatalf("expected return stmt, got %T", decl.Body[0])
+			}
+			inExpr, ok := ret.Value.(*ast.BinaryExpr)
+			if !ok || inExpr.Op != lexer.TOKEN_IN {
+				t.Fatalf("expected membership expr, got %#v", ret.Value)
+			}
+			rangeExpr, ok := inExpr.Right.(*ast.MembershipRangeExpr)
+			if !ok || rangeExpr.Op != tc.wantOp {
+				t.Fatalf("expected direct membership range %s, got %#v", lexer.TokenName(tc.wantOp), inExpr.Right)
+			}
+			if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, tc.wantFormatted) {
+				t.Fatalf("expected direct membership range to unparse with %q, got:\n%s", tc.wantFormatted, formatted)
+			}
+		})
+	}
+}
+
 func TestParseBraceMembershipShorthandMembers(t *testing.T) {
 	file, errs := parseSourceFile(t, "const enum TokenKind of u32:\n    IF\n    LET\n    IDENT\n\ndef keep(kind: TokenKind) -> bool:\n    return kind in {.IF, .LET}\n")
 	if len(errs) != 0 {

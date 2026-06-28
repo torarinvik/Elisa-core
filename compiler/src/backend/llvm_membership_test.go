@@ -75,6 +75,23 @@ func TestGenerateLLVMIRLowersBraceMembershipRangeExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersDirectCharMembershipRangeExpr(t *testing.T) {
+	src := `def keep(ch: char) -> bool:
+    return ch in '0'..'9'
+`
+
+	result := parseAndAnalyzeBackendTest(t, "backend_direct_char_membership_range.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @keep(", "membership.range.lower", "membership.range.upper", "membership.range"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected direct char membership range lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
+
 func TestGenerateLLVMIRLowersCharsetMembershipExpr(t *testing.T) {
 	src := `charset IdentStart = 'a'..'z' | 'A'..'Z' | '_'
 

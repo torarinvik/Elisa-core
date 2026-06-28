@@ -202,7 +202,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 						return nil, packedPayloadValueCache{}, err
 					}
 				}
-				cond, _, err := s.emitTagRangeTest(tagValue, category.LeafTagLo, category.LeafTagCount)
+				cond, _, err := s.emitTagRangeTest(tagValue, enumType, category.LeafTagLo, category.LeafTagCount)
 				if err != nil {
 					return nil, packedPayloadValueCache{}, err
 				}
@@ -458,7 +458,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 				return nil, packedPayloadValueCache{}, err
 			}
 		}
-		tagConst, err := s.enumTagConstant(variant.Tag)
+		tagConst, err := s.enumTagConstant(enumType, variant.Tag)
 		if err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}

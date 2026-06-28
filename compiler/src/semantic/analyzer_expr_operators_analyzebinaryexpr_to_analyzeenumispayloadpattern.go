@@ -401,6 +401,9 @@ func (a *Analyzer) membershipCandidateList(expr ast.Expr) (*ast.ListLitExpr, boo
 	if list, ok := expr.(*ast.ListLitExpr); ok {
 		return list, true
 	}
+	if rangeExpr, ok := expr.(*ast.MembershipRangeExpr); ok {
+		return &ast.ListLitExpr{Position: rangeExpr.Pos(), Elems: []ast.Expr{rangeExpr}}, true
+	}
 	ident, ok := expr.(*ast.Ident)
 	if !ok || ident == nil {
 		return nil, false

@@ -15,12 +15,12 @@ used across [01](01-memory-layout-syntax.md), [22](22-value-fact-core.md), and
 > caller when the value is returned (the function becomes region-polymorphic,
 > [docs/75](75-region-polymorphic-functions.md)), or uses the innermost active
 > region otherwise. Write `new[r] T(...)` only when you want to target a *named*
-> region explicitly. `new[auto]` is the (still-accepted) spelling of the inferred
-> default — bare `new` is now preferred. The `in auto:` block has been removed:
-> inference no longer needs it; use an explicit `region NAME(size):` when you
-> want a scope you control. Container literals (`darray[T] = []`, `dict = {}`)
-> infer their region the same way. Examples below that show `new[auto]` /
-> `in auto:` predate this and read identically with the bare forms.
+> region explicitly. `new[auto]` is deprecated; write bare `new` instead. The
+> `in auto:` block is also deprecated: inference no longer needs it; remove the
+> block, or use an explicit `region NAME(size):` when you want a scope you
+> control. Container literals (`darray[T] = []`, `dict = {}`) infer their region
+> the same way. Examples below that show `new[auto]` / `in auto:` predate this
+> and read identically with the bare forms.
 
 ---
 

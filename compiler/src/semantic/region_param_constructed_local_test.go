@@ -46,6 +46,72 @@ def use() -> void:
 	}
 }
 
+func TestConstructedLocalUFCSReceiverForwardedInferred(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "literal_local_ufcs.elisa",
+		`struct Bag:
+    items: mutable darray[i64]
+def grow(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+def use() -> void:
+    bag: mutable Bag = Bag{items: zeroed}
+    bag.grow(7)
+`).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("struct-literal local used as a UFCS receiver must infer region-poly, got: %s", errs)
+	}
+}
+
+func TestRegionParamForwardedThroughUFCSReceiverInferred(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "param_forward_ufcs.elisa",
+		`struct Bag:
+    items: mutable darray[i64]
+def grow(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+def wrap(b: mutable Bag&, v: i64) -> void:
+    b.grow(v)
+def use() -> void:
+    bag: mutable Bag = Bag{items: zeroed}
+    wrap(bag, 7)
+`).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("region-requiring callee reached through UFCS must stamp the forwarding param, got: %s", errs)
+	}
+}
+
+func TestConstructedLocalMixedUFCSForwardingInferred(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "mixed_ufcs_forward.elisa",
+		`struct Bag:
+    items: mutable darray[i64]
+def grow(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+def wrap(b: mutable Bag&, v: i64) -> void:
+    b.grow(v)
+def use() -> void:
+    bag: mutable Bag = Bag{items: zeroed}
+    bag.wrap(7)
+`).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("constructed local and forwarding helper must both work through UFCS, got: %s", errs)
+	}
+}
+
+func TestUFCSNonRegionPolyBuilderResultNotThreaded(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "ufcs_non_region_poly_builder.elisa",
+		`struct Bag:
+    items: mutable darray[i64]
+def wrap(seed: darray[i64]) -> Bag:
+    return Bag(seed)
+def grow(b: mutable Bag&, v: i64) -> void:
+    b.items.push(v)
+def use(seed: darray[i64]) -> void:
+    bag: mutable Bag = wrap(seed)
+    bag.grow(7)
+`).Errors(), " | ")
+	if !strings.Contains(errs, "cannot infer region parameter") {
+		t.Fatalf("UFCS must not thread non-region-poly builder results with ambient regions, got: %s", errs)
+	}
+}
+
 // SOUNDNESS GATE: a borrow of the grown field returned region-less (so it would outlive the
 // frame-local `bag`) must STILL be rejected — the auto-region inference must not enable a dangle.
 func TestConstructedLocalGrownBorrowEscapeStillRejected(t *testing.T) {

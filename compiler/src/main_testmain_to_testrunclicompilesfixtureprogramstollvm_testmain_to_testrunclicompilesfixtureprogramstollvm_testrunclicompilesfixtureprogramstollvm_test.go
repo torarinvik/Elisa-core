@@ -269,7 +269,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "frontend_stress.elisa"),
 			checks: []string{
 				"%SourceSpan = type { i64, i64 }",
-				"%Token = type { i32, %SourceSpan, ptr }",
+				"%Token = type { i8, %SourceSpan, ptr }",
 				"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
 				"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
 				"%ParserState = type { %DynArrayView, i64, ptr }",
@@ -507,7 +507,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "grammar_surface_precedence",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_surface_precedence.elisa"),
 			checks: []string{
-				"%Token = type { i32 }",
+				"%Token = type { i8 }",
 				"define %Token @grammar_surface_parse_expr(ptr",
 				"define %Token @grammar_surface_parse_one_off(ptr",
 				"@__grammar_try__Arithmetic____grammar_precedence_Arithmetic_expression_1_compare(",
@@ -536,7 +536,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "grammar_uses_shared_helpers",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.elisa"),
 			checks: []string{
-				"%Token = type { i32 }",
+				"%Token = type { i8 }",
 				"define %Token @grammar_uses_parse_statement(ptr",
 				"define %Token @grammar_uses_recovering_atom(ptr",
 				"@__grammar_try__StatementGrammar____grammar_precedence_StatementGrammar_statement_1_compare(",

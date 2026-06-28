@@ -31,6 +31,9 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	if expr == nil {
 		return invalidType
 	}
+	if expr.ExplicitAutoRegion {
+		a.deprecatedf(expr.Pos(), "`new[auto]` is deprecated; use `new` instead")
+	}
 	if expr.AutoRegion {
 		return a.analyzeAutoAllocExpr(expr, expected)
 	}

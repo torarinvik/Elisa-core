@@ -5,9 +5,8 @@ import (
 	"testing"
 )
 
-// Bare `new T(...)` (no `[...]`) defaults to region inference — identical to
-// `new[auto] T(...)`. Inside an inferred region it compiles cleanly and yields a
-// region-qualified reference.
+// Bare `new T(...)` (no `[...]`) defaults to region inference. Inside an inferred
+// region it compiles cleanly and yields a region-qualified reference.
 func TestBareNewDefaultsToRegionInference(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "bare_new_ok.elisa", `struct Box:
     value: i64
@@ -19,10 +18,13 @@ def f() -> i64:
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("bare `new` must default to region inference and compile cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
+	if deps := result.Deprecations(); len(deps) != 0 {
+		t.Fatalf("bare `new` is the canonical spelling and must not warn, got:\n%s", strings.Join(deps, "\n"))
+	}
 }
 
 // Returning a bare-`new` value makes the function region-polymorphic, exactly
-// like `new[auto]` — the inferred region is threaded from the caller, so the
+// like inferred allocation — the inferred region is threaded from the caller, so the
 // result outlives the call.
 func TestBareNewReturnIsRegionPolymorphic(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "bare_new_ret.elisa", `struct Box:
@@ -37,18 +39,21 @@ def f() -> Box&:
 	}
 }
 
-// `in auto:` has been removed now that allocations infer their region by
-// default. A user-written block is a hard error pointing at the replacement.
-func TestInAutoBlockIsRemoved(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "in_auto_removed.elisa", `def f() -> i64:
+// `in auto:` remains accepted as a compatibility spelling, but it is deprecated:
+// lifetimes should normally be inferred without a region block.
+func TestInAutoBlockIsDeprecated(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "in_auto_deprecated.elisa", `def f() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         in auto:
             xs: mutable darray[i64] = []
             xs.push(7)
             return xs[0]
 `, AnalyzeOptions{})
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "`in auto:` is no longer supported") {
-		t.Fatalf("expected `in auto:` to be rejected as removed, got:\n%s", all)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("deprecated `in auto:` must still compile, got:\n%s", strings.Join(errs, "\n"))
+	}
+	if deps := strings.Join(result.Deprecations(), "\n"); !strings.Contains(deps, "`in auto:` is deprecated") {
+		t.Fatalf("expected `in auto:` deprecation, got:\n%s", deps)
 	}
 }
 

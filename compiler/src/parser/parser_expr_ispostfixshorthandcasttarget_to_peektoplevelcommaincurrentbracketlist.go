@@ -205,6 +205,16 @@ func (p *Parser) consumeValueRangeOp() (lexer.TokenKind, lexer.Pos) {
 	}
 }
 
+func (p *Parser) consumeMembershipRangeOp() (lexer.TokenKind, lexer.Pos) {
+	op := p.advance()
+	switch op.Kind {
+	case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LE:
+		return lexer.TOKEN_RANGE, op.Pos
+	default:
+		return op.Kind, op.Pos
+	}
+}
+
 // parseRefinementPredArgs parses the comma-separated bracket arguments of a refinement predicate,
 // shared by `T is Law[...]` types and `ensures x is Law[...]` postconditions. An inclusive `..=` range is
 // sugar for its two endpoints (`Bounded[0 ..= 500]` → `0, 500`); a `..<` range is exclusive

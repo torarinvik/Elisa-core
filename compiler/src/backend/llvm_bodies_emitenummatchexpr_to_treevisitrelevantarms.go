@@ -84,7 +84,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 				continue
 			}
 			variant, _ := s.resolveEnumArmVariant(enumType, pattern)
-			tagConst, err := s.enumTagConstant(variant.Tag)
+			tagConst, err := s.enumTagConstant(enumType, variant.Tag)
 			if err != nil {
 				return nil, nil, err
 			}

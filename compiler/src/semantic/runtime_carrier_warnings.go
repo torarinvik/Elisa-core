@@ -90,6 +90,8 @@ func runtimeCarrierCarrierPathIsInternal(path string) bool {
 	}
 	internalRoots := []string{
 		"compiler/runtime/elisacore_std/",
+		"elisac.elisalib/vendor/elisacore_std/",
+		"vendor/elisacore_std/",
 		"Code/frontend_elisacore/",
 		"Code/elisacore_lua/",
 		"Code/test_programs/",

@@ -132,12 +132,12 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 }
 
 // paramForwardedToRegionRequiringCallee reports whether the body passes the named parameter (as a bare
-// identifier, `&param`, or a reborrow cast) as an argument to a resolved direct free-function call
+// identifier, `&param`, or a reborrow cast) as an argument to a resolved direct free-function/UFCS call
 // whose parameter at that position REQUIRES a region (its type carries one of the callee's region
 // params). Such a forward makes this function region-polymorphic over the param even though it never
-// grows it itself — the callee's region must be threaded in. Conservative: an unresolved/method/
-// indirect callee, or a non-region-requiring position, simply doesn't trigger (a false negative
-// re-surfaces as the existing "cannot infer region parameter" error, never an unsound accept).
+// grows it itself — the callee's region must be threaded in. Conservative: an unresolved/indirect
+// callee, or a non-region-requiring position, simply doesn't trigger (a false negative re-surfaces
+// as the existing "cannot infer region parameter" error, never an unsound accept).
 //
 // IMPORTANT: a PascalCase callee `Name(args)` parses as an *ast.StructLitExpr (constructor-or-call
 // ambiguity) at this pre-pass — name resolution only reclassifies it to a call later. So a free call
@@ -177,16 +177,9 @@ func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name 
 			if v.IsNil() {
 				return
 			}
-			switch n := v.Interface().(type) {
-			case *ast.CallExpr:
-				if ident, ok := n.Func.(*ast.Ident); ok && ident != nil && checkCall(ident.Name, n.Args) {
-					found = true
-					return
-				}
-			case *ast.StructLitExpr:
-				// `Name(args)` paren-call form of a PascalCase free function (Brace==false). Spreads are
-				// not positional forwards, so only Args are checked.
-				if n != nil && !n.Brace && checkCall(n.Name, n.Args) {
+			if expr, ok := v.Interface().(ast.Expr); ok {
+				calleeName, args, isCall := ast.PrepassCallShape(expr)
+				if isCall && checkCall(calleeName, args) {
 					found = true
 					return
 				}

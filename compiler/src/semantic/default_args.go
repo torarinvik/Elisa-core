@@ -242,7 +242,7 @@ func cloneDefaultArgExpr(expr ast.Expr) ast.Expr {
 		if (n.Owner != nil && owner == nil) || (n.Value != nil && value == nil) {
 			return nil
 		}
-		return &ast.AllocExpr{Position: n.Position, Owner: owner, Value: value, AutoRegion: n.AutoRegion}
+		return &ast.AllocExpr{Position: n.Position, Owner: owner, Value: value, AutoRegion: n.AutoRegion, ExplicitAutoRegion: n.ExplicitAutoRegion}
 	case *ast.CanExpr:
 		exprClone := cloneDefaultArgExpr(n.Expr)
 		if n.Expr != nil && exprClone == nil {

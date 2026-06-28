@@ -14,3 +14,18 @@ def use_string_literal() -> i64:
     return takes_view("hello")
 `)
 }
+
+func TestStringViewComparesDirectlyWithStringLiteral(t *testing.T) {
+	analyzeTreeTestSource(t, "sview_string_literal_eq.elisa", `def is_hello(text: sview) -> bool:
+    return text == "hello"
+
+def is_not_hello(text: sview) -> bool:
+    return text != "hello"
+
+def literal_left(text: sview) -> bool:
+    return "hello" == text
+
+def valid_suffix(view: sview) -> bool:
+    return any suffix in ["u", "u8", "usize"] where view == suffix
+`)
+}

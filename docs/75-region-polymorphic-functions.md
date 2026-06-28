@@ -1,24 +1,24 @@
 # 75 — Inferred region-polymorphic functions
 
 > Status: design + staged implementation. Builds on the region memory model (docs/68), multi-stack
-> regions (docs/71), default stack backing (docs/73), `new[auto]` (inferred-region struct
-> allocation), and region-backed packed enums (docs/74). This is the cross-function half of `new[auto]`:
+> regions (docs/71), default stack backing (docs/73), inferred-region struct
+> allocation, and region-backed packed enums (docs/74). This is the cross-function half of inferred allocation:
 > it lets a function *return* a region-allocated value, and recursion build one.
 >
 > **Spelling (2026-06):** bare `new T(...)` is now the default inferred-region allocation;
-> `new[auto]` is the older, still-accepted synonym. Every `new[auto]` in this doc reads identically
-> as bare `new`. See the default-allocation note in [docs/68](68-region-memory-model.md).
+> `new[auto]` is a deprecated compatibility spelling. Every `new[auto]` in this doc reads
+> identically as bare `new`. See the default-allocation note in [docs/68](68-region-memory-model.md).
 
 ## The problem
 
-`new[auto]` places an allocation into the function's own innermost inferred region. That region dies
+Bare `new` places an allocation into the function's own innermost inferred region. That region dies
 when the function returns, so a function that **returns** what it allocated is rejected:
 
 ```elisa
 def make(depth: i64) -> Expr:
     if depth <= 0:
-        return new[auto] Expr.Int(span: 0, value: 1)
-    return new[auto] Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
+        return new Expr.Int(span: 0, value: 1)
+    return new Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
 #   error: cannot return value: region dependency facts include local region "__auto_259801"
 ```
 
@@ -33,16 +33,17 @@ not spelled.
 
 ## The decision
 
-A function that returns a region-allocated value (a `new[auto]` handle, or a value transitively built
+A function that returns a region-allocated value (a bare `new` handle, or a value transitively built
 from one) is **region-polymorphic**: it is implicitly parameterized over the region its result lives
 in, exactly as it is already implicitly parameterized over nothing-you-write for ordinary type
 inference. The region parameter is:
 
 - **Inferred, not declared.** No `def make[@r]`. The signature stays `def make(depth) -> Expr`.
-- **Threaded as a hidden parameter.** The caller passes its ambient region; `new[auto]` inside the
+- **Threaded as a hidden parameter.** The caller passes its ambient region; bare `new` inside the
   callee resolves to that region; the returned handle's provenance is the caller's region.
-- **Bound at the call site to the region the result flows into.** `root: Expr = make(21)` inside
-  `in auto:` binds the hidden param to that `auto` region; the whole tree lands in one region.
+- **Bound at the call site to the region the result flows into.** `root: Expr = make(21)` in an
+  ordinary body binds the hidden param to the compiler-synthesized ambient region; if the value is
+  returned, that region is threaded/adopted by the caller. The whole tree lands in one inferred region.
 - **Pinnable with `@r` when ambiguous.** The two-tier story (inferred default, `@r` to pin) extends
   here: `def make(depth) -> Expr @r` names the region when the callee juggles more than one and
   inference can't pick.
@@ -56,16 +57,15 @@ packed enum Expr:                       # pure layout (docs/74)
 
 def make(depth: i64) -> Expr:           # region-polymorphic: hidden region param, inferred
     if depth <= 0:
-        return new[auto] Expr.Int(span: 0, value: 1)
-    return new[auto] Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
+        return new Expr.Int(span: 0, value: 1)
+    return new Expr.Add(span: 0, left: make(depth - 1), right: make(depth - 1))
 
 def build():
-    in auto:                            # the tree's region
-        root: Expr = make(21)           # hidden param ← this region; all nodes co-located here
-        # ... match root, walk, etc. ...
+    root: Expr = make(21)               # hidden param ← inferred region; all nodes co-located here
+    # ... match root, walk, etc. ...
 ```
 
-This is `new[auto]`'s natural completion: `new[auto]` is "allocate into the region I'm in";
+This is inferred allocation's natural completion: bare `new` is "allocate into the region I'm in";
 region-polymorphism is "the region I'm in can be my caller's."
 
 ## Why inferred, not explicit `[@r]`
@@ -76,7 +76,7 @@ functions are the same table, one row down:
 | | inferred (default) | pinned (when ambiguous) |
 |---|---|---|
 | container backing | `darray[T] = []` | `darray[T] @r = []` |
-| struct alloc | `new[auto] Box(...)` | `new[r] Box(...)` |
+| struct alloc | `new Box(...)` | `new[r] Box(...)` |
 | **region-poly fn** | `def make(...) -> Expr` | `def make(...) -> Expr @r` |
 
 Going explicit-only here (the `def make[@r]` form) would be the one inconsistent axis in an
@@ -107,9 +107,9 @@ returned value**. Concretely:
    binding, an argument position annotated `@R`, or another region-poly call already bound to `R`)
    binds `ρ := R`. The ambient `in R:` is the default `R`. If the result flows nowhere region-bound
    (e.g. a bare temporary), `ρ` binds to the caller's innermost inferred region — the same region
-   `new[auto]` would have chosen in the caller.
+   bare `new` would have chosen in the caller.
 4. **Thread.** Lower `ρ` to a hidden leading parameter (an `Arena&`, reusing the `tree` store-param
-   plumbing and `treeAllocOwner`), passed at every call site, consumed by `new[auto]` in the body.
+   plumbing and `treeAllocOwner`), passed at every call site, consumed by bare `new` in the body.
 5. **Escape-check across `ρ`.** A returned `ρ`-value is sound because `ρ` outlives the call by
    construction (it's the caller's region). A value whose deps include *both* `ρ` and a still-local
    region is rejected as today. `freeze`/affine ride on the value unchanged (docs/69).
@@ -122,7 +122,7 @@ Recursion falls out for free: `make` calls `make` with the same `ρ` (the body i
 `tree X:` already does (1)–(4) for a hidden **store** param (`__tree_store_X`, auto-threaded through
 every recursive call, recovered in `match`). This design generalizes that machinery from "implicit
 store" to "implicit region" so it works for any region-polymorphic function — packed enums (docs/74),
-`new[auto]` structs, and container-returning helpers alike — without the `tree` keyword. `tree` then
+bare-`new` structs, and container-returning helpers alike — without the `tree` keyword. `tree` then
 becomes sugar expressible in this lower layer rather than a bespoke mechanism.
 
 ## Staging
@@ -130,8 +130,8 @@ becomes sugar expressible in this lower layer rather than a bespoke mechanism.
 | Step | Delivers | Risk | Status |
 |------|----------|------|--------|
 | 1 | Detect: a value-returning path whose result carries a synthesized `__auto_*` region marks `f` `RegionPolymorphic` on its `FuncType`. | medium | **DONE** |
-| 2+3 | Pre-pass `classifyRegionPolymorphicFunctions` (fixpoint, before any body is analyzed) injects a hidden `__region_auto` Arena& param; call sites thread the caller's region (recursive → own `__region_auto`, root → active `in auto:`); the body's synthesized `__auto_*` region ADOPTS the threaded arena (no per-call arena, no premature free); escape error suppressed for region-poly fns. | high | **DONE** — verified end-to-end on a depth-100 recursive struct builder |
-| 4 | Packed-enum payoff: the docs/74 recursive `make` compiles and runs — region-backed `new[auto] Expr.V` + storeless `match`, store auto-threaded across `make`/`eval`. | medium | **DONE** — verified: make(10) builds a 1024-leaf tree, eval sums to 1024, zero ceremony |
+| 2+3 | Pre-pass `classifyRegionPolymorphicFunctions` (fixpoint, before any body is analyzed) injects a hidden `__region_auto` Arena& param; call sites thread the caller's region (recursive → own `__region_auto`, root → synthesized ambient inferred region); the body's synthesized `__auto_*` region ADOPTS the threaded arena (no per-call arena, no premature free); escape error suppressed for region-poly fns. | high | **DONE** — verified end-to-end on a depth-100 recursive struct builder |
+| 4 | Packed-enum payoff: the docs/74 recursive `make` compiles and runs — region-backed bare `new Expr.V` + storeless `match`, store auto-threaded across `make`/`eval`. | medium | **DONE** — verified: make(10) builds a 1024-leaf tree, eval sums to 1024, zero ceremony |
 | 5 | Explicit `-> T @r` pin form for multi-region returns; ambiguous-multi-region detection; `tree` reframed as sugar over this layer. | low | TODO |
 
 Steps 1-3 are the milestone for *any* region-polymorphic value (structs work today). Step 4 — the
@@ -141,8 +141,8 @@ features compose: docs/75 threads the region; docs/74 lowers a packed node into 
 
 ## What is verified (structs) vs pending (packed enums)
 
-`new[auto] Box(...)` (a struct) lowers via the region arena and threads correctly — a recursive
-builder runs and every node lives in the one caller-threaded region. `new[auto] Expr.V(...)` (a
+`new Box(...)` (a struct) lowers via the region arena and threads correctly — a recursive
+builder runs and every node lives in the one caller-threaded region. `new Expr.V(...)` (a
 packed enum) currently type-checks but does not codegen: it is still misroutable to the struct alloc
 path and there is no per-region packed store to push columns onto. That is docs/74 step 2; storeless
 `match node:` is docs/74 step 3. Both are required before the recursive packed tree builds and the
@@ -153,5 +153,5 @@ binary-trees benchmark can run.
 - No `[@r]` parameter syntax on functions. The region is inferred; `@r` pins only when
   inference is ambiguous, and ambiguity is an error-with-a-fix, never a silent guess.
 - No change to the enum/handle types (docs/74): the region rides on the value, never the type.
-- No reuse vocabulary beyond what exists: `@r`, `new[auto]`/`new[r]`, and the `tree` store-threading
+- No reuse vocabulary beyond what exists: bare `new`, `new[r]`, `@r`, and the `tree` store-threading
   plumbing already cover it.

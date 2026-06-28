@@ -99,7 +99,7 @@ func (s *functionState) emitEnumConstructorValue(callExpr *ast.CallExpr, enumTyp
 		return nil, nil, fmt.Errorf("enum constructor %s.%s expects %d arguments, got %d", enumType.Name, variant.Name, len(variant.Payload), len(args))
 	}
 	if enumIsTagOnly(enumType) {
-		tagValue, err := s.enumTagConstant(variant.Tag)
+		tagValue, err := s.enumTagConstant(enumType, variant.Tag)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -113,7 +113,7 @@ func (s *functionState) emitEnumConstructorValue(callExpr *ast.CallExpr, enumTyp
 	if err != nil {
 		return nil, nil, err
 	}
-	tagValue, err := s.enumTagConstant(variant.Tag)
+	tagValue, err := s.enumTagConstant(enumType, variant.Tag)
 	if err != nil {
 		return nil, nil, err
 	}

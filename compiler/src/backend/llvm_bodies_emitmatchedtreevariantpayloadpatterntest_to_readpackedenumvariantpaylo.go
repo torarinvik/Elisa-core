@@ -309,7 +309,7 @@ func constEnumMatchIsExhaustive(constEnumType *semantic.ConstEnumType, arms []as
 }
 func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLVMValueRef, enumType *semantic.EnumType, store *packedStoreBinding) (C.LLVMValueRef, error) {
 	if enumType != nil && !enumType.Packed && enumIsTagOnly(enumType) {
-		tagType, err := s.g.lowerBuiltin("u32")
+		tagType, err := s.g.lowerEnumTagType(enumType)
 		if err != nil {
 			return nil, err
 		}
@@ -334,7 +334,7 @@ func (s *functionState) loadEnumTag(decodedEnumPtr C.LLVMValueRef, enumPtr C.LLV
 		return nil, err
 	}
 	tagPtr := C.LLVMBuildStructGEP2(s.builder, enumLLVMType, enumPtr, 0, cStringFree("match.tag.ptr"))
-	tagType, err := s.g.lowerBuiltin("u32")
+	tagType, err := s.g.lowerEnumTagType(enumType)
 	if err != nil {
 		return nil, err
 	}
