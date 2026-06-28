@@ -506,6 +506,9 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if isStringViewType(ref.Elem) {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
+		if builtin, ok := ref.Elem.(*BuiltinType); ok && builtin.Name == "u8" {
+			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: ref.Region}
+		}
 	}
 	a.errorf(expr.Pos(), "slicing requires string, array, view, or packed store type, got %s", objType)
 	return invalidType

@@ -225,7 +225,11 @@ func (a *Analyzer) lookupVisibleInitHooks(target Type) []*Symbol {
 	}
 	key := exactTypeKey(target)
 	var hooks []*Symbol
-	for _, candidate := range a.visibleNameCandidates("__init__") {
+	candidates := a.visibleNameCandidates("__init__")
+	if base, _, _, ok := structLiteralBaseAndBindings(target); ok && base != nil && base.Namespace != "" {
+		candidates = append(candidates, joinQualifiedName(base.Namespace, "__init__"))
+	}
+	for _, candidate := range dedupeQualifiedNames(candidates) {
 		registered := a.initHooksByName[candidate]
 		if len(registered) == 0 {
 			continue

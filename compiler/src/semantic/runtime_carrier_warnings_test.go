@@ -71,26 +71,35 @@ func TestUserSourceRejectsDirectArenaSurfaceType(t *testing.T) {
 }
 
 func TestVendoredStdlibSourceAllowsArenaCarrierSurfaceType(t *testing.T) {
-	path := filepath.Join("project", "elisac.elisalib", "vendor", "elisacore_std", "collections.elisa")
-	if !runtimeCarrierCarrierPathIsInternal(path) {
-		t.Fatalf("expected vendored stdlib path to be internal: %s", path)
+	for _, path := range []string{
+		filepath.Join("project", "elisac.elisalib", "vendor", "elisacore_std", "collections.elisa"),
+		filepath.Join("project", "elisacore_std", "collections.elisa"),
+	} {
+		if !runtimeCarrierCarrierPathIsInternal(path) {
+			t.Fatalf("expected vendored stdlib path to be internal: %s", path)
+		}
 	}
 	src := `def build(owner: Arena) -> void:
     pass
 `
-	l := lexer.New(path, []byte(src))
-	tokens := l.Tokenize()
-	if errs := l.Errors(); len(errs) != 0 {
-		t.Fatalf("unexpected lex errors: %v", errs)
-	}
-	p := parser.New(tokens)
-	file := p.ParseFile(path)
-	if errs := p.Errors(); len(errs) != 0 {
-		t.Fatalf("unexpected parse errors: %v", errs)
-	}
-	result := Analyze(file)
-	all := allDiagnostics(result)
-	if strings.Contains(all, `internal runtime carrier type "Arena"`) {
-		t.Fatalf("expected vendored stdlib Arena carrier use to stay quiet, got:\n%s", all)
+	for _, path := range []string{
+		filepath.Join("project", "elisac.elisalib", "vendor", "elisacore_std", "collections.elisa"),
+		filepath.Join("project", "elisacore_std", "collections.elisa"),
+	} {
+		l := lexer.New(path, []byte(src))
+		tokens := l.Tokenize()
+		if errs := l.Errors(); len(errs) != 0 {
+			t.Fatalf("unexpected lex errors: %v", errs)
+		}
+		p := parser.New(tokens)
+		file := p.ParseFile(path)
+		if errs := p.Errors(); len(errs) != 0 {
+			t.Fatalf("unexpected parse errors: %v", errs)
+		}
+		result := Analyze(file)
+		all := allDiagnostics(result)
+		if strings.Contains(all, `internal runtime carrier type "Arena"`) {
+			t.Fatalf("expected vendored stdlib Arena carrier use to stay quiet for %s, got:\n%s", path, all)
+		}
 	}
 }

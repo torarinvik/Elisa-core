@@ -57,6 +57,30 @@ def is_win(os: i32) -> bool:
 	}
 }
 
+func TestConstEnumAliasMatchPatternsResolveToCanonicalType(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "const_enum_alias_match_patterns.elisa", `
+module M:
+	public:
+		const enum Kind of u8:
+			A
+			B
+
+type Kind = M::Kind
+
+def stmt_match(k: Kind) -> int:
+	match k:
+		Kind.A:
+			return 1
+		Kind.B:
+			return 2
+
+def expr_match(k: Kind) -> int:
+	return match k:
+		Kind.A: 1
+		Kind.B: 2
+`)
+}
+
 func TestTypeAliasDuplicateErrors(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "type_alias_duplicate.elisa", `
 type NameId = u32

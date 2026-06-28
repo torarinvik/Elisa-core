@@ -272,10 +272,16 @@ func (a *Analyzer) canonicalizeMatchEnumName(name string, expectedName string) s
 	if a == nil || name == "" || name == expectedName || expectedName == "" {
 		return name
 	}
+	expectedType, _, expectedOK := a.lookupVisibleType(expectedName)
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if candidate == expectedName {
 			if _, ok := a.namedTypes[candidate]; ok {
 				return candidate
+			}
+		}
+		if expectedOK {
+			if candidateType, ok := a.namedTypes[candidate]; ok && SameType(candidateType, expectedType) {
+				return expectedName
 			}
 		}
 	}

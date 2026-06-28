@@ -285,6 +285,9 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	if value, resultType, handled, err := s.emitDArraySliceExpr(expr); handled {
 		return value, resultType, err
 	}
+	if value, resultType, handled, err := s.emitRawU8RefSliceExpr(expr); handled {
+		return value, resultType, err
+	}
 	info, ok := runtimeSliceOperandInfo(s.exprType(expr.Object), s.exprType(expr))
 	if !ok {
 		return nil, nil, fmt.Errorf("slice is not implemented for %s", s.exprType(expr.Object).String())
@@ -334,6 +337,59 @@ func (s *functionState) emitSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, sema
 	call := s.buildCall(llvmFnType, callee, args, callName)
 	return call, info.resultType, nil
 }
+
+func (s *functionState) emitRawU8RefSliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	objectType := s.exprType(expr.Object)
+	refType, ok := objectType.(*semantic.RefType)
+	if !ok || refType.State != semantic.RefStateNonNull {
+		return nil, nil, false, nil
+	}
+	builtin, ok := refType.Elem.(*semantic.BuiltinType)
+	if !ok || builtin.Name != "u8" {
+		return nil, nil, false, nil
+	}
+	resultType, ok := s.exprType(expr).(*semantic.SViewType)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("u8& slice must produce sview, got %s", s.exprType(expr).String())
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	sourceValue, _, err := s.emitExpr(expr.Object, objectType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	startValue, _, err := s.emitExpr(expr.Start, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	endValue, _, err := s.emitExpr(expr.End, usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	u8LLVMType, err := s.g.lowerType(refType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	dataPtr := C.LLVMBuildGEP2(s.builder, u8LLVMType, sourceValue, llvmValueSlicePtr([]C.LLVMValueRef{startValue}), 1, cStringFree("rawstrslice.data"))
+	sliceLen := C.LLVMBuildSub(s.builder, endValue, startValue, cStringFree("rawstrslice.len"))
+	viewLLVMType, err := s.g.lowerType(resultType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	lenFieldType := C.LLVMStructGetTypeAtIndex(viewLLVMType, 1)
+	lenValue := sliceLen
+	if lenFieldType != usizeLLVMType {
+		lenValue = C.LLVMBuildIntCast2(s.builder, sliceLen, lenFieldType, 0, cStringFree("rawstrslice.len.cast"))
+	}
+	viewValue := C.LLVMGetUndef(viewLLVMType)
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, dataPtr, 0, cStringFree("rawstrslice.view.data"))
+	viewValue = C.LLVMBuildInsertValue(s.builder, viewValue, lenValue, 1, cStringFree("rawstrslice.view.len"))
+	return viewValue, resultType, true, nil
+}
+
 func (s *functionState) emitDArraySliceExpr(expr *ast.SliceExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	objectType := s.exprType(expr.Object)
 	darrayType, objectIsRef := darraySliceBaseType(objectType)

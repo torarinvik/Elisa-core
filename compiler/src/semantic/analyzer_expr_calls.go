@@ -186,6 +186,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
 		return helperType
 	}
+	a.rewriteQualifiedFunctionCallee(expr)
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
 		if variant == nil {
 			for _, arg := range expr.Args {
@@ -287,6 +288,27 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		return invalidType
 	}
 	return a.analyzeResolvedCallExprWithExpected(expr, ft, orderedArgs, expected)
+}
+
+func (a *Analyzer) rewriteQualifiedFunctionCallee(expr *ast.CallExpr) {
+	if a == nil || expr == nil || expr.Func == nil {
+		return
+	}
+	if _, alreadyIdent := expr.Func.(*ast.Ident); alreadyIdent {
+		return
+	}
+	name, ok := qualifiedTypePathFromExpr(expr.Func)
+	if !ok || name == "" {
+		return
+	}
+	sym, _, ok := a.lookupVisibleGlobal(name)
+	if !ok || sym == nil {
+		return
+	}
+	if _, ok := sym.Type.(*FuncType); !ok {
+		return
+	}
+	expr.Func = &ast.Ident{Position: expr.Func.Pos(), Name: name}
 }
 
 func (a *Analyzer) analyzeResolvedCallExpr(expr *ast.CallExpr, ft *FuncType, orderedArgs []ast.Expr) Type {

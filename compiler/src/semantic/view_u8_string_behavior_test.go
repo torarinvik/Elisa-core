@@ -29,3 +29,12 @@ def valid_suffix(view: sview) -> bool:
     return any suffix in ["u", "u8", "usize"] where view == suffix
 `)
 }
+
+func TestRawU8RefSliceProducesStringView(t *testing.T) {
+	analyzeTreeTestSource(t, "raw_u8_ref_slice_sview.elisa", `def window(source: u8&, start: usize, end: usize) -> sview:
+    return source[start:end]
+
+def has_prefix(source: u8&) -> bool:
+    return source[0:5] == "hello"
+`)
+}

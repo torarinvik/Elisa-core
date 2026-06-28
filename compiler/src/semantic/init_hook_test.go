@@ -68,6 +68,24 @@ def build() -> i64:
 	}
 }
 
+func TestAnalyzeModuleQualifiedTypeNamedConstructorCall(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "qualified_type_named_constructor.elisa", `module M:
+    public:
+        struct Box:
+            value: i64
+
+        def Box(value: i64) -> Box:
+            return Box{value: value}
+
+def build() -> i64:
+    box: M::Box = M::Box(4)
+    return box.value
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected qualified constructor function call to analyze cleanly, got %v", errs)
+	}
+}
+
 func TestAnalyzePascalCaseFunctionCallFallsBackBeforeStructDiagnostic(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "pascal_case_function_call.elisa", `def MakeSpan() -> i64:
     return 7

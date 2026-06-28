@@ -36,3 +36,27 @@ def valid_suffix(view: sview) -> bool:
 		t.Fatalf("expected direct literal equality to use specialized lowering, got runtime helper call:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRLowersRawU8RefSliceDirectly(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_raw_u8_ref_slice.elisa", `def window(source: u8&, start: usize, end: usize) -> sview:
+    return source[start:end]
+`)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{
+		"define %StringView @window(",
+		"rawstrslice.data = getelementptr i8, ptr %source",
+		"rawstrslice.len = sub i64",
+		"rawstrslice.view.data = insertvalue %StringView",
+		"rawstrslice.view.len = insertvalue %StringView",
+	} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected raw u8& slicing lowering to include %q, got:\n%s", check, output)
+		}
+	}
+	if strings.Contains(output, "call %StringView @ctx_string_view") || strings.Contains(output, "call %StringView @ctx_string_view_slice") {
+		t.Fatalf("expected raw u8& slicing to build StringView directly, got runtime helper call:\n%s", output)
+	}
+}
