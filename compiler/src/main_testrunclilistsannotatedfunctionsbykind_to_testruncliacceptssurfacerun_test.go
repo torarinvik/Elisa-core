@@ -435,23 +435,25 @@ struct WriteJob:
 	value: i64
 
 def write_slot(job: WriteJob) -> i64:
-	slot: mutable i64& = job.slot_bits.cast[mutable i64&]
-	slot[0] <- job.value
-	return job.value
+	trusted Unsafe.PointerCast:
+		slot: mutable i64& = job.slot_bits.cast[mutable i64&]
+		slot[0] <- job.value
+		return job.value
 
 @test
 def pool_backed_case() -> void:
 	can Thread.Spawn, Thread.Join, Pool.Create, Pool.Shutdown, Pool.Submit, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		partials: i64[2] = zeroed
 		pool workers(2):
-			group: mutable TaskGroup = task_group_new()
-			first_bits: uintptr = (&partials[0]).cast[i64&].uintptr()
-			second_bits: uintptr = (&partials[1]).cast[i64&].uintptr()
-			first: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: first_bits, value: 1})
-			second: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: second_bits, value: 2})
-			task_group_add((&group).cast[TaskGroup&], move first)
-			task_group_add((&group).cast[TaskGroup&], move second)
-			wait all group
+			trusted Unsafe.PointerCast:
+				group: mutable TaskGroup = task_group_new()
+				first_bits: uintptr = (&partials[0]).cast[i64&].uintptr()
+				second_bits: uintptr = (&partials[1]).cast[i64&].uintptr()
+				first: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: first_bits, value: 1})
+				second: Task[i64, Pending] = submit write_slot(WriteJob{slot_bits: second_bits, value: 2})
+				task_group_add((&group).cast[TaskGroup&], move first)
+				task_group_add((&group).cast[TaskGroup&], move second)
+				wait all group
 		assert_eq(partials[0], 1)
 		assert_eq(partials[1], 2)
 `, runtimeInclude)

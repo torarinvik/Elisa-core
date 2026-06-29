@@ -45,19 +45,20 @@ def expr_depth(graph: FrozenExprGraph) -> i64:
 
 def compiler_parallel_fixture(pool: mutable ThreadPool&) -> i64:
 	can Thread.Spawn, Thread.Join, Pool.Submit, Pool.Await, Pool.WaitAll, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		region scratch(4096)
-		graph: FrozenExprGraph = build_frozen_expr_graph(scratch)
-		summed: Task[i64, Pending] = submit[pool] expr_sum(graph)
-		awaited: Task[i64, Pending] = submit[pool] expr_depth(graph)
+		trusted Unsafe.PointerCast:
+			region scratch(4096)
+			graph: FrozenExprGraph = build_frozen_expr_graph(scratch)
+			summed: Task[i64, Pending] = submit[pool] expr_sum(graph)
+			awaited: Task[i64, Pending] = submit[pool] expr_depth(graph)
 
-		group: mutable TaskGroup = task_group_new()
-		grouped: Task[i64, Pending] = submit[pool] expr_sum(graph)
-		task_group_add(&group, move grouped)
-		wait all group
+			group: mutable TaskGroup = task_group_new()
+			grouped: Task[i64, Pending] = submit[pool] expr_sum(graph)
+			task_group_add(&group, move grouped)
+			wait all group
 
-		out: i64 = await summed + await awaited
-		destroy scratch
-		return out
+			out: i64 = await summed + await awaited
+			destroy scratch
+			return out
 
 def compiler_lock_probe(mu: mutable Mutex) -> i64:
 	can Sync.Lock, Sync.Unlock:

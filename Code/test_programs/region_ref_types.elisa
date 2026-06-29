@@ -5,9 +5,10 @@ struct RegionNode[@owner]:
 
 def region_ref_sum(seed: i32) -> i32:
     region scratch(1024)
-    first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
-    second: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: first.cast[RegionNode&? @scratch], value: seed + 1}
-    alias: RegionNode[scratch]& @scratch = second
-    out: i32 = first.value + alias.value
-    destroy scratch
-    return out
+    trusted Unsafe.PointerCast:
+        first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
+        second: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: first.cast[RegionNode&? @scratch], value: seed + 1}
+        alias: RegionNode[scratch]& @scratch = second
+        out: i32 = first.value + alias.value
+        destroy scratch
+        return out
