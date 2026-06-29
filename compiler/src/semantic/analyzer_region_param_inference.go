@@ -499,13 +499,24 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 			if v.IsNil() {
 				return
 			}
-			// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or local `region:`
-			// (RegionStmt) scope already has its allocation region supplied lexically — no region
-			// param threading is needed (and forcing `@r` would make the call site demand a region
-			// the struct ref doesn't carry). Don't descend into those scopes.
-			switch v.Interface().(type) {
-			case *ast.InStoreStmt, *ast.RegionStmt:
+			// A growth nested inside an explicit `in <arena>:` (InStoreStmt) or USER-written
+			// local `region:` (RegionStmt) scope already has its allocation region supplied
+			// lexically — no region param threading is needed (and forcing `@r` would make the
+			// call site demand a region the struct ref doesn't carry). Don't descend into those.
+			// BUT a compiler-SYNTHESIZED `__auto_*` region (the parser's speculative
+			// maybeWrapFunctionBodyInAutoRegion wrap, e.g. when the body forwards a constructed
+			// struct-literal element to a push) is NOT a real allocation region for the param's
+			// field: growing a by-ref struct param's field into a per-call auto arena that frees
+			// on return is a use-after-free. We MUST see through such a wrap so the field growth
+			// stamps `@r` and threads the caller's region. Descend into synthesized regions only.
+			switch s := v.Interface().(type) {
+			case *ast.InStoreStmt:
 				return
+			case *ast.RegionStmt:
+				if !isSynthesizedAutoRegion(s.Name) {
+					return
+				}
+				// fall through to descend into the synthesized wrap's body
 			}
 			if call, ok := v.Interface().(*ast.CallExpr); ok {
 				if growth, ok := call.Func.(*ast.FieldExpr); ok && growth != nil && containerGrowthMethods[growth.Field] {

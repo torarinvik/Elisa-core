@@ -497,3 +497,35 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("returning a region-less ref into a grown @r field must be REJECTED at compile time (was a segfault), got %s", status)
 	}
 }
+
+// Regression: a by-ref struct param's field grown via a helper whose body CONSTRUCTS a
+// struct-literal element and forwards it to push (`e = E{...}; p.errs.push(e)`) — the shape
+// the parser speculatively wraps in a synthesized `__auto_*` region (it can't tell the
+// by-value element from an auto-ref'd `mutable&` arg without types). That wrap used to hide the
+// field growth from paramFieldContainerIsGrown, so NO region param was inferred and the push
+// allocated into the per-call auto arena, freed on return -> use-after-free (SIGSEGV on the 2nd
+// push). The fix makes the predicate see through the SYNTHESIZED wrap so the caller's region is
+// threaded. Loop + read-back so a dangling backing corrupts the result instead of passing by luck.
+func TestS4FieldGrowthThroughSyntheticAutoRegionWrapNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, "struct E:\n    v: u32\nstruct Bag:\n    errs: mutable darray[E]\n"+`def Bag() -> Bag:
+    return Bag{errs: []}
+def add(b: mutable Bag&, n: u32) -> void can[Memory.Allocate, Abort.Panic]:
+    e: E = E{v: n}
+    b.errs.push(e)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    total: mutable u64 = 0
+    i: mutable i64 = 0
+    while i < 2000:
+        b: mutable Bag = Bag()
+        add(b, 65) can Memory.Allocate, Abort.Panic
+        add(b, 66) can Memory.Allocate, Abort.Panic
+        total <- total + b.errs[0].v.u64() + b.errs[1].v.u64()
+        i <- i + 1
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "262000" {
+		t.Fatalf("field growth through a synthesized auto-region wrap must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
+	}
+}
