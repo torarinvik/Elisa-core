@@ -356,13 +356,14 @@ def packed_ml_ast_repeated_checksum_impl(iterations: usize) -> i64:
     return out
 
 def ml_ast_parallel_worker(job: MlAstParallelJob) -> i64:
-    forest: FrozenMlAstForest& = job.forest_bits.cast[FrozenMlAstForest&]
-    result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
-    total: mutable i64 = 0
-    for iteration in 0..<job.repeats:
-        total <- total + checksum_root_range(job.start, job.end, forest)
-    result_slot[0] <- total
-    return total
+    trusted Unsafe.PointerCast:
+        forest: FrozenMlAstForest& = job.forest_bits.cast[FrozenMlAstForest&]
+        result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
+        total: mutable i64 = 0
+        for iteration in 0..<job.repeats:
+            total <- total + checksum_root_range(job.start, job.end, forest)
+        result_slot[0] <- total
+        return total
 
 def packed_ml_ast_parallel_max_workers_impl() -> i64:
     return ML_AST_PARALLEL_MAX_WORKERS.i64()
