@@ -432,12 +432,15 @@ func (a *Analyzer) validatePermissionExpr(expr ast.Expr, granted map[string]bool
 			// Unsafe.GuestHostPointerCast, so a guest address can never be
 			// silently dereferenced as a host pointer.
 			a.warnOnMissingLocalGrant(n.Pos(), "guest-host pointer cast", unsafeGuestHostPointerCastRefs(n.Position), granted)
-		} else if a.enforceUnsafePermissions && n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
+		} else if n.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(src, dst) {
+			// Memory-safety opt-out: hard-errors under enforcement, warns in permissive
+			// mode (warnOnMissingLocalGrant picks the severity). Surfaced in BOTH modes so
+			// an ungranted unsafe cast is never silent — "make unsafe loud" (docs/26).
 			a.warnOnMissingLocalGrant(n.Pos(), "pointer cast", unsafePointerCastRefs(n.Position), granted)
-		} else if a.enforceUnsafePermissions && a.unsafeLifetimeWidenCasts[n] {
+		} else if a.unsafeLifetimeWidenCasts[n] {
 			a.warnOnMissingLocalGrant(n.Pos(), "lifetime-widening reference cast (a borrow cast to a longer-lived storage class; it can dangle when the storage is freed — persist via clone[dstr] instead)", unsafePointerCastRefs(n.Position), granted)
 		}
-		if a.enforceUnsafePermissions && a.unsafeBufferReinterpretCasts[n] {
+		if a.unsafeBufferReinterpretCasts[n] {
 			a.warnOnMissingLocalGrant(n.Pos(), "buffer reinterpret cast", unsafeBufferReinterpretRefs(n.Position), granted)
 		}
 		if sym, ok := a.resolvedCastHooks[n]; ok {
