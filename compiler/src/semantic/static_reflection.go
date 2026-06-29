@@ -19,6 +19,12 @@ func CloneConstValue(value ConstValue) ConstValue {
 			cloned.Fields[name] = CloneConstValue(fieldValue)
 		}
 	}
+	if len(value.Dict) != 0 {
+		cloned.Dict = make([]ConstDictEntry, len(value.Dict))
+		for i, entry := range value.Dict {
+			cloned.Dict[i] = ConstDictEntry{Key: CloneConstValue(entry.Key), Value: CloneConstValue(entry.Value)}
+		}
+	}
 	if value.Value != nil {
 		child := CloneConstValue(*value.Value)
 		cloned.Value = &child

@@ -6,11 +6,11 @@ import (
 	"fmt"
 )
 
-func builtinDictEntryValueRefType(dictType *DictType) *RefType {
+func builtinDictEntryValueRefType(dictType *DictType, mutable bool) *RefType {
 	if dictType == nil {
-		return &RefType{Elem: invalidType, Mutable: true, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+		return &RefType{Elem: invalidType, Mutable: mutable, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
 	}
-	return &RefType{Elem: dictType.Value, Mutable: true, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+	return &RefType{Elem: dictType.Value, Mutable: mutable, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
 }
 
 func builtinDictEntryReceiverType(t Type) (*DictEntryType, *RefType, bool) {
@@ -153,6 +153,13 @@ func dictMethodReceiverExpr(receiver ast.Expr, receiverType Type, mutable bool) 
 	}
 }
 
+func (a *Analyzer) dictReceiverCanYieldMutableValue(receiver ast.Expr, receiverRefType *RefType) bool {
+	if receiverRefType != nil {
+		return receiverRefType.Mutable
+	}
+	return a.exprCanYieldWritableRef(receiver)
+}
+
 func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictMethodRewriteStatus {
 	if a == nil || expr == nil {
 		return builtinDictMethodRewriteNone
@@ -179,6 +186,12 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 	switch method {
 	case "get":
 		helperName = "arena_dict_get"
+		if len(expr.Args) == 1 && dictCstrKeyAcceptsSView(dictType, a.analyzeExpr(expr.Args[0])) {
+			helperName = "arena_dict_get_cstr_view"
+			if a.dictReceiverCanYieldMutableValue(fieldExpr.Object, receiverRefType) {
+				helperName = "arena_dict_get_cstr_view_mut"
+			}
+		}
 	case "contains":
 		helperName = "arena_dict_contains"
 	case "remove":
@@ -228,12 +241,102 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 	if needsAlloc {
 		rewrittenArgs = append(rewrittenArgs, a.currentAllocExpr)
 	}
-	rewrittenArgs = append(rewrittenArgs, dictMethodReceiverExpr(fieldExpr.Object, receiverType, mutates))
+	receiverMutable := mutates || (method == "get" && a.dictReceiverCanYieldMutableValue(fieldExpr.Object, receiverRefType))
+	rewrittenArgs = append(rewrittenArgs, dictMethodReceiverExpr(fieldExpr.Object, receiverType, receiverMutable))
 	rewrittenArgs = append(rewrittenArgs, expr.Args...)
 	expr.Func = &ast.Ident{Position: fieldExpr.Position, Name: helperName}
 	expr.Args = rewrittenArgs
 	expr.ArgNames = nil
 	return builtinDictMethodRewriteApplied
+}
+
+func dictCstrKeyAcceptsSView(dictType *DictType, keyType Type) bool {
+	if dictType == nil {
+		return false
+	}
+	if _, ok := StripAggregateStateType(dictType.Key).(*DStrType); !ok {
+		return false
+	}
+	return isStringViewType(keyType)
+}
+
+func dictLookupCallReceiverExpr(receiver ast.Expr, receiverType Type, mutable bool) ast.Expr {
+	return dictMethodReceiverExpr(receiver, receiverType, mutable)
+}
+
+func (a *Analyzer) analyzeBuiltinDictIndexExpr(expr *ast.IndexExpr, objType Type) (Type, bool) {
+	dictType, receiverRefType, ok := builtinDictReceiverType(objType)
+	if !ok || dictType == nil {
+		return nil, false
+	}
+	if !a.ensureRuntimeBackedDictSupported(expr.Object.Pos(), dictType) {
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+
+	indexType := a.analyzeExpr(expr.Index)
+	cstrViewLookup := dictCstrKeyAcceptsSView(dictType, indexType)
+	if !cstrViewLookup && !AssignableTo(dictType.Key, indexType) {
+		a.errorf(expr.Index.Pos(), "dict index expects key of type %s, got %s", dictType.Key, indexType)
+		a.reportShapeMismatchNotes(expr.Index.Pos(), dictType.Key, indexType)
+	}
+
+	if objectValue, objectOK := a.evalConstExpr(expr.Object); objectOK && objectValue.Kind == ConstDict {
+		if keyValue, keyOK := a.evalConstExpr(expr.Index); keyOK {
+			key, ok := constDictKeyFingerprint(dictType.Key, keyValue)
+			if !ok {
+				a.errorf(expr.Index.Pos(), "const dict index key must be a compile-time cstr, integer, bool, char, or const enum value")
+				a.exprTypes[expr] = invalidType
+				return invalidType, true
+			}
+			for _, entry := range objectValue.Dict {
+				entryKey, ok := constDictKeyFingerprint(dictType.Key, entry.Key)
+				if ok && entryKey == key {
+					a.exprTypes[expr] = dictType.Value
+					return dictType.Value, true
+				}
+			}
+			a.errorf(expr.Index.Pos(), "const dict has no key %s", key)
+			a.exprTypes[expr] = invalidType
+			return invalidType, true
+		}
+	}
+
+	mutable := a.dictReceiverCanYieldMutableValue(expr.Object, receiverRefType)
+	helperName := "arena_dict_get"
+	if mutable {
+		helperName = "arena_dict_get_mut"
+	}
+	if cstrViewLookup {
+		helperName = "arena_dict_get_cstr_view"
+		if mutable {
+			helperName = "arena_dict_get_cstr_view_mut"
+		}
+	}
+	call := &ast.CallExpr{
+		Position: expr.Position,
+		Func:     &ast.Ident{Position: expr.Position, Name: helperName},
+		Args: []ast.Expr{
+			dictLookupCallReceiverExpr(expr.Object, objType, mutable),
+			expr.Index,
+		},
+	}
+	expr.AsBuiltinDictGet = call
+	callResult := a.analyzeCallExpr(call)
+	if callResult == nil || IsInvalidType(callResult) {
+		callResult = builtinDictEntryValueRefType(dictType, mutable)
+	}
+	result := callResult
+	if expr.Fallback != nil {
+		fallbackType := a.analyzeValueExpr(expr.Fallback, dictType.Value)
+		if !IsNeverType(fallbackType) && !AssignableTo(dictType.Value, fallbackType) {
+			a.errorf(expr.Fallback.Pos(), "dict index fallback expects %s, got %s", dictType.Value, fallbackType)
+			a.reportShapeMismatchNotes(expr.Fallback.Pos(), dictType.Value, fallbackType)
+		}
+		result = dictType.Value
+	}
+	a.exprTypes[expr] = result
+	return result, true
 }
 
 func (a *Analyzer) analyzeBuiltinDictEntryCall(expr *ast.CallExpr) (Type, bool) {
@@ -312,7 +415,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 		}
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry insert")
 	}
-	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict, true)
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
@@ -393,7 +496,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		}
 		a.consumeAffineValueExpr(expr.Args[1], dictType.Value, "move into dict "+method)
 	}
-	valueRefType := builtinDictEntryValueRefType(dictType)
+	valueRefType := builtinDictEntryValueRefType(dictType, true)
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict." + method, Params: []Type{receiverType, dictType.Key, dictType.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true
@@ -432,7 +535,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 		}
 		a.consumeAffineValueExpr(expr.Args[0], entryType.Dict.Value, "move into dict entry get_or_insert")
 	}
-	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict, true)
 	a.exprTypes[expr.Func] = &FuncType{Name: "dict.entry.get_or_insert", Params: []Type{receiverType, entryType.Dict.Value}, Return: valueRefType}
 	a.exprTypes[expr] = valueRefType
 	return valueRefType, true

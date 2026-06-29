@@ -317,6 +317,27 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		if n.Owner != nil {
 			return ConstValue{}, false
 		}
+		if n.Brace && len(n.Keys) > 0 {
+			entries := make([]ConstDictEntry, 0, len(n.Elems))
+			for i, elem := range n.Elems {
+				if i >= len(n.Keys) || n.Keys[i] == nil {
+					return ConstValue{}, false
+				}
+				if i < len(n.Spreads) && n.Spreads[i] {
+					return ConstValue{}, false
+				}
+				key, ok := a.evalConstExpr(n.Keys[i])
+				if !ok {
+					return ConstValue{}, false
+				}
+				value, ok := a.evalConstExpr(elem)
+				if !ok {
+					return ConstValue{}, false
+				}
+				entries = append(entries, ConstDictEntry{Key: key, Value: value})
+			}
+			return ConstValue{Kind: ConstDict, Dict: entries}, true
+		}
 		elems := make([]ConstValue, 0, len(n.Elems))
 		for i, elem := range n.Elems {
 			if i < len(n.Spreads) && n.Spreads[i] {
@@ -395,7 +416,28 @@ func (a *Analyzer) evalConstIndexExpr(expr *ast.IndexExpr) (ConstValue, bool) {
 		return ConstValue{}, false
 	}
 	index, ok := a.evalConstExpr(expr.Index)
-	if !ok || index.Kind != ConstInt {
+	if !ok {
+		return ConstValue{}, false
+	}
+	if object.Kind == ConstDict {
+		objType := a.exprTypes[expr.Object]
+		dictType, _, ok := builtinDictReceiverType(objType)
+		if !ok || dictType == nil {
+			return ConstValue{}, false
+		}
+		key, ok := constDictKeyFingerprint(dictType.Key, index)
+		if !ok {
+			return ConstValue{}, false
+		}
+		for _, entry := range object.Dict {
+			entryKey, ok := constDictKeyFingerprint(dictType.Key, entry.Key)
+			if ok && entryKey == key {
+				return entry.Value, true
+			}
+		}
+		return ConstValue{}, false
+	}
+	if index.Kind != ConstInt {
 		return ConstValue{}, false
 	}
 	if index.Int >= 0 {

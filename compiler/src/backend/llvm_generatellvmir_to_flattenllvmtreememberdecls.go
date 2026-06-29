@@ -543,7 +543,9 @@ func (g *llvmGenerator) emitDeclInNamespace(decl ast.Decl, namespace string) err
 		// consts cannot be inlined at a dynamic-index use site. Emit those as
 		// private read-only LLVM globals so `CONST_ARRAY[i]` lowers to a GEP.
 		if sym, ok := g.symbolsByNode[decl]; ok && n.Value != nil {
-			if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
+			_, isArray := sym.Type.(*semantic.ArrayType)
+			_, isDict := sym.Type.(*semantic.DictType)
+			if isArray || isDict {
 				globalValue, err := g.ensureGlobalDeclared(sym.Name, sym.Type, false)
 				if err != nil {
 					return err

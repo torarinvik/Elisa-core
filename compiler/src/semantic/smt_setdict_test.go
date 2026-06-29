@@ -44,7 +44,7 @@ def probe(s: set[i64], p: i64) -> void:
 // dict membership/lookup wiring is exercised end-to-end from source spelling (`d.contains(k)` /
 // `d.get(k)`) inside the test package (which has no stdlib prelude).
 const dictSurfaceStubs = `
-def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
     return null
 
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:

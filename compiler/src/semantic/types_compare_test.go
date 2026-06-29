@@ -39,6 +39,19 @@ func TestAssignableToFuncTypesIsCovariantInReturn(t *testing.T) {
 	}
 }
 
+func TestAssignableToRejectsImmutableRefToMutableRef(t *testing.T) {
+	intType := &BuiltinType{Name: "i64"}
+	immutableRef := &RefType{Elem: intType, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+	mutableRef := &RefType{Elem: intType, Mutable: true, State: RefStateNullable, Storage: RefStorageAny, ExplicitStorage: true}
+
+	if AssignableTo(mutableRef, immutableRef) {
+		t.Fatalf("immutable nullable ref must not be assignable to mutable nullable ref")
+	}
+	if !AssignableTo(immutableRef, mutableRef) {
+		t.Fatalf("mutable nullable ref should be assignable to immutable nullable ref")
+	}
+}
+
 func TestFuncTypeProofMetadataDoesNotAffectTypeIdentity(t *testing.T) {
 	intType := &BuiltinType{Name: "int"}
 	plain := &FuncType{

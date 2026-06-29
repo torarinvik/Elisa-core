@@ -65,6 +65,11 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
 		return result
 	}
+	if result, handled := a.analyzeBuiltinDictIndexExpr(expr, objType); handled {
+		a.reportInvalidRegionUse(expr, result)
+		a.reportBorrowedOwnerRefUseAfterConsume(expr, result)
+		return result
+	}
 	indexExpected := a.namedTypes["usize"]
 	if indexExpected == nil {
 		indexExpected = builtinUsizeType()
@@ -261,6 +266,12 @@ func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
 
 	var resultType Type
 	switch {
+	case isIndex && idx.AsBuiltinDictGet != nil:
+		if refType, ok := valueType.(*RefType); ok && refType.State == RefStateNullable {
+			resultType = refType.Elem
+		} else {
+			resultType = valueType
+		}
 	case isIndex:
 		// The element type produced by analyzeIndexExpr is the unwrapped result;
 		// `get` performs the bounds check, so the access is total.

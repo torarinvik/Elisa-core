@@ -12,7 +12,7 @@ func TestDictInteriorRefInvalidatedByInsert(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "dict_interior_insert.elisa", `def f(owner: mutable Arena&) -> void:
     m: mutable dict[i64, i64] = arena_dict_new[i64, i64](owner, 16)
     _ = arena_dict_put_checked[i64, i64](owner, m.ref[mutable dict[i64, i64]&], 1, 100)
-    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[dict[i64, i64]&], 1)
+    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[mutable dict[i64, i64]&], 1)
     _ = arena_dict_put_checked[i64, i64](owner, m.ref[mutable dict[i64, i64]&], 2, 200)
     ok: bool = v != null
     if ok:
@@ -29,7 +29,7 @@ func TestDictInteriorRefInvalidatedByInsertInLoop(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "dict_interior_loop.elisa", `def f(owner: mutable Arena&) -> void:
     m: mutable dict[i64, i64] = arena_dict_new[i64, i64](owner, 4)
     _ = arena_dict_put_checked[i64, i64](owner, m.ref[mutable dict[i64, i64]&], 1, 100)
-    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[dict[i64, i64]&], 1)
+    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[mutable dict[i64, i64]&], 1)
     for k in 0..<100:
         _ = arena_dict_put_checked[i64, i64](owner, m.ref[mutable dict[i64, i64]&], (k + 10).i64(), k.i64())
     ok: bool = v != null
@@ -49,7 +49,7 @@ func TestDictInteriorRefValidBeforeInsert(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "dict_interior_ok.elisa", `def f(owner: mutable Arena&) -> void:
     m: mutable dict[i64, i64] = arena_dict_new[i64, i64](owner, 16)
     _ = arena_dict_put_checked[i64, i64](owner, m.ref[mutable dict[i64, i64]&], 1, 100)
-    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[dict[i64, i64]&], 1)
+    v: mutable i64&? = arena_dict_get[i64, i64](m.ref[mutable dict[i64, i64]&], 1)
     if v != null:
         v[0] <- 7
 `)

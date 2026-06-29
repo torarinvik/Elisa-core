@@ -699,6 +699,9 @@ type IndexExpr struct {
 	// MemoryManager_ReadU<N>(mem, base + offset) call instead of an index, making the lowered code
 	// byte-identical to the hand-written read. nil for ordinary indexing.
 	AsOverlayCall *CallExpr
+	// AsBuiltinDictGet is set by the analyzer when `dict[key]` is reinterpreted as the builtin
+	// optional dictionary lookup. When non-nil, codegen emits this call instead of ordinary indexing.
+	AsBuiltinDictGet *CallExpr
 }
 type SliceExpr struct {
 	Position lexer.Pos

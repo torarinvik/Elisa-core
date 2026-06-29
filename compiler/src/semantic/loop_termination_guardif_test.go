@@ -105,6 +105,42 @@ def loop(n: i64):
 	guardIfRejected(t, "call_in_branch.elisa", src)
 }
 
+func TestGuardIf_OpaqueExitGuardFallthroughProgress_Proves(t *testing.T) {
+	src := `def hit(x: usize) -> bool:
+    return x == 5
+
+def loop(n: usize):
+    j: mutable usize = 0
+    while j < n:
+        decreases n - j
+        if hit(j):
+            return
+        j <- j + 1
+`
+	guardIfProved(t, "opaque_exit_guard_fallthrough_progress.elisa", src)
+}
+
+func TestGuardIf_IgnoredBookkeepingWithCapacityMeasure_Proves(t *testing.T) {
+	src := `def hit(x: usize) -> bool:
+    return x == 5
+
+def loop(capacity: usize):
+    slot: mutable usize = 0
+    insert_slot: mutable usize = capacity
+    probed: mutable usize = 0
+    while probed < capacity:
+        decreases capacity - probed
+        if slot == 0:
+            return
+        if hit(slot):
+            return
+        insert_slot <- slot if slot == 2 and insert_slot == capacity else insert_slot
+        slot <- slot + 1
+        probed <- probed + 1
+`
+	guardIfProved(t, "ignored_bookkeeping_capacity_measure.elisa", src)
+}
+
 // nested `if` where one deep path does not decrease (the inner empty-else no-op path).
 func TestGuardIf_NestedDeepPathNoDecrease_Rejected(t *testing.T) {
 	src := `def loop(n: i64):

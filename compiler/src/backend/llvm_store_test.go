@@ -15,7 +15,13 @@ func TestGenerateLLVMIRUsesExplicitSOAColumns(t *testing.T) {
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
+def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> T&?:
+    return null
+
+def arena_dict_get_mut[T](m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
+    return null
+
+def arena_dict_get[T](m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
     return null
 
 def arena_dict_put[T](a: mutable Arena&, m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape], value: T) -> mutable T&?:
@@ -259,7 +265,10 @@ def build() -> i64 error[Error] can[Abort.Panic, Memory.Allocate]:
 }
 
 func TestGenerateLLVMIRRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
-	src := `def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+	src := `def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
+    return null
+
+def arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
     return null
 
 def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&?:

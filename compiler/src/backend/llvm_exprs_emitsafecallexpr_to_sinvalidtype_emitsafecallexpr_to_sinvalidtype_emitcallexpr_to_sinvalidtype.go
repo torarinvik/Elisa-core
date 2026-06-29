@@ -578,11 +578,11 @@ func builtinSetReceiverType(t semantic.Type) (*semantic.SetType, *semantic.RefTy
 	return setType, refType, true
 }
 
-func builtinDictEntryValueRefType(dictType *semantic.DictType) *semantic.RefType {
+func builtinDictEntryValueRefType(dictType *semantic.DictType, mutable bool) *semantic.RefType {
 	if dictType == nil {
-		return &semantic.RefType{Elem: sInvalidType(), Mutable: true, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+		return &semantic.RefType{Elem: sInvalidType(), Mutable: mutable, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	}
-	return &semantic.RefType{Elem: dictType.Value, Mutable: true, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	return &semantic.RefType{Elem: dictType.Value, Mutable: mutable, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 }
 func sInvalidType() semantic.Type {
 	return &semantic.InvalidType{}

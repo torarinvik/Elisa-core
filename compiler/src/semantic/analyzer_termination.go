@@ -321,13 +321,14 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 			a.errorf(m.Pos(), "loop `decreases` measure must be an integer, got %s", t)
 		}
 	}
-	subst, captured := a.captureLoopBodyEffectForTermination(stmt.Body)
+	focus := terminationMeasureIdentSet(measures)
+	subst, captured := a.captureLoopBodyEffectForTerminationFocused(stmt.Body, focus)
 	if !captured {
 		// The body is not straight-line (it contains `if`/`break`/`return`, etc.). Attempt GUARD-`if`
 		// path modeling: enumerate the body's mutually-exclusive paths and require the measure to
 		// strictly decrease (and stay >= 0) on EVERY non-exiting path. ALL paths must discharge — a
 		// single non-decreasing non-exit path (including the implicit no-op `else`) rejects the loop.
-		if paths, ok := a.enumerateLoopBodyPaths(stmt.Body); ok {
+		if paths, ok := a.enumerateLoopBodyPaths(stmt.Body, focus); ok {
 			for _, p := range paths {
 				a.typeLoopSubstCastsForSMT(p.subst)
 			}
@@ -484,6 +485,14 @@ func leadingDecreases(body []ast.Stmt) []*ast.ContractStmt {
 		}
 	}
 	return out
+}
+
+func terminationMeasureIdentSet(measures []ast.Expr) map[string]bool {
+	focus := map[string]bool{}
+	for _, measure := range measures {
+		collectArithIdents(measure, focus)
+	}
+	return focus
 }
 
 // PURE / TOTAL function defining-equation eligibility (feat/recursive-axiom-b).

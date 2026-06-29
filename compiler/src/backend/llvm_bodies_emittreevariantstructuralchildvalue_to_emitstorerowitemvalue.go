@@ -24,6 +24,8 @@ func iterLoopItemTypeBackend(t semantic.Type) (semantic.Type, bool) {
 		return tt.Elem, true
 	case *semantic.DArrayType:
 		return tt.Elem, true
+	case *semantic.DictType:
+		return semantic.DictEntryTupleType(tt), true
 	case *semantic.ViewType:
 		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return nil, false

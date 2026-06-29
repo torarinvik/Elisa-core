@@ -232,7 +232,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		}
 		return g.ensureGenericInstanceStruct(&semantic.GenericInstanceType{Name: "DynSet", Base: base, Args: []semantic.Type{tt.Elem}})
 	case *semantic.DictEntryType:
-		dictRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict, Mutable: true, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+		dictRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict, Mutable: tt.Mutable, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 		if err != nil {
 			return nil, err
 		}
@@ -240,7 +240,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		if err != nil {
 			return nil, err
 		}
-		valueRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict.Value, Mutable: true, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
+		valueRefType, err := g.lowerType(&semantic.RefType{Elem: tt.Dict.Value, Mutable: tt.Mutable, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny, ExplicitStorage: true})
 		if err != nil {
 			return nil, err
 		}

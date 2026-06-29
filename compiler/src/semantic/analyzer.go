@@ -18,6 +18,7 @@ const (
 	ConstTuple
 	ConstList
 	ConstRecord
+	ConstDict
 	ConstOptional
 )
 
@@ -35,8 +36,14 @@ type ConstValue struct {
 	String string
 	Elems  []ConstValue
 	Fields map[string]ConstValue
+	Dict   []ConstDictEntry
 	Some   bool
 	Value  *ConstValue
+}
+
+type ConstDictEntry struct {
+	Key   ConstValue
+	Value ConstValue
 }
 
 type ShapeTransformSpec struct {
@@ -211,6 +218,7 @@ type Analyzer struct {
 	interfaceAssocTypeScopes []map[string]Type
 	constParamScopes         []map[string]Type
 	constEvalScopes          []map[string]ConstValue
+	constInitDepth           int
 	staticContextDepth       int
 	staticCallDepth          int
 	shapeParamScopes         []map[string]Shape
@@ -377,16 +385,16 @@ type Analyzer struct {
 	// measure law, docs/89 Stage 5). It opts the function's range loops into the existing autovec
 	// verifier: each ForStmt is tagged AutovecExpected, so the post-optimization pass warns (verify-
 	// only, never build-gating) if the loop did not vectorize. Saved/restored per function.
-	currentFunctionExpectsVectorize   bool
-	currentProgressSummary            *FunctionProgressSummary
-	loopDepth                         int
+	currentFunctionExpectsVectorize bool
+	currentProgressSummary          *FunctionProgressSummary
+	loopDepth                       int
 	// activeOuterLoopInvariants is a stack of proven outer-loop invariant clauses accumulated as the
 	// analyzer descends into nested loops. Each push corresponds to one WhileStmt whose invariants were
 	// fully proven; each pop happens after the body is analyzed. The inner-loop invariant prover reads
 	// this stack to use outer invariants as additional hypotheses when the outer invariant's dependency
 	// variables are disjoint from the inner loop's assigned variables (conservative: if the inner loop
 	// mutates ANY variable the outer invariant depends on, the outer invariant is NOT admitted).
-	activeOuterLoopInvariants []*ast.ContractStmt
+	activeOuterLoopInvariants         []*ast.ContractStmt
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int
@@ -450,16 +458,16 @@ type Analyzer struct {
 	// negated obligation — has the same verdict and counterexample; reusing it is sound and skips the
 	// round-trip. Lazily created; lives for one analysis pass (a query embeds its function's facts, so a
 	// cross-function key collision means a byte-identical proof).
-	smtQueryCache                    map[string]smtQueryResult
-	proofReport                      []ProofFact
-	currentProofCategory             ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
-	indexBoundsRuntimeCount          int                     // elision telemetry: index expressions that are NOT statically proven in-bounds
+	smtQueryCache           map[string]smtQueryResult
+	proofReport             []ProofFact
+	currentProofCategory    ProofObligationCategory // elision-telemetry tag stamped on the next recordProof call; cleared after each call
+	indexBoundsRuntimeCount int                     // elision telemetry: index expressions that are NOT statically proven in-bounds
 	// zeroedStructLocals tracks locals declared `= zeroed` whose type is a struct and whose root has
 	// not been wholesale-replaced since declaration. Cleared for a root in invalidateWrittenFieldsForRoot
 	// when called for a non-field write (a root reassignment, borrow, or mutating-callee escape).
 	// Used by zeroedStructLocalFieldMap to supply zero as the baseline value for unwritten struct fields
 	// in `ensure result.f == v` postcondition proofs where `result` is a zeroed-then-mutated local.
-	zeroedStructLocals map[string]bool
+	zeroedStructLocals               map[string]bool
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool

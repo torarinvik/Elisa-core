@@ -297,7 +297,7 @@ func dictEntrySyntheticField(t Type, fieldName string) (Field, bool) {
 	case "found":
 		return Field{Name: "found", Type: &BuiltinType{Name: "bool"}, Mutable: false}, true
 	case "value":
-		return Field{Name: "value", Type: builtinDictEntryValueRefType(entryType.Dict), Mutable: false}, true
+		return Field{Name: "value", Type: builtinDictEntryValueRefType(entryType.Dict, entryType.Mutable), Mutable: false}, true
 	default:
 		return Field{}, false
 	}

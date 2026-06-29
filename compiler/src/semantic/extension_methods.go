@@ -213,7 +213,13 @@ func (a *Analyzer) receiverMatchRank(expected, actual Type) int {
 			}
 		}
 	}
-	return 1 + typeSpecificityScore(eBase)
+	rank := 1 + typeSpecificityScore(eBase)
+	if expectedRef, ok := expected.(*RefType); ok && expectedRef != nil {
+		if actualRef, ok := actual.(*RefType); ok && actualRef != nil && expectedRef.Mutable == actualRef.Mutable {
+			rank++
+		}
+	}
+	return rank
 }
 
 func unwrapReceiverRef(t Type) Type {
@@ -308,6 +314,9 @@ func (a *Analyzer) ufcsReceiverAssignableTo(expected Type, actual Type) bool {
 	}
 	if actualRef, ok := actual.(*RefType); ok && actualRef != nil {
 		if ufcsReceiverBaseCompatible(expectedRef.Elem, actualRef.Elem) {
+			if expectedRef.Mutable && !actualRef.Mutable {
+				return false
+			}
 			return expectedRef.State == RefStateNonNull || expectedRef.State == RefStateNullable
 		}
 	}

@@ -121,6 +121,8 @@ func (t *ConstValueType) String() string {
 		return "<const list>"
 	case ConstRecord:
 		return "<const record>"
+	case ConstDict:
+		return "<const dict>"
 	case ConstOptional:
 		if !t.Value.Some {
 			return "<const none>"

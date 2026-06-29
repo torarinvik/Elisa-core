@@ -815,6 +815,28 @@ def ctx_hash_cstr(s: cstr) -> u64:
         h <- h * 0x100000001b3
     return h
 
+def ctx_hash_sview(view: sview) -> u64:
+    h: mutable u64 = 0xcbf29ce484222325
+    i: mutable i64 = 0
+    while i < view.len:
+        h <- h ^ view.data[i.usize()].u64()
+        h <- h * 0x100000001b3
+        i <- i + 1
+    return h
+
+def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
+    false return if view.len < 0
+    i: mutable usize = 0
+    len: usize = view.len.usize()
+    remaining: mutable usize = len
+    while remaining > 0:
+        decreases remaining
+        if text[i] != view.data[i]:
+            return false
+        i <- i + 1
+        remaining <- remaining - 1
+    return text[len] == 0
+
 def ctx_hash_u64(value: u64) -> u64:
     h: mutable u64 = value
     h <- (h ^ (h >> 30)) * 0xbf58476d1ce4e5b9
@@ -847,6 +869,29 @@ def arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult:
             slot <- (slot + 1.usize()) & mask
             probed <- probed + 1.usize()
     DictProbeResult{index: insert_slot, found: false} return if insert_slot != m.capacity
+    return DictProbeResult{index: 0, found: false}
+
+def arena_dict_find_cstr_view_index[T](m: dict[cstr, T]&, key: sview) -> DictProbeResult:
+    DictProbeResult{index: 0, found: false} return if m.capacity == 0 or m.items == null
+
+    assert m.items != null
+    items: DictBucket[cstr, T]& = m.items
+    capacity: usize = m.capacity
+    mask: usize = capacity - 1
+    slot: mutable usize = ctx_hash_sview(key).usize() & mask
+    insert_slot: mutable usize = capacity
+    remaining: mutable usize = capacity
+    while remaining > 0:
+        decreases remaining
+        if items[slot].state == 0:
+            final_slot: usize = slot if insert_slot == capacity else insert_slot
+            return DictProbeResult{index: final_slot, found: false}
+        if items[slot].state == 1 and ctx_cstr_eq_sview(items[slot].key, key):
+            return DictProbeResult{index: slot, found: true}
+        insert_slot <- slot if items[slot].state == 2 and insert_slot == capacity else insert_slot
+        slot <- (slot + 1) & mask
+        remaining <- remaining - 1
+    DictProbeResult{index: insert_slot, found: false} return if insert_slot != capacity
     return DictProbeResult{index: 0, found: false}
 
 # Place (key, value) into a table that is known to have room and to not already contain `key`
@@ -913,15 +958,50 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
                     arena_dict_place_fresh(m, old_items[i].key, old_items[i].value)
         return
 
-def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
-    null return if m.count == 0 or m.items == null
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
+	null return if m.count == 0 or m.items == null
 
-    probe: DictProbeResult = arena_dict_find_index(m, key)
-    null return if not probe.found
+	probe: DictProbeResult = arena_dict_find_index(m, key)
+	null return if not probe.found
 
-    assert m.items != null
-    items: mutable DictBucket[K, T]& = m.items
-    return &items[probe.index].value
+	assert m.items != null
+	items: DictBucket[K, T]& = m.items
+	return &items[probe.index].value
+
+def arena_dict_get_cstr_view[T](m: dict[cstr, T]&, key: sview) -> T&?:
+	null return if m.count == 0 or m.items == null
+
+	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
+	null return if not probe.found
+
+	assert m.items != null
+	items: DictBucket[cstr, T]& = m.items
+	return &items[probe.index].value
+
+@internal
+def arena_dict_get_mut[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
+	null return if m.count == 0 or m.items == null
+
+	probe: DictProbeResult = arena_dict_find_index(m, key)
+	null return if not probe.found
+
+	assert m.items != null
+	items: mutable DictBucket[K, T]& = m.items
+	return &items[probe.index].value
+
+@internal
+def arena_dict_get_cstr_view_mut[T](m: mutable dict[cstr, T]&, key: sview) -> mutable T&?:
+	null return if m.count == 0 or m.items == null
+
+	probe: DictProbeResult = arena_dict_find_cstr_view_index(m, key)
+	null return if not probe.found
+
+	assert m.items != null
+	items: mutable DictBucket[cstr, T]& = m.items
+	return &items[probe.index].value
+
+def arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
+	return arena_dict_get_mut(m, key)
 
 def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
@@ -955,7 +1035,7 @@ def arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, valu
 
 def arena_dict_get_or_insert[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
-        existing: mutable T&? = arena_dict_get(m, key)
+		existing: mutable T&? = arena_dict_get_mut(m, key)
         existing return if existing != null
         return try arena_dict_put(a, m, key, value)
 
@@ -1049,8 +1129,11 @@ def arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], 
     can Memory.Allocate, Abort.Panic:
         try arena_dict_reserve[cstr[key_shape], i64](a, m, min_capacity)
 
-def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?:
-    return arena_dict_get[cstr[key_shape], i64](m, key)
+def arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64&?:
+	return arena_dict_get[cstr[key_shape], i64](m, key)
+
+def arena_dict_get_mut__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?:
+	return arena_dict_get_mut[cstr[key_shape], i64](m, key)
 
 def arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]:
     can Memory.Allocate, Abort.Panic:
@@ -1290,7 +1373,7 @@ def index_map_valid_index[K, T](map: IndexMap[K, T]&, index: usize) -> bool:
 
 
 def index_map_find_index[K, T](map: IndexMap[K, T]&, key: K) -> usize?:
-    found: mutable usize&? = arena_dict_get[K, usize](map.by_key, key)
+	found: usize&? = arena_dict_get[K, usize](map.by_key, key)
     null return if found == null
     trusted Unsafe.UncheckedIndex:
         return found[0]

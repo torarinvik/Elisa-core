@@ -523,7 +523,11 @@ func (s *functionState) emitBuiltinDictEntryCall(expr *ast.CallExpr) (C.LLVMValu
 	if err != nil {
 		return nil, nil, true, err
 	}
-	getCallee, getType, err := s.ensureRuntimeFunction("arena_dict_get", map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
+	getHelper := "arena_dict_get"
+	if resultType.Mutable {
+		getHelper = "arena_dict_get_mut"
+	}
+	getCallee, getType, err := s.ensureRuntimeFunction(getHelper, map[string]semantic.Type{"K": dictType.Key, "T": dictType.Value})
 	if err != nil {
 		return nil, nil, true, err
 	}
@@ -599,7 +603,7 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict, true)
 	valueRefLLVMType, err := s.g.lowerType(valueRefType)
 	if err != nil {
 		return nil, nil, true, err
@@ -740,7 +744,7 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		return nil, nil, true, err
 	}
 	value := s.buildCall(llvmType, callee, []C.LLVMValueRef{owner.arenaRef, dictValue, keyValue, insertedArg}, resultName)
-	return value, builtinDictEntryValueRefType(dictType), true, nil
+	return value, builtinDictEntryValueRefType(dictType, true), true, nil
 }
 
 func (s *functionState) emitBuiltinSetReceiverValue(receiver ast.Expr, receiverType semantic.Type) (C.LLVMValueRef, *semantic.SetType, error) {

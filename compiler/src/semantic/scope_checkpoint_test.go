@@ -188,7 +188,10 @@ layout soa struct PendingGotoStore:
     name_key: u32
     depth: u32
 
-def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
+def arena_dict_get[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> T&?:
+    return null
+
+def arena_dict_get[T](m: mutable dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> mutable T&?:
     return null
 
 def arena_dict_contains[T](m: dict[cstr[key_shape], T]&, key: cstr[key_shape]) -> bool:
@@ -313,7 +316,10 @@ func TestAnalyzeRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 struct Key:
     id: u32
 
-def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:
+def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
+    return null
+
+def arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?:
     return null
 
 def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:

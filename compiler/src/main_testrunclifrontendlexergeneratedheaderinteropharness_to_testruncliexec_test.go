@@ -373,7 +373,7 @@ func TestRunCLIRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "generic_key_dict_runtime_reject.elisa")
 	// Integral keys are now supported; a float key (no safe value equality) is still rejected.
-	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?:\n    return null\n\ndef bad(values: dict[f64, i64], key: f64) -> mutable i64&?:\n    return values.get(key)\n"
+	src := "def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:\n    return null\n\ndef bad(values: dict[f64, i64], key: f64) -> i64&?:\n    return values.get(key)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write generic-key dict runtime rejection fixture: %v", err)
 	}

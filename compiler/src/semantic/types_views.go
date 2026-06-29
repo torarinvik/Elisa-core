@@ -55,6 +55,13 @@ func EnumerateTupleType(item Type) *TupleType {
 	return &TupleType{Fields: []TupleField{{Name: "index", Type: &BuiltinType{Name: "usize"}}, {Name: "value", Type: item}}}
 }
 
+func DictEntryTupleType(dict *DictType) *TupleType {
+	if dict == nil {
+		return nil
+	}
+	return &TupleType{Fields: []TupleField{{Name: "key", Type: dict.Key}, {Name: "value", Type: dict.Value}}}
+}
+
 func TreeKindFilteredViewInstance(t Type) (*GenericInstanceType, bool) {
 	gi, ok := t.(*GenericInstanceType)
 	if !ok || gi == nil || gi.Name != "TreeKindFilteredView" || len(gi.Args) != 2 {

@@ -31,6 +31,130 @@ func (s *functionState) emitIterLoopChunksExactItemValue(carrierValue C.LLVMValu
 	}
 	return value, chunkType, nil
 }
+
+func iterLoopIsDictSource(t semantic.Type) bool {
+	switch tt := t.(type) {
+	case *semantic.DictType:
+		return true
+	case *semantic.RefType:
+		_, ok := tt.Elem.(*semantic.DictType)
+		return tt.State == semantic.RefStateNonNull && ok
+	default:
+		return false
+	}
+}
+
+func (s *functionState) iterLoopDictBucketType(dictType *semantic.DictType) (*semantic.GenericInstanceType, C.LLVMTypeRef, error) {
+	base, ok := s.g.result.NamedTypes["DictBucket"]
+	if !ok {
+		return nil, nil, fmt.Errorf("missing runtime struct DictBucket")
+	}
+	bucketType := &semantic.GenericInstanceType{Name: "DictBucket", Base: base, Args: []semantic.Type{dictType.Key, dictType.Value}}
+	llvmType, err := s.g.lowerType(bucketType)
+	if err != nil {
+		return nil, nil, err
+	}
+	return bucketType, llvmType, nil
+}
+
+func (s *functionState) iterLoopDictSourcePtr(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (*semantic.DictType, C.LLVMValueRef, error) {
+	switch tt := sourceType.(type) {
+	case *semantic.DictType:
+		return tt, sourceAlloca, nil
+	case *semantic.RefType:
+		if tt.State != semantic.RefStateNonNull {
+			return nil, nil, fmt.Errorf("iterable loop requires a non-null reference source, got %s", sourceType.String())
+		}
+		dictType, ok := tt.Elem.(*semantic.DictType)
+		if !ok || dictType == nil {
+			return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+		}
+		ptr, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.dict.ref")
+		if err != nil {
+			return nil, nil, err
+		}
+		return dictType, ptr, nil
+	default:
+		return nil, nil, fmt.Errorf("unsupported iterable loop source %s", sourceType.String())
+	}
+}
+
+func (s *functionState) emitIterLoopDictCapacity(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
+	dictType, dictPtr, err := s.iterLoopDictSourcePtr(sourceAlloca, sourceType, sourceName)
+	if err != nil {
+		return nil, err
+	}
+	dictLLVMType, err := s.g.lowerType(dictType)
+	if err != nil {
+		return nil, err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	capacityPtr := C.LLVMBuildStructGEP2(s.builder, dictLLVMType, dictPtr, 3, cStringFree(sourceName+".iter.dict.capacity.ptr"))
+	return s.loadValue(capacityPtr, usizeType, sourceName+".iter.dict.capacity")
+}
+
+func (s *functionState) emitIterLoopDictBucketPtr(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (*semantic.DictType, *semantic.GenericInstanceType, C.LLVMTypeRef, C.LLVMValueRef, error) {
+	dictType, dictPtr, err := s.iterLoopDictSourcePtr(sourceAlloca, sourceType, sourceName)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	bucketType, bucketLLVMType, err := s.iterLoopDictBucketType(dictType)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	dictLLVMType, err := s.g.lowerType(dictType)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	itemsPtrPtr := C.LLVMBuildStructGEP2(s.builder, dictLLVMType, dictPtr, 0, cStringFree(sourceName+".iter.dict.items.ptr"))
+	itemsPtr, err := s.loadValue(itemsPtrPtr, &semantic.RefType{Elem: bucketType, Mutable: true, State: semantic.RefStateNullable, Storage: semantic.RefStorageAny}, sourceName+".iter.dict.items")
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	bucketPtr := C.LLVMBuildGEP2(s.builder, bucketLLVMType, itemsPtr, llvmValueSlicePtr([]C.LLVMValueRef{indexValue}), 1, cStringFree(sourceName+".iter.dict.bucket"))
+	return dictType, bucketType, bucketLLVMType, bucketPtr, nil
+}
+
+func (s *functionState) emitIterLoopDictOccupied(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, error) {
+	_, _, bucketLLVMType, bucketPtr, err := s.emitIterLoopDictBucketPtr(sourceAlloca, sourceType, indexValue, sourceName)
+	if err != nil {
+		return nil, err
+	}
+	statePtr := C.LLVMBuildStructGEP2(s.builder, bucketLLVMType, bucketPtr, 2, cStringFree(sourceName+".iter.dict.state.ptr"))
+	stateValue, err := s.loadValue(statePtr, s.g.result.NamedTypes["u8"], sourceName+".iter.dict.state")
+	if err != nil {
+		return nil, err
+	}
+	occupied := C.LLVMConstInt(C.LLVMInt8TypeInContext(s.g.context), 1, 0)
+	return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntEQ), stateValue, occupied, cStringFree(sourceName+".iter.dict.occupied")), nil
+}
+
+func (s *functionState) emitIterLoopDictEntryValue(sourceAlloca C.LLVMValueRef, sourceType semantic.Type, indexValue C.LLVMValueRef, sourceName string) (C.LLVMValueRef, semantic.Type, error) {
+	dictType, _, bucketLLVMType, bucketPtr, err := s.emitIterLoopDictBucketPtr(sourceAlloca, sourceType, indexValue, sourceName)
+	if err != nil {
+		return nil, nil, err
+	}
+	itemType := semantic.DictEntryTupleType(dictType)
+	itemLLVMType, err := s.g.lowerType(itemType)
+	if err != nil {
+		return nil, nil, err
+	}
+	keyPtr := C.LLVMBuildStructGEP2(s.builder, bucketLLVMType, bucketPtr, 0, cStringFree(sourceName+".iter.dict.key.ptr"))
+	valuePtr := C.LLVMBuildStructGEP2(s.builder, bucketLLVMType, bucketPtr, 1, cStringFree(sourceName+".iter.dict.value.ptr"))
+	keyValue, err := s.loadValue(keyPtr, dictType.Key, sourceName+".iter.dict.key")
+	if err != nil {
+		return nil, nil, err
+	}
+	valueValue, err := s.loadValue(valuePtr, dictType.Value, sourceName+".iter.dict.value")
+	if err != nil {
+		return nil, nil, err
+	}
+	itemValue := C.LLVMGetUndef(itemLLVMType)
+	itemValue = C.LLVMBuildInsertValue(s.builder, itemValue, keyValue, 0, cStringFree(sourceName+".iter.dict.item.key"))
+	itemValue = C.LLVMBuildInsertValue(s.builder, itemValue, valueValue, 1, cStringFree(sourceName+".iter.dict.item.value"))
+	return itemValue, itemType, nil
+}
+
 func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LLVMValueRef, sourceType semantic.Type, sourceName string) (C.LLVMValueRef, error) {
 	if colExpr, ok := sourceExpr.(*ast.EnumColumnExpr); ok {
 		return s.emitEnumColumnScanCount(colExpr, sourceName)
@@ -57,6 +181,8 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 			return nil, err
 		}
 		return lenValue, nil
+	case *semantic.DictType:
+		return s.emitIterLoopDictCapacity(sourceAlloca, sourceType, sourceName)
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
 	case *semantic.DStrType:
@@ -151,6 +277,8 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 				return nil, err
 			}
 			return lenValue, nil
+		case *semantic.DictType:
+			return s.emitIterLoopDictCapacity(sourceAlloca, sourceType, sourceName)
 		case *semantic.StoreRowsViewType:
 			return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
 		case *semantic.DStrType:
@@ -330,6 +458,8 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		}
 		value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 		return value, elemType, err
+	case *semantic.DictType:
+		return s.emitIterLoopDictEntryValue(sourceAlloca, sourceType, indexValue, sourceName)
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
 	case *semantic.DStrType, *semantic.SViewType:
@@ -376,6 +506,8 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 			}
 			value, err := s.loadValue(ptr, elemType, sourceName+".iter.value")
 			return value, elemType, err
+		case *semantic.DictType:
+			return s.emitIterLoopDictEntryValue(sourceAlloca, sourceType, indexValue, sourceName)
 		case *semantic.StoreRowsViewType:
 			return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
 		case *semantic.DStrType, *semantic.SViewType:

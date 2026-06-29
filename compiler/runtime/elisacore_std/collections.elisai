@@ -438,9 +438,15 @@ extern arena_dict_next_capacity(min_capacity: usize) -> usize
 
 extern ctx_hash_cstr(s: cstr) -> u64
 
+extern ctx_hash_sview(view: sview) -> u64
+
+extern ctx_cstr_eq_sview(text: cstr, view: sview) -> bool
+
 extern ctx_hash_u64(value: u64) -> u64
 
 extern arena_dict_find_index[K, T](m: dict[K, T]&, key: K) -> DictProbeResult
+
+extern arena_dict_find_cstr_view_index[T](m: dict[cstr, T]&, key: sview) -> DictProbeResult
 
 extern arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> void
 
@@ -450,7 +456,11 @@ extern arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[
 
 extern arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capacity: usize) -> void error[RuntimeError]
 
-extern arena_dict_get[K, T](m: dict[K, T]&, key: K) -> mutable T&?
+extern arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?
+
+extern arena_dict_get_cstr_view[T](m: dict[cstr, T]&, key: sview) -> T&?
+
+extern arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?
 
 extern arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
 
@@ -478,7 +488,9 @@ extern arena_dict_new__i64(a: mutable Arena&, initial_capacity: usize) -> dict[c
 
 extern arena_dict_reserve__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, min_capacity: usize) -> void error[RuntimeError]
 
-extern arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?
+extern arena_dict_get__i64(m: dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> i64&?
+
+extern arena_dict_get_mut__i64(m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape]) -> mutable i64&?
 
 extern arena_dict_put__i64(a: mutable Arena&, m: mutable dict[cstr[key_shape], i64]&, key: cstr[key_shape], value: i64) -> mutable i64&? error[RuntimeError]
 

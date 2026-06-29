@@ -169,6 +169,49 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 			}
 		}
 		return nil, fmt.Errorf("identifier %s is not a constant global initializer", n.Name)
+	case *ast.FieldExpr:
+		if value, ok, err := g.constEnumFieldExprValue(n, actual); err != nil {
+			return nil, err
+		} else if ok {
+			return value, nil
+		}
+		if value, ok := g.evalConstExpr(expr); ok {
+			coercedType := expected
+			if coercedType == nil {
+				coercedType = g.exprType(expr)
+			}
+			if coercedType == nil {
+				coercedType = constValueType(g.result, value)
+			}
+			if coercedType == nil {
+				return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
+			}
+			return g.constValueAsLLVM(value, coercedType)
+		}
+		if parts, ok := qualifiedFieldParts(expr); ok && len(parts) > 0 {
+			name := strings.Join(parts, ".")
+			for _, candidate := range llvmVisibleGlobalNames(namespace, name) {
+				if value, ok := g.constValue(candidate); ok {
+					coercedType := expected
+					if coercedType == nil && g.result != nil && g.result.GlobalScope != nil {
+						if sym, ok := g.result.GlobalScope.Lookup(candidate); ok && sym.Kind == semantic.SymbolConst {
+							coercedType = sym.Type
+						}
+					}
+					if coercedType == nil {
+						coercedType = g.exprType(expr)
+					}
+					if coercedType == nil {
+						coercedType = constValueType(g.result, value)
+					}
+					if coercedType == nil {
+						return nil, fmt.Errorf("could not infer type for constant global initializer %T", expr)
+					}
+					return g.constValueAsLLVM(value, coercedType)
+				}
+			}
+		}
+		return nil, fmt.Errorf("unsupported global initializer expression %T", expr)
 	case *ast.StructLitExpr:
 		stType := g.exprType(expr)
 		if expected != nil {
@@ -199,11 +242,14 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		}
 		return C.LLVMConstNamedStruct(llvmType, llvmValueSlicePtr(values), C.unsigned(len(values))), nil
 	case *ast.ListLitExpr:
-		arrayType := expected
-		if arrayType == nil {
-			arrayType = g.exprType(expr)
+		literalType := expected
+		if literalType == nil {
+			literalType = g.exprType(expr)
 		}
-		fixedArray, ok := arrayType.(*semantic.ArrayType)
+		if dictType, ok := literalType.(*semantic.DictType); ok && n.Brace && len(n.Keys) > 0 {
+			return g.constDictLiteralValue(n, dictType, namespace)
+		}
+		fixedArray, ok := literalType.(*semantic.ArrayType)
 		if !ok {
 			return nil, fmt.Errorf("array literal global initializer requires a fixed array type")
 		}
@@ -260,6 +306,30 @@ func (g *llvmGenerator) constExprValueInNamespace(expr ast.Expr, expected semant
 		}
 		return nil, fmt.Errorf("unsupported global initializer expression %T", expr)
 	}
+}
+
+func (g *llvmGenerator) constEnumFieldExprValue(expr *ast.FieldExpr, expected semantic.Type) (C.LLVMValueRef, bool, error) {
+	constEnumType, ok := semantic.StripAggregateStateType(expected).(*semantic.ConstEnumType)
+	if !ok || constEnumType == nil {
+		return nil, false, nil
+	}
+	parts, ok := qualifiedFieldParts(expr)
+	if !ok || len(parts) == 0 {
+		return nil, false, nil
+	}
+	for i := len(parts) - 1; i >= 0; i-- {
+		memberName := strings.Join(parts[i:], ".")
+		member, ok := constEnumType.Member(memberName)
+		if !ok || member == nil {
+			continue
+		}
+		llvmType, err := g.lowerType(constEnumType)
+		if err != nil {
+			return nil, false, err
+		}
+		return C.LLVMConstInt(llvmType, C.ulonglong(member.Value), boolToLLVMBool(member.Value < 0)), true, nil
+	}
+	return nil, false, nil
 }
 
 func (g *llvmGenerator) resolveConstAggregateExpr(expr ast.Expr) (ast.Expr, semantic.Type, bool, error) {

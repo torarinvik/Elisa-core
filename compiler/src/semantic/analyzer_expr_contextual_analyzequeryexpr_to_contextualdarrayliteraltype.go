@@ -1,6 +1,9 @@
 package semantic
 
-import "elisacore/src/ast"
+import (
+	"elisacore/src/ast"
+	"fmt"
+)
 
 func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 	if expr == nil {
@@ -247,11 +250,63 @@ func (a *Analyzer) analyzeDictLiteralExpr(expr *ast.ListLitExpr, expected Type) 
 		a.exprTypes[expr] = invalidType
 		return invalidType
 	}
-	if !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil {
+	if a.constInitDepth > 0 {
+		a.validateConstDictLiteralKeys(expr, dictType)
+	}
+	if a.constInitDepth == 0 && !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil {
 		a.errorf(expr.Pos(), "dict literal requires an active in <arena>: scope")
 	}
 	a.recordAnalyzedExprType(expr, dictType)
 	return dictType
+}
+
+func (a *Analyzer) validateConstDictLiteralKeys(expr *ast.ListLitExpr, dictType *DictType) {
+	seen := map[string]bool{}
+	for i, keyExpr := range expr.Keys {
+		value, ok := a.evalConstExpr(keyExpr)
+		if !ok {
+			a.errorf(keyExpr.Pos(), "const dict key %d must be a compile-time value", i)
+			continue
+		}
+		key, ok := constDictKeyFingerprint(dictType.Key, value)
+		if !ok {
+			a.errorf(keyExpr.Pos(), "const dict key %d must be a compile-time cstr, integer, bool, char, or const enum value", i)
+			continue
+		}
+		if seen[key] {
+			a.errorf(keyExpr.Pos(), "duplicate const dict key")
+			continue
+		}
+		seen[key] = true
+	}
+}
+
+func constDictKeyFingerprint(keyType Type, value ConstValue) (string, bool) {
+	if _, ok := StripAggregateStateType(keyType).(*DStrType); ok {
+		if value.Kind != ConstString {
+			return "", false
+		}
+		return "s:" + value.String, true
+	}
+	if IsBoolType(StripAggregateStateType(keyType)) {
+		if value.Kind != ConstBool {
+			return "", false
+		}
+		return fmt.Sprintf("b:%t", value.Bool), true
+	}
+	if _, ok := ConstEnumStorageType(StripAggregateStateType(keyType)); ok {
+		if value.Kind != ConstInt {
+			return "", false
+		}
+		return fmt.Sprintf("i:%d", value.Int), true
+	}
+	if IsIntegralType(StripAggregateStateType(keyType)) {
+		if value.Kind != ConstInt {
+			return "", false
+		}
+		return fmt.Sprintf("i:%d", value.Int), true
+	}
+	return "", false
 }
 
 func (a *Analyzer) analyzeSetLiteralExpr(expr *ast.ListLitExpr, expected Type) Type {

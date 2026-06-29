@@ -66,10 +66,18 @@ func CloneExpr(expr Expr) Expr {
 		index := CloneExpr(n.Index)
 		index2 := CloneExpr(n.Index2)
 		fallback := CloneExpr(n.Fallback)
-		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Index2 != nil && index2 == nil) || (n.Fallback != nil && fallback == nil) {
+		var dictGet Expr
+		if n.AsBuiltinDictGet != nil {
+			dictGet = CloneExpr(n.AsBuiltinDictGet)
+		}
+		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Index2 != nil && index2 == nil) || (n.Fallback != nil && fallback == nil) || (n.AsBuiltinDictGet != nil && dictGet == nil) {
 			return nil
 		}
-		return &IndexExpr{Position: n.Position, Object: object, Index: index, Index2: index2, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
+		cloned := &IndexExpr{Position: n.Position, Object: object, Index: index, Index2: index2, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
+		cloned.AsSpecialize = n.AsSpecialize
+		cloned.AsOverlayCall = n.AsOverlayCall
+		cloned.AsBuiltinDictGet, _ = dictGet.(*CallExpr)
+		return cloned
 	case *SliceExpr:
 		object := CloneExpr(n.Object)
 		start := CloneExpr(n.Start)
@@ -214,10 +222,18 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 		index := CloneExprSubst(n.Index, subst)
 		index2 := CloneExprSubst(n.Index2, subst)
 		fallback := CloneExprSubst(n.Fallback, subst)
-		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Index2 != nil && index2 == nil) || (n.Fallback != nil && fallback == nil) {
+		var dictGet Expr
+		if n.AsBuiltinDictGet != nil {
+			dictGet = CloneExprSubst(n.AsBuiltinDictGet, subst)
+		}
+		if (n.Object != nil && object == nil) || (n.Index != nil && index == nil) || (n.Index2 != nil && index2 == nil) || (n.Fallback != nil && fallback == nil) || (n.AsBuiltinDictGet != nil && dictGet == nil) {
 			return nil
 		}
-		return &IndexExpr{Position: n.Position, Object: object, Index: index, Index2: index2, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
+		cloned := &IndexExpr{Position: n.Position, Object: object, Index: index, Index2: index2, Fallback: fallback, LegacyElseFallback: n.LegacyElseFallback}
+		cloned.AsSpecialize = n.AsSpecialize
+		cloned.AsOverlayCall = n.AsOverlayCall
+		cloned.AsBuiltinDictGet, _ = dictGet.(*CallExpr)
+		return cloned
 	case *TernaryExpr:
 		value := CloneExprSubst(n.Value, subst)
 		cond := CloneExprSubst(n.Cond, subst)

@@ -132,7 +132,7 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 	if err != nil {
 		return nil, nil, true, err
 	}
-	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict, true)
 	valueRefLLVMType, err := s.g.lowerType(valueRefType)
 	if err != nil {
 		return nil, nil, true, err
@@ -200,7 +200,7 @@ func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LL
 	if err != nil {
 		return nil, nil, true, err
 	}
-	valueRefType := builtinDictEntryValueRefType(entryType.Dict)
+	valueRefType := builtinDictEntryValueRefType(entryType.Dict, true)
 	valueRefLLVMType, err := s.g.lowerType(valueRefType)
 	if err != nil {
 		return nil, nil, true, err
@@ -218,6 +218,7 @@ func (s *functionState) emitBuiltinDictEntryFieldExpr(expr *ast.FieldExpr) (C.LL
 		return nil, nil, false, nil
 	}
 }
+
 // backendStructLikeValueType reports whether t is a by-value aggregate (struct or
 // generic struct instance) for which a reference argument should be auto-dereferenced
 // when fed to a by-value parameter.

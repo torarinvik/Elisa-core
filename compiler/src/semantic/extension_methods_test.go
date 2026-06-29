@@ -917,6 +917,44 @@ def drive(d: mutable Door&) -> void:
 	}
 }
 
+func TestAnalyzeUFCSRefOverloadRespectsMutability(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "ufcs_ref_overload_mutability.elisa", `
+struct Box:
+    value: mutable i64
+
+def lookup(box: Box&) -> i64&?:
+    return null
+
+def lookup(box: mutable Box&) -> mutable i64&?:
+    return null
+
+def read_mut(box: mutable Box&) -> mutable i64&?:
+    return box.lookup()
+
+def read_imm(box: Box&) -> i64&?:
+    return box.lookup()
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("unexpected semantic errors: %v", errs)
+	}
+	mutSym, ok := result.GlobalScope.Lookup("read_mut")
+	if !ok {
+		t.Fatal("expected read_mut symbol")
+	}
+	mutCall := mutSym.Node.(*ast.FuncDecl).Body[0].(*ast.ReturnStmt).Value.(*ast.CallExpr)
+	if got := result.ExprTypes[mutCall]; got == nil || got.String() != "mutable i64&?" {
+		t.Fatalf("expected mutable receiver lookup to return mutable i64&?, got %T %v", got, got)
+	}
+	immSym, ok := result.GlobalScope.Lookup("read_imm")
+	if !ok {
+		t.Fatal("expected read_imm symbol")
+	}
+	immCall := immSym.Node.(*ast.FuncDecl).Body[0].(*ast.ReturnStmt).Value.(*ast.CallExpr)
+	if got := result.ExprTypes[immCall]; got == nil || got.String() != "i64&?" {
+		t.Fatalf("expected immutable receiver lookup to return i64&?, got %T %v", got, got)
+	}
+}
+
 // Primitive values are valid UFCS receivers — including a bare integer literal,
 // whose untyped `int` type is accepted against an integer-typed first parameter.
 func TestAnalyzePrimitiveAndLiteralReceiversResolveUFCS(t *testing.T) {

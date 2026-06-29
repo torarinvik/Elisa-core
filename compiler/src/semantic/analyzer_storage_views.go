@@ -184,7 +184,7 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	}
 	name := callBaseName(call)
 	switch name {
-	case "arena_dict_get":
+	case "arena_dict_get", "arena_dict_get_mut", "arena_dict_get_cstr_view", "arena_dict_get_cstr_view_mut":
 		// arena_dict_get returns `&items[i].value` — an interior reference into the dict's bucket
 		// array. A later relocating insert (arena_dict_put*/get_or_insert resize → realloc) moves
 		// that array, dangling the reference. Record a dependency on the dict so the insert
@@ -193,7 +193,7 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 			return storageViewDependencyFromSource(dictContainerArgBase(call.Args[0]))
 		}
 		return storageViewDependencyState{}, false
-	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_get_or_insert":
+	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_put_or_panic", "arena_dict_get_or_insert", "arena_dict_get_or_insert_checked", "arena_dict_get_or_insert_or_panic":
 		// These also return an interior ref into the (post-resize) bucket array — depends on the
 		// dict (arg 1, after the Arena) so a subsequent insert invalidates it.
 		if len(call.Args) >= 2 {
@@ -294,7 +294,7 @@ func (a *Analyzer) invalidateStorageViewsForRelocatingDictCall(call *ast.CallExp
 		return
 	}
 	switch callBaseName(call) {
-	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_get_or_insert":
+	case "arena_dict_put", "arena_dict_put_checked", "arena_dict_put_or_panic", "arena_dict_get_or_insert", "arena_dict_get_or_insert_checked", "arena_dict_get_or_insert_or_panic":
 	default:
 		return
 	}

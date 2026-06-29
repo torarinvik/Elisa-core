@@ -400,6 +400,16 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 			return err
 		}
 	}
+	if iterLoopIsDictSource(iterSourceType) {
+		occupiedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("iter.dict.occupied"))
+		occupiedValue, err := s.emitIterLoopDictOccupied(iterSourceAlloca, iterSourceType, iterIndexValue, sourceName)
+		if err != nil {
+			s.popScope()
+			return err
+		}
+		C.LLVMBuildCondBr(s.builder, occupiedValue, occupiedBB, stepBB)
+		C.LLVMPositionBuilderAtEnd(s.builder, occupiedBB)
+	}
 	var boundItemValue C.LLVMValueRef
 	var boundItemPtr C.LLVMValueRef
 	if stmt.Mode == ast.IterBindValue {

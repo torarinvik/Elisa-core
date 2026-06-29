@@ -652,7 +652,7 @@ type loopArrayStore struct {
 // conservatism is what makes the substitution sound: a captured body provably touches state only
 // through these pure assignments and contains no control flow.
 func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, []loopArrayStore, bool) {
-	return a.captureLoopBodyEffectMode(body, false)
+	return a.captureLoopBodyEffectMode(body, false, nil)
 }
 
 // captureLoopBodyEffectForTermination is the relaxed capture used by the loop-termination prover. It
@@ -663,11 +663,16 @@ func (a *Analyzer) captureLoopBodyEffect(body []ast.Stmt) (map[string]ast.Expr, 
 // weaken, the invariant-preservation array-store SMT model, which keeps using the strict
 // captureLoopBodyEffect.
 func (a *Analyzer) captureLoopBodyEffectForTermination(body []ast.Stmt) (map[string]ast.Expr, bool) {
-	subst, _, ok := a.captureLoopBodyEffectMode(body, true)
+	subst, _, ok := a.captureLoopBodyEffectMode(body, true, nil)
 	return subst, ok
 }
 
-func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination bool) (map[string]ast.Expr, []loopArrayStore, bool) {
+func (a *Analyzer) captureLoopBodyEffectForTerminationFocused(body []ast.Stmt, focus map[string]bool) (map[string]ast.Expr, bool) {
+	subst, _, ok := a.captureLoopBodyEffectMode(body, true, focus)
+	return subst, ok
+}
+
+func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination bool, focus map[string]bool) (map[string]ast.Expr, []loopArrayStore, bool) {
 	// On the termination path the array-store index/value may also contain side-effect-free reads;
 	// on the invariant path they must stay strictly pure-arith so the `(store arr idx val)` SMT model
 	// reads only modeled terms.
@@ -677,6 +682,7 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 	}
 	subst := map[string]ast.Expr{}
 	assigned := map[string]bool{}
+	ignoredAssigned := map[string]bool{}
 	var order []string
 	var stores []loopArrayStore
 	storedArrays := map[string]bool{}
@@ -692,6 +698,13 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 			case *ast.Ident:
 				if target == nil {
 					return nil, nil, false
+				}
+				if forTermination && len(focus) != 0 && !focus[target.Name] {
+					if !exprIsSideEffectFreeForTermination(n.Value) {
+						return nil, nil, false
+					}
+					ignoredAssigned[target.Name] = true
+					continue
 				}
 				if assigned[target.Name] || storedArrays[target.Name] {
 					return nil, nil, false // multiple writes: simultaneous substitution would be wrong
@@ -771,12 +784,49 @@ func (a *Analyzer) captureLoopBodyEffectMode(body []ast.Stmt, forTermination boo
 		refs := map[string]bool{}
 		collectArithIdents(subst[name], refs)
 		for r := range refs {
+			if ignoredAssigned[r] {
+				return nil, nil, false
+			}
 			if r != name && assigned[r] {
 				return nil, nil, false
 			}
 		}
 	}
 	return subst, stores, true
+}
+
+func exprIsSideEffectFreeForTermination(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && exprIsSideEffectFreeForTermination(n.Inner)
+	case *ast.FieldExpr:
+		return n != nil && !n.Safe && exprIsSideEffectFreeForTermination(n.Object)
+	case *ast.IndexExpr:
+		return n != nil &&
+			n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
+			n.AsSpecialize == nil && n.AsOverlayCall == nil &&
+			exprIsSideEffectFreeForTermination(n.Object) && exprIsSideEffectFreeForTermination(n.Index)
+	case *ast.SliceExpr:
+		return n != nil &&
+			exprIsSideEffectFreeForTermination(n.Object) &&
+			(n.Start == nil || exprIsSideEffectFreeForTermination(n.Start)) &&
+			(n.End == nil || exprIsSideEffectFreeForTermination(n.End))
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && exprIsSideEffectFreeForTermination(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && exprIsSideEffectFreeForTermination(n.Left) && exprIsSideEffectFreeForTermination(n.Right)
+	case *ast.CastExpr:
+		return n != nil && exprIsSideEffectFreeForTermination(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil &&
+			exprIsSideEffectFreeForTermination(n.Cond) &&
+			exprIsSideEffectFreeForTermination(n.Value) &&
+			exprIsSideEffectFreeForTermination(n.Alt)
+	default:
+		return false
+	}
 }
 
 // loopStoreTargetBaseKey returns the normalized base key of an array-element store target

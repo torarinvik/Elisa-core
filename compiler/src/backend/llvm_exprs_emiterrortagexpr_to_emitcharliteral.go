@@ -752,12 +752,56 @@ func (s *functionState) emitGetExpr(expr *ast.GetExpr) (C.LLVMValueRef, semantic
 		recovery = &ast.RecoveryClause{Position: expr.Position, Kind: ast.RecoveryReturn, Value: &ast.NullLit{Position: expr.Position}}
 	}
 	if idx, ok := expr.Value.(*ast.IndexExpr); ok {
+		if idx.AsBuiltinDictGet != nil {
+			return s.emitGetDictIndexExpr(idx, recovery, resultType)
+		}
 		return s.emitGetCheckedIndexExpr(idx, recovery, resultType)
 	}
 	if slice, ok := expr.Value.(*ast.SliceExpr); ok {
 		return s.emitGetCheckedSliceExpr(slice, recovery, resultType)
 	}
 	return s.emitGetUnwrapExpr(expr.Value, recovery, resultType)
+}
+
+func (s *functionState) emitGetDictIndexExpr(idx *ast.IndexExpr, recovery *ast.RecoveryClause, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	valueType := s.exprType(idx.AsBuiltinDictGet)
+	if valueType == nil {
+		dictType, _, ok := builtinDictReceiverType(s.exprType(idx.Object))
+		if !ok || dictType == nil {
+			return nil, nil, fmt.Errorf("dict index get missing lookup result type")
+		}
+		mutable := false
+		if call := idx.AsBuiltinDictGet; call != nil {
+			if ident, ok := call.Func.(*ast.Ident); ok && ident != nil {
+				mutable = ident.Name == "arena_dict_get_mut" || ident.Name == "arena_dict_get_cstr_view_mut"
+			}
+		}
+		valueType = builtinDictEntryValueRefType(dictType, mutable)
+	}
+	refType, ok := valueType.(*semantic.RefType)
+	if !ok || refType == nil || refType.State != semantic.RefStateNullable {
+		return nil, nil, fmt.Errorf("dict index get requires nullable ref lookup result")
+	}
+	value, _, err := s.emitExpr(idx.AsBuiltinDictGet, valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	llvmRefType, err := s.g.lowerType(valueType)
+	if err != nil {
+		return nil, nil, err
+	}
+	nullValue := C.LLVMConstNull(llvmRefType)
+	okCond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, nullValue, cStringFree("get.dict.nonnull"))
+	return s.emitGetBranch(okCond, func() (C.LLVMValueRef, error) {
+		loaded, err := s.loadValue(value, refType.Elem, "get.dict.value")
+		if err != nil {
+			return nil, err
+		}
+		if !semantic.SameType(refType.Elem, resultType) && !isVoidType(resultType) {
+			return s.coerceValue(loaded, refType.Elem, resultType)
+		}
+		return loaded, nil
+	}, recovery, resultType)
 }
 
 // emitGetCheckedSliceExpr emits a bounds-checked slice: when [start, end) is

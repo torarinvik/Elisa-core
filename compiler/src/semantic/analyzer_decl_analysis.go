@@ -14,7 +14,9 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			switch n := scoped.Decl.(type) {
 			case *ast.ConstDecl:
 				if sym, ok := a.globalScope.Lookup(joinQualifiedName(scoped.Namespace, n.Name)); ok {
+					a.constInitDepth++
 					valueType := a.analyzeValueExprInScope(n.Value, sym.Type, a.globalScope)
+					a.constInitDepth--
 					if !AssignableTo(sym.Type, valueType) {
 						a.errorf(n.Pos(), "const %q expects %s, got %s", n.Name, sym.Type, valueType)
 					}

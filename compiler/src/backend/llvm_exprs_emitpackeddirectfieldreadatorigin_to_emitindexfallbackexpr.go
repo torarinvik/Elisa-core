@@ -561,6 +561,26 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 		// value specialization. Emit the materialized generic-function value, not an index.
 		return s.emitSpecializeExpr(expr.AsSpecialize)
 	}
+	if expr != nil && expr.AsBuiltinDictGet != nil {
+		if expr.Fallback != nil {
+			recovery := &ast.RecoveryClause{Position: expr.Fallback.Pos(), Kind: ast.RecoveryValue, Value: expr.Fallback}
+			return s.emitGetDictIndexExpr(expr, recovery, s.exprType(expr))
+		}
+		return s.emitCallExpr(expr.AsBuiltinDictGet)
+	}
+	if value, actualType, handled, err := s.emitConstDictIndexExpr(expr); handled {
+		return value, actualType, err
+	}
+	if expr != nil {
+		if value, ok := s.evalConstExpr(expr); ok {
+			resultType := s.exprType(expr)
+			if resultType == nil {
+				resultType = semantic.ConstValueStaticType(s.g.result.NamedTypes, value)
+			}
+			llvmValue, err := s.g.constValueAsLLVM(value, resultType)
+			return llvmValue, resultType, err
+		}
+	}
 	if expr != nil && expr.AsOverlayCall != nil {
 		// docs/107 typed guest-memory overlay: `base.field[mem]` over a `GuestVAddr[L]` carrier was
 		// rewritten by the analyzer to the equivalent MemoryManager_ReadU<N>(mem, base + offset)
@@ -599,6 +619,64 @@ func (s *functionState) emitIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, sema
 	}
 	value, err := s.loadValue(ptr, elemType, "idx")
 	return value, elemType, err
+}
+
+func (s *functionState) emitConstDictIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	objectValue, ok := s.evalConstExpr(expr.Object)
+	if !ok || objectValue.Kind != semantic.ConstDict {
+		return nil, nil, false, nil
+	}
+	dictType, _, ok := builtinDictReceiverType(s.exprType(expr.Object))
+	if !ok || dictType == nil {
+		return nil, nil, false, nil
+	}
+	keyValue, ok := s.evalConstExpr(expr.Index)
+	if !ok {
+		return nil, nil, false, nil
+	}
+	key, ok := backendConstDictKeyFingerprint(dictType.Key, keyValue)
+	if !ok {
+		return nil, nil, true, fmt.Errorf("const dict index key is not supported")
+	}
+	for _, entry := range objectValue.Dict {
+		entryKey, ok := backendConstDictKeyFingerprint(dictType.Key, entry.Key)
+		if ok && entryKey == key {
+			llvmValue, err := s.g.constValueAsLLVM(entry.Value, dictType.Value)
+			return llvmValue, dictType.Value, true, err
+		}
+	}
+	return nil, nil, true, fmt.Errorf("const dict has no key %s", key)
+}
+
+func backendConstDictKeyFingerprint(keyType semantic.Type, value semantic.ConstValue) (string, bool) {
+	if _, ok := semantic.StripAggregateStateType(keyType).(*semantic.DStrType); ok {
+		if value.Kind != semantic.ConstString {
+			return "", false
+		}
+		return "s:" + value.String, true
+	}
+	if semantic.IsBoolType(semantic.StripAggregateStateType(keyType)) {
+		if value.Kind != semantic.ConstBool {
+			return "", false
+		}
+		return fmt.Sprintf("b:%t", value.Bool), true
+	}
+	if _, ok := semantic.ConstEnumStorageType(semantic.StripAggregateStateType(keyType)); ok {
+		if value.Kind != semantic.ConstInt {
+			return "", false
+		}
+		return fmt.Sprintf("i:%d", value.Int), true
+	}
+	if semantic.IsIntegralType(semantic.StripAggregateStateType(keyType)) {
+		if value.Kind != semantic.ConstInt {
+			return "", false
+		}
+		return fmt.Sprintf("i:%d", value.Int), true
+	}
+	return "", false
 }
 
 func (s *functionState) emitTupleIndexExpr(expr *ast.IndexExpr) (C.LLVMValueRef, semantic.Type, bool, error) {

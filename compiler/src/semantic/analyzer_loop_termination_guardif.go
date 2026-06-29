@@ -3,6 +3,7 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"strconv"
 )
 
 // GUARD-`if` modeling for the loop-TERMINATION prover (highest-risk, TRUSTED code).
@@ -73,6 +74,23 @@ func (a *Analyzer) enumPaths(stmts []ast.Stmt, depth int) ([]pathFrag, bool) {
 		}
 		switch n := s.(type) {
 		case *ast.IfStmt:
+			if a.ifIsOpaqueExitFallthrough(n) {
+				next := make([]pathFrag, 0, len(frontier)*2)
+				for _, p := range frontier {
+					if p.exited {
+						next = append(next, p)
+						continue
+					}
+					exitPath := p
+					exitPath.exited = true
+					next = append(next, exitPath, p)
+					if len(next) > maxLoopBodyPaths {
+						return nil, false
+					}
+				}
+				frontier = next
+				continue
+			}
 			branches, ok := a.ifBranchGuards(n)
 			if !ok {
 				return nil, false
@@ -147,7 +165,7 @@ func concatStmts(parts ...[]ast.Stmt) []ast.Stmt {
 // runs its accumulated straight-line statements through the EXISTING capture
 // (captureLoopBodyEffectForTermination) to produce σ; an empty path (the implicit no-op else) gets the
 // identity σ; an exiting path (break/return) needs no σ.
-func (a *Analyzer) enumerateLoopBodyPaths(body []ast.Stmt) ([]loopBodyPath, bool) {
+func (a *Analyzer) enumerateLoopBodyPaths(body []ast.Stmt, focus map[string]bool) ([]loopBodyPath, bool) {
 	// Strip the leading contract clauses (invariant/decreases) — they are specifications, not effects.
 	stmts := stripLeadingContracts(body)
 	frags, ok := a.enumPaths(stmts, 0)
@@ -178,7 +196,7 @@ func (a *Analyzer) enumerateLoopBodyPaths(body []ast.Stmt) ([]loopBodyPath, bool
 			out = append(out, path)
 			continue
 		}
-		subst, ok := a.captureLoopBodyEffectForTermination(wrapStmtsForCapture(p.stmts))
+		subst, ok := a.captureLoopBodyEffectForTerminationFocused(wrapStmtsForCapture(p.stmts), focus)
 		if !ok {
 			return nil, false
 		}
@@ -189,6 +207,43 @@ func (a *Analyzer) enumerateLoopBodyPaths(body []ast.Stmt) ([]loopBodyPath, bool
 		return nil, false
 	}
 	return out, true
+}
+
+// ifIsOpaqueExitFallthrough recognizes the shape:
+//
+//	if opaque_readonly_cond:
+//	    return
+//
+// The guard itself is not useful for proving a decrease, but the branch exits the loop/function. For
+// termination of the surrounding loop it is therefore sound to model this as two paths:
+//
+//   - an exiting path, carrying no decrease obligation;
+//   - an unguarded fallthrough path, which must still prove the measure decreases unconditionally.
+//
+// We only admit read-only/effect-free guard expressions so the condition cannot mutate the loop
+// measure before falling through. Calls with permission requirements stay unmodelable.
+func (a *Analyzer) ifIsOpaqueExitFallthrough(n *ast.IfStmt) bool {
+	if n == nil || n.Cond == nil || len(n.Elifs) != 0 || len(n.Else) != 0 {
+		return false
+	}
+	if !a.opaqueExitGuardReadOnly(n.Cond) {
+		return false
+	}
+	return stmtListAlwaysExits(n.Then)
+}
+
+func stmtListAlwaysExits(stmts []ast.Stmt) bool {
+	for _, s := range stmts {
+		switch s.(type) {
+		case *ast.ContractStmt:
+			continue
+		case *ast.ReturnStmt, *ast.BreakStmt:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // branchGuard is one branch of an `if` chain: the conditions that must hold to take it (the branch's
@@ -307,6 +362,53 @@ func condArithOperandTranslatable(expr ast.Expr) bool {
 	return exprIsPureArithOrRead(expr)
 }
 
+// opaqueExitGuardReadOnly is a conservative side-effect gate for opaque early-exit guards. It admits
+// ordinary value reads and calls whose arguments are themselves read-only. This predicate is used only
+// for branches that immediately exit; calls in non-exiting body effects remain unmodelable.
+func (a *Analyzer) opaqueExitGuardReadOnly(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit, *ast.BoolLit, *ast.StringLit, *ast.CharLit, *ast.Ident:
+		return true
+	case *ast.ParenExpr:
+		return n != nil && a.opaqueExitGuardReadOnly(n.Inner)
+	case *ast.FieldExpr:
+		return n != nil && !n.Safe && a.opaqueExitGuardReadOnly(n.Object)
+	case *ast.IndexExpr:
+		return n != nil &&
+			n.Index2 == nil && n.Fallback == nil && !n.LegacyElseFallback &&
+			n.AsSpecialize == nil && n.AsOverlayCall == nil &&
+			a.opaqueExitGuardReadOnly(n.Object) && a.opaqueExitGuardReadOnly(n.Index)
+	case *ast.SliceExpr:
+		return n != nil &&
+			a.opaqueExitGuardReadOnly(n.Object) &&
+			(n.Start == nil || a.opaqueExitGuardReadOnly(n.Start)) &&
+			(n.End == nil || a.opaqueExitGuardReadOnly(n.End))
+	case *ast.UnaryExpr:
+		return n != nil && n.Op != lexer.TOKEN_AMPERSAND && a.opaqueExitGuardReadOnly(n.Operand)
+	case *ast.BinaryExpr:
+		return n != nil && a.opaqueExitGuardReadOnly(n.Left) && a.opaqueExitGuardReadOnly(n.Right)
+	case *ast.CastExpr:
+		return n != nil && a.opaqueExitGuardReadOnly(n.Operand)
+	case *ast.TernaryExpr:
+		return n != nil &&
+			a.opaqueExitGuardReadOnly(n.Cond) &&
+			a.opaqueExitGuardReadOnly(n.Value) &&
+			a.opaqueExitGuardReadOnly(n.Alt)
+	case *ast.CallExpr:
+		if n == nil {
+			return false
+		}
+		for _, arg := range n.Args {
+			if !a.opaqueExitGuardReadOnly(arg) {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
+}
+
 // isPureFieldPath reports whether expr is a stable field path rooted at an identifier through `.field`
 // hops only (no call/index/deref/safe-nav) — used to gate boolean field reads in guard conditions.
 func isPureFieldPath(expr ast.Expr) bool {
@@ -366,8 +468,10 @@ func (a *Analyzer) proveLoopMeasureDecreasesAllPaths(loopCond ast.Expr, invs []*
 			continue // loop terminates on this path — no decrease obligation
 		}
 		pathCond := buildPathCond(loopCond, p.conds)
-		if proven, _ := a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst); !proven {
-			return false // this non-exit path does not provably decrease → reject the whole loop
+		if !simpleCountdownPathDecrease(measures, p.subst) {
+			if proven, _ := a.proveLoopMeasureDecreases(pathCond, invs, measures, p.subst); !proven {
+				return false // this non-exit path does not provably decrease → reject the whole loop
+			}
 		}
 		provedAny = true
 	}
@@ -375,6 +479,34 @@ func (a *Analyzer) proveLoopMeasureDecreasesAllPaths(loopCond ast.Expr, invs []*
 	// with no non-exit path is degenerate; require at least one proven decreasing path to record an SMT
 	// proof (otherwise decline to the runtime backstop — conservative).
 	return provedAny
+}
+
+func simpleCountdownPathDecrease(measures []ast.Expr, subst map[string]ast.Expr) bool {
+	if len(measures) != 1 || len(subst) == 0 {
+		return false
+	}
+	measure, ok := measures[0].(*ast.Ident)
+	if !ok || measure == nil {
+		return false
+	}
+	next, ok := subst[measure.Name]
+	if !ok {
+		return false
+	}
+	bin, ok := next.(*ast.BinaryExpr)
+	if !ok || bin == nil || bin.Op != lexer.TOKEN_MINUS {
+		return false
+	}
+	left, ok := bin.Left.(*ast.Ident)
+	if !ok || left == nil || left.Name != measure.Name {
+		return false
+	}
+	right, ok := bin.Right.(*ast.IntLit)
+	if !ok || right == nil || right.IsHex {
+		return false
+	}
+	value, err := strconv.ParseInt(right.Value, 10, 64)
+	return err == nil && value > 0
 }
 
 // buildPathCond conjoins the loop condition with a path's guard conditions into a single boolean

@@ -33,6 +33,15 @@ func backendIsAddressableLValue(expr ast.Expr) bool {
 	}
 }
 
+func backendConstAggregateIsMaterialized(t semantic.Type) bool {
+	switch t.(type) {
+	case *semantic.ArrayType, *semantic.DictType:
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Type, error) {
 	switch n := expr.(type) {
 	case *ast.Ident:
@@ -51,16 +60,14 @@ func (s *functionState) emitAddress(expr ast.Expr) (C.LLVMValueRef, semantic.Typ
 				global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, sym.Kind == semantic.SymbolExternVar)
 				return global, sym.Type, err
 			}
-			// Aggregate (array) consts are materialized as read-only globals (see
+			// Aggregate consts are materialized as read-only globals (see
 			// emitIdentValueAddress / emitDeclInNamespace), so their address can be
 			// taken — e.g. TABLE.ref[u32[N]&] to build a zero-copy view over a
 			// static const table. Mutating through such a ref is rejected by the
 			// semantic layer (a const yields no writable ref).
-			if sym.Kind == semantic.SymbolConst {
-				if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
-					global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
-					return global, sym.Type, err
-				}
+			if sym.Kind == semantic.SymbolConst && backendConstAggregateIsMaterialized(sym.Type) {
+				global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
+				return global, sym.Type, err
 			}
 		}
 		return nil, nil, fmt.Errorf("identifier %s is not addressable", n.Name)
@@ -104,16 +111,14 @@ func (s *functionState) emitIdentValueAddress(expr *ast.Ident) (C.LLVMValueRef, 
 			}
 			return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
 		}
-		// Aggregate (array) consts are materialized as read-only globals (see
+		// Aggregate consts are materialized as read-only globals (see
 		// emitDeclInNamespace), so they are addressable for indexing.
-		if sym.Kind == semantic.SymbolConst {
-			if _, isArray := sym.Type.(*semantic.ArrayType); isArray {
-				global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
-				if err != nil {
-					return nil, nil, err
-				}
-				return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
+		if sym.Kind == semantic.SymbolConst && backendConstAggregateIsMaterialized(sym.Type) {
+			global, err := s.g.ensureGlobalDeclared(resolvedName, sym.Type, false)
+			if err != nil {
+				return nil, nil, err
 			}
+			return s.refinedOptionalPayloadAddress(global, sym.Type, valueType, expr.Name)
 		}
 	}
 	return nil, nil, fmt.Errorf("identifier %s is not addressable", expr.Name)
