@@ -134,6 +134,13 @@ type Analyzer struct {
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
 	regionPolyFn            *ast.FuncDecl
+	// regionPolyCandidateFnTypes maps a candidate function's SIMPLE name to its
+	// FuncType(s), built once per classification pre-pass. It resolves a constructor
+	// call (`Parser(args)`) to its `def Parser(...)->Parser` FuncType even when a
+	// same-named struct shadows it in the global value scope — lookupVisibleGlobal
+	// returns the struct, hiding the region-poly constructor. Region-poly-ness is read
+	// live from the FuncType during the fixpoint. Nil outside the pre-pass.
+	regionPolyCandidateFnTypes map[string][]*FuncType
 	extensionMethodsByName  map[string][]*ExtensionMethod
 	ufcsFunctionsByName     map[string][]*Symbol
 	permissions             map[string]*PermissionSet

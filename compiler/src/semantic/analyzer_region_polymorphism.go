@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 	"reflect"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -28,6 +29,22 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	if len(funcs) == 0 {
 		return
 	}
+	// Index candidate functions by simple name so a constructor call shadowed by a
+	// same-named struct (e.g. `Parser(args)` with both `struct Parser` and
+	// `def Parser(...)->Parser`) still resolves to the constructor's FuncType. The
+	// stored *FuncType is the same pointer mutated below, so RegionPolymorphic reads
+	// stay live across the fixpoint.
+	a.regionPolyCandidateFnTypes = map[string][]*FuncType{}
+	for _, fn := range funcs {
+		if fn == nil || fn.Name == "" {
+			continue
+		}
+		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
+			key := simpleTypeNameSegment(fn.Name)
+			a.regionPolyCandidateFnTypes[key] = append(a.regionPolyCandidateFnTypes[key], ft)
+		}
+	}
+	defer func() { a.regionPolyCandidateFnTypes = nil }()
 	changed := true
 	for changed {
 		changed = false
@@ -299,6 +316,15 @@ func (a *Analyzer) injectRegionPolymorphicParam(fnType *FuncType) {
 // nested closure is correctly excluded.
 func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 	found := false
+	// retCarriesRegionStorage gates the struct-literal-field rule below: it only fires when the
+	// return type can actually hold region-backed storage (a container, view, or struct with
+	// such a field), so a function returning a scalar field copy is never mis-classified.
+	retCarriesRegionStorage := false
+	if fn != nil {
+		if ft := a.funcTypeForRegionPoly(fn); ft != nil {
+			retCarriesRegionStorage = typeCarriesRegionStorage(ft.Return)
+		}
+	}
 	// Locals fed by region-allocated values (a `result` accumulated across branches from
 	// region-polymorphic calls / bare region-backed constructors): returning one is returning a
 	// region-allocated value — the same local-tracking functionBuildsAndReturnsLocalContainer
@@ -315,8 +341,25 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			return regionLocals[e.Name]
 		case *ast.StructLitExpr:
 			for _, arg := range e.Args {
-				if arg != nil && regiony(arg) {
+				if arg == nil {
+					continue
+				}
+				if regiony(arg) {
 					return true
+				}
+				// A container field of a region-fed local as a struct-literal field carries
+				// that local's region (the build-and-return-aggregate pattern:
+				// `return File{errors: parser.errors}`, parser built by a region-poly ctor).
+				// Restricted to a struct-literal field (not a bare `return b.field`) and to a
+				// region-carrying return type, so a scalar field copy (`return b.value: i64`)
+				// or a bare field return is unaffected. Without this the field's buffer dangles
+				// after return — count reads fine, element reads segfault.
+				if retCarriesRegionStorage {
+					if fe, ok := unwrapParenForRegionPoly(arg).(*ast.FieldExpr); ok {
+						if root := rootIdentExpr(fe); root != nil && regionLocals[root.Name] {
+							return true
+						}
+					}
 				}
 			}
 		case *ast.ListLitExpr:
@@ -699,6 +742,12 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 				return true
 			}
 		}
+		// Fallback for a constructor call shadowed by a same-named struct: the value
+		// scope resolved `Name` to the struct (above), hiding the region-poly
+		// `def Name(...)->Name` constructor. Resolve it from the classification index.
+		if a.regionPolyConstructorIsRegionAllocated(e.Name) {
+			return true
+		}
 		// A struct literal wrapping region-allocated values (the parse-result pattern:
 		// `return Result{ast: ..., decls: decls}`) carries its fields' region — returning
 		// it returns region-allocated data, so the function must thread the caller region
@@ -721,6 +770,67 @@ func (a *Analyzer) exprResultIsRegionAllocated(value ast.Expr) bool {
 		}
 	}
 	return false
+}
+
+// regionPolyConstructorIsRegionAllocated reports whether a `Name(args)` call resolves
+// to a region-polymorphic constructor (`def Name(...)->Name`) via the classification
+// index. This is the fallback for the name-collision case: when a struct named `Name`
+// shadows the same-named constructor in the value scope, lookupVisibleGlobal returns
+// the struct and the constructor's region-poly classification is otherwise invisible.
+// Only a constructor (return type names the same `Name`) qualifies, so a region-poly
+// non-constructor written as `Name(args)` is unaffected (it has no shadowing struct and
+// is already resolved by the normal lookup).
+func (a *Analyzer) regionPolyConstructorIsRegionAllocated(name string) bool {
+	if a == nil || a.regionPolyCandidateFnTypes == nil || name == "" {
+		return false
+	}
+	simple := simpleTypeNameSegment(name)
+	for _, ft := range a.regionPolyCandidateFnTypes[simple] {
+		if ft != nil && ft.RegionPolymorphic && funcTypeReturnTypeNamed(ft, simple) {
+			return true
+		}
+	}
+	return false
+}
+
+// funcTypeReturnTypeNamed reports whether the function's return type is a struct/enum
+// named `name` — the constructor shape (`def Name(...)->Name`). Names are compared by
+// simple (unqualified) segment, since a return StructType inside a module carries a
+// namespace-qualified Name (`Parser.Parser`) while the call site names it `Parser`.
+// AggregateStateType wrappers are unwrapped so a mutable/region-qualified return matches.
+func funcTypeReturnTypeNamed(ft *FuncType, name string) bool {
+	if ft == nil {
+		return false
+	}
+	want := simpleTypeNameSegment(name)
+	t := ft.Return
+	for {
+		switch rt := t.(type) {
+		case *AggregateStateType:
+			if rt == nil {
+				return false
+			}
+			t = rt.Base
+		case *StructType:
+			return rt != nil && simpleTypeNameSegment(rt.Name) == want
+		case *EnumType:
+			return rt != nil && simpleTypeNameSegment(rt.Name) == want
+		default:
+			return false
+		}
+	}
+}
+
+// simpleTypeNameSegment returns the last segment of a possibly namespace-qualified
+// name, handling both `::` (source) and `.` (internal) separators.
+func simpleTypeNameSegment(n string) string {
+	if i := strings.LastIndex(n, "::"); i >= 0 {
+		n = n[i+2:]
+	}
+	if i := strings.LastIndex(n, "."); i >= 0 {
+		n = n[i+1:]
+	}
+	return n
 }
 
 // regionBackedEnumConstructor reports the enum if a call is a bare constructor of a region-backed

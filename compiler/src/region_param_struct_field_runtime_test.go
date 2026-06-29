@@ -529,3 +529,39 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("field growth through a synthesized auto-region wrap must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
 	}
 }
+
+// A region-poly builder constructs a struct via a constructor (whose name collides with the struct),
+// grows a container field through a forwarded ref, and RETURNS that field inside a DIFFERENT struct;
+// the caller reads it back. Before the fix, the builder was not classified region-polymorphic (the
+// constructor call `Bag()` resolved to the shadowing struct, and the returned `Out{items: b.errs}`
+// field access was not recognized as region-carrying), so the builder's auto-region was freed on
+// return -> the returned aggregate's container dangled (headers copy out fine, element reads UAF).
+// This is the exact shape of the stage1 parser's `parser = Parser(...); return Ast::File{errors:
+// parser.errors, ...}`. Loop + read-back so a dangling backing corrupts the sum instead of passing
+// by luck.
+func TestRegionPolyBuilderReturnsFieldInOtherStructNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, "struct E:\n    v: u32\nstruct Bag:\n    errs: mutable darray[E]\nstruct Out:\n    items: darray[E]\n"+`def Bag() -> Bag:
+    return Bag{errs: []}
+def add(b: mutable Bag&, n: u32) -> void can[Memory.Allocate, Abort.Panic]:
+    e: E = E{v: n}
+    b.errs.push(e)
+    return
+def build() -> Out can[Memory.Allocate, Abort.Panic]:
+    b: mutable Bag = Bag()
+    add(b, 65) can Memory.Allocate, Abort.Panic
+    add(b, 66) can Memory.Allocate, Abort.Panic
+    return Out{items: b.errs}
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    total: mutable u64 = 0
+    i: mutable i64 = 0
+    while i < 2000:
+        o: Out = build() can Memory.Allocate, Abort.Panic
+        total <- total + o.items[0].v.u64() + o.items[1].v.u64()
+        i <- i + 1
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "262000" {
+		t.Fatalf("a region-poly builder returning a grown field inside another struct must thread+adopt the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
+	}
+}

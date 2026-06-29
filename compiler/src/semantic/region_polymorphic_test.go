@@ -88,3 +88,46 @@ def make() -> Box&:
 		t.Fatalf("an explicitly-named local region must NOT make a function region-polymorphic")
 	}
 }
+
+// A region-polymorphic constructor's result (resolved even though a same-named struct shadows the
+// constructor in the value scope) whose container field is returned INSIDE A DIFFERENT struct
+// literal makes the function region-polymorphic: the field's buffer lives in the threaded region
+// and must be adopted by the caller, not freed on return. Regression for the stage1 parser's
+// `parser = Parser(...); return Ast::File{errors: parser.errors, ...}` — which silently produced a
+// use-after-free (the File's container headers copy out, but their backing freed: count reads fine,
+// element reads segfault).
+func TestRegionPolymorphicSetForConstructorFieldInReturnedStruct(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rp_ctorfield.elisa", `struct Bag:
+    xs: mutable darray[i64]
+struct Out:
+    a: darray[i64]
+def Bag() -> Bag:
+    return Bag{xs: []}
+def build() -> Out:
+    can Memory.Allocate, Abort.Panic:
+        b: mutable Bag = Bag()
+        b.xs.push(7)
+        return Out{a: b.xs}
+`, AnalyzeOptions{})
+	fn := regionPolymorphicFuncType(t, result, "build")
+	if !fn.RegionPolymorphic {
+		t.Fatalf("a function returning a region-poly constructor's container field inside a struct literal must be region-polymorphic")
+	}
+}
+
+// SOUNDNESS-NEGATIVE companion: returning a SCALAR field of a region-fed local (copied out by
+// value) must NOT make the function region-polymorphic — no region escapes, so no caller region is
+// needed. Guards the struct-literal-field rule above from over-classifying scalar field reads.
+func TestRegionPolymorphicNotSetForScalarFieldReturn(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rp_scalarfield.elisa", `struct Box:
+    value: i64
+def make() -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        b: Box& = new[auto] Box(7)
+        return b.value
+`, AnalyzeOptions{})
+	fn := regionPolymorphicFuncType(t, result, "make")
+	if fn.RegionPolymorphic {
+		t.Fatalf("returning a scalar field copy must NOT make a function region-polymorphic")
+	}
+}
