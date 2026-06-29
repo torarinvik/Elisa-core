@@ -1,48 +1,53 @@
 def json_parser_document_field_string_len_impl(doc: JsonParserDocument&, key: u8&) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
-    if json_node_is_invalid(field_node, store):
-        return -1
-    return json_ast_string_len(json_parser_document_source(impl), field_node, store)
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
+            return -1
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+        field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+        if json_node_is_invalid(field_node, store):
+            return -1
+        return json_ast_string_len(json_parser_document_source(impl), field_node, store)
 def json_parser_document_field_string_copy_impl(doc: JsonParserDocument&, key: u8&, out: u8&, capacity: usize) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    field_node: JsonNode = json_parser_document_field_node(impl, key, store)
-    if json_node_is_invalid(field_node, store):
-        return -1
-    return json_ast_string_copy(json_parser_document_source(impl), field_node, out, capacity, store)
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
+            return -1
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+        field_node: JsonNode = json_parser_document_field_node(impl, key, store)
+        if json_node_is_invalid(field_node, store):
+            return -1
+        return json_ast_string_copy(json_parser_document_source(impl), field_node, out, capacity, store)
 def json_parser_document_array_field_string_copy_at_impl(doc: JsonParserDocument&, key: u8&, index: usize, out: u8&, capacity: usize) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
-    if json_node_is_invalid(item_node, store):
-        return -1
-    return json_ast_string_copy(json_parser_document_source(impl), item_node, out, capacity, store)
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
+            return -1
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+        item_node: JsonNode = json_parser_document_array_field_item_node(impl, key, index, store)
+        if json_node_is_invalid(item_node, store):
+            return -1
+        return json_ast_string_copy(json_parser_document_source(impl), item_node, out, capacity, store)
 def json_parser_document_object_value_string_copy_at_impl(doc: JsonParserDocument&, index: usize, out: u8&, capacity: usize) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
-    if json_node_is_invalid(value_node, store):
-        return -1
-    return json_ast_string_copy(json_parser_document_source(impl), value_node, out, capacity, store)
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
+            return -1
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+        value_node: JsonNode = json_parser_document_object_value_node_at(impl, index, store)
+        if json_node_is_invalid(value_node, store):
+            return -1
+        return json_ast_string_copy(json_parser_document_source(impl), value_node, out, capacity, store)
 def json_parser_document_array_string_copy_at_impl(doc: JsonParserDocument&, index: usize, out: u8&, capacity: usize) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
-    item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
-    if json_node_is_invalid(item_node, store):
-        return -1
-    return json_ast_string_copy(json_parser_document_source(impl), item_node, out, capacity, store)
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
+            return -1
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = JsonNode.Store(impl.arena)
+        item_node: JsonNode = json_parser_document_array_item_node_at(impl, index, store)
+        if json_node_is_invalid(item_node, store):
+            return -1
+        return json_ast_string_copy(json_parser_document_source(impl), item_node, out, capacity, store)
 def json_parser_value_string_eq_impl(value: JsonParserValue&, literal: u8&) -> i64:
     if not json_parser_value_is_live(value):
         return -1

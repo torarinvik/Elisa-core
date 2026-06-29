@@ -1,155 +1,156 @@
 def json_parser_parity_suite_impl() -> int:
-    can Memory.Allocate, Abort.Panic:
-        if not json_expect_checksum("{}", 47):
-            return 0
-        if not json_expect_ast_checksum("{}", 47):
-            return 0
-        if not json_expect_checksum("[]", 43):
-            return 0
-        if not json_expect_ast_checksum("[]", 43):
-            return 0
-        if not json_expect_checksum("[1,2,3]", 115):
-            return 0
-        if not json_expect_ast_checksum("[1,2,3]", 115):
-            return 0
-        if not json_expect_checksum("[true,false,null]", 152):
-            return 0
-        if not json_expect_ast_checksum("[true,false,null]", 152):
-            return 0
-        if not json_expect_checksum("[-12,3.5,null]", 136):
-            return 0
-        if not json_expect_ast_checksum("[-12,3.5,null]", 136):
-            return 0
-        if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}") != 12:
-            return 0
-        if not json_expect_invalid("[1,2}"):
-            return 0
-        if not json_expect_invalid_ast("[1,2}"):
-            return 0
-        if not json_expect_invalid("[1,,2]"):
-            return 0
-        if not json_expect_invalid_ast("[1,,2]"):
-            return 0
+    trusted Unsafe.PointerCast:
+        can Memory.Allocate, Abort.Panic:
+            if not json_expect_checksum("{}", 47):
+                return 0
+            if not json_expect_ast_checksum("{}", 47):
+                return 0
+            if not json_expect_checksum("[]", 43):
+                return 0
+            if not json_expect_ast_checksum("[]", 43):
+                return 0
+            if not json_expect_checksum("[1,2,3]", 115):
+                return 0
+            if not json_expect_ast_checksum("[1,2,3]", 115):
+                return 0
+            if not json_expect_checksum("[true,false,null]", 152):
+                return 0
+            if not json_expect_ast_checksum("[true,false,null]", 152):
+                return 0
+            if not json_expect_checksum("[-12,3.5,null]", 136):
+                return 0
+            if not json_expect_ast_checksum("[-12,3.5,null]", 136):
+                return 0
+            if json_parser_ast_node_count_impl("{\"a\":[1,2,3],\"b\":[4,5],\"c\":null}") != 12:
+                return 0
+            if not json_expect_invalid("[1,2}"):
+                return 0
+            if not json_expect_invalid_ast("[1,2}"):
+                return 0
+            if not json_expect_invalid("[1,,2]"):
+                return 0
+            if not json_expect_invalid_ast("[1,,2]"):
+                return 0
 
-        if not json_expect_invalid("\"\\q\""):
-            return 0
-        if not json_expect_invalid_ast("\"\\q\""):
-            return 0
-        if not json_expect_invalid("\"\\uD83D\""):
-            return 0
-        if not json_expect_invalid_ast("\"\\uD83D\""):
-            return 0
-        if not json_expect_invalid("\"\\uDE00\""):
-            return 0
-        if not json_expect_invalid_ast("\"\\uDE00\""):
-            return 0
-        if not json_expect_invalid("\"\\uD83D\\u0041\""):
-            return 0
-        if not json_expect_invalid_ast("\"\\uD83D\\u0041\""):
-            return 0
+            if not json_expect_invalid("\"\\q\""):
+                return 0
+            if not json_expect_invalid_ast("\"\\q\""):
+                return 0
+            if not json_expect_invalid("\"\\uD83D\""):
+                return 0
+            if not json_expect_invalid_ast("\"\\uD83D\""):
+                return 0
+            if not json_expect_invalid("\"\\uDE00\""):
+                return 0
+            if not json_expect_invalid_ast("\"\\uDE00\""):
+                return 0
+            if not json_expect_invalid("\"\\uD83D\\u0041\""):
+                return 0
+            if not json_expect_invalid_ast("\"\\uD83D\\u0041\""):
+                return 0
 
-        source: static u8& = "{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"smile\":\"\\u263A\"}"
-        source_any: u8& = source.cast[u8&]
-        source_len: usize = runtime_strlen(source_any)
-        region scratch(json_ast_scratch_capacity(source_len))
-        store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
-        result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, arena, store)
-        if result.checksum < 0:
+            source: static u8& = "{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"smile\":\"\\u263A\"}"
+            source_any: u8& = source.cast[u8&]
+            source_len: usize = runtime_strlen(source_any)
+            region scratch(json_ast_scratch_capacity(source_len))
+            store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+            arena: mutable Arena& = (&scratch).cast[mutable Arena&]
+            result: JsonParseNodeResult = json_parse_document_node_with_len(source_any, source_len, arena, store)
+            if result.checksum < 0:
+                destroy scratch
+                return 0
+
+            name_node: JsonNode = json_ast_object_get(result.node, source_any, "name", store)
+            quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote", store)
+            smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile", store)
+            if json_node_is_invalid(name_node, store) or json_node_is_invalid(quote_node, store) or json_node_is_invalid(smile_node, store):
+                destroy scratch
+                return 0
+            if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak", store):
+                destroy scratch
+                return 0
+            if not json_ast_string_eq_literal(source_any, quote_node, "\"", store):
+                destroy scratch
+                return 0
+            if not json_ast_string_eq_literal(source_any, smile_node, "\u263A", store):
+                destroy scratch
+                return 0
             destroy scratch
-            return 0
 
-        name_node: JsonNode = json_ast_object_get(result.node, source_any, "name", store)
-        quote_node: JsonNode = json_ast_object_get(result.node, source_any, "quote", store)
-        smile_node: JsonNode = json_ast_object_get(result.node, source_any, "smile", store)
-        if json_node_is_invalid(name_node, store) or json_node_is_invalid(quote_node, store) or json_node_is_invalid(smile_node, store):
-            destroy scratch
-            return 0
-        if not json_ast_string_eq_literal(source_any, name_node, "line\nbreak", store):
-            destroy scratch
-            return 0
-        if not json_ast_string_eq_literal(source_any, quote_node, "\"", store):
-            destroy scratch
-            return 0
-        if not json_ast_string_eq_literal(source_any, smile_node, "\u263A", store):
-            destroy scratch
-            return 0
-        destroy scratch
+            numbers_source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
+            numbers_any: u8& = numbers_source.cast[u8&]
+            numbers_len: usize = runtime_strlen(numbers_any)
+            region numbers_scratch(json_ast_scratch_capacity(numbers_len))
+            numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
+            numbers_arena: mutable Arena& = (&numbers_scratch).cast[mutable Arena&]
+            numbers_result: JsonParseNodeResult = json_parse_document_node_with_len(numbers_any, numbers_len, numbers_arena, numbers_store)
+            if numbers_result.checksum < 0:
+                destroy numbers_scratch
+                return 0
 
-        numbers_source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
-        numbers_any: u8& = numbers_source.cast[u8&]
-        numbers_len: usize = runtime_strlen(numbers_any)
-        region numbers_scratch(json_ast_scratch_capacity(numbers_len))
-        numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
-        numbers_arena: mutable Arena& = (&numbers_scratch).cast[mutable Arena&]
-        numbers_result: JsonParseNodeResult = json_parse_document_node_with_len(numbers_any, numbers_len, numbers_arena, numbers_store)
-        if numbers_result.checksum < 0:
-            destroy numbers_scratch
-            return 0
+            small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small", numbers_store)
+            big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big", numbers_store)
+            neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg", numbers_store)
+            frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac", numbers_store)
+            exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp", numbers_store)
+            huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge", numbers_store)
+            tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny", numbers_store)
 
-        small_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "small", numbers_store)
-        big_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "big", numbers_store)
-        neg_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "neg", numbers_store)
-        frac_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "frac", numbers_store)
-        exp_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "exp", numbers_store)
-        huge_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "huge", numbers_store)
-        tiny_node: JsonNode = json_ast_object_get(numbers_result.node, numbers_any, "tiny", numbers_store)
+            small_u64: u64 = try json_ast_number_u64_value(numbers_any, small_node, numbers_store) else 0
+            small_i64: i64 = try json_ast_number_i64_value(numbers_any, small_node, numbers_store) else -1
+            big_u64: u64 = try json_ast_number_u64_value(numbers_any, big_node, numbers_store) else 0
+            big_i64: i64 = try json_ast_number_i64_value(numbers_any, big_node, numbers_store) else -7
+            neg_u64: u64 = try json_ast_number_u64_value(numbers_any, neg_node, numbers_store) else 7
+            neg_i64: i64 = try json_ast_number_i64_value(numbers_any, neg_node, numbers_store) else 0
+            frac_value: JsonNumberValue = json_ast_number_value(numbers_any, frac_node, numbers_store)
+            exp_value: JsonNumberValue = json_ast_number_value(numbers_any, exp_node, numbers_store)
+            huge_value: JsonNumberValue = json_ast_number_value(numbers_any, huge_node, numbers_store)
+            tiny_value: JsonNumberValue = json_ast_number_value(numbers_any, tiny_node, numbers_store)
 
-        small_u64: u64 = try json_ast_number_u64_value(numbers_any, small_node, numbers_store) else 0
-        small_i64: i64 = try json_ast_number_i64_value(numbers_any, small_node, numbers_store) else -1
-        big_u64: u64 = try json_ast_number_u64_value(numbers_any, big_node, numbers_store) else 0
-        big_i64: i64 = try json_ast_number_i64_value(numbers_any, big_node, numbers_store) else -7
-        neg_u64: u64 = try json_ast_number_u64_value(numbers_any, neg_node, numbers_store) else 7
-        neg_i64: i64 = try json_ast_number_i64_value(numbers_any, neg_node, numbers_store) else 0
-        frac_value: JsonNumberValue = json_ast_number_value(numbers_any, frac_node, numbers_store)
-        exp_value: JsonNumberValue = json_ast_number_value(numbers_any, exp_node, numbers_store)
-        huge_value: JsonNumberValue = json_ast_number_value(numbers_any, huge_node, numbers_store)
-        tiny_value: JsonNumberValue = json_ast_number_value(numbers_any, tiny_node, numbers_store)
+            if small_u64 != 123:
+                destroy numbers_scratch
+                return 0
+            if small_i64 != 123:
+                destroy numbers_scratch
+                return 0
+            if json_ast_number_kind(numbers_any, small_node, numbers_store) != JsonNumberKind.UNSIGNED:
+                destroy numbers_scratch
+                return 0
+            if big_u64 != 18446744073709551615:
+                destroy numbers_scratch
+                return 0
+            if big_i64 != -7:
+                destroy numbers_scratch
+                return 0
+            if json_ast_number_kind(numbers_any, big_node, numbers_store) != JsonNumberKind.UNSIGNED:
+                destroy numbers_scratch
+                return 0
+            if neg_u64 != 7:
+                destroy numbers_scratch
+                return 0
+            min_i64: i64 = -9223372036854775807 - 1
+            if neg_i64 != min_i64:
+                destroy numbers_scratch
+                return 0
+            if json_ast_number_kind(numbers_any, neg_node, numbers_store) != JsonNumberKind.SIGNED:
+                destroy numbers_scratch
+                return 0
+            if frac_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, frac_node, numbers_store):
+                destroy numbers_scratch
+                return 0
+            if exp_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, exp_node, numbers_store):
+                destroy numbers_scratch
+                return 0
+            if huge_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, huge_node, numbers_store):
+                destroy numbers_scratch
+                return 0
+            if tiny_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, tiny_node, numbers_store):
+                destroy numbers_scratch
+                return 0
 
-        if small_u64 != 123:
             destroy numbers_scratch
-            return 0
-        if small_i64 != 123:
-            destroy numbers_scratch
-            return 0
-        if json_ast_number_kind(numbers_any, small_node, numbers_store) != JsonNumberKind.UNSIGNED:
-            destroy numbers_scratch
-            return 0
-        if big_u64 != 18446744073709551615:
-            destroy numbers_scratch
-            return 0
-        if big_i64 != -7:
-            destroy numbers_scratch
-            return 0
-        if json_ast_number_kind(numbers_any, big_node, numbers_store) != JsonNumberKind.UNSIGNED:
-            destroy numbers_scratch
-            return 0
-        if neg_u64 != 7:
-            destroy numbers_scratch
-            return 0
-        min_i64: i64 = -9223372036854775807 - 1
-        if neg_i64 != min_i64:
-            destroy numbers_scratch
-            return 0
-        if json_ast_number_kind(numbers_any, neg_node, numbers_store) != JsonNumberKind.SIGNED:
-            destroy numbers_scratch
-            return 0
-        if frac_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, frac_node, numbers_store):
-            destroy numbers_scratch
-            return 0
-        if exp_value.kind != JsonNumberKind.NON_INTEGRAL or json_ast_number_is_integral(numbers_any, exp_node, numbers_store):
-            destroy numbers_scratch
-            return 0
-        if huge_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, huge_node, numbers_store):
-            destroy numbers_scratch
-            return 0
-        if tiny_value.kind != JsonNumberKind.OUT_OF_RANGE or json_ast_number_is_integral(numbers_any, tiny_node, numbers_store):
-            destroy numbers_scratch
-            return 0
 
-        destroy numbers_scratch
-
-        return 1
+            return 1
 def json_parser_parallel_max_workers_impl() -> i64:
     return JSON_PARALLEL_MAX_WORKERS.i64()
 def json_parser_parallel_checksum_impl(source: u8&, worker_count: usize, iterations: usize) -> i64:

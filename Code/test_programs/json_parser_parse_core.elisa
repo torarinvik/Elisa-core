@@ -436,21 +436,23 @@ def json_parse_number_value(source: u8&, source_offset: usize, source_len: usize
         signed_value <- magnitude.i64()
     return JsonNumberValue{kind: JsonNumberKind.UNSIGNED, unsigned_value: magnitude, signed_value: signed_value}
 def json_parser_document_node_count_impl(doc: JsonParserDocument&) -> i64:
-    if doc[0].impl_bits == 0.uintptr():
-        return -1
-    impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-    store: JsonNode.Store[Local] = json_parser_document_store(impl)
-    return json_ast_node_count(impl.root, store)
-def json_parser_ast_node_count_impl(source: u8&) -> i64:
-    can Memory.Allocate, Abort.Panic:
-        source_len: usize = runtime_strlen(source)
-        region scratch(json_ast_scratch_capacity(source_len))
-        store: JsonNode.Store[Local] = JsonNode.Store(scratch)
-        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
-        result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
-        if result.checksum < 0:
-            destroy scratch
+    trusted Unsafe.PointerCast:
+        if doc[0].impl_bits == 0.uintptr():
             return -1
-        count: i64 = json_ast_node_count(result.node, store)
-        destroy scratch
-        return count
+        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+        store: JsonNode.Store[Local] = json_parser_document_store(impl)
+        return json_ast_node_count(impl.root, store)
+def json_parser_ast_node_count_impl(source: u8&) -> i64:
+    trusted Unsafe.PointerCast:
+        can Memory.Allocate, Abort.Panic:
+            source_len: usize = runtime_strlen(source)
+            region scratch(json_ast_scratch_capacity(source_len))
+            store: JsonNode.Store[Local] = JsonNode.Store(scratch)
+            arena: mutable Arena& = (&scratch).cast[mutable Arena&]
+            result: JsonParseNodeResult = json_parse_document_node_with_len(source, source_len, arena, store)
+            if result.checksum < 0:
+                destroy scratch
+                return -1
+            count: i64 = json_ast_node_count(result.node, store)
+            destroy scratch
+            return count

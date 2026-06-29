@@ -1,12 +1,13 @@
 def json_parser_document_root_value_impl(doc: JsonParserDocument&, out: mutable JsonParserValue&) -> i64:
-    can Memory.Allocate, Abort.Panic:
-        out[0] <- json_parser_value_null()
-        if doc[0].impl_bits == 0.uintptr():
-            return 0
+    trusted Unsafe.PointerCast:
+        can Memory.Allocate, Abort.Panic:
+            out[0] <- json_parser_value_null()
+            if doc[0].impl_bits == 0.uintptr():
+                return 0
 
-        impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
-        out[0] <- json_parser_value_from_node_ref(impl, (&impl.root).cast[JsonNode&])
-        return 1 if out[0].impl_bits != 0.uintptr() else 0
+            impl: heap JsonParserDocumentInternal& = doc[0].impl_bits.cast[heap JsonParserDocumentInternal&]
+            out[0] <- json_parser_value_from_node_ref(impl, (&impl.root).cast[JsonNode&])
+            return 1 if out[0].impl_bits != 0.uintptr() else 0
 def json_parser_value_is_valid_impl(value: JsonParserValue&) -> i64:
     return 1 if json_parser_value_is_live(value) else 0
 def json_parser_value_kind_impl(value: JsonParserValue&) -> i64:

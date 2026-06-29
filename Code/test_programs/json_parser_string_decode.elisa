@@ -201,31 +201,32 @@ def json_decoded_string_len(source: u8&, source_offset: usize, source_len: usize
             total <- total + utf8_size.i64()
     return total
 def json_decode_string_into(source: u8&, source_offset: usize, source_len: usize, dst: mutable u8&) -> i64:
-    if source_len < 2:
-        return -1
+    trusted Unsafe.PointerCast:
+        if source_len < 2:
+            return -1
 
-    raw_offset: usize = source_offset + 1
-    raw_len: usize = source_len - 2
-    if not json_string_has_escape(source, source_offset, source_len):
-        if raw_len > 0:
-            memcpy(dst.cast[mutable void&], (source + raw_offset).cast[void&], raw_len)
-        return raw_len.i64()
+        raw_offset: usize = source_offset + 1
+        raw_len: usize = source_len - 2
+        if not json_string_has_escape(source, source_offset, source_len):
+            if raw_len > 0:
+                memcpy(dst.cast[mutable void&], (source + raw_offset).cast[void&], raw_len)
+            return raw_len.i64()
 
-    pos: mutable usize = raw_offset
-    end: usize = source_offset + source_len - 1
-    out_pos: mutable usize = 0
-    while pos < end:
-        ch: i64 = source[pos].i64()
-        pos <- pos + 1
-        if likely ch != JSON_CH_BSLASH:
-            dst[out_pos] <- ch.u8()
-            out_pos <- out_pos + 1
-        else:
-            codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, &pos)
-            if codepoint < 0:
-                return -1
-            out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
-    return out_pos.i64()
+        pos: mutable usize = raw_offset
+        end: usize = source_offset + source_len - 1
+        out_pos: mutable usize = 0
+        while pos < end:
+            ch: i64 = source[pos].i64()
+            pos <- pos + 1
+            if likely ch != JSON_CH_BSLASH:
+                dst[out_pos] <- ch.u8()
+                out_pos <- out_pos + 1
+            else:
+                codepoint: i64 = json_decode_escape_codepoint_from_source(source, end, &pos)
+                if codepoint < 0:
+                    return -1
+                out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
+        return out_pos.i64()
 def json_string_matches_literal(source: u8&, source_offset: usize, source_len: usize, literal: u8&) -> bool:
     if source_len < 2:
         return false

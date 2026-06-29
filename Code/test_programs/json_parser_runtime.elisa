@@ -90,15 +90,16 @@ def json_parallel_parse_once(source: u8&, mode: i64) -> i64:
             return json_parser_ast_cached_checksum_impl(source)
         return -1
 def json_parallel_worker(job: JsonParallelJob) -> i64:
-    can Memory.Allocate, Abort.Panic:
-        source: u8& = job.source_bits.cast[u8&]
-        result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
-        total: mutable i64 = 0
-        for iteration in 0..<job.repeats:
-            value: i64 = json_parallel_parse_once(source, job.mode)
-            if value < 0:
-                result_slot[0] <- -1
-                return -1
-            total <- total + value
-        result_slot[0] <- total
-        return total
+    trusted Unsafe.PointerCast:
+        can Memory.Allocate, Abort.Panic:
+            source: u8& = job.source_bits.cast[u8&]
+            result_slot: mutable i64& = job.result_bits.cast[mutable i64&]
+            total: mutable i64 = 0
+            for iteration in 0..<job.repeats:
+                value: i64 = json_parallel_parse_once(source, job.mode)
+                if value < 0:
+                    result_slot[0] <- -1
+                    return -1
+                total <- total + value
+            result_slot[0] <- total
+            return total
