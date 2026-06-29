@@ -64,6 +64,13 @@ func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int 
 		return 0
 	}
 
+	// Content-addressed build cache (docs/117): serve an identical `-emit obj`
+	// result without reparsing/recompiling. On a miss it builds and publishes,
+	// so it owns the whole build for that path.
+	if code, handled := tryBuildObjectCache(options, stdout, stderr); handled {
+		return code
+	}
+
 	program, ok := loadProgramInput(options.filename, stderr)
 	if !ok {
 		return 1
