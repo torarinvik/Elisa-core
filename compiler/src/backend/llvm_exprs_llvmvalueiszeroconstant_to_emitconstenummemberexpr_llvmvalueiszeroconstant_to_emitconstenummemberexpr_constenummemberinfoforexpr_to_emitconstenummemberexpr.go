@@ -94,7 +94,7 @@ func (s *functionState) constEnumMemberInfoForExpr(expr ast.Expr) (*semantic.Con
 	var matchedMemberName string
 	for i := len(parts) - 1; i >= 1; i-- {
 		baseName := strings.Join(parts[:i], ".")
-		base, ok := s.g.result.NamedTypes[baseName]
+		base, _, ok := s.lookupVisibleNamedType(baseName)
 		if !ok {
 			continue
 		}
@@ -125,7 +125,7 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		base, ok := s.g.result.NamedTypes[n.Name]
+		base, _, ok := s.lookupVisibleNamedType(n.Name)
 		if !ok {
 			return nil, false
 		}
@@ -136,7 +136,7 @@ func (s *functionState) constEnumTypeForExpr(expr ast.Expr) (*semantic.ConstEnum
 		if !ok || n.Field != "Tag" {
 			return nil, false
 		}
-		base, ok := s.g.result.NamedTypes[ident.Name]
+		base, _, ok := s.lookupVisibleNamedType(ident.Name)
 		if !ok {
 			return nil, false
 		}
