@@ -140,7 +140,14 @@ type FuncDecl struct {
 	Name             string
 	TypeParams       []string
 	RegionParams     []string
-	PermissionParams []string
+	// AmbientGrownContainerRegion names a `__rg_<param>` region (one of RegionParams) inferred for a
+	// container parameter this function grows by INSERTING region-allocated values (the void-grower
+	// shape `out.push(make_node())`). The backend binds this function's ambient allocation region to
+	// that region's arena so a region-poly callee producing the inserted value allocates into the
+	// caller-owned container's region (adopted with it), not a per-call arena freed on return. Empty
+	// otherwise.
+	AmbientGrownContainerRegion string
+	PermissionParams            []string
 	GenericParams    []GenericParam
 	Permissions      []PermissionRef
 	Ensures          []EnsuresClause

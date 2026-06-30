@@ -565,3 +565,85 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("a region-poly builder returning a grown field inside another struct must thread+adopt the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
 	}
 }
+
+// Void-grower region adoption (docs/75 cross-fn container growth): a `void` helper that grows a
+// caller-owned `darray[Node]&` by INSERTING a region-poly node-with-payload (`out.push(Block(...))`)
+// must allocate the inserted node — and its side-table darray payload — into the caller's container
+// region, not a per-call arena freed on return. Before AmbientGrownContainerRegion this segfaulted on
+// traversal (the payload darray backing dangled: `body.count` read, `for x in body` faulted). Builds
+// cross-fn through the void grower, then folds the tree: 99 + 10 + 20 = 129.
+func TestVoidGrowerPayloadDarrayAdoptedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `enum Node: pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+def make_leaf(v: i64) -> Node can[Memory.Allocate, Abort.Panic]:
+    return new Stmt.Leaf(value: v)
+def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
+    kids: mutable darray[Node] = []
+    kids.push(make_leaf(10))
+    kids.push(make_leaf(20))
+    out.push(new Stmt.Block(body: kids, tag: 99))
+    return
+def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
+    match n:
+        Stmt.Leaf(value: v):
+            return v
+        Stmt.Block(body: b, tag: t):
+            total: mutable i64 = t
+            for k in b:
+                total <- total + sumtree(k)
+            return total
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nodes: mutable darray[Node] = []
+    grow(nodes) can Memory.Allocate, Abort.Panic
+    acc: mutable i64 = 0
+    for n in nodes:
+        acc <- acc + sumtree(n) can Memory.Allocate, Abort.Panic
+    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "129" {
+		t.Fatalf("void grower inserting a region-poly node-with-payload must adopt its payload into the caller's container region; expected RAN 129, got %s %q", status, out)
+	}
+}
+
+// Void-grower SAFETY GATE: the ambient-region binding only engages for a function with a SINGLE
+// regionless container parameter — so the inserted value's only destination is that one caller-owned
+// container, sound by construction (no second different-lifetime container to escape into). This
+// exercises the sound path end-to-end: a one-arg grower builds a node-with-payload that is folded
+// after return (1 + 1 leaves + tag 0 = 2). The orthogonal handle-level cross-region escape check for
+// MULTI-container growers (not ambient-bound by this fix) is tracked separately
+// ([[void-grower-region-adoption]]).
+func TestVoidGrowerSingleContainerAdoptedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `enum Node: pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+def make_block(tag: i64) -> Node can[Memory.Allocate, Abort.Panic]:
+    kids: mutable darray[Node] = []
+    kids.push(new Stmt.Leaf(value: 1))
+    kids.push(new Stmt.Leaf(value: 1))
+    return new Stmt.Block(body: kids, tag: tag)
+def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(make_block(0))
+    return
+def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
+    match n:
+        Stmt.Leaf(value: v):
+            return v
+        Stmt.Block(body: b, tag: t):
+            total: mutable i64 = t
+            for k in b:
+                total <- total + sumtree(k)
+            return total
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nodes: mutable darray[Node] = []
+    grow(nodes) can Memory.Allocate, Abort.Panic
+    print(sumtree(nodes[0]).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "2" {
+		t.Fatalf("single-container void grower must adopt the payload soundly; expected RAN 2, got %s %q", status, out)
+	}
+}

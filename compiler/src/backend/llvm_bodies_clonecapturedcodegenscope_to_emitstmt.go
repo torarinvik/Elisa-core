@@ -270,8 +270,14 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 // instead of creating its own arena. When true the region allocates nothing, frees nothing, and is
 // NOT added to s.regions (the caller owns it) — `new[auto]` in its body lands in the caller's arena.
 func (s *functionState) regionPolyAutoAdopts(n *ast.RegionStmt) bool {
-	return s != nil && s.fnType != nil && s.fnType.RegionPolymorphic &&
-		n != nil && n.Lazy && backendIsSynthesizedAutoRegion(n.Name) && s.regionPolyOwner.arenaRef != nil
+	if s == nil || s.fnType == nil || n == nil || !n.Lazy || !backendIsSynthesizedAutoRegion(n.Name) || s.regionPolyOwner.arenaRef == nil {
+		return false
+	}
+	// A region-polymorphic function adopts the threaded caller region. So does a VOID GROWER whose
+	// ambient region was bound to a grown caller-owned container's arena (AmbientGrownContainerRegion):
+	// its synthesized `__auto_*` region must route inserted region-poly values into that arena, not a
+	// per-call arena freed on return.
+	return s.fnType.RegionPolymorphic || s.ambientGrownContainerRegion != ""
 }
 
 func backendIsSynthesizedAutoRegion(name string) bool {

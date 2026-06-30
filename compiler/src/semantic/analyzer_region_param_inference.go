@@ -94,14 +94,34 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 	}
 	changed := false
 	inferred := map[string]string{} // param name -> inferred region-param name
+	// ambientGrownParam is the container param (if any) grown by INSERTING region-allocated values
+	// (the void-grower shape). Its inferred region becomes the function's ambient allocation region so
+	// the inserted value's region-poly producer allocates into the caller's container region.
+	ambientGrownParam := ""
+	// Count regionless-ref-container params: the ambient-region binding is only SOUND when there is
+	// exactly one. With two (`def bad(scratch: darray&, keep: darray&)`), binding the ambient region to
+	// one container lets a value inserted into it ALSO be inserted into the other (a different-lifetime)
+	// container — an escape the handle-level checker does not yet catch. Restricting to a single
+	// container param removes that second target entirely (and covers every parser grower, all single
+	// `out`). Other escape vectors (explicit inner regions, returns) remain covered by existing checks.
+	containerParamCount := 0
+	for i := range fn.Params {
+		if _, ok := regionlessRefContainer(fn.Params[i].Type); ok {
+			containerParamCount++
+		}
+	}
 	for i := range fn.Params {
 		p := &fn.Params[i]
 		var stamp func(string)
 		if cstamp, ok := regionlessRefContainer(p.Type); ok {
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
-			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName)
+			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) || grownWithRegionValue {
 				stamp = cstamp
+				if grownWithRegionValue && ambientGrownParam == "" && containerParamCount == 1 {
+					ambientGrownParam = p.Name
+				}
 			}
 		} else if sstamp, ok := regionlessRefStruct(p.Type); ok {
 			// docs/91 S4 Stage 1: a region-less by-ref STRUCT param whose CONTAINER FIELD is grown
@@ -127,6 +147,14 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 	}
 	if len(inferred) > 0 {
 		inferReturnViewRegion(fn, inferred)
+	}
+	// Record the ambient grown-container region on the FuncType so the backend binds this function's
+	// ambient allocation region to it (the void-grower fix): inserted region-poly values then land in
+	// the caller-owned container's region instead of a per-call arena freed on return.
+	if ambientGrownParam != "" {
+		// Recorded on the AST FuncDecl (like RegionParams) — symbol/FuncType resolution is not reliably
+		// available at this pre-pass, and the backend reads the FuncDecl directly.
+		fn.AmbientGrownContainerRegion = "__rg_" + ambientGrownParam
 	}
 	return changed
 }
@@ -596,6 +624,242 @@ func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// containerParamGrownWithRegionValue reports whether the body grows the named container parameter
+// (`name.push(v)` / .extend / .insert / …) with a value whose RESOLVED TYPE carries region-backed
+// storage — a packed-enum node or a nested container. Such an insert moves a region-allocated value
+// into a CALLER-OWNED container, so the value's backing must live in the param's region or it dangles
+// when this function returns (the void-grower use-after-free: a region-poly callee's payload darray is
+// pushed into `out` but lands in a grower-local region freed on return). Stamping `__rg_<param>` makes
+// the param's region threadable; the backend then binds the grower's ambient allocation region to it so
+// the inserted value's region-poly producer allocates into the param's region (and is adopted with it).
+//
+// PRE-CLASSIFICATION-SAFE: decides purely from RESOLVED TYPES (callee return types, local binding
+// types, packed-enum constructors), NEVER region-poly classification — which runs after this pass
+// (analyzer.go: inferRegionParamsForGrownContainerParams precedes classifyRegionPolymorphicFunctions).
+// Traces an inserted ident through its var-decl / assignment / `if EXPR is x` refinement binding to its
+// producing expression. Conservative both ways: an unresolved insert simply doesn't trigger (the prior
+// behavior, sound), and over-triggering only threads a region the caller — which owns the container —
+// can always supply.
+func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name string, funcByName map[string]*ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	// 1. Map each local name to the expression it was bound from, so an inserted ident resolves to its
+	//    producer: a var-decl value, an assignment, or an `if EXPR is x:` refinement scrutinee.
+	boundExpr := map[string]ast.Expr{}
+	bind := func(n string, e ast.Expr) {
+		if n == "" || e == nil {
+			return
+		}
+		if _, seen := boundExpr[n]; !seen {
+			boundExpr[n] = e
+		}
+	}
+	bindRefinements := func(cond ast.Expr) {
+		var walk func(v reflect.Value)
+		walk = func(v reflect.Value) {
+			if !v.IsValid() || !v.CanInterface() {
+				return
+			}
+			switch v.Kind() {
+			case reflect.Pointer:
+				if v.IsNil() {
+					return
+				}
+				if ob, ok := v.Interface().(*ast.OptionalBindExpr); ok && ob != nil {
+					bind(ob.Name, ob.Value)
+				}
+				walk(v.Elem())
+			case reflect.Interface:
+				if v.IsNil() {
+					return
+				}
+				walk(v.Elem())
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					walk(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					walk(v.Index(i))
+				}
+			}
+		}
+		walk(reflect.ValueOf(cond))
+	}
+	var collectBindings func(stmts []ast.Stmt)
+	collectBindings = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.VarDeclStmt:
+				bind(s.Name, s.Value)
+			case *ast.AssignStmt:
+				if id, ok := s.Target.(*ast.Ident); ok && id != nil {
+					bind(id.Name, s.Value)
+				}
+			case *ast.IfStmt:
+				bindRefinements(s.Cond)
+				collectBindings(s.Then)
+				for _, elif := range s.Elifs {
+					bindRefinements(elif.Cond)
+					collectBindings(elif.Body)
+				}
+				collectBindings(s.Else)
+			case *ast.WhileStmt:
+				bindRefinements(s.Cond)
+				collectBindings(s.Body)
+			case *ast.ForStmt:
+				collectBindings(s.Body)
+			case *ast.IterForStmt:
+				collectBindings(s.Body)
+			case *ast.MatchStmt:
+				for _, arm := range s.Arms {
+					collectBindings(arm.Body)
+				}
+			case *ast.ScopeStmt:
+				collectBindings(s.Body)
+			case *ast.CanStmt:
+				collectBindings(s.Body)
+			case *ast.RegionStmt:
+				collectBindings(s.Body)
+			case *ast.InStoreStmt:
+				collectBindings(s.Body)
+			}
+		}
+	}
+	collectBindings(fn.Body)
+
+	// 2. Decide whether an expression produces a region-carrying value (resolved types only).
+	argIsRegionValued := func(arg ast.Expr) bool {
+		visited := map[string]bool{}
+		var rec func(e ast.Expr, depth int) bool
+		rec = func(e ast.Expr, depth int) bool {
+			if e == nil || depth > 16 {
+				return false
+			}
+			switch n := unwrapParenForRegionPoly(e).(type) {
+			case *ast.AllocExpr:
+				return true
+			case *ast.ListLitExpr:
+				return n != nil && n.Owner == nil
+			case *ast.ListComprehensionExpr:
+				return n != nil && n.Owner == nil
+			case *ast.Ident:
+				if n == nil || visited[n.Name] {
+					return false
+				}
+				visited[n.Name] = true
+				if prod, ok := boundExpr[n.Name]; ok {
+					return rec(prod, depth+1)
+				}
+				return false
+			case *ast.CallExpr:
+				// A bare constructor of a region-backed packed enum allocates region storage.
+				if et, _, ok := a.packedAllocConstructorInfo(n); ok && et != nil && et.Packed {
+					return true
+				}
+				// Otherwise resolve the callee's RETURN TYPE (region-carrying ⇒ region-valued).
+				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
+					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
+						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+					}
+				}
+				return false
+			case *ast.StructLitExpr:
+				// Pre-analysis `Name(args)` parses as a StructLitExpr; resolve it as a call.
+				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
+					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
+						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+					}
+				}
+				return false
+			}
+			return false
+		}
+		return rec(arg, 0)
+	}
+
+	// 3. Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
+	found := false
+	var scan func(v reflect.Value)
+	scan = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+						for _, arg := range call.Args {
+							if argIsRegionValued(arg) {
+								found = true
+								return
+							}
+						}
+					}
+				}
+			}
+			scan(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			scan(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				scan(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				scan(v.Index(i))
+			}
+		}
+	}
+	scan(reflect.ValueOf(fn.Body))
+	return found
+}
+
+// typeIsRegionValued reports whether a value of this resolved type owns/references region-backed
+// storage that must be adopted with it: a container/view/store-struct (typeCarriesRegionStorage), OR
+// a region-backed packed-enum HANDLE — whose record lives in a region store and whose variant
+// payloads may hold side-table containers (docs/76). The packed-enum case is NOT folded into the
+// shared typeCarriesRegionStorage because that predicate gates escape checks with narrower intent;
+// here we only decide whether inserting such a value into a caller-owned container forces the
+// container's region to be threaded.
+func (a *Analyzer) typeIsRegionValued(t Type) bool {
+	if typeCarriesRegionStorage(t) {
+		return true
+	}
+	for t != nil {
+		switch tt := t.(type) {
+		case *OptionalType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Value
+		case *AggregateStateType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Base
+		case *RefType:
+			if tt == nil {
+				return false
+			}
+			t = tt.Elem
+		case *EnumType:
+			return tt != nil && (tt.Packed || tt.Root().Packed)
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 // collectProgramLifetimeRoots gathers the names that, when used as an `in <name>:` allocation

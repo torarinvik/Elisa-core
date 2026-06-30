@@ -91,6 +91,11 @@ type functionState struct {
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
 	// region and the returned handle outlives the call. Zero value (nil arenaRef) for ordinary fns.
 	regionPolyOwner              treeAllocOwnerBinding
+	// ambientGrownContainerRegion (the void-grower fix) is the `__rg_<param>` region of a caller-owned
+	// container this function grows with region-allocated inserts; when set, the function's synthesized
+	// `__auto_*` region adopts that container's arena so inserted region-poly values land in the
+	// caller's region. Empty for ordinary functions.
+	ambientGrownContainerRegion  string
 	currentSequenceRewrite       *sequenceRewriteCodegenContext
 	packedStoreValueKey1         packedStoreExtractCacheKey
 	packedStoreValue1            C.LLVMValueRef
@@ -558,6 +563,21 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		for j, regionName := range fnType.RegionParams {
 			arenaParam := C.LLVMGetParam(fnValue, C.unsigned(base+j))
 			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType, owned: false})
+		}
+	}
+
+	// Void-grower ambient region (docs/75 cross-fn container growth): when this function grows a
+	// caller-owned container by INSERTING region-allocated values (`out.push(make_node())`), bind its
+	// ambient allocation region to the container's (caller-provided) arena. A region-poly callee
+	// producing the inserted value then allocates into the caller's container region — adopted with it
+	// — instead of a per-call synthesized `__auto_*` region freed on return (the void-grower UAF).
+	if decl.AmbientGrownContainerRegion != "" {
+		state.ambientGrownContainerRegion = decl.AmbientGrownContainerRegion
+		if owner, ok := state.regionArenaOwner(decl.AmbientGrownContainerRegion); ok && state.regionPolyOwner.arenaRef == nil {
+			state.regionPolyOwner = owner
+			if state.treeAllocOwner.arenaRef == nil && state.treeAllocOwner.arenaRefPtr == nil {
+				state.treeAllocOwner = owner
+			}
 		}
 	}
 
