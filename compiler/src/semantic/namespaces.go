@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"sort"
 	"strings"
 
 	"elisacore/src/ast"
@@ -115,7 +116,14 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 		if !ok {
 			continue
 		}
-		blockUsings = append(blockUsings, joinQualifiedName(namespace, usingDecl.Name))
+		switch {
+		case usingDecl.Alias != "":
+			a.registerModuleAlias(usingDecl, namespace)
+		case usingDecl.Member != "":
+			a.registerUsingMember(usingDecl, namespace)
+		default:
+			blockUsings = append(blockUsings, joinQualifiedName(namespace, usingDecl.Name))
+		}
 	}
 	effectiveUsings := dedupeQualifiedNames(append(append([]string(nil), inheritedUsings...), blockUsings...))
 	out := make([]scopedDecl, 0, len(decls))
@@ -197,6 +205,81 @@ func (a *Analyzer) registerImportAliases(n *ast.ImportDecl, namespace string) {
 	}
 }
 
+// registerUsingMember records `using Foo::bar` so the bare name `bar` resolves to
+// `Foo.bar`, exactly like `from Foo import bar`. Program-level; only an extra
+// resolution candidate (never shadows a local/namespace/wildcard-using name).
+func (a *Analyzer) registerUsingMember(n *ast.UsingDecl, namespace string) {
+	if a == nil || n == nil || n.Member == "" {
+		return
+	}
+	if a.importAliases == nil {
+		a.importAliases = make(map[string]string)
+	}
+	target := joinQualifiedName(joinQualifiedName(namespace, n.Name), n.Member)
+	if existing, ok := a.importAliases[n.Member]; ok && existing != target {
+		a.errorf(n.Pos(), "conflicting using: %q is already brought in as %q, cannot also bring it as %q", n.Member, existing, target)
+		return
+	}
+	a.importAliases[n.Member] = target
+}
+
+// registerModuleAlias records `using Foo as F` so the qualifier `F` rewrites to the
+// module `Foo`: `F::x` resolves to `Foo.x`. Qualification is kept, just shortened.
+func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
+	if a == nil || n == nil || n.Alias == "" {
+		return
+	}
+	if a.moduleAliases == nil {
+		a.moduleAliases = make(map[string]string)
+	}
+	target := joinQualifiedName(namespace, n.Name)
+	if existing, ok := a.moduleAliases[n.Alias]; ok && existing != target {
+		a.errorf(n.Pos(), "conflicting alias: %q already aliases module %q, cannot also alias %q", n.Alias, existing, target)
+		return
+	}
+	a.moduleAliases[n.Alias] = target
+}
+
+// reportUsingAmbiguity errors when a bare name is brought in by two or more
+// wildcard `using` imports that resolve to distinct globals — the collision must
+// be resolved by qualifying the reference (`Foo::bar`). A current-namespace or
+// local binding takes precedence and is never ambiguous. Returns true if it erred.
+func (a *Analyzer) reportUsingAmbiguity(name string, pos lexer.Pos) bool {
+	if a == nil || name == "" || strings.Contains(name, ".") || len(a.currentUsings) < 2 {
+		return false
+	}
+	namespace := a.currentNamespace
+	if namespace == "" && a.currentFuncType != nil {
+		namespace = privateOwnerNamespace(a.currentFuncType.Name)
+	}
+	if namespace != "" {
+		if _, ok := a.globalScope.Lookup(joinQualifiedName(namespace, name)); ok {
+			return false
+		}
+	}
+	seen := map[string]bool{}
+	matches := make([]string, 0, 2)
+	for _, usingName := range a.currentUsings {
+		cand := joinQualifiedName(usingName, name)
+		if seen[cand] {
+			continue
+		}
+		if sym, ok := a.globalScope.Lookup(cand); ok && sym != nil {
+			if sym.Private && !a.canAccessPrivateName(cand) {
+				continue
+			}
+			seen[cand] = true
+			matches = append(matches, cand)
+		}
+	}
+	if len(matches) > 1 {
+		sort.Strings(matches)
+		a.errorf(pos, "ambiguous reference %q is brought in by multiple `using` imports (%s); qualify it explicitly", name, strings.Join(matches, ", "))
+		return true
+	}
+	return false
+}
+
 func (a *Analyzer) withResolutionContext(namespace string, usings []string, fn func()) {
 	savedNamespace := a.currentNamespace
 	savedUsings := a.currentUsings
@@ -227,6 +310,11 @@ func (a *Analyzer) visibleNameCandidates(name string) []string {
 		}
 		if target, ok := a.importAliases[name]; ok {
 			candidates = append(candidates, target)
+		}
+	} else if idx := strings.Index(name, "."); idx > 0 {
+		// Module-alias qualifier rewrite: `F.x` (from `using Foo as F`) -> `Foo.x`.
+		if canon, ok := a.moduleAliases[name[:idx]]; ok {
+			candidates = append(candidates, canon+name[idx:])
 		}
 	}
 	candidates = append(candidates, name)

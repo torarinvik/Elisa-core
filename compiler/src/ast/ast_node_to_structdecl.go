@@ -118,9 +118,16 @@ type NamespaceDecl struct {
 	// `module Foo:` (and only one may exist).
 	Extend bool
 }
+// UsingDecl drops the qualifier on names from another module. Three forms:
+//   - wildcard `using Foo`:        Name="Foo" — all of Foo's public names unqualified.
+//   - selective `using Foo::bar`:  Name="Foo", Member="bar" — just `bar` unqualified.
+//   - alias `using Foo as F`:      Name="Foo", Alias="F" — `F::x` resolves to `Foo.x`
+//     (qualification kept, just shortened).
 type UsingDecl struct {
 	Position lexer.Pos
 	Name     string
+	Member   string
+	Alias    string
 }
 
 // ImportDecl is a selective import: `from Module import a, b` brings only the

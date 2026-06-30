@@ -107,6 +107,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			return
 		}
 		if sym, canonical, ok := a.lookupVisibleGlobal(n.Name); ok {
+			a.reportUsingAmbiguity(n.Name, n.Position)
 			// Record the resolved canonical (namespace/using/import-qualified) name so
 			// the interpreter can resolve namespaced value/function references instead
 			// of re-deriving from the bare name without namespace context.

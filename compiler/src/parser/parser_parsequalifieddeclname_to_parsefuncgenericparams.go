@@ -87,12 +87,28 @@ func (p *Parser) parseConstModuleMemberDecl() *ast.ConstDecl {
 	p.expectNewlineAfterValueExpr(value)
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
+// parseUsingDecl parses the three `using` forms. A multi-segment qualified name
+// (`using Foo::bar`) is selective — the final segment is the member; an `as` suffix
+// (`using Foo as F`) makes a module-qualifier alias. A bare single name is wildcard.
 func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("using")
-	name := p.parseQualifiedDeclName()
+	segments := []string{p.expect(lexer.TOKEN_IDENT).Text}
+	for p.matchQualifiedNameSeparator() {
+		segments = append(segments, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	if p.match(lexer.TOKEN_AS) {
+		alias := p.expect(lexer.TOKEN_IDENT).Text
+		p.expectNewline()
+		return &ast.UsingDecl{Position: pos, Name: strings.Join(segments, "."), Alias: alias}
+	}
 	p.expectNewline()
-	return &ast.UsingDecl{Position: pos, Name: name}
+	if len(segments) > 1 {
+		member := segments[len(segments)-1]
+		module := strings.Join(segments[:len(segments)-1], ".")
+		return &ast.UsingDecl{Position: pos, Name: module, Member: member}
+	}
+	return &ast.UsingDecl{Position: pos, Name: segments[0]}
 }
 
 // parseImportDecl parses `from Module import a, b` — a selective import that

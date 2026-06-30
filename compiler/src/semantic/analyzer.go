@@ -532,6 +532,7 @@ type Analyzer struct {
 	currentNamespace            string
 	currentUsings               []string
 	importAliases               map[string]string
+	moduleAliases               map[string]string
 	resolvedTypeNames           map[ast.TypeExpr]string
 	resolvedValueNames          map[*ast.Ident]string
 	currentImplicitScopes       []map[string]ast.Expr
