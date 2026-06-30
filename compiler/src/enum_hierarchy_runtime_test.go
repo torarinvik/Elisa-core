@@ -314,6 +314,57 @@ def bt() -> void:
 `)
 }
 
+// docs/77 §2 category arm with binder, where the hierarchy is declared inside a MODULE so the
+// sub-category's type is namespace-qualified (`Ast.Expr`) while the arm names it unqualified
+// (`Expr e:`). Regression: the backend's enumCategoryArm did a raw NamedTypes["Expr"] lookup that
+// missed the qualified key, so the binder was never emitted -> "unknown identifier e during LLVM
+// lowering". It now resolves the arm name against the scrutinee's hierarchy by simple name.
+func TestEnumHierarchyCategoryArmBinderInModule(t *testing.T) {
+	runEnumHierarchyProgram(t, "cat_arm_bind_module.elisa", `
+module Ast:
+    public:
+        enum Node: pass
+        enum Expr is Node:
+            Add(left: Node, right: Node)
+            Lit(value: i64)
+        enum Stmt is Node:
+            Ret(value: Node)
+            Nop
+
+using Ast
+
+def eval_expr(e: Ast::Expr) -> i64:
+    match e:
+        Expr.Add(left: l, right: r):
+            return describe(l) + describe(r)
+        Expr.Lit(value: v):
+            return v
+        _:
+            return 0
+
+def describe(n: Ast::Node) -> i64:
+    match n:
+        Expr e:
+            return eval_expr(e)
+        Stmt:
+            return 100
+        _:
+            return 0
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: Ast::Node = new[auto] Expr.Lit(value: 5)
+        b: Ast::Node = new[auto] Expr.Lit(value: 7)
+        root: Ast::Node = new[auto] Expr.Add(left: a, right: b)
+        nop: Ast::Node = new[auto] Stmt.Nop
+        if describe(root) != 12:
+            panic("module-qualified Expr category arm with binder must narrow and eval to 12")
+        if describe(nop) != 100:
+            panic("module-qualified Stmt category arm must match Nop")
+`)
+}
+
 // docs/77 §2 binding form: `if e is Stmt s:` — the docs/81 range test plus a branch-scoped
 // binder at the NARROWED category type (sugar for `is Stmt as s`). The binder must be usable
 // where the sub-category is required.

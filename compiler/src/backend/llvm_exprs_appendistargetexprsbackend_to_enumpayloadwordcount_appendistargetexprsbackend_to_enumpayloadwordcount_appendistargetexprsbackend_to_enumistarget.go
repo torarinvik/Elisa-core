@@ -239,11 +239,44 @@ func (s *functionState) enumCategoryArm(enumType *semantic.EnumType, name string
 	if enumType == nil || name == "" || (enumType.Parent == nil && len(enumType.Children) == 0) {
 		return nil, false
 	}
-	category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType)
-	if !ok || category == nil || !semantic.EnumDescendsFrom(category, enumType) {
-		return nil, false
+	if category, ok := s.g.result.NamedTypes[name].(*semantic.EnumType); ok && category != nil && semantic.EnumDescendsFrom(category, enumType) {
+		return category, true
 	}
-	return category, true
+	// A category-arm name (`Decl d:`) is written UNQUALIFIED, but a type declared inside a
+	// module is keyed namespace-qualified in NamedTypes (`Ast.Decl`), so the raw lookup
+	// above misses it. The semantic analyzer resolves it via the using/namespace-aware
+	// lookupVisibleType; the backend has no scope here, so resolve against the scrutinee's
+	// own hierarchy by simple (unqualified) name — which is also namespace-agnostic.
+	if category := findEnumCategoryBySimpleName(enumType, name); category != nil {
+		return category, true
+	}
+	return nil, false
+}
+
+// findEnumCategoryBySimpleName returns the scrutinee enum or one of its transitive
+// sub-categories whose unqualified name matches `name`, or nil — the backend's
+// namespace-agnostic resolution of an unqualified category-arm name to a hierarchy member.
+func findEnumCategoryBySimpleName(root *semantic.EnumType, name string) *semantic.EnumType {
+	if root == nil {
+		return nil
+	}
+	if simpleEnumCategoryName(root.Name) == name {
+		return root
+	}
+	for _, child := range root.Children {
+		if found := findEnumCategoryBySimpleName(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
+}
+
+// simpleEnumCategoryName strips a namespace qualifier (`Ast.Decl` / `Ast::Decl` -> `Decl`).
+func simpleEnumCategoryName(qualified string) string {
+	if i := strings.LastIndexAny(qualified, ".:"); i >= 0 {
+		return qualified[i+1:]
+	}
+	return qualified
 }
 
 // enumCategoryIsTarget recognizes a bare enum-category `is` target (docs/77): the target names an
