@@ -1134,9 +1134,36 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 		if ft := a.regionPolyProtocolMethodFuncType(callee); ft != nil {
 			return ft
 		}
-		// UFCS method call `self.helper(...)`: methods are plain globals, so
-		// resolve by the field name when it names a visible function.
+		// UFCS method call `recv.helper(...)`: methods are plain globals, so resolve by
+		// the field name. A top-level helper resolves under its simple name here; a
+		// MODULE-scoped method (`Parser.expr`) does NOT — lookupVisibleGlobal only sees
+		// its namespace-qualified name — so without a fallback every UFCS call of a
+		// module-method region-poly builder is invisible to classification, and its
+		// callers fail with "must occur where a region can be inferred". Fall back to the
+		// simple-name candidate index (populated for every candidate, module methods
+		// included; same *FuncType pointers, live across the fixpoint). Prefer a
+		// region-polymorphic candidate; UFCS can't disambiguate same-named methods
+		// pre-analysis, and over-classifying the region decision is sound (an unused
+		// threaded region). A lone candidate is returned as-is so store-needs threading
+		// (keyed on the same pointer) also resolves module methods.
 		name = callee.Field
+		if sym, _, ok := a.lookupVisibleGlobal(name); ok && sym != nil {
+			if ft, isFn := sym.Type.(*FuncType); isFn && ft != nil {
+				return ft
+			}
+		}
+		if a.regionPolyCandidateFnTypes != nil {
+			cands := a.regionPolyCandidateFnTypes[simpleTypeNameSegment(name)]
+			for _, ft := range cands {
+				if ft != nil && ft.RegionPolymorphic {
+					return ft
+				}
+			}
+			if len(cands) == 1 {
+				return cands[0]
+			}
+		}
+		return nil
 	default:
 		return nil
 	}
