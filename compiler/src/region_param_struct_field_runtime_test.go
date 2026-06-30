@@ -676,3 +676,31 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("loop-local container forwarded to a grower must infer its region with no explicit region; expected RAN 201, got %s %q", status, out)
 	}
 }
+
+// A region-polymorphic container-growing function defined inside a MODULE must be
+// dispatched as a direct call so its hidden region-param args thread correctly.
+// directCallTarget looked up the callee by its BARE name in GlobalScope, missing the
+// module-scoped symbol (`M.grow`) — so the call fell through to the function-value
+// (closure) path, whose lowered type omits the region param, yielding an LLVM
+// "Incorrect number of arguments passed to called function" build failure. The fix
+// resolves the canonical (namespaced) name first, exactly as resolveCallTarget does.
+// Exercises both an unqualified same-module call (`grow`) and a qualified one
+// (`M::build`). Folds 1+2=3.
+func TestModuleScopedRegionPolyGrowerCall(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `module M:
+    def grow(out: mutable darray[i64]&, v: i64) -> void can[Memory.Allocate, Abort.Panic]:
+        out.push(v)
+        return
+    def build() -> i64 can[Memory.Allocate, Abort.Panic]:
+        xs: mutable darray[i64] = []
+        grow(xs, 1)
+        grow(xs, 2)
+        return xs[0] + xs[1]
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    print(M::build().i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "3" {
+		t.Fatalf("module-scoped region-poly grower call must dispatch directly and thread region args; expected RAN 3, got %s %q", status, out)
+	}
+}

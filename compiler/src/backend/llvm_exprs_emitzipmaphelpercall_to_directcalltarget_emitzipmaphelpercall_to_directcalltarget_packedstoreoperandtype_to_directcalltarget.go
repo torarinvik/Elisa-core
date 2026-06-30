@@ -221,7 +221,18 @@ func (s *functionState) directCallTarget(expr ast.Expr) bool {
 	if s.identIsLocalBinding(ident.Name) {
 		return false
 	}
-	sym, ok := s.g.result.GlobalScope.Lookup(ident.Name)
+	// Resolve through the analyzer's recorded canonical (namespace/using/import-
+	// qualified) name, exactly as resolveCallTarget does — otherwise a module-scoped
+	// callee (`M.grow`) misses the bare-name lookup and is mis-dispatched through the
+	// function-value path, which doesn't thread the hidden region-param args and
+	// produces a call/definition arity mismatch.
+	lookupName := ident.Name
+	if s.g.result.ResolvedValueNames != nil {
+		if canon, ok := s.g.result.ResolvedValueNames[ident]; ok {
+			lookupName = canon
+		}
+	}
+	sym, ok := s.g.result.GlobalScope.Lookup(lookupName)
 	if !ok {
 		return false
 	}
