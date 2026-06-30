@@ -148,6 +148,87 @@ def bt() -> void:
 `)
 }
 
+// docs/76 side-tables: a variant whose ONLY self-reference is through a container (`body: darray[Node]`)
+// is still a recursive tree (the AST block/args case) and must promote to the AoS handle store — not
+// silently stay an inline value enum. Before the computeRecursiveEnumSet container-descent fix the
+// hierarchy was not packed, so a builder returning such a node left its child container's backing in a
+// build-local region that freed on return → use-after-free on traversal. Build cross-fn + return + fold.
+func TestRecursiveEnumHierarchyContainerChildCrossFunction(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_hier_container.elisa", `
+enum Node: pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+
+def make_leaf(v: i64) -> Node:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        return new Stmt.Leaf(value: v)
+
+def build() -> Node:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        kids: mutable darray[Node] = []
+        kids.push(make_leaf(10))
+        kids.push(make_leaf(20))
+        kids.push(make_leaf(30))
+        return new Stmt.Block(body: kids, tag: 99)
+
+def sum_tree(n: Node) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        match n:
+            Stmt.Leaf(value: v):
+                return v
+            Stmt.Block(body: b, tag: t):
+                total: mutable i64 = t
+                for k in b:
+                    total <- total + sum_tree(k)
+                return total
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        root: Node = build()
+        if sum_tree(root) != 159:
+            panic("container-child cross-function fold produced wrong sum")
+`)
+}
+
+// Same container-child shape but with a narrowed handle width (docs/82 dial): `new` must hand back a
+// width-correct opaque handle (here u16), never a raw ref, even when the variant carries a container.
+func TestRecursiveEnumHierarchyContainerChildNarrowHandle(t *testing.T) {
+	runEnumHierarchyProgram(t, "rec_hier_container_u16.elisa", `
+enum Node layout(handle: u16): pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+
+def build() -> Node:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        kids: mutable darray[Node] = []
+        kids.push(new Stmt.Leaf(value: 10))
+        kids.push(new Stmt.Leaf(value: 20))
+        kids.push(new Stmt.Leaf(value: 30))
+        return new Stmt.Block(body: kids, tag: 99)
+
+def sum_tree(n: Node) -> i64:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        match n:
+            Stmt.Leaf(value: v):
+                return v
+            Stmt.Block(body: b, tag: t):
+                total: mutable i64 = t
+                for k in b:
+                    total <- total + sum_tree(k)
+                return total
+
+@test
+def bt() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        root: Node = build()
+        if sum_tree(root) != 159:
+            panic("u16 container-child fold produced wrong sum")
+`)
+}
+
 // docs/77: common(...) fields on the hierarchy root are shared by every node, readable from any
 // refinement (the canonical AST `span` pattern). Build two nodes with spans, sum via match.
 func TestRecursiveEnumHierarchyCommonField(t *testing.T) {

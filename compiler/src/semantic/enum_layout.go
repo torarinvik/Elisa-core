@@ -95,6 +95,56 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 		out = append(out, descendants[name]...)
 		return out
 	}
+	// collectEnumRefs gathers the enum names a payload field reaches by VALUE — a direct
+	// `left: Node`, but also one buried in a container/optional/array/tail (`body: darray[Node]`,
+	// `else: Node?`, `items: tail Node`). A node holding a darray of children IS a recursive tree
+	// (the canonical AST case), so the self-typed element must promote the hierarchy to the AoS
+	// handle store exactly like a direct field — otherwise the only-recursive-through-a-container
+	// hierarchy stays an inline value enum and its child container dangles on a region-poly return.
+	// References (`Node&`) and closure signatures are deliberately NOT descended: a borrow or a
+	// func-type mention is not by-value containment.
+	var collectEnumRefs func(t ast.TypeExpr, out *[]string)
+	collectEnumRefs = func(t ast.TypeExpr, out *[]string) {
+		switch tt := t.(type) {
+		case *ast.NamedType:
+			if tt != nil {
+				if _, isEnum := byName[tt.Name]; isEnum {
+					*out = append(*out, hierarchyOf(tt.Name)...)
+				}
+			}
+		case *ast.GenericType:
+			if tt != nil {
+				if _, isEnum := byName[tt.Name]; isEnum {
+					*out = append(*out, hierarchyOf(tt.Name)...)
+				}
+				for _, arg := range tt.Args {
+					collectEnumRefs(arg, out)
+				}
+			}
+		case *ast.BuiltinTypeExpr: // darray[T], dict[K,V], set[T], view[T]: a self-typed element makes the node recursive
+			if tt != nil {
+				for _, arg := range tt.TypeArgs {
+					collectEnumRefs(arg, out)
+				}
+			}
+		case *ast.OptionalTypeExpr:
+			if tt != nil {
+				collectEnumRefs(tt.Value, out)
+			}
+		case *ast.ArrayType:
+			if tt != nil {
+				collectEnumRefs(tt.Elem, out)
+			}
+		case *ast.TailType:
+			if tt != nil {
+				collectEnumRefs(tt.Elem, out)
+			}
+		case *ast.MutableType:
+			if tt != nil {
+				collectEnumRefs(tt.Elem, out)
+			}
+		}
+	}
 	byValueEnumRefs := func(ed *ast.EnumDecl) []string {
 		var out []string
 		if ed == nil {
@@ -102,11 +152,7 @@ func computeRecursiveEnumSet(decls []scopedDecl) map[string]bool {
 		}
 		for i := range ed.Variants {
 			for _, pd := range ed.Variants[i].Payload {
-				if nt, ok := pd.Type.(*ast.NamedType); ok && nt != nil {
-					if _, isEnum := byName[nt.Name]; isEnum {
-						out = append(out, hierarchyOf(nt.Name)...)
-					}
-				}
+				collectEnumRefs(pd.Type, &out)
 			}
 		}
 		return out
