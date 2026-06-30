@@ -29,6 +29,26 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 	if len(funcs) == 0 {
 		return
 	}
+	// Each candidate's enclosing namespace + usings, so the region-allocated-return
+	// detection below resolves UNQUALIFIED type names in a module body (e.g. `Val.Arr`
+	// referring to `M.Val`) the way the body's own analysis later will. Without this a
+	// module-scoped builder that returns a packed-enum value built from a local container
+	// fails the `regionBackedEnumConstructor` check (the bare name `Val` doesn't resolve
+	// to `M.Val`), so it never gets its `__region_auto` param and the container backing
+	// dangles after return.
+	fnScope := map[*ast.FuncDecl]scopedDecl{}
+	for _, scoped := range decls {
+		switch n := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			fnScope[n] = scoped
+		case *ast.ImplDecl:
+			for _, member := range n.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					fnScope[fn] = scoped
+				}
+			}
+		}
+	}
 	// Index candidate functions by simple name so a constructor call shadowed by a
 	// same-named struct (e.g. `Parser(args)` with both `struct Parser` and
 	// `def Parser(...)->Parser`) still resolves to the constructor's FuncType. The
@@ -60,7 +80,12 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			// so classifying it region-polymorphic would inject a spurious
 			// `__region_auto` param and break its callers.
 			a.regionPolyFn = fn
-			if (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) || functionBuildsAndReturnsLocalContainer(fn) {
+			sc := fnScope[fn]
+			isPoly := false
+			a.withResolutionContext(sc.Namespace, sc.Usings, func() {
+				isPoly = (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) || functionBuildsAndReturnsLocalContainer(fn)
+			})
+			if isPoly {
 				fnType.RegionPolymorphic = true
 				changed = true
 			}
