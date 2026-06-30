@@ -318,6 +318,11 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
+	// `extend Foo:` extends a module; `extend grammar Name` (handled later) extends
+	// a grammar. Disambiguate on the token after `extend`.
+	if p.peekIdentText("extend") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "grammar" {
+		return p.parseExtendDecl()
+	}
 	if p.peekIdentText("using") {
 		return p.parseUsingDecl()
 	}

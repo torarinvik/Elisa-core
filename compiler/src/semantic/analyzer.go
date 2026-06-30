@@ -852,6 +852,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)
 	a.collectConstValues(activeDecls)
+	a.validateModuleExtensions(activeFile.Decls)
 	a.collectPermissionDecls(activeDecls)
 	a.collectOverlayLayouts(activeDecls)
 	a.collectNamedTypes(activeDecls)

@@ -112,6 +112,11 @@ type NamespaceDecl struct {
 	Module   bool
 	Const    bool
 	Private  bool
+	// Extend marks an `extend Foo:` block: it contributes members to an
+	// already-declared `module Foo:` rather than declaring it. Extending an
+	// undeclared module is an error; the canonical declaration must be a
+	// `module Foo:` (and only one may exist).
+	Extend bool
 }
 type UsingDecl struct {
 	Position lexer.Pos

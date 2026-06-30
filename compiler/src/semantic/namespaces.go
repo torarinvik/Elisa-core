@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 type scopedDecl struct {
@@ -66,6 +67,45 @@ func (a *Analyzer) declIsPrivate(decl ast.Decl, inheritedPrivate bool) bool {
 
 func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheritedUsings []string) []scopedDecl {
 	return a.flattenScopedDeclsWithVisibility(decls, namespace, inheritedUsings, false)
+}
+
+// validateModuleExtensions enforces the `module`/`extend` contract before symbol
+// collection: a module has exactly one canonical `module Foo:` declaration, and
+// every `extend Foo:` targets an existing module. Both checks are file-order
+// independent — all declarations are collected first, then validated — matching
+// the merge semantics (extend members already flatten into Foo's namespace).
+func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
+	declared := map[string]lexer.Pos{}
+	type extendSite struct {
+		name string
+		pos  lexer.Pos
+	}
+	var extends []extendSite
+	var walk func(decls []ast.Decl, namespace string)
+	walk = func(decls []ast.Decl, namespace string) {
+		for _, decl := range decls {
+			switch n := decl.(type) {
+			case *ast.StaticIfDecl:
+				walk(a.activeDeclBranch(n), namespace)
+			case *ast.NamespaceDecl:
+				full := joinQualifiedName(namespace, n.Name)
+				if n.Extend {
+					extends = append(extends, extendSite{name: full, pos: n.Position})
+				} else if prev, ok := declared[full]; ok {
+					a.errorf(n.Position, "module %q is already declared (at %s); use `extend %s:` to add to it", full, prev, full)
+				} else {
+					declared[full] = n.Position
+				}
+				walk(n.Decls, full)
+			}
+		}
+	}
+	walk(decls, "")
+	for _, e := range extends {
+		if _, ok := declared[e.name]; !ok {
+			a.errorf(e.pos, "no module %q to extend; declare it with `module %s:` first", e.name, e.name)
+		}
+	}
 }
 
 func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace string, inheritedUsings []string, inheritedPrivate bool) []scopedDecl {

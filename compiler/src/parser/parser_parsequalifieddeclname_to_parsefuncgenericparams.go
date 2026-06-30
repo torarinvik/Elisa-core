@@ -42,6 +42,19 @@ func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	decls := p.parseDeclBlock()
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true}
 }
+// parseExtendDecl parses `extend Foo:` — a block that adds members to an
+// already-declared `module Foo:`. It shares the module body grammar (including
+// `public:`/`private:` sections); the semantic analyzer verifies the target
+// module exists and merges the members into its namespace.
+func (p *Parser) parseExtendDecl() *ast.NamespaceDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("extend")
+	name := p.parseQualifiedDeclName()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	decls := p.parseDeclBlock()
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Extend: true}
+}
 func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_CONST)
