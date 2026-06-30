@@ -1256,11 +1256,14 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() == lexer.TOKEN_LBRACE {
 		return p.parseMatchStructPatternAfterName(pos, parts[0])
 	}
-	if !p.match(lexer.TOKEN_DOT) {
+	// A `::` or `.` after the first segment introduces a qualified variant path:
+	// `Color.Red`, `M::Color.Red` (module-qualified). `::` namespaces the module
+	// while `.` selects the variant; both join into the canonical dotted name.
+	if !p.matchQualifiedNameSeparator() {
 		return &ast.MatchBindPattern{Position: pos, Name: parts[0]}
 	}
 	parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
-	for p.match(lexer.TOKEN_DOT) {
+	for p.matchQualifiedNameSeparator() {
 		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
 	}
 	name := strings.Join(parts[:len(parts)-1], ".")

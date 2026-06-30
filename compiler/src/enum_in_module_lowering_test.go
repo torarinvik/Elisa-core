@@ -61,3 +61,32 @@ def main() -> int can[Console.Write, Console.Format, Abort.Panic]:
 		t.Fatalf("enum-in-module qualified value: got status=%s, want RUNERR (exit 2)", status)
 	}
 }
+
+// `M::Color.Red` qualified enum variant in a MATCH PATTERN parses and lowers (no
+// `using` needed). Previously the pattern parser only accepted `.` as a segment
+// separator, so `::` left the arm unparseable.
+func TestEnumInModuleQualifiedMatchPattern(t *testing.T) {
+	prog := `module M:
+    public:
+        const enum Color of u8:
+            Red
+            Green
+            Blue
+
+def code(c: M::Color) -> i64:
+    match c:
+        M::Color.Red:
+            return 1
+        M::Color.Green:
+            return 42
+        M::Color.Blue:
+            return 3
+
+def main() -> int can[Abort.Panic]:
+    return code(M::Color.Green).int()
+`
+	status, out := s4CompileRun(t, prog)
+	if status != "RUNERR" { // exit 42
+		t.Fatalf("qualified match pattern: got status=%s out=%q, want RUNERR (exit 42)", status, out)
+	}
+}
