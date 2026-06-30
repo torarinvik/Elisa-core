@@ -534,6 +534,14 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 			if functionBodyNeedsAutoRegion(s.Body) {
 				return true
 			}
+		case *ast.IterForStmt:
+			// `for x in coll:` (iterator form) — a container literal built inside such a loop that
+			// the loop tightener leaves untightened (e.g. it forwards the container to a grower, so
+			// it isn't iteration-local) still needs the function-body auto region as its home, just
+			// like a ForStmt body. Missing this case left such a container with NO region at all.
+			if functionBodyNeedsAutoRegion(s.Body) {
+				return true
+			}
 		case *ast.WhileStmt:
 			if functionBodyNeedsAutoRegion(s.Body) {
 				return true

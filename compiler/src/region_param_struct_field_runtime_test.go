@@ -647,3 +647,32 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("single-container void grower must adopt the payload soundly; expected RAN 2, got %s %q", status, out)
 	}
 }
+
+// Auto-region inference into an iterator-loop body (`for x in coll:`): a container literal built
+// inside such a loop and forwarded to a by-ref grower must get the function-body auto region with NO
+// explicit `region NAME:` — functionBodyNeedsAutoRegion was missing the IterForStmt case, so the
+// container got NO region (loop tightening also skips it because the forward makes it non-iteration-
+// local). Mirrors the stage1 resolver's per-function scratch pattern. Folds (1+99)+(2+99)=201.
+func TestIterForLoopLocalContainerForwardedNoExplicitRegion(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def grow(out: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(99)
+    return
+def process(xs: darray[i64]) -> i64 can[Memory.Allocate, Abort.Panic]:
+    total: mutable i64 = 0
+    for v in xs:
+        bound: mutable darray[i64] = []
+        bound.push(v)
+        grow(bound)
+        total <- total + bound[0] + bound[1]
+    return total
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(1) can Memory.Allocate, Abort.Panic
+    xs.push(2) can Memory.Allocate, Abort.Panic
+    print(process(xs).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "201" {
+		t.Fatalf("loop-local container forwarded to a grower must infer its region with no explicit region; expected RAN 201, got %s %q", status, out)
+	}
+}
