@@ -559,12 +559,19 @@ func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeP
 	line += formatEnsuresClauses(ensures)
 	return line
 }
+// formatExportTargetName renders an export target's internal dotted qualified
+// name back to source `::` form so the unparsed text round-trips (the parser
+// consumes `::`, not `.`, in export-target position).
+func formatExportTargetName(name string) string {
+	return strings.ReplaceAll(name, ".", "::")
+}
+
 func formatExportFuncHeader(n *ast.ExportFuncDecl) string {
 	line := "export func " + n.Name + "(" + formatExplicitParamList(n.Params, false) + ")"
 	if n.ReturnType != nil {
 		line += " -> " + formatTypeExpr(n.ReturnType)
 	}
-	line += " = " + n.TargetName
+	line += " = " + formatExportTargetName(n.TargetName)
 	if len(n.TargetTypeArgs) > 0 {
 		parts := make([]string, 0, len(n.TargetTypeArgs))
 		for _, arg := range n.TargetTypeArgs {

@@ -508,8 +508,15 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.ExportFuncDecl:
 		f.writeLine(level, formatExportFuncHeader(n))
 	case *ast.ExportGlobalDecl:
-		line := "export global " + n.TargetName
-		if n.Alias != "" && n.Alias != n.TargetName {
+		line := "export global " + formatExportTargetName(n.TargetName)
+		// Suppress the `as` clause when the alias is the parser's default (the
+		// target's last segment) so the output round-trips without a redundant
+		// alias; emit it only for an alias that actually renames the target.
+		defaultAlias := n.TargetName
+		if idx := strings.LastIndex(defaultAlias, "."); idx >= 0 {
+			defaultAlias = defaultAlias[idx+1:]
+		}
+		if n.Alias != "" && n.Alias != defaultAlias {
 			line += " as " + n.Alias
 		}
 		f.writeLine(level, line)

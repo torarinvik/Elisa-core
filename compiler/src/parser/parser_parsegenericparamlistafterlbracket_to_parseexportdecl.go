@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -618,7 +620,9 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		}
 
 		p.expect(lexer.TOKEN_ASSIGN)
-		targetName := p.expect(lexer.TOKEN_IDENT).Text
+		// The target may be `::`-qualified (`Mod::fn`); store it as the internal
+		// dotted name so lookupVisibleGlobal resolves it like any module member.
+		targetName := p.parseQualifiedIdentNameAfterFirst(p.expect(lexer.TOKEN_IDENT).Text)
 		var targetTypeArgs []ast.TypeExpr
 		if p.match(lexer.TOKEN_LBRACKET) {
 			targetTypeArgs = make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
@@ -633,8 +637,14 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		p.expectNewline()
 		return &ast.ExportFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, TargetName: targetName, TargetTypeArgs: targetTypeArgs}
 	case "global":
-		targetName := p.expect(lexer.TOKEN_IDENT).Text
+		// A `::`-qualified target (`Mod::g`) stores as the internal dotted name; the
+		// default public alias is its last segment, since a dotted name is not a
+		// valid C export symbol. An explicit `as` overrides it.
+		targetName := p.parseQualifiedIdentNameAfterFirst(p.expect(lexer.TOKEN_IDENT).Text)
 		alias := targetName
+		if idx := strings.LastIndex(alias, "."); idx >= 0 {
+			alias = alias[idx+1:]
+		}
 		if p.match(lexer.TOKEN_AS) {
 			alias = p.expect(lexer.TOKEN_IDENT).Text
 		}
