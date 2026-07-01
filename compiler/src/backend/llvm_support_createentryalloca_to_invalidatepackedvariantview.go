@@ -311,6 +311,22 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 			if containerRegionName(p) != regionParam || i >= len(expr.Args) {
 				continue
 			}
+			// Multi-stack routing (Phase B1b): a fresh inferred-region darray argument is routed
+			// to its own parallel arena via darrayStackTag, and ALL of its own growth ops allocate
+			// there (see darrayGrowthOwner). A forwarded-param grower must grow it into that SAME
+			// parallel arena — otherwise the darray's backing is split across two arenas (the grower
+			// allocates in the caller's nominal/ambient arena while the caller reallocs in the
+			// parallel one), and a later realloc straddles arenas, tripping the arena_realloc
+			// `a.end != null` / not-the-tail abort. Mirror darrayGrowthOwner: prefer the argument's
+			// stack-tagged parallel arena over its nominal region.
+			if id, ok := expr.Args[i].(*ast.Ident); ok && s.darrayStackTag != nil {
+				if tag, ok := s.darrayStackTag[id.Name]; ok {
+					if owner, ok := s.regionArenaOwner(tag); ok {
+						arena = owner.arenaRef
+						break
+					}
+				}
+			}
 			if argRegion := containerRegionName(s.exprType(expr.Args[i])); argRegion != "" {
 				if owner, ok := s.regionArenaOwner(argRegion); ok {
 					arena = owner.arenaRef
