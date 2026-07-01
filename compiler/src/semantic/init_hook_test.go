@@ -15,7 +15,7 @@ def Span(start: i64) -> Span:
     return Span{start, finish: start + 1}
 
 def build(start: i64) -> i64:
-    inferred: Span = Span(start:)
+    inferred: Span = Span(start: start)
     return inferred.finish
 `)
 	buildSym, ok := result.GlobalScope.Lookup("build")

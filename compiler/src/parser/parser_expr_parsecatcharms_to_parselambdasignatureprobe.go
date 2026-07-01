@@ -284,7 +284,8 @@ func (p *Parser) parseCallArgs() ([]ast.Expr, []string, []bool, []ast.CallArgIte
 			namePos = tok.Pos
 			p.expect(lexer.TOKEN_COLON)
 			if p.peek() == lexer.TOKEN_COMMA || p.peek() == lexer.TOKEN_RPAREN {
-				shorthand = true
+				p.errorf("shorthand named argument `%s:` has been removed; write `%s: %s`", name, name, name)
+				shorthand = true // recover: treat as the punned reference so the rest of the arg list still parses
 			}
 		}
 		var arg ast.Expr

@@ -303,7 +303,7 @@ func TestParseParenStructLiteralNamedArgs(t *testing.T) {
     finish: i64
 
 def build(start: i64) -> Span:
-    return Span(start:, finish: start + 1)
+    return Span(start: start, finish: start + 1)
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -330,8 +330,28 @@ def build(start: i64) -> Span:
 		t.Fatalf("expected second paren constructor arg to target finish, got %q", got)
 	}
 	formatted := unparse.FormatFile(file)
-	if !strings.Contains(formatted, "return Span(start:, finish: (start + 1))") {
+	if !strings.Contains(formatted, "return Span(start: start, finish: (start + 1))") {
 		t.Fatalf("expected formatted output to preserve paren constructor names, got:\n%s", formatted)
+	}
+}
+
+// The shorthand punned named argument `f(x:)` (== `f(x: x)`) has been removed:
+// the parser reports a hard error pointing at the explicit form.
+func TestParseShorthandNamedArgRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `struct Span:
+    start: i64
+
+def build(start: i64) -> Span:
+    return Span(start:)
+`)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "shorthand named argument") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected shorthand-named-argument rejection error, got: %v", errs)
 	}
 }
 

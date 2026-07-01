@@ -102,11 +102,7 @@ func formatExpr(expr ast.Expr) string {
 					argText = indentMultilineText(argText, indentUnit)
 				}
 				if name := n.ArgName(item.ArgIndex); name != "" {
-					if item.ArgIndex < len(n.ArgShorthand) && n.ArgShorthand[item.ArgIndex] {
-						parts = append(parts, name+":")
-					} else {
-						parts = append(parts, name+": "+argText)
-					}
+					parts = append(parts, name+": "+argText)
 				} else {
 					parts = append(parts, argText)
 				}
@@ -119,11 +115,7 @@ func formatExpr(expr ast.Expr) string {
 					argText = indentMultilineText(argText, indentUnit)
 				}
 				if name := n.ArgName(i); name != "" {
-					if i < len(n.ArgShorthand) && n.ArgShorthand[i] {
-						parts = append(parts, name+":")
-					} else {
-						parts = append(parts, name+": "+argText)
-					}
+					parts = append(parts, name+": "+argText)
 				} else {
 					parts = append(parts, argText)
 				}
@@ -688,11 +680,10 @@ func formatStructLiteralField(name string, value ast.Expr, brace bool) string {
 	if name == "" {
 		return formatExpr(value)
 	}
-	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name {
-		if brace {
-			return name
-		}
-		return name + ":"
+	// Brace shorthand `Foo{x}` (no colon) is kept; the paren colon-pun `Foo(x:)`
+	// has been removed, so paren fields always render explicitly as `name: value`.
+	if ident, ok := value.(*ast.Ident); ok && ident != nil && ident.Name == name && brace {
+		return name
 	}
 	return name + ": " + formatExpr(value)
 }

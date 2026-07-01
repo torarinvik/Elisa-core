@@ -92,19 +92,6 @@ def build() -> Bad:
 	}
 }
 
-func TestAnalyzeRejectsMissingShorthandValue(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_shorthand.elisa", `def consume(missing: i64) -> i64:
-    return missing
-
-def build() -> i64:
-    return consume(missing:)
-`)
-	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `no value named "missing" for shorthand argument`) {
-		t.Fatalf("expected targeted shorthand diagnostic, got:\n%s", all)
-	}
-}
-
 func TestAnalyzeRejectsMissingDestructureField(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_missing_destructure_field.elisa", `struct PairRow:
     first: i64

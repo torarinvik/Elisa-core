@@ -440,7 +440,7 @@ grammar PascalFrontend over Token using ParserState:
 	if !strings.Contains(formatted, "return (true, __grammar_committed_") {
 		t.Fatalf("expected synthesized struct return to produce success tuple, got:\n%s", formatted)
 	}
-	if !strings.Contains(formatted, "BuiltSummary(items:, checksum_total:, arg_count:, close_span:)") {
+	if !strings.Contains(formatted, "BuiltSummary(items: items, checksum_total: checksum_total, arg_count: arg_count, close_span: close_span)") {
 		t.Fatalf("expected synthesized struct return to assemble channel fields, got:\n%s", formatted)
 	}
 }
@@ -458,7 +458,7 @@ grammar PascalFrontend over Token using ParserState:
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if !strings.Contains(formatted, "BuiltSummary[i64](item:, count:)") {
+	if !strings.Contains(formatted, "BuiltSummary[i64](item: item, count: count)") {
 		t.Fatalf("expected synthesized generic struct return to preserve type args, got:\n%s", formatted)
 	}
 }
@@ -475,7 +475,7 @@ grammar PerlFrontend over Token using ParserState:
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if strings.Contains(formatted, "Tail(node:)") {
+	if strings.Contains(formatted, "Tail(node: node)") {
 		t.Fatalf("expected non-matching tree channel not to synthesize struct literal, got:\n%s", formatted)
 	}
 	if !strings.Contains(formatted, "zeroed.cast[Tail]") {
@@ -502,7 +502,7 @@ grammar PerlFrontend over Token using ParserState:
 	for _, want := range []string{
 		"name_token: mutable Token = zeroed.cast[Token]",
 		"close_token: mutable Token = zeroed.cast[Token]",
-		"Tail(name_token:, close_token:)",
+		"Tail(name_token: name_token, close_token: close_token)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected struct field channel inference lowering to contain %q, got:\n%s", want, formatted)
@@ -529,7 +529,7 @@ grammar PerlFrontend over Token using ParserState:
 	for _, want := range []string{
 		"name_token: mutable Token = zeroed.cast[Token]",
 		"close_token: mutable Token = zeroed.cast[Token]",
-		"Tail(name_token:, close_token:)",
+		"Tail(name_token: name_token, close_token: close_token)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected production-local channel lowering to contain %q, got:\n%s", want, formatted)

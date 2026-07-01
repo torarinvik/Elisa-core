@@ -27,7 +27,7 @@ grammar PerlFrontend over Token using ParserState:
 	for _, want := range []string{
 		"__grammar_seq_value_",
 		"zeroed.cast[Tail]",
-		"Tail(name_token:, close_token:)",
+		"Tail(name_token: name_token, close_token: close_token)",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected channel-ending seq lowering to contain %q, got:\n%s", want, formatted)
@@ -304,7 +304,7 @@ func TestLowerFileStatefulSynthesizesStructReturnFromNamespacedChannels(t *testi
 `)
 	lowered := LowerFile(file)
 	formatted := unparse.FormatFile(lowered)
-	if !strings.Contains(formatted, "BuiltSummary(items:, checksum_total:, arg_count:, close_span:)") {
+	if !strings.Contains(formatted, "BuiltSummary(items: items, checksum_total: checksum_total, arg_count: arg_count, close_span: close_span)") {
 		t.Fatalf("expected namespaced struct return synthesis to use the local struct scope, got:\n%s", formatted)
 	}
 }
