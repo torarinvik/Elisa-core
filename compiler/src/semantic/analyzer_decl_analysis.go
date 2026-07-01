@@ -120,6 +120,10 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
+		if hint, removed := removedAnnotationMigration(annotation.Name); removed {
+			a.errorf(annotation.Position, "@%s has been removed; %s", annotation.Name, hint)
+			continue
+		}
 		if !isSupportedFunctionAnnotation(annotation.Name) {
 			a.errorf(annotation.Position, "unknown function annotation @%s on %q", annotation.Name, fn.Name)
 			continue
@@ -147,7 +151,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 				a.applyFunctionTemperatureAnnotation(annotation, fn, signature)
 			case "fast_math":
 				signature.FastMath = true
-			case "callconv", "c_abi", "stdcall":
+			case "callconv":
 				a.applyFunctionCallConvAnnotation(annotation, fn, signature)
 			case "guard_nonnull", "guard_variant":
 				a.applyFunctionGuardAnnotation(annotation, fn, signature)
@@ -254,7 +258,7 @@ func (a *Analyzer) applyFunctionCallConvAnnotation(annotation ast.Annotation, fn
 		return
 	}
 	switch annotation.Name {
-	case "callconv", "c_abi":
+	case "callconv":
 		if len(annotation.Args) != 1 {
 			return
 		}
@@ -263,11 +267,6 @@ func (a *Analyzer) applyFunctionCallConvAnnotation(annotation ast.Annotation, fn
 			return
 		}
 		signature.CallConv = callConv
-	case "stdcall":
-		if len(annotation.Args) != 0 {
-			return
-		}
-		signature.CallConv = "stdcall"
 	}
 }
 
@@ -382,7 +381,7 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "guard_variant" {
 		return a.validateFunctionGuardVariantAnnotation(annotation, fn, signature)
 	}
-	if annotation.Name == "skip" || annotation.Name == "ignore" {
+	if annotation.Name == "skip" {
 		return true
 	}
 	if annotation.Name == "internal" {
@@ -477,20 +476,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 		}
 		return true
 	}
-	if annotation.Name == "callconv" || annotation.Name == "c_abi" {
+	if annotation.Name == "callconv" {
 		if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 			a.errorf(annotation.Position, "@%s on function %q expects exactly one calling convention name", annotation.Name, fn.Name)
 			return false
 		}
 		if _, ok := normalizeExternCallConvAnnotationArg(annotation.Args[0]); !ok {
 			a.errorf(annotation.Position, "unsupported calling convention %q on function %q", strings.TrimSpace(annotation.Args[0]), fn.Name)
-			return false
-		}
-		return true
-	}
-	if annotation.Name == "stdcall" {
-		if len(annotation.Args) != 0 {
-			a.errorf(annotation.Position, "@stdcall on function %q does not take arguments", fn.Name)
 			return false
 		}
 		return true
@@ -919,7 +911,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "property", "differential", "lockstep", "fixture", "skip", "ignore", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "c_abi", "stdcall", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
+	case "test", "bench", "property", "differential", "lockstep", "fixture", "skip", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
 		return true
 	case "boundary_pointer_args":
 		return true

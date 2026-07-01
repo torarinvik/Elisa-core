@@ -13,7 +13,7 @@ extern popcount64(value: u64) -> u64
 @callconv(winapi)
 extern winapi(value: i32) -> i32
 
-@c_abi(c)
+@callconv(c)
 extern c_api(value: i32) -> i32
 `)
 
@@ -79,12 +79,12 @@ def winapi_callback(arg: void&) -> u32:
 	_ = arg
 	return 0
 
-@c_abi(c)
+@callconv(c)
 def c_callback(arg: void&) -> u32:
 	_ = arg
 	return 1
 
-@stdcall
+@callconv(stdcall)
 def stdcall_callback(arg: void&) -> u32:
 	_ = arg
 	return 2
@@ -116,25 +116,88 @@ func TestFunctionABIAnnotationsRejectInvalidValues(t *testing.T) {
 def bad_callconv(arg: void&) -> u32:
 	_ = arg
 	return 0
-
-@stdcall(extra)
-def bad_stdcall(arg: void&) -> u32:
-	_ = arg
-	return 0
 `)
 
 	allErrors := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(allErrors, "unsupported calling convention \"vectorcall\" on function \"bad_callconv\"") {
 		t.Fatalf("expected invalid function calling convention error, got:\n%s", allErrors)
 	}
-	if !strings.Contains(allErrors, "@stdcall on function \"bad_stdcall\" does not take arguments") {
-		t.Fatalf("expected invalid stdcall arity error, got:\n%s", allErrors)
+}
+
+// The redundant ABI aliases @c_abi and @stdcall were removed in favor of the general
+// @callconv form; each now reports an actionable migration message.
+func TestRemovedABIAliasAnnotationsAreRejected(t *testing.T) {
+	cases := map[string]struct {
+		src  string
+		want string
+	}{
+		"c_abi on function": {
+			src:  "@c_abi(c)\ndef f(arg: void&) -> u32:\n\t_ = arg\n\treturn 0\n",
+			want: "@c_abi has been removed; use @callconv",
+		},
+		"stdcall on function": {
+			src:  "@stdcall\ndef f(arg: void&) -> u32:\n\t_ = arg\n\treturn 0\n",
+			want: "@stdcall has been removed; use @callconv(stdcall)",
+		},
+		"c_abi on extern": {
+			src:  "@c_abi(c)\nextern f(value: i32) -> i32\n",
+			want: "@c_abi has been removed; use @callconv",
+		},
+		"stdcall on extern": {
+			src:  "@stdcall\nextern f(value: i32) -> i32\n",
+			want: "@stdcall has been removed; use @callconv(stdcall)",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "removed_abi_alias.elisa", tc.src)
+			allErrors := strings.Join(result.Errors(), "\n")
+			if !strings.Contains(allErrors, tc.want) {
+				t.Fatalf("expected removal message %q, got:\n%s", tc.want, allErrors)
+			}
+		})
+	}
+}
+
+// The @borrows_return_* variants collapsed into flags on @borrows_return, and
+// @c_bind_prefix into a trailing `prefix` flag on @c_bind; each removed name reports a
+// migration message.
+func TestRemovedBorrowsReturnAndCBindVariantsAreRejected(t *testing.T) {
+	cases := map[string]struct {
+		src  string
+		want string
+	}{
+		"borrows_return_field": {
+			src:  "@borrows_return_field(node, node)\nextern f(node: void&) -> void&\n",
+			want: "@borrows_return_field has been removed; use @borrows_return with a leading `field` flag",
+		},
+		"borrows_return_rebased": {
+			src:  "@borrows_return_rebased(node)\nextern f(node: void&) -> void&\n",
+			want: "@borrows_return_rebased has been removed; use @borrows_return with a leading `rebased` flag",
+		},
+		"borrows_return_field_rebased": {
+			src:  "@borrows_return_field_rebased(node, node)\nextern f(node: void&) -> void&\n",
+			want: "@borrows_return_field_rebased has been removed; use @borrows_return with leading `field, rebased` flags",
+		},
+		"c_bind_prefix": {
+			src:  "@c_bind_prefix(\"header.h\", \"Foo\")\nstruct Foo layout c:\n    value: i64\n",
+			want: "@c_bind_prefix has been removed; use @c_bind with a trailing `prefix` flag",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "removed_borrow_cbind_variant.elisa", tc.src)
+			allErrors := strings.Join(result.Errors(), "\n")
+			if !strings.Contains(allErrors, tc.want) {
+				t.Fatalf("expected removal message %q, got:\n%s", tc.want, allErrors)
+			}
+		})
 	}
 }
 
 func TestExternFunctionCanBeSatisfiedByLaterElisaDefinition(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "extern_satisfied_later.elisa", `
-@c_abi(c)
+@callconv(c)
 extern bridge(value: i32) -> i32
 
 def bridge(value: i32) -> i32:
@@ -163,7 +226,7 @@ def bridge(value: i32) -> i32:
 	return value + 1
 
 @link_name(native_bridge)
-@c_abi(c)
+@callconv(c)
 extern bridge(value: i32) -> i32
 `)
 
@@ -346,10 +409,10 @@ def main() -> usize:
 // reported "duplicate declaration".
 func TestExternForwardDeclarationReconcilesWithImplementation(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "extern_forward_decl_reconcile.elisa", `
-@c_abi(c)
+@callconv(c)
 def k_create(type_: int, out_error: mutable int&?) -> void&?:
     return null
-@c_abi(c)
+@callconv(c)
 def k_destroy(handle: void&?) -> int:
     return 0
 

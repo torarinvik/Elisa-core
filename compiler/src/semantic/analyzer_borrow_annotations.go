@@ -248,16 +248,5 @@ func (a *Analyzer) resolveExternBorrowAnnotationPath(fn *ast.ExternFuncDecl, fnT
 }
 
 func (a *Analyzer) errorExternBorrowAnnotationPathError(fn *ast.ExternFuncDecl, annotation ast.Annotation, pathText string, returnField string, format string, args ...interface{}) {
-	switch annotation.Name {
-	case "borrows_return":
-		a.errorf(annotation.Position, "@borrows_return on extern function %q "+format, append([]interface{}{fn.Name}, args...)...)
-	case "borrows_return_field":
-		a.errorf(annotation.Position, "@borrows_return_field on extern function %q "+format, append([]interface{}{fn.Name}, args...)...)
-	case "borrows_return_rebased":
-		a.errorf(annotation.Position, "@borrows_return_rebased on extern function %q "+format, append([]interface{}{fn.Name}, args...)...)
-	case "borrows_return_field_rebased":
-		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q "+format, append([]interface{}{fn.Name}, args...)...)
-	default:
-		a.errorf(annotation.Position, "@%s on extern function %q "+format, append([]interface{}{annotation.Name, fn.Name}, args...)...)
-	}
+	a.errorf(annotation.Position, "@%s on extern function %q "+format, append([]interface{}{annotation.Name, fn.Name}, args...)...)
 }

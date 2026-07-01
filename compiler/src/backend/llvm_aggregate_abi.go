@@ -81,7 +81,7 @@ const aggregateMemoryClassThresholdBytes = 1024
 // ABI: both arm64 AAPCS and x86-64 SysV pass aggregates LARGER than 16 bytes via
 // memory (sret returns / indirect args). This is required for FFI — calling C /
 // Objective-C functions that take or return such structs by value (e.g. CMTime,
-// 24 bytes). It applies only at the C-ABI boundary (extern/@c_abi functions and
+// 24 bytes). It applies only at the C-ABI boundary (extern/@callconv(c) functions and
 // call_as indirect calls, identified by CallConv == "c"), so Elisa-internal
 // calls are completely unaffected.
 const cAbiAggregateMemoryClassThresholdBytes = 17

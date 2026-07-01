@@ -459,19 +459,23 @@ func (a *Analyzer) resolveProjectedFieldValueFromCallExpr(call *ast.CallExpr, pa
 		return nil, false
 	}
 	for _, annotation := range decl.Annotations {
-		if annotation.Name != "borrows_return_field" && annotation.Name != "borrows_return_field_rebased" {
+		if annotation.Name != "borrows_return" {
 			continue
 		}
-		if len(annotation.Args) == 0 || len(annotation.Args)%2 != 0 {
+		fieldMode, _, fieldArgs := splitBorrowsReturnFlags(annotation.Args)
+		if !fieldMode {
 			continue
 		}
-		for i := 0; i < len(annotation.Args); i += 2 {
-			returnSteps, ok := parseExternReturnTargetPath(annotation.Args[i])
+		if len(fieldArgs) == 0 || len(fieldArgs)%2 != 0 {
+			continue
+		}
+		for i := 0; i < len(fieldArgs); i += 2 {
+			returnSteps, ok := parseExternReturnTargetPath(fieldArgs[i])
 			wildcardCaptures, matched := borrowReturnAnnotationStepsMatchPrefix(path, returnSteps)
 			if !ok || len(returnSteps) > len(path) || !matched {
 				continue
 			}
-			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, annotation.Args[i+1], wildcardCaptures); ok {
+			if expr, ok := a.resolveProjectedFieldBorrowSourceExprFromCall(call, decl, fieldArgs[i+1], wildcardCaptures); ok {
 				return a.resolveProjectedFieldValueExprAtPath(expr, path[len(returnSteps):])
 			}
 		}

@@ -432,8 +432,8 @@ func TestParseAlignedStructAnnotation(t *testing.T) {
 		t.Fatalf("expected align(32), got %#v", decl.Annotations[0].Args)
 	}
 }
-func TestParseCachelineAlignedStructAnnotation(t *testing.T) {
-	file, errs := parseSourceFile(t, "@cacheline_aligned\nstruct Counter:\n    value: i64\n")
+func TestParseAlign64StructAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, "@align(64)\nstruct Counter:\n    value: i64\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -444,11 +444,11 @@ func TestParseCachelineAlignedStructAnnotation(t *testing.T) {
 	if len(decl.Annotations) != 1 {
 		t.Fatalf("expected one struct annotation, got %d", len(decl.Annotations))
 	}
-	if decl.Annotations[0].Name != "cacheline_aligned" {
-		t.Fatalf("expected cacheline_aligned annotation, got %q", decl.Annotations[0].Name)
+	if decl.Annotations[0].Name != "align" {
+		t.Fatalf("expected align annotation, got %q", decl.Annotations[0].Name)
 	}
-	if len(decl.Annotations[0].Args) != 0 {
-		t.Fatalf("expected cacheline_aligned to take no args, got %#v", decl.Annotations[0].Args)
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "64" {
+		t.Fatalf("expected align(64), got %#v", decl.Annotations[0].Args)
 	}
 }
 func TestParsePackedEnumProfileAnnotation(t *testing.T) {

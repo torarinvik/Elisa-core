@@ -26,20 +26,6 @@ struct Vec4:
 	}
 }
 
-func TestAnalyzeCachelineAlignedStructSetsTypeMetadata(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "cacheline_semantics.elisa", `@cacheline_aligned
-struct Counter:
-    value: i64
-`)
-	st, ok := result.NamedTypes["Counter"].(*semantic.StructType)
-	if !ok || st == nil {
-		t.Fatalf("expected Counter to resolve to semantic.StructType, got %#v", result.NamedTypes["Counter"])
-	}
-	if !st.HasAlignment || st.Alignment != 64 {
-		t.Fatalf("expected Counter alignment metadata to record 64 bytes, got %+v", st)
-	}
-}
-
 func TestAnalyzeStructAlignAnnotationRejectsNonPowerOfTwo(t *testing.T) {
 	result := analyzeInlineTestSource(t, "align_invalid.elisa", `@align(24)
 struct Vec4:
@@ -51,14 +37,16 @@ struct Vec4:
 	}
 }
 
-func TestAnalyzeCachelineAlignedStructRejectsArguments(t *testing.T) {
-	result := analyzeInlineTestSource(t, "cacheline_invalid.elisa", `@cacheline_aligned(128)
+// @cacheline_aligned was removed as redundant with @align(64); it now reports a
+// migration message pointing at the general form.
+func TestAnalyzeCachelineAlignedStructIsRejected(t *testing.T) {
+	result := analyzeInlineTestSource(t, "cacheline_removed.elisa", `@cacheline_aligned
 struct Counter:
     value: i64
 `)
 	errText := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(errText, `@cacheline_aligned on struct "Counter" does not take arguments`) {
-		t.Fatalf("expected invalid cacheline_aligned diagnostic, got:\n%s", errText)
+	if !strings.Contains(errText, "@cacheline_aligned has been removed; use @align(64)") {
+		t.Fatalf("expected cacheline_aligned removal diagnostic, got:\n%s", errText)
 	}
 }
 

@@ -9,9 +9,37 @@ import (
 	"elisacore/src/lexer"
 )
 
+// removedAnnotationMigration reports the replacement guidance for an attribute that
+// has been removed as redundant with a more general form. The returned string is a
+// migration hint ("use @X"); ok is false for still-supported names. Shared across the
+// function / extern-function / struct validation paths so every use site gets the same
+// actionable message instead of a bare "unknown annotation".
+func removedAnnotationMigration(name string) (string, bool) {
+	switch name {
+	case "ignore":
+		return "use @skip", true
+	case "c_abi":
+		return "use @callconv with the convention name, e.g. @callconv(c)", true
+	case "stdcall":
+		return "use @callconv(stdcall)", true
+	case "cacheline_aligned":
+		return "use @align(64)", true
+	case "c_bind_prefix":
+		return "use @c_bind with a trailing `prefix` flag, e.g. @c_bind(header, name, prefix)", true
+	case "borrows_return_field":
+		return "use @borrows_return with a leading `field` flag, e.g. @borrows_return(field, return_path, param_path, …)", true
+	case "borrows_return_rebased":
+		return "use @borrows_return with a leading `rebased` flag, e.g. @borrows_return(rebased, param_path, …)", true
+	case "borrows_return_field_rebased":
+		return "use @borrows_return with leading `field, rebased` flags, e.g. @borrows_return(field, rebased, return_path, param_path, …)", true
+	default:
+		return "", false
+	}
+}
+
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "borrows_return_field", "borrows_return_rebased", "borrows_return_field_rebased", "link_name", "intrinsic", "callconv", "c_abi", "stdcall", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
+	case "borrows_return", "link_name", "intrinsic", "callconv", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
 		return true
 	default:
 		return false
@@ -161,7 +189,7 @@ func isSupportedEnumAnnotation(name string) bool {
 
 func isSupportedStructAnnotation(name string) bool {
 	switch name {
-	case "align", "cacheline_aligned", "fixed_layout", "c_bind", "c_bind_prefix", "abi_layout", "intrusive":
+	case "align", "fixed_layout", "c_bind", "abi_layout", "intrusive":
 		return true
 	default:
 		return false
@@ -283,6 +311,10 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
+		if hint, removed := removedAnnotationMigration(annotation.Name); removed {
+			a.errorf(annotation.Position, "@%s has been removed; %s", annotation.Name, hint)
+			continue
+		}
 		if !isSupportedStructAnnotation(annotation.Name) {
 			a.errorf(annotation.Position, "unknown struct annotation @%s on %q", annotation.Name, structDecl.Name)
 			continue
@@ -305,19 +337,6 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			alignment = parsed
 			hasAlignment = true
 			alignmentSource = annotation.Name
-		case "cacheline_aligned":
-			if len(annotation.Args) != 0 {
-				a.errorf(annotation.Position, "@cacheline_aligned on struct %q does not take arguments", structDecl.Name)
-				continue
-			}
-			const cachelineAlignment = 64
-			if hasAlignment && alignment != cachelineAlignment {
-				a.errorf(annotation.Position, "@cacheline_aligned on struct %q conflicts with existing @%s request for %d-byte alignment", structDecl.Name, alignmentSource, alignment)
-				continue
-			}
-			alignment = cachelineAlignment
-			hasAlignment = true
-			alignmentSource = annotation.Name
 		case "fixed_layout":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@fixed_layout on struct %q does not take arguments", structDecl.Name)
@@ -325,15 +344,26 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			}
 		case "abi_layout":
 			a.validateStructAbiLayoutAnnotation(structDecl, annotation)
-		case "c_bind", "c_bind_prefix":
-			if len(annotation.Args) != 2 {
-				a.errorf(annotation.Position, "@%s on struct %q expects exactly two arguments: header and C type name", annotation.Name, structDecl.Name)
+		case "c_bind":
+			// @c_bind(header, name) binds the struct to an exact C type; an optional
+			// trailing `prefix` flag (@c_bind(header, name, prefix)) marks `name` as a
+			// symbol prefix instead — this replaced the removed @c_bind_prefix variant.
+			if len(annotation.Args) != 2 && len(annotation.Args) != 3 {
+				a.errorf(annotation.Position, "@c_bind on struct %q expects header and C type name, with an optional trailing `prefix` flag", structDecl.Name)
 				continue
+			}
+			prefixMode := false
+			if len(annotation.Args) == 3 {
+				if strings.ToLower(strings.Trim(strings.TrimSpace(annotation.Args[2]), "\"")) != "prefix" {
+					a.errorf(annotation.Position, "@c_bind on struct %q accepts only `prefix` as a third argument, got %q", structDecl.Name, annotation.Args[2])
+					continue
+				}
+				prefixMode = true
 			}
 			header := strings.Trim(strings.TrimSpace(annotation.Args[0]), "\"")
 			cName := strings.Trim(strings.TrimSpace(annotation.Args[1]), "\"")
 			if header == "" || cName == "" {
-				a.errorf(annotation.Position, "@%s on struct %q requires non-empty header and C type name arguments", annotation.Name, structDecl.Name)
+				a.errorf(annotation.Position, "@c_bind on struct %q requires non-empty header and C type name arguments", structDecl.Name)
 				continue
 			}
 			if !structDecl.ReprC {
@@ -346,7 +376,7 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 			}
 			structType.CBindHeader = header
 			structType.CBindName = cName
-			structType.CBindPrefix = annotation.Name == "c_bind_prefix"
+			structType.CBindPrefix = prefixMode
 		}
 	}
 	if hasAlignment {
@@ -476,6 +506,10 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
+		if hint, removed := removedAnnotationMigration(annotation.Name); removed {
+			a.errorf(annotation.Position, "@%s has been removed; %s", annotation.Name, hint)
+			continue
+		}
 		if !isSupportedExternFunctionAnnotation(annotation.Name) {
 			a.errorf(annotation.Position, "unknown extern function annotation @%s on %q", annotation.Name, fn.Name)
 			continue
@@ -496,7 +530,7 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				continue
 			}
 			fnType.IntrinsicName = intrinsicName
-		case "callconv", "c_abi":
+		case "callconv":
 			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 				a.errorf(annotation.Position, "@%s on extern function %q expects exactly one calling convention name", annotation.Name, fn.Name)
 				continue
@@ -507,12 +541,6 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 				continue
 			}
 			fnType.CallConv = callConv
-		case "stdcall":
-			if len(annotation.Args) != 0 {
-				a.errorf(annotation.Position, "@stdcall on extern function %q does not take arguments", fn.Name)
-				continue
-			}
-			fnType.CallConv = "stdcall"
 		case "internal":
 			if len(annotation.Args) != 0 {
 				a.errorf(annotation.Position, "@internal on extern function %q does not take arguments", fn.Name)
@@ -556,12 +584,6 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			}
 		case "borrows_return":
 			a.applyExternBorrowsReturnAnnotation(fn, fnType, annotation)
-		case "borrows_return_field":
-			a.applyExternBorrowsReturnFieldAnnotation(fn, fnType, annotation)
-		case "borrows_return_rebased":
-			a.applyExternBorrowsReturnRebasedAnnotation(fn, fnType, annotation)
-		case "borrows_return_field_rebased":
-			a.applyExternBorrowsReturnFieldRebasedAnnotation(fn, fnType, annotation)
 		}
 	}
 	if !blockingPos.IsZero() && !nonblockingPos.IsZero() {
@@ -625,15 +647,50 @@ func (a *Analyzer) applyExternTypeAnnotations(decl *ast.ExternTypeDecl, opaque *
 	}
 }
 
+// applyExternBorrowsReturnAnnotation handles the unified @borrows_return attribute.
+// Leading flag tokens select the mode (order-independent): `field` switches the payload
+// from a list of parameter paths to return-path/param-path pairs; `rebased` marks the
+// borrow as rebased. Everything after the flags is the payload. These four combinations
+// replaced the removed @borrows_return_field / _rebased / _field_rebased variants.
 func (a *Analyzer) applyExternBorrowsReturnAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
-	if len(annotation.Args) == 0 {
-		a.errorf(annotation.Position, "@borrows_return on extern function %q expects at least one parameter name", fn.Name)
+	fieldMode, rebased, args := splitBorrowsReturnFlags(annotation.Args)
+	if fieldMode {
+		a.applyExternBorrowsReturnFieldPayload(fn, fnType, annotation, args, rebased)
+		return
+	}
+	a.applyExternBorrowsReturnPathPayload(fn, fnType, annotation, args, rebased)
+}
+
+// splitBorrowsReturnFlags peels the order-independent leading `field` / `rebased` flag
+// tokens off a unified @borrows_return argument list, returning the flags and the
+// remaining payload args. Shared by the annotation applier and the projection resolver so
+// the two never disagree on how the flags are parsed.
+func splitBorrowsReturnFlags(args []string) (fieldMode bool, rebased bool, payload []string) {
+	payload = args
+	for len(payload) > 0 {
+		switch strings.ToLower(strings.TrimSpace(payload[0])) {
+		case "field":
+			fieldMode = true
+			payload = payload[1:]
+		case "rebased":
+			rebased = true
+			payload = payload[1:]
+		default:
+			return fieldMode, rebased, payload
+		}
+	}
+	return fieldMode, rebased, payload
+}
+
+func (a *Analyzer) applyExternBorrowsReturnPathPayload(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, args []string, rebased bool) {
+	if len(args) == 0 {
+		a.errorf(annotation.Position, "@borrows_return on extern function %q expects at least one parameter path", fn.Name)
 		return
 	}
 	var states []regionRefState
 	var ownerSummaries []borrowedOwnerRefSummary
-	for _, pathText := range annotation.Args {
-		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, "")
+	for _, pathText := range args {
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, rebased, "")
 		if !ok {
 			continue
 		}
@@ -660,23 +717,23 @@ func (a *Analyzer) applyExternBorrowsReturnAnnotation(fn *ast.ExternFuncDecl, fn
 	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
-func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
-	if len(annotation.Args) == 0 || len(annotation.Args)%2 != 0 {
-		a.errorf(annotation.Position, "@borrows_return_field on extern function %q expects field/path pairs", fn.Name)
+func (a *Analyzer) applyExternBorrowsReturnFieldPayload(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation, args []string, rebased bool) {
+	if len(args) == 0 || len(args)%2 != 0 {
+		a.errorf(annotation.Position, "@borrows_return(field, …) on extern function %q expects return-path/param-path pairs after the flags", fn.Name)
 		return
 	}
 	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
-		a.errorf(annotation.Position, "@borrows_return_field on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return)
+		a.errorf(annotation.Position, "@borrows_return(field, …) on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return)
 		return
 	}
-	for i := 0; i < len(annotation.Args); i += 2 {
-		returnFieldPath := annotation.Args[i]
-		pathText := annotation.Args[i+1]
+	for i := 0; i < len(args); i += 2 {
+		returnFieldPath := args[i]
+		pathText := args[i+1]
 		returnSteps, ok := a.resolveExternReturnTargetPath(fn, fnType, annotation, returnFieldPath)
 		if !ok {
 			continue
 		}
-		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, false, returnFieldPath)
+		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, rebased, returnFieldPath)
 		if !ok {
 			continue
 		}
@@ -697,74 +754,3 @@ func (a *Analyzer) applyExternBorrowsReturnFieldAnnotation(fn *ast.ExternFuncDec
 	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
 
-func (a *Analyzer) applyExternBorrowsReturnRebasedAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
-	if len(annotation.Args) == 0 {
-		a.errorf(annotation.Position, "@borrows_return_rebased on extern function %q expects at least one parameter path", fn.Name)
-		return
-	}
-	var states []regionRefState
-	var ownerSummaries []borrowedOwnerRefSummary
-	for _, pathText := range annotation.Args {
-		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, "")
-		if !ok {
-			continue
-		}
-		if hasRegionProvenance(state) {
-			states = append(states, state)
-		}
-		if hasBorrowedOwnerRefSummary(ownerSummary) {
-			ownerSummaries = append(ownerSummaries, ownerSummary)
-		}
-	}
-	if merged, ok := mergeRegionRefStates(states...); ok {
-		fnType.ReturnProvenance = merged
-	}
-	if len(ownerSummaries) != 0 {
-		mergedOwner := cloneBorrowedOwnerRefSummary(ownerSummaries[0])
-		for i := 1; i < len(ownerSummaries); i++ {
-			if next, ok := mergeBorrowedOwnerRefSummary(mergedOwner, ownerSummaries[i]); ok {
-				mergedOwner = next
-			}
-		}
-		fnType.ReturnBorrowedOwnerRefs = mergedOwner
-	}
-	fnType.ReturnProvenanceKnown = true
-	fnType.ReturnBorrowedOwnerRefsKnown = true
-}
-
-func (a *Analyzer) applyExternBorrowsReturnFieldRebasedAnnotation(fn *ast.ExternFuncDecl, fnType *FuncType, annotation ast.Annotation) {
-	if len(annotation.Args) == 0 || len(annotation.Args)%2 != 0 {
-		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q expects field/path pairs", fn.Name)
-		return
-	}
-	if _, ok := a.resolvedStructFields(fnType.Return); !ok {
-		a.errorf(annotation.Position, "@borrows_return_field_rebased on extern function %q requires a concrete struct return type, got %s", fn.Name, fnType.Return)
-		return
-	}
-	for i := 0; i < len(annotation.Args); i += 2 {
-		returnFieldPath := annotation.Args[i]
-		pathText := annotation.Args[i+1]
-		returnSteps, ok := a.resolveExternReturnTargetPath(fn, fnType, annotation, returnFieldPath)
-		if !ok {
-			continue
-		}
-		state, ownerSummary, ok := a.resolveExternBorrowAnnotationPath(fn, fnType, annotation, pathText, true, returnFieldPath)
-		if !ok {
-			continue
-		}
-		if hasRegionProvenance(state) {
-			fnType.ReturnProvenance = assignRegionRefStateAtPath(fnType.ReturnProvenance, returnSteps, state)
-		}
-		if hasBorrowedOwnerRefSummary(ownerSummary) {
-			fnType.ReturnBorrowedOwnerRefs = assignBorrowedOwnerRefSummaryAtPath(fnType.ReturnBorrowedOwnerRefs, returnSteps, ownerSummary)
-		}
-	}
-	if !hasRegionProvenance(fnType.ReturnProvenance) {
-		fnType.ReturnProvenance = regionRefState{}
-	}
-	if !hasBorrowedOwnerRefSummary(fnType.ReturnBorrowedOwnerRefs) {
-		fnType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
-	}
-	fnType.ReturnProvenanceKnown = true
-	fnType.ReturnBorrowedOwnerRefsKnown = true
-}

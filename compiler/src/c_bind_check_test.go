@@ -107,7 +107,7 @@ struct Header {
 		t.Fatal(err)
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
-	source := `@c_bind_prefix("` + headerPath + `", "struct Header")
+	source := `@c_bind("` + headerPath + `", "struct Header", prefix)
 struct HeaderPrefix layout c:
 	owner: void&?
 	count: u32

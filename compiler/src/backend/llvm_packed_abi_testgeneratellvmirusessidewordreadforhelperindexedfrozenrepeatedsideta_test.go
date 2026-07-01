@@ -20,7 +20,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_side_common_frozen_helper_indexed_direct() -> int:
@@ -100,7 +100,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_common_frozen_helper_indexed_reassign() -> int:
@@ -147,7 +147,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_helper_indexed_direct() -> int:
@@ -190,7 +190,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+@borrows_return(field, rebased, meta.items[*].node, src[*].node)
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_wild_helper_indexed_direct() -> int:
@@ -233,7 +233,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+@borrows_return(field, rebased, meta.items[*].node, src[*].node)
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_wild_helper_indexed_reassign() -> int:
@@ -280,7 +280,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_common_frozen_nested_helper_indexed_reassign() -> int:
@@ -483,7 +483,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_helper_indexed_child_common_frozen_mixed() -> int:
@@ -541,7 +541,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_nested_helper_indexed_child_common_frozen_mixed() -> int:

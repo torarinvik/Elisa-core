@@ -460,7 +460,7 @@ func TestGenerateLLVMIRUsesIndexWordReadForFrozenHelperWrappedRepeatedCommonFiel
 struct Box:
 	node: mutable Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def fold_common_frozen_wrapped_direct() -> int:
@@ -500,7 +500,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def fold_common_frozen_helper_indexed_direct() -> int:
@@ -537,7 +537,7 @@ func TestGenerateLLVMIRUsesSideWordReadForFrozenHelperWrappedRepeatedSideTableCo
 struct Box:
 	node: mutable Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def fold_side_common_frozen_wrapped_direct() -> int:

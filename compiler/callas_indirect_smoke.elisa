@@ -1,14 +1,14 @@
 include "./runtime/elisacore_std/elisacore_runtime.elisa"
 
-@c_abi(c)
+@callconv(c)
 def callas_add(x: int, y: int) -> int:
     return x + y
 
-@c_abi(c)
+@callconv(c)
 def callas_neg(x: int) -> int:
     return 0 - x
 
-@c_abi(c)
+@callconv(c)
 def callas_noargs() -> int:
     return 99
 

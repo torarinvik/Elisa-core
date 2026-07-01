@@ -26,7 +26,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+@borrows_return(field, rebased, meta.items[*].node, src[*].node)
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def fold_nested_wild_helper_indexed_child_common_frozen_mixed() -> int:
