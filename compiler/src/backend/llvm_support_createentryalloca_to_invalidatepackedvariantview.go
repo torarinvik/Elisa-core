@@ -295,6 +295,26 @@ func containerRegionName(t semantic.Type) string {
 	}
 }
 
+// stackTagArgIdentName returns the underlying variable name of a call argument for a
+// darrayStackTag lookup, peeling the parens and `&` (AddrOfExpr) a by-reference
+// (`mutable darray&`) parameter wraps around the argument. Returns ok=false when the
+// argument is not ultimately a bare identifier (e.g. a field access or temporary), which
+// carries no stack tag.
+func stackTagArgIdentName(e ast.Expr) (string, bool) {
+	for {
+		switch n := e.(type) {
+		case *ast.Ident:
+			return n.Name, true
+		case *ast.ParenExpr:
+			e = n.Inner
+		case *ast.AddrOfExpr:
+			e = n.Operand
+		default:
+			return "", false
+		}
+	}
+}
+
 // resolveRegionArenaArgs builds the hidden Arena& arguments for a call to a
 // region-parameterized function: for each region param, find a container param
 // annotated with that region, read the matching argument's region, and pass
@@ -318,9 +338,13 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 			// allocates in the caller's nominal/ambient arena while the caller reallocs in the
 			// parallel one), and a later realloc straddles arenas, tripping the arena_realloc
 			// `a.end != null` / not-the-tail abort. Mirror darrayGrowthOwner: prefer the argument's
-			// stack-tagged parallel arena over its nominal region.
-			if id, ok := expr.Args[i].(*ast.Ident); ok && s.darrayStackTag != nil {
-				if tag, ok := s.darrayStackTag[id.Name]; ok {
+			// stack-tagged parallel arena over its nominal region. Peel the `&`/parens a
+			// `mutable darray&` param puts around the argument — `f(body)` lowers the by-reference
+			// receiver to an AddrOfExpr, so without peeling a stack-tagged darray passed to a grower
+			// (e.g. `push_str(body, …)`) is missed and its backing splits (base vs parallel). Unlike
+			// darrayGrowthOwner, whose receiver is already a bare Ident, the call argument is wrapped.
+			if name, ok := stackTagArgIdentName(expr.Args[i]); ok && s.darrayStackTag != nil {
+				if tag, ok := s.darrayStackTag[name]; ok {
 					if owner, ok := s.regionArenaOwner(tag); ok {
 						arena = owner.arenaRef
 						break
