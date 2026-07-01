@@ -355,14 +355,37 @@ def build(start: i64) -> Span:
 	}
 }
 
-func TestParseBraceStructLiteralSpread(t *testing.T) {
+// Struct-literal spread `Type{...base, f: v}` has been removed in favor of record
+// update `base{f = v}`: the parser rejects it with a message pointing at the
+// record-update form.
+func TestParseBraceStructLiteralSpreadRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, `struct Accessors:
+    read_name_id: i64?
+
+def update(base: Accessors, name: i64) -> Accessors:
+    return Accessors{...base, read_name_id: name}
+`)
+	found := false
+	for _, e := range errs {
+		if strings.Contains(e, "struct-literal spread") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected struct-literal-spread rejection error, got: %v", errs)
+	}
+}
+
+// Record update `base{f = v}` is the replacement for struct-literal spread: a copy
+// of `base` with named fields overridden, distinguished from construction (`:`) by
+// the `=` separator, and round-tripping through unparse.
+func TestParseRecordUpdate(t *testing.T) {
 	file, errs := parseSourceFile(t, `struct Accessors:
     read_name_id: i64?
-    write_name_id: i64?
     default_enabled: bool
 
 def update(base: Accessors, name: i64) -> Accessors:
-    return Accessors{...base, read_name_id: name, default_enabled: true}
+    return base{read_name_id = name, default_enabled = true}
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -375,19 +398,16 @@ def update(base: Accessors, name: i64) -> Accessors:
 	if !ok {
 		t.Fatalf("expected return stmt, got %T", updateDecl.Body[0])
 	}
-	lit, ok := ret.Value.(*ast.StructLitExpr)
+	upd, ok := ret.Value.(*ast.RecordUpdateExpr)
 	if !ok {
-		t.Fatalf("expected struct literal return value, got %T", ret.Value)
+		t.Fatalf("expected record-update return value, got %T", ret.Value)
 	}
-	if len(lit.Spreads) != 1 {
-		t.Fatal("expected struct literal spread")
-	}
-	if got := lit.ArgName(0); got != "read_name_id" {
-		t.Fatalf("expected first override to target read_name_id, got %q", got)
+	if upd.ArgName(0) != "read_name_id" || upd.ArgName(1) != "default_enabled" {
+		t.Fatalf("unexpected record-update field names: %q, %q", upd.ArgName(0), upd.ArgName(1))
 	}
 	formatted := unparse.FormatDecl(updateDecl)
-	if !strings.Contains(formatted, "Accessors{...base, read_name_id: name, default_enabled: true}") {
-		t.Fatalf("expected formatted spread literal, got:\n%s", formatted)
+	if !strings.Contains(formatted, "base{read_name_id = name, default_enabled = true}") {
+		t.Fatalf("expected formatted record update, got:\n%s", formatted)
 	}
 }
 

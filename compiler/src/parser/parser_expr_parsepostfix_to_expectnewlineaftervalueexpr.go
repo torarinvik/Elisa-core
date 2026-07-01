@@ -708,8 +708,11 @@ func (p *Parser) parseStructLiteralBraceFields() ([]ast.Expr, []string, []ast.Ex
 		return args, argNames, nil
 	}
 	for {
-		if p.match(lexer.TOKEN_ELLIPSIS) {
-			spreads = append(spreads, p.parseExpr())
+		if p.peek() == lexer.TOKEN_ELLIPSIS {
+			spreadPos := p.cur().Pos
+			p.advance()
+			p.errorAt(spreadPos, "struct-literal spread `Type{...base}` has been removed; use record update `base{field = value}`")
+			spreads = append(spreads, p.parseExpr()) // recover so the rest of the literal still parses
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}

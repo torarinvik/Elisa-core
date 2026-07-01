@@ -55,24 +55,24 @@ func TestGenerateLLVMIRLowersWithArenaScopedAllocatorShorthand(t *testing.T) {
 	}
 }
 
-func TestGenerateLLVMIRLowersStructLiteralSpread(t *testing.T) {
+func TestGenerateLLVMIRLowersRecordUpdate(t *testing.T) {
 	src := `struct Accessors:
     read_name_id: i64?
     write_name_id: i64?
     default_enabled: bool
 
 def update(base: Accessors, name: i64) -> bool:
-    next: Accessors = Accessors{...base, read_name_id: name, default_enabled: true}
+    next: Accessors = base{read_name_id = name, default_enabled = true}
     return next.default_enabled
 `
-	result := parseAndAnalyzeBackendTest(t, "backend_struct_literal_spread.elisa", src)
+	result := parseAndAnalyzeBackendTest(t, "backend_record_update.elisa", src)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
 		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
 	}
 	for _, want := range []string{"ins", "default_enabled"} {
 		if !strings.Contains(output, want) {
-			t.Fatalf("expected struct literal spread lowering to include %q, got:\n%s", want, output)
+			t.Fatalf("expected record-update lowering to include %q, got:\n%s", want, output)
 		}
 	}
 }
