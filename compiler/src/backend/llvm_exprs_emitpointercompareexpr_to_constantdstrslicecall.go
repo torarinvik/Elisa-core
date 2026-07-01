@@ -258,6 +258,26 @@ func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, baseValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("ptrarith"))
 	return ptr, resultType, true, nil
 }
+// emitStringCompareOperandValue materializes a string-compare operand as a VALUE of
+// valueType. When the operand expression is a reference to a view (`sview&`, e.g. a
+// `dict.get` result bound via `is`), emitExpr on it yields the pointer, not the aggregate —
+// the value-context coercion that loads scalars through a ref does not load a StringView. So
+// detect the ref, emit it as the pointer, and load the value through it. valueType comes from
+// stringCompareValueOperandType (already peeled), so it matches the helper's declared param.
+func (s *functionState) emitStringCompareOperandValue(e ast.Expr, valueType semantic.Type) (C.LLVMValueRef, error) {
+	if ref, ok := s.exprType(e).(*semantic.RefType); ok {
+		if _, ok := ref.Elem.(*semantic.SViewType); ok {
+			ptr, _, err := s.emitExpr(e, s.exprType(e))
+			if err != nil {
+				return nil, err
+			}
+			return s.loadValue(ptr, ref.Elem, "strcmp.deref")
+		}
+	}
+	value, _, err := s.emitExpr(e, valueType)
+	return value, err
+}
+
 func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helperName string, firstType semantic.Type, secondType semantic.Type, swap bool) (C.LLVMValueRef, semantic.Type, error) {
 	firstExpr := expr.Left
 	secondExpr := expr.Right
@@ -310,11 +330,11 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 		}
 		return cmp, s.g.result.NamedTypes["bool"], nil
 	}
-	firstValue, _, err := s.emitExpr(firstExpr, firstType)
+	firstValue, err := s.emitStringCompareOperandValue(firstExpr, firstType)
 	if err != nil {
 		return nil, nil, err
 	}
-	secondValue, _, err := s.emitExpr(secondExpr, secondType)
+	secondValue, err := s.emitStringCompareOperandValue(secondExpr, secondType)
 	if err != nil {
 		return nil, nil, err
 	}

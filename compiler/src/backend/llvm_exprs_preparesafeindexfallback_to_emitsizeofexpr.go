@@ -426,6 +426,22 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	}
 	return runtimeSliceInfo{}, false
 }
+// stringCompareValueOperandType peels an `sview&` (a reference to a view — e.g. the result
+// of `dict.get`, which returns `sview&?`) to the value `sview`. The returned type is used
+// BOTH as the runtime helper's declared parameter type and (via emitStringCompareValue) as
+// the type the operand value is materialized at, so the two always agree. Without this the
+// operand keeps its ref type: `ctx_string_views_eq` gets declared once as i64(ptr, ...) and
+// elsewhere as i64(StringView, ...), tripping "conflicting LLVM function declaration". A
+// `u8&` (raw cstr) operand is intentionally NOT peeled — it is a pointer by design.
+func stringCompareValueOperandType(t semantic.Type) semantic.Type {
+	if ref, ok := t.(*semantic.RefType); ok {
+		if _, ok := ref.Elem.(*semantic.SViewType); ok {
+			return ref.Elem
+		}
+	}
+	return t
+}
+
 func runtimeStringCompareInfo(leftType semantic.Type, rightType semantic.Type) (string, semantic.Type, semantic.Type, bool, bool) {
 	leftKind := classifyRuntimeStringCompareKind(leftType)
 	rightKind := classifyRuntimeStringCompareKind(rightType)
@@ -435,16 +451,18 @@ func runtimeStringCompareInfo(leftType semantic.Type, rightType semantic.Type) (
 	if leftKind == runtimeStringCompareRaw && rightKind == runtimeStringCompareRaw {
 		return "", nil, nil, false, false
 	}
+	left := stringCompareValueOperandType(leftType)
+	right := stringCompareValueOperandType(rightType)
 	if leftKind == runtimeStringCompareView && rightKind == runtimeStringCompareView {
-		return "ctx_string_views_eq", leftType, rightType, false, true
+		return "ctx_string_views_eq", left, right, false, true
 	}
 	if leftKind == runtimeStringCompareView {
-		return "ctx_string_view_eq", leftType, rightType, false, true
+		return "ctx_string_view_eq", left, right, false, true
 	}
 	if rightKind == runtimeStringCompareView {
-		return "ctx_string_view_eq", rightType, leftType, true, true
+		return "ctx_string_view_eq", right, left, true, true
 	}
-	return "ctx_streq", leftType, rightType, false, true
+	return "ctx_streq", left, right, false, true
 }
 
 type runtimeStringCompareKind int
