@@ -569,8 +569,8 @@ func TestParseChainedRangeForStatementLowersToNestedLoops(t *testing.T) {
 	}
 }
 
-func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for value in rev(items):\n        pass\n    scope pool_new(2):\n        pass\n    checkpoint mark = items:\n        pass\n    restore mark\n")
+func TestParseReverseIterableForScopeStatements(t *testing.T) {
+	file, errs := parseSourceFile(t, "extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]\n\ndef walk(items: darray[int]) -> void:\n    for value in rev(items):\n        pass\n    scope pool_new(2):\n        pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -585,44 +585,22 @@ func TestParseReverseIterableForScopeAndCheckpointStatements(t *testing.T) {
 	if _, ok := decl.Body[1].(*ast.ScopeStmt); !ok {
 		t.Fatalf("expected scope statement, got %T", decl.Body[1])
 	}
-	checkpointStmt, ok := decl.Body[2].(*ast.CheckpointStmt)
-	if !ok {
-		t.Fatalf("expected checkpoint statement, got %T", decl.Body[2])
-	}
-	if checkpointStmt.Name != "mark" {
-		t.Fatalf("expected checkpoint name mark, got %q", checkpointStmt.Name)
-	}
-	if _, ok := decl.Body[3].(*ast.RestoreCheckpointStmt); !ok {
-		t.Fatalf("expected restore checkpoint statement, got %T", decl.Body[3])
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") || !strings.Contains(formatted, "scope pool_new(2):") || !strings.Contains(formatted, "checkpoint mark = items:") || !strings.Contains(formatted, "restore mark") {
-		t.Fatalf("expected formatter to preserve reverse/scope/checkpoint syntax, got:\n%s", formatted)
+	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "for value in rev(items):") || !strings.Contains(formatted, "scope pool_new(2):") {
+		t.Fatalf("expected formatter to preserve reverse/scope syntax, got:\n%s", formatted)
 	}
 }
-func TestParseGroupedCheckpointStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "def walk(items: darray[int], others: darray[int], more: darray[int]) -> void:\n    checkpoint items, others, more:\n        pass\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl := file.Decls[0].(*ast.FuncDecl)
-	checkpointStmt, ok := decl.Body[0].(*ast.GroupedCheckpointStmt)
-	if !ok {
-		t.Fatalf("expected grouped checkpoint statement, got %T", decl.Body[0])
-	}
-	if len(checkpointStmt.Targets) != 3 {
-		t.Fatalf("expected 3 grouped checkpoint targets, got %d", len(checkpointStmt.Targets))
-	}
-	if formatted := unparse.FormatDecl(decl); !strings.Contains(formatted, "checkpoint items, others, more:") {
-		t.Fatalf("expected formatter to preserve grouped checkpoint syntax, got:\n%s", formatted)
-	}
-}
-func TestParseRejectsSingleTargetAnonymousCheckpoint(t *testing.T) {
-	_, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    checkpoint items:\n        pass\n")
-	if len(errs) == 0 {
-		t.Fatal("expected parser error for single-target anonymous checkpoint")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "grouped checkpoint requires at least 2 targets") {
-		t.Fatalf("expected grouped checkpoint arity diagnostic, got: %v", errs)
+func TestParseCheckpointStatementRejected(t *testing.T) {
+	for _, src := range []string{
+		"def walk(items: darray[int], others: darray[int]) -> void:\n    checkpoint items, others:\n        pass\n",
+		"def walk(items: darray[int]) -> void:\n    checkpoint mark = items:\n        pass\n",
+	} {
+		_, errs := parseSourceFile(t, src)
+		if len(errs) == 0 {
+			t.Fatalf("expected `checkpoint` to be rejected, but parse succeeded for:\n%s", src)
+		}
+		if !strings.Contains(strings.Join(errs, "\n"), "`checkpoint …:` has been removed") {
+			t.Fatalf("expected checkpoint removal diagnostic, got: %v", errs)
+		}
 	}
 }
 func TestParseRevLoopVariableNameWithoutReverseCompatCollision(t *testing.T) {

@@ -143,92 +143,18 @@ func TestParseOpenAndViewRemainContextualIdentifiers(t *testing.T) {
 		t.Fatalf("expected call callee open, got %T %#v", call.Func, call.Func)
 	}
 }
-func TestParseSequenceRewriteExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0:\n                    emit item\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected func decl, got %T", file.Decls[0])
-	}
-	canStmt, ok := decl.Body[0].(*ast.CanStmt)
-	if !ok {
-		t.Fatalf("expected can stmt, got %T", decl.Body[0])
-	}
-	inStmt, ok := canStmt.Body[0].(*ast.InStoreStmt)
-	if !ok {
-		t.Fatalf("expected in stmt, got %T", canStmt.Body[0])
-	}
-	ret, ok := inStmt.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", inStmt.Body[0])
-	}
-	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
-	if !ok {
-		t.Fatalf("expected fold-backed rewrite expr, got %T", ret.Value)
-	}
-	rootType, ok := rewriteExpr.Root.(*ast.GenericType)
-	if !ok || rootType.Name != "sequence" || len(rootType.Args) != 1 {
-		t.Fatalf("expected sequence[T] root, got %#v", rewriteExpr.Root)
-	}
-	if len(rewriteExpr.Arms) != 1 || rewriteExpr.Arms[0].TargetName != "item" {
-		t.Fatalf("unexpected sequence rewrite arms: %#v", rewriteExpr.Arms)
-	}
-	stmt, ok := rewriteExpr.Arms[0].Body[0].(*ast.ExprStmt)
-	if !ok {
-		t.Fatalf("expected expr stmt arm body, got %T", rewriteExpr.Arms[0].Body[0])
-	}
-	emitExpr, ok := stmt.Expr.(*ast.EmitExpr)
-	if !ok {
-		t.Fatalf("expected emit expr, got %T", stmt.Expr)
-	}
-	if emitExpr.Value == nil || emitExpr.Nothing {
-		t.Fatalf("expected emit value form, got %#v", emitExpr)
-	}
-	got := unparse.FormatExpr(rewriteExpr)
-	if !strings.HasPrefix(got, "rewrite items as sequence[u32]:") {
-		t.Fatalf("expected unparse to preserve sequence rewrite spelling, got:\n%s", got)
-	}
-	if !strings.Contains(got, "emit item") {
-		t.Fatalf("expected unparse to preserve emit, got:\n%s", got)
-	}
-}
-func TestParseSequenceRewriteEmitAllExpr(t *testing.T) {
-	file, errs := parseSourceFile(t, "def concat(owner: mutable Arena&, left: view[u32], right: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[view[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	decl, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected func decl, got %T", file.Decls[0])
-	}
-	canStmt, ok := decl.Body[0].(*ast.CanStmt)
-	if !ok {
-		t.Fatalf("expected can stmt, got %T", decl.Body[0])
-	}
-	inStmt, ok := canStmt.Body[0].(*ast.InStoreStmt)
-	if !ok {
-		t.Fatalf("expected in stmt, got %T", canStmt.Body[0])
-	}
-	ret, ok := inStmt.Body[1].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", inStmt.Body[1])
-	}
-	rewriteExpr, ok := ret.Value.(*ast.FoldExpr)
-	if !ok {
-		t.Fatalf("expected fold-backed rewrite expr, got %T", ret.Value)
-	}
-	stmt, ok := rewriteExpr.Arms[0].Body[0].(*ast.ExprStmt)
-	if !ok {
-		t.Fatalf("expected expr stmt arm body, got %T", rewriteExpr.Arms[0].Body[0])
-	}
-	emitExpr, ok := stmt.Expr.(*ast.EmitExpr)
-	if !ok || !emitExpr.All || emitExpr.Value == nil {
-		t.Fatalf("expected emit-all expr, got %#v", stmt.Expr)
-	}
-	if got := unparse.FormatExpr(rewriteExpr); !strings.Contains(got, "emit all segment") {
-		t.Fatalf("expected unparse to preserve emit all, got:\n%s", got)
+func TestParseSequenceRewriteExprRejected(t *testing.T) {
+	for _, src := range []string{
+		"def keep_non_zero(owner: mutable Arena&, items: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            return rewrite items as sequence[u32]:\n                item when item != 0:\n                    emit item\n",
+		"def concat(owner: mutable Arena&, left: view[u32], right: view[u32]) -> darray[u32]:\n    can Abort.Panic, Memory.Allocate:\n        in owner:\n            segments: darray[view[u32]] = [left, right]\n            return rewrite segments as sequence[u32]:\n                segment:\n                    emit all segment\n",
+	} {
+		_, errs := parseSourceFile(t, src)
+		if len(errs) == 0 {
+			t.Fatalf("expected `rewrite … as sequence[T]:` to be rejected, but parse succeeded for:\n%s", src)
+		}
+		if !strings.Contains(strings.Join(errs, "\n"), "`rewrite … as sequence[T]:` has been removed") {
+			t.Fatalf("expected rewrite removal diagnostic, got: %v", errs)
+		}
 	}
 }
 func TestParseDeferStatements(t *testing.T) {

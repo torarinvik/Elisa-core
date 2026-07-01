@@ -8,7 +8,9 @@ import (
 	"elisacore/src/parser"
 )
 
-func TestAnalyzeScopeCheckpointAndReverseIterableLoop(t *testing.T) {
+func TestAnalyzeScopeAndReverseIterableLoopWithSnapshotRewind(t *testing.T) {
+	// The `checkpoint …:` statement was removed; its replacement is a manual
+	// length snapshot restored on all exits via `defer block:` + `truncate`.
 	result := analyzeFunctionAnalysisTestSource(t, "scope_checkpoint.elisa", `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
 
 def build(owner: Arena, items: darray[int]) -> usize:
@@ -20,8 +22,10 @@ def build(owner: Arena, items: darray[int]) -> usize:
         pass
     in alloc:
         xs: mutable darray[int] = [1, 2, 3]
-        checkpoint mark = xs:
-            xs.push(4)
+        cp: usize = xs.count
+        defer block:
+            xs.truncate(cp)
+        xs.push(4)
         return xs.count + total
 `)
 	if len(result.Errors()) != 0 {
@@ -29,43 +33,18 @@ def build(owner: Arena, items: darray[int]) -> usize:
 	}
 }
 
-func TestAnalyzeGroupedCheckpointStmt(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "grouped_scope_checkpoint.elisa", `def build(owner: Arena) -> usize:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    in alloc:
-        xs: mutable darray[int] = [1, 2]
-        ys: mutable darray[int] = [3, 4]
-        checkpoint xs, ys:
-            xs.push(5)
-            ys.push(6)
-        return xs.count + ys.count
-`)
-	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("unexpected semantic errors: %v", errs)
-	}
-}
-
-func TestAnalyzeRejectsInvalidGroupedCheckpointTarget(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "grouped_scope_checkpoint_invalid.elisa", `def build(value: i64) -> void:
-    checkpoint value, value:
-        pass
-`)
-	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "checkpoint requires a region or mutable darray value") {
-		t.Fatalf("expected grouped checkpoint target diagnostic, got:\n%s", all)
-	}
-}
+// The `checkpoint …:` statement is rejected at parse time; see the parser test
+// TestParseCheckpointStatementRejected for the removal diagnostic assertions.
 
 func TestAnalyzeInvalidatedRegionRefDiagnosticUsesFactVocabulary(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "region_fact_invalidated_use.elisa", `def build(seed: i32) -> i32:
     region scratch(1024)
-    mark scratch as cp
     value: i32& @scratch = new[scratch] seed
-    restore scratch from cp
+    destroy scratch
     return value[0]
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, `reference "value" cannot be used: region dependency facts were invalidated by restore of region "scratch" from checkpoint "cp"`) {
+	if !strings.Contains(all, `reference "value" cannot be used: region dependency facts were invalidated by destroy of region "scratch"`) {
 		t.Fatalf("expected invalidated region fact diagnostic, got:\n%s", all)
 	}
 }

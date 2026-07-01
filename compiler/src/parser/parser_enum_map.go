@@ -17,6 +17,7 @@ func (p *Parser) parseEnumMapDecl() *ast.FuncDecl {
 	p.expect(lexer.TOKEN_ENUM)
 	p.expectIdentText("map")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	p.errorAt(pos, "`enum map NAME: FROM -> TO:` has been removed; write a plain function with a `match` (`def NAME(value: FROM) -> TO:` with `FROM.X: return TO.Y` arms and a `_:` default)")
 	p.expect(lexer.TOKEN_COLON)
 	sourceType := p.parseTypeExpr()
 	p.expect(lexer.TOKEN_ARROW)

@@ -114,8 +114,8 @@ func TestRunCLIEmitsFactTraceContractSnapshot(t *testing.T) {
 	for _, want := range []string{
 		"contract: version=fact-trace-v2 order=kind,target,class,reason,source summary=mode=eq:summary json=format=eq:json matchers=contains|eq|regex filters=alias|class|detail|effect|format|function|kind|mode|path|reason|region|source|sourcekind|store|target|verb",
 		"func fact_core_rules",
-		"summary: transforms=26",
-		"kinds=[consume:1, ensure:1, invalidate:6, produce:4, rebase:1, recompute:7, refine:5, widen:1]",
+		"summary: transforms=22",
+		"kinds=[consume:1, ensure:1, invalidate:2, produce:4, rebase:1, recompute:7, refine:5, widen:1]",
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected fact trace contract snapshot to contain %q, got:\n%s", want, output)
@@ -142,7 +142,7 @@ func TestRunCLIEmitsFactTraceKeyedFilterSelectors(t *testing.T) {
 		{name: "target", fixture: coreFixture, filter: "target=contains:alias.value", contains: []string{"recompute alias.value [typestate,shape,optimization]"}, omits: []string{"consume store"}},
 		{name: "path", fixture: coreFixture, filter: "path=contains:alias.value", contains: []string{"path_facts=[<return>.value{root=<return>,path=value,steps=result:value};", "alias.value{root=alias,path=value,steps=field:value}", "recompute alias.value [typestate,shape,optimization]"}},
 		{name: "alias", fixture: coreFixture, filter: "alias=contains:alias-class#0", contains: []string{"alias-class#0: {alias, first} mutated", "recompute first [typestate,shape,optimization,store-deps]"}},
-		{name: "region", fixture: coreFixture, filter: "region=eq:scratch", contains: []string{"region_deps=[scratch[0->destroyed], scratch[1->0], scratch[1->1]]", "invalidate scratch [region-deps]"}},
+		{name: "region", fixture: coreFixture, filter: "region=eq:scratch", contains: []string{"region_deps=[scratch[0->destroyed]]", "invalidate scratch [region-deps]"}},
 		{name: "store", fixture: coreFixture, filter: "store=eq:store", contains: []string{"handle_store_deps=[frozen<-store]", "rebase store [store-deps]"}},
 		{name: "detail", fixture: coreFixture, filter: "detail=eq:store_deps=store", contains: []string{"{operation=freeze,store_deps=store}"}, omits: []string{"rebase store [store-deps]"}},
 		{name: "effect", fixture: interfaceFixture, filter: "effect=eq:Console.Write", contains: []string{"require Console.Write [effects]", "required_effects=[Console.Write]"}},

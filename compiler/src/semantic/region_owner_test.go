@@ -3,6 +3,9 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/lexer"
+	"elisacore/src/parser"
 )
 
 // A region owns a bulk allocation and is an affine must-consume owner: a bare
@@ -38,28 +41,31 @@ func TestScopedRegionAutoDischarges(t *testing.T) {
 // `leak` discharges the must-consume obligation (so the region is no longer
 // reported unconsumed), but it is an audited memory-safety opt-out gated by
 // Unsafe.Leak — ungranted use must be flagged.
-func TestLeakDischargesButRequiresUnsafeLeak(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "region_leak_stmt.elisa", `def f() -> void:
-    region scratch(64)
-    leak scratch
-`)
-	if errs := strings.Join(result.Errors(), "\n"); strings.Contains(errs, "must be consumed before scope exit") {
-		t.Fatalf("leak should satisfy the must-consume obligation; got errors: %s", errs)
+// The explicit region-lifecycle statements `mark`/`restore`/`reset`/`leak`/
+// `promote`/`adopt` were removed (region high-water rewinds and lifetime/ownership
+// transfer are inferred, or expressed with nested scoped `region NAME:` blocks).
+// Scoped/owned regions, `destroy`, and explicit size/backing are unchanged.
+func TestRemovedRegionLifecycleStatementsAreRejected(t *testing.T) {
+	prelude := "def f() -> void:\n    region scratch(64)\n    region other(64)\n"
+	for _, stmt := range []string{
+		"    mark scratch as cp\n",
+		"    restore scratch from cp\n",
+		"    reset scratch\n",
+		"    leak scratch\n",
+		"    promote scratch into other\n",
+		"    adopt scratch into other\n",
+	} {
+		l := lexer.New("removed_region_lifecycle.elisa", []byte(prelude+stmt))
+		p := parser.New(l.Tokenize())
+		_ = p.ParseFile("removed_region_lifecycle.elisa")
+		errs := p.Errors()
+		if len(errs) == 0 {
+			t.Fatalf("expected removed region-lifecycle statement to be rejected:\n%s", stmt)
+		}
+		if !strings.Contains(strings.Join(errs, "\n"), "has been removed") {
+			t.Fatalf("expected removal diagnostic for %q, got: %v", strings.TrimSpace(stmt), errs)
+		}
 	}
-	// The Unsafe.Leak requirement is a warning in non-enforcing mode (a hard
-	// error under EnforceUnsafePermissions, like other Unsafe.* ops).
-	if warns := strings.Join(result.Warnings(), "\n"); !strings.Contains(warns, "leak requires") || !strings.Contains(warns, "Unsafe.Leak") {
-		t.Fatalf("expected leak to require Unsafe.Leak; got warnings: %s", warns)
-	}
-}
-
-// With the grant, leak is fully clean.
-func TestLeakWithGrantIsClean(t *testing.T) {
-	analyzeTreeTestSource(t, "region_leak_granted.elisa", `def f() -> void:
-    region scratch(64)
-    trusted Unsafe.Leak:
-        leak scratch
-`)
 }
 
 // A closure that captures a region-dependent value carries that region

@@ -25,7 +25,6 @@ def fact_core_error_path(value: int) -> int error[FactCoreError]:
 
 def fact_core_rules(mutable player: FactPlayer[Alive]&, owner: Arena) -> int ensures player => Alive | Dead:
     region scratch(1024)
-    mark scratch as saved
     first: FactNode& @scratch = new[scratch] FactNode{next: null, value: player.health}
     alias: mutable FactNode& = first
     alias.value <- alias.value + 1
@@ -33,8 +32,6 @@ def fact_core_rules(mutable player: FactPlayer[Alive]&, owner: Arena) -> int ens
     frozen: FactExpr.Store[Frozen] = freeze(move store)
     unknown_fact_update(player)
     value: int = try fact_core_error_path(player.health) else 0
-    restore scratch from saved
-    reset scratch
     _ = frozen
     out: int = value
     destroy scratch

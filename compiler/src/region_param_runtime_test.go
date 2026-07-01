@@ -434,9 +434,11 @@ func TestRunCLIRegionParamSequenceRewriteUsesHiddenArena(t *testing.T) {
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "region_param_sequence_rewrite.elisa")
 	src := `def keep_non_zero[@r](items: darray[u32] @r) -> darray[u32] @r:
-    return rewrite items as sequence[u32]:
-        item when item != 0:
-            emit item
+    out: mutable darray[u32] @r = []
+    for item in items:
+        if item != 0:
+            out.push(item)
+    return out
 
 @test
 def region_param_sequence_rewrite_test() -> void:
@@ -494,9 +496,10 @@ func TestRunCLISequenceRewriteOverByValueDArrayParamNoStackOverflow(t *testing.T
 def copy_list(alloc: mutable Arena&, values: darray[Box]) -> darray[Box]:
     can Abort.Panic, Memory.Allocate:
         in alloc:
-            return rewrite values as sequence[Box]:
-                value:
-                    emit value
+            out: mutable darray[Box] = []
+            for value in values:
+                out.push(value)
+            return out
 
 def run(owner: Arena) -> i64 can[Abort.Panic, Memory.Allocate]:
     can Abort.Panic, Memory.Allocate:

@@ -113,6 +113,7 @@ func (p *Parser) parseDestroy() *ast.DestroyStmt {
 func (p *Parser) parseLeak() *ast.LeakStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
+	p.errorAt(pos, "explicit `leak NAME` has been removed; region lifetimes are inferred")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectNewline()
 	return &ast.LeakStmt{Position: pos, Name: name}
@@ -120,6 +121,7 @@ func (p *Parser) parseLeak() *ast.LeakStmt {
 func (p *Parser) parseMark() *ast.MarkStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
+	p.errorAt(pos, "explicit `mark NAME as SAVE` has been removed; use a nested scoped `region NAME:` block instead of manual high-water marks")
 	regionName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expect(lexer.TOKEN_AS)
 	name := p.expect(lexer.TOKEN_IDENT).Text
@@ -129,6 +131,7 @@ func (p *Parser) parseMark() *ast.MarkStmt {
 func (p *Parser) parseCheckpointStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("checkpoint")
+	p.errorAt(pos, "`checkpoint …:` has been removed; snapshot the darray lengths (`n: usize = xs.count`) and restore them on exit with `defer block:` + `xs.truncate(n)`")
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ASSIGN {
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_ASSIGN)
@@ -161,6 +164,7 @@ func (p *Parser) parseCheckpointStmt() ast.Stmt {
 func (p *Parser) parseRestore() *ast.RestoreStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
+	p.errorAt(pos, "explicit `restore NAME from SAVE` has been removed; use a nested scoped `region NAME:` block instead of manual high-water marks")
 	regionName := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectIdentText("from")
 	markName := p.expect(lexer.TOKEN_IDENT).Text
@@ -170,6 +174,7 @@ func (p *Parser) parseRestore() *ast.RestoreStmt {
 func (p *Parser) parseRestoreCheckpointStmt() *ast.RestoreCheckpointStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("restore")
+	p.errorAt(pos, "explicit `restore NAME` has been removed; region lifetimes are inferred and scoped")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectNewline()
 	return &ast.RestoreCheckpointStmt{Position: pos, Name: name}
@@ -177,6 +182,7 @@ func (p *Parser) parseRestoreCheckpointStmt() *ast.RestoreCheckpointStmt {
 func (p *Parser) parseReset() *ast.ResetStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT)
+	p.errorAt(pos, "explicit `reset NAME` has been removed; use a nested scoped `region NAME:` block whose allocations are freed at block exit")
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectNewline()
 	return &ast.ResetStmt{Position: pos, Name: name}
@@ -184,6 +190,7 @@ func (p *Parser) parseReset() *ast.ResetStmt {
 func (p *Parser) parsePromote() *ast.PromoteStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT) // "promote"
+	p.errorAt(pos, "explicit `promote VALUE into REGION` has been removed; region-polymorphic returns thread the caller's region automatically")
 	value := p.parseExpr()
 	p.expectIdentText("into")
 	region := p.expect(lexer.TOKEN_IDENT).Text
@@ -193,6 +200,7 @@ func (p *Parser) parsePromote() *ast.PromoteStmt {
 func (p *Parser) parseAdopt() *ast.AdoptStmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_IDENT) // "adopt"
+	p.errorAt(pos, "explicit `adopt CHILD into PARENT` has been removed; region ownership transfer is inferred")
 	child := p.expect(lexer.TOKEN_IDENT).Text
 	p.expectIdentText("into")
 	parent := p.expect(lexer.TOKEN_IDENT).Text

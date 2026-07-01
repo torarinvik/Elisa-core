@@ -442,12 +442,9 @@ func TestBuildFunctionFactSnapshotRecordsStoreDependencyLabels(t *testing.T) {
 	}
 }
 func TestAnalyzeFunctionAnalysisRecordsRegionInvalidateTransforms(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.elisa", `def checkpoint_demo(seed: i32) -> i32:
+	result := analyzeFunctionAnalysisTestSource(t, "region_invalidate_fact_transforms.elisa", `def region_demo(seed: i32) -> i32:
 	region scratch(1024)
-	mark scratch as cp
 	temp: i32& @scratch = new[scratch] seed + 1
-	restore scratch from cp
-	reset scratch
 	destroy scratch
 	return seed
 
@@ -455,34 +452,24 @@ def destroy_demo() -> void:
 	region scratch(1024)
 	destroy scratch
 `)
-	checkpointAnalysis, ok := result.FunctionAnalysisByName("checkpoint_demo")
-	if !ok || checkpointAnalysis == nil {
-		t.Fatal("expected checkpoint_demo function analysis")
+	regionAnalysis, ok := result.FunctionAnalysisByName("region_demo")
+	if !ok || regionAnalysis == nil {
+		t.Fatal("expected region_demo function analysis")
 	}
-	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "restore region checkpoint") {
-		t.Fatalf("expected function analysis to expose restore invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
-	}
-	for _, transform := range checkpointAnalysis.FactTransforms {
-		if transform.Kind == FactTransformInvalidate && transform.Target == "scratch" && transform.Reason == "restore region checkpoint" {
-			if len(transform.Details) == 0 || transform.Details[0].Name != "operation" || transform.Details[0].Value != "restore region checkpoint" {
-				t.Fatalf("expected invalidate transform details, got %#v", transform)
-			}
-		}
+	if !hasFactTransform(regionAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "destroy region") {
+		t.Fatalf("expected function analysis to expose destroy invalidate transform, got %#v", regionAnalysis.FactTransforms)
 	}
 	var sawGenerationDetails bool
-	for _, transform := range checkpointAnalysis.FactTransforms {
-		if transform.Kind == FactTransformInvalidate && transform.Target == "scratch" && factTransformDetailValue(transform.Details, "generation_before") != "" && factTransformDetailValue(transform.Details, "generation_after") != "" {
+	for _, transform := range regionAnalysis.FactTransforms {
+		if transform.Kind == FactTransformInvalidate && transform.Target == "scratch" && factTransformDetailValue(transform.Details, "generation_before") != "" {
 			sawGenerationDetails = true
 		}
 	}
 	if !sawGenerationDetails {
-		t.Fatalf("expected invalidate transform to include region generation details, got %#v", checkpointAnalysis.FactTransforms)
+		t.Fatalf("expected invalidate transform to include region generation details, got %#v", regionAnalysis.FactTransforms)
 	}
-	if len(checkpointAnalysis.FactSnapshot.RegionDeps) == 0 {
-		t.Fatalf("expected snapshot to include region generation dependency keys, got %#v", checkpointAnalysis.FactSnapshot)
-	}
-	if !hasFactTransform(checkpointAnalysis.FactTransforms, FactTransformInvalidate, FactRegionDeps, "scratch", "reset region") {
-		t.Fatalf("expected function analysis to expose reset invalidate transform, got %#v", checkpointAnalysis.FactTransforms)
+	if len(regionAnalysis.FactSnapshot.RegionDeps) == 0 {
+		t.Fatalf("expected snapshot to include region generation dependency keys, got %#v", regionAnalysis.FactSnapshot)
 	}
 	destroyAnalysis, ok := result.FunctionAnalysisByName("destroy_demo")
 	if !ok || destroyAnalysis == nil {

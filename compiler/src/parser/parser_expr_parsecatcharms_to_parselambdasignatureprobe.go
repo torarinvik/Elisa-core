@@ -65,6 +65,7 @@ func (p *Parser) parseCatchArmBody(pos lexer.Pos) []ast.Stmt {
 func (p *Parser) parseRewriteExpr() ast.Expr {
 	pos := p.cur().Pos
 	p.expectIdentText("rewrite")
+	p.errorAt(pos, "`rewrite … as sequence[T]:` has been removed; build the result explicitly with a `darray[T] = []` and a `for` loop that `.push(…)`es each element (`emit all` → an inner push loop)")
 	value := p.parseExpr()
 	p.expect(lexer.TOKEN_AS)
 	root := p.parseTypeExpr()
