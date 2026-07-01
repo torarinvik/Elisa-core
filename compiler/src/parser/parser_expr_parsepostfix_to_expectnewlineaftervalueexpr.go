@@ -30,6 +30,7 @@ func (p *Parser) parsePostfix() ast.Expr {
 				return expr
 			}
 			pos := p.cur().Pos
+			p.errorAt(pos, "optional chaining `x?.…` has been removed; bind the optional explicitly with `if x is v: …`")
 			receiver := expr
 			p.advance()
 			p.expect(lexer.TOKEN_DOT)

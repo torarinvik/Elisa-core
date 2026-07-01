@@ -331,115 +331,6 @@ def read(tok: Tok) -> i64:
 	}
 }
 
-func TestParseUFCSAndOptionalChaining(t *testing.T) {
-	file, errs := parseSourceFile(t, `
-struct Box:
-    value: int
-
-def read(maybe_box: Box?, maybe_ref: Box&?) -> int:
-    _ = maybe_box?.value
-    _ = maybe_box?.scale(2)
-    return get maybe_ref?.value else 0
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[1])
-	}
-	firstDiscard, ok := funcDecl.Body[0].(*ast.DiscardStmt)
-	if !ok {
-		t.Fatalf("expected first discard stmt, got %T", funcDecl.Body[0])
-	}
-	safeField, ok := firstDiscard.Value.(*ast.FieldExpr)
-	if !ok || !safeField.Safe {
-		t.Fatalf("expected safe field expr, got %T %#v", firstDiscard.Value, firstDiscard.Value)
-	}
-	secondDiscard, ok := funcDecl.Body[1].(*ast.DiscardStmt)
-	if !ok {
-		t.Fatalf("expected second discard stmt, got %T", funcDecl.Body[1])
-	}
-	safeCall, ok := secondDiscard.Value.(*ast.CallExpr)
-	if !ok || !safeCall.Safe {
-		t.Fatalf("expected safe call expr, got %T %#v", secondDiscard.Value, secondDiscard.Value)
-	}
-	callee, ok := safeCall.Func.(*ast.FieldExpr)
-	if !ok || callee.Safe || callee.Field != "scale" {
-		t.Fatalf("expected safe call callee field scale, got %T %#v", safeCall.Func, safeCall.Func)
-	}
-	if got := unparse.FormatExpr(safeField); got != "maybe_box?.value" {
-		t.Fatalf("expected safe field to unparse canonically, got %q", got)
-	}
-	if got := unparse.FormatExpr(safeCall); got != "maybe_box?.scale(2)" {
-		t.Fatalf("expected safe call to unparse canonically, got %q", got)
-	}
-}
-
-func TestParseOptionalTransformCall(t *testing.T) {
-	file, errs := parseSourceFile(t, `
-def bump(value: int) -> int:
-    return value + 1
-
-def read(maybe_value: int?) -> int?:
-    return maybe_value?.(bump)
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[1])
-	}
-	ret, ok := funcDecl.Body[0].(*ast.ReturnStmt)
-	if !ok {
-		t.Fatalf("expected return stmt, got %T", funcDecl.Body[0])
-	}
-	call, ok := ret.Value.(*ast.CallExpr)
-	if !ok || !call.Safe {
-		t.Fatalf("expected safe transform call, got %T %#v", ret.Value, ret.Value)
-	}
-	receiver, ok := call.SafeReceiver.(*ast.Ident)
-	if !ok || receiver.Name != "maybe_value" {
-		t.Fatalf("expected transform receiver maybe_value, got %T %#v", call.SafeReceiver, call.SafeReceiver)
-	}
-	callee, ok := call.Func.(*ast.Ident)
-	if !ok || callee.Name != "bump" {
-		t.Fatalf("expected transform callee bump, got %T %#v", call.Func, call.Func)
-	}
-	if got := unparse.FormatExpr(call); got != "maybe_value?.(bump)" {
-		t.Fatalf("expected safe transform to unparse canonically, got %q", got)
-	}
-}
-
-func TestParseNullableAssignStmt(t *testing.T) {
-	file, errs := parseSourceFile(t, `
-struct Box:
-    value: int
-
-def write(maybe_ref: Box&?) -> void:
-    maybe_ref?.value ?= 7
-`)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
-	}
-	funcDecl, ok := file.Decls[1].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[1])
-	}
-	assign, ok := funcDecl.Body[0].(*ast.AssignStmt)
-	if !ok || !assign.Optional {
-		t.Fatalf("expected optional assign stmt, got %T %#v", funcDecl.Body[0], funcDecl.Body[0])
-	}
-	target, ok := assign.Target.(*ast.FieldExpr)
-	if !ok || !target.Safe || target.Field != "value" {
-		t.Fatalf("expected safe field target, got %T %#v", assign.Target, assign.Target)
-	}
-	if got := unparse.FormatStmt(funcDecl.Body[0]); got != "maybe_ref?.value ?= 7" {
-		t.Fatalf("expected nullable assign to unparse canonically, got %q", got)
-	}
-}
-
 func TestParseTryElseRecovery(t *testing.T) {
 	file, errs := parseSourceFile(t, `
 error FileError:
@@ -611,5 +502,27 @@ protocol Sink:
 	}
 	if !strings.Contains(strings.Join(errs, "\n"), "may only carry requires/ensure/changes/preserves") {
 		t.Fatalf("expected the contract-only error, got: %v", errs)
+	}
+}
+
+// Optional chaining `x?.…` (field `x?.f`, method `x?.m()`, and transform-apply
+// `x?.(f)`) has been removed; bind the optional explicitly with `if x is v: …`.
+// The parser rejects it with a message pointing at that form.
+func TestParseOptionalChainingRejected(t *testing.T) {
+	for _, src := range []string{
+		"def f(b: Box?) -> int:\n    _ = b?.value\n    return 0\n",
+		"def f(b: Box?) -> int:\n    _ = b?.scale(2)\n    return 0\n",
+		"def f(b: int?) -> int?:\n    return b?.(bump)\n",
+	} {
+		_, errs := parseSourceFile(t, src)
+		found := false
+		for _, e := range errs {
+			if strings.Contains(e, "optional chaining") {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected optional-chaining rejection for %q, got: %v", src, errs)
+		}
 	}
 }

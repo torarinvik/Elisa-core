@@ -972,34 +972,3 @@ def via_literal() -> i64:
 		t.Fatalf("unexpected semantic errors: %v", errs)
 	}
 }
-
-func TestAnalyzeOptionalChainingOnOptionalAndNullableReceivers(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "optional_chaining.elisa", `
-struct Box:
-    value: i64
-
-def score(box: Box, delta: i64 = 1) -> i64:
-    return box.value + delta
-
-def score_ref(box: Box&, delta: i64 = 1) -> i64:
-    return box.value + delta
-
-def read(maybe_box: Box?, maybe_ref: Box&?) -> void:
-    _ = maybe_box?.value
-    _ = maybe_box?.score()
-    _ = maybe_ref?.score_ref(2)
-`)
-	fn := result.File.Decls[3].(*ast.FuncDecl)
-	first := fn.Body[0].(*ast.DiscardStmt).Value
-	second := fn.Body[1].(*ast.DiscardStmt).Value
-	third := fn.Body[2].(*ast.DiscardStmt).Value
-	if got := result.ExprTypes[first].String(); got != "i64?" {
-		t.Fatalf("expected optional safe-field type i64?, got %s", got)
-	}
-	if got := result.ExprTypes[second].String(); got != "i64?" {
-		t.Fatalf("expected optional safe-call type i64?, got %s", got)
-	}
-	if got := result.ExprTypes[third].String(); got != "i64?" {
-		t.Fatalf("expected nullable-ref safe-call type i64?, got %s", got)
-	}
-}
