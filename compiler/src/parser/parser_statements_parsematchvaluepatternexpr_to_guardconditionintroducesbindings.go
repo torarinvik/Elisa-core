@@ -233,6 +233,15 @@ func (p *Parser) parseReturn() ast.Stmt {
 		p.skipRemovedQuestionStmtTail()
 		return &ast.ReturnStmt{Position: pos}
 	}
+	// Bare postfix guard: `return if <cond>` desugars to `if <cond>: return`. Since a
+	// bare return has no value, an `if` immediately after `return` is unambiguously a
+	// guard (never a ternary, which needs a preceding value). Mirrors `break if`.
+	if p.peek() == lexer.TOKEN_IF {
+		p.advance()
+		cond := p.parseExpr()
+		p.expectNewlineAfterValueExpr(cond)
+		return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{&ast.ReturnStmt{Position: pos}}}
+	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
 		value = p.parseValueExprAllowTuple()
