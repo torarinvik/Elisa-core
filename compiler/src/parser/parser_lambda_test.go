@@ -94,3 +94,33 @@ func TestParseLambdaExprAcceptsInlineFatArrowBody(t *testing.T) {
 		t.Fatalf("expected formatted output to round-trip lambda body, got:\n%s", formatted)
 	}
 }
+
+// The `lambda` keyword has been removed in favor of `fn`, which is contextual (a bare
+// `fn` / `fn(x)` call stays an ordinary reference), plus any Unicode lambda letter.
+func TestParseLambdaKeywordFnAndUnicodeFamily(t *testing.T) {
+	// Every accepted lambda head (canonical `fn` + the Unicode lambda letters) parses.
+	// The BMP lambda letters (Greek λ/Λ and Latin lambda-with-stroke ƛ) plus `fn`.
+	// The supplementary-plane math-alphanumeric variants are intentionally excluded.
+	heads := []string{"fn", "λ", "Λ", "ƛ"}
+	for _, h := range heads {
+		src := "def use() -> void:\n    g: T = " + h + " x: x\n"
+		if _, errs := parseSourceFile(t, src); len(errs) != 0 {
+			t.Fatalf("lambda head %q should parse, got: %v", h, errs)
+		}
+	}
+}
+
+func TestParseLambdaKeywordRejectsRemovedLambdaSpelling(t *testing.T) {
+	_, errs := parseSourceFile(t, "def use() -> void:\n    g: T = lambda x: x\n")
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "the `lambda` keyword has been removed; use `fn`") {
+		t.Fatalf("expected the lambda removal diagnostic, got: %v", errs)
+	}
+}
+
+// `fn` stays an ordinary identifier: a call and a bare reference are not lambdas.
+func TestParseFnRemainsOrdinaryIdentifier(t *testing.T) {
+	src := "def apply(fn: func(int) -> int, x: int) -> int:\n    return fn(x)\n"
+	if _, errs := parseSourceFile(t, src); len(errs) != 0 {
+		t.Fatalf("`fn` as a param + call should parse, got: %v", errs)
+	}
+}

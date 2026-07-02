@@ -80,11 +80,18 @@ func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
 	return p.parseExpr()
 }
 // isLambdaKeyword reports whether text introduces a lambda expression: the canonical
-// `fn`, a Unicode lambda letter (`λ` U+03BB / `Λ` U+039B), or the removed `lambda`
-// spelling (still recognized so parseLambdaExpr can emit a directed migration error).
+// `fn`, a Unicode lambda letter, or the removed `lambda` spelling (still recognized so
+// parseLambdaExpr can emit a directed migration error). The Unicode set is the BMP lambda
+// letters (Greek λ/Λ and the Latin lambda-with-stroke ƛ) — the ones actually typed. The
+// supplementary-plane Mathematical-Alphanumeric lambda variants are intentionally NOT
+// included: they are never keyed by hand, and stage1's lexer does not yet span a 4-byte
+// identifier rune correctly, so accepting them would make stage0 and stage1 disagree.
 func isLambdaKeyword(text string) bool {
 	switch text {
-	case "fn", "λ", "Λ", "lambda":
+	case "fn", "lambda",
+		"λ", // U+03BB GREEK SMALL LETTER LAMBDA
+		"Λ", // U+039B GREEK CAPITAL LETTER LAMBDA
+		"ƛ": // U+019B LATIN SMALL LETTER LAMBDA WITH STROKE
 		return true
 	}
 	return false
