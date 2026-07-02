@@ -216,11 +216,12 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 		}
 	case *ast.IterForStmt:
 		line := "for "
-		switch n.Mode {
-		case ast.IterBindRef:
-			line += "ref "
-		case ast.IterBindMutableRef:
-			line += "mutable ref "
+		// IterBindRef is not spelled: the surface `ref` binder was removed, and the
+		// mode now only arises from parse recovery or the analyzer's affine
+		// auto-borrow — formatting it back out would emit invalid syntax. Only
+		// `mutable` has a surface spelling.
+		if n.Mode == ast.IterBindMutableRef {
+			line += "mutable "
 		}
 		sourceText := formatExpr(n.Source)
 		var wherePredicate ast.Expr

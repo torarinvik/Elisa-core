@@ -290,7 +290,7 @@ func TestGenerateLLVMIRLowersIterableForLoopMutableRef(t *testing.T) {
 
 def bump() -> int:
 	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
-	for mutable ref item in items:
+	for mutable item in items:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value
 `

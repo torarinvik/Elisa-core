@@ -75,7 +75,7 @@ func TestAnalyzeAcceptsIterableForLoopMutableRef(t *testing.T) {
 
 def bump() -> int:
 	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
-	for mutable ref item in items:
+	for mutable item in items:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value
 `
@@ -117,7 +117,7 @@ func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
 	src := `def bad(values: darray[i32, 4]) -> void:
 	base: view[i32] = values[0:4]
 	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
-	for ref chunk in chunks:
+	for chunk in chunks:
 		_ = chunk
 `
 	_, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ref_reject.elisa", src)

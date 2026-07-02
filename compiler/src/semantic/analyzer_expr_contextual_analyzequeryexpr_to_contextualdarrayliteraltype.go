@@ -17,7 +17,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		info.ItemType = invalidType
 	}
 	if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-		a.errorf(expr.Pos(), "query expression value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
+		a.errorf(expr.Pos(), "query expression value iteration does not support affine element type %s; use an explicit `for` loop (read-only iteration borrows affine elements automatically)", info.ItemType)
 	}
 	if expr.Owner != nil {
 		ownerType := a.analyzeExpr(expr.Owner)

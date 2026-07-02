@@ -64,10 +64,11 @@ def ref_scalar_arith_test() -> void:
             nums.push(4)
             nums.push(5)
             sum: mutable i64 = 0
-            for ref v in nums:
+            for i in 0..<nums.count:
+                v: i64& = &nums[i]
                 sum <- sum + v
             if sum != 12:
-                panic("for ref scalar sum must be value arithmetic (expected 12)")
+                panic("immutable scalar ref sum must be value arithmetic (expected 12)")
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write ref-scalar-arith fixture: %v", err)

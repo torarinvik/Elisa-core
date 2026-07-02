@@ -270,25 +270,11 @@ def build(owner: Arena) -> usize:
 	}
 }
 
-func TestAnalyzeRejectsStoreRowsRefBinding(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "store_rows_ref_binding.elisa", `
-layout soa struct PendingGotoStore:
-    name_key: usize
-    depth: usize
-
-def build(owner: Arena) -> void:
-    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
-    in alloc:
-        pending: mutable PendingGotoStore = zeroed
-        pending.push(1, 2)
-        for ref row in pending.rows():
-            pass
-`)
-	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "for ref requires an addressable array-like iterable") {
-		t.Fatalf("expected store rows ref-binding diagnostic, got:\n%s", all)
-	}
-}
+// NOTE: the explicit `for ref row in pending.rows()` rejection test was removed with
+// the `ref` binder spelling itself — the scenario is unreachable from surface syntax
+// (the parser rejects `for ref x` with a directed removal diagnostic; see
+// TestParseIterableForStatementRefBinderRemoved). The analyzer's addressability check
+// for by-reference iteration remains for the recovery/auto-borrow paths.
 
 func TestAnalyzeRejectsGenericKeyRuntimeBackedDictSugar(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "generic_key_dict_sugar.elisa", `

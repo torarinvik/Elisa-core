@@ -787,17 +787,27 @@ func (p *Parser) looksLikeForStmtAt(pos int) bool {
 	}
 	return false
 }
+// parseIterBindMode parses the loop-binding intent: `for x in ...` reads (the compiler
+// binds by reference under the hood when beneficial or required — see the affine
+// auto-borrow in analyzeIterForStmt), `for mutable x in ...` mutates elements in place,
+// and `for x in move c` (spelled on the iterable) consumes. The mechanism spellings
+// `ref` / `mutable ref` have been removed: copy-vs-ref on an immutable binding is
+// semantically invisible, so it is the compiler's decision, not syntax.
 func (p *Parser) parseIterBindMode() ast.IterBindMode {
 	if p.match(lexer.TOKEN_MUTABLE) {
-		// `for mutable x in ...` binds a mutable ref (mutating a discarded
-		// per-iteration copy is never the intent, so `mutable` alone means
-		// mutable-ref). `for mutable ref x in ...` is an accepted explicit alias.
+		// Removed explicit alias `for mutable ref x in ...`: directed error, recover
+		// as the canonical `mutable` (same mode) so the loop still parses cleanly.
 		if p.peekIdentText("ref") {
+			p.errorf("`for mutable ref x in ...` has been removed; use `for mutable x in ...` (same meaning)")
 			p.advance()
 		}
 		return ast.IterBindMutableRef
 	}
 	if p.peekIdentText("ref") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind != lexer.TOKEN_IN {
+		// Removed `for ref x in ...`: an immutable binding's copy-vs-ref mechanism is
+		// inferred now. Directed error; recover as IterBindRef so the semantics the
+		// author relied on (borrow, e.g. affine elements) still hold with no cascade.
+		p.errorf("`for ref x in ...` has been removed; use `for x in ...` (the compiler binds by reference when needed)")
 		p.advance()
 		return ast.IterBindRef
 	}

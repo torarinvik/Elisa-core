@@ -524,7 +524,16 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 		}
 	}
 	if stmt.Mode == ast.IterBindValue && !stmt.MovedSource && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-		a.errorf(stmt.Pos(), "for value iteration does not support affine element type %s; use ref or mutable ref (or `for x in move c` to drain and consume each element)", info.ItemType)
+		// AUTO-BORROW: read-only iteration over affine elements binds by reference —
+		// a per-iteration value copy would duplicate linear handles, and the removed
+		// `for ref x` spelling made authors say so manually. Copy-vs-ref on an
+		// immutable binding is semantically invisible, so upgrade the mode here when
+		// a borrow is legal; only the genuinely un-borrowable cases still error.
+		if info.AllowRef && isBorrowableAffineOwnerType(info.ItemType) {
+			stmt.Mode = ast.IterBindRef
+		} else {
+			a.errorf(stmt.Pos(), "iteration over affine element type %s cannot copy or borrow the elements; use `for x in move c` to drain and consume each element", info.ItemType)
+		}
 	}
 	if stmt.Mode != ast.IterBindValue && a.containsAffineHandleValues(info.ItemType, map[string]bool{}) && !isBorrowableAffineOwnerType(info.ItemType) {
 		a.errorf(stmt.Pos(), "references to values containing linear handles are not supported; got %s&", info.ItemType)
@@ -532,11 +541,11 @@ func (a *Analyzer) analyzeIterForStmt(stmt *ast.IterForStmt) {
 	switch stmt.Mode {
 	case ast.IterBindRef:
 		if !info.AllowRef {
-			a.errorf(stmt.Pos(), "for ref requires an addressable array-like iterable, got %s", sourceType)
+			a.errorf(stmt.Pos(), "by-reference iteration requires an addressable array-like iterable, got %s", sourceType)
 		}
 	case ast.IterBindMutableRef:
 		if !info.AllowMutableRef {
-			a.errorf(stmt.Pos(), "for mutable ref requires a writable addressable array-like iterable, got %s", sourceType)
+			a.errorf(stmt.Pos(), "`for mutable` requires a writable addressable array-like iterable, got %s", sourceType)
 		}
 	}
 

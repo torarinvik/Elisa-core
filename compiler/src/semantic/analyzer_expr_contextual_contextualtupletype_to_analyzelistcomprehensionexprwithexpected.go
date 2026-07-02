@@ -675,7 +675,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 			info.ItemType = invalidType
 		}
 		if a.containsAffineHandleValues(info.ItemType, map[string]bool{}) {
-			a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit loop with ref binding", info.ItemType)
+			a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit `for` loop (read-only iteration borrows affine elements automatically)", info.ItemType)
 		}
 		itemType = info.ItemType
 		pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}

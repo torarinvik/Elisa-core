@@ -100,7 +100,7 @@ func TestParseForStatementRangeForms(t *testing.T) {
 	}
 }
 func TestParseIterableForStatementWithRefDestructuring(t *testing.T) {
-	file, errs := parseSourceFile(t, "struct Pair:\n    left: int\n    right: int\n\ndef walk(items: array[Pair, 2]) -> void:\n    for ref Pair(left, right) in items:\n        pass\n")
+	file, errs := parseSourceFile(t, "struct Pair:\n    left: int\n    right: int\n\ndef walk(items: array[Pair, 2]) -> void:\n    for Pair(left, right) in items:\n        pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -109,8 +109,8 @@ func TestParseIterableForStatementWithRefDestructuring(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
 	}
-	if iterStmt.Mode != ast.IterBindRef {
-		t.Fatalf("expected readonly ref bind mode, got %v", iterStmt.Mode)
+	if iterStmt.Mode != ast.IterBindValue {
+		t.Fatalf("expected value bind mode, got %v", iterStmt.Mode)
 	}
 	pattern, ok := iterStmt.Pattern.(*ast.MoveBindStructPattern)
 	if !ok {
@@ -126,8 +126,44 @@ func TestParseIterableForStatementWithRefDestructuring(t *testing.T) {
 		t.Fatalf("expected iterable source ident, got %T", iterStmt.Source)
 	}
 }
-func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
+// The `mutable ref` / `ref` binder spellings have been removed: copy-vs-ref on an
+// immutable binding is the compiler's decision (affine read-only iteration
+// auto-borrows), and `mutable` alone is the mutate-in-place spelling. Both removed
+// forms get a directed diagnostic with recover-as-canonical (mode preserved, no
+// cascade).
+func TestParseIterableForStatementMutableRefBinderRemoved(t *testing.T) {
 	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for mutable ref item in items:\n        pass\n")
+	if len(errs) != 1 || !strings.Contains(errs[0], "`for mutable ref x in ...` has been removed") {
+		t.Fatalf("expected exactly the mutable-ref removal diagnostic, got: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindMutableRef {
+		t.Fatalf("expected recovery to keep mutable-ref bind mode, got %v", iterStmt.Mode)
+	}
+}
+
+func TestParseIterableForStatementRefBinderRemoved(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for ref item in items:\n        pass\n")
+	if len(errs) != 1 || !strings.Contains(errs[0], "`for ref x in ...` has been removed") {
+		t.Fatalf("expected exactly the ref removal diagnostic, got: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	iterStmt, ok := decl.Body[0].(*ast.IterForStmt)
+	if !ok {
+		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
+	}
+	if iterStmt.Mode != ast.IterBindRef {
+		t.Fatalf("expected recovery to keep ref bind mode, got %v", iterStmt.Mode)
+	}
+}
+
+// A loop variable literally named `ref` (`for ref in xs`) is untouched by the removal.
+func TestParseIterableForStatementRefAsVariableName(t *testing.T) {
+	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for ref in items:\n        pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -136,17 +172,12 @@ func TestParseIterableForStatementWithMutableRefBinder(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected iterable for stmt, got %T", decl.Body[0])
 	}
-	if iterStmt.Mode != ast.IterBindMutableRef {
-		t.Fatalf("expected mutable ref bind mode, got %v", iterStmt.Mode)
-	}
-	pattern, ok := iterStmt.Pattern.(*ast.MoveBindNamePattern)
-	if !ok || pattern.Name != "item" {
-		t.Fatalf("expected mutable ref name pattern item, got %T %#v", iterStmt.Pattern, iterStmt.Pattern)
+	if iterStmt.Mode != ast.IterBindValue {
+		t.Fatalf("expected value bind mode for a variable named ref, got %v", iterStmt.Mode)
 	}
 }
 
-// `for mutable item in ...` is the concise spelling of a mutable-ref binder;
-// `mutable ref` remains an accepted alias (covered above).
+// `for mutable item in ...` is the sole spelling of the mutate-in-place binder.
 func TestParseIterableForStatementWithMutableBinderShorthand(t *testing.T) {
 	file, errs := parseSourceFile(t, "def walk(items: darray[int]) -> void:\n    for mutable item in items:\n        pass\n")
 	if len(errs) != 0 {

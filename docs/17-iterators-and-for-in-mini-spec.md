@@ -3,6 +3,14 @@
 This document proposes the first general iterable surface for Elisa core /
 `elisacore`.
 
+> **UPDATE (2026-07):** the `ref` / `mutable ref` binder spellings described
+> below have been **removed**. The surface now has two binder intents: plain
+> `for x in xs:` (read — the compiler binds by value or by reference as
+> needed; affine elements auto-borrow) and `for mutable x in xs:` (mutate in
+> place). `for x in move c:` consumes/drains. Copy-vs-ref on an immutable
+> binding is semantically invisible, so the mechanism is the compiler's
+> decision, not syntax. Examples below using `ref` are historical.
+
 It is still mainly a design note for the broader sequential iterable model.
 Since it was written, the compiler has also shipped companion implemented
 surfaces such as filtered iterable loops, canonical `rev(items)` syntax, and
@@ -121,31 +129,27 @@ So the rule is:
 
 Idiomatic loop choice follows from that rule:
 
-- use `for item in source:` for ordinary traversal
+- use `for item in source:` for ordinary traversal (read; the compiler binds
+  by reference under the hood when beneficial or required)
 - use `for index, item in source.enumerate():` when both index and value matter
-- use `for ref item in source:` or `for mutable ref item in source:` when the
-  body needs references rather than copies
+- use `for mutable item in source:` when the body mutates elements in place
 - use `for i in 0..<n:` for numeric ranges, index-only passes, fixed-count
   loops, explicit strides, and temporary gaps where a source has no iterable
   surface yet
 
 ## Surface Syntax
 
-The first surface should support three binder modes.
+The surface supports two binder intents.
 
-### Value iteration
+### Read iteration
 
 ```elisa
 for item in items:
     use(item)
 ```
 
-### Readonly-ref iteration
-
-```elisa
-for ref item in items:
-    inspect(item)
-```
+The compiler chooses the binding mechanism (value copy or reference); affine
+elements auto-borrow so read-only traversal needs no annotation.
 
 ### Mutable-ref iteration
 
@@ -155,8 +159,8 @@ for mutable item in items:
 ```
 
 `mutable` alone denotes a mutable-ref binder — mutating a discarded per-iteration
-copy is never the intent. `for mutable ref item in items:` is an accepted, more
-explicit alias.
+copy is never the intent. (The explicit `ref` / `mutable ref` spellings were
+removed; they named a mechanism, not an intent.)
 
 These forms should all share the same overall `for` shape.
 
