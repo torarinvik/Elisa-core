@@ -229,7 +229,7 @@ def narrowed() -> void:
 	}
 }
 
-// docs/76 §5 (Phase 5): first-class column scan. A `layout soa` (columnar) recursive enum is
+// docs/76 §5 (Phase 5): first-class column scan. A `layout(soa)` (columnar) recursive enum is
 // region-backed with per-field column arrays; `for s in Expr of .span` streams the dense `span`
 // common-field column across every node in the implicit store. Builds 3 nodes (spans 10, 20, 30)
 // and sums the column → 60. A broken column scan would read the wrong column, miscount rows, or
@@ -243,7 +243,7 @@ func TestEnumColumnScanSumsCommonField(t *testing.T) {
 		t.Skip("std runtime not found")
 	}
 	src := "include \"" + std + "\"\n" + `
-enum Expr layout soa:
+enum Expr layout(soa):
     common(span: int)
     Int(value: int)
     Add(left: Expr, right: Expr)

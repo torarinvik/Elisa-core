@@ -6,7 +6,7 @@ import (
 )
 
 func TestGenerateLLVMIRLowersStoreRowDestructuring(t *testing.T) {
-	src := `layout soa struct PendingGotoStore:
+	src := `struct PendingGotoStore layout(soa):
     name_key: usize
     depth: usize
 

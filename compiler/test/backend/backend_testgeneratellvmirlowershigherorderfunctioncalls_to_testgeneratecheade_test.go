@@ -486,7 +486,7 @@ def use_identity(value: i32) -> i32:
 	}
 }
 func TestGenerateLLVMIRLowersExportWrappers(t *testing.T) {
-	src := `struct Vec[T] layout c:
+	src := `struct Vec[T] layout(c):
 	x: mutable T
 	y: mutable T
 
@@ -531,7 +531,7 @@ export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[
 	}
 }
 func TestGenerateCHeaderForExportedVec2i(t *testing.T) {
-	src := `struct Vec[T] layout c:
+	src := `struct Vec[T] layout(c):
 	x: mutable T
 	y: mutable T
 

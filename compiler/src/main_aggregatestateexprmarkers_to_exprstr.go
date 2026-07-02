@@ -74,12 +74,12 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if n.Affine {
 			affine = "affine "
 		}
-		layoutPrefix := ""
+		layoutSuffix := ""
 		switch n.Layout {
 		case ast.StructLayoutAOS:
-			layoutPrefix = "layout aos "
+			layoutSuffix = " layout(aos)"
 		case ast.StructLayoutSOA:
-			layoutPrefix = "layout soa "
+			layoutSuffix = " layout(soa)"
 		}
 		regionParams := n.RegionParams
 		if n.RegionOwner != "" {
@@ -96,7 +96,7 @@ func printDecl(w io.Writer, d ast.Decl, level int) {
 		if stateParamCount > 0 {
 			tparams += aggregateStatePlaceholders(stateParamCount)
 		}
-		fmt.Fprintf(w, "%s%s%sstruct %s%s (%d fields)\n", prefix, affine, layoutPrefix, n.Name, tparams, len(n.Fields))
+		fmt.Fprintf(w, "%s%sstruct %s%s%s (%d fields)\n", prefix, affine, n.Name, tparams, layoutSuffix, len(n.Fields))
 	case *ast.InterfaceDecl:
 		fmt.Fprintf(w, "%sprotocol %s: (%d members)\n", prefix, n.Name, len(n.Members))
 	case *ast.ImplDecl:

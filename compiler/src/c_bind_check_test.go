@@ -31,7 +31,7 @@ struct Header {
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
 	source := `@c_bind("` + headerPath + `", "struct Header")
-struct Header layout c:
+struct Header layout(c):
 	tag: u8
 	count: u32
 	total: usize
@@ -69,7 +69,7 @@ struct Header {
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
 	source := `@c_bind("` + headerPath + `", "struct Header")
-struct Header layout c:
+struct Header layout(c):
 	tag: u8
 	count: u32
 `
@@ -108,7 +108,7 @@ struct Header {
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
 	source := `@c_bind("` + headerPath + `", "struct Header", prefix)
-struct HeaderPrefix layout c:
+struct HeaderPrefix layout(c):
 	owner: void&?
 	count: u32
 	flags: u32
@@ -146,7 +146,7 @@ struct Header {
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
 	source := `@c_bind("` + headerPath + `", "struct Header")
-struct Header layout c:
+struct Header layout(c):
 	tag: u8
 	count: u32
 `
@@ -223,7 +223,7 @@ struct Header {
 	}
 	sourcePath := filepath.Join(tmpDir, "fixture.elisa")
 	source := `@c_bind("` + headerPath + `", "struct Header")
-struct Header layout c:
+struct Header layout(c):
 	ptr: void&?
 	count: u32
 `

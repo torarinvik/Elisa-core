@@ -80,21 +80,21 @@ struct Header:
 }
 
 func TestParseStructLayoutModes(t *testing.T) {
-	file, errs := parseSourceFile(t, `struct Header layout packed:
+	file, errs := parseSourceFile(t, `struct Header layout(packed):
 	tag: u4
 	arity: u3
 	active: u1
 
-struct CHeader layout c:
+struct CHeader layout(c):
 	kind: u32
 	flags: u32
 	size: usize
 
-layout aos struct Particle:
+struct Particle layout(aos):
 	x: f32
 	y: f32
 
-layout soa struct ParticleRows:
+struct ParticleRows layout(soa):
 	x: f32
 	y: f32
 `)
@@ -136,7 +136,7 @@ func TestParseStructRegionOwnerForms(t *testing.T) {
 	left: Expr&? @owner
 	right: Expr&? @owner
 
-layout soa struct SymbolRows[@owner]:
+struct SymbolRows[@owner] layout(soa):
 	name_id: NameId
 	span: Span
 `)
@@ -245,7 +245,7 @@ struct Box[T, @owner]:
 	value: T
 	next: Box[T, owner]&? @owner
 
-layout soa struct SymbolRows[@owner]:
+struct SymbolRows[@owner] layout(soa):
 	name_id: NameId
 	span: Span
 `)
@@ -256,7 +256,7 @@ layout soa struct SymbolRows[@owner]:
 	for _, want := range []string{
 		"struct Expr[@owner]:",
 		"struct Box[T, @owner]:",
-		"layout soa struct SymbolRows[@owner]:",
+		"struct SymbolRows[@owner] layout(soa):",
 		"next: Box[T, owner]&? @owner",
 	} {
 		if !strings.Contains(formatted, want) {

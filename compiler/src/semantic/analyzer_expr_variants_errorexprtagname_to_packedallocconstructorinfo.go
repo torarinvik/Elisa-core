@@ -113,7 +113,7 @@ func (a *Analyzer) analyzeEnumColumnExpr(expr *ast.EnumColumnExpr) Type {
 	// store, so a sub-category scan reads the root's columns filtered to the category's tag range.
 	root := enumType.Root()
 	if !root.Packed || !root.LayoutSet || root.Layout != ast.StructLayoutSOA {
-		a.errorf(expr.Pos(), "column scan `%s of .%s` requires `enum %s layout soa`; the default layout stores nodes row-major (AoS), which has no dense columns", expr.Enum, expr.Field, root.Name)
+		a.errorf(expr.Pos(), "column scan `%s of .%s` requires `enum %s layout(soa)`; the default layout stores nodes row-major (AoS), which has no dense columns", expr.Enum, expr.Field, root.Name)
 		return invalidType
 	}
 	var elem Type

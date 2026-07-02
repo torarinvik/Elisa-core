@@ -33,25 +33,25 @@ func TestEnumIndexWidthAndSentinel(t *testing.T) {
 	}
 }
 
-// `(sparse)` requires layout soa.
+// `(sparse)` requires layout(soa).
 func TestEnumSparseRequiresSoa(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "spaos.elisa", `packed enum Expr layout aos(sparse):
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "spaos.elisa", `packed enum Expr layout(aos, sparse):
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "`(sparse)` requires `layout soa`") {
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "`(sparse)` requires `layout(soa)`") {
 		t.Fatalf("sparse on aos must error, got:\n%s", all)
 	}
 }
 
 // `(handle: uN)` is carried and accepted on soa/aos.
 func TestEnumIndexWidthAcceptedOnAos(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "idxaos.elisa", `packed enum Expr layout aos(handle: u16):
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "idxaos.elisa", `packed enum Expr layout(aos, handle: u16):
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("layout aos(handle: u16) must be accepted, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("layout(aos, handle: u16) must be accepted, got:\n%s", strings.Join(errs, "\n"))
 	}
 	et := enumTypeByName(t, result, "Expr")
 	if et.ResolvedIndexWidthBits() != 16 {

@@ -11,7 +11,7 @@ import (
 )
 
 func TestGenerateLLVMIRUsesExplicitSOAColumns(t *testing.T) {
-	src := `layout soa struct PendingGotoStore:
+	src := `struct PendingGotoStore layout(soa):
     name_key: u32
     depth: u32
 
@@ -79,7 +79,7 @@ def build(owner: Arena) -> usize:
 }
 
 func TestGenerateLLVMIRLowersSOAIndexing(t *testing.T) {
-	src := `layout soa struct SymbolRows:
+	src := `struct SymbolRows layout(soa):
     name_id: usize
     flags: u32
 
@@ -135,7 +135,7 @@ def build(owner: Arena) -> usize:
 }
 
 func TestGenerateLLVMIRLowersLayoutSOAStructSugar(t *testing.T) {
-	src := `layout soa struct SymbolRows:
+	src := `struct SymbolRows layout(soa):
     name_id: usize
     flags: u32
 
@@ -152,7 +152,7 @@ def build(owner: Arena) -> usize:
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_layout_soa.elisa", src)
 	if st, ok := result.NamedTypes["SymbolRows"].(*semantic.StructType); !ok || st == nil || st.Layout != ast.StructLayoutSOA || !st.Store || st.StoreDecl == nil || !st.StoreDecl.Soa {
-		t.Fatalf("expected layout soa struct to analyze as an SOA-backed struct, got %#v", result.NamedTypes["SymbolRows"])
+		t.Fatalf("expected layout(soa) struct to analyze as an SOA-backed struct, got %#v", result.NamedTypes["SymbolRows"])
 	}
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {
@@ -160,7 +160,7 @@ def build(owner: Arena) -> usize:
 	}
 	for _, want := range []string{"store.name_id.push.slot", "store.flags.push.slot", "soa.row.index", "soa.count"} {
 		if !strings.Contains(output, want) {
-			t.Fatalf("expected layout soa lowering to include %q, got:\n%s", want, output)
+			t.Fatalf("expected layout(soa) lowering to include %q, got:\n%s", want, output)
 		}
 	}
 }
@@ -216,7 +216,7 @@ def build(owner: Arena) -> i64:
 }
 
 func TestGenerateLLVMIRLowersStoreRowsIteration(t *testing.T) {
-	src := `layout soa struct PendingGotoStore:
+	src := `struct PendingGotoStore layout(soa):
     name_key: usize
     depth: usize
 

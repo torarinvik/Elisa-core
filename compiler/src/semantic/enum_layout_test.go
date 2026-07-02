@@ -27,16 +27,16 @@ func enumTypeByName(t *testing.T, result *Result, name string) *EnumType {
 	return nil
 }
 
-// docs/76 Phase 1: `enum X layout soa:` parses and the layout suffix is carried onto the EnumType.
+// docs/76 Phase 1: `enum X layout(soa):` parses and the layout suffix is carried onto the EnumType.
 func TestEnumLayoutSoaCarried(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_soa.elisa", `packed enum Expr layout soa:
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_soa.elisa", `packed enum Expr layout(soa):
     common:
         span: int
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("layout soa enum must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("layout(soa) enum must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 	et := enumTypeByName(t, result, "Expr")
 	if !et.LayoutSet || et.Layout != ast.StructLayoutSOA {
@@ -46,14 +46,14 @@ func TestEnumLayoutSoaCarried(t *testing.T) {
 
 // The `(handle: u16)` and `(sparse)` sub-options are carried.
 func TestEnumLayoutSubOptionsCarried(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_opts.elisa", `packed enum Expr layout soa(sparse, handle: u16):
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "el_opts.elisa", `packed enum Expr layout(soa, sparse, handle: u16):
     common:
         span: int
     Int(value: int)
     Add(left: Expr, right: Expr)
 `, AnalyzeOptions{})
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("layout soa(sparse, handle: u16) must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("layout(soa, sparse, handle: u16) must parse cleanly, got:\n%s", strings.Join(errs, "\n"))
 	}
 	et := enumTypeByName(t, result, "Expr")
 	if !et.LayoutSparse {

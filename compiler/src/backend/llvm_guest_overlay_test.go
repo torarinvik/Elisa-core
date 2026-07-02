@@ -15,9 +15,9 @@ import (
 func TestGuestOverlayLocalCarrierLowers(t *testing.T) {
 	src := `extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout MemParamOverlay size 48:
-    0 size: u64
-    40 ext2: u64
+struct MemParamOverlay layout(guest, size: 48):
+    size: u64 at 0
+    ext2: u64 at 40
 
 def read_ext2(raw: uintptr, memory: uintptr) -> u64:
     mem_param: GuestVAddr[MemParamOverlay] = raw.cast[GuestVAddr[MemParamOverlay]]

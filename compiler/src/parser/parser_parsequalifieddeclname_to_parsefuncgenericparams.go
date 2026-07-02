@@ -192,9 +192,9 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 // parseEnumLayoutSuffix parses an optional `layout soa|aos|c|packed` suffix on an enum declaration
 // (docs/76), with optional `(sparse)` and/or `(handle: uN)` sub-options, e.g.
 //
-//	enum Expr layout soa:
-//	enum Expr layout soa(sparse):
-//	enum Small layout aos(handle: u16):
+//	enum Expr layout(soa):
+//	enum Expr layout(soa, sparse):
+//	enum Small layout(aos, handle: u16):
 //	enum Small layout(handle: u16):       # mode omitted — keeps the default layout (docs/82)
 //
 // `handle:` is the canonical key for the opaque-handle width (docs/82); the legacy docs/76 `index:`
@@ -205,61 +205,51 @@ func (p *Parser) parseEnumLayoutSuffix() (ast.StructLayoutMode, bool, bool, stri
 	if !p.matchIdentText("layout") {
 		return ast.StructLayoutDefault, false, false, ""
 	}
-	layout := ast.StructLayoutDefault
-	if p.peek() != lexer.TOKEN_LPAREN { // mode-less `layout(...)` keeps the default mode
+	var opts layoutClauseOptions
+	if p.peek() == lexer.TOKEN_LPAREN {
+		// Canonical parenthesized clause: `layout(soa)`, `layout(soa, sparse)`,
+		// `layout(aos, handle: u16)`, `layout(handle: u32)` (mode-less keeps the
+		// default layout, docs/82).
+		opts = p.parseLayoutClauseOptions()
+	} else {
+		// Removed bare-word spellings `layout soa` / `layout soa(sparse)` — directed
+		// error, recover as the canonical clause (same options, no cascade).
+		opts.Size = -1
 		mode := p.cur()
 		if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
-			p.errorf("expected enum layout mode `aos`, `soa`, `c`, or `packed`, got %s", mode)
+			p.errorf("expected `layout(...)` clause, got %s", mode)
 		} else {
+			p.errorf("bare `layout %s` has been removed; use the parenthesized clause `layout(%s, ...)`", mode.Text, mode.Text)
 			p.advance()
+			opts.Mode = mode.Text
 		}
-		switch mode.Text {
-		case "aos":
-			layout = ast.StructLayoutAOS
-		case "soa":
-			layout = ast.StructLayoutSOA
-		case "c":
-			layout = ast.StructLayoutC
-		case "packed":
-			layout = ast.StructLayoutPacked
-		default:
-			p.errorf("unsupported enum layout %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
+		if p.peek() == lexer.TOKEN_LPAREN {
+			legacy := p.parseLayoutClauseOptions() // the trailing `(sparse)` / `(handle: uN)` options
+			opts.Sparse = legacy.Sparse
+			opts.HandleWidth = legacy.HandleWidth
 		}
 	}
-	sparse := false
-	indexWidth := ""
-	if p.match(lexer.TOKEN_LPAREN) {
-		for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
-			opt := p.cur()
-			if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "sparse" {
-				p.advance()
-				sparse = true
-			} else if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "index" {
-				p.errorf("enum layout `(index: uN)` has been removed; use the canonical `(handle: uN)` spelling (docs/82)")
-				p.advance()
-				p.match(lexer.TOKEN_COLON)
-				p.advance()
-			} else if opt.Kind == lexer.TOKEN_IDENT && opt.Text == "handle" {
-				p.advance()
-				p.expect(lexer.TOKEN_COLON)
-				width := p.expect(lexer.TOKEN_IDENT).Text
-				switch width {
-				case "u8", "u16", "u32", "u64", "ptr":
-					indexWidth = width
-				default:
-					p.errorf("enum handle width must be u8, u16, u32, u64, or ptr, got %q", width)
-				}
-			} else {
-				p.errorf("unexpected enum layout option %s; expected `sparse` or `handle: uN`", opt)
-				p.advance()
-			}
-			if !p.match(lexer.TOKEN_COMMA) {
-				break
-			}
-		}
-		p.expect(lexer.TOKEN_RPAREN)
+	if opts.Guest {
+		p.errorf("`guest` is a struct overlay layout; it has no meaning on an enum")
 	}
-	return layout, true, sparse, indexWidth
+	if opts.Size >= 0 {
+		p.errorf("`size: N` is only meaningful with the struct `guest` overlay layout")
+	}
+	layout := ast.StructLayoutDefault
+	switch opts.Mode {
+	case "aos":
+		layout = ast.StructLayoutAOS
+	case "soa":
+		layout = ast.StructLayoutSOA
+	case "c":
+		layout = ast.StructLayoutC
+	case "packed":
+		layout = ast.StructLayoutPacked
+	case "": // mode-less keeps the default layout
+	default:
+		p.errorf("unsupported enum layout %q; expected `aos`, `soa`, `c`, or `packed`", opts.Mode)
+	}
+	return layout, true, opts.Sparse, opts.HandleWidth
 }
 func (p *Parser) parseEnumCommonFields() []ast.FieldDecl {
 	p.expect(lexer.TOKEN_IDENT)
@@ -472,6 +462,15 @@ func (p *Parser) parseLayoutDecl() *ast.LayoutDecl {
 	if p.matchIdentText("size") {
 		decl.Size = p.parseLayoutInt()
 	}
+	// The standalone overlay declaration has been replaced by the unified postfix
+	// layout clause: an overlay is a struct whose layout is externally fixed.
+	// Directed error; recovery keeps parsing the legacy offset-led body below so
+	// the fields still land in the LayoutDecl (no cascade).
+	if decl.Size > 0 {
+		p.errorAt(pos, "standalone `layout %s size %d:` has been removed; use `struct %s layout(guest, size: %d):` with `field: type at OFFSET` members", name, decl.Size, name, decl.Size)
+	} else {
+		p.errorAt(pos, "standalone `layout %s:` has been removed; use `struct %s layout(guest):` with `field: type at OFFSET` members", name, name)
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -630,13 +629,114 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 
 	return &ast.GlobalDecl{Position: pos, Mutable: mutable, Name: name, Type: typ, Value: value}
 }
-func (p *Parser) parseStructDecl() *ast.StructDecl {
+// layoutClauseOptions is the parsed content of the canonical parenthesized
+// `layout(...)` clause — one grammar shared by struct, enum, and guest-overlay
+// declarations. Callers validate which options make sense in their context.
+type layoutClauseOptions struct {
+	Mode        string // "aos" | "soa" | "c" | "packed" | "" (mode-less)
+	Sparse      bool   // enum: sparse handle store
+	HandleWidth string // enum: `handle: uN` opaque-handle width
+	Guest       bool   // struct: typed guest-memory overlay (docs/107)
+	Size        int64  // guest overlay total byte size; -1 when absent
+}
+
+// parseLayoutClauseOptions parses `( opt {, opt} )` where opt is a layout mode
+// word (`aos`/`soa`/`c`/`packed`), `sparse`, `handle: uN`, `guest`, or `size: N`.
+func (p *Parser) parseLayoutClauseOptions() layoutClauseOptions {
+	opts := layoutClauseOptions{Size: -1}
+	p.expect(lexer.TOKEN_LPAREN)
+	for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+		opt := p.cur()
+		switch {
+		case opt.Kind == lexer.TOKEN_PACKED || (opt.Kind == lexer.TOKEN_IDENT && (opt.Text == "aos" || opt.Text == "soa" || opt.Text == "c")):
+			if opts.Mode != "" {
+				p.errorf("duplicate layout mode %q in `layout(...)` (already %q)", opt.Text, opts.Mode)
+			}
+			opts.Mode = opt.Text
+			p.advance()
+		case opt.Kind == lexer.TOKEN_IDENT && opt.Text == "guest":
+			opts.Guest = true
+			p.advance()
+		case opt.Kind == lexer.TOKEN_IDENT && opt.Text == "sparse":
+			opts.Sparse = true
+			p.advance()
+		case opt.Kind == lexer.TOKEN_IDENT && opt.Text == "handle":
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			width := p.expect(lexer.TOKEN_IDENT).Text
+			switch width {
+			case "u8", "u16", "u32", "u64", "ptr":
+				opts.HandleWidth = width
+			default:
+				p.errorf("layout handle width must be u8, u16, u32, u64, or ptr, got %q", width)
+			}
+		case opt.Kind == lexer.TOKEN_IDENT && opt.Text == "size":
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			opts.Size = p.parseLayoutInt()
+		case opt.Kind == lexer.TOKEN_IDENT && opt.Text == "index":
+			p.errorf("layout `(index: uN)` has been removed; use the canonical `(handle: uN)` spelling (docs/82)")
+			p.advance()
+			p.match(lexer.TOKEN_COLON)
+			p.advance()
+		default:
+			p.errorf("unexpected layout option %s; expected a mode (`aos`/`soa`/`c`/`packed`), `sparse`, `handle: uN`, `guest`, or `size: N`", opt)
+			p.advance()
+		}
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return opts
+}
+
+// parseGuestOverlayBody parses the member block of a typed guest-memory overlay
+// `struct Name layout(guest, size: N):` — `field: type at OFFSET [requires size >= N]`
+// lines (name-first, like every other struct member) — into the LayoutDecl the
+// docs/107 overlay checker consumes. Size -1 means "derive from the fields".
+func (p *Parser) parseGuestOverlayBody(name string, size int64, pos lexer.Pos) *ast.LayoutDecl {
+	decl := &ast.LayoutDecl{Position: pos, Name: name}
+	if size >= 0 {
+		decl.Size = size
+	}
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		fpos := p.cur().Pos
+		fname := p.expect(lexer.TOKEN_IDENT).Text
+		p.expect(lexer.TOKEN_COLON)
+		ftype := p.expect(lexer.TOKEN_IDENT).Text
+		field := ast.LayoutFieldDecl{Position: fpos, Name: fname, Type: ftype, Offset: -1}
+		if p.matchIdentText("at") {
+			field.Offset = p.parseLayoutInt()
+		} else {
+			p.errorf("guest overlay field %q needs an explicit offset: `%s: %s at OFFSET`", fname, fname, ftype)
+		}
+		if p.matchIdentText("requires") {
+			p.expectIdentText("size")
+			p.expect(lexer.TOKEN_GTEQ)
+			field.RequiresSizeAtLeast = p.parseLayoutInt()
+		}
+		p.expectNewline()
+		decl.Fields = append(decl.Fields, field)
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return decl
+}
+
+func (p *Parser) parseStructDecl() ast.Decl {
 	return p.parseStructDeclWithAnnotations(nil)
 }
-func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
+func (p *Parser) parseStructDeclWithAnnotations(annotations []ast.Annotation) ast.Decl {
 	return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, p.cur().Pos)
 }
-func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, leadingLayout ast.StructLayoutMode, leadingReprC bool, pos lexer.Pos) *ast.StructDecl {
+func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, leadingLayout ast.StructLayoutMode, leadingReprC bool, pos lexer.Pos) ast.Decl {
 	// Two distinct single-use disciplines (both move-only / use-at-most-once):
 	//   `linear` = must be consumed exactly once (cannot be dropped); the
 	//             must-consume-before-scope-exit obligation applies.
@@ -704,13 +804,41 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 
 	layout := leadingLayout
 	if p.matchIdentText("layout") {
-		mode := p.cur()
-		if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
-			p.errorf("expected struct layout mode `aos`, `soa`, `c`, or `packed`, got %s", mode)
+		var opts layoutClauseOptions
+		if p.peek() == lexer.TOKEN_LPAREN {
+			// Canonical parenthesized layout clause (one grammar across struct/enum/
+			// overlay): `layout(soa)`, `layout(c)`, `layout(packed)`,
+			// `layout(guest, size: 72)`.
+			opts = p.parseLayoutClauseOptions()
 		} else {
-			p.advance()
+			// Removed bare-word spelling `struct Name layout soa:` — directed error,
+			// recover as the canonical parenthesized clause (same mode, no cascade).
+			mode := p.cur()
+			if mode.Kind != lexer.TOKEN_IDENT && mode.Kind != lexer.TOKEN_PACKED {
+				p.errorf("expected `layout(...)` clause, got %s", mode)
+			} else {
+				p.errorf("bare `layout %s` has been removed; use the parenthesized clause `layout(%s)`", mode.Text, mode.Text)
+				p.advance()
+				opts.Mode = mode.Text
+			}
+			opts.Size = -1
 		}
-		switch mode.Text {
+		if opts.Sparse {
+			p.errorf("`sparse` is an enum layout option; it has no meaning on a struct")
+		}
+		if opts.HandleWidth != "" {
+			p.errorf("`handle: uN` is an enum layout option; it has no meaning on a struct")
+		}
+		if opts.Guest {
+			// `struct Name layout(guest, size: N):` — a typed guest-memory overlay
+			// (docs/107). The body is `field: type at OFFSET [requires size >= N]`
+			// lines producing the LayoutDecl the overlay checker consumes.
+			return p.parseGuestOverlayBody(name, opts.Size, pos)
+		}
+		if opts.Size >= 0 {
+			p.errorf("`size: N` is only meaningful with the `guest` overlay layout")
+		}
+		switch opts.Mode {
 		case "aos":
 			layout = ast.StructLayoutAOS
 			reprC = false
@@ -723,8 +851,10 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 		case "packed":
 			layout = ast.StructLayoutPacked
 			reprC = false
+		case "":
+			p.errorf("struct `layout(...)` needs a mode: `aos`, `soa`, `c`, `packed`, or `guest`")
 		default:
-			p.errorf("unsupported struct layout %q; expected `aos`, `soa`, `c`, or `packed`", mode.Text)
+			p.errorf("unsupported struct layout %q; expected `aos`, `soa`, `c`, `packed`, or `guest`", opts.Mode)
 		}
 	}
 

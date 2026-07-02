@@ -263,7 +263,7 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "region_owned_struct_ast.elisa")
-	src := "struct Expr[@owner]:\n    next: Expr&? @owner\n\nstruct Explicit[@arena]:\n    next: Explicit&? @arena\n\nlayout soa struct Rows[@owner]:\n    value: i64\n"
+	src := "struct Expr[@owner]:\n    next: Expr&? @owner\n\nstruct Explicit[@arena]:\n    next: Explicit&? @arena\n\nstruct Rows[@owner] layout(soa):\n    value: i64\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write region-owned AST fixture: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 		t.Fatalf("expected region-owned AST fixture to print, stderr:\n%s", stderr.String())
 	}
 	output := stdout.String()
-	for _, check := range []string{"struct Expr[@owner]", "struct Explicit[@arena]", "layout soa struct Rows[@owner]"} {
+	for _, check := range []string{"struct Expr[@owner]", "struct Explicit[@arena]", "layout(soa) struct Rows[@owner]"} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected AST output to contain %q, got:\n%s", check, output)
 		}

@@ -39,7 +39,7 @@ func (a *Analyzer) populateStructFields(decls []scopedDecl) {
 					if _, exists := st.Fields[field.Name]; exists {
 						typeKind := "store"
 						if stDecl != nil {
-							typeKind = "layout soa struct"
+							typeKind = "struct ... layout(soa)"
 						}
 						a.errorf(field.Position, "duplicate field %q in %s %q", field.Name, typeKind, storeDecl.Name)
 						continue

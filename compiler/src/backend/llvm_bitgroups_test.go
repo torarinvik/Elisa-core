@@ -43,12 +43,12 @@ def build() -> bool:
 }
 
 func TestGenerateLLVMIRLowersExplicitStructLayoutModes(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "struct_layout_modes.elisa", `struct Header layout packed:
+	result := parseAndAnalyzeBackendTest(t, "struct_layout_modes.elisa", `struct Header layout(packed):
 	tag: u4
 	arity: u3
 	active: u1
 
-struct CHeader layout c:
+struct CHeader layout(c):
 	kind: u32
 	flags: u32
 	size: usize

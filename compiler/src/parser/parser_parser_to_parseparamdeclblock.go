@@ -388,12 +388,12 @@ func (p *Parser) parseDecl() ast.Decl {
 		return p.parseLayoutStructDecl()
 	}
 	if p.peekIdentText("store") {
-		p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `layout soa struct` only when compiler-known SoA layout is required")
+		p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `struct Name layout(soa):` only when compiler-known SoA layout is required")
 		p.skipRejectedDecl()
 		return nil
 	}
 	if p.peekIdentText("soa") {
-		p.errorf("`soa Name:` declarations have been removed; use `layout soa struct Name:` for the remaining compiler-known SoA form")
+		p.errorf("`soa Name:` declarations have been removed; use `struct Name layout(soa):` for the remaining compiler-known SoA form")
 		p.skipRejectedDecl()
 		return nil
 	}
@@ -409,12 +409,12 @@ func (p *Parser) parseDecl() ast.Decl {
 			return p.parseLayoutStructDeclWithAnnotations(annotations)
 		}
 		if p.peekIdentText("store") {
-			p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `layout soa struct` only when compiler-known SoA layout is required")
+			p.errorf("`store Name:` declarations have been removed; use an explicit struct with darray fields, or `struct Name layout(soa):` only when compiler-known SoA layout is required")
 			p.skipRejectedDecl()
 			return nil
 		}
 		if p.peekIdentText("soa") {
-			p.errorf("`soa Name:` declarations have been removed; use `layout soa struct Name:` for the remaining compiler-known SoA form")
+			p.errorf("`soa Name:` declarations have been removed; use `struct Name layout(soa):` for the remaining compiler-known SoA form")
 			p.skipRejectedDecl()
 			return nil
 		}
@@ -432,14 +432,14 @@ func (p *Parser) parseDecl() ast.Decl {
 			if p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_ENUM {
 				return p.parsePackedEnumDeclWithAnnotations(annotations)
 			}
-			p.errorf("declaration annotations must be followed by def, extern, struct, layout struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		case lexer.TOKEN_ENUM:
 			return p.parseEnumDeclWithAnnotations(annotations)
 		case lexer.TOKEN_STRUCT:
 			return p.parseStructDeclWithAnnotations(annotations)
 		default:
-			p.errorf("declaration annotations must be followed by def, extern, struct, layout struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
+			p.errorf("declaration annotations must be followed by def, extern, struct, store, soa, tree, enum, packed enum, or impl, got %s", p.cur())
 			return nil
 		}
 	}
@@ -482,7 +482,7 @@ func (p *Parser) parseDecl() ast.Decl {
 		return nil
 	}
 }
-func (p *Parser) parseLayoutStructDecl() *ast.StructDecl {
+func (p *Parser) parseLayoutStructDecl() ast.Decl {
 	return p.parseLayoutStructDeclWithAnnotations(nil)
 }
 
@@ -977,7 +977,11 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	p.expectNewline()
 	return &ast.TypeAliasDecl{Position: pos, Name: name, TypeParams: typeParams, Target: target}
 }
-func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotation) *ast.StructDecl {
+// parseLayoutStructDeclWithAnnotations handles the REMOVED prefix form
+// `layout soa struct Name:` — the layout clause is a postfix header clause now
+// (`struct Name layout(soa):`, one grammar across struct/enum/overlay). Directed
+// error, recover-as-canonical (same mode, member block parses, no cascade).
+func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotation) ast.Decl {
 	pos := p.cur().Pos
 	p.expectIdentText("layout")
 	mode := p.cur()
@@ -986,6 +990,7 @@ func (p *Parser) parseLayoutStructDeclWithAnnotations(annotations []ast.Annotati
 		return p.parseStructDeclWithLeadingLayout(annotations, ast.StructLayoutDefault, false, pos)
 	}
 	p.advance()
+	p.errorf("`layout %s struct Name:` has been removed; use the postfix clause `struct Name layout(%s):`", mode.Text, mode.Text)
 	layout := ast.StructLayoutDefault
 	reprC := false
 	switch mode.Text {

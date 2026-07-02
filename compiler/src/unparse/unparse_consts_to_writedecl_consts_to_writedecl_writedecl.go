@@ -72,13 +72,13 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		f.writeLine(level+1, "_ => "+formatExpr(n.Fallback))
 	case *ast.LayoutDecl:
-		header := "layout " + n.Name
+		header := "struct " + n.Name + " layout(guest"
 		if n.Size > 0 {
-			header += " size " + strconv.FormatInt(n.Size, 10)
+			header += ", size: " + strconv.FormatInt(n.Size, 10)
 		}
-		f.writeLine(level, header+":")
+		f.writeLine(level, header+"):")
 		for _, field := range n.Fields {
-			line := strconv.FormatInt(field.Offset, 10) + " " + field.Name + ": " + field.Type
+			line := field.Name + ": " + field.Type + " at " + strconv.FormatInt(field.Offset, 10)
 			if field.RequiresSizeAtLeast > 0 {
 				line += " requires size >= " + strconv.FormatInt(field.RequiresSizeAtLeast, 10)
 			}
@@ -133,27 +133,24 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			header += " is " + n.Parent // sealed refinement (docs/77)
 		}
 		if n.LayoutSet {
-			header += " layout"
+			opts := make([]string, 0, 3)
 			switch n.Layout {
 			case ast.StructLayoutAOS:
-				header += " aos"
+				opts = append(opts, "aos")
 			case ast.StructLayoutSOA:
-				header += " soa"
+				opts = append(opts, "soa")
 			case ast.StructLayoutC:
-				header += " c"
+				opts = append(opts, "c")
 			case ast.StructLayoutPacked:
-				header += " packed"
+				opts = append(opts, "packed")
 			}
-			opts := make([]string, 0, 2)
 			if n.LayoutSparse {
 				opts = append(opts, "sparse")
 			}
 			if n.IndexWidth != "" {
-				opts = append(opts, "handle: "+n.IndexWidth) // canonical key (docs/82); `index:` is the legacy alias
+				opts = append(opts, "handle: "+n.IndexWidth) // canonical key (docs/82)
 			}
-			if len(opts) > 0 {
-				header += "(" + strings.Join(opts, ", ") + ")"
-			}
+			header += " layout(" + strings.Join(opts, ", ") + ")"
 		}
 		header += ":"
 		f.writeLine(level, header)
@@ -388,17 +385,10 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.StructDecl:
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
-		prefix := ""
 		if n.Affine {
 			header += "affine "
 		}
-		switch n.Layout {
-		case ast.StructLayoutAOS:
-			prefix = "layout aos "
-		case ast.StructLayoutSOA:
-			prefix = "layout soa "
-		}
-		header += prefix + "struct " + n.Name
+		header += "struct " + n.Name
 		if n.RegionOwner != "" {
 			header += formatGenericParams(n.GenericParams, n.TypeParams, nil, nil)
 		} else {
@@ -409,10 +399,14 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		header += formatAggregateStateSuffix(n.HasStateParam, n.StateParamCount)
 		switch n.Layout {
+		case ast.StructLayoutAOS:
+			header += " layout(aos)"
+		case ast.StructLayoutSOA:
+			header += " layout(soa)"
 		case ast.StructLayoutC:
-			header += " layout c"
+			header += " layout(c)"
 		case ast.StructLayoutPacked:
-			header += " layout packed"
+			header += " layout(packed)"
 		}
 		header += ":"
 		f.writeLine(level, header)
@@ -421,7 +415,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.StoreDecl:
 		f.writeAnnotations(level, n.Annotations)
-		f.writeLine(level, "layout soa struct "+n.Name+":")
+		f.writeLine(level, "struct "+n.Name+" layout(soa):")
 		for _, field := range n.Fields {
 			f.writeField(level+1, field)
 		}

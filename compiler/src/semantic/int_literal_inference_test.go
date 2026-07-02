@@ -4,7 +4,7 @@ import "testing"
 
 func TestAnalyzeUnsuffixedIntegerLiteralsInUnsignedContexts(t *testing.T) {
 	analyzeFunctionAnalysisTestSource(t, "int_literal_unsigned_contexts.elisa", `
-layout soa struct PendingGotoStore:
+struct PendingGotoStore layout(soa):
 	name_key: usize
 	depth: usize
 

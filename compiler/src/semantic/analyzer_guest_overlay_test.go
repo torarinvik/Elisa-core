@@ -230,9 +230,9 @@ func TestGuestOverlayInSourceLayoutReadAndWrite(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 extern MemoryManager_WriteU64(mem: uintptr, addr: uintptr, value: u64) -> void
 
-layout OrbisProcParam size 80:
-	0 size: u64
-	64 mem_param: u64
+struct OrbisProcParam layout(guest, size: 80):
+	size: u64 at 0
+	mem_param: u64 at 64
 
 def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
 	return proc_param.mem_param[memory]
@@ -264,8 +264,8 @@ def store(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr, value: u64) -
 func TestGuestOverlayInSourceUnknownFieldRejected(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisProcParam size 80:
-	0 size: u64
+struct OrbisProcParam layout(guest, size: 80):
+	size: u64 at 0
 
 def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
 	return proc_param.mem_param[memory]
@@ -279,7 +279,7 @@ def load(proc_param: GuestVAddr[OrbisProcParam], memory: uintptr) -> u64:
 // is rejected at declaration time.
 func TestGuestOverlayInSourceBadFieldTypeRejected(t *testing.T) {
 	result := analyzeBareSource(`layout Bad:
-	0 weird: f32
+	weird: f32 at 0
 
 def f() -> void:
 	return
@@ -294,9 +294,9 @@ def f() -> void:
 func TestGuestOverlaySizeGuardRequiredRejectsUnguarded(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	return mem_param.ext2[memory]
@@ -311,9 +311,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardDischargedByDominatingGuard(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] >= 48:
@@ -330,9 +330,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardWeakerGuardRejected(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] >= 40:
@@ -348,9 +348,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardScopedToBranch(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] >= 48:
@@ -368,9 +368,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardEarlyReturnDischarges(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] < 48:
@@ -387,9 +387,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardEarlyReturnLessEqual(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] <= 47:
@@ -406,9 +406,9 @@ def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 func TestGuestOverlaySizeGuardEarlyReturnWeakerRejected(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] < 40:
@@ -427,9 +427,9 @@ func TestGuestOverlaySizeGuardNonExitingGuardRejected(t *testing.T) {
 	result := analyzeBareSource(`extern MemoryManager_ReadU64(mem: uintptr, addr: uintptr) -> u64
 extern note(x: u64) -> void
 
-layout OrbisKernelMemParam size 48:
-	0 size: u64
-	40 ext2: u64 requires size >= 48
+struct OrbisKernelMemParam layout(guest, size: 48):
+	size: u64 at 0
+	ext2: u64 at 40 requires size >= 48
 
 def load(mem_param: GuestVAddr[OrbisKernelMemParam], memory: uintptr) -> u64:
 	if mem_param.size[memory] < 48:

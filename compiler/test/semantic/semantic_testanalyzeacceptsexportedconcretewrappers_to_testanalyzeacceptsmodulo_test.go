@@ -6,7 +6,7 @@ import (
 )
 
 func TestAnalyzeAcceptsExportedConcreteWrappers(t *testing.T) {
-	src := `struct Vec[T] layout c:
+	src := `struct Vec[T] layout(c):
 	x: mutable T
 	y: mutable T
 

@@ -1,5 +1,20 @@
 # 107 — Typed Guest-Memory Overlay (proc_param / mem_param hardening)
 
+> **UPDATE (2026-07):** the standalone `layout Name size N:` declaration described
+> below has been folded into the unified postfix layout clause: an overlay is now
+> declared as a struct whose layout is externally fixed —
+>
+> ```elisa
+> struct ProcParamOverlay layout(guest, size: 72):
+>     size: u64 at 0
+>     mem_param: u64 at 64 requires size >= 72
+> ```
+>
+> Members are name-first (`field: type at OFFSET [requires size >= N]`), matching
+> every other struct member. `GuestVAddr[Name]` carriers and the checked accessor
+> `base.field[mem]` are unchanged. The EASM dialect's own `layout` declaration is a
+> separate surface and keeps its spelling. Examples below use the historical form.
+
 ## Why
 
 docs/104 increment 1 gave EASM **typed memory layouts**: a declared `layout` types the record

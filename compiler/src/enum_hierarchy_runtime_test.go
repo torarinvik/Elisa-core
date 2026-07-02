@@ -745,7 +745,7 @@ def main() -> i64:
 // and the Stmt node 8: root sum = 15, Expr-only sum = 7, Stmt-only sum = 8.
 func TestHierarchyColumnScanRangeFilters(t *testing.T) {
 	runEnumHierarchyProgram(t, "hier_colscan.elisa", `
-enum Node layout soa:
+enum Node layout(soa):
     common(span: i64)
 enum Expr is Node:
     Lit(value: i64)
@@ -1131,7 +1131,7 @@ enum Tree layout(handle: u8):
 func TestPtrHandleRejectsSoA(t *testing.T) {
 	t.Parallel()
 	expectEnumProgramError(t, "ptr_soa.elisa", `
-enum Tree layout soa(handle: ptr):
+enum Tree layout(soa, handle: ptr):
     Node(left: Tree, right: Tree)
     Leaf(value: i64)
 

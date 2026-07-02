@@ -254,7 +254,7 @@ func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType
 	// store-resident record to point at.
 	if enumDecl.IndexWidth == "ptr" {
 		if enumDecl.Layout == ast.StructLayoutSOA {
-			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires stable record addresses; `layout soa` columns relocate — use the AoS layout or an index handle (`handle: u32`)", enumDecl.Name)
+			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires stable record addresses; `layout(soa)` columns relocate — use the AoS layout or an index handle (`handle: u32`)", enumDecl.Name)
 		} else if enumType != nil && !enumType.RecursivePlain {
 			a.errorf(enumDecl.Pos(), "enum %q: `handle: ptr` requires a recursive region-backed enum (an AoS store record to point at); this enum has no store — use an index width or drop the option", enumDecl.Name)
 		}
@@ -264,12 +264,12 @@ func (a *Analyzer) validateEnumLayout(enumDecl *ast.EnumDecl, enumType *EnumType
 		a.errorf(enumDecl.Pos(), "enum %q layout must be `aos` or `soa`; `c` and `packed` are struct layouts, not enum layouts", enumDecl.Name)
 	}
 	if enumDecl.LayoutSparse && enumDecl.Layout != ast.StructLayoutSOA {
-		a.errorf(enumDecl.Pos(), "enum %q: `(sparse)` requires `layout soa` (variant-sparse payload columns)", enumDecl.Name)
+		a.errorf(enumDecl.Pos(), "enum %q: `(sparse)` requires `layout(soa)` (variant-sparse payload columns)", enumDecl.Name)
 	}
 	// docs/82: the handle width is valid with `aos`, `soa`, or the mode-less `layout(handle: uN)`
 	// form (StructLayoutDefault — keeps the compiler's default mode). Only the struct-FFI modes
 	// (already rejected above) can't carry it.
 	if enumDecl.IndexWidth != "" && enumDecl.Layout != ast.StructLayoutSOA && enumDecl.Layout != ast.StructLayoutAOS && enumDecl.Layout != ast.StructLayoutDefault {
-		a.errorf(enumDecl.Pos(), "enum %q: `(handle: %s)` requires `layout soa`, `layout aos`, or the mode-less `layout(handle: %s)` form", enumDecl.Name, enumDecl.IndexWidth, enumDecl.IndexWidth)
+		a.errorf(enumDecl.Pos(), "enum %q: `(handle: %s)` requires `layout(soa)`, `layout(aos)`, or the mode-less `layout(handle: %s)` form", enumDecl.Name, enumDecl.IndexWidth, enumDecl.IndexWidth)
 	}
 }

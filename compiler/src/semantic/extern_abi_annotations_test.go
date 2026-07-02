@@ -180,7 +180,7 @@ func TestRemovedBorrowsReturnAndCBindVariantsAreRejected(t *testing.T) {
 			want: "@borrows_return_field_rebased has been removed; use @borrows_return with leading `field, rebased` flags",
 		},
 		"c_bind_prefix": {
-			src:  "@c_bind_prefix(\"header.h\", \"Foo\")\nstruct Foo layout c:\n    value: i64\n",
+			src:  "@c_bind_prefix(\"header.h\", \"Foo\")\nstruct Foo layout(c):\n    value: i64\n",
 			want: "@c_bind_prefix has been removed; use @c_bind with a trailing `prefix` flag",
 		},
 	}

@@ -1,6 +1,6 @@
 include "./runtime/elisacore_std/elisacore_runtime.elisa"
 
-struct Pair layout c:
+struct Pair layout(c):
 	a: mutable i64
 	b: mutable i64
 

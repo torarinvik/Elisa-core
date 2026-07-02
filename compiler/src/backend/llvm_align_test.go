@@ -76,7 +76,7 @@ def fold() -> i64:
 }
 
 func TestGenerateLLVMIRLowersLayoutIntrospectionBuiltins(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_layout_introspection.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_layout_introspection.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -96,7 +96,7 @@ def layout_total() -> usize:
 }
 
 func TestGenerateLLVMIRLowersGenericStyleLayoutIntrospectionBuiltins(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_layout_introspection_generic_style.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_layout_introspection_generic_style.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -116,7 +116,7 @@ def layout_total() -> usize:
 }
 
 func TestGenerateLLVMIRChecksStaticAssertWithLayoutIntrospection(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -134,7 +134,7 @@ def keep() -> void:
 
 func TestGenerateLLVMIRChecksAbiLayoutAnnotation(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_abi_layout_annotation.elisa", `@abi_layout(size, 16, align, 8, field, tag, 0, field, count, 4, field, payload, 8)
-struct Header layout c:
+struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -223,7 +223,7 @@ def folded(expr: Expr) -> bool:
 }
 
 func TestGenerateLLVMIRChecksStaticBlockWithLayoutIntrospection(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_static_block_layout_introspection.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_static_block_layout_introspection.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -240,7 +240,7 @@ def keep() -> void:
 }
 
 func TestGenerateLLVMIRChecksTopLevelStaticAssertWithLayoutIntrospection(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -587,7 +587,7 @@ def keep() -> void:
 
 func TestGenerateLLVMIRRejectsAbiLayoutAnnotationMismatch(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_abi_layout_annotation_bad.elisa", `@abi_layout(size, 12, field, payload, 4)
-struct Header layout c:
+struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -602,7 +602,7 @@ def keep() -> void:
 }
 
 func TestGenerateLLVMIRRejectsStaticAssertWithLayoutIntrospection(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_static_assert_layout_introspection_bad.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -617,7 +617,7 @@ def keep() -> void:
 }
 
 func TestGenerateLLVMIRRejectsTopLevelStaticAssertWithLayoutIntrospection(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection_bad.elisa", `struct Header layout c:
+	result := parseAndAnalyzeBackendTest(t, "backend_top_level_static_assert_layout_introspection_bad.elisa", `struct Header layout(c):
     tag: u8
     count: u32
     payload: u64
@@ -635,7 +635,7 @@ def keep() -> void:
 
 func TestGenerateCHeaderRendersAlignedStructAndGlobal(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "header_align.elisa", `@align(64)
-struct Counter layout c:
+struct Counter layout(c):
     value: i64
 
 global counter: Counter = zeroed

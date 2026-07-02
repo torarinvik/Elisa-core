@@ -130,21 +130,21 @@ func TestAnalyzePackedGroupStructIsNotCABICompatible(t *testing.T) {
 }
 
 func TestAnalyzeStructLayoutModes(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "struct_layout_modes.elisa", `struct Header layout packed:
+	result := analyzeFunctionAnalysisTestSource(t, "struct_layout_modes.elisa", `struct Header layout(packed):
 	tag: u4
 	arity: u3
 	active: u1
 
-struct CHeader layout c:
+struct CHeader layout(c):
 	kind: u32
 	flags: u32
 	size: usize
 
-layout aos struct Particle:
+struct Particle layout(aos):
 	x: f32
 	y: f32
 
-layout soa struct ParticleRows:
+struct ParticleRows layout(soa):
 	x: f32
 	y: f32
 
@@ -181,7 +181,7 @@ struct Plain:
 
 func TestAnalyzeStructCBindAnnotation(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "struct_c_bind.elisa", `@c_bind(stddef.h, Header)
-struct Header layout c:
+struct Header layout(c):
 	tag: u32
 	count: usize
 `)
@@ -199,7 +199,7 @@ func TestAnalyzeStructCBindRequiresCLayout(t *testing.T) {
 struct Header:
 	tag: u32
 `)
-	if !strings.Contains(strings.Join(result.Errors(), "\n"), "requires `layout c`") {
+	if !strings.Contains(strings.Join(result.Errors(), "\n"), "requires `layout(c)`") {
 		t.Fatalf("expected c_bind layout diagnostic, got:\n%s", strings.Join(result.Errors(), "\n"))
 	}
 }
@@ -288,7 +288,7 @@ def build() -> void:
 }
 
 func TestAnalyzeLayoutIntrospectionChecksOffsetFields(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "layout_introspection_missing_field.elisa", `struct Header layout c:
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "layout_introspection_missing_field.elisa", `struct Header layout(c):
 	tag: u8
 	count: u32
 
@@ -304,7 +304,7 @@ def read() -> usize:
 // (The removed `sizeof` / `alignof` / `offsetof` spellings are rejected at parse time; see the
 // parser package's TestParseRejectsLegacyLayoutIntrospectionNames.)
 func TestAnalyzeModernLayoutIntrospectionNames(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_names.elisa", `struct Header layout c:
+	result := analyzeFunctionAnalysisTestSource(t, "layout_introspection_names.elisa", `struct Header layout(c):
 	tag: u8
 	count: u32
 

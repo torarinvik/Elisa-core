@@ -367,7 +367,7 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 				continue
 			}
 			if !structDecl.ReprC {
-				a.errorf(annotation.Position, "@%s on struct %q requires `layout c` so Elisa and C agree on ABI layout rules", annotation.Name, structDecl.Name)
+				a.errorf(annotation.Position, "@%s on struct %q requires `layout(c)` so Elisa and C agree on ABI layout rules", annotation.Name, structDecl.Name)
 				continue
 			}
 			if len(structDecl.TypeParams) != 0 || len(structDecl.GenericParams) != 0 {
@@ -387,7 +387,7 @@ func (a *Analyzer) analyzeStructAnnotations(structDecl *ast.StructDecl, structTy
 
 func (a *Analyzer) validateStructAbiLayoutAnnotation(structDecl *ast.StructDecl, annotation ast.Annotation) {
 	if !structDecl.ReprC && !structDeclHasAnnotation(structDecl, "fixed_layout") {
-		a.errorf(annotation.Position, "@abi_layout on struct %q requires `layout c` or @fixed_layout so the asserted offsets are intentional ABI surface", structDecl.Name)
+		a.errorf(annotation.Position, "@abi_layout on struct %q requires `layout(c)` or @fixed_layout so the asserted offsets are intentional ABI surface", structDecl.Name)
 		return
 	}
 	if len(structDecl.TypeParams) != 0 || len(structDecl.GenericParams) != 0 {

@@ -194,7 +194,7 @@ def bad_id(exit: ExitFunction) -> GuestEntryPoint:
 
 func TestRowIDTypeRequiresSOATag(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "row_id_type_ok.elisa", `
-layout soa struct SymbolRows:
+struct SymbolRows layout(soa):
 	name: u32
 
 type SymbolRow = RowId[SymbolRows]
@@ -208,7 +208,7 @@ type SymbolRow = RowId[SymbolRows]
 	}
 
 	layoutResult := analyzeFunctionAnalysisTestSource(t, "row_id_layout_soa_ok.elisa", `
-layout soa struct LayoutRows:
+struct LayoutRows layout(soa):
 	name: u32
 
 type LayoutRow = RowId[LayoutRows]
@@ -218,7 +218,7 @@ type LayoutRow = RowId[LayoutRows]
 		t.Fatalf("expected LayoutRow to resolve to IDType, got %T", layoutResult.NamedTypes["LayoutRow"])
 	}
 	if !SameType(layoutRowID.Storage, layoutResult.NamedTypes["u32"]) {
-		t.Fatalf("expected layout soa RowId storage to be u32, got %s", layoutRowID.Storage)
+		t.Fatalf("expected layout(soa) RowId storage to be u32, got %s", layoutRowID.Storage)
 	}
 
 	bad := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "row_id_type_reject.elisa", `
