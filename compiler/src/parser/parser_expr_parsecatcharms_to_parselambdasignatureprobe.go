@@ -122,6 +122,7 @@ func (p *Parser) parseLambdaExpr() ast.Expr {
 			BodyExpr:            bodyExpr,
 		}
 	}
+	colonPos := p.cur().Pos
 	p.expect(lexer.TOKEN_COLON)
 	if p.match(lexer.TOKEN_NEWLINE) {
 		body := p.parseBlock()
@@ -134,6 +135,10 @@ func (p *Parser) parseLambdaExpr() ast.Expr {
 			Body:                body,
 		}
 	}
+	// The inline `: EXPR` implicit-return body has been removed: a lambda mirrors a
+	// function's two body forms — `=> EXPR` (expression) and `:` + an indented block.
+	// Directed error, recover by parsing the expression as the `=>` form would.
+	p.errorAt(colonPos, "an inline `: EXPR` lambda body has been removed; use `=> EXPR` for an expression body (or `:` with an indented block)")
 	bodyExpr := p.parseExpr()
 	return &ast.LambdaExpr{
 		Position:            pos,
@@ -158,10 +163,15 @@ func (p *Parser) parseLambdaParams() ([]ast.ParamDecl, bool) {
 		p.expect(lexer.TOKEN_RPAREN)
 		return params, false
 	}
+	// Shorthand unparenthesized params (`λ a, b: …`) have been removed — a lambda's
+	// parameters are always parenthesized, like a function's. Directed error, recover
+	// by parsing the ident list so the rest of the lambda still parses.
+	shorthandPos := p.cur().Pos
 	params := []ast.ParamDecl{{Position: p.cur().Pos, Name: p.expect(lexer.TOKEN_IDENT).Text}}
 	for p.match(lexer.TOKEN_COMMA) {
 		params = append(params, ast.ParamDecl{Position: p.cur().Pos, Name: p.expect(lexer.TOKEN_IDENT).Text})
 	}
+	p.errorAt(shorthandPos, "shorthand lambda parameters have been removed; parenthesize them: `fn(a, b) => …`")
 	return params, true
 }
 

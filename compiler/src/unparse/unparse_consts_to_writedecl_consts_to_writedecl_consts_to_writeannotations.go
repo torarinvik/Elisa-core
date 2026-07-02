@@ -122,43 +122,36 @@ func formatLexerCharClassTerm(term ast.LexerCharClassTerm) string {
 }
 func formatLambdaExpr(expr *ast.LambdaExpr) string {
 	if expr == nil {
-		return "lambda"
+		return "fn"
 	}
 	keyword := expr.Keyword
-	if keyword == "" {
-		keyword = "lambda"
+	// The removed `lambda` spelling and any empty keyword normalize to the canonical
+	// `fn`; a Unicode lambda letter (λ/Λ/ƛ) is preserved as written.
+	if keyword == "" || keyword == "lambda" {
+		keyword = "fn"
 	}
+	// Parameters are always parenthesized — the shorthand form has been removed.
 	params := make([]string, 0, len(expr.Params))
-	if expr.UsesShorthandParams {
-		for _, param := range expr.Params {
-			params = append(params, param.Name)
+	for _, param := range expr.Params {
+		part := ""
+		if param.Mutable {
+			part += "mutable "
 		}
-	} else {
-		for _, param := range expr.Params {
-			part := ""
-			if param.Mutable {
-				part += "mutable "
-			}
-			part += param.Name
-			// A parenthesized lambda param may omit its type (`lambda(n) => ...`),
-			// inferring it from the contextual callback signature.
-			if param.Type != nil {
-				part += ": " + formatTypeExpr(param.Type)
-			}
-			params = append(params, part)
+		part += param.Name
+		// A lambda param may omit its type (`fn(n) => …`), inferring it from the
+		// contextual callback signature.
+		if param.Type != nil {
+			part += ": " + formatTypeExpr(param.Type)
 		}
+		params = append(params, part)
 	}
-	line := keyword + " "
-	if expr.UsesShorthandParams {
-		line += strings.Join(params, ", ")
-	} else {
-		line += "(" + strings.Join(params, ", ") + ")"
-	}
+	line := keyword + "(" + strings.Join(params, ", ") + ")"
 	if expr.ReturnType != nil {
 		line += " -> " + formatTypeExpr(expr.ReturnType)
 	}
+	// `=> EXPR` for an expression body; `:` + an indented block otherwise.
 	if expr.BodyExpr != nil {
-		return line + ": " + formatExpr(expr.BodyExpr)
+		return line + " => " + formatExpr(expr.BodyExpr)
 	}
 	lines := []string{line + ":"}
 	for _, stmt := range expr.Body {
