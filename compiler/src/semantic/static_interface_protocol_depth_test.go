@@ -78,7 +78,7 @@ struct Num:
 protocol Eq:
     def eq(self: Self, other: Self) -> bool
 
-protocol Ord: Eq:
+protocol Ord is Eq:
     def lt(self: Self, other: Self) -> bool
     def le(self: Self, other: Self) -> bool:
         return Self.lt(self, other) or Self.eq(self, other)
@@ -114,7 +114,7 @@ struct Num:
 protocol Eq:
     def eq(self: Self, other: Self) -> bool
 
-protocol Ord: Eq:
+protocol Ord is Eq:
     def lt(self: Self, other: Self) -> bool
 
 impl Ord for Num:
@@ -143,7 +143,7 @@ struct Num:
 protocol Eq:
     def eq(self: Self, other: Self) -> bool
 
-protocol Ord: Eq:
+protocol Ord is Eq:
     def lt(self: Self, other: Self) -> bool
 
 impl Ord for Num:
@@ -164,7 +164,7 @@ def same[B: Ord](a: B, b: B) -> bool:
 // Unknown base protocol is reported.
 func TestProtocolInheritanceRejectsUnknownBase(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "protocol_inheritance_unknown_base.elisa", `
-protocol Ord: Nonexistent:
+protocol Ord is Nonexistent:
     def lt(self: Self, other: Self) -> bool
 `)
 

@@ -4,14 +4,14 @@ import (
 	"elisacore/src/ast"
 )
 
-// foldInterfaceBases implements PROTOCOL INHERITANCE (`protocol Ord: Eq:`): every base protocol's
+// foldInterfaceBases implements PROTOCOL INHERITANCE (`protocol Ord is Eq:`): every base protocol's
 // members (associated types + methods, including their default bodies) are folded into the derived
 // protocol's member set. The effect is that a single `impl Ord for T` must satisfy the union of Eq's
 // and Ord's members, and Eq's methods become resolvable on an Ord receiver — without the impl having
 // to name Eq separately. Folding runs after all interfaces are collected (so a base may be declared
 // in any order) and resolves each base name within the deriving interface's own resolution context.
 //
-// Cycles (`protocol A: B` / `protocol B: A`) are reported and broken so folding terminates.
+// Cycles (`protocol A is B` / `protocol B is A`) are reported and broken so folding terminates.
 func (a *Analyzer) foldInterfaceBases(decls []scopedDecl) {
 	for _, scoped := range decls {
 		decl, ok := scoped.Decl.(*ast.InterfaceDecl)

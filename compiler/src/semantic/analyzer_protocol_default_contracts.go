@@ -8,7 +8,7 @@ import (
 //
 // A protocol may give a method a default body that itself carries a contract:
 //
-//	protocol Comparable: Ord:
+//	protocol Comparable is Ord:
 //	    def max(self: Self, other: Self) -> Self:
 //	        ensure self.le(result) and other.le(result)
 //	        if self.le(other): return other

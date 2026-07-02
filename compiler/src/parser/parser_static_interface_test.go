@@ -45,14 +45,14 @@ func TestParseInterfaceSpellingIsRejected(t *testing.T) {
 	}
 }
 
-// Protocol depth: a protocol may declare base protocols (`protocol Ord: Eq:`) and default-method
+// Protocol depth: a protocol may declare base protocols (`protocol Ord is Eq:`) and default-method
 // bodies (`def le(...): <body>`). Bases parse into InterfaceDecl.Bases; a default method parses as a
 // FuncDecl member (carrying a Body) rather than a bodiless ExternFuncDecl.
 func TestParseProtocolBasesAndDefaultMethod(t *testing.T) {
 	file, errs := parseSourceFile(t, `protocol Eq:
     def eq(self: Self, other: Self) -> bool
 
-protocol Ord: Eq:
+protocol Ord is Eq:
     def lt(self: Self, other: Self) -> bool
     def le(self: Self, other: Self) -> bool:
         return Self.lt(self, other) or Self.eq(self, other)
@@ -94,7 +94,7 @@ protocol Ord: Eq:
 
 	// Round-trips through the formatter without dropping bases or the default body.
 	formatted := unparse.FormatDecl(ord)
-	if !strings.Contains(formatted, "protocol Ord: Eq:") {
+	if !strings.Contains(formatted, "protocol Ord is Eq:") {
 		t.Fatalf("expected formatted protocol to retain its base list, got:\n%s", formatted)
 	}
 	if !strings.Contains(formatted, "def le(") || !strings.Contains(formatted, "Self.lt(self, other)") {

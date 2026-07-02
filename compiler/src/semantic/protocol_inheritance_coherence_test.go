@@ -19,7 +19,7 @@ protocol Eq:
     def eq(self: Self, other: Self) -> bool
     law eq_reflexive(a: Self) = a.eq(a)
 
-protocol Hash: Eq:
+protocol Hash is Eq:
     def hash(self: Self) -> u64
 `
 
@@ -102,7 +102,7 @@ func TestDefaultMethodContractHoldsAgainstOwnBody(t *testing.T) {
 protocol Bound:
     def lo(self: Self) -> i64
 
-protocol Clamp: Bound:
+protocol Clamp is Bound:
     def clamp(self: Self) -> i64:
         ensure result == self.lo()
         return self.lo()
@@ -124,7 +124,7 @@ protocol Bound:
     def lo(self: Self) -> i64
     def hi(self: Self) -> i64
 
-protocol Clamp: Bound:
+protocol Clamp is Bound:
     def clamp(self: Self) -> i64:
         ensure result == self.lo()
         return self.hi()
@@ -151,7 +151,7 @@ struct N:
 protocol Ord:
     def le(self: Self, other: Self) -> bool
 
-protocol Comparable: Ord:
+protocol Comparable is Ord:
     def max(self: Self, other: Self) -> Self:
         ensure self.le(result)
         if self.le(other):
@@ -190,13 +190,13 @@ protocol A:
     def eq(self: Self, other: Self) -> bool
     law a_reflexive(x: Self) = x.eq(x)
 
-protocol B: A:
+protocol B is A:
     def b(self: Self) -> u64
 
-protocol C: A:
+protocol C is A:
     def c(self: Self) -> u64
 
-protocol D: B, C:
+protocol D is B, C:
     def d(self: Self) -> u64
 
 impl D for K:

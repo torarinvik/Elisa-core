@@ -5,7 +5,7 @@ import "elisacore/src/lexer"
 type InterfaceDecl struct {
 	Position lexer.Pos
 	Name     string
-	// Bases names the protocols this protocol inherits from (`protocol Ord: Eq, Show:`).
+	// Bases names the protocols this protocol inherits from (`protocol Ord is Eq, Show:`).
 	// A type conforming to this protocol must also satisfy every base protocol; the base
 	// protocols' members (signatures and defaults) are folded into this protocol's member set.
 	Bases   []string

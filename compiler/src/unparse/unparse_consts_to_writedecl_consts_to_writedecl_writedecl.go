@@ -428,7 +428,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.InterfaceDecl:
 		header := "protocol " + n.Name + ":"
 		if len(n.Bases) != 0 {
-			header = "protocol " + n.Name + ": " + strings.Join(n.Bases, ", ") + ":"
+			header = "protocol " + n.Name + " is " + strings.Join(n.Bases, ", ") + ":"
 		}
 		f.writeLine(level, header)
 		for _, member := range n.Members {

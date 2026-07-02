@@ -20,14 +20,26 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("protocol")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+
+	// Optional base-protocol list (protocol inheritance): `protocol Ord is Eq, Show:`.
+	// `is` is the language's one subtype/conformance spelling (enum hierarchies
+	// `enum Child is Parent`, refinements `u64 is Pred`), so protocols use it too.
+	var bases []string
+	if p.match(lexer.TOKEN_IS) {
+		for {
+			bases = append(bases, p.parseQualifiedDeclName())
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+	}
 	p.expect(lexer.TOKEN_COLON)
 
-	// Optional base-protocol list (protocol inheritance): `protocol Ord: Eq, Show:`.
-	// The first colon is consumed above; if it is followed by an identifier (rather than the
-	// block-opening newline) those identifiers are the inherited protocols, terminated by a
-	// second colon that opens the member block.
-	var bases []string
-	if p.peek() == lexer.TOKEN_IDENT {
+	// The removed double-colon form `protocol Ord: Eq, Show:` gets a directed
+	// diagnostic; recover by consuming the stray base list (and its block colon)
+	// as if it were spelled with `is`, so the member block still parses cleanly.
+	if len(bases) == 0 && p.peek() == lexer.TOKEN_IDENT {
+		p.errorf("`protocol %s: Parent:` has been removed; use `protocol %s is Parent:`", name, name)
 		for {
 			bases = append(bases, p.parseQualifiedDeclName())
 			if !p.match(lexer.TOKEN_COMMA) {
