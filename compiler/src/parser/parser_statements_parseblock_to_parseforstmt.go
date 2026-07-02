@@ -1022,6 +1022,14 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		var step ast.Expr
 		if p.match(lexer.TOKEN_RANGE) {
 			step = p.parseForHeaderExpr()
+		} else if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "step" {
+			// `for i in lo..<hi step N:` was never syntax — it used to be silently
+			// truncated (the loop stepped by 1). Directed error, recover as the
+			// canonical range stride `lo..<hi..N` so the loop parses with the
+			// intended step and no cascade.
+			p.errorf("`step N` is not range syntax; spell the stride on the range: `lo..<hi..N`")
+			p.advance()
+			step = p.parseForHeaderExpr()
 		}
 		// Optional `by par` data-parallel marker on a range for-loop: lowers to the runtime
 		// `for_indices_par` combinator (disjoint index bands over a structured nursery). `by simd`

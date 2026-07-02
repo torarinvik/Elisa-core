@@ -34,6 +34,20 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 				return expr
 			}
 		case lexer.TOKEN_IDENT:
+			// A trailing `step N` ends the range-bound expression so the loop parser can reject it
+			// with a directed diagnostic (the stride is spelled on the range: `lo..<hi..N`). Without
+			// this boundary the slice sub-parse silently TRUNCATED `step N` — the loop compiled and
+			// stepped by 1. Guarded to end > p.pos so a source expression named `step` still parses.
+			if depth == 0 && tok.Text == "step" && end > p.pos && end+1 < len(p.tokens) && p.tokens[end+1].Kind != lexer.TOKEN_COLON {
+				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
+				sub := New(subTokens)
+				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
+				expr := sub.parseExpr()
+				p.errors = append(p.errors, sub.Errors()...)
+				p.pos = end
+				return expr
+			}
 			// A trailing `by par` / `by simd` data-parallel marker ends the range-bound expression
 			// (e.g. the `n` in `for i in 0 ..< n by par:`). Stop the header scan at `by` so the loop
 			// parser can see and consume the marker.
