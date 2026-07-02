@@ -10,6 +10,25 @@ import (
 	"strings"
 )
 
+// parseForHeaderSlice sub-parses the header tokens [p.pos, end) as one expression and
+// advances past them. The sub-parser must consume the WHOLE slice: unconsumed trailing
+// tokens used to be silently dropped, which let junk in a for-loop header compile as a
+// no-op (`for i in 0..<len step 2:` stepped by 1 — a silent miscompile). Anything the
+// expression grammar leaves behind is now a parse error at the first leftover token.
+func (p *Parser) parseForHeaderSlice(end int, boundaryPos lexer.Pos) ast.Expr {
+	subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
+	subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: boundaryPos})
+	sub := New(subTokens)
+	sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
+	expr := sub.parseExpr()
+	p.errors = append(p.errors, sub.Errors()...)
+	if len(sub.Errors()) == 0 && sub.peek() != lexer.TOKEN_EOF {
+		p.errorAt(sub.cur().Pos, "unexpected trailing tokens in for-loop header, starting at %s", sub.cur())
+	}
+	p.pos = end
+	return expr
+}
+
 func (p *Parser) parseForHeaderExpr() ast.Expr {
 	end := p.pos
 	depth := 0
@@ -24,14 +43,7 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 			}
 		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE, lexer.TOKEN_IF, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			if depth == 0 {
-				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
-				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
-				sub := New(subTokens)
-				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
-				expr := sub.parseExpr()
-				p.errors = append(p.errors, sub.Errors()...)
-				p.pos = end
-				return expr
+				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 		case lexer.TOKEN_IDENT:
 			// A trailing `step N` ends the range-bound expression so the loop parser can reject it
@@ -39,47 +51,19 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 			// this boundary the slice sub-parse silently TRUNCATED `step N` — the loop compiled and
 			// stepped by 1. Guarded to end > p.pos so a source expression named `step` still parses.
 			if depth == 0 && tok.Text == "step" && end > p.pos && end+1 < len(p.tokens) && p.tokens[end+1].Kind != lexer.TOKEN_COLON {
-				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
-				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
-				sub := New(subTokens)
-				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
-				expr := sub.parseExpr()
-				p.errors = append(p.errors, sub.Errors()...)
-				p.pos = end
-				return expr
+				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 			// A trailing `by par` / `by simd` data-parallel marker ends the range-bound expression
 			// (e.g. the `n` in `for i in 0 ..< n by par:`). Stop the header scan at `by` so the loop
 			// parser can see and consume the marker.
 			if depth == 0 && tok.Text == "by" && end+1 < len(p.tokens) && p.tokens[end+1].Kind == lexer.TOKEN_IDENT {
-				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
-				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
-				sub := New(subTokens)
-				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
-				expr := sub.parseExpr()
-				p.errors = append(p.errors, sub.Errors()...)
-				p.pos = end
-				return expr
+				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 			if depth == 0 && p.isForHeaderWhereClauseBoundary(end) {
-				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
-				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
-				sub := New(subTokens)
-				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
-				expr := sub.parseExpr()
-				p.errors = append(p.errors, sub.Errors()...)
-				p.pos = end
-				return expr
+				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 			if depth == 0 && p.looksLikeForStmtAt(end) {
-				subTokens := append([]lexer.Token(nil), p.tokens[p.pos:end]...)
-				subTokens = append(subTokens, lexer.Token{Kind: lexer.TOKEN_EOF, Pos: tok.Pos})
-				sub := New(subTokens)
-				sub.poolScopes = append(sub.poolScopes, p.poolScopes...)
-				expr := sub.parseExpr()
-				p.errors = append(p.errors, sub.Errors()...)
-				p.pos = end
-				return expr
+				return p.parseForHeaderSlice(end, tok.Pos)
 			}
 		}
 		end++
