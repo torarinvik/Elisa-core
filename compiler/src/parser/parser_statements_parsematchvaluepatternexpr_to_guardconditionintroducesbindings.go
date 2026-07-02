@@ -393,8 +393,17 @@ func (p *Parser) parseIf() ast.Stmt {
 	first := p.parseIfClause(false)
 	clauses := []ifClause{first}
 
-	for p.peek() == lexer.TOKEN_ELIF {
-		p.advance()
+	for p.peek() == lexer.TOKEN_ELIF || p.isElseIfChain() {
+		if p.peek() == lexer.TOKEN_ELSE {
+			// Two-word `else if` chain has been removed in favor of `elif`. Give a
+			// directed diagnostic but recover by treating `else if` as `elif`, so the
+			// rest of the chain still parses into a correct AST (no error cascade).
+			p.errorf("`else if` is not valid; use `elif COND:` for a chained condition")
+			p.advance() // `else`
+			p.advance() // `if`
+		} else {
+			p.advance() // `elif`
+		}
 		clauses = append(clauses, p.parseIfClause(true))
 	}
 
@@ -406,6 +415,12 @@ func (p *Parser) parseIf() ast.Stmt {
 	}
 
 	return lowerIfClauses(clauses, elseBlock)
+}
+
+// isElseIfChain reports whether the cursor is at a removed two-word `else if` chain
+// (an `else` immediately followed by `if`), as opposed to a plain trailing `else:` block.
+func (p *Parser) isElseIfChain() bool {
+	return p.peek() == lexer.TOKEN_ELSE && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IF
 }
 func (p *Parser) parseIfClause(isElif bool) ifClause {
 	pos := p.cur().Pos
