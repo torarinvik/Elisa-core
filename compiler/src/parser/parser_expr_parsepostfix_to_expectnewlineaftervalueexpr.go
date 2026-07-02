@@ -771,7 +771,14 @@ func (p *Parser) parseRecordUpdateFields() ([]ast.Expr, []string) {
 	return args, argNames
 }
 func (p *Parser) expectNewline() {
-	if p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_SEMICOLON {
+	if p.peek() == lexer.TOKEN_SEMICOLON {
+		// `;` as a statement separator has been removed: one statement per line.
+		// Directed error, recover as a newline (consume it) so following statements
+		// still parse — no cascade. A one-line multi-statement body is almost always
+		// a stub; `def f(...) -> T = EXPR` is the clean one-expression spelling.
+		p.errorf("`;` statement separator has been removed; put each statement on its own line (or use `def f(...) -> T = EXPR` for a one-expression body)")
+		p.advance()
+	} else if p.peek() == lexer.TOKEN_NEWLINE {
 		p.advance()
 	} else if p.peek() == lexer.TOKEN_EOF || p.peek() == lexer.TOKEN_DEDENT {
 		// OK at end of file or block

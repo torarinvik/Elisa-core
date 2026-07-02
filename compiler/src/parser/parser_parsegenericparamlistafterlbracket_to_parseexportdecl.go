@@ -329,13 +329,23 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		fulfills = p.parseFulfillsClausesAfterKeyword()
 	}
 
-	p.expect(lexer.TOKEN_COLON)
-
 	var body []ast.Stmt
-	if isStatic {
-		body = p.withStaticFunctionBody(p.parseFuncBodyAfterColon)
+	if p.match(lexer.TOKEN_ASSIGN) {
+		// Expression-bodied function: `def f(...) -> T = EXPR` is exactly
+		// `def f(...) -> T: return EXPR` (same `=` "the definition is this expression"
+		// as `law`/`type`/`alias`/`export func`). One expression, so no leading
+		// contracts — for `requires`/`ensure` use the block body form.
+		valuePos := p.cur().Pos
+		valueExpr := p.parseExpr()
+		p.expectNewline()
+		body = []ast.Stmt{&ast.ReturnStmt{Position: valuePos, Value: valueExpr}}
 	} else {
-		body = p.parseFuncBodyAfterColon()
+		p.expect(lexer.TOKEN_COLON)
+		if isStatic {
+			body = p.withStaticFunctionBody(p.parseFuncBodyAfterColon)
+		} else {
+			body = p.parseFuncBodyAfterColon()
+		}
 	}
 	// Value contracts are written as the FIRST statements of the body (`requires <bool-expr>` /
 	// `ensure <bool-expr>`), then lifted out into the decl here. They are NOT post-signature

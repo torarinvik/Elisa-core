@@ -57,28 +57,23 @@ func TestParseInfersAutoRegionForUntypedDArrayBuilders(t *testing.T) {
 	}
 }
 
-func TestParseOneLineFunctionBodiesWithSemicolonSeparatedStatements(t *testing.T) {
-	file, errs := parseSourceFile(t, "def answer(x: int) -> int: _ = x; return 42\n")
-	if len(errs) != 0 {
-		t.Fatalf("unexpected parser errors: %v", errs)
+// The `;` statement separator has been removed (one statement per line). The
+// multi-statement one-liner it enabled — almost always a native-binding stub —
+// is now spelled with the expression-body form `def f(...) -> T = EXPR`.
+func TestParseSemicolonStatementSeparatorRejected(t *testing.T) {
+	_, errs := parseSourceFile(t, "def answer(x: int) -> int: _ = x; return 42\n")
+	if len(errs) == 0 {
+		t.Fatal("expected `;` removal diagnostic, got none")
 	}
-	decl, ok := file.Decls[0].(*ast.FuncDecl)
-	if !ok {
-		t.Fatalf("expected function decl, got %T", file.Decls[0])
-	}
-	if len(decl.Body) != 2 {
-		t.Fatalf("expected two inline statements, got %d", len(decl.Body))
-	}
-	if _, ok := decl.Body[0].(*ast.DiscardStmt); !ok {
-		t.Fatalf("expected assignment statement, got %T", decl.Body[0])
-	}
-	if _, ok := decl.Body[1].(*ast.ReturnStmt); !ok {
-		t.Fatalf("expected return statement, got %T", decl.Body[1])
+	if !strings.Contains(strings.Join(errs, "\n"), "`;` statement separator has been removed") {
+		t.Fatalf("expected the semicolon removal diagnostic, got: %v", errs)
 	}
 }
 
-func TestParseOneLineIfBodyInsideOneLineFunction(t *testing.T) {
-	file, errs := parseSourceFile(t, "def clamp(flag: bool, value: mutable int&) -> int: if flag: value <- 1; return value\n")
+// The canonical replacement: an expression-bodied function is exactly
+// `def f(...) -> T: return EXPR`, and an unused parameter is named `_`.
+func TestParseExpressionBodiedFunction(t *testing.T) {
+	file, errs := parseSourceFile(t, "def answer(_: int) -> int = 42\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -86,18 +81,30 @@ func TestParseOneLineIfBodyInsideOneLineFunction(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected function decl, got %T", file.Decls[0])
 	}
-	if len(decl.Body) != 2 {
-		t.Fatalf("expected inline if plus return, got %d statements", len(decl.Body))
+	if len(decl.Body) != 1 {
+		t.Fatalf("expected a single synthesized return, got %d statements", len(decl.Body))
 	}
-	ifStmt, ok := decl.Body[0].(*ast.IfStmt)
+	ret, ok := decl.Body[0].(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("expected inline if statement, got %T", decl.Body[0])
+		t.Fatalf("expected the body to be a return statement, got %T", decl.Body[0])
 	}
-	if len(ifStmt.Then) != 1 {
-		t.Fatalf("expected one inline if body statement, got %d", len(ifStmt.Then))
+	if ret.Value == nil {
+		t.Fatal("expected the return to carry the body expression")
 	}
-	if _, ok := decl.Body[1].(*ast.ReturnStmt); !ok {
-		t.Fatalf("expected outer return statement, got %T", decl.Body[1])
+}
+
+// A single-statement inline body (no `;`) is unaffected — `def f() -> T: return X`.
+func TestParseOneLineSingleStatementBody(t *testing.T) {
+	file, errs := parseSourceFile(t, "def one() -> int: return 1\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl := file.Decls[0].(*ast.FuncDecl)
+	if len(decl.Body) != 1 {
+		t.Fatalf("expected one inline statement, got %d", len(decl.Body))
+	}
+	if _, ok := decl.Body[0].(*ast.ReturnStmt); !ok {
+		t.Fatalf("expected return statement, got %T", decl.Body[0])
 	}
 }
 
