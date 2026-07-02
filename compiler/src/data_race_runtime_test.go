@@ -43,7 +43,7 @@ def race() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         x: mutable i64 = 0
         r: mutable i64& = &x
-        t: Thread[i64, Joinable] = spawn1(lambda(a: i64) => r[0] + a, 5)
+        t: Thread[i64, Joinable] = spawn1(fn(a: i64) => r[0] + a, 5)
         r[0] <- 99
         _ = join(move t)
 `)
@@ -56,7 +56,7 @@ def race() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         x: mutable i64 = 0
         r: mutable i64& = &x
-        worker: func(i64) -> i64 = lambda(a: i64) => r[0] + a
+        worker: func(i64) -> i64 = fn(a: i64) => r[0] + a
         t: Thread[i64, Joinable] = spawn1(worker, 5)
         r[0] <- 99
         _ = join(move t)
@@ -74,7 +74,7 @@ func TestRunCLISpawnAllowsValueCapturingClosure(t *testing.T) {
 def ok() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         seed: i64 = 7
-        t: Thread[i64, Joinable] = spawn1(lambda(a: i64) => seed + a, 5)
+        t: Thread[i64, Joinable] = spawn1(fn(a: i64) => seed + a, 5)
         _ = join(move t)
 `)
 	if strings.Contains(out, dataRaceMarker) {

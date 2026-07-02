@@ -21,8 +21,8 @@ def std_parallel_native_smoke():
 		assert xs[0.usize()] == 1.0
 		assert xs[999.usize()] == 1000.0
 		# parallel sum: 1+2+...+1000 = 500500, worker count inferred
-		total: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b)
+		total: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => a + b)
 		assert total == 500500.0
 		# parallel max with an EXPLICIT trailing worker count (tuning still available)
-		mx: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => (a if a > b else b), 4.usize())
+		mx: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => (a if a > b else b), 4.usize())
 		assert mx == 1000.0

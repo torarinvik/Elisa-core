@@ -18,7 +18,7 @@ def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def use() -> i64 error[IoErr]:
-    catch applyDouble(lambda () -> i64 => raise IoErr.Bad):
+    catch applyDouble(fn () -> i64 => raise IoErr.Bad):
         v:
             return v
         IoErr.Bad:
@@ -42,7 +42,7 @@ def seven() -> i64 error[IoErr]:
     return 7
 
 def use() -> i64 error[IoErr]:
-    return applyDouble(lambda () -> i64 => try seven())
+    return applyDouble(fn () -> i64 => try seven())
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
 		t.Fatalf("lambda with value-only annotation + try should infer error set, got:\n%s", all)
@@ -63,7 +63,7 @@ def wantsIo(f: func() -> i64 error[IoErr]) -> i64 error[IoErr]:
     return try f()
 
 def use() -> i64 error[IoErr]:
-    return wantsIo(lambda () -> i64 => raise NetErr.Down)
+    return wantsIo(fn () -> i64 => raise NetErr.Down)
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
 		t.Fatalf("lambda raising NetErr should not satisfy func -> i64 error[IoErr]")

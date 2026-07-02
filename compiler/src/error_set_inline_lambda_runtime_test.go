@@ -10,8 +10,8 @@ import (
 )
 
 // End-to-end: an INLINE lambda passed to an `[errorset R]` combinator. The
-// infallible `lambda(n) => n + 1` binds R := ∅ (the combinator collapses to a
-// plain return); a raising `lambda(n) => raise IoErr.Bad` infers error[IoErr]
+// infallible `fn(n) => n + 1` binds R := ∅ (the combinator collapses to a
+// plain return); a raising `fn(n) => raise IoErr.Bad` infers error[IoErr]
 // and binds R to it, so the SAME combinator catches the raised tag — both
 // monomorphizations run in one program.
 func TestRunCLIErrorSetParamInlineLambda(t *testing.T) {
@@ -29,10 +29,10 @@ def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     return v * 2
 
 def runPure() -> i64:
-    return applyOne(lambda(n) => n + 1, 3)
+    return applyOne(fn(n) => n + 1, 3)
 
 def runRaise() -> i64:
-    catch applyOne(lambda(n) => raise IoErr.Bad, 3):
+    catch applyOne(fn(n) => raise IoErr.Bad, 3):
         v:
             return v
         IoErr.Bad:

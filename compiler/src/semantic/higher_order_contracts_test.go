@@ -114,7 +114,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => n if n >= 0 else 0, 3)
+    return apply(fn(n) => n if n >= 0 else 0, 3)
 `
 	result := analyzeContractStrict(t, "ho_lambda_ok.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -131,7 +131,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) -> i64 => 5, 3)
+    return apply(fn(n) -> i64 => 5, 3)
 `
 	result := analyzeContractStrict(t, "ho_lambda_const.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -149,7 +149,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => n - 1, 3)
+    return apply(fn(n) => n - 1, 3)
 `
 	result := analyzeContractStrict(t, "ho_lambda_bad.elisa", src)
 	if !strings.Contains(strings.Join(result.Errors(), "\n"), "does not satisfy its contract") {
@@ -167,7 +167,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => n if n >= 5 else 5, 0)
+    return apply(fn(n) => n if n >= 5 else 5, 0)
 `
 	result := analyzeContractStrict(t, "ho_lambda_assume.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

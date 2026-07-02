@@ -197,7 +197,7 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 }
 
 // CLOSED GAP 5b (bare-lambda error inference — docs/64 Phase 5b): a bare
-// lambda whose body propagates errors (`lambda() => try seven()`) infers its
+// lambda whose body propagates errors (`fn() => try seven()`) infers its
 // error-union return from what the body propagates, so it binds R end to end
 // with no annotation. `try`-without-else / `raise` in the bare body accumulate
 // their error sets instead of requiring an already-declared error-union return.
@@ -213,7 +213,7 @@ def seven() -> i64 error[IoErr]:
     return 7
 
 def use() -> i64 error[IoErr]:
-    return applyDouble(lambda() => try seven())
+    return applyDouble(fn() => try seven())
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
 		t.Fatalf("bare lambda should infer its error-union return and bind R, got:\n%s", all)
@@ -221,7 +221,7 @@ def use() -> i64 error[IoErr]:
 }
 
 // CLOSED GAP (parenthesized untyped lambda params + empty-set instantiation):
-// `lambda(n) => n + 1` parses (the param type is inferred from the callback
+// `fn(n) => n + 1` parses (the param type is inferred from the callback
 // signature), raises nothing, so the `[errorset R]` combinator binds R := ∅ and
 // the whole call is non-raising — `use` declares no error union and type-checks.
 func TestErrorSetParamInlineLambdaEmptySet(t *testing.T) {
@@ -230,7 +230,7 @@ def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     return try f(x)
 
 def use() -> i64:
-    return applyOne(lambda(n) => n + 1, 3)
+    return applyOne(fn(n) => n + 1, 3)
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
 		t.Fatalf("infallible inline lambda should bind R := empty and compose as non-raising, got:\n%s", all)
@@ -248,7 +248,7 @@ def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     return try f(x)
 
 def use() -> i64:
-    catch applyOne(lambda(n) => raise IoErr.Bad, 3):
+    catch applyOne(fn(n) => raise IoErr.Bad, 3):
         v:
             return v
         IoErr.Bad:
@@ -273,7 +273,7 @@ def wantsIo(f: func(i64) -> i64 error[IoErr], x: i64) -> i64 error[IoErr]:
     return try f(x)
 
 def use() -> i64 error[IoErr]:
-    return wantsIo(lambda(n) => raise NetErr.Down, 3)
+    return wantsIo(fn(n) => raise NetErr.Down, 3)
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
 		t.Fatalf("an inline lambda raising error[NetErr] must not satisfy func -> i64 error[IoErr]")
@@ -297,7 +297,7 @@ def boom() -> i64 error[NetErr]:
     return 1
 
 def use() -> i64 error[IoErr]:
-    return wantsIo(lambda() => try boom())
+    return wantsIo(fn() => try boom())
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
 		t.Fatalf("a bare lambda inferring error[NetErr] must not satisfy func() -> i64 error[IoErr]")
@@ -317,7 +317,7 @@ def seven() -> i64 error[IoErr]:
     return 7
 
 def use() -> i64 error[IoErr]:
-    return applyDouble(lambda() -> i64 error[IoErr] => try seven())
+    return applyDouble(fn() -> i64 error[IoErr] => try seven())
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
 		t.Fatalf("an annotated lambda callback should bind R, got:\n%s", all)

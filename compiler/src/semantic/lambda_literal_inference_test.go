@@ -16,7 +16,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => 5, 3)
+    return apply(fn(n) => 5, 3)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_literal.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -32,7 +32,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => n + 1, 3)
+    return apply(fn(n) => n + 1, 3)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_arith.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
@@ -48,7 +48,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n) => "hi", 3)
+    return apply(fn(n) => "hi", 3)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_wrong.elisa", src)
 	joined := strings.Join(result.Errors(), "\n")
@@ -68,7 +68,7 @@ def apply(f: func(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
-    return apply(lambda(n: i64) -> i64 => n + 1, 3)
+    return apply(fn(n: i64) -> i64 => n + 1, 3)
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_explicit.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {

@@ -37,7 +37,7 @@ func TestSpawnRejectsGenericStructCaptureWithContainerField(t *testing.T) {
     items: darray[T]
 def start(h: Holder[i64]) -> Task[i64, Pending]:
     pool: mutable ThreadPool = zeroed
-    return submit[&pool] (lambda (ignored: i64) => h.items[0])(0)
+    return submit[&pool] (fn (ignored: i64) => h.items[0])(0)
 `)
 	if all := strings.Join(generic.Errors(), "\n"); !strings.Contains(all, "captures state that cannot be shared") {
 		t.Fatalf("expected generic-struct-with-darray capture to be rejected; got:\n%s", all)
@@ -46,7 +46,7 @@ def start(h: Holder[i64]) -> Task[i64, Pending]:
     items: darray[i64]
 def start(h: HolderC) -> Task[i64, Pending]:
     pool: mutable ThreadPool = zeroed
-    return submit[&pool] (lambda (ignored: i64) => h.items[0])(0)
+    return submit[&pool] (fn (ignored: i64) => h.items[0])(0)
 `)
 	if all := strings.Join(nonGeneric.Errors(), "\n"); !strings.Contains(all, "captures state that cannot be shared") {
 		t.Fatalf("expected non-generic-struct-with-darray capture to be rejected (parity); got:\n%s", all)

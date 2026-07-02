@@ -79,9 +79,26 @@ func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
 	p.advance()
 	return p.parseExpr()
 }
+// isLambdaKeyword reports whether text introduces a lambda expression: the canonical
+// `fn`, a Unicode lambda letter (`λ` U+03BB / `Λ` U+039B), or the removed `lambda`
+// spelling (still recognized so parseLambdaExpr can emit a directed migration error).
+func isLambdaKeyword(text string) bool {
+	switch text {
+	case "fn", "λ", "Λ", "lambda":
+		return true
+	}
+	return false
+}
+
 func (p *Parser) parseLambdaExpr() ast.Expr {
 	pos := p.cur().Pos
 	keyword := p.expect(lexer.TOKEN_IDENT).Text
+	if keyword == "lambda" {
+		// Directed migration: the `lambda` spelling has been removed in favor of `fn`
+		// (or a Unicode lambda letter). Recover as canonical — parse the lambda anyway,
+		// so a single clear error is reported rather than a cascade.
+		p.errorAt(pos, "the `lambda` keyword has been removed; use `fn` (or a Unicode lambda letter `λ`)")
+	}
 	params, shorthand := p.parseLambdaParams()
 	var retType ast.TypeExpr
 	if p.match(lexer.TOKEN_ARROW) {
@@ -397,7 +414,7 @@ func (p *Parser) looksLikeCascadeExpr() bool {
 	return probe.peek() == lexer.TOKEN_FATARROW
 }
 func (p *Parser) looksLikeLambdaExpr() bool {
-	if p.peek() != lexer.TOKEN_IDENT || (p.cur().Text != "lambda" && p.cur().Text != "λ") {
+	if p.peek() != lexer.TOKEN_IDENT || !isLambdaKeyword(p.cur().Text) {
 		return false
 	}
 	probe := *p

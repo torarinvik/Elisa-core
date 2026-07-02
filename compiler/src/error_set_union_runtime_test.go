@@ -153,7 +153,7 @@ def error_set_union_test() -> void:
 }
 
 // End-to-end (docs/64 Phase 5b): a BARE expr-lambda whose body propagates errors
-// (`lambda() => try ioFail()`) infers its error-union return from what it propagates,
+// (`fn() => try ioFail()`) infers its error-union return from what it propagates,
 // binds the callee's error-set param R, and round-trips at runtime — both the ok and
 // the error paths. No annotation on the lambda.
 func TestRunCLIBareLambdaErrorInference(t *testing.T) {
@@ -176,14 +176,14 @@ def applyOnce[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def runInferredOk() -> i64:
-    catch applyOnce(lambda() => try ioOk()):
+    catch applyOnce(fn() => try ioOk()):
         n:
             return n
         IoErr.Bad:
             return -1
 
 def runInferredFail() -> i64:
-    catch applyOnce(lambda() => try ioFail()):
+    catch applyOnce(fn() => try ioFail()):
         n:
             return n
         IoErr.Bad:

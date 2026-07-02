@@ -482,7 +482,7 @@ func (p *Parser) parsePrimary() ast.Expr {
 			p.advance()
 			return p.parseExprBlockValue(pos, false)
 		}
-		if (p.cur().Text == "lambda" || p.cur().Text == "λ") && p.looksLikeLambdaExpr() {
+		if isLambdaKeyword(p.cur().Text) && p.looksLikeLambdaExpr() {
 			return p.parseLambdaExpr()
 		}
 		if p.cur().Text == "cascade" && p.looksLikeCascadeExpr() {

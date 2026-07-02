@@ -107,7 +107,7 @@ struct Node[@owner]:
 def f() -> i32:
     r: owned Arena = new_arena(64)
     first: Node[r]& @r = new[r] Node{value: 7}
-    g: func() -> i32 = lambda () => first.value
+    g: func() -> i32 = fn () => first.value
     destroy r
     return g()
 `)

@@ -43,10 +43,10 @@ def pool_determinism_smoke():
 		for k in 0..<4000:
 			xs[k.usize()] <- (k + 1).f64()
 		expected: f64 = 8002000.0
-		s1: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b, 1.usize())
-		s2: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b, 2.usize())
-		s4: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b, 4.usize())
-		s8: f64 = reduce(slice(&xs), 0.0, lambda(a: f64, b: f64) => a + b, 8.usize())
+		s1: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => a + b, 1.usize())
+		s2: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => a + b, 2.usize())
+		s4: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => a + b, 4.usize())
+		s8: f64 = reduce(slice(&xs), 0.0, fn(a: f64, b: f64) => a + b, 8.usize())
 		assert s1 == expected
 		assert s2 == expected
 		assert s4 == expected

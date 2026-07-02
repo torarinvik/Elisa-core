@@ -56,7 +56,7 @@ def par_index_worker(a: ParIndexArg) -> i64:
 # on a range for-loop:
 #
 #	for i in 0 ..< n by par:
-#		out[i] <- f(in[i])        # desugars to  for_indices_par(n, lambda i => { ...; 0 })
+#		out[i] <- f(in[i])        # desugars to  for_indices_par(n, fn i => { ...; 0 })
 #
 # Disjoint bands => race-free for the canonical "write your own index" shape. Sharing a darray (or
 # any non-thread-shareable value) into the body is still rejected at the lambda/nursery boundary.
