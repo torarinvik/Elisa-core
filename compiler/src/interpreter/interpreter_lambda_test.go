@@ -29,11 +29,11 @@ func parseAndAnalyzeInterpreterTest(t *testing.T, filename string, src string) *
 }
 
 func TestExecuteReturnedLambdaCapturesOuterValue(t *testing.T) {
-	src := `def make_adder(offset: i64) -> func(i64) -> i64:
+	src := `def make_adder(offset: i64) -> fn(i64) -> i64:
     return fn(value) => value + offset
 
 def run() -> i64:
-    adder: func(i64) -> i64 = make_adder(2)
+    adder: fn(i64) -> i64 = make_adder(2)
     return adder(40)
 `
 

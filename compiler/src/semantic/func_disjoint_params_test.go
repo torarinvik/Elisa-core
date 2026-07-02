@@ -89,7 +89,7 @@ def run() -> void:
 	a: mutable darray[f64] = []
 	b: mutable darray[f64] = []
 	axpy(&a, &b)
-	handler: func(mutable darray[f64]&, mutable darray[f64]&) -> void = axpy
+	handler: fn(mutable darray[f64]&, mutable darray[f64]&) -> void = axpy
 `
 	result := analyzeTreeTestSource(t, "fdisjoint_addr.elisa", src)
 	if info := disjointInfoForFunc(result, "axpy"); info != nil {

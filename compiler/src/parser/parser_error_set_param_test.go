@@ -9,7 +9,7 @@ import (
 // Phase 5b: `[errorset R]` parses as a GenericParamErrorSet generic param.
 func TestParseErrorSetGenericParam(t *testing.T) {
 	file, errs := parseSourceFile(t, `
-def applies[T, errorset R](f: func() -> T error[R]) -> T error[R]:
+def applies[T, errorset R](f: fn() -> T error[R]) -> T error[R]:
     return try f()
 `)
 	if len(errs) != 0 {

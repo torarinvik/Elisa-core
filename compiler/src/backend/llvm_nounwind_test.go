@@ -15,7 +15,7 @@ func TestGenerateLLVMIRMarksDefinedFunctionsNoUnwind(t *testing.T) {
 def add(a: i64, b: i64) -> i64:
 	return a + b
 
-export func probe_add(a: i64, b: i64) -> i64 = add
+export fn probe_add(a: i64, b: i64) -> i64 = add
 `)
 
 	g, err := compileLLVMModule(result, OptimizationLevel0, DefaultPackedLoweringProfile())

@@ -394,7 +394,7 @@ func TestGenerateLLVMIRLowersSubmitSyntaxInsidePoolScope(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -433,7 +433,7 @@ def submit_then_await() -> i64:
 	}
 }
 func TestGenerateLLVMIRLowersExplicitSubmitSyntax(t *testing.T) {
-	src := `def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+	src := `def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 

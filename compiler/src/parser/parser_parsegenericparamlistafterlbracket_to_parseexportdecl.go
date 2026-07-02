@@ -618,7 +618,12 @@ func (p *Parser) parseExportDecl() ast.Decl {
 		alias := p.expect(lexer.TOKEN_IDENT).Text
 		p.expectNewline()
 		return &ast.ExportTypeDecl{Position: pos, ExportedType: target, Alias: alias}
-	case "func":
+	case "func", "fn":
+		if kindText == "func" {
+			// `export func NAME …` is now `export fn NAME …` (the `func` keyword is
+			// renamed to `fn` everywhere). Directed error; recover by parsing as usual.
+			p.errorf("`export func` has been renamed to `export fn`")
+		}
 		name := p.expect(lexer.TOKEN_IDENT).Text
 		p.expect(lexer.TOKEN_LPAREN)
 		params := p.parseParamList(false)

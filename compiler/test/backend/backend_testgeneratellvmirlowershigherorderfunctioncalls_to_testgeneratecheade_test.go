@@ -7,7 +7,7 @@ import (
 )
 
 func TestGenerateLLVMIRLowersHigherOrderFunctionCalls(t *testing.T) {
-	src := `def apply_twice(fn: func(i64) -> i64, value: i64) -> i64:
+	src := `def apply_twice(fn: fn(i64) -> i64, value: i64) -> i64:
     return fn(fn(value))
 
 def inc(value: i64) -> i64:
@@ -46,7 +46,7 @@ func TestGenerateLLVMIRLowersFunctionValueErasureCasts(t *testing.T) {
     return value + 1
 
 def call_bits(bits: uintptr, value: i64) -> i64:
-	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
+	fn: fn(i64) -> i64 = bits.cast[fn(i64) -> i64]
     return fn(value)
 
 def run() -> i64:
@@ -76,11 +76,11 @@ func TestGenerateLLVMIRLowersExplicitGenericFunctionSpecializationValues(t *test
 	src := `def id[T](value: T) -> T:
     return value
 
-def apply_i64(fn: func(i64) -> i64, value: i64) -> i64:
+def apply_i64(fn: fn(i64) -> i64, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
-    fn: func(i64) -> i64 = id[i64]
+    fn: fn(i64) -> i64 = id[i64]
     return apply_i64(fn, 7)
 `
 	result := parseAndAnalyze(t, "backend_explicit_generic_function_specialization.elisa", src)
@@ -106,7 +106,7 @@ func TestGenerateLLVMIRLowersGenericBuilderStructFunctionFields(t *testing.T) {
     value: T
 
 struct Builder[T]:
-    make: func(T) -> Box[T]
+    make: fn(T) -> Box[T]
 
 def make_i64_box(value: i64) -> Box[i64]:
     return Box[i64](value)
@@ -504,8 +504,8 @@ def keep_left[T](left: T, right: T) -> T:
 	return left
 
 export global seed as ctx_seed
-export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
-export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+export fn vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
 	result := parseAndAnalyze(t, "backend_export_wrappers.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -549,8 +549,8 @@ def keep_left[T](left: T, right: T) -> T:
 	return left
 
 export global seed as ctx_seed
-export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
-export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+export fn vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
 	result := parseAndAnalyze(t, "backend_export_header.elisa", src)
 	header, err := backend.GenerateCHeader(result)

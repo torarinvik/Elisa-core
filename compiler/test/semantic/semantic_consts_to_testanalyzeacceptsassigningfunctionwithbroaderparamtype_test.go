@@ -16,7 +16,7 @@ import (
 const parallelForConcurrencyPrelude = `extern pool_new(workers: usize) -> ThreadPool can[Pool.Create]
 extern pool_shutdown(pool: ThreadPool&) -> void can[Pool.Shutdown]
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending] can[Pool.Submit, Memory.Allocate, Abort.Panic]:
 	task: Task[R, Pending] = zeroed
 	return move task
 
@@ -605,7 +605,7 @@ def use_alloc() -> int:
 	}
 }
 func TestAnalyzeAcceptsFunctionTypeParametersAndHigherOrderCalls(t *testing.T) {
-	src := `def apply_identity[T](fn: func(T) -> T, value: T) -> T:
+	src := `def apply_identity[T](fn: fn(T) -> T, value: T) -> T:
     return fn(value)
 
 def bump(value: int) -> int:
@@ -628,7 +628,7 @@ def only_nonnull(box: Box&) -> int:
 	return box.value
 
 def bad() -> int:
-	wider: func(Box&?) -> int = only_nonnull
+	wider: fn(Box&?) -> int = only_nonnull
 	return wider(null)
 `
 	_, errs := parseAndAnalyze(t, "function_param_contravariance_reject.elisa", src)
@@ -636,7 +636,7 @@ def bad() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(Box&?) -> int`) || !strings.Contains(all, `func(Box&) -> int`) {
+	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `fn(Box&?) -> int`) || !strings.Contains(all, `fn(Box&) -> int`) {
 		t.Fatalf("expected contravariant function assignment diagnostic, got:\n%s", all)
 	}
 }
@@ -652,7 +652,7 @@ def allow_null(box: Box&?) -> int:
 def ok() -> int:
 	region scratch(256)
 	box: Box& = new[scratch] Box(7)
-	narrower: func(Box&) -> int = allow_null
+	narrower: fn(Box&) -> int = allow_null
 	return narrower(box)
 `
 	result, errs := parseAndAnalyze(t, "function_param_contravariance_ok.elisa", src)

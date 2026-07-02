@@ -11,4 +11,4 @@ def scaled(a: mutable darray[f64]&) -> f64:
 			s <- s + out[i]
 		return s
 
-export func probe_scaled(a: mutable darray[f64]&) -> f64 = scaled
+export fn probe_scaled(a: mutable darray[f64]&) -> f64 = scaled

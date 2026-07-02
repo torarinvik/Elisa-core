@@ -165,4 +165,4 @@ def packed_ml_expr_repro_impl() -> i64:
     destroy scratch
     return out
 
-export func packed_ml_expr_repro() -> i64 = packed_ml_expr_repro_impl
+export fn packed_ml_expr_repro() -> i64 = packed_ml_expr_repro_impl

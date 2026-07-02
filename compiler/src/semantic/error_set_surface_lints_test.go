@@ -23,7 +23,7 @@ func TestErrorSetEllipsisSuffixRejected(t *testing.T) {
 error IoErr:
     Bad
 
-extern reader(f: func() -> i64 error[IoErr, ...]) -> i64
+extern reader(f: fn() -> i64 error[IoErr, ...]) -> i64
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, "`, ...` suffix in error[...] is no longer supported") {
@@ -59,7 +59,7 @@ error NetErr:
 
 extern fetch() -> i64 error[NetErr]
 
-def shady[errorset IoErr](f: func() -> i64 error[IoErr]) -> i64 error[IoErr]:
+def shady[errorset IoErr](f: fn() -> i64 error[IoErr]) -> i64 error[IoErr]:
     return try f()
 
 def use() -> i64 error[NetErr]:
@@ -79,7 +79,7 @@ error IoErr:
 
 extern reader() -> i64 error[IoErr]
 
-def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applies[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def use() -> i64 error[IoErr]:

@@ -26,7 +26,7 @@ error NetErr:
     Down
 
 protocol Runner:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]
 
 struct AddOne:
     tag: i64
@@ -35,12 +35,12 @@ struct Double:
     tag: i64
 
 impl Runner for AddOne:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
         v: i64 = try f()
         return v + 1
 
 impl Runner for Double:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
         v: i64 = try f()
         return v * 2
 
@@ -53,7 +53,7 @@ def ioFail() -> i64 error[IoErr]:
 def netOk() -> i64 error[NetErr]:
     return 5
 
-def drive[T: Runner, errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def drive[T: Runner, errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return T.run(f)
 
 def runAddIo() -> i64:

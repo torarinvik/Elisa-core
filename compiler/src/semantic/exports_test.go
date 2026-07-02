@@ -10,8 +10,8 @@ func TestAnalyzeRejectsDuplicateExportName(t *testing.T) {
 def keep() -> i64:
     return 1
 
-export func api() -> i64 = keep
-export func api() -> i64 = keep
+export fn api() -> i64 = keep
+export fn api() -> i64 = keep
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, DuplicateExportNameMessage("api")) {
@@ -21,7 +21,7 @@ export func api() -> i64 = keep
 
 func TestAnalyzeRejectsUndefinedExportTarget(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "undefined_export_target.elisa", `
-export func api() -> i64 = missing_target
+export fn api() -> i64 = missing_target
 `)
 	all := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(all, UndefinedExportTargetMessage("missing_target")) {

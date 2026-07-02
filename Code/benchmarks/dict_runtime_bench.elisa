@@ -74,6 +74,6 @@ def dict_enum_bool_impl(repeats: i64) -> i64:
 			kinds.put(DictBenchKind.Beta, total)
 		return dict_bench_escape(total)
 
-export func dict_i64_growth_churn(repeats: i64) -> i64 = dict_i64_growth_churn_impl
-export func dict_cstr_lookup(repeats: i64) -> i64 = dict_cstr_lookup_impl
-export func dict_enum_bool(repeats: i64) -> i64 = dict_enum_bool_impl
+export fn dict_i64_growth_churn(repeats: i64) -> i64 = dict_i64_growth_churn_impl
+export fn dict_cstr_lookup(repeats: i64) -> i64 = dict_cstr_lookup_impl
+export fn dict_enum_bool(repeats: i64) -> i64 = dict_enum_bool_impl

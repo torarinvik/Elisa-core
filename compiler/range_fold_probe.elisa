@@ -8,4 +8,4 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 def sum_range(n: i64) -> f64:
 	return (acc + i.f64() for i in 0..<n with acc: f64 = 0.0)
 
-export func probe_range(n: i64) -> f64 = sum_range
+export fn probe_range(n: i64) -> f64 = sum_range

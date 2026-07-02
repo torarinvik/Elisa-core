@@ -16,5 +16,5 @@ def keep_left[T](left: T, right: T) -> T:
 	return left
 
 export global seed as ctx_seed
-export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
-export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+export fn vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]

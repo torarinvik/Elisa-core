@@ -519,7 +519,7 @@ func TestAnalyzeRejectsSpawnOfValueDependingOnUnpublishedPackedStore(t *testing.
 	src := `packed enum Expr:
 	Int(value: int)
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
 def worker(node: Expr) -> i64:

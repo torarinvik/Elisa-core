@@ -10,4 +10,4 @@ def mods(a: mutable darray[i64]&, d: i64) -> usize:
 		out: darray[i64] = [x % d for x in a]
 		return out.count
 
-export func probe_mods(a: mutable darray[i64]&, d: i64) -> usize = mods
+export fn probe_mods(a: mutable darray[i64]&, d: i64) -> usize = mods

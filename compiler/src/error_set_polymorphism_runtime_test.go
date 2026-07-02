@@ -40,7 +40,7 @@ def netFail() -> i64 error[NetErr]:
 
 # The polymorphic combinator: doubles the callback's ok value, propagating
 # whatever error set the callback raises.
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     v: i64 = try f()
     return v * 2
 

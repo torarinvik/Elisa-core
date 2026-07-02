@@ -82,16 +82,26 @@ func (p *Parser) parseExprAfterRemovedPrefixKeyword() ast.Expr {
 // isLambdaKeyword reports whether text introduces a lambda expression: the canonical
 // `fn`, a Unicode lambda letter, or the removed `lambda` spelling (still recognized so
 // parseLambdaExpr can emit a directed migration error). The Unicode set is the BMP lambda
-// letters (Greek λ/Λ and the Latin lambda-with-stroke ƛ) — the ones actually typed. The
-// supplementary-plane Mathematical-Alphanumeric lambda variants are intentionally NOT
-// included: they are never keyed by hand, and stage1's lexer does not yet span a 4-byte
-// identifier rune correctly, so accepting them would make stage0 and stage1 disagree.
+// letters (Greek λ/Λ and the Latin lambda-with-stroke ƛ) plus the supplementary-plane
+// Mathematical-Alphanumeric lambda variants (all five styles, small and capital). This
+// set MUST stay in lockstep with stage1's is_lambda_keyword (Elisa-compiler
+// src/parser/parser_expr.elisa).
 func isLambdaKeyword(text string) bool {
 	switch text {
 	case "fn", "lambda",
 		"λ", // U+03BB GREEK SMALL LETTER LAMBDA
 		"Λ", // U+039B GREEK CAPITAL LETTER LAMBDA
-		"ƛ": // U+019B LATIN SMALL LETTER LAMBDA WITH STROKE
+		"ƛ", // U+019B LATIN SMALL LETTER LAMBDA WITH STROKE
+		"𝛌", // U+1D6CC MATHEMATICAL BOLD SMALL LAMDA
+		"𝜆", // U+1D706 MATHEMATICAL ITALIC SMALL LAMDA
+		"𝝀", // U+1D740 MATHEMATICAL BOLD ITALIC SMALL LAMDA
+		"𝝺", // U+1D77A MATHEMATICAL SANS-SERIF BOLD SMALL LAMDA
+		"𝞴", // U+1D7B4 MATHEMATICAL SANS-SERIF BOLD ITALIC SMALL LAMDA
+		"𝚲", // U+1D6B2 MATHEMATICAL BOLD CAPITAL LAMDA
+		"𝛬", // U+1D6EC MATHEMATICAL ITALIC CAPITAL LAMDA
+		"𝜦", // U+1D726 MATHEMATICAL BOLD ITALIC CAPITAL LAMDA
+		"𝝠", // U+1D760 MATHEMATICAL SANS-SERIF BOLD CAPITAL LAMDA
+		"𝞚": // U+1D79A MATHEMATICAL SANS-SERIF BOLD ITALIC CAPITAL LAMDA
 		return true
 	}
 	return false

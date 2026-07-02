@@ -61,4 +61,4 @@ def allocator_ports_main_impl() -> int:
         memory_pool_smoke()
         return 0
 
-export func main() -> int = allocator_ports_main_impl
+export fn main() -> int = allocator_ports_main_impl

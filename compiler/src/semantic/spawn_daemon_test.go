@@ -11,7 +11,7 @@ import (
 // frozen stores), exactly like spawn1 — a thread-unsafe capture demands an
 // explicit Unsafe.ThreadShare vouch. These tests pin both directions through a
 // local spawn_daemon declaration (mirroring the thread_region_transfer prelude).
-const spawnDaemonPrelude = `def spawn_daemon[A, permission P](fn: func(A) -> void can[P], arg: A):
+const spawnDaemonPrelude = `def spawn_daemon[A, permission P](fn: fn(A) -> void can[P], arg: A):
     return
 `
 

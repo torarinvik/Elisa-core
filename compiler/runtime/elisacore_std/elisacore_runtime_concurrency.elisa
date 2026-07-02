@@ -449,7 +449,7 @@ def notify_all(cv: mutable CondVar&):
 # place and the condition being waited on is visible at the call boundary.
 # ------------------------------------------------------------
 
-def predicate_wait[permission P](cv: mutable CondVar&, guard: MutexGuard[Held], predicate: func() -> bool can[P]) -> MutexGuard[Held]:
+def predicate_wait[permission P](cv: mutable CondVar&, guard: MutexGuard[Held], predicate: fn() -> bool can[P]) -> MutexGuard[Held]:
 	can P, Sync.Wait, Abort.Panic:
 		g: mutable MutexGuard[Held] = move guard
 		trusted Unsafe.AssumeProgress:
@@ -642,7 +642,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 					entry_bits: void& = head.entry
 					arg_bits: void& = head.arg
 					trusted Unsafe.IndirectCall:
-						_ = entry_bits.call_as[func(mutable void&) -> void&](arg_bits)
+						_ = entry_bits.call_as[fn(mutable void&) -> void&](arg_bits)
 					# publish completion and wake any awaiter
 					ctx_pool_lock(mu)
 					head.done <- 1
@@ -876,7 +876,7 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?):
 			free(state.result_bits.cast[heap void&])
 			free(state.cast[heap void&])
 
-def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
+def ctx_concurrency_work1_new[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
 	can Memory.Allocate, Abort.Panic:
 		arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
 		result_seed: R = zeroed
@@ -892,7 +892,7 @@ def ctx_concurrency_work1_new[A, R, permission P](fn: func(A) -> R can[P], arg: 
 def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -> void&:
 	can P, Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
-		fn: func(A) -> R can[P] = state.fn_bits.cast[func(A) -> R can[P]]
+		fn: fn(A) -> R can[P] = state.fn_bits.cast[fn(A) -> R can[P]]
 		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
 		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
 		result_box.value <- fn(arg_box.value)
@@ -968,9 +968,9 @@ def ctx_task_group_release_all(group: mutable TaskGroup&):
 				free(current.cast[heap void&])
 				current <- next
 
-def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic:
-		from_raw: func(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
+		from_raw: fn(Thread[void&?, Joinable]) -> Thread[R, Joinable] = ctx_thread_from_raw[R, Joinable]
 		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 		raw: Thread[void&?, Joinable] = spawn_raw(
 			ctx_concurrency_work1_entry[A, R].cast[void&],
@@ -981,7 +981,7 @@ def spawn1[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joi
 
 def join[R](thread: Thread[R, Joinable]) -> R:
 	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: func(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+		take_result: fn(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = thread.state
 		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
 		_ = join_raw(move raw)
@@ -1005,7 +1005,7 @@ def detach[R](thread: Thread[R, Joinable]):
 # can reason about locally: it may only touch state that provably outlives it and
 # cannot be raced. Prefer `nursery:` / `pool` for anything that should shut down
 # cleanly; reach for spawn_daemon only for genuinely immortal background work.
-def spawn_daemon[A, permission P](fn: func(A) -> void can[P], arg: A):
+def spawn_daemon[A, permission P](fn: fn(A) -> void can[P], arg: A):
 	can P, Thread.Spawn, Thread.Detach, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		detach(spawn1(fn, arg))
 
@@ -1025,7 +1025,7 @@ def spawn_daemon[A, permission P](fn: func(A) -> void can[P], arg: A):
 # For pool-based fan-out see `nursery:` / `each()` / `reduce()`.
 # ------------------------------------------------------------
 
-def task[A, R, permission P](fn: func(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
+def task[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> Thread[R, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Abort.Panic:
 		return spawn1(fn, arg)
 
@@ -1033,9 +1033,9 @@ def future_get[R](handle: Thread[R, Joinable]) -> R:
 	can Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		return join(move handle)
 
-def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R can[P], arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: fn(A) -> R can[P], arg: A) -> Task[R, Pending]:
 	can Pool.Submit, Thread.Spawn, Memory.Allocate, Abort.Panic:
-		from_raw: func(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
+		from_raw: fn(Task[void&?, Pending]) -> Task[R, Pending] = ctx_task_from_raw[R, Pending]
 		state: heap ConcurrencyWorkStart1& = ctx_concurrency_work1_new(fn, arg)
 		raw: Task[void&?, Pending] = pool_submit_raw(
 			pool,
@@ -1047,7 +1047,7 @@ def pool_submit1[A, R, permission P](pool: mutable ThreadPool&, fn: func(A) -> R
 
 def pool_await[R](task: Task[R, Pending]) -> R:
 	can Pool.Await, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		take_result: func(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
+		take_result: fn(void&?) -> R can[Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange] = ctx_concurrency_work1_take_result[R]
 		state_bits: void&? = task.state
 		raw: Task[void&?, Pending] = ctx_task_to_raw(move task)
 		_ = pool_await_raw(move raw)

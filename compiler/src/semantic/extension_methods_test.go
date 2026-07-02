@@ -83,7 +83,7 @@ def read(tok: Tok, box: Box) -> i64:
 func TestAnalyzeExtensionMethodPrefersRealFieldFunctionValues(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "extension_method_field_precedence.elisa", `
 struct CallbackBox:
-    run: func() -> i64
+    run: fn() -> i64
 
 impl CallbackBox:
     def run(self: CallbackBox) -> i64:

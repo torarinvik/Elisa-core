@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// A void-returning `export func NAME(...) = impl` alias used to SIGSEGV: the void path
+// A void-returning `export fn NAME(...) = impl` alias used to SIGSEGV: the void path
 // names the forwarded call "" and passed it through cStringFree (which returns a nil
 // C string), and LLVMBuildCall2 dereferences the name into a Twine(const char*). The
 // fix routes the call name through cString (always non-nil). Regression: this must
@@ -19,7 +19,7 @@ func TestExportFuncVoidAliasDoesNotCrash(t *testing.T) {
 	for i in 0..<n:
 		y[i.usize()] <- y[i.usize()] + a * x[i.usize()]
 
-export func axpy(y: mutable darray[f64]&, x: mutable darray[f64]&, a: f64, n: i64) -> void = axpy_impl
+export fn axpy(y: mutable darray[f64]&, x: mutable darray[f64]&, a: f64, n: i64) -> void = axpy_impl
 `
 	result := parseAndAnalyzeBackendTest(t, "export_void_alias.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
@@ -40,7 +40,7 @@ func TestExportFuncVoidAliasValueParamsDoesNotCrash(t *testing.T) {
 	src := `def sink(a: i64, b: i64) -> void:
 	_ = a + b
 
-export func e(a: i64, b: i64) -> void = sink
+export fn e(a: i64, b: i64) -> void = sink
 `
 	result := parseAndAnalyzeBackendTest(t, "export_void_value_alias.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)

@@ -238,7 +238,7 @@ func TestRunCLIGeneratesTestRunnerSource(t *testing.T) {
 		"def ctx_test_main() -> int can[Console.Write]:",
 		"alpha_case()",
 		"beta_case()",
-		"export func main() -> int = ctx_test_main",
+		"export fn main() -> int = ctx_test_main",
 		"[ SUMMARY  ] 2 test(s) selected",
 	} {
 		if !strings.Contains(output, check) {

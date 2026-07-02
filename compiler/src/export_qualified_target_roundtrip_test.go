@@ -15,7 +15,7 @@ import (
 // form (dotted output would not reparse, since export-target position consumes
 // `::` not `.`).
 func TestExportQualifiedTargetRoundTrips(t *testing.T) {
-	src := "export func probe(seed: u64) -> u32 = Semantic::hash_occupied_probe\n" +
+	src := "export fn probe(seed: u64) -> u32 = Semantic::hash_occupied_probe\n" +
 		"export global Config::max_depth\n" +
 		"export global Config::max_depth as elisa_max_depth\n"
 

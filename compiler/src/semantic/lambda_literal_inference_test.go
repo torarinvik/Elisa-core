@@ -8,11 +8,11 @@ import (
 )
 
 // An untyped lambda whose body is a bare numeric literal, passed where a
-// `func(i64) -> i64` is expected, must infer the literal as `i64` (contextual
+// `fn(i64) -> i64` is expected, must infer the literal as `i64` (contextual
 // typing) rather than the abstract `int`, so the argument type-checks.
 func TestUntypedLambdaNumericLiteralBodyInfersContextualReturn(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
@@ -28,7 +28,7 @@ def use() -> i64:
 // expected function type.
 func TestUntypedLambdaArithmeticBodyInfersContextualReturn(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
@@ -36,7 +36,7 @@ def use() -> i64:
 `
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_arith.elisa", src)
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("an arithmetic lambda body must type-check against func(i64)->i64; got: %v", errs)
+		t.Fatalf("an arithmetic lambda body must type-check against fn(i64)->i64; got: %v", errs)
 	}
 }
 
@@ -44,7 +44,7 @@ def use() -> i64:
 // returning a string where an i64 is expected is still rejected.
 func TestUntypedLambdaWrongTypedBodyStillErrors(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:
@@ -53,7 +53,7 @@ def use() -> i64:
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "lambda_wrong.elisa", src)
 	joined := strings.Join(result.Errors(), "\n")
 	if len(result.Errors()) == 0 {
-		t.Fatalf("a string-bodied lambda passed where func(i64)->i64 is expected must error")
+		t.Fatalf("a string-bodied lambda passed where fn(i64)->i64 is expected must error")
 	}
 	if !strings.Contains(joined, "i64") {
 		t.Fatalf("the mismatch diagnostic should reference the expected i64 return; got: %v", result.Errors())
@@ -64,7 +64,7 @@ def use() -> i64:
 // contextual path.
 func TestExplicitlyTypedLambdaUnchanged(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     return f(x)
 
 def use() -> i64:

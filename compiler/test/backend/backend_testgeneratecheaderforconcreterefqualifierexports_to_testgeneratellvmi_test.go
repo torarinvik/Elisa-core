@@ -65,7 +65,7 @@ export global tau as ctx_tau
 def scale_sum_impl(left: f32, right: f64) -> f64:
 	return left.f64() + right
 
-export func scale_sum(left: f32, right: f64) -> f64 = scale_sum_impl
+export fn scale_sum(left: f32, right: f64) -> f64 = scale_sum_impl
 `
 	result := parseAndAnalyze(t, "backend_float_header.elisa", src)
 	header, err := backend.GenerateCHeader(result)

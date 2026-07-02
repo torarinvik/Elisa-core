@@ -12,10 +12,10 @@ extern pool_await(task: Task[i64, Pending]) -> i64
 packed enum Expr:
 	Int(value: int)
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(node: Expr) -> i64:
@@ -39,10 +39,10 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarriers(t *testing.T) {
 	mu: Mutex
 	cv: CondVar
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(gate: SharedGate) -> i64:
@@ -59,7 +59,7 @@ def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
 func TestAnalyzeAcceptsSpawnTransferOfStaticRef(t *testing.T) {
 	src := `extern shared_cell() -> static i32&
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(cell: static i32&) -> i64:
@@ -73,10 +73,10 @@ def ok(pool: ThreadPool&) -> Task[i64, Pending] can[Pool.Submit]:
 	requireNoWarnings(t, result)
 }
 func TestAnalyzeRejectsThreadTransferOfNonStaticRef(t *testing.T) {
-	src := `def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+	src := `def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(cell: i32&) -> i64:
@@ -104,10 +104,10 @@ func TestAnalyzeAcceptsThreadTransferOfBlessedRuntimeCarrierResults(t *testing.T
 	mu: Mutex
 	cv: CondVar
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def echo(gate: SharedGate) -> SharedGate:
@@ -125,10 +125,10 @@ def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
 func TestAnalyzeAcceptsThreadTransferOfStaticRefResult(t *testing.T) {
 	src := `extern shared_cell() -> static i32&
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(value: i64) -> static i32&:
@@ -146,10 +146,10 @@ def ok(pool: ThreadPool&) -> i64 can[Pool.Submit]:
 func TestAnalyzeRejectsThreadTransferOfNonStaticRefResult(t *testing.T) {
 	src := `extern borrowed_cell() -> i32&
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(value: i64) -> i32&:
@@ -183,7 +183,7 @@ struct Box:
 @borrows_return_field(node, node)
 extern wrap_node(node: Expr) -> Box
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
 def worker(box: Box) -> i64:
@@ -215,7 +215,7 @@ struct Box:
 @borrows_return_field(node, node)
 extern wrap_node(node: Expr) -> Box
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(box: Box) -> i64:
@@ -244,7 +244,7 @@ struct Box:
 @borrows_return_field(node, node)
 extern wrap_node(node: Expr) -> Box
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
 	return zeroed
 
 def worker(items: view[Box]) -> i64:
@@ -276,7 +276,7 @@ struct Box:
 @borrows_return_field(node, node)
 extern wrap_node(node: Expr) -> Box
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(items: view[Box]) -> i64:
@@ -299,7 +299,7 @@ func TestAnalyzeRejectsPoolTransferOfValueDependingOnLocalRegion(t *testing.T) {
 	src := `packed enum Expr:
 	Hold(value: i32&)
 
-def pool_submit1[A, R](pool: ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
 	return zeroed
 
 def worker(node: Expr) -> i64:

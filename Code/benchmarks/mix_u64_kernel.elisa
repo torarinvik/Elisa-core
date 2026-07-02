@@ -15,4 +15,4 @@ def mix_u64_impl(data: u64&, len: usize, rounds: usize, seed: u64) -> u64:
 
     return acc
 
-export func elisa_core_mix_u64(data: u64&, len: usize, rounds: usize, seed: u64) -> u64 = mix_u64_impl
+export fn elisa_core_mix_u64(data: u64&, len: usize, rounds: usize, seed: u64) -> u64 = mix_u64_impl

@@ -277,7 +277,7 @@ def do_wait() -> void can[Pool.WaitAll]:
 	pass
 
 def bad(flag: bool) -> void:
-	local_fn: mutable func() -> void can[Pool] = do_wait
+	local_fn: mutable fn() -> void can[Pool] = do_wait
 	if flag:
 		local_fn <- do_submit
 	else:

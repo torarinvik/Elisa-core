@@ -34,7 +34,7 @@ def first_byte_inner(text: cstr) -> i64:
 def first_byte_impl(text: u8&) -> i64:
     return first_byte_inner(text)
 
-export func elisa_first_byte(text: u8&) -> i64 = first_byte_impl
+export fn elisa_first_byte(text: u8&) -> i64 = first_byte_impl
 `)
 	writeFixtureFile(t, headerPath, `#ifndef FIRST_BYTE_ABI_H
 #define FIRST_BYTE_ABI_H

@@ -10,7 +10,7 @@ func TestAnalyzeAcceptsGenericBuilderStructFunctionFields(t *testing.T) {
     value: T
 
 struct Builder[T]:
-    make: func(T) -> Box[T]
+    make: fn(T) -> Box[T]
 
 def make_i64_box(value: i64) -> Box[i64]:
     return Box[i64](value)
@@ -381,7 +381,7 @@ func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdown(t *testing.T) {
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -406,7 +406,7 @@ func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaBorrowedAlias(t *te
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -431,7 +431,7 @@ def bad() -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolParamAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -455,7 +455,7 @@ func TestAnalyzeRejectsSubmittingToThreadPoolAfterShutdownViaProjectedBorrowedAl
 	src := `extern pool_new(workers: usize) -> ThreadPool
 extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -483,7 +483,7 @@ def bad() -> void:
 func TestAnalyzeRejectsReusingReassignedProjectedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -512,7 +512,7 @@ def bad(left: ThreadPool&, right: ThreadPool&) -> void:
 func TestAnalyzeRejectsReusingAggregateThreadPoolParamFieldAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 

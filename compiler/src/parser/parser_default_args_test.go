@@ -42,7 +42,7 @@ func TestParseRejectsDefaultsInDisallowedPositions(t *testing.T) {
 	}{
 		{
 			name: "export func",
-			src:  "def add(x: i64, y: i64) -> i64:\n    return x + y\n\nexport func add_export(x: i64 = 1, y: i64) -> i64 = add\n",
+			src:  "def add(x: i64, y: i64) -> i64:\n    return x + y\n\nexport fn add_export(x: i64 = 1, y: i64) -> i64 = add\n",
 		},
 	}
 	for _, tc := range tests {

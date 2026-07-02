@@ -47,4 +47,4 @@ def retained_nested_type_repro_impl() -> i64:
     frozen: TypeExpr.Store[Frozen] = freeze(move store)
     return score_type(current, frozen)
 
-export func retained_nested_type_repro() -> i64 = retained_nested_type_repro_impl
+export fn retained_nested_type_repro() -> i64 = retained_nested_type_repro_impl

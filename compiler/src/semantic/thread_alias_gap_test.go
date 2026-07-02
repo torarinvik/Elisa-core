@@ -8,7 +8,7 @@ import (
 // The thread-share safety net keys on `pool_submit1` (the lowering target of the
 // safe `submit` sugar); raw `spawn1` was removed from the public surface, so
 // these tests drive the same checker branch through `submit[&pool] worker(arg)`.
-const threadSubmitPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+const threadSubmitPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
     return zeroed
 `
 

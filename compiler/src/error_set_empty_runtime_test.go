@@ -23,7 +23,7 @@ func TestRunCLIErrorSetParamEmptySet(t *testing.T) {
 	src := `error IoErr:
     Bad
 
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     v: i64 = try f()
     return v * 2
 

@@ -1024,7 +1024,7 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 		out.WriteString(".cast[u8&]) can Console.Write\n")
 		out.WriteString(bodyIndent)
 		out.WriteString("return 1\n\n")
-		out.WriteString("export func main() -> int = ctx_test_main\n")
+		out.WriteString("export fn main() -> int = ctx_test_main\n")
 		return out.String()
 	}
 
@@ -1061,7 +1061,7 @@ func buildTestRunnerSource(source []byte, cases []selectedTestCase, filter strin
 	out.WriteString(".cast[u8&])\n")
 	out.WriteString(bodyIndent)
 	out.WriteString("return 0\n\n")
-	out.WriteString("export func main() -> int = ctx_test_main\n")
+	out.WriteString("export fn main() -> int = ctx_test_main\n")
 	return out.String()
 }
 func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) string {
@@ -1089,7 +1089,7 @@ func buildIsolatedTestRunnerSource(source []byte, testCase selectedTestCase) str
 	}
 	out.WriteString("\t")
 	out.WriteString("return 0\n\n")
-	out.WriteString("export func main() -> int = ctx_test_main\n")
+	out.WriteString("export fn main() -> int = ctx_test_main\n")
 	return out.String()
 }
 func testCaseExportName(index int) string {
@@ -1141,7 +1141,7 @@ func buildDispatchTestRunnerSource(source []byte, cases []selectedTestCase) stri
 		out.WriteString("\n")
 		out.WriteString("\t")
 		out.WriteString("return 0\n\n")
-		out.WriteString("export func ")
+		out.WriteString("export fn ")
 		out.WriteString(exportName)
 		out.WriteString("() -> int = ")
 		out.WriteString(internalName)

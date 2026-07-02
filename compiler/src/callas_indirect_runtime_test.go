@@ -8,7 +8,7 @@ import (
 )
 
 // TestRunCLIExecutesCallAsIndirectCall exercises the typed, Unsafe-gated
-// indirect-call primitive `value.call_as[func(...)->T](args)` end to end: a raw
+// indirect-call primitive `value.call_as[fn(...)->T](args)` end to end: a raw
 // pointer-like value is invoked through an asserted function signature and
 // lowers to a native LLVM indirect call. It is the general replacement for the
 // old string-keyed, one-C-shim-per-signature native callback path.

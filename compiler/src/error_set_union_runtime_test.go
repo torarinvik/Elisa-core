@@ -40,7 +40,7 @@ def ioOk() -> i64 error[IoErr]:
 def netOk() -> i64 error[NetErr]:
     return 9
 
-def retryTwice[errorset R](f: func() -> i64 error[R], propagate: bool) -> i64 error[R, Timeout]:
+def retryTwice[errorset R](f: fn() -> i64 error[R], propagate: bool) -> i64 error[R, Timeout]:
     catch f():
         n:
             return n
@@ -53,7 +53,7 @@ def retryTwice[errorset R](f: func() -> i64 error[R], propagate: bool) -> i64 er
                 error e2:
                     raise Timeout.Expired
 
-def pair[errorset R, errorset S](f: func() -> i64 error[R], g: func() -> i64 error[S]) -> i64 error[R, S]:
+def pair[errorset R, errorset S](f: fn() -> i64 error[R], g: fn() -> i64 error[S]) -> i64 error[R, S]:
     return (try f()) + (try g())
 
 def runRetryGiveUp() -> i64:
@@ -92,7 +92,7 @@ def runPairOk() -> i64:
         NetErr.Down:
             return -2
 
-def bothOf[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i64 error[R]:
+def bothOf[errorset R](f: fn() -> i64 error[R], g: fn() -> i64 error[R]) -> i64 error[R]:
     return (try f()) + (try g())
 
 def bigFail() -> i64 error[IoErr, NetErr]:
@@ -172,7 +172,7 @@ def ioFail() -> i64 error[IoErr]:
 def ioOk() -> i64 error[IoErr]:
     return 7
 
-def applyOnce[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyOnce[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def runInferredOk() -> i64:

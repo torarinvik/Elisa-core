@@ -418,7 +418,7 @@ func TestGenerateLLVMIRForNamedLocalFunctionAliasCallArgs(t *testing.T) {
     return x + y
 
 def build() -> i64:
-    runner: func(i64, i64) -> i64 = add
+    runner: fn(i64, i64) -> i64 = add
     return runner(y: 7, x: do:
         seed = 3
         seed
@@ -439,7 +439,7 @@ def build() -> i64:
 
 func TestGenerateLLVMIRForNamedLocalFieldFunctionAliasCallArgs(t *testing.T) {
 	src := `struct CallbackBox:
-    run: func(i64, i64) -> i64
+    run: fn(i64, i64) -> i64
 
 def add(x: i64, y: i64) -> i64:
     return x + y

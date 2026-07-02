@@ -447,7 +447,7 @@ func TestS4W5IndirectFnPtrStoreRejected(t *testing.T) {
 	status, _ := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def doStore(dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     dst.push(v) can Memory.Allocate, Abort.Panic
     return
-def stash(fn: func(mutable darray[Mod]&, Mod) -> void can[Memory.Allocate, Abort.Panic], dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
+def stash(fn: fn(mutable darray[Mod]&, Mod) -> void can[Memory.Allocate, Abort.Panic], dst: mutable darray[Mod]&, v: Mod) -> void can[Memory.Allocate, Abort.Panic]:
     fn(dst, v) can Memory.Allocate, Abort.Panic
     return
 def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:

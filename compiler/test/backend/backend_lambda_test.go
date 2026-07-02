@@ -8,7 +8,7 @@ import (
 )
 
 func TestGenerateLLVMIRLowersCapturelessLambdaHelpers(t *testing.T) {
-	src := `def apply(fn: func(i64) -> i64, value: i64) -> i64:
+	src := `def apply(fn: fn(i64) -> i64, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
@@ -29,7 +29,7 @@ def run() -> i64:
 }
 
 func TestGenerateLLVMIRLowersCapturedLambdasThroughClosureDispatch(t *testing.T) {
-	src := `def apply(fn: func(i64) -> i64, value: i64) -> i64:
+	src := `def apply(fn: fn(i64) -> i64, value: i64) -> i64:
     return fn(value)
 
 def run(offset: i64) -> i64:

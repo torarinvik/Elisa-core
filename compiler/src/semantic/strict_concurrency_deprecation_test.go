@@ -56,10 +56,10 @@ def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
 def notify_one(cv: mutable CondVar&):
     pass
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
     return zeroed
 
-def pool_submit1[A, R](pool: mutable ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
     return zeroed
 
 def detach[R](thread: Thread[R, Joinable]):

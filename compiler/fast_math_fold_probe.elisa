@@ -7,4 +7,4 @@ include "./runtime/elisacore_std/elisacore_runtime.elisa"
 def sum_f64(a: mutable darray[f64]&) -> f64:
 	return (acc + x for x in a with acc: f64 = 0.0)
 
-export func probe_sum_f64(a: mutable darray[f64]&) -> f64 = sum_f64
+export fn probe_sum_f64(a: mutable darray[f64]&) -> f64 = sum_f64

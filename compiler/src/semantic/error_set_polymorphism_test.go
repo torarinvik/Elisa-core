@@ -18,7 +18,7 @@ error NetErr:
 extern reader() -> i64 error[IoErr]
 extern fetch() -> i64 error[NetErr]
 
-def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applies[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def useIo() -> i64 error[IoErr]:
@@ -45,7 +45,7 @@ error NetErr:
 
 extern reader() -> i64 error[IoErr]
 
-def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applies[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def use() -> i64 error[NetErr]:
@@ -64,7 +64,7 @@ func TestErrorSetParamInfallibleCallbackBindsEmpty(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "esp_empty.elisa", `
 extern plain() -> i64
 
-def applies[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applies[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def use() -> i64:
@@ -110,7 +110,7 @@ error NetErr:
 extern reader() -> i64 error[IoErr]
 extern fetch() -> i64 error[NetErr]
 
-def combine[errorset R, errorset S](f: func() -> i64 error[R], g: func() -> i64 error[S]) -> i64 error[R]:
+def combine[errorset R, errorset S](f: fn() -> i64 error[R], g: fn() -> i64 error[S]) -> i64 error[R]:
     return try f()
 
 def use() -> i64 error[IoErr]:

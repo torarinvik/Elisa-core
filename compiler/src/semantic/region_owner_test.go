@@ -80,7 +80,7 @@ func TestClosureCapturingRegionDepRejectedAfterDestroy(t *testing.T) {
 def f(seed: i32) -> i32:
     region r(64)
     first: RegionNode[r]& @r = new[r] RegionNode[r]{next: null, value: seed}
-    g: func() -> i32 = fn () => first.value
+    g: fn() -> i32 = fn () => first.value
     destroy r
     return g()
 `)
@@ -98,7 +98,7 @@ func TestClosureCapturingRegionDepCleanBeforeDestroy(t *testing.T) {
 def f(seed: i32) -> i32:
     region r(64)
     first: RegionNode[r]& @r = new[r] RegionNode[r]{next: null, value: seed}
-    g: func() -> i32 = fn () => first.value
+    g: fn() -> i32 = fn () => first.value
     out: i32 = g()
     destroy r
     return out

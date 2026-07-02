@@ -6,13 +6,13 @@ import (
 	"elisacore/src/ast"
 )
 
-// `export func f(...) = Mod::g` accepts a `::`-qualified target and stores it as
+// `export fn f(...) = Mod::g` accepts a `::`-qualified target and stores it as
 // the internal dotted name, so the analyzer resolves it like any module member.
 // Previously the target parsed as a single IDENT and the `::` tripped
 // expectNewline ("expected newline, got ::").
 func TestParseExportFuncQualifiedTarget(t *testing.T) {
 	file, errs := parseSourceFile(t, `
-export func probe(seed: u64) -> u32 = Semantic::hash_occupied_probe
+export fn probe(seed: u64) -> u32 = Semantic::hash_occupied_probe
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -32,7 +32,7 @@ export func probe(seed: u64) -> u32 = Semantic::hash_occupied_probe
 // An unqualified target still parses (regression guard for the common case).
 func TestParseExportFuncBareTarget(t *testing.T) {
 	file, errs := parseSourceFile(t, `
-export func probe(seed: u64) -> u32 = local_impl
+export fn probe(seed: u64) -> u32 = local_impl
 `)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)

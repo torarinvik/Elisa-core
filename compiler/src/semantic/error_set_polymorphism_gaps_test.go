@@ -22,7 +22,7 @@ error IoErr:
 
 extern reader() -> i64 error[IoErr]
 
-def giveUp[errorset R](f: func() -> i64 error[R]) -> i64 error[R, Timeout]:
+def giveUp[errorset R](f: fn() -> i64 error[R]) -> i64 error[R, Timeout]:
     v: i64 = try f() else e:
         raise Timeout.Expired
     return v
@@ -46,7 +46,7 @@ error NetErr:
 extern reader() -> i64 error[IoErr]
 extern fetch() -> i64 error[NetErr]
 
-def pair[errorset R, errorset S](f: func() -> i64 error[R], g: func() -> i64 error[S]) -> i64 error[R, S]:
+def pair[errorset R, errorset S](f: fn() -> i64 error[R], g: fn() -> i64 error[S]) -> i64 error[R, S]:
     return (try f()) + (try g())
 
 def use() -> i64 error[IoErr, NetErr]:
@@ -70,7 +70,7 @@ error Timeout:
 
 extern flaky() -> i64 error[IoErr, Timeout]
 
-def giveUp[errorset R](f: func() -> i64 error[R, Timeout]) -> i64 error[R, Timeout]:
+def giveUp[errorset R](f: fn() -> i64 error[R, Timeout]) -> i64 error[R, Timeout]:
     return try f()
 
 def use() -> i64 error[IoErr, Timeout]:
@@ -115,7 +115,7 @@ func TestGapErrorSetParamBodyCannotRaiseConcrete(t *testing.T) {
 error Timeout:
     Expired
 
-def giveUp[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def giveUp[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     v: i64 = try f() else e:
         raise Timeout.Expired
     return v
@@ -141,7 +141,7 @@ error NetErr:
 extern big() -> i64 error[IoErr, NetErr]
 extern small() -> i64 error[IoErr]
 
-def both[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i64 error[R]:
+def both[errorset R](f: fn() -> i64 error[R], g: fn() -> i64 error[R]) -> i64 error[R]:
     a: i64 = try f()
     b: i64 = try g()
     return a + b
@@ -166,7 +166,7 @@ def both[errorset R](f: func() -> i64 error[R], g: func() -> i64 error[R]) -> i6
 // (next test).
 func TestCatchBinderArmCannotMatchParamSetHintsCatchAll(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "gap_catch_param.elisa", `
-def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def logged[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     catch f():
         n:
             return n
@@ -184,7 +184,7 @@ def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
 
 func TestCatchAllErrorBindingMatchesParamSet(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "gap_catch_all_param.elisa", `
-def logged[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def logged[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     catch f():
         n:
             return n
@@ -206,7 +206,7 @@ func TestGapBareLambdaErrorInferenceCloses(t *testing.T) {
 error IoErr:
     Bad
 
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def seven() -> i64 error[IoErr]:
@@ -226,7 +226,7 @@ def use() -> i64 error[IoErr]:
 // the whole call is non-raising — `use` declares no error union and type-checks.
 func TestErrorSetParamInlineLambdaEmptySet(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "inline_lambda_empty.elisa", `
-def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
+def applyOne[errorset R](f: fn(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     return try f(x)
 
 def use() -> i64:
@@ -244,7 +244,7 @@ func TestErrorSetParamInlineLambdaRaiseInfersR(t *testing.T) {
 error IoErr:
     Bad
 
-def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
+def applyOne[errorset R](f: fn(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     return try f(x)
 
 def use() -> i64:
@@ -269,7 +269,7 @@ error IoErr:
 error NetErr:
     Down
 
-def wantsIo(f: func(i64) -> i64 error[IoErr], x: i64) -> i64 error[IoErr]:
+def wantsIo(f: fn(i64) -> i64 error[IoErr], x: i64) -> i64 error[IoErr]:
     return try f(x)
 
 def use() -> i64 error[IoErr]:
@@ -290,7 +290,7 @@ error IoErr:
 error NetErr:
     Down
 
-def wantsIo(f: func() -> i64 error[IoErr]) -> i64 error[IoErr]:
+def wantsIo(f: fn() -> i64 error[IoErr]) -> i64 error[IoErr]:
     return try f()
 
 def boom() -> i64 error[NetErr]:
@@ -300,7 +300,7 @@ def use() -> i64 error[IoErr]:
     return wantsIo(fn() => try boom())
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) == "" {
-		t.Fatalf("a bare lambda inferring error[NetErr] must not satisfy func() -> i64 error[IoErr]")
+		t.Fatalf("a bare lambda inferring error[NetErr] must not satisfy fn() -> i64 error[IoErr]")
 	}
 }
 
@@ -310,7 +310,7 @@ func TestErrorSetParamAnnotatedLambdaBindsR(t *testing.T) {
 error IoErr:
     Bad
 
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def seven() -> i64 error[IoErr]:
@@ -326,7 +326,7 @@ def use() -> i64 error[IoErr]:
 
 func TestTryElseBindingReRaisesOpaqueParamSet(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "gap_else_param.elisa", `
-def passThrough[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def passThrough[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     v: i64 = try f() else e:
         raise e
     return v
@@ -349,13 +349,13 @@ error IoErr:
     Bad
 
 protocol Runner:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]
 
 struct MyRunner:
     tag: i64
 
 impl Runner for MyRunner:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
         return try f()
 `)
 	if all := allDiagnostics(result); strings.TrimSpace(all) != "" {
@@ -388,16 +388,16 @@ func TestErrorSetParamFlowsThroughProtocolMethod(t *testing.T) {
 	for _, callerParam := range []string{"R", "Q"} {
 		result := analyzeFunctionAnalysisTestSource(t, "proto_flow_"+callerParam+".elisa", `
 protocol Runner:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]
 
 struct AddOne:
     tag: i64
 
 impl Runner for AddOne:
-    def run[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+    def run[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
         return try f()
 
-def drive[T: Runner, errorset `+callerParam+`](f: func() -> i64 error[`+callerParam+`]) -> i64 error[`+callerParam+`]:
+def drive[T: Runner, errorset `+callerParam+`](f: fn() -> i64 error[`+callerParam+`]) -> i64 error[`+callerParam+`]:
     return T.run(f)
 `)
 		if all := allDiagnostics(result); strings.TrimSpace(all) != "" {

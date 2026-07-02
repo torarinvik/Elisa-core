@@ -15,7 +15,7 @@ import (
 // `ensures(f, result >= 0)`, and inside `apply` the call `f(x)` lets `ensure result >= 0` discharge.
 func TestHigherOrderParamContractSatisfyingProves(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -37,7 +37,7 @@ def use() -> i64:
 // `apply`'s required `ensures(f, result >= 0)` — the call site must error.
 func TestHigherOrderParamContractNonSatisfyingErrors(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -59,7 +59,7 @@ def use() -> i64:
 // A function with NO ensure cannot satisfy a non-trivial param contract: empty range entails nothing.
 func TestHigherOrderParamContractNoEnsureErrors(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -81,7 +81,7 @@ def use() -> i64:
 // the no-ensure error path); here we confirm the positive direction reaches a downstream obligation.
 func TestHigherOrderParamContractAssumptionDischargesAssert(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 5)
     ensure result >= 0
     return f(x)
@@ -108,7 +108,7 @@ def use() -> i64:
 // the literal 0), so it entails `ensures(f, result >= 0)`, and the body assumption discharges `ensure`.
 func TestHigherOrderLambdaSatisfyingProves(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -125,7 +125,7 @@ def use() -> i64:
 // A constant lambda whose result is literally 5 entails `result >= 0`.
 func TestHigherOrderLambdaConstantProves(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -143,7 +143,7 @@ def use() -> i64:
 // The call site must error (fail-closed), never silently pass.
 func TestHigherOrderLambdaNonSatisfyingErrors(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 0)
     ensure result >= 0
     return f(x)
@@ -161,7 +161,7 @@ def use() -> i64:
 // (`n if n >= 5 else 5`, always >= 5) lets the downstream `ensure result >= 0` discharge.
 func TestHigherOrderLambdaAssumptionDischarges(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(f, result >= 5)
     ensure result >= 0
     return f(x)
@@ -178,7 +178,7 @@ def use() -> i64:
 // Naming a non-function parameter in ensures(...) is a hard error (the clause is meaningless).
 func TestHigherOrderParamContractNonFuncParamErrors(t *testing.T) {
 	src := `
-def apply(f: func(i64) -> i64, x: i64) -> i64:
+def apply(f: fn(i64) -> i64, x: i64) -> i64:
     requires ensures(x, result >= 0)
     ensure result >= 0
     return f(x)

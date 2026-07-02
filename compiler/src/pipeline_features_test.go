@@ -389,7 +389,7 @@ func TestRunCLIInterpretsNamedGlobalFunctionAliasCall(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_function_alias.elisa")
-	src := "def add(x: int, y: int) -> int:\n    return x + y\n\nglobal runner: func(int, int) -> int = add\n\ndef main() -> int:\n    return runner(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
+	src := "def add(x: int, y: int) -> int:\n    return x + y\n\nglobal runner: fn(int, int) -> int = add\n\ndef main() -> int:\n    return runner(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named global alias interpreter fixture: %v", err)
 	}
@@ -409,7 +409,7 @@ func TestRunCLIInterpretsNamedGlobalFieldFunctionAliasCall(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
 	sourcePath := filepath.Join(fixtureDir, "interpret_named_global_field_function_alias.elisa")
-	src := "struct CallbackBox:\n    run: func(int, int) -> int\n\ndef add(x: int, y: int) -> int:\n    return x + y\n\nglobal BOX: CallbackBox = CallbackBox{run: add}\n\ndef main() -> int:\n    return BOX.run(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
+	src := "struct CallbackBox:\n    run: fn(int, int) -> int\n\ndef add(x: int, y: int) -> int:\n    return x + y\n\nglobal BOX: CallbackBox = CallbackBox{run: add}\n\ndef main() -> int:\n    return BOX.run(y: 7, x: do:\n        seed = 3\n        seed\n    )\n"
 	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write named global-field alias interpreter fixture: %v", err)
 	}

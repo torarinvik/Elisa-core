@@ -13,7 +13,7 @@ def callas_noargs() -> int:
     return 99
 
 # Exercises the typed, Unsafe-gated indirect-call primitive
-# `value.call_as[func(...)->T](args)`: a raw pointer-like value is invoked
+# `value.call_as[fn(...)->T](args)`: a raw pointer-like value is invoked
 # through an asserted function signature, lowering to a native LLVM indirect
 # call. Replaces the old string-keyed, one-C-shim-per-signature callback path.
 @test
@@ -26,7 +26,7 @@ def call_as_indirect_smoke():
         assert f != null
         two: mutable int = 0
         trusted Unsafe.IndirectCall:
-            two <- f.call_as[func(int, int) -> int](40, 2)
+            two <- f.call_as[fn(int, int) -> int](40, 2)
         assert two == 42
 
         # single-argument signature, negative return
@@ -35,7 +35,7 @@ def call_as_indirect_smoke():
             g <- callas_neg.cast[void&?]
         one: mutable int = 0
         trusted Unsafe.IndirectCall:
-            one <- g.call_as[func(int) -> int](7)
+            one <- g.call_as[fn(int) -> int](7)
         assert one == 0 - 7
 
         # zero-argument signature
@@ -44,5 +44,5 @@ def call_as_indirect_smoke():
             h <- callas_noargs.cast[void&?]
         zero: mutable int = 0
         trusted Unsafe.IndirectCall:
-            zero <- h.call_as[func() -> int]()
+            zero <- h.call_as[fn() -> int]()
         assert zero == 99

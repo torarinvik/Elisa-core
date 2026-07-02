@@ -9,7 +9,7 @@ import (
 // name (the lowering target of the safe `submit` sugar). Raw `spawn1` was
 // removed from the public surface, so these tests drive the net through
 // `submit[&pool] worker(arg)` — exercising the same checker branch.
-const threadRegionPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: func(A) -> R, arg: A) -> Task[R, Pending]:
+const threadRegionPrelude = `def pool_submit1[A, R](pool: mutable ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
     return zeroed
 extern new_arena(cap: usize) -> Arena
 struct Node[@owner]:

@@ -14,7 +14,7 @@ def sub(x: i64, y: i64) -> i64:
 	return x - y
 
 def run(flag: bool) -> i64:
-	local_fn: mutable func(i64, i64) -> i64 = sub
+	local_fn: mutable fn(i64, i64) -> i64 = sub
 	if flag:
 		local_fn <- add
 	else:
@@ -37,7 +37,7 @@ def mix(left: i64, right: i64) -> i64:
 	return left + right
 
 def bad(flag: bool) -> i64:
-	local_fn: mutable func(i64, i64) -> i64 = mix
+	local_fn: mutable fn(i64, i64) -> i64 = mix
 	if flag:
 		local_fn <- add
 	else:
@@ -148,7 +148,7 @@ func TestAnalyzeRejectsInvalidPackedCommonFieldStorageMode(t *testing.T) {
 func TestAnalyzeRejectsReusingExternReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -178,7 +178,7 @@ def bad(holder: PoolHolder) -> void:
 func TestAnalyzeRejectsReusingExternReturnedAggregateBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -208,7 +208,7 @@ def bad(holder: PoolHolder) -> void:
 func TestAnalyzeRejectsReusingExternReturnedNestedBorrowedThreadPoolFieldAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -437,7 +437,7 @@ func TestAnalyzeAcceptsSubmitSyntaxInsidePoolScope(t *testing.T) {
 extern pool_shutdown(pool: mutable ThreadPool&) -> void
 extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: mutable ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -458,7 +458,7 @@ def ok() -> i64:
 func TestAnalyzeAcceptsExplicitSubmitSyntaxOutsidePoolScope(t *testing.T) {
 	src := `extern pool_await(task: Task[i64, Pending]) -> i64
 
-def pool_submit1(pool: mutable ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: mutable ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 

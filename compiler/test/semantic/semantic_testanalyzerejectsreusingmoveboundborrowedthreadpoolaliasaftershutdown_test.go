@@ -8,7 +8,7 @@ import (
 func TestAnalyzeRejectsReusingMoveBoundBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -35,7 +35,7 @@ def bad(holder: PoolHolder) -> void:
 func TestAnalyzeRejectsReusingHelperReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -65,7 +65,7 @@ def bad(holder: PoolHolder) -> void:
 func TestAnalyzeRejectsReusingHelperReturnedAggregateBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -115,14 +115,14 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
 	pool_ref: ThreadPool&
 
-def apply_getter(fn: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+def apply_getter(fn: fn(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
 	return fn(holder)
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
@@ -152,7 +152,7 @@ extern task_group_wait_all(group: TaskGroup&) -> void
 struct GroupHolder:
 	group_ref: TaskGroup&
 
-def apply_keeper(fn: func(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
+def apply_keeper(fn: fn(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
 	return fn(holder)
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
@@ -171,15 +171,15 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingHigherOrderHelperReturnedBorrowedThreadPoolAliasAfterLocalCallbackBinding(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
 struct PoolHolder:
 	pool_ref: ThreadPool&
 
-def apply_getter(fn: func(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
-	local_fn: func(PoolHolder) -> ThreadPool& = fn
+def apply_getter(fn: fn(PoolHolder) -> ThreadPool&, holder: PoolHolder) -> ThreadPool&:
+	local_fn: fn(PoolHolder) -> ThreadPool& = fn
 	return local_fn(holder)
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
@@ -209,8 +209,8 @@ extern task_group_wait_all(group: TaskGroup&) -> void
 struct GroupHolder:
 	group_ref: TaskGroup&
 
-def apply_keeper(fn: func(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
-	local_fn: func(GroupHolder) -> GroupHolder = fn
+def apply_keeper(fn: fn(GroupHolder) -> GroupHolder, holder: GroupHolder) -> GroupHolder:
+	local_fn: fn(GroupHolder) -> GroupHolder = fn
 	return local_fn(holder)
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
@@ -229,7 +229,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaAggregateHeldCallbackAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -237,7 +237,7 @@ struct PoolHolder:
 	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> ThreadPool&
+	fn: fn(PoolHolder) -> ThreadPool&
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
@@ -268,7 +268,7 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 struct GroupKeeper:
-	fn: func(GroupHolder) -> GroupHolder
+	fn: fn(GroupHolder) -> GroupHolder
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
@@ -287,7 +287,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsDestructuredCallbackAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -295,7 +295,7 @@ struct PoolHolder:
 	pool_ref: ThreadPool&
 
 struct PoolGetter:
-	fn: func(PoolHolder) -> ThreadPool&
+	fn: fn(PoolHolder) -> ThreadPool&
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
@@ -327,7 +327,7 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 struct GroupKeeper:
-	fn: func(GroupHolder) -> GroupHolder
+	fn: fn(GroupHolder) -> GroupHolder
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
@@ -347,7 +347,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaMoveAsVariantDestructuredCallbackAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -355,7 +355,7 @@ struct PoolHolder:
 	pool_ref: ThreadPool&
 
 enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> ThreadPool&)
+	Wrap(fn: fn(PoolHolder) -> ThreadPool&)
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
@@ -387,7 +387,7 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 enum GroupKeeper:
-	Wrap(fn: func(GroupHolder) -> GroupHolder)
+	Wrap(fn: fn(GroupHolder) -> GroupHolder)
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
@@ -407,7 +407,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -415,7 +415,7 @@ struct PoolHolder:
 	pool_ref: ThreadPool&
 
 enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> ThreadPool&)
+	Wrap(fn: fn(PoolHolder) -> ThreadPool&)
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
@@ -448,7 +448,7 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 enum GroupKeeper:
-	Wrap(fn: func(GroupHolder) -> GroupHolder)
+	Wrap(fn: fn(GroupHolder) -> GroupHolder)
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
@@ -469,7 +469,7 @@ def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 func TestAnalyzeRejectsReusingBorrowedThreadPoolAliasReturnedViaPackedEnumMatchBoundCallbackAfterShutdown(t *testing.T) {
 	src := `extern pool_shutdown(pool: ThreadPool&) -> void
 
-def pool_submit1(pool: ThreadPool&, fn: func(i64) -> i64, arg: i64) -> Task[i64, Pending]:
+def pool_submit1(pool: ThreadPool&, fn: fn(i64) -> i64, arg: i64) -> Task[i64, Pending]:
 	task: Task[i64, Pending] = zeroed
 	return move task
 
@@ -477,7 +477,7 @@ struct PoolHolder:
 	pool_ref: ThreadPool&
 
 packed enum PoolGetter:
-	Wrap(fn: func(PoolHolder) -> ThreadPool&)
+	Wrap(fn: fn(PoolHolder) -> ThreadPool&)
 
 def get_pool_ref(holder: PoolHolder) -> ThreadPool&:
 	return holder.pool_ref
@@ -512,7 +512,7 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 packed enum GroupKeeper:
-	Wrap(fn: func(GroupHolder) -> GroupHolder)
+	Wrap(fn: fn(GroupHolder) -> GroupHolder)
 
 def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder

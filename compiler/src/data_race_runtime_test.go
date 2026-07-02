@@ -56,7 +56,7 @@ def race() -> void:
     can Thread.Spawn, Thread.Join, Memory.Allocate, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
         x: mutable i64 = 0
         r: mutable i64& = &x
-        worker: func(i64) -> i64 = fn(a: i64) => r[0] + a
+        worker: fn(i64) -> i64 = fn(a: i64) => r[0] + a
         t: Thread[i64, Joinable] = spawn1(worker, 5)
         r[0] <- 99
         _ = join(move t)

@@ -1409,7 +1409,7 @@ def advance(ptr: u8&, offset: usize) -> u8&:
 
 func TestThreadTransferOfNonStaticRefRequiresUnsafeThreadShareGrant(t *testing.T) {
 	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "thread_share_requires_unsafe.elisa", `
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
     return zeroed
 
 def worker(cell: i32&) -> i64:
@@ -1438,7 +1438,7 @@ def start(cell: i32&) -> Thread[i64, Joinable]:
 
 func TestTrustedThreadShareDoesNotInferCallerPermission(t *testing.T) {
 	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "trusted_thread_share.elisa", `
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
     return zeroed
 
 def worker(cell: i32&) -> i64:
@@ -1470,7 +1470,7 @@ func TestThreadTransferOfStaticRefDoesNotRequireUnsafeThreadShareGrant(t *testin
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "static_ref_thread_share_no_unsafe.elisa", `
 extern shared_cell() -> static i32&
 
-def spawn1[A, R](fn: func(A) -> R, arg: A) -> Thread[R, Joinable]:
+def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
     return zeroed
 
 def worker(cell: static i32&) -> i64:

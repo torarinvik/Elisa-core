@@ -14,7 +14,7 @@ func TestLambdaValueAnnotationRaiseInfersErrorSet(t *testing.T) {
 error IoErr:
     Bad
 
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def use() -> i64 error[IoErr]:
@@ -35,7 +35,7 @@ func TestLambdaValueAnnotationTryInfersErrorSet(t *testing.T) {
 error IoErr:
     Bad
 
-def applyDouble[errorset R](f: func() -> i64 error[R]) -> i64 error[R]:
+def applyDouble[errorset R](f: fn() -> i64 error[R]) -> i64 error[R]:
     return try f()
 
 def seven() -> i64 error[IoErr]:
@@ -59,7 +59,7 @@ error IoErr:
 error NetErr:
     Down
 
-def wantsIo(f: func() -> i64 error[IoErr]) -> i64 error[IoErr]:
+def wantsIo(f: fn() -> i64 error[IoErr]) -> i64 error[IoErr]:
     return try f()
 
 def use() -> i64 error[IoErr]:

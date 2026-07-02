@@ -8,4 +8,4 @@ def stream_axpy_u64_impl(dst: u64&, src: u64&, len: usize, rounds: usize, scale:
 
     return acc
 
-export func elisa_core_stream_axpy_u64(dst: u64&, src: u64&, len: usize, rounds: usize, scale: u64) -> u64 = stream_axpy_u64_impl
+export fn elisa_core_stream_axpy_u64(dst: u64&, src: u64&, len: usize, rounds: usize, scale: u64) -> u64 = stream_axpy_u64_impl

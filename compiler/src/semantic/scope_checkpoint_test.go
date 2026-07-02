@@ -451,7 +451,7 @@ func TestAnalyzeNamedFunctionCallArgsThroughGlobalAlias(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_alias.elisa", `def add(x: i64, y: i64) -> i64:
     return x + y
 
-global runner: func(i64, i64) -> i64 = add
+global runner: fn(i64, i64) -> i64 = add
 
 def build() -> i64:
     can Global.Read:
@@ -467,7 +467,7 @@ def build() -> i64:
 
 func TestAnalyzeNamedFunctionCallArgsThroughGlobalFieldAlias(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "named_function_call_args_global_field_alias.elisa", `struct CallbackBox:
-    run: func(i64, i64) -> i64
+    run: fn(i64, i64) -> i64
 
 def add(x: i64, y: i64) -> i64:
     return x + y

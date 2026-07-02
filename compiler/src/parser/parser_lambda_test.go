@@ -9,7 +9,7 @@ import (
 )
 
 func TestParseLambdaExprPreservesKeywordAndBlockBody(t *testing.T) {
-	file, errs := parseSourceFile(t, "def build() -> func(i64) -> i64:\n    return fn (value: i64) -> i64:\n        return value + 1\n")
+	file, errs := parseSourceFile(t, "def build() -> fn(i64) -> i64:\n    return fn (value: i64) -> i64:\n        return value + 1\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -37,7 +37,7 @@ func TestParseLambdaExprPreservesKeywordAndBlockBody(t *testing.T) {
 }
 
 func TestParseLambdaExprRemainsContextualAndPreservesLambdaRune(t *testing.T) {
-	src := "def keep(lambda: int) -> int:\n    return lambda\n\ndef build() -> func(i64) -> i64:\n    return λ(value) => value + 1\n"
+	src := "def keep(lambda: int) -> int:\n    return lambda\n\ndef build() -> fn(i64) -> i64:\n    return λ(value) => value + 1\n"
 	file, errs := parseSourceFile(t, src)
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
@@ -71,7 +71,7 @@ func TestParseLambdaExprRemainsContextualAndPreservesLambdaRune(t *testing.T) {
 }
 
 func TestParseLambdaExprAcceptsInlineFatArrowBody(t *testing.T) {
-	file, errs := parseSourceFile(t, "def build() -> func(i64) -> i64:\n    return fn (value: i64) => value + 1\n")
+	file, errs := parseSourceFile(t, "def build() -> fn(i64) -> i64:\n    return fn (value: i64) => value + 1\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -119,8 +119,36 @@ func TestParseLambdaKeywordRejectsRemovedLambdaSpelling(t *testing.T) {
 
 // `fn` stays an ordinary identifier: a call and a bare reference are not lambdas.
 func TestParseFnRemainsOrdinaryIdentifier(t *testing.T) {
-	src := "def apply(fn: func(int) -> int, x: int) -> int:\n    return fn(x)\n"
+	src := "def apply(fn: fn(int) -> int, x: int) -> int:\n    return fn(x)\n"
 	if _, errs := parseSourceFile(t, src); len(errs) != 0 {
 		t.Fatalf("`fn` as a param + call should parse, got: %v", errs)
+	}
+}
+
+// The `func` type keyword has been renamed to `fn` (one keyword for "function" in both
+// type and value position). `func` in type position and `export func` are directed errors.
+func TestParseFuncTypeKeywordRenamedToFn(t *testing.T) {
+	// `fn(...) -> T` in type position parses; a param named `fn` with an `fn` type is fine.
+	if _, errs := parseSourceFile(t, "def apply(fn: fn(i64) -> i64, x: i64) -> i64:\n    return fn(x)\n"); len(errs) != 0 {
+		t.Fatalf("`fn` function type should parse, got: %v", errs)
+	}
+	// `func` in type position is a directed error.
+	_, errs := parseSourceFile(t, "def apply(f: func(i64) -> i64) -> void:\n    pass\n")
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "the `func` type keyword has been renamed to `fn`") {
+		t.Fatalf("expected the func-rename diagnostic, got: %v", errs)
+	}
+	// A variable named `func` (value position) is untouched by the rename.
+	if _, errs := parseSourceFile(t, "def g(func: i64) -> i64:\n    return func + 1\n"); len(errs) != 0 {
+		t.Fatalf("`func` as a variable name should still parse, got: %v", errs)
+	}
+}
+
+func TestParseExportFuncRenamedToExportFn(t *testing.T) {
+	if _, errs := parseSourceFile(t, "def impl(x: i64) -> i64:\n    return x\n\nexport fn probe(x: i64) -> i64 = impl\n"); len(errs) != 0 {
+		t.Fatalf("`export fn` should parse, got: %v", errs)
+	}
+	_, errs := parseSourceFile(t, "def impl(x: i64) -> i64:\n    return x\n\nexport func probe(x: i64) -> i64 = impl\n")
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "`export func` has been renamed to `export fn`") {
+		t.Fatalf("expected the export-func rename diagnostic, got: %v", errs)
 	}
 }

@@ -24,8 +24,8 @@ def keep_left[T](left: T, right: T) -> T:
 	return left
 
 export global seed as ctx_seed
-export func vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
-export func vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
+export fn vec2i_add(left: Vec2i, right: Vec2i) -> Vec2i = vec_add_i32
+export fn vec2i_keep_left(left: Vec2i, right: Vec2i) -> Vec2i = keep_left[Vec[i32]]
 `
 	result, errs := parseAndAnalyze(t, "export_wrappers.elisa", src)
 	requireNoErrors(t, errs)
@@ -292,13 +292,13 @@ func TestAnalyzeRejectsExportedArrayBoundaryTypes(t *testing.T) {
 	src := `def pass_array(value: i32[4]) -> i32[4]:
 	return value
 
-export func pass_array_c(value: i32[4]) -> i32[4] = pass_array
+export fn pass_array_c(value: i32[4]) -> i32[4] = pass_array
 `
 	_, errs := parseAndAnalyze(t, "export_array_boundary_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "export func \"pass_array_c\" is not C-ABI-compatible") {
+	if !strings.Contains(strings.Join(errs, "\n"), "export fn \"pass_array_c\" is not C-ABI-compatible") {
 		t.Fatalf("expected export array boundary rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

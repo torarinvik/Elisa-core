@@ -26,16 +26,16 @@ func TestRunCLIIndexedFuncElementCall(t *testing.T) {
 def two() -> i64:
     return 2
 
-def applyAt(fs: darray[func() -> i64], i: usize) -> i64:
+def applyAt(fs: darray[fn() -> i64], i: usize) -> i64:
     return fs[i]()
 
 struct Dispatch:
-    handlers: darray[func() -> i64]
+    handlers: darray[fn() -> i64]
 
 @test
 def func_element_index_call_test() -> void:
     can Abort.Panic, Memory.Allocate:
-        fs: darray[func() -> i64] = [one, two]
+        fs: darray[fn() -> i64] = [one, two]
         if fs[0]() != 1:
             panic("fs[0]() != 1")
         if fs[1]() != 2:

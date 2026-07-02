@@ -863,7 +863,7 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 		"def expression(state: mutable ParserState&) -> Token:",
 		"=== semantic ===",
 		"func expression",
-		"signature: func(mutable ParserState&) -> Token",
+		"signature: fn(mutable ParserState&) -> Token",
 		"func __grammar_try__PascalFrontend__expression",
 		"return_isolation:",
 		"fact_snapshot:",

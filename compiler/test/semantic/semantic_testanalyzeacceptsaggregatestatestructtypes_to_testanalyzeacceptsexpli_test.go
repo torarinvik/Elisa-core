@@ -490,7 +490,7 @@ def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: u8&) -> int can[Console.Write]
 
-def invoke_writer(fn: func(u8&) -> int can[Console.Write], text: u8&) -> int can[Console.Write]:
+def invoke_writer(fn: fn(u8&) -> int can[Console.Write], text: u8&) -> int can[Console.Write]:
     return fn(text)
 
 def run() -> int can[Console.Write]:
@@ -503,7 +503,7 @@ def run() -> int can[Console.Write]:
 func TestAnalyzeAcceptsPermissionPolymorphicFunctionWrappers(t *testing.T) {
 	src := `extern puts(text: u8&) -> int can[Console.Write]
 
-def invoke_writer[permission P](fn: func(u8&) -> int can[P], text: u8&) -> int can[P]:
+def invoke_writer[permission P](fn: fn(u8&) -> int can[P], text: u8&) -> int can[P]:
     return fn(text)
 
 def run() -> int can[Console.Write]:
@@ -515,7 +515,7 @@ def run() -> int can[Console.Write]:
 	requireFunctionReturnTypeString(t, result, "invoke_writer", "int")
 }
 func TestAnalyzeRejectsPermissionParamMemberAccess(t *testing.T) {
-	src := `def bad[permission P](fn: func() -> void can[P.Write]) -> void:
+	src := `def bad[permission P](fn: fn() -> void can[P.Write]) -> void:
     fn()
 `
 	_, errs := parseAndAnalyze(t, "permission_param_member_access_reject.elisa", src)
@@ -531,13 +531,13 @@ func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
     return value + 1
 
 def call_erased(raw: void&, value: i64) -> i64:
-	fn: func(i64) -> i64 = raw.cast[func(i64) -> i64]
+	fn: fn(i64) -> i64 = raw.cast[fn(i64) -> i64]
     return fn(value)
 
 def run() -> i64:
 	raw: void& = inc.cast[void&]
 	bits: uintptr = raw.cast[uintptr]
-	fn: func(i64) -> i64 = bits.cast[func(i64) -> i64]
+	fn: fn(i64) -> i64 = bits.cast[fn(i64) -> i64]
 	return call_erased(fn.cast[void&], 40)
 `
 	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.elisa", src)
@@ -550,11 +550,11 @@ func TestAnalyzeAcceptsExplicitGenericFunctionSpecializationValues(t *testing.T)
 	src := `def id[T](value: T) -> T:
     return value
 
-def apply_i64(fn: func(i64) -> i64, value: i64) -> i64:
+def apply_i64(fn: fn(i64) -> i64, value: i64) -> i64:
     return fn(value)
 
 def run() -> i64:
-    fn: func(i64) -> i64 = id[i64]
+    fn: fn(i64) -> i64 = id[i64]
     return apply_i64(fn, 7)
 `
 	result, errs := parseAndAnalyze(t, "explicit_generic_function_specialization.elisa", src)

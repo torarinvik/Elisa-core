@@ -24,7 +24,7 @@ func TestRunCLIErrorSetParamInlineLambda(t *testing.T) {
 	src := `error IoErr:
     Bad
 
-def applyOne[errorset R](f: func(i64) -> i64 error[R], x: i64) -> i64 error[R]:
+def applyOne[errorset R](f: fn(i64) -> i64 error[R], x: i64) -> i64 error[R]:
     v: i64 = try f(x)
     return v * 2
 

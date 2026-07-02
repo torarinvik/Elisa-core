@@ -81,7 +81,7 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		elem := p.parseTypeExpr()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
+	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "fn" || p.cur().Text == "func") {
 		return p.parseFuncTypeExpr()
 	}
 	var typ ast.TypeExpr
@@ -257,7 +257,7 @@ func (p *Parser) parseTypeExprWithoutErrorUnionSuffix() ast.TypeExpr {
 		elem := p.parseTypeExprWithoutErrorUnionSuffix()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}
 	}
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
+	if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "fn" || p.cur().Text == "func") {
 		return p.parseFuncTypeExpr()
 	}
 	if p.peek() == lexer.TOKEN_LPAREN {
@@ -893,6 +893,12 @@ func (p *Parser) looksLikeQueryExpr() bool {
 }
 func (p *Parser) parseFuncTypeExpr() ast.TypeExpr {
 	pos := p.cur().Pos
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "func" {
+		// `func` as the function-type keyword has been renamed to `fn` (which doubles
+		// as the lambda head — one keyword for "function" in type and value position,
+		// like Rust). Directed error; recover by parsing the type as usual.
+		p.errorAt(pos, "the `func` type keyword has been renamed to `fn`; write `fn(...) -> T`")
+	}
 	p.expect(lexer.TOKEN_IDENT)
 	p.expect(lexer.TOKEN_LPAREN)
 	params := make([]ast.TypeExpr, 0)

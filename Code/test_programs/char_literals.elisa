@@ -26,4 +26,4 @@ def char_literals_main_impl() -> int:
         assert_eq(char_array_checksum(), 208)
         return 0
 
-export func main() -> int = char_literals_main_impl
+export fn main() -> int = char_literals_main_impl

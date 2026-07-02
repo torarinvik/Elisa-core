@@ -386,7 +386,7 @@ func TestGenerateLLVMIRPropagatesHotAttributeToExportWrapper(t *testing.T) {
 def helper(value: int) -> int:
 	return value + 1
 
-export func public_helper(value: int) -> int = helper
+export fn public_helper(value: int) -> int = helper
 `)
 	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
 	if err != nil {
@@ -405,7 +405,7 @@ func TestGenerateLLVMIRPropagatesNoRecurseAttributeToExportWrapper(t *testing.T)
 def helper(value: int) -> int:
 	return value + 1
 
-export func public_helper(value: int) -> int = helper
+export fn public_helper(value: int) -> int = helper
 `)
 	g, err := compileLLVMModule(result, OptimizationLevel2, DefaultPackedLoweringProfile())
 	if err != nil {

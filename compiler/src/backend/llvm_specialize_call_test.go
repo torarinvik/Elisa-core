@@ -11,10 +11,10 @@ func TestGenerateLLVMIRKeepsGenericCallBindingsPerSpecialization(t *testing.T) {
 	src := `struct SharedGate:
     handle: i64
 
-def ctx_concurrency_work1_new[A, R](fn: func(A) -> R, arg: A) -> R:
+def ctx_concurrency_work1_new[A, R](fn: fn(A) -> R, arg: A) -> R:
     return fn(arg)
 
-def run_pair[A, R](fn: func(A) -> R, arg: A) -> R:
+def run_pair[A, R](fn: fn(A) -> R, arg: A) -> R:
     return ctx_concurrency_work1_new(fn, arg)
 
 def work_int(value: i64) -> i64:
