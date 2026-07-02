@@ -166,34 +166,21 @@ func (p *Parser) parseWaitAllStmt() ast.Stmt {
 		},
 	}
 }
+// parseNotifyStmt recognizes the removed `notify one` / `notify all` condition-variable
+// notification statement and rejects it. The sugar desugared to a raw `notify_one` /
+// `notify_all` CondVar call, which the analyzer already rejects for user code as removed
+// raw concurrency surface — so the statement form only ever produced a two-stage failure.
+// Its wait counterpart (`cond_wait`) was likewise removed in favor of `predicate_wait`;
+// structured `wait all` (task-group join) is a separate, retained construct. `notify`
+// remains a usable ordinary identifier.
 func (p *Parser) parseNotifyStmt() ast.Stmt {
 	pos := p.cur().Pos
 	p.expectIdentText("notify")
-	kind := p.expect(lexer.TOKEN_IDENT)
-	target := p.parseExpr()
+	p.errorAt(pos, "the `notify one` / `notify all` statement has been removed; use `predicate_notify_one` / `predicate_notify_all` or a notifier tied to the protected-state predicate (structured `wait all` is unaffected)")
+	_ = p.expect(lexer.TOKEN_IDENT) // `one` / `all`
+	_ = p.parseExpr()
 	p.expectNewline()
-	callee := "notify_one"
-	if kind.Text == "all" {
-		callee = "notify_all"
-	}
-	return &ast.ExprStmt{
-		Position: pos,
-		Expr: &ast.CallExpr{
-			Position: pos,
-			Func:     &ast.Ident{Position: pos, Name: callee},
-			Args: []ast.Expr{&ast.CastExpr{
-				Position: pos,
-				Operand:  &ast.AddrOfExpr{Position: pos, Operand: target},
-				Target: &ast.RefType{
-					Position: pos,
-					Elem:     &ast.NamedType{Position: pos, Name: "CondVar"},
-					State:    ast.RefStateNonNull,
-					Storage:  ast.RefStorageAny,
-					Explicit: true,
-				},
-			}},
-		},
-	}
+	return &ast.PassStmt{Position: pos}
 }
 func (p *Parser) parseLockStmt() *ast.LockStmt {
 	pos := p.cur().Pos
