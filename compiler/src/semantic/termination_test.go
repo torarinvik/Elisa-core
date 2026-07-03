@@ -166,3 +166,51 @@ def caller(n: usize) -> usize:
 		}
 	}
 }
+
+// SOUNDNESS (docs/118 brick 118-0): a recursive call HIDDEN inside a `get` unwrap
+// must still get its termination obligation. Before the walkStaticExpr fix, calls
+// inside get/else/try/catch/match EXPRESSIONS were invisible to the termination
+// call collector, so a function with a visible decreasing call (`f(n-1)`) AND a
+// hidden diverging one (`get f(n+1)`) was UNSOUNDLY proven terminating.
+func TestTerminationHiddenGetCallRefuted(t *testing.T) {
+	src := `
+def f(n: i64) -> i64?:
+    decreases n
+    if n > 100:
+        return get f(n + 1)
+    if n <= 0:
+        return 0
+    return f(n - 1)
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_hidden_get.elisa", src)
+	errText := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errText, "cannot prove the `decreases` measure strictly decreases") {
+		t.Fatalf("expected the hidden `get f(n+1)` call to be refuted (soundness), got:\n%s", errText)
+	}
+}
+
+// A recursive cycle whose calls are all inside `get` unwraps is DETECTED as a
+// mutual cycle (not the false "decreases … is unused"). Before the fix its
+// `decreases` was silently ignored.
+func TestTerminationGetHiddenCycleDetected(t *testing.T) {
+	src := `
+struct S:
+    n: mutable i64
+
+def a(s: mutable S&) -> i64?:
+    decreases s.n
+    if s.n <= 0:
+        return 0
+    v: i64 = get s.b()
+    return v
+
+def b(s: mutable S&) -> i64?:
+    s.n <- s.n - 1
+    return s.a()
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "term_get_cycle.elisa", src)
+	errText := strings.Join(result.Errors(), "\n")
+	if strings.Contains(errText, "the termination clause is unused") {
+		t.Fatalf("cycle through `get` must be DETECTED, not reported unused; got:\n%s", errText)
+	}
+}

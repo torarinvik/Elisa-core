@@ -92,12 +92,16 @@ gets stronger. No parser refactor, no live fuel, no runtime cost.
 
 ## 4. Brick plan
 
-- **118-0 — SCC detection for the real descent (Wall 2). [prereq]** Pin why
-  `collectRecursiveSCCEdges` yields 0 edges on the parser's cycle while minimal cycles
-  detect fine. Likely a traversal/scale limit in the reach-root walk over a large call
-  graph, or a resolve gap on a specific call shape in the chain. Fix so the cycle is seen;
-  a genuinely-recursive `decreases` must never silently become `unused`. Standalone value:
-  every mutual-recursion `decreases` benefits.
+- **118-0 — SCC detection for the real descent (Wall 2). [LANDED]** Root cause: the static
+  call walker `walkStaticExpr` did not descend into the optional/error-unwrap and
+  try/catch/match EXPRESSIONS (`get`/`else`/`try`/`catch`/`match`), so any call inside them
+  was invisible to the termination call collector — and the parser's core recursion is
+  `left = get parser.unary_expr()`. This was a **soundness hole**, not just a missed warning:
+  a function with a visible decreasing call and a hidden diverging one (`get f(n+1)`) was
+  UNSOUNDLY proven terminating. Fixed by adding the five cases to `walkStaticExpr`; the
+  parser cycle is now detected (falls through to Wall 1). Regression tests
+  `TestTerminationHiddenGetCallRefuted` / `TestTerminationGetHiddenCycleDetected`. Strict
+  improvement to every consumer of the walker (structural induction + several lints).
 - **118-1 — `ensure`/`preserves` on the token primitives. [stage1]** Add the progress
   contracts (§3.1) to `advance`/`expect` and `preserves position` to the non-consumers.
   Intraprocedurally checkable now; lands independently as executable documentation of the

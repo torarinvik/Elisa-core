@@ -1846,6 +1846,36 @@ func (a *Analyzer) walkStaticExpr(expr ast.Expr, visitExpr func(ast.Expr) bool) 
 		return a.walkStaticExpr(n.Operand, visitExpr)
 	case *ast.SpecializeExpr:
 		return a.walkStaticExpr(n.Operand, visitExpr)
+	// Optional/error-unwrap and try/catch/match EXPRESSIONS wrap a value expression
+	// that can itself contain calls (e.g. `get parser.unary_expr()`). Descending into
+	// them is required for soundness: a recursive call hidden inside `get`/`else`/`try`
+	// would otherwise be invisible to the termination call collector, so its `decreases`
+	// obligation would be silently skipped (a function could be "proven" terminating
+	// while a hidden call diverges).
+	case *ast.GetExpr:
+		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Fallback, visitExpr)
+	case *ast.UnwrapElseExpr:
+		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Fallback, visitExpr)
+	case *ast.TryExpr:
+		return a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Fallback, visitExpr)
+	case *ast.CatchExpr:
+		if a.walkStaticExpr(n.Value, visitExpr) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if a.walkStaticStmts(arm.Body, visitExpr) {
+				return true
+			}
+		}
+	case *ast.MatchExpr:
+		if a.walkStaticExpr(n.Value, visitExpr) || a.walkStaticExpr(n.Store, visitExpr) {
+			return true
+		}
+		for _, arm := range n.Arms {
+			if a.walkStaticStmts(arm.Body, visitExpr) {
+				return true
+			}
+		}
 	}
 	return false
 }
