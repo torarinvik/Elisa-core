@@ -101,6 +101,32 @@ gets stronger. No parser refactor, no live fuel, no runtime cost.
 
 ## 4. Brick plan
 
+> **STATUS (landed).** The stack is built end to end. The original 118-1 blocker
+> ("no `old()`-vs-mutation-flow reasoning") turned out NOT to need new foundational
+> machinery — the weakest-precondition engine (`analyzer_vc_wp.go`) already models
+> `old()` as an entry snapshot, single-level `if`/`else` merges, and backward
+> substitution. It only lacked FIELD places. So the realized bricks are:
+>
+> - **A — field places in WP** (`analyzer_vc_wp.go`, `analyzer_vc_ir.go`). A scalar
+>   `p.field` of a `mutable T&` param lowers to a substitutable `vcVar` (was opaque),
+>   so `ensure p.pos >= old(p.pos)` and the conditional-increment form now discharge.
+>   Aliasing gate: field-place WP is admitted only with ≤1 reference param.
+> - **B — `=>` implication postcondition** (both stage0 and stage1 parsers). Accepted
+>   as a spelling of the existing `implies` infix (`(not A) or B`). Makes the
+>   conditional-strict contract writable; the EOF-saturating branch discharges via the
+>   false guard. stage1 parses+resolves it (no discharge there — stage1 has no prover).
+> - **C/D — callee-summary decrease certificate** (`analyzer_termination_callee_summary.go`).
+>   When the affine proof reports the measure unchanged (Wall 1), compose the consumer's
+>   `ensure`/`changes`/`requires` into an SMT decrease proof over the two-symbol
+>   entry/current model. Field-precise `changes p.pos` is what lets the unchanged places
+>   (`stop`) cancel; a coarse `changes p` soundly declines. Pattern-restricted per §5.
+>
+> Original 118-1..4 map onto A+B (the primitives' contracts) and C/D (the composition).
+> The one honest gap vs. the *full* real parser: the certificate handles a single
+> straight-line-prefix consumer with pure early-exit guards; the mutual-recursion cycle
+> (§4 118-3) and deeply-branched descent are the remaining extension surface.
+
+
 - **118-0 — SCC detection for the real descent (Wall 2). [LANDED]** Root cause: the static
   call walker `walkStaticExpr` did not descend into the optional/error-unwrap and
   try/catch/match EXPRESSIONS (`get`/`else`/`try`/`catch`/`match`), so any call inside them
