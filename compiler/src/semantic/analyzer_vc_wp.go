@@ -78,31 +78,38 @@ func augAssignBaseOp(op lexer.TokenKind) (lexer.TokenKind, bool) {
 func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 	switch n := stmt.(type) {
 	case *ast.VarDeclStmt:
-		if n.Value == nil || !exprIsPureArith(n.Value) {
+		if n.Value == nil || !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
 		}
 		return wpAssign{name: n.Name, rhs: n.Value}, true
 	case *ast.AssignStmt:
-		id, ok := n.Target.(*ast.Ident)
-		if n.Optional || !ok || id == nil || !exprIsPureArith(n.Value) {
+		if n.Optional || !exprIsPureArithOrRead(n.Value) {
 			return wpAssign{}, false
 		}
-		return wpAssign{name: id.Name, rhs: n.Value}, true
+		key, ok := a.wpPlaceKey(n.Target)
+		if !ok {
+			return wpAssign{}, false
+		}
+		return wpAssign{name: key, rhs: n.Value}, true
 	case *ast.AugAssignStmt:
-		id, ok := n.Target.(*ast.Ident)
-		if !ok || id == nil || !exprIsPureArith(n.Value) {
+		if !exprIsPureArithOrRead(n.Value) {
+			return wpAssign{}, false
+		}
+		key, ok := a.wpPlaceKey(n.Target)
+		if !ok {
 			return wpAssign{}, false
 		}
 		baseOp, ok := augAssignBaseOp(n.Op)
 		if !ok {
 			return wpAssign{}, false
 		}
-		// `x OP= e`  ≡  `x := x OP e`. The synthesized RHS reads its own target, exactly the case WP
-		// backward substitution exists to handle (it is NOT recorded as a one-symbol equality fact).
-		leftIdent := &ast.Ident{Position: n.Target.Pos(), Name: id.Name}
+		// `place OP= e`  ≡  `place := place OP e`. The synthesized RHS reads its own target (an ident or a
+		// scalar field place), exactly the case WP backward substitution exists to handle (it is NOT
+		// recorded as a one-symbol equality fact).
+		leftRead := cloneReadPlace(n.Target)
 		rhs := &ast.BinaryExpr{
 			Position: n.Pos(),
-			Left:     leftIdent,
+			Left:     leftRead,
 			Op:       baseOp,
 			Right:    n.Value,
 		}
@@ -111,13 +118,77 @@ func (a *Analyzer) captureScalarAssign(stmt ast.Stmt) (wpAssign, bool) {
 		// CLEAN `(+ y 100)` with no `(mod 2^W)` — proving false `>=` postconditions on a wrapping unsigned
 		// type (`u8` y += 100 wraps 200->44 but the engine accepted `result >= x`). With the type present
 		// the wrap model engages and the obligation correctly declines.
-		if t := a.augAssignTargetType(n.Target, id.Name); t != nil {
+		if t := a.augAssignTargetType(n.Target, key); t != nil {
 			a.exprTypes[rhs] = t
-			a.exprTypes[leftIdent] = t
+			a.exprTypes[leftRead] = t
 		}
-		return wpAssign{name: id.Name, rhs: rhs}, true
+		return wpAssign{name: key, rhs: rhs}, true
 	}
 	return wpAssign{}, false
+}
+
+// wpPlaceKey returns the WP substitution key for an assignment target WP can thread: a bare identifier
+// (its name) or a scalar struct-field place `p.pos` reached through a reference root (its syntactic
+// projection name, matching the vcVar name lowerVCTerm mints for the field READ). A field place is
+// admitted only when the enclosing function has AT MOST ONE reference-typed parameter — otherwise two
+// distinct syntactic paths (`a.pos`, `b.pos`) could alias the same location, and a WP-threaded write to
+// one would silently miss the aliased read of the other, unsoundly leaving its exit value equal to
+// `old()`. Declines on any other target shape.
+func (a *Analyzer) wpPlaceKey(target ast.Expr) (string, bool) {
+	switch t := stripOptimizationParens(target).(type) {
+	case *ast.Ident:
+		return t.Name, true
+	case *ast.FieldExpr:
+		if !fieldPlaceRootedAtIdent(t) || !a.currentFuncSingleRefRoot() {
+			return "", false
+		}
+		return smtProjectionName(t), true
+	}
+	return "", false
+}
+
+// fieldPlaceRootedAtIdent reports whether a field-projection chain bottoms out at a plain identifier
+// (`p.pos`, `p.a.b`) rather than a call/index/other computed base — the only shape whose projection name
+// is a stable place key.
+func fieldPlaceRootedAtIdent(fe *ast.FieldExpr) bool {
+	obj := stripOptimizationParens(fe.Object)
+	for {
+		switch o := obj.(type) {
+		case *ast.Ident:
+			return true
+		case *ast.FieldExpr:
+			obj = stripOptimizationParens(o.Object)
+		default:
+			return false
+		}
+	}
+}
+
+// currentFuncSingleRefRoot reports whether the enclosing function has at most one reference-typed
+// parameter, so field places on distinct syntactic roots cannot alias (see wpPlaceKey).
+func (a *Analyzer) currentFuncSingleRefRoot() bool {
+	if a.currentFuncDecl == nil {
+		return false
+	}
+	refCount := 0
+	for _, p := range a.currentFuncDecl.Params {
+		if _, ok := p.Type.(*ast.RefType); ok {
+			refCount++
+		}
+	}
+	return refCount <= 1
+}
+
+// cloneReadPlace builds a fresh READ expression for an aug-assignment target (ident or field place), so
+// the synthesized `place OP e` RHS re-reads the target without sharing the lvalue node.
+func cloneReadPlace(target ast.Expr) ast.Expr {
+	switch t := stripOptimizationParens(target).(type) {
+	case *ast.Ident:
+		return &ast.Ident{Position: t.Position, Name: t.Name}
+	case *ast.FieldExpr:
+		return &ast.FieldExpr{Position: t.Position, Object: t.Object, Field: t.Field, Safe: t.Safe}
+	}
+	return target
 }
 
 // augAssignTargetType resolves the type of an aug-assignment target. The target is an lvalue, so its
@@ -129,7 +200,17 @@ func (a *Analyzer) augAssignTargetType(target ast.Expr, name string) Type {
 			return sym.Type
 		}
 	}
-	return a.exprTypes[target]
+	if t := a.exprTypes[target]; t != nil {
+		return t
+	}
+	// A field-place target (`p.pos`) has no scope symbol under its projection key; recover the field's
+	// declared width from the object's struct type so the synthetic `place OP e` node wraps correctly.
+	if fe, ok := stripOptimizationParens(target).(*ast.FieldExpr); ok {
+		if rt, ok := a.fieldReadResolvedType(fe); ok {
+			return rt
+		}
+	}
+	return nil
 }
 
 // captureScalarAssigns captures a flat block of scalar assignments (a conditional branch). Returns

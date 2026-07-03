@@ -512,6 +512,22 @@ func (tr *smtTranslator) lowerVCTerm(expr ast.Expr, env map[string]string) (vcTe
 			return vcVar{Name: n.Name, SMT: s}, true
 		}
 		return vcOpaque{SMT: s}, true
+	case *ast.FieldExpr:
+		// A scalar struct-field place `p.pos` becomes a substitutable place variable keyed by its
+		// syntactic projection, so weakest-precondition transport can thread a `p.pos <- p.pos + 1`
+		// mutation and relate the exit value to `old(p.pos)`. termEnv emits exactly smtVar(projection)
+		// only for a plain numeric field READ; a const-valued field, `.count`/`.len`, or a non-numeric
+		// field take other paths and stay opaque. The place-aliasing gate (single reference root) is
+		// enforced where the MUTATION is captured (wpPlaceKey), so a bare read here is always safe to make
+		// substitutable — substitution only ever runs over a captured, gated body.
+		s, ok := tr.termEnv(n, env)
+		if !ok {
+			return nil, false
+		}
+		if key := smtProjectionName(n); s == smtVar(key) {
+			return vcVar{Name: key, SMT: s}, true
+		}
+		return vcOpaque{SMT: s}, true
 	case *ast.UnaryExpr:
 		if n.Op == lexer.TOKEN_MINUS {
 			if inner, ok := tr.lowerVCTerm(n.Operand, env); ok {
