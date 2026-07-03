@@ -670,6 +670,14 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		C.LLVMBuildRet(s.builder, errorCode)
 		return nil
 	}
+	if isVoidType(s.fnType.Return) {
+		// `return <void-expr>` (e.g. `return void_fn()`): the value expression was
+		// already emitted for its side effects by the caller. A void function must
+		// terminate with RetVoid — building a value `ret` here yields an invalid
+		// `ret void <badref>` that the module verifier rejects.
+		C.LLVMBuildRetVoid(s.builder)
+		return nil
+	}
 	coerced, err := s.coerceValue(value, actual, s.fnType.Return)
 	if err != nil {
 		return err

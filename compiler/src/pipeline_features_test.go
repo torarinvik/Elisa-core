@@ -242,6 +242,34 @@ func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) 
 	}
 }
 
+// A `return <void-expr>` — forwarding another void function's call in a void-returning
+// function — must lower to `RetVoid`, not a value `ret`. emitFunctionReturn previously
+// coerced the void call result and built `ret void <badref>`, which the module verifier
+// rejects with "Found return instr that returns non-void in Function of void return type".
+func TestRunCLILowersReturnOfVoidCall(t *testing.T) {
+	t.Parallel()
+	fixtureDir := t.TempDir()
+	sourcePath := filepath.Join(fixtureDir, "return_void_call.elisa")
+	src := "def do_nothing() -> void:\n    return\n\ndef wrapper() -> void:\n    return do_nothing()\n\ndef main() -> i64:\n    wrapper()\n    return 0\n"
+	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write return-void-call fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "llvm", sourcePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected return-of-void-call fixture to compile, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	// The void call is emitted for its side effect, then the function terminates with RetVoid.
+	if !strings.Contains(output, "call void @do_nothing()") {
+		t.Fatalf("expected wrapper to call do_nothing, got:\n%s", output)
+	}
+	if strings.Contains(output, "ret void <badref>") {
+		t.Fatalf("emitted an invalid value ret in a void function:\n%s", output)
+	}
+}
+
 func TestRunCLICompilesRegionOwnedStructFixture(t *testing.T) {
 	t.Parallel()
 	sourcePath := filepath.Join(repoRootFromMainTest(t), "Code", "test_programs", "region_owned_structs.elisa")
