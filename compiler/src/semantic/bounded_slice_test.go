@@ -75,8 +75,8 @@ func TestBoundedViewRejectsWriteFromImmutableSource(t *testing.T) {
     if xs[0:3] is s:
         s[1] <- 25
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	if !strings.Contains(allDiagnostics(result), "cannot mutate through readonly ref") {
-		t.Fatalf("expected write through view of immutable source to be rejected, got:\n%s", allDiagnostics(result))
+	if !strings.Contains(allDiagnostics(result), "cannot assign to read-only view index result") {
+		t.Fatalf("expected write through readonly view (immutable source) to be rejected, got:\n%s", allDiagnostics(result))
 	}
 }
 
@@ -86,8 +86,8 @@ func TestBareSliceViewRejectsWriteFromImmutableSource(t *testing.T) {
     s: view[i32] = xs[0:3]
     s[1] <- 25
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
-	if !strings.Contains(allDiagnostics(result), "cannot mutate through readonly ref") {
-		t.Fatalf("expected write through bare view of immutable source to be rejected, got:\n%s", allDiagnostics(result))
+	if !strings.Contains(allDiagnostics(result), "cannot assign to read-only view index result") {
+		t.Fatalf("expected write through bare readonly view (immutable source) to be rejected, got:\n%s", allDiagnostics(result))
 	}
 }
 

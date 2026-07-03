@@ -230,7 +230,12 @@ type DArrayType struct {
 // split into a static `view` and a dynamic `dview`; those were unified, and the `dview` spelling and
 // the `DArrayViewType` name were removed.) SurfaceName is the spelling used in diagnostics.
 type ViewType struct {
-	Elem        Type
+	Elem Type
+	// Mutable distinguishes `mutable view[T]` (a writable borrow, like `&mut [T]`) from the default
+	// read-only `view[T]` (like `&[T]`). A slice inherits its source's mutability; writing through a
+	// view (indexed store or mutable-ref iteration) requires the STATIC type to be Mutable, and a
+	// `mutable view[T]` cannot be assigned from a read-only view (no laundering — see AssignableTo).
+	Mutable     bool
 	Begin       string
 	End         string
 	SurfaceName string

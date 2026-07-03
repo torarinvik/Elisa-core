@@ -209,6 +209,12 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 		if view.SurfaceName == "packedtags" {
 			return "packed store tag view index result", true
 		}
+		// A read-only `view[T]` is a look-only borrow: indexed writes through it are rejected. A
+		// `mutable view[T]` (Mutable) permits write-through, so it is NOT value-only. To mutate via a
+		// read-only view you must instead hold a `mutable view[T]` (which requires a mutable source).
+		if !view.Mutable {
+			return "read-only view index result", true
+		}
 	}
 	if _, ok := t.(*DStrType); ok {
 		return "string index", true
@@ -232,6 +238,9 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 		}
 		if view.SurfaceName == "packedtags" {
 			return "packed store tag view index result", true
+		}
+		if !view.Mutable {
+			return "read-only view index result", true
 		}
 	}
 	if _, ok := ref.Elem.(*DStrType); ok {

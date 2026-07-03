@@ -363,7 +363,10 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		if tt.SurfaceName != "" && tt.SurfaceName != "view" {
 			return iterLoopSourceInfo{}, false
 		}
-		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: !readOnly}, true
+		// A read-only `view[T]` binds by value or immutable ref only; a `mutable view[T]` additionally
+		// permits mutable element refs (write-through). `readOnly` facts can further downgrade a
+		// mutable view (e.g. wrapped in `readonly(...)`).
+		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: tt.Mutable && !readOnly}, true
 	case *StoreRowsViewType:
 		return iterLoopSourceInfo{ItemType: &StoreRowViewType{Store: tt.Store}}, true
 	case *DStrType:

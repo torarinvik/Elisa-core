@@ -34,6 +34,19 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		var valueType Type
 		if n.Type != nil {
 			declType = a.resolveType(n.Type)
+			// A `mutable`-declared view local is a WRITABLE view (`mutable view[T]`). In a var-decl the
+			// leading `mutable` is parsed as the binding's mutability (n.Mutable), not folded into the
+			// type the way a param's `mutable view[T]` is — so bridge it here: `mutable` means "I can
+			// mutate this", which for a view is write-through (exactly as it means push for a `mutable
+			// darray`). A read-only view keeps `v: view[T]`. AssignableTo still forbids backing a
+			// mutable view with a read-only (immutable-source) slice.
+			if n.Mutable {
+				if view, ok := declType.(*ViewType); ok && !view.Mutable {
+					cloned := *view
+					cloned.Mutable = true
+					declType = &cloned
+				}
+			}
 		}
 		if n.Value != nil {
 			if n.Type == nil && a.ambiguousDArrayBuilders != nil && a.ambiguousDArrayBuilders[n] {
@@ -1023,7 +1036,13 @@ func concreteDArrayViewBindingType(declared Type, actual Type) (Type, bool) {
 	if !SameType(declaredView.Elem, actualView.Elem) {
 		return nil, false
 	}
-	return actualView, true
+	// Specialize to the actual slice's concrete bounds (for indexed bounds-checking), but keep the
+	// DECLARED mutability: `v: view[T] = mutableSlice` narrows to read-only, and `v: mutable view[T]`
+	// stays writable. (The declaration-site AssignableTo already rejected `mutable view[T]` from a
+	// read-only source, so a declared-mutable binding here is always backed by a mutable source.)
+	specialized := *actualView
+	specialized.Mutable = declaredView.Mutable
+	return &specialized, true
 }
 
 func (a *Analyzer) analyzeMoveBindStmt(stmt *ast.MoveBindStmt) {

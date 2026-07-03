@@ -276,8 +276,10 @@ func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "cannot assign to readonly view index result") {
-		t.Fatalf("expected readonly-view assignment diagnostic, got:\n%s", all)
+	// Every view[T] is now read-only (not just `readonly(...)`-marked ones), so the general
+	// view-index-write rejection fires here — the `readonly` wrapper is redundant for this.
+	if !strings.Contains(all, "cannot assign to view index result") {
+		t.Fatalf("expected view-index assignment diagnostic, got:\n%s", all)
 	}
 }
 func TestAnalyzeRejectsZipMapWithoutReadonlySources(t *testing.T) {

@@ -134,6 +134,19 @@ func AssignableTo(dst, src Type) bool {
 			return refStateAssignable(dr.State, sr.State) && refStorageAssignable(dr.Storage, sr.Storage, dr.ExplicitStorage, sr.ExplicitStorage) && refRegionAssignable(dr.Region, sr.Region)
 		}
 	}
+	// View mutability variance (mirrors RefType): a read-only `view[T]` may narrow from a
+	// `mutable view[T]` (drop write capability, like `&mut [T]` → `&[T]`), but a `mutable view[T]`
+	// may NOT be assigned from a read-only `view[T]` — that would launder write access onto a borrow
+	// whose source is immutable. Element type must match; other fields (bounds/region/surface) are
+	// inert, as in SameType.
+	if dv, ok := dst.(*ViewType); ok {
+		if sv, ok := src.(*ViewType); ok {
+			if !SameType(dv.Elem, sv.Elem) {
+				return false
+			}
+			return !(dv.Mutable && !sv.Mutable)
+		}
+	}
 	// Sealed enum refinement (docs/77): a Child enum (a subset of cases) is assignable to its Parent
 	// (the wider union) — `enum Child is Parent:` ⟹ Child <: Parent. Widening only; the reverse
 	// requires an explicit narrowing match/`is` test. Unrelated enums never relate (enumDescendsFrom

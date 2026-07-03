@@ -498,15 +498,20 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			a.errorf(expr.Pos(), "slicing requires proven non-null reference, got %s", objType)
 			return invalidType
 		}
+		// A slice inherits the source's mutability: slicing a `mutable darray&`/`mutable array` (or a
+		// `mutable view`) yields a `mutable view[T]` capable of write-through; slicing an immutable
+		// source yields a read-only `view[T]`. The binding/param TYPE then decides the actual
+		// capability — declaring `view[T]` narrows to read-only; declaring `mutable view[T]` requires
+		// this source-mutability (AssignableTo rejects laundering a read-only view into a mutable one).
 		if array, ok := ref.Elem.(*ArrayType); ok {
 			a.checkConstantArraySliceBounds(array, expr.Start, expr.End)
-			return &ViewType{Elem: array.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
+			return &ViewType{Elem: array.Elem, Mutable: ref.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view"}
 		}
 		if view, ok := ref.Elem.(*DArrayType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view", Region: view.Region}
+			return &ViewType{Elem: view.Elem, Mutable: ref.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view", Region: view.Region}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
-			return &ViewType{Elem: view.Elem, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: view.Region}
+			return &ViewType{Elem: view.Elem, Mutable: ref.Mutable && view.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: view.Region}
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}

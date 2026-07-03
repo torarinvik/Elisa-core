@@ -180,6 +180,13 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			cloned.Mutable = true
 			return cloned
 		}
+		// `mutable view[T]` is a writable borrow (like `&mut [T]`); mark the view mutable so
+		// indexed writes and mutable-ref iteration through it are permitted.
+		if view, ok := elemType.(*ViewType); ok {
+			cloned := *view
+			cloned.Mutable = true
+			return &cloned
+		}
 		return elemType
 	case *ast.OwnedType:
 		// `owned T` resolves to T; the affine must-consume obligation is recorded
