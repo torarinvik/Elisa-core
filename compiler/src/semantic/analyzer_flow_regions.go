@@ -115,6 +115,16 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	savedPackedVariantViews := a.currentPackedVariantViews
 	savedPackedStores := a.currentPackedStores
 	savedPackedStoreResolutions := a.currentPackedStoreResolutions
+	// A scoped `region NAME:` block (incl. synthesized `__auto_*` body/loop
+	// wraps) ends at the block: its ambient alloc scope must NOT outlive it.
+	// analyzeRegionDecl sets currentAllocExpr = Ident{NAME} unconditionally (the
+	// bare-region path relies on that persisting until `destroy`); the scoped
+	// path must restore it, or a later region-poly call outside the block threads
+	// this region's name — an out-of-scope `__auto_*` the backend can't resolve
+	// ("unknown identifier __auto_N during LLVM lowering"). Nested scoped regions
+	// (e.g. a loop-tightened per-iteration region before a subsequent region-poly
+	// call) are exactly this shape.
+	savedAllocExpr := a.currentAllocExpr
 	a.currentScope = NewScope(savedScope)
 	a.currentRegions = a.cloneRegionStates()
 	a.currentRegionMarks = a.cloneRegionMarkStates()
@@ -144,6 +154,7 @@ func (a *Analyzer) analyzeScopedArenaStmt(stmt *ast.RegionStmt) {
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
+	a.currentAllocExpr = savedAllocExpr
 }
 
 // returnedRegionOwner reports the region owner symbol of a `return move <region>`
