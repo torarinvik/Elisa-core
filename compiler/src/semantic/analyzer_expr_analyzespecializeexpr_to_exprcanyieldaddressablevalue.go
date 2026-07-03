@@ -80,7 +80,17 @@ func (a *Analyzer) fieldExprProvidesWritableRef(expr *ast.FieldExpr) bool {
 	if expr.Safe {
 		return false
 	}
-	field, ok := a.lookupFieldNoError(a.analyzeExpr(expr.Object), expr.Field)
+	// Reuse the object's already-computed type when present. This predicate is called ALONGSIDE
+	// analyzeFieldExpr on the same node (both in the FieldExpr case of analyzeExpr, line ~295), and each
+	// re-analyzing the object independently makes a nested field chain `a.b.b.b…` cost 2^depth — a hang
+	// the mutating fuzzer surfaced. analyzeExpr caches the object's type in exprTypes on the first pass, so
+	// read it back instead of recomputing; only analyze afresh when it is genuinely unset (identical
+	// result, minus the redundant re-walk and its duplicate diagnostics).
+	objType := a.exprTypes[expr.Object]
+	if objType == nil {
+		objType = a.analyzeExpr(expr.Object)
+	}
+	field, ok := a.lookupFieldNoError(objType, expr.Field)
 	if !ok {
 		return false
 	}
