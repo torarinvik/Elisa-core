@@ -487,6 +487,122 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	}, true
 }
 
+// fusedExtendComprehensionBlock builds the fused desugar for `dst.extend([ value for name in src ])`
+// — a filter-free list comprehension over a plain darray identifier — appending DIRECTLY into `dst`
+// with no intermediate darray. Instead of materializing the comprehension into a temp and memcpy-ing
+// it (the general extend path), it presizes `dst` ONCE by the source count and fills the appended
+// tail slots by indexed store (which auto-vectorizes at -O3, like the fresh-init fast path). Returns
+// ok=false — caller falls back to the materialized extend — unless every precondition holds: `dst`
+// is a plain identifier (so it is re-evaluable without side effects across `.count`/`.resize`/index
+// store), and the argument is a filter-free, darray-source list comprehension.
+//
+//	{ __n: usize = src.count;          // snapshot BEFORE resize — correct even when src IS dst
+//	  __base: usize = dst.count;       //   (self-extend: read region [0,__n) and written tail
+//	  dst.resize(__base + __n);        //    region [__base,__base+__n) are disjoint since base>=n)
+//	  for __i in 0..<__n: name = src[__i]; <bindings>; dst[__base + __i] <- value; 0 }
+func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dstDarray *semantic.DArrayType) (*ast.ExprBlock, bool) {
+	if dstDarray == nil {
+		return nil, false
+	}
+	dstIdent, ok := dstExpr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	inner := arg
+	for {
+		if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+			inner = p.Inner
+			continue
+		}
+		break
+	}
+	comp, ok := inner.(*ast.ListComprehensionExpr)
+	// Stage 1: only the filter-free, darray-source (not range) list comprehension — the exact
+	// shape the fresh-init fast path (indexedStoreComprehensionBlock) vectorizes. Filtered and
+	// range sources fall back to the materialized extend.
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd != nil {
+		return nil, false
+	}
+	srcIdent, ok := comp.Source.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	srcType := s.exprType(srcIdent)
+	if ref, ok := srcType.(*semantic.RefType); ok && ref != nil {
+		srcType = ref.Elem
+	}
+	srcDarray, ok := srcType.(*semantic.DArrayType)
+	if !ok || srcDarray == nil {
+		return nil, false
+	}
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	if usizeType == nil {
+		return nil, false
+	}
+	pos := comp.Position
+	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = t
+		}
+		return e
+	}
+	nName := s.g.nextSyntheticName("extend.n.")
+	baseName := s.g.nextSyntheticName("extend.base.")
+	idxName := s.g.nextSyntheticName("extend.i.")
+	nIdent := reg(&ast.Ident{Position: pos, Name: nName}, usizeType)
+	baseIdent := reg(&ast.Ident{Position: pos, Name: baseName}, usizeType)
+	idxIdent := reg(&ast.Ident{Position: pos, Name: idxName}, usizeType)
+
+	nDecl := &ast.VarDeclStmt{Position: pos, Name: nName, Value: reg(&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}, usizeType)}
+	baseDecl := &ast.VarDeclStmt{Position: pos, Name: baseName, Value: reg(&ast.FieldExpr{Position: pos, Object: dstIdent, Field: "count"}, usizeType)}
+	resizeCall := &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "resize"},
+		Args:     []ast.Expr{reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: nIdent}, usizeType)},
+	}
+
+	// A `_` (discard) element binder can't be declared as a usable local; substitute a synthetic
+	// name (the value never references `_`, so this is safe).
+	bindName := comp.Name
+	if bindName == "_" {
+		bindName = s.g.nextSyntheticName("extend.elem.")
+	}
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: reg(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent}, srcDarray.Elem)}
+	storeTarget := reg(&ast.IndexExpr{Position: pos, Object: dstIdent, Index: reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: idxIdent}, usizeType)}, dstDarray.Elem)
+	store := &ast.AssignStmt{Position: pos, Target: storeTarget, Value: comp.Value}
+	body := []ast.Stmt{ast.Stmt(elemDecl)}
+	body = append(body, comp.Bindings...)
+	body = append(body, ast.Stmt(store))
+
+	startLit := reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType)
+	loop := &ast.ForStmt{
+		Position:        pos,
+		Name:            idxName,
+		Start:           startLit,
+		End:             nIdent,
+		Op:              lexer.TOKEN_RANGE_LT,
+		Body:            body,
+		AutovecExpected: comprehensionBodyCallFree(comp),
+		AutovecReason:   "extend comprehension map",
+	}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			nDecl,
+			baseDecl,
+			&ast.ExprStmt{Position: pos, Expr: resizeCall},
+			loop,
+		},
+		// The extend call's own return value (the receiver ptr) is re-derived by the caller; this
+		// throwaway value only satisfies emitExprBlock's non-nil-Value requirement and is DCE'd.
+		Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType),
+	}, true
+}
+
 // exprContainsCall reports whether an expression contains a function/method call. Used to gate the
 // AutovecExpected marker: a call in the loop body legitimately blocks auto-vectorization (the
 // callee may not inline), so warning about it would be noise rather than a real defect. Unknown

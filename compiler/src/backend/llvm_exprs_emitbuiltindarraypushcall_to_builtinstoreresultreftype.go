@@ -208,6 +208,21 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("darray extend expects 1 argument, got %d", len(expr.Args))
 	}
+	// Fused fast path: `dst.extend([ v for x in src ])` appends the comprehension DIRECTLY into
+	// `dst` (presize once + vectorizable indexed-store fill), skipping the materialize-a-temp +
+	// memcpy the general path below would do. resize/index-store resolve `dst`'s arena themselves,
+	// so this needs no owner/source resolution. Falls through to the materialized path when the
+	// argument is not a fusable comprehension.
+	if fused, ok := s.fusedExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType); ok {
+		if _, _, err := s.emitExprBlock(fused, s.g.result.NamedTypes["usize"]); err != nil {
+			return nil, nil, true, err
+		}
+		darrayPtr, resultType, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		return darrayPtr, resultType, true, nil
+	}
 	owner, ok := s.darrayGrowthOwner(expr, fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
 		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
