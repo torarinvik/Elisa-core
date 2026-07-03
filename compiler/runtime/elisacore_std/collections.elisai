@@ -460,8 +460,6 @@ extern arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?
 
 extern arena_dict_get_cstr_view[T](m: dict[cstr, T]&, key: sview) -> T&?
 
-extern arena_dict_get_cstr_view_mut[T](m: mutable dict[cstr, T]&, key: sview) -> mutable T&?
-
 extern arena_dict_get[K, T](m: mutable dict[K, T]&, key: K) -> mutable T&?
 
 extern arena_dict_put[K, T](a: mutable Arena&, m: mutable dict[K, T]&, key: K, value: T) -> mutable T&? error[RuntimeError]
