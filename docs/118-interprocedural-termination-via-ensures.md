@@ -64,20 +64,29 @@ Two spec-only ingredients, both **fully erased in release** (they are contracts/
 requirement is met by construction):
 
 1. **Progress contracts on the consuming primitives.** The token primitives gain a
-   postcondition that they advance the cursor, e.g. on the stage1 side:
+   postcondition about the cursor. **The progress is conditional, not flat** — the single
+   most important subtlety of this whole design, discovered while landing 118-0. `advance`
+   does NOT strictly increase `position`; at end-of-input it stays put (you cannot advance
+   past EOF), and that saturation is *exactly why the parser terminates* (the measure is
+   bounded below at 0). So:
 
    ```
    def advance(parser: mutable Parser&) -> Token:
-       ensure parser.position > old(parser.position)
+       ensure parser.position >= old(parser.position)                 # monotone (always)
+       ensure parser.position <= parser.tokens.count                  # bounded (never past EOF)
+       ensure old(parser.position) < parser.tokens.count => parser.position > old(parser.position)  # STRICT when a token remained
        …
    def expect(parser: mutable Parser&, kind: TokenKind) -> Token:
-       ensure parser.position > old(parser.position)   # expect always advances (consumes or errors+advances)
+       ensure parser.position >= old(parser.position)                 # advances-or-stays (delegates to advance)
        …
    ```
 
    `accept`/`peek`/`cursor` get `preserves parser.position` (they must NOT be relied on for
-   progress). These are intraprocedurally checkable today ([87] brick 87-1 landed `changes`;
-   the `>`-on-a-scalar-field obligation is exactly a tier-2 linear fact from [86]).
+   progress; `peek`/`cursor` genuinely preserve it, `accept` may advance so it gets the
+   monotone form). The monotone/bounded halves are flat tier-2 facts checkable today ([86]);
+   the **conditional strict** postcondition (`guard => strict`) is the piece that needs
+   contract support for an implication postcondition — verify that spelling exists before
+   118-1, else express it as a `where`-refined return or a lemma.
 
 2. **A position-delta summary in the termination prover.** New machinery (this is the real
    work): when discharging `decreases M` at a recursive call, instead of *only* comparing
@@ -102,16 +111,34 @@ gets stronger. No parser refactor, no live fuel, no runtime cost.
   parser cycle is now detected (falls through to Wall 1). Regression tests
   `TestTerminationHiddenGetCallRefuted` / `TestTerminationGetHiddenCycleDetected`. Strict
   improvement to every consumer of the walker (structural induction + several lints).
-- **118-1 — `ensure`/`preserves` on the token primitives. [stage1]** Add the progress
-  contracts (§3.1) to `advance`/`expect` and `preserves position` to the non-consumers.
-  Intraprocedurally checkable now; lands independently as executable documentation of the
-  cursor discipline even before the prover consumes it.
+- **118-1 — `ensure`/`preserves` on the token primitives. [BLOCKED — needs a prover
+  prerequisite].** Verified empirically (2026-07-03) that the contracts do NOT check today,
+  for two independent reasons, both foundational rather than bounded:
+  1. **No `old()`-vs-mutation-flow reasoning.** Even the flat `ensure p.pos >= old(p.pos)`
+     on `advance` (a plain `if p.pos < p.len: p.pos <- p.pos + 1`) is rejected —
+     *"could not be proven statically … it can fail when p.pos=0"* — with `pos: usize`. The
+     postcondition prover does not relate `old(p.pos)` to the value after a *conditional
+     field mutation*. This is the very same limitation as Wall 1, surfacing in the `ensure`
+     checker. Until it is fixed, `advance` cannot carry *any* useful progress contract.
+  2. **No implication postcondition.** `ensure GUARD => POST` is a syntax error
+     (`unexpected token =>`), so the conditional-strict form (§3.1) cannot even be written.
+  So 118-1 is gated on a **prerequisite feature**: postcondition reasoning over conditional
+  mutations relative to `old()` (an extension of [87]/[the contract system], likely its own
+  brick/doc), plus implication-postcondition surface syntax. This is the true bottom of the
+  stack — do it before 118-1, and 118-2 inherits the same `old()`-vs-mutation machinery.
 - **118-2 — callee-summary composition in the decrease proof (Wall 1). [stage0, the core].**
   Teach `directNumericTerminationCertificate` / `recursiveCallCertificate` to consult callee
   `ensure`/`changes` summaries along the entry→call path and fold their guaranteed
   place-deltas into the measure comparison. Start with the single, sound, high-value pattern:
   *scalar field of a `mutable T&` param, strictly monotone via a callee whose `ensure` says
-  so*. Reject (soundly) anything outside the pattern.
+  so*. Reject (soundly) anything outside the pattern. **Because progress is conditional
+  (§3.1), 118-2 must also thread the guard**: the strict-increase fact only fires when the
+  callee's precondition-side guard (`position < tokens.count`, i.e. the consumed token was
+  not EOF) holds at the call site — which the parser establishes by construction (it only
+  recurses after matching a real, non-EOF token). So the composition is: `guard at call site`
+  ∧ `callee (guard => strict)` ⊢ `strict decrease`. The guard fact comes from the same flow
+  analysis [86]'s guard-if prover already does for loop measures — reuse it, don't rebuild.
+  This is the crux and the bulk of the effort.
 - **118-3 — compose 118-2 around the mutual cycle.** Extend `mutualRecursionVerified` so a
   cycle discharges when the *summed* per-edge place-delta strictly decreases the shared
   measure (not only when each edge decreases in isolation) — the distributed-decrease case
