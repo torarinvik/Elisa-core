@@ -80,6 +80,14 @@ type functionState struct {
 	// arena (multi-stack regions, Phase B1b): name -> region arena tag "__auto_N#k". Populated at
 	// region entry from Result.RegionStacks, cleared at region exit. Empty for ordinary code.
 	darrayStackTag map[string]string
+	// currentDArraySinkTag is the parallel-arena tag ("__auto_N#k") of the darray a seeded
+	// container initializer is being stored into — set around a VarDecl/assign RHS emit when the
+	// destination has a darrayStackTag, and CONSUMED ONCE (read-and-cleared) by the container
+	// literal / comprehension emit so its initial backing lands in the SAME parallel arena its
+	// later growth ops use. Without this a non-empty-seeded local's backing goes to the region
+	// base arena while a grower reallocs in the parallel arena — a straddling realloc that trips
+	// `assert a.end != null` (task_00a7fdf3). Empty for ordinary code / empty-`[]` seeds.
+	currentDArraySinkTag string
 	// earlyFreeByOffset frees an own-stack arena early (Phase B2): the byte offset of a top-level
 	// statement -> the stack arena to free right after it (the object died and is not aliased).
 	// Populated at region entry, fired once and removed when the statement is emitted.

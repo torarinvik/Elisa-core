@@ -636,7 +636,18 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		}
 		var initValue C.LLVMValueRef
 		if n.Value != nil {
+			// If this local is a stack-tagged darray, tell a seeded container initializer to
+			// allocate its initial backing into that SAME parallel arena (consumed once by the
+			// literal/comprehension emit), so later growth through a grower never straddles the
+			// region base arena and the parallel arena (task_00a7fdf3).
+			savedSink := s.currentDArraySinkTag
+			if s.darrayStackTag != nil {
+				if tag, ok := s.darrayStackTag[n.Name]; ok {
+					s.currentDArraySinkTag = tag
+				}
+			}
 			value, _, err := s.emitExpr(n.Value, declType)
+			s.currentDArraySinkTag = savedSink
 			if err != nil {
 				return err
 			}
@@ -814,7 +825,17 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		s.invalidatePackedEnumStoreOriginExpr(n.Target)
 		s.invalidatePackedCommonFieldValuesExpr(n.Target)
 		s.invalidatePackedVariantViewExpr(n.Target)
+		// Reassigning a seeded container into a stack-tagged darray (`xs <- [..]`) must allocate
+		// the new backing into that darray's parallel arena, exactly like the VarDecl seed path —
+		// otherwise a later grower's realloc straddles the region base arena (task_00a7fdf3).
+		savedAssignSink := s.currentDArraySinkTag
+		if id, ok := n.Target.(*ast.Ident); ok && s.darrayStackTag != nil {
+			if tag, ok := s.darrayStackTag[id.Name]; ok {
+				s.currentDArraySinkTag = tag
+			}
+		}
 		value, _, err := s.emitExpr(n.Value, targetType)
+		s.currentDArraySinkTag = savedAssignSink
 		if err != nil {
 			return err
 		}

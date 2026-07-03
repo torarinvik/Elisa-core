@@ -63,29 +63,37 @@ def main() -> int can[Memory.Allocate, Abort.Panic]:
 	}
 }
 
-// KNOWN-OPEN stage0 bug (task_00a7fdf3) — reproducer, currently SKIPPED so the suite stays
-// green until the fix lands. Remove the t.Skip when fixing.
+// Regression for task_00a7fdf3 (FIXED): a NON-EMPTY-seeded local darray grown through a callee
+// `mutable darray&` past ~one region's capacity used to abort in arena_realloc (`assert a.end !=
+// null`, RESERVE_COMMIT/FIXED path). Root cause: the seeded initial backing was allocated into
+// the region's BASE arena while the darray's stack tag (the arena threaded to the grower) pointed
+// at its parallel arena `#1` — so the grower's realloc-into-a-new-region straddled two arenas and
+// `#1.end` was null. The empty-`[]` seed dodged it (its first push lazily establishes `#1`).
 //
-// A NON-EMPTY-seeded local darray (`xs = [0,1,2,3]` OR `xs = [k for k in 0..<4]` — the seed
-// being a literal or a comprehension makes no difference) grown through a callee `mutable&`
-// past ~one region's capacity aborts in arena_realloc: `assert a.end != null` (arena.elisa,
-// RESERVE_COMMIT/FIXED path). The empty-seed form (`xs = []` then push) is SAFE — that is why
-// the stage1 resolver's `bound = []` + push-loop workaround (semantic/resolve.elisa,
-// semantic/symbols.elisa) sidesteps it and MUST stay until this is fixed.
+// Fix (currentDArraySinkTag): a seeded container initializer stored into a stack-tagged darray
+// allocates its initial backing into that SAME parallel arena — the list-literal emit consults
+// the sink tag, and the comprehension aliases it onto its synthetic result name. Now the seeded
+// backing and the grower share one reserve_commit arena, so growth is in-place and `#1.end` is
+// valid. This is what lets the stage1 resolver's `bound = [p.name for p in params]` comprehension
+// replace the defensive `[]`+push-loop workaround.
 //
-// Narrowed trigger (matrix-tested): crash requires (a) a non-empty initial seed AND (b) growth
-// that crosses one region's capacity (~256 i64 slots — grow-to-200 passes, grow-to-300 aborts).
-// The initial seeded backing is threaded to the region-poly grower with an arena tag whose
-// region chain isn't reachable at the realloc-into-a-new-region site (same class as the
-// by-reference-grower fix above, but for the seeded-initialization path — resolveRegionArenaArgs
-// / the darray growth-owner tag for a seeded literal, rather than an empty `[]`).
-//
-// grow(out) pushes 300 entries into a by-ref `mutable darray[i64]&`; caller seeds `xs` from a
-// comprehension then grows it. build() returns 300 + 4 = 304; exit code 304 mod 256 = 48.
+// All three seed forms are exercised (VarDecl literal, VarDecl comprehension, and `xs <- [..]`
+// reassignment); each crosses the ~256-slot boundary (grow-to-300). build() returns 300 + 4 =
+// 304; exit code 304 mod 256 = 48.
 func TestRegionGrowerSeededThenGrowRuns(t *testing.T) {
 	t.Parallel()
-	t.Skip("KNOWN-OPEN task_00a7fdf3: non-empty-seeded local grown past a region boundary aborts in arena_realloc; empty-seed workaround in stage1 stays until fixed")
-	status, out := s4CompileRun(t, `def grow(out: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+	for _, tc := range []struct {
+		name string
+		seed string
+	}{
+		{"literal", "xs: mutable darray[i64] = [10, 20, 30, 40]"},
+		{"comprehension", "xs: mutable darray[i64] = [k * 2 for k in 0..<4]"},
+		{"reassign", "xs: mutable darray[i64] = []\n        xs <- [10, 20, 30, 40]"},
+	} {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			status, out := s4CompileRun(t, `def grow(out: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
     i: mutable i64 = 0
     while i < 300:
         out.push(i)
@@ -93,18 +101,20 @@ func TestRegionGrowerSeededThenGrowRuns(t *testing.T) {
 
 def build() -> usize can[Memory.Allocate, Abort.Panic]:
     can Memory.Allocate, Abort.Panic:
-        xs: mutable darray[i64] = [k * 2 for k in 0..<4]
+        `+tc.seed+`
         grow(&xs)
         return xs.count
 
 def main() -> int can[Memory.Allocate, Abort.Panic]:
     return build().int()
 `)
-	if strings.Contains(out, "assert failed") {
-		t.Fatalf("comprehension-seeded grower crash REGRESSED (arena assert): status=%s out=%q", status, out)
-	}
-	if status != "RUNERR" || !strings.Contains(out, "exit status 48") {
-		t.Fatalf("comprehension-seeded grower: expected clean exit with code 48 (build returns 304), "+
-			"got status=%s out=%q", status, out)
+			if strings.Contains(out, "assert failed") {
+				t.Fatalf("%s-seeded grower crash REGRESSED (arena assert): status=%s out=%q", tc.name, status, out)
+			}
+			if status != "RUNERR" || !strings.Contains(out, "exit status 48") {
+				t.Fatalf("%s-seeded grower: expected clean exit with code 48 (build returns 304), "+
+					"got status=%s out=%q", tc.name, status, out)
+			}
+		})
 	}
 }

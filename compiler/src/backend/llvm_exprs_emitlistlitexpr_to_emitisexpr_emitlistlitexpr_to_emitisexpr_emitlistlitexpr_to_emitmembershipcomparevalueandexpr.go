@@ -197,13 +197,25 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		return zero, darrayType, nil
 	}
 	owner, ok := treeAllocOwnerBinding{}, false
-	if expr.Owner != nil {
+	// A stack-tagged destination (task_00a7fdf3): a seeded container stored into a darray that is
+	// routed to its own parallel arena must allocate its backing INTO that same arena, so the
+	// backing and the darray's later growth ops (incl. a grower's realloc) never straddle the
+	// region base arena and the parallel arena. This takes priority over the analyzer's own owner
+	// resolution — whether it left Owner nil (a fresh VarDecl seed) or attached a region owner (a
+	// reassignment, whose darray type carries no region). Read-and-clear so only this outermost
+	// sunk container consumes it (a nested inner literal falls back to normal resolution).
+	if s.currentDArraySinkTag != "" {
+		sinkTag := s.currentDArraySinkTag
+		s.currentDArraySinkTag = ""
+		owner, ok = s.regionArenaOwner(sinkTag)
+	}
+	if !ok && expr.Owner != nil {
 		var err error
 		owner, ok, err = s.classifyTreeAllocOwnerExpr(expr.Owner)
 		if err != nil {
 			return nil, nil, err
 		}
-	} else {
+	} else if !ok {
 		owner, ok = s.regionArenaOwner(darrayType.Region)
 		if !ok {
 			owner, ok = s.lookupTreeAllocOwner()
@@ -340,6 +352,21 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 		s.g.result.ExprTypes[resultInit] = resultType
 	}
 	resultIdent := &ast.Ident{Position: expr.Position, Name: resultName}
+
+	// task_00a7fdf3: a comprehension stored into a stack-tagged darray must build its synthetic
+	// result in that SAME parallel arena, so the resized/pushed backing and a later grower's
+	// reallocs share one arena (else the backing lands in the region base arena and the grower's
+	// realloc in the parallel arena straddles → `assert a.end != null`). Alias the destination's
+	// stack tag onto the synthetic result name (consumed once) so the desugar block's growth ops
+	// route there via darrayGrowthOwner.
+	if s.currentDArraySinkTag != "" {
+		if s.darrayStackTag == nil {
+			s.darrayStackTag = map[string]string{}
+		}
+		s.darrayStackTag[resultName] = s.currentDArraySinkTag
+		s.currentDArraySinkTag = ""
+		defer delete(s.darrayStackTag, resultName)
+	}
 
 	// Vectorizable fast path: a no-filter map over a re-evaluable darray source lowers to a
 	// presized indexed-store loop (`result.resize(src.count); for i: result[i] <- value`)
