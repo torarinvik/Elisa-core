@@ -46,13 +46,68 @@ import (
 	"fmt"
 	"unsafe"
 
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
 
-// tagAutovecExpectedLoop marks a compiler-synthesized comprehension build loop's latch branch as
-// expected-to-vectorize (see ForStmt.AutovecExpected). No-op at -O0, where no vectorization runs.
+// permissionRefsGrantScalar reports whether a permission list grants the Scalar family — either
+// the bare-family spelling `can Scalar` or any member spelling (`can Scalar.Loop`). Used to
+// suppress expected-to-vectorize loop tagging inside the grant's lexical extent.
+func permissionRefsGrantScalar(refs []ast.PermissionRef) bool {
+	for _, ref := range refs {
+		if ref.Name == "Scalar" {
+			return true
+		}
+	}
+	return false
+}
+
+// userLoopVectorEligible reports whether a USER-WRITTEN loop body is the clean element-wise shape
+// the vectorizer should handle: straight-line (no branches, nested loops, breaks, or returns),
+// call-free, and containing at least one indexed store (`dst[i] <- value`). Loops outside this
+// shape are NOT tagged — a call, branch, or I/O in the body already explains scalar execution, so
+// demanding `can Scalar` there would be noise, and accumulator reductions (`s <- s + x`, an
+// assignment to a bare name) are excluded because a strict-FP reduction legitimately cannot
+// vectorize without reassociation (the fold-comprehension form is the vectorizable spelling).
+func userLoopVectorEligible(body []ast.Stmt) bool {
+	hasIndexedStore := false
+	for _, stmt := range body {
+		switch n := stmt.(type) {
+		case *ast.VarDeclStmt:
+			if n.Value != nil && ast.ExprContainsCall(n.Value) {
+				return false
+			}
+		case *ast.ExprStmt:
+			if ast.ExprContainsCall(n.Expr) {
+				return false
+			}
+		case *ast.AssignStmt:
+			if n.Optional || ast.ExprContainsCall(n.Target) || ast.ExprContainsCall(n.Value) {
+				return false
+			}
+			if _, ok := n.Target.(*ast.IndexExpr); ok {
+				hasIndexedStore = true
+			} else {
+				// Assignment to a non-indexed target (bare accumulator, field) — a loop-carried
+				// scalar dependency the vectorizer can't (or shouldn't be demanded to) handle.
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return hasIndexedStore
+}
+
+// tagAutovecExpectedLoop marks a loop's latch branch as expected-to-vectorize (compiler-synthesized
+// comprehension builds via ForStmt.AutovecExpected, plus vector-eligible user loops). No-op at -O0,
+// where no vectorization runs, and inside a `can Scalar` grant, which is the sanctioned way to
+// accept a scalar loop (warning otherwise; hard error under -Wperf).
 func (s *functionState) tagAutovecExpectedLoop(branchInst C.LLVMValueRef, pos lexer.Pos, reason string) {
 	if s == nil || s.g == nil || s.g.optLevel == OptimizationLevel0 || branchInst == nil {
+		return
+	}
+	if s.scalarGrantDepth > 0 {
 		return
 	}
 	if reason == "" {
@@ -93,7 +148,8 @@ func (g *llvmGenerator) verifyAutovecExpectations() {
 				continue
 			}
 			seen[pos] = true
-			g.perfWarnings = append(g.perfWarnings, autovecPerfWarning(pos, reason, int(g.optLevel)))
+			enforce := g.result != nil && g.result.EnforcePerfLints
+			g.perfWarnings = append(g.perfWarnings, autovecPerfWarning(pos, reason, int(g.optLevel), enforce))
 		}
 	}
 }
@@ -141,7 +197,7 @@ func inspectAutovecLoopMetadata(loopMD C.LLVMValueRef) (pos string, reason strin
 // construct (from the embedded reason) and the most likely blocker for that construct. The loop was
 // only marked because its body is call-free and its shape was lowered to be vectorizer-legal, so a
 // real failure is almost always a memory dependency the vectorizer could not disprove.
-func autovecPerfWarning(pos, reason string, optLevel int) string {
+func autovecPerfWarning(pos, reason string, optLevel int, enforce bool) string {
 	construct := reason
 	if construct == "" {
 		construct = "comprehension"
@@ -154,9 +210,17 @@ func autovecPerfWarning(pos, reason string, optLevel int) string {
 	case "comprehension map":
 		hint = "the element store did not vectorize — check whether the source and destination may alias, " +
 			"or for a loop-carried dependency in the element transform"
+	case "loop":
+		hint = "the element store did not vectorize — check for aliasing between the arrays, a loop-carried " +
+			"dependency, or a shape the vectorizer cost model rejected"
 	}
-	return fmt.Sprintf("%s: warning [-Wperf]: %s was lowered for auto-vectorization but did not vectorize "+
-		"at -O%d; %s", pos, construct, optLevel, hint)
+	severity := "warning"
+	if enforce {
+		severity = "error"
+	}
+	return fmt.Sprintf("%s: %s [-Wperf]: %s was lowered for auto-vectorization but did not vectorize "+
+		"at -O%d; %s. If scalar execution is intended, wrap it in a `can Scalar:` block (or grant "+
+		"`can[Scalar]` on the function)", pos, severity, construct, optLevel, hint)
 }
 
 // mdNodeOperands returns the operands of an MDNode-as-value, or nil if it is not a node.

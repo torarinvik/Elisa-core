@@ -703,6 +703,10 @@ func writeNativeObjectViaClangIR(clangPath string, result *semantic.Result, obje
 	for _, w := range perfWarnings {
 		fmt.Fprintln(stderr, w)
 	}
+	// Under -Wperf, unacknowledged scalar loops (no `can Scalar` grant) are hard errors.
+	if result.EnforcePerfLints && len(perfWarnings) > 0 {
+		return fmt.Errorf("-Wperf: %d loop(s) expected to vectorize stayed scalar; wrap intentional scalar loops in a `can Scalar:` block", len(perfWarnings))
+	}
 	if buildTiming {
 		fmt.Fprintf(stderr, "[build-timing] IR-gen: %v (%d bytes IR)\n", time.Since(irStart).Round(time.Millisecond), len(ir))
 	}

@@ -1004,6 +1004,14 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.InStoreStmt:
 		return s.emitInStore(n)
 	case *ast.CanStmt:
+		// A `can Scalar` grant suppresses expected-to-vectorize loop tagging for the block it
+		// lexically covers (see functionState.scalarGrantDepth / tagAutovecExpectedLoop).
+		if permissionRefsGrantScalar(n.Permissions) {
+			s.scalarGrantDepth++
+			err := s.emitBlock(n.Body, true)
+			s.scalarGrantDepth--
+			return err
+		}
 		return s.emitBlock(n.Body, true)
 	case *ast.PoolStmt:
 		return s.emitPoolStmt(n)

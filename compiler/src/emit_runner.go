@@ -409,6 +409,12 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		printPerfWarnings(stderr, perfWarnings)
+		// Under -Wperf the autovec verifier's findings are hard errors (the messages themselves
+		// carry the "error" severity): a loop that was expected to vectorize stayed scalar and no
+		// `can Scalar` grant acknowledged it.
+		if result.EnforcePerfLints && len(perfWarnings) > 0 {
+			return 1
+		}
 		if options.output != "" {
 			if err := writeOutputFile(options.output, []byte(output)); err != nil {
 				fmt.Fprintf(stderr, "error: %s\n", err)

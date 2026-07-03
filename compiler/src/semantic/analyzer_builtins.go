@@ -33,6 +33,12 @@ func (a *Analyzer) registerBuiltinPermissions() {
 	a.registerBuiltinPermission("Progress", []string{"Tick", "Yield", "CheckCancel", "EnterRecursion", "LeaveRecursion", "Deadline", "Budget"})
 	a.registerBuiltinPermission("Blocking", []string{"Wait", "Join", "Lock", "Sleep", "IO", "RawExtern", "UnknownCall"})
 	a.registerBuiltinPermission("Perf", []string{"HotLoop"})
+	// Scalar acknowledges a loop that was expected to auto-vectorize but stays scalar (docs/70):
+	// the backend's post-optimization autovec verifier warns on such loops (hard error under
+	// -Wperf) UNLESS they sit inside a `can Scalar` grant — the explicit "yes, this one is scalar
+	// on purpose" escape hatch. Nothing ever REQUIRES Scalar, so granting it never propagates to
+	// callers; it only silences the vectorization expectation for the code it lexically covers.
+	a.registerBuiltinPermission("Scalar", []string{"Loop"})
 	a.registerBuiltinPermission("Segment", []string{"Host", "Guest"})
 	a.registerBuiltinPermission("Global", []string{"Read", "Write"})
 	a.registerBuiltinPermission("Unsafe", []string{"PointerCast", "PointerArithmetic", "GuestHostPointerCast", "IndirectCall", "UncheckedIndex", "RawExtern", "MutableGlobal", "ThreadShare", "StaleRef", "Alias", "BufferReinterpret", "Assembly", "ExecutableCodePublish", "MachineCodeBuilder", "SegmentMutation", "GuestSegmentInstall", "NonProgress", "BlockMain", "AssumeProgress", "Leak"})

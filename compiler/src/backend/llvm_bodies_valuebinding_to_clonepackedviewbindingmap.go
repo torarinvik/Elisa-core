@@ -56,6 +56,11 @@ type functionState struct {
 	specializedFuncTypes map[*semantic.FuncType]*semantic.FuncType
 	resultSlot           C.LLVMValueRef
 	sretReturn           bool
+	// scalarGrantDepth > 0 means the code currently being emitted sits inside a `can Scalar` grant
+	// (a `can Scalar:` block, or the whole function via `can[Scalar]` on its signature). While
+	// granted, loops are NOT tagged expected-to-vectorize, so the post-optimization autovec
+	// verifier stays silent for them — the explicit "this is scalar on purpose" escape hatch.
+	scalarGrantDepth int
 	// aliasSafeElementPtrs holds GEP'd element addresses of scalar-element darrays (e.g. darray[f64]).
 	// Loads/stores through these are tagged with the "elt" alias scope (noalias the "hdr" scope), and
 	// the darray's data-pointer header load is tagged "hdr" (noalias "elt"). This lets LLVM prove the
@@ -486,6 +491,11 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnType:  fnType,
 		builder: builder,
 		typeMap: typeBindings,
+	}
+	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
+	// (see the CanStmt case in emitStmt).
+	if decl != nil && permissionRefsGrantScalar(decl.Permissions) {
+		state.scalarGrantDepth = 1
 	}
 
 	if g.di != nil {

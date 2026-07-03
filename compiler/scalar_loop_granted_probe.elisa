@@ -1,0 +1,13 @@
+include "./runtime/elisacore_std/elisacore_runtime.elisa"
+
+# The same non-vectorizable `%` loop as scalar_loop_warn_probe, but wrapped in a `can Scalar:`
+# block — the sanctioned "this loop is scalar on purpose" acknowledgment. The backend skips the
+# expected-to-vectorize tag inside the grant, so the verifier stays silent even under -Wperf.
+def mods_acknowledged(a: mutable darray[i64]&, out: mutable darray[i64]&, d: i64) -> usize:
+	can Memory.Allocate, Abort.Panic:
+		can Scalar:
+			for i in 0..<a.count:
+				out[i] <- a[i] % d
+		return out.count
+
+export fn probe_scalar_granted(a: mutable darray[i64]&, out: mutable darray[i64]&, d: i64) -> usize = mods_acknowledged

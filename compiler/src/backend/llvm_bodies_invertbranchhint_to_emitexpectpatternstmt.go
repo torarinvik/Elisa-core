@@ -355,6 +355,11 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 		backedge := C.LLVMBuildBr(s.builder, condBB)
 		if stmt.AutovecExpected {
 			s.tagAutovecExpectedLoop(backedge, stmt.Position, stmt.AutovecReason)
+		} else if stmt.Step == nil && userLoopVectorEligible(stmt.Body) {
+			// A user range loop whose body is the clean element-wise store shape is expected to
+			// vectorize too (docs/70); scalar fallback warns / errors under -Wperf unless the loop
+			// sits inside a `can Scalar` grant (checked inside tagAutovecExpectedLoop).
+			s.tagAutovecExpectedLoop(backedge, stmt.Position, "loop")
 		}
 	}
 

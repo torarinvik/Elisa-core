@@ -505,7 +505,18 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 	if !s.currentBlockTerminated() {
 		nextValue := C.LLVMBuildAdd(s.builder, indexValue, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("iter.next"))
 		C.LLVMBuildStore(s.builder, nextValue, indexAlloca)
-		C.LLVMBuildBr(s.builder, condBB)
+		backedge := C.LLVMBuildBr(s.builder, condBB)
+		// A plain forward `for x in xs:` whose body is the clean element-wise store shape is
+		// expected to vectorize (docs/70). Filtered / reversed / view-transformed / dict / column
+		// -scan loops have body-side branching that legitimately explains scalar execution, so
+		// only the unbranched shape is tagged; a `can Scalar` grant suppresses the tag (checked
+		// inside tagAutovecExpectedLoop). Scalar fallback then warns, or errors under -Wperf.
+		_, isColumnScan := iterSourceExpr.(*ast.EnumColumnExpr)
+		if stmt.PatternFilter == nil && stmt.WhereFilter == nil && stmt.Filter == nil && !stmt.Reverse &&
+			len(transforms) == 0 && !isColumnScan && !iterLoopIsDictSource(iterSourceType) &&
+			userLoopVectorEligible(stmt.Body) {
+			s.tagAutovecExpectedLoop(backedge, stmt.Position, "loop")
+		}
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)

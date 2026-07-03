@@ -16,12 +16,22 @@ func TestAutovecPerfWarningIsConstructSpecific(t *testing.T) {
 	}{
 		{"fold reduction", "re-bracket"},
 		{"comprehension map", "element store"},
-		{"", "loop-carried"}, // unknown reason falls back to the generic construct/hint
+		{"loop", "cost model"}, // user-written vector-eligible loop
+		{"", "loop-carried"},   // unknown reason falls back to the generic construct/hint
 	}
 	for _, c := range cases {
-		msg := autovecPerfWarning("file.elisa:3:5", c.reason, 3)
-		if !strings.Contains(msg, "-Wperf") || !strings.Contains(msg, "did not vectorize") {
+		msg := autovecPerfWarning("file.elisa:3:5", c.reason, 3, false)
+		if !strings.Contains(msg, "warning [-Wperf]") || !strings.Contains(msg, "did not vectorize") {
 			t.Fatalf("reason %q: message missing the -Wperf marker phrasing: %s", c.reason, msg)
+		}
+		// Every variant names the `can Scalar` escape hatch, and -Wperf enforcement flips the
+		// severity word to error (the exit-code promotion is tested end-to-end in
+		// src/wperf_scalar_permission_test.go).
+		if !strings.Contains(msg, "can Scalar") {
+			t.Fatalf("reason %q: message must name the can Scalar escape hatch: %s", c.reason, msg)
+		}
+		if enforced := autovecPerfWarning("file.elisa:3:5", c.reason, 3, true); !strings.Contains(enforced, "error [-Wperf]") {
+			t.Fatalf("reason %q: enforced message must carry error severity: %s", c.reason, enforced)
 		}
 		if !strings.Contains(msg, "-O3") || !strings.Contains(msg, "file.elisa:3:5") {
 			t.Fatalf("reason %q: message missing position/opt level: %s", c.reason, msg)

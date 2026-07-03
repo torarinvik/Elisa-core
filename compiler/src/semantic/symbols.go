@@ -33,7 +33,11 @@ type Result struct {
 	// SMTProfile reports the optional SMT discharge tier's cost (docs/90): query count, verdict
 	// breakdown, and wall time. Zero-valued when the tier is off. Surfaced by `--explain` so "is SMT
 	// cheap or demanding?" is answered with data.
-	SMTProfile              SMTStats
+	SMTProfile SMTStats
+	// EnforcePerfLints echoes the -Wperf flag into the analysis result so the BACKEND (which only
+	// learns vectorization outcomes post-LLVM-optimization) and its callers can promote the autovec
+	// verifier's warnings to hard compile errors without a separate flag-threading path.
+	EnforcePerfLints        bool
 	File                    *ast.File
 	LoweredFile             *ast.File
 	GlobalScope             *Scope

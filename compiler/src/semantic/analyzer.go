@@ -961,6 +961,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	}
 	return &Result{
 		SMTProfile:              a.smtStats,
+		EnforcePerfLints:        a.enforcePerfLints,
 		File:                    file,
 		LoweredFile:             loweredFile,
 		GlobalScope:             a.globalScope,
