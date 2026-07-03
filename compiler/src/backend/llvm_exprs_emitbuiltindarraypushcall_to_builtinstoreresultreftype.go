@@ -217,6 +217,9 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	if !fusedOK {
 		fused, fusedOK = s.fusedFilteredExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
 	}
+	if !fusedOK {
+		fused, fusedOK = s.fusedRangeExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
+	}
 	if fusedOK {
 		if _, _, err := s.emitExprBlock(fused, s.g.result.NamedTypes["usize"]); err != nil {
 			return nil, nil, true, err

@@ -711,6 +711,137 @@ func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.E
 	}, true
 }
 
+// fusedRangeExtendComprehensionBlock is the RANGE-source counterpart of
+// fusedExtendComprehensionBlock: `dst.extend([ value for name in start..<end ])`. Like the
+// fresh-init range fast path (indexedStoreRangeComprehensionBlock) it presizes once and fills by
+// indexed store (vectorizable) — but appends into an existing `dst` instead of a fresh result, so
+// the dense output offset is shifted by the current length `__base`:
+//
+//	{ __base = dst.count;
+//	  dst.resize( __base + ((end - start) if end > start else 0) );
+//	  for name in start..<end: <bindings>; dst[__base + (name - start)] <- value;
+//	  0 }
+//
+// The clamp keeps the grown count non-negative (the (end-start) branch is only selected when
+// end > start, so its unsigned underflow when start >= end is computed-but-discarded). __base is
+// snapshotted BEFORE resize (resize changes dst.count). The store index `__base + (name - start)`
+// mixes usize (__base) and the range's numeric type (name - start); emitBinaryExpr unifies them via
+// CommonNumericType and the darray index coerces the sum to usize — the same rangeType-index the
+// fresh-init range block already proves works. A range source can never alias `dst` (it is a range
+// literal, not a container), so no snapshot-for-self-extend concern applies. Returns ok=false
+// (materialized fallback) unless: dst a plain ident, and a FILTER-FREE, default-step, exclusive
+// (`..<`) range list comprehension whose bounds are side-effect-free re-evaluable (ident/int-lit,
+// since start/end are read multiple times). Filtered/stepped/inclusive ranges fall back.
+func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr, dstDarray *semantic.DArrayType) (*ast.ExprBlock, bool) {
+	if dstDarray == nil {
+		return nil, false
+	}
+	dstIdent, ok := dstExpr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	inner := arg
+	for {
+		if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+			inner = p.Inner
+			continue
+		}
+		break
+	}
+	comp, ok := inner.(*ast.ListComprehensionExpr)
+	// Filter-free, default-step, exclusive range list comprehension only. Filtered goes nowhere
+	// (falls back to materialized), non-range goes to the darray-source fused paths above.
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd == nil {
+		return nil, false
+	}
+	if comp.RangeStep != nil || comp.RangeOp != lexer.TOKEN_RANGE_LT {
+		return nil, false
+	}
+	// start/end are re-read (clamp ternary evaluates each twice, loop once, store index once), so
+	// they must be side-effect-free and re-evaluable — same restriction as the fresh-init range block.
+	if !comprehensionRangeBoundReEvaluable(comp.Source) || !comprehensionRangeBoundReEvaluable(comp.RangeEnd) {
+		return nil, false
+	}
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	if usizeType == nil {
+		return nil, false
+	}
+	pos := comp.Position
+	start := comp.Source
+	end := comp.RangeEnd
+	rangeType := s.exprType(end)
+	if rangeType == nil {
+		rangeType = s.exprType(start)
+	}
+	if rangeType == nil {
+		return nil, false
+	}
+	var boolType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		boolType = s.g.result.NamedTypes["bool"]
+	}
+	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = t
+		}
+		return e
+	}
+	// The store index `name - start` references the loop variable, so a `_` (discard) binder can't
+	// be read; substitute a synthetic name (the value never references `_`).
+	loopName := comp.Name
+	if loopName == "_" {
+		loopName = s.g.nextSyntheticName("extend.range.i.")
+	}
+
+	baseName := s.g.nextSyntheticName("extend.base.")
+	baseIdent := reg(&ast.Ident{Position: pos, Name: baseName}, usizeType)
+	baseDecl := &ast.VarDeclStmt{Position: pos, Name: baseName, Value: reg(&ast.FieldExpr{Position: pos, Object: dstIdent, Field: "count"}, usizeType)}
+
+	// count = (end - start) if end > start else 0   — clamped, never negative.
+	count := reg(&ast.TernaryExpr{
+		Position: pos,
+		Value:    reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: end, Right: start}, rangeType),
+		Cond:     reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_GT, Left: end, Right: start}, boolType),
+		Alt:      reg(&ast.IntLit{Position: pos, Value: "0"}, rangeType),
+	}, rangeType)
+	resizeCall := &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "resize"},
+		Args:     []ast.Expr{reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: count}, usizeType)},
+	}
+
+	offset := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: reg(&ast.Ident{Position: pos, Name: loopName}, rangeType), Right: start}, rangeType)
+	storeIndex := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: offset}, usizeType)
+	storeTarget := reg(&ast.IndexExpr{Position: pos, Object: dstIdent, Index: storeIndex}, dstDarray.Elem)
+	store := &ast.AssignStmt{Position: pos, Target: storeTarget, Value: comp.Value}
+	body := append([]ast.Stmt{}, comp.Bindings...)
+	body = append(body, ast.Stmt(store))
+
+	loop := &ast.ForStmt{
+		Position:        pos,
+		Name:            loopName,
+		Start:           start,
+		End:             end,
+		Op:              lexer.TOKEN_RANGE_LT,
+		Body:            body,
+		AutovecExpected: comprehensionBodyCallFree(comp),
+		AutovecReason:   "extend range comprehension map",
+	}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			baseDecl,
+			&ast.ExprStmt{Position: pos, Expr: resizeCall},
+			loop,
+		},
+		Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType),
+	}, true
+}
+
 // exprContainsCall reports whether an expression contains a function/method call. Used to gate the
 // AutovecExpected marker: a call in the loop body legitimately blocks auto-vectorization (the
 // callee may not inline), so warning about it would be noise rather than a real defect. Unknown

@@ -100,6 +100,78 @@ func TestExtendComprehensionFusionEmitsNoTemp(t *testing.T) {
 	}
 }
 
+// `dst.extend([ value for name in start..<end ])` fuses over a RANGE source: presize dst by the
+// clamped span and fill its tail by indexed store at the shifted offset `__base + (name - start)`.
+// This pins the value semantics: append onto a non-empty dst, crossing a region-capacity boundary,
+// an empty (start >= end) range appending nothing, and a mapped value.
+func TestExtendRangeComprehensionFusionRuntime(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def check(cond: bool, msg: cstr) -> void can[Abort.Panic]:
+    if not cond:
+        panic(msg)
+
+def scenarios() -> int can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        # append a mapped range onto a non-empty dst, crossing a region-capacity boundary (>256).
+        # Range/loop-var element type is int, so dst must be darray[int] (extend requires the
+        # source element type to match; there is no expected-type propagation into an extend arg).
+        dst: mutable darray[int] = [42]
+        dst.extend([i * 2 for i in 0..<400])
+        check(dst.count == 401 and dst[0] == 42 and dst[1] == 0 and dst[400] == 798, "range")
+
+        # empty range appends nothing (clamped count is 0)
+        empty: mutable darray[int] = [7, 8]
+        empty.extend([i for i in 5..<5])
+        check(empty.count == 2 and empty[1] == 8, "empty-range")
+
+        # non-zero start: offset shift is correct
+        shifted: mutable darray[int] = [100]
+        shifted.extend([i for i in 3..<6])
+        check(shifted.count == 4 and shifted[1] == 3 and shifted[3] == 5, "shifted")
+
+        return 23
+
+def main() -> int can[Memory.Allocate, Abort.Panic]:
+    return scenarios()
+`)
+	if strings.Contains(out, "assert failed") || strings.Contains(out, "range") || strings.Contains(out, "empty-range") || strings.Contains(out, "shifted") {
+		t.Fatalf("fused range extend produced a wrong result: status=%s out=%q", status, out)
+	}
+	if status != "RUNERR" || !strings.Contains(out, "exit status 23") {
+		t.Fatalf("expected clean exit code 23, got status=%s out=%q", status, out)
+	}
+}
+
+// The RANGE fused path presizes + indexed-stores — no materialized comprehension temp / memcpy.
+func TestExtendRangeComprehensionFusionEmitsNoTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_range_fusion.elisa")
+	prog := "def build() -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        dst: mutable darray[int] = [9]\n" +
+		"        dst.extend([i * 3 for i in 0..<8])\n" +
+		"        return dst.count\n\n" +
+		"def main() -> i64:\n" +
+		"    return build().i64()\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected fused range-extend fixture to compile, stderr:\n%s", stderr.String())
+	}
+	ir := stdout.String()
+	for _, banned := range []string{"list.comp.result", "darray.extend.memcpy"} {
+		if strings.Contains(ir, banned) {
+			t.Fatalf("fused range extend still emitted %q (materialized path not skipped):\n%s", banned, ir)
+		}
+	}
+	if !strings.Contains(ir, "resize") && !strings.Contains(ir, "ensure") {
+		t.Fatalf("expected a presize (resize/ensure-capacity) in the fused range extend, got:\n%s", ir)
+	}
+}
+
 // The FILTERED fused path (`dst.extend([ v for x in src if cond ])`) reserves the upper bound and
 // conditionally pushes — no materialized temp / memcpy either.
 func TestExtendFilteredComprehensionFusionEmitsNoTemp(t *testing.T) {
