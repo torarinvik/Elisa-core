@@ -278,7 +278,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	}
 	if bulkPush {
 		if !builtinDArrayExtendSourceCompatible(darrayType.Elem, argType) {
-			a.errorf(expr.Args[0].Pos(), "darray push expects %s or a compatible darray, view, or array source of %s, got %s", darrayType.Elem, darrayType.Elem, argType)
+			a.errorf(expr.Args[0].Pos(), "darray push expects %s or a compatible darray or array source of %s, got %s", darrayType.Elem, darrayType.Elem, argType)
 		}
 		if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 			a.errorf(expr.Args[0].Pos(), "bulk darray push does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
@@ -399,7 +399,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	}
 	sourceType := a.analyzeValueExpr(expr.Args[0], expectedSource)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
-		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, view, or array source of %s, got %s", darrayType.Elem, sourceType)
+		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray or array source of %s, got %s", darrayType.Elem, sourceType)
 	}
 	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
@@ -904,10 +904,14 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 	if elemType == nil || sourceType == nil {
 		return false
 	}
+	// Only owning/array containers are valid extend SOURCES. A view (`view[T]`/`sview`) is a
+	// read-only borrow (fat pointer, no owned backing) and is deliberately NOT accepted: to bulk-
+	// append elements you pass the owning `mutable darray[T]&`, not a view over it. (Appending a
+	// view's contents is still expressible via a comprehension, `dst.extend([x for x in v])`, which
+	// is a darray-typed source and fuses to a zero-copy read — but the view itself is not an extend
+	// participant.)
 	switch tt := sourceType.(type) {
 	case *DArrayType:
-		return SameType(elemType, tt.Elem)
-	case *ViewType:
 		return SameType(elemType, tt.Elem)
 	case *ArrayType:
 		return SameType(elemType, tt.Elem)
@@ -917,8 +921,6 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 		}
 		switch inner := tt.Elem.(type) {
 		case *DArrayType:
-			return SameType(elemType, inner.Elem)
-		case *ViewType:
 			return SameType(elemType, inner.Elem)
 		case *ArrayType:
 			return SameType(elemType, inner.Elem)
