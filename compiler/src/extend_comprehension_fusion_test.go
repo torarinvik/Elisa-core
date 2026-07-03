@@ -65,6 +65,67 @@ def main() -> int can[Memory.Allocate, Abort.Panic]:
 	}
 }
 
+// `dst.extend([b for b in sv])` fuses over an SVIEW source, exactly like a darray source: an sview
+// is indexable (`sv[i]` -> u8) and count-bearing (`sv.len`, an i64), so it lowers to the same
+// presize + indexed-store fill. (Motivated by dogfooding the frontend, whose byte-buffer builders
+// iterate string views.) Pins the appended bytes and that appending onto a non-empty dst is correct.
+func TestExtendSviewComprehensionFusionRuntime(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def check(cond: bool, msg: cstr) -> void can[Abort.Panic]:
+    if not cond:
+        panic(msg)
+
+def scenarios() -> int can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        sv: sview = sview("hello world", 0, 5)
+        buf: mutable darray[u8] = [42]
+        buf.extend([b for b in sv])
+        # "hello" = 104,101,108,108,111
+        check(buf.count == 6 and buf[0] == 42 and buf[1] == 104 and buf[5] == 111, "sview")
+        return 44
+
+def main() -> int can[Memory.Allocate, Abort.Panic]:
+    return scenarios()
+`)
+	if strings.Contains(out, "assert failed") || strings.Contains(out, "sview") {
+		t.Fatalf("fused sview extend produced a wrong result: status=%s out=%q", status, out)
+	}
+	if status != "RUNERR" || !strings.Contains(out, "exit status 44") {
+		t.Fatalf("expected clean exit code 44, got status=%s out=%q", status, out)
+	}
+}
+
+// The sview fused path presizes + indexed-stores — no materialized comprehension temp / memcpy
+// (checked at the default opt level, where the presize is not folded away). The sview comes in as a
+// param so the fixture needs no runtime include (whose own extend calls would pollute the
+// whole-module substring check); sview is a builtin type, so `build` compiles standalone.
+func TestExtendSviewComprehensionFusionEmitsNoTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_sview_fusion.elisa")
+	prog := "def build(sv: sview) -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        buf: mutable darray[u8] = [9]\n" +
+		"        buf.extend([b for b in sv])\n" +
+		"        return buf.count\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected fused sview-extend fixture to compile, stderr:\n%s", stderr.String())
+	}
+	ir := stdout.String()
+	for _, banned := range []string{"list.comp.result", "darray.extend.memcpy"} {
+		if strings.Contains(ir, banned) {
+			t.Fatalf("fused sview extend still emitted %q (materialized path not skipped):\n%s", banned, ir)
+		}
+	}
+	if !strings.Contains(ir, "resize") && !strings.Contains(ir, "ensure") {
+		t.Fatalf("expected a presize (resize/ensure-capacity) in the fused sview extend, got:\n%s", ir)
+	}
+}
+
 // The fused path must NOT emit the materialized comprehension temp (`list.comp.result.*`) or the
 // extend memcpy — it presizes `dst` and fills its tail by indexed store. This pins that fusion
 // actually occurs, not merely that the result is correct (a materialized lowering would also be

@@ -517,9 +517,8 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 		break
 	}
 	comp, ok := inner.(*ast.ListComprehensionExpr)
-	// Stage 1: only the filter-free, darray-source (not range) list comprehension — the exact
-	// shape the fresh-init fast path (indexedStoreComprehensionBlock) vectorizes. Filtered and
-	// range sources fall back to the materialized extend.
+	// Filter-free, non-range list comprehension — the exact shape the fresh-init fast path
+	// (indexedStoreComprehensionBlock) vectorizes. Filtered / range sources fall back.
 	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd != nil {
 		return nil, false
 	}
@@ -531,15 +530,37 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	if ref, ok := srcType.(*semantic.RefType); ok && ref != nil {
 		srcType = ref.Elem
 	}
-	srcDarray, ok := srcType.(*semantic.DArrayType)
-	if !ok || srcDarray == nil {
-		return nil, false
-	}
-	var usizeType semantic.Type
+	var usizeType, u8Type semantic.Type
 	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
 		usizeType = s.g.result.NamedTypes["usize"]
+		u8Type = s.g.result.NamedTypes["u8"]
 	}
 	if usizeType == nil {
+		return nil, false
+	}
+	// Any indexable, count-bearing source with the same read-N-then-store shape fuses. darray reads
+	// `.count` (usize); an sview reads `.len` (i64) and yields u8 per element. Both support `src[i]`,
+	// so the loop body is identical modulo element type. The i64 length on sview mixes with the usize
+	// base in the store index — emitBinaryExpr unifies via CommonNumericType and the darray index
+	// coerces the sum, exactly as the range-source fusion already relies on.
+	var srcElem semantic.Type
+	var countField string
+	var countType semantic.Type
+	switch st := srcType.(type) {
+	case *semantic.DArrayType:
+		if st == nil {
+			return nil, false
+		}
+		srcElem, countField, countType = st.Elem, "count", usizeType
+	case *semantic.SViewType:
+		if u8Type == nil {
+			return nil, false
+		}
+		srcElem, countField, countType = u8Type, "len", s.g.result.NamedTypes["i64"]
+		if countType == nil {
+			return nil, false
+		}
+	default:
 		return nil, false
 	}
 	pos := comp.Position
@@ -552,11 +573,13 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	nName := s.g.nextSyntheticName("extend.n.")
 	baseName := s.g.nextSyntheticName("extend.base.")
 	idxName := s.g.nextSyntheticName("extend.i.")
-	nIdent := reg(&ast.Ident{Position: pos, Name: nName}, usizeType)
+	// The loop counter runs in the source's count type (usize for darray, i64 for sview); the base
+	// stays usize. The store index's usize+countType sum coerces on the darray-index boundary.
+	nIdent := reg(&ast.Ident{Position: pos, Name: nName}, countType)
 	baseIdent := reg(&ast.Ident{Position: pos, Name: baseName}, usizeType)
-	idxIdent := reg(&ast.Ident{Position: pos, Name: idxName}, usizeType)
+	idxIdent := reg(&ast.Ident{Position: pos, Name: idxName}, countType)
 
-	nDecl := &ast.VarDeclStmt{Position: pos, Name: nName, Value: reg(&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}, usizeType)}
+	nDecl := &ast.VarDeclStmt{Position: pos, Name: nName, Value: reg(&ast.FieldExpr{Position: pos, Object: srcIdent, Field: countField}, countType)}
 	baseDecl := &ast.VarDeclStmt{Position: pos, Name: baseName, Value: reg(&ast.FieldExpr{Position: pos, Object: dstIdent, Field: "count"}, usizeType)}
 	resizeCall := &ast.CallExpr{
 		Position: pos,
@@ -570,14 +593,14 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	if bindName == "_" {
 		bindName = s.g.nextSyntheticName("extend.elem.")
 	}
-	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: reg(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent}, srcDarray.Elem)}
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: reg(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent}, srcElem)}
 	storeTarget := reg(&ast.IndexExpr{Position: pos, Object: dstIdent, Index: reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: idxIdent}, usizeType)}, dstDarray.Elem)
 	store := &ast.AssignStmt{Position: pos, Target: storeTarget, Value: comp.Value}
 	body := []ast.Stmt{ast.Stmt(elemDecl)}
 	body = append(body, comp.Bindings...)
 	body = append(body, ast.Stmt(store))
 
-	startLit := reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType)
+	startLit := reg(&ast.IntLit{Position: pos, Value: "0"}, countType)
 	loop := &ast.ForStmt{
 		Position:        pos,
 		Name:            idxName,
