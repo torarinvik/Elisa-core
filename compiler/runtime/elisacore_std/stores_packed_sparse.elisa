@@ -75,7 +75,6 @@ def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&
         raw: uintptr = ptr.cast[u8&].uintptr()
         assert state.handles.items != null
 
-        handles: uintptr& = state.handles.items
         for i, handle in state.handles.enumerate():
             i.u32() return if handle == raw
 
