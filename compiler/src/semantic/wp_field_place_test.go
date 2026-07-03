@@ -50,6 +50,51 @@ def advance(p: mutable Parser&) changes p:
 	}
 }
 
+// Brick 118-B: the IMPLICATION postcondition `ensure GUARD => POST` (and its `implies` spelling) makes
+// the conditional progress expressible and PROVABLE. The advancing branch discharges POST directly; the
+// saturating (EOF) branch discharges because the guard `old(p.pos) < p.stop` is false there. This is the
+// exact `guard => strict` contract Brick 118-D consumes to prove the parser's measure decreases.
+func TestWPFieldPlaceConditionalStrictProven(t *testing.T) {
+	fatArrow := `
+struct Parser:
+    pos: mutable usize
+    stop: usize
+
+def advance(p: mutable Parser&) changes p:
+    ensure old(p.pos) < p.stop => p.pos > old(p.pos)
+    if p.pos < p.stop:
+        p.pos <- p.pos + 1
+`
+	if errs := analyzeContractStrict(t, "wp_field_impl_arrow.elisa", fatArrow).Errors(); len(errs) != 0 {
+		t.Fatalf("`ensure GUARD => strict` conditional postcondition must discharge, got: %v", errs)
+	}
+
+	// The `implies` keyword spelling desugars identically and must prove the same contract.
+	impliesKw := strings.Replace(fatArrow, "=>", "implies", 1)
+	if errs := analyzeContractStrict(t, "wp_field_impl_kw.elisa", impliesKw).Errors(); len(errs) != 0 {
+		t.Fatalf("`ensure GUARD implies strict` must discharge identically to `=>`, got: %v", errs)
+	}
+}
+
+// The implication must not be a rubber stamp: a FALSE consequent under a satisfiable guard is still
+// rejected. `old(p.pos) < p.stop => p.pos > old(p.pos) + 5` cannot hold (the body advances by at most 1).
+func TestWPFieldPlaceConditionalFalseConsequentRejected(t *testing.T) {
+	src := `
+struct Parser:
+    pos: mutable usize
+    stop: usize
+
+def advance(p: mutable Parser&) changes p:
+    ensure old(p.pos) < p.stop => p.pos > old(p.pos) + 5
+    if p.pos < p.stop:
+        p.pos <- p.pos + 1
+`
+	errs := strings.Join(analyzeContractStrict(t, "wp_field_impl_false.elisa", src).Errors(), "\n")
+	if !strings.Contains(errs, "could not be proven statically") {
+		t.Fatalf("an implication with an unprovable consequent must still be rejected, got: %v", errs)
+	}
+}
+
 // A field place that genuinely DECREASES must be rejected for a `>=` postcondition — guards against the
 // engine folding a field read to `true` reflexively regardless of the mutation direction.
 func TestWPFieldPlaceDecrementRejected(t *testing.T) {

@@ -101,8 +101,12 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 	expr := p.parseOr()
 	// `implies` infix (lowest precedence, right-associative), only in law/spec bodies. Desugared to
-	// `(not a) or b` so the analyzer/SMT/backend need no new node.
-	if p.allowQuantifiers && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "implies" {
+	// `(not a) or b` so the analyzer/SMT/backend need no new node. `=>` is an accepted spelling of the
+	// same operator (docs/118-B: `ensure GUARD => POST` for conditional postconditions), sharing the
+	// identical desugaring. `=>` is gated on the same allowQuantifiers flag, so it stays inert in
+	// ordinary expression position where it belongs to lambdas / catch arms / enum maps.
+	if p.allowQuantifiers && (p.peek() == lexer.TOKEN_FATARROW ||
+		(p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "implies")) {
 		opPos := p.cur().Pos
 		p.advance()
 		right := p.parseExpr() // right-assoc; also catches nested implies / quantifiers
