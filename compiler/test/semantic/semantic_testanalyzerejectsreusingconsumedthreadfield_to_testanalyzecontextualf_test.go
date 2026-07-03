@@ -135,7 +135,7 @@ struct Holder:
     count: mutable i64
 
 def bad(thread: Thread[i64, Joinable]) -> i64:
-    holder: Holder = Holder(move thread, 1)
+    holder: Holder = Holder{thread: move thread, count: 1}
     return join(move thread)
 `
 	_, errs := parseAndAnalyze(t, "affine_struct_literal_move_reject.elisa", src)
@@ -409,7 +409,7 @@ def contextual_call() -> f32:
 	return passthrough(4.5)
 
 def contextual_struct() -> FloatPair:
-	return FloatPair(5.5, 6.5)
+	return FloatPair{left: 5.5, right: 6.5}
 
 def contextual_array() -> f32[2]:
 	return [7.5, 8.5]

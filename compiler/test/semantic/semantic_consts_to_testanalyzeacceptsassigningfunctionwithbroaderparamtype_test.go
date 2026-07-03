@@ -66,8 +66,8 @@ func requireNoWarnings(t *testing.T, result *semantic.Result) {
 
 func TestAnalyzeWarnsOnNumericLiteralTypeSuffixes(t *testing.T) {
 	src := `def use() -> i64:
-    x: i64 = 42
-    y: f64 = 1.5
+    x: i64 = 42i64
+    y: f64 = 1.5f64
     return x
 `
 	result, errs := parseAndAnalyze(t, "numeric_literal_suffix_warning.elisa", src)
@@ -313,8 +313,8 @@ func TestAnalyzeCastMethodUsesExistingCastSemantics(t *testing.T) {
 	src := `struct Arena:
     value: i64
 
-def keep(owner: mutable Arena&) -> mutable Arena&:
-    return owner.cast[mutable Arena&]
+def keep(owner: mutable Arena&) -> Arena&:
+    return owner.cast[Arena&]
 `
 
 	result, errs := parseAndAnalyze(t, "method_cast.elisa", src)
@@ -636,7 +636,7 @@ def bad() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `fn(Box&?) -> int`) || !strings.Contains(all, `fn(Box&) -> int`) {
+	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(Box&?) -> int`) || !strings.Contains(all, `func(Box&) -> int`) {
 		t.Fatalf("expected contravariant function assignment diagnostic, got:\n%s", all)
 	}
 }
@@ -651,7 +651,7 @@ def allow_null(box: Box&?) -> int:
 
 def ok() -> int:
 	region scratch(256)
-	box: Box& = new[scratch] Box(7)
+	box: Box& = new[scratch] Box{value: 7}
 	narrower: fn(Box&) -> int = allow_null
 	return narrower(box)
 `

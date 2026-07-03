@@ -25,42 +25,40 @@ def bad(node: Expr, store: Token.Store[Local]) -> int:
 		t.Fatalf("expected packed move-as wrong-store diagnostic, got:\n%s", all)
 	}
 }
-func TestAnalyzeRejectsUsingMoveAsEnumBoundReferenceInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingMoveAsEnumBoundReferenceEscapingRegion(t *testing.T) {
 	src := `enum Holder:
 	Keep(value: i32&, count: i32)
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	value: Holder = Holder.Keep(new[scratch] 1, 7)
-	move value as Holder.Keep(alias, count)
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		value: Holder = Holder.Keep(new[scratch] 1, 7)
+		move value as Holder.Keep(alias, count)
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_enum_alias.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_move_enum_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for enum move-as alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for enum move-as alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsMoveAsEnumScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsMoveAsEnumScalarLeavingRegion(t *testing.T) {
 	src := `enum Holder:
 	Keep(value: i32&, count: i32)
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	value: Holder = Holder.Keep(new[scratch] 1, 7)
-	move value as Holder.Keep(alias, count)
-	restore scratch from cp
-	return count
+	total: i32 = 0
+	region scratch:
+		value: Holder = Holder.Keep(new[scratch] 1, 7)
+		move value as Holder.Keep(alias, count)
+		total = count
+	return total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_enum_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_move_enum_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsUsingHelperReturnedReferenceInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingHelperReturnedReferenceEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -68,23 +66,21 @@ func TestAnalyzeRejectsUsingHelperReturnedReferenceInvalidatedByRestore(t *testi
 def borrow_value(holder: Holder) -> i32&:
 	return holder.value
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: i32& = borrow_value(holder)
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		holder: Holder = Holder{value: new[scratch] 1, count: 7}
+		alias: i32& = borrow_value(holder)
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_ref_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_helper_returned_ref.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for helper-returned reference, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for helper-returned reference, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsHelperReturnedScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsHelperReturnedScalarLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -93,17 +89,16 @@ def borrow_count(holder: Holder) -> i32:
 	return holder.count
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	count: i32 = borrow_count(holder)
-	restore scratch from cp
-	return count
+	total: i32 = 0
+	region scratch:
+		holder: Holder = Holder{value: new[scratch] 1, count: 7}
+		total = borrow_count(holder)
+	return total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_returned_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_helper_returned_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsUsingHelperReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingHelperReturnedNestedViewAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -114,44 +109,42 @@ struct Window:
 def keep_window(window: Window) -> Window:
 	return window
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = keep_window(Window(items[0:2]))
-	which: usize = 1
-	alias: i32& = window.items[which].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = keep_window(Window{items: items[0:2]})
+		which: usize = 1
+		alias: i32& = window.items[which].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_helper_nested_view_alias_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_helper_nested_view_alias.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for helper-returned nested view alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for helper-returned nested view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsFreshHelperReturnAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsFreshHelperReturnLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&?
 	count: i32
 
 def copy_count(holder: Holder) -> Holder:
-	return Holder(null, holder.count)
+	return Holder{value: null, count: holder.count}
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	copy: Holder = copy_count(holder)
-	restore scratch from cp
-	return copy.count
+	total: i32 = 0
+	region scratch:
+		holder: Holder = Holder{value: new[scratch] 1, count: 7}
+		copy: Holder = copy_count(holder)
+		total = copy.count
+	return total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_fresh_helper_return_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_fresh_helper_return_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -159,23 +152,21 @@ func TestAnalyzeRejectsUsingExternBorrowReturnedReferenceInvalidatedByRestore(t 
 @borrows_return(holder)
 extern borrow_value(holder: Holder) -> i32&
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: i32& = borrow_value(holder)
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		holder: Holder = Holder{value: new[scratch] 1, count: 7}
+		alias: i32& = borrow_value(holder)
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_ref_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_borrowed_ref.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern borrowed reference, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for extern borrowed reference, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeRejectsUsingExternBorrowReturnedNestedViewAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternBorrowReturnedNestedViewAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -186,25 +177,23 @@ struct Window:
 @borrows_return(window)
 extern keep_window(window: Window) -> Window
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = keep_window(Window(items[0:2]))
-	which: usize = 1
-	alias: i32& = window.items[which].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = keep_window(Window{items: items[0:2]})
+		which: usize = 1
+		alias: i32& = window.items[which].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_borrowed_nested_view_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_borrowed_nested_view.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern borrowed nested view alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for extern borrowed nested view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeRejectsUsingExternPathBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternPathBorrowReturnedViewAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -216,26 +205,24 @@ struct Window:
 @borrows_return(window.items)
 extern get_items(window: Window) -> view[Holder]
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = Window(items[0:2], 9)
-	selected: view[Holder] = get_items(window)
-	which: usize = 1
-	alias: i32& = selected[which].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = Window{items: items[0:2], id: 9}
+		selected: view[Holder] = get_items(window)
+		which: usize = 1
+		alias: i32& = selected[which].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_path_borrowed_view.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern path-borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for extern path-borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsExternPathBorrowReturnedViewScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsExternPathBorrowReturnedViewScalarLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -248,20 +235,19 @@ struct Window:
 extern get_items(window: Window) -> view[Holder]
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = Window(items[0:2], 9)
-	selected: view[Holder] = get_items(window)
-	which: usize = 1
-	count: i32 = selected[which].count
-	restore scratch from cp
-	return count
+	total: i32 = 0
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = Window{items: items[0:2], id: 9}
+		selected: view[Holder] = get_items(window)
+		which: usize = 1
+		total = selected[which].count
+	return total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_path_borrowed_view_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_extern_path_borrowed_view_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedViewAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedViewAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -273,26 +259,24 @@ struct Window:
 @borrows_return(window.items)
 extern get_items(window: Window&) -> view[Holder]
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = Window(items[0:2], 9)
-	selected: view[Holder] = get_items((&window).cast[Window&])
-	which: usize = 1
-	alias: i32& = selected[which].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = Window{items: items[0:2], id: 9}
+		selected: view[Holder] = get_items((&window).cast[Window&])
+		which: usize = 1
+		alias: i32& = selected[which].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_view_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_ref_param_view.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for extern ref-param borrowed view alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedElementAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternRefParamBorrowReturnedElementAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -304,26 +288,24 @@ struct Window:
 @borrows_return(window.items[*])
 extern get_item(window: Window&, which: usize) -> Holder
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	window: Window = Window(items[0:2], 9)
-	which: usize = 1
-	item: Holder = get_item((&window).cast[Window&], which)
-	alias: i32& = item.value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		window: Window = Window{items: items[0:2], id: 9}
+		which: usize = 1
+		item: Holder = get_item((&window).cast[Window&], which)
+		alias: i32& = item.value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_ref_param_elem_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_ref_param_elem.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern ref-param borrowed element alias, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for extern ref-param borrowed element alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeRejectsUsingExternFieldBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternFieldBorrowReturnedStructFieldEscapingRegion(t *testing.T) {
 	src := `struct Box:
 	value: i32&
 
@@ -331,101 +313,70 @@ struct Pair:
 	left: i32&
 	right: i32&
 
-@borrows_return_field(left, left_src.value, right, right_src.value)
+@borrows_return(field, left, left_src.value, right, right_src.value)
 extern pair_refs(left_src: Box, right_src: Box) -> Pair
 
-def bad() -> i32:
-	region left_r
-	region right_r
-	mark left_r as left_cp
-	mark right_r as right_cp
-	left_box: Box = Box(new[left_r] 1)
-	right_box: Box = Box(new[right_r] 2)
-	pair: Pair = pair_refs(left_box, right_box)
-	restore left_r from left_cp
-	return pair.left[0]
+def bad() -> i32&:
+	region left_r:
+		region right_r:
+			left_box: Box = Box{value: new[left_r] 1}
+			right_box: Box = Box{value: new[right_r] 2}
+			pair: Pair = pair_refs(left_box, right_box)
+			return pair.left
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_left_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_field_borrow_left.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"pair.left\" cannot be used: region dependency facts were invalidated by restore of region \"left_r\" from checkpoint \"left_cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for extern field-borrowed left field, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"left_r\"") {
+		t.Fatalf("expected region-escape diagnostic for extern field-borrowed left field, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsUsingExternFieldBorrowReturnedSiblingFieldAfterUnrelatedRestore(t *testing.T) {
-	src := `struct Box:
-	value: i32&
-
-struct Pair:
-	left: i32&
-	right: i32&
-
-@borrows_return_field(left, left_src.value, right, right_src.value)
-extern pair_refs(left_src: Box, right_src: Box) -> Pair
-
-def ok() -> i32:
-	region left_r
-	region right_r
-	mark left_r as left_cp
-	mark right_r as right_cp
-	left_box: Box = Box(new[left_r] 1)
-	right_box: Box = Box(new[right_r] 2)
-	pair: Pair = pair_refs(left_box, right_box)
-	restore left_r from left_cp
-	return pair.right[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_borrow_right_ok.elisa", src)
-	requireNoErrors(t, errs)
-}
-func TestAnalyzeRejectsUsingExternRebasedBorrowReturnedSubviewAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternRebasedBorrowReturnedSubviewAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
 
-@borrows_return_rebased(items)
+@borrows_return(rebased, items)
 extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	sub: view[Holder] = sub_items(view, 1, 2)
-	alias: i32& = sub[0].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		sub: view[Holder] = sub_items(view, 1, 2)
+		alias: i32& = sub[0].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_rebased_subview.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected rebased subview invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected region-escape diagnostic for rebased subview alias, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsExternRebasedBorrowReturnedSubviewScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsExternRebasedBorrowReturnedSubviewScalarLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
 
-@borrows_return_rebased(items)
+@borrows_return(rebased, items)
 extern sub_items(items: view[Holder], start: usize, end: usize) -> view[Holder]
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	sub: view[Holder] = sub_items(view, 1, 2)
-	count: i32 = sub[0].count
-	restore scratch from cp
-	return count
+	total: i32 = 0
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		sub: view[Holder] = sub_items(view, 1, 2)
+		total = sub[0].count
+	return total
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_rebased_subview_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_extern_rebased_subview_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
-func TestAnalyzeRejectsUsingExternFieldRebasedBorrowReturnedStructFieldInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternFieldRebasedBorrowReturnedStructFieldEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -434,28 +385,26 @@ struct SlicePair:
 	items: view[Holder]
 	total: i32
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> SlicePair
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	pair: SlicePair = slice_pair(view, 1, 2, 9)
-	alias: i32& = pair.items[0].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		pair: SlicePair = slice_pair(view, 1, 2, 9)
+		alias: i32& = pair.items[0].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_field_rebased.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected field-rebased invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected field-rebased region-escape diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsExternFieldRebasedSiblingScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsExternFieldRebasedSiblingScalarLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -464,34 +413,34 @@ struct SlicePair:
 	items: view[Holder]
 	total: i32
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern slice_pair(src: view[Holder], start: usize, end: usize, total: i32) -> SlicePair
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	pair: SlicePair = slice_pair(view, 1, 2, 9)
-	restore scratch from cp
-	return pair.total
+	out: i32 = 0
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		pair: SlicePair = slice_pair(view, 1, 2, 9)
+		out = pair.total
+	return out
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_field_rebased_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_extern_field_rebased_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeRejectsExternBorrowsReturnFieldRebasedOnNonStructReturn(t *testing.T) {
-	src := `@borrows_return_field_rebased(items, source)
+	src := `@borrows_return(field, rebased, items, source)
 extern bad(source: i32&) -> i32&
 `
 	_, errs := parseAndAnalyze(t, "extern_function_field_rebased_non_struct_reject.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return_field_rebased on extern function \"bad\" requires a concrete struct return type, got i32&") {
+	if !strings.Contains(strings.Join(errs, "\n"), "@borrows_return(field, …) on extern function \"bad\" requires a concrete struct return type, got i32&") {
 		t.Fatalf("expected field-rebased non-struct diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeRejectsUsingExternNestedFieldBorrowReturnedAliasInvalidatedByRestore(t *testing.T) {
+func TestAnalyzeRejectsUsingExternNestedFieldBorrowReturnedAliasEscapingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -504,28 +453,26 @@ struct Wrapper:
 	meta: Meta
 	tag: i32
 
-@borrows_return_field(meta.items, src)
+@borrows_return(field, meta.items, src)
 extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
 
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	wrapped: Wrapper = wrap_meta(view, 9, 5)
-	alias: i32& = wrapped.meta.items[0].value
-	restore scratch from cp
-	return alias[0]
+def bad() -> i32&:
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		wrapped: Wrapper = wrap_meta(view, 9, 5)
+		alias: i32& = wrapped.meta.items[0].value
+		return alias
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_invalid.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_escape_extern_nested_field.elisa", src)
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected nested field-path invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
+		t.Fatalf("expected nested field-path region-escape diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
-func TestAnalyzeAcceptsExternNestedFieldBorrowReturnedSiblingScalarAfterRestore(t *testing.T) {
+func TestAnalyzeAcceptsExternNestedFieldBorrowReturnedSiblingScalarLeavingRegion(t *testing.T) {
 	src := `struct Holder:
 	value: i32&
 	count: i32
@@ -538,18 +485,18 @@ struct Wrapper:
 	meta: Meta
 	tag: i32
 
-@borrows_return_field(meta.items, src)
+@borrows_return(field, meta.items, src)
 extern wrap_meta(src: view[Holder], total: i32, tag: i32) -> Wrapper
 
 def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	items: array[Holder, 2] = [Holder(new[scratch] 1, 7), Holder(new[scratch] 2, 8)]
-	view: view[Holder] = items[0:2]
-	wrapped: Wrapper = wrap_meta(view, 9, 5)
-	restore scratch from cp
-	return wrapped.meta.total + wrapped.tag
+	out: i32 = 0
+	region scratch:
+		items: array[Holder, 2] = [Holder{value: new[scratch] 1, count: 7}, Holder{value: new[scratch] 2, count: 8}]
+		view: view[Holder] = items[0:2]
+		wrapped: Wrapper = wrap_meta(view, 9, 5)
+		out = wrapped.meta.total + wrapped.tag
+	return out
 `
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_extern_nested_field_scalar_ok.elisa", src)
+	_, errs := parseAndAnalyze(t, "regions_extern_nested_field_scalar_ok.elisa", src)
 	requireNoErrors(t, errs)
 }

@@ -210,7 +210,7 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		if n.Variadic {
 			parts = append(parts, "...")
 		}
-		line := "func(" + strings.Join(parts, ", ") + ")"
+		line := "fn(" + strings.Join(parts, ", ") + ")"
 		if n.Return != nil {
 			line += " -> " + formatTypeExpr(n.Return)
 		}

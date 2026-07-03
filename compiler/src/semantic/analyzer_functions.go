@@ -66,6 +66,20 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	savedReturnBorrowedOwnerRefs := a.currentReturnBorrowedOwnerRefs
 	savedConservativeCallWidenings := a.currentConservativeCallWidenings
 	savedRegionFactTransforms := a.currentRegionFactTransforms
+	// Mutable-alias access tracking is per-function: borrows are function-local, so a fresh
+	// function must start with an empty access/binding map. Failing to reset these leaked
+	// borrows (e.g. an outer function's `r = a.begin` read) into later functions, where they
+	// caused spurious overlap conflicts (a write to param `a` "conflicting" with a stale
+	// `a.begin` borrow) and false Unsafe.Alias inference. Save + reset + restore so nested
+	// functions still see the enclosing state on return.
+	savedAliasAccesses := a.currentAliasAccesses
+	savedAliasBindings := a.currentAliasBindings
+	savedAliasCarriers := a.currentAliasCarriers
+	savedAliasCarrierFieldOverrides := a.currentAliasCarrierFieldOverrides
+	a.currentAliasAccesses = nil
+	a.currentAliasBindings = nil
+	a.currentAliasCarriers = nil
+	a.currentAliasCarrierFieldOverrides = nil
 	a.currentScope = NewScope(a.globalScope)
 	a.currentRegions = map[*Symbol]regionState{}
 	a.currentRegionMarks = map[*Symbol]regionMarkState{}
@@ -247,6 +261,10 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
 	a.currentValueBindings = savedValueBindings
 	a.currentStorageViewDeps = savedStorageViewDeps
+	a.currentAliasAccesses = savedAliasAccesses
+	a.currentAliasBindings = savedAliasBindings
+	a.currentAliasCarriers = savedAliasCarriers
+	a.currentAliasCarrierFieldOverrides = savedAliasCarrierFieldOverrides
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions

@@ -11,8 +11,13 @@
 .DEFAULT_GOAL := test
 
 # Fast packages: everything EXCEPT the heavy elisacore/src package. ~12s cold, instant cached.
+# Includes the fixture suites under ./test/ that are fast (analyzer/lexer-level, no native
+# runtime) and green — gating them here stops the silent rot that let removed-syntax and
+# stale-contract drift accumulate while nothing ran them. (./test/backend is NOT yet listed:
+# it has its own pre-existing rot; add it once de-rotted.)
 FAST_PKGS := ./src/semantic/ ./src/smt/ ./src/backend/ ./src/parser/ ./src/lexer/ \
-             ./src/interpreter/ ./src/grammar/ ./src/easm/ ./src/frontendir/ ./src/unparse/
+             ./src/interpreter/ ./src/grammar/ ./src/easm/ ./src/frontendir/ ./src/unparse/ \
+             ./test/semantic/ ./test/lexer/
 
 # test: fast inner-loop suite. The default. Does NOT run the slow ./src native-runtime tests.
 .PHONY: test

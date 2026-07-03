@@ -61,12 +61,13 @@ def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	boxed: KeeperBox = KeeperBox.Wrap(keeper: GroupKeeper(keep_holder))
+	boxed: KeeperBox = KeeperBox.Wrap(keeper: GroupKeeper{fn: keep_holder})
 	match boxed:
 		KeeperBox.Wrap(wrapper):
 			alias_holder: GroupHolder = wrapper.fn(holder)
 			task_group_add(alias_holder.group_ref, move task)
-			wait all holder.group_ref
+			trusted Unsafe.PointerCast:
+				wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_enum_match_bound_aggregate_projected_callback_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -133,12 +134,13 @@ def keep_holder(holder: GroupHolder) -> GroupHolder:
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	region store_owner
 	store: KeeperBox.Store[Local] = KeeperBox.Store(store_owner)
-	boxed: KeeperBox = new[store] KeeperBox.Wrap(keeper: GroupKeeper(keep_holder))
+	boxed: KeeperBox = new[store] KeeperBox.Wrap(keeper: GroupKeeper{fn: keep_holder})
 	match boxed in store:
 		KeeperBox.Wrap(wrapper):
 			alias_holder: GroupHolder = wrapper.fn(holder)
 			task_group_add(alias_holder.group_ref, move task)
-			wait all holder.group_ref
+			trusted Unsafe.PointerCast:
+				wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_packed_enum_match_bound_aggregate_projected_callback_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -198,9 +200,10 @@ def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), holder)
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper{fn: keep_holder}, holder)
 	task_group_add(alias_holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_projection_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -264,9 +267,10 @@ def keep_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), holder)
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper{fn: keep_holder}, holder)
 	task_group_add(alias_holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_callback_param_local_alias_projection_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -336,9 +340,10 @@ def fallback_holder(holder: GroupHolder) -> GroupHolder:
 	return holder
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	alias_holder: GroupHolder = apply_keeper(GroupKeeper(keep_holder), GroupKeeper(fallback_holder), holder)
+	alias_holder: GroupHolder = apply_keeper(GroupKeeper{fn: keep_holder}, GroupKeeper{fn: fallback_holder}, holder)
 	task_group_add(alias_holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_mutable_aggregate_callback_wrapper_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -404,7 +409,8 @@ def keep_holder_fallback(holder: GroupHolder) -> GroupHolder:
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	alias_holder: GroupHolder = apply_keeper(keep_holder, keep_holder_fallback, holder)
 	task_group_add(alias_holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_mutable_callback_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -478,7 +484,8 @@ def get_fallback_group_ref(holder: GroupHolder) -> TaskGroup&:
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	group_ref: TaskGroup& = apply_getter(true, get_primary_group_ref, get_fallback_group_ref, holder)
 	task_group_add(group_ref, move task)
-	wait all holder.primary_group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.primary_group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_higher_order_helper_branch_merged_callback_rebinding_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -550,7 +557,8 @@ def get_group_ref_alias(box: GroupHolder) -> TaskGroup&:
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	group_ref: TaskGroup& = apply_getter(true, get_group_ref, get_group_ref_alias, holder)
 	task_group_add(group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_branch_merged_callback_different_param_names_ok.elisa", src)
 	requireNoErrors(t, errs)

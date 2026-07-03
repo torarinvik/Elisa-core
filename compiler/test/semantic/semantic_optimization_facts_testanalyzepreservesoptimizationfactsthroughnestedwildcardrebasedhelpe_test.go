@@ -13,11 +13,11 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
 	left_indexed: view[i32] = wrapped.meta.items[0].left
 	right_indexed: view[i32] = wrapped.meta.items[0].right
@@ -58,11 +58,11 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
 	left_overlap: view[i32] = wrapped.meta.items[0].left
 	right_overlap: view[i32] = wrapped.meta.items[0].right
@@ -103,11 +103,11 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def inspect(values: array[i32, 4]) -> int:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	left_indexed: view[i32] = wrapped.meta.items[0].left
 	right_indexed: view[i32] = wrapped.meta.items[0].right
@@ -151,13 +151,13 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(value: 2)}, Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move wrapped.meta.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
@@ -213,13 +213,13 @@ struct Box:
 struct BoxWindow:
 	items: view[Box]
 
-@borrows_return_field_rebased(items[*].node, src[*].node)
+@borrows_return(field, rebased, items[*].node, src[*].node)
 extern wrap_nodes_wild(src: view[Box], start: usize, end: usize) -> BoxWindow
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(value: 2)}, Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	wrapped: BoxWindow = wrap_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move wrapped.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
@@ -278,13 +278,13 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+@borrows_return(field, rebased, meta.items[*].node, src[*].node)
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(value: 2)}, Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move wrapped.meta.items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
@@ -399,13 +399,13 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(value: 2)}, Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0].node in frozen:
@@ -469,13 +469,13 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].node, src[*].node)
+@borrows_return(field, rebased, meta.items[*].node, src[*].node)
 extern wrap_submeta_nodes_wild(src: view[Box], start: usize, end: usize) -> Wrapper
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(new[store] Expr.Int(value: 2)), Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 2] = [Box{node: new[store] Expr.Int(value: 2)}, Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	wrapped: Wrapper = wrap_submeta_nodes_wild(items[1:2], 0, 1)
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match wrapped.meta.items[0].node in frozen:

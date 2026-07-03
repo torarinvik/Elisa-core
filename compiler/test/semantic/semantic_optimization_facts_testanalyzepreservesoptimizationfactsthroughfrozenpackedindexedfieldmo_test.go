@@ -13,7 +13,7 @@ struct Box:
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 1] = [Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))]
+	items: array[Box, 1] = [Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}]
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move items[0].node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
@@ -68,7 +68,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
@@ -124,11 +124,11 @@ func TestAnalyzePreservesOptimizationFactsThroughDirectFieldProjectionExpression
 	left: view[i32]
 	right: view[i32]
 
-@borrows_return_field(left, left, right, right)
+@borrows_return(field, left, left, right, right)
 extern wrap_views(left: view[i32], right: view[i32]) -> Views
 
 def inspect(buf: array[i32, 4]) -> int:
-	boxed: Views = Views(buf[0:2], buf[2:4])
+	boxed: Views = Views{left: buf[0:2], right: buf[2:4]}
 	wrapped: Views = wrap_views(buf[0:2], buf[2:4])
 	left_direct: view[i32] = boxed.left
 	right_direct: view[i32] = boxed.right
@@ -184,11 +184,11 @@ func TestAnalyzePreservesOptimizationFactsThroughNestedFieldProjectionExpression
 struct NestedViews:
 	inner: Views
 
-@borrows_return_field(inner.left, left, inner.right, right)
+@borrows_return(field, inner.left, left, inner.right, right)
 extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
 
 def inspect(buf: array[i32, 4]) -> int:
-	direct: NestedViews = NestedViews(Views(buf[0:2], buf[2:4]))
+	direct: NestedViews = NestedViews{inner: Views{left: buf[0:2], right: buf[2:4]}}
 	wrapped: NestedViews = wrap_nested_views(buf[0:2], buf[2:4])
 	left_direct: view[i32] = direct.inner.left
 	right_direct: view[i32] = direct.inner.right

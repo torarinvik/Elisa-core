@@ -143,7 +143,7 @@ def make_box(owner: Arena) -> Box:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
 		_ = new Expr.Int(value: 7)
-	return Box(move store)
+	return Box{store: move store}
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
@@ -162,7 +162,7 @@ struct RootBox:
 	root: Expr
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
-	box: RootBox = RootBox(store[index])
+	box: RootBox = RootBox{root: store[index]}
 	match box.root:
 		Expr.Int(value: value):
 			return value

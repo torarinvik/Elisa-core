@@ -377,7 +377,7 @@ struct Box:
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	boxed: Box = Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
+	boxed: Box = Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	match boxed.node in frozen:
 		Expr.HoldViews(left: left, right: right, child: child_alias):
@@ -433,7 +433,7 @@ func TestAnalyzePreservesOptimizationFactsThroughFrozenPackedHelperFieldMatchBin
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:
@@ -500,7 +500,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def inspect(owner: Arena, buf: array[i32, 4]) -> int:

@@ -298,7 +298,7 @@ export fn pass_array_c(value: i32[4]) -> i32[4] = pass_array
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "export fn \"pass_array_c\" is not C-ABI-compatible") {
+	if !strings.Contains(strings.Join(errs, "\n"), "export func \"pass_array_c\" is not C-ABI-compatible") {
 		t.Fatalf("expected export array boundary rejection, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

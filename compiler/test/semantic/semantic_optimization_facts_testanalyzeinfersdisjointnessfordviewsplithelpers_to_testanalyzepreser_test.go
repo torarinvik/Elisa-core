@@ -16,8 +16,9 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		trusted Unsafe.PointerCast:
+			return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_view_prefix[T](view: view[T], end: usize) -> view[T]:
 	_ = end
@@ -70,8 +71,9 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		trusted Unsafe.PointerCast:
+			return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	_ = start
@@ -116,8 +118,9 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		trusted Unsafe.PointerCast:
+			return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def inspect(values: darray[i32, 4]&) -> int:
 	base: view[i32] = arena_da_view(values, 0, 4)
@@ -168,7 +171,7 @@ def arena_da_view_slice(input: view[Views], start: usize, end: usize) -> view[Vi
 	return input
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0:2], values[2:4]), Views(values[4:6], values[6:8])]
+	items: array[Views, 2] = [Views{left: values[0:2], right: values[2:4]}, Views{left: values[4:6], right: values[6:8]}]
 	window: view[Views] = arena_da_view_slice(items[1:2], 0, 1)
 	left_projected: view[i32] = window[0].left
 	right_projected: view[i32] = window[0].right
@@ -218,7 +221,7 @@ def inspect(owner: Arena) -> int:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	node0: Expr = new[store] Expr.Int(value: 0)
 	node1: Expr = new[store] Expr.Int(value: 1)
-	items: array[Box, 2] = [Box(node0), Box(node1)]
+	items: array[Box, 2] = [Box{node: node0}, Box{node: node1}]
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	window: view[Box] = arena_da_view_slice(items[1:2], 0, 1)
 	projected: Expr = window[0].node
@@ -255,7 +258,7 @@ func TestAnalyzeMarksValuesDependingOnlyOnFrozenPackedStores(t *testing.T) {
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def inspect(owner: Arena) -> int:

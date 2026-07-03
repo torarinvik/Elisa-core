@@ -22,7 +22,7 @@ func TestAnalyzeAcceptsNamespaceAndUsingForTypesAndFunctions(t *testing.T) {
 		value: int
 
 	def make_box(value: int) -> Box:
-		return Box(value)
+		return Box{value: value}
 
 	def read(box: Box) -> int:
 		return box.value

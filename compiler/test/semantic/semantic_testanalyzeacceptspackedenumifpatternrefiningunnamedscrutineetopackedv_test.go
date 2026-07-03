@@ -160,7 +160,7 @@ struct RootBox:
 	root: Expr
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
-	box: RootBox = RootBox(store[index])
+	box: RootBox = RootBox{root: store[index]}
 	if box.root as Expr.Int(value: value):
 		return value + box.root.span
 	return 0
@@ -237,7 +237,7 @@ def make_box(owner: Arena) -> Box:
 	store: Expr.Store[Local] = Expr.Store(owner)
 	in store:
 		_ = new Expr.Int(value: 7)
-	return Box(move store)
+	return Box{store: move store}
 
 def read(owner: Arena) -> int:
 	box: Box = make_box(owner)
@@ -260,7 +260,7 @@ struct RootBox:
 	root: Expr
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
-	box: RootBox = RootBox(store[index])
+	box: RootBox = RootBox{root: store[index]}
 	if box.root as Expr.Int(value: value):
 		return value + box.root.span
 	return 0
@@ -308,7 +308,7 @@ struct RootBox:
 	root: Expr
 
 def read(store: Expr.Store[Frozen], index: usize) -> int:
-	box: RootBox = RootBox(store[index])
+	box: RootBox = RootBox{root: store[index]}
 	if box.root as Expr.Int(value: value):
 		return value
 	return 0
@@ -437,7 +437,7 @@ def make_box(owner: Arena) -> FrozenBox:
 		right: Expr = new Expr.Lit(span: 2, value: 4)
 		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return FrozenBox(frozen)
+	return FrozenBox{store: frozen}
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)

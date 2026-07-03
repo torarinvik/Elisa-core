@@ -17,7 +17,7 @@ struct Box:
 struct BoxHolder:
 	items: array[Box, 1]
 
-@borrows_return_field(items[0].node, node)
+@borrows_return(field, items[0].node, node)
 extern wrap_indexed_node(node: Expr) -> BoxHolder
 
 def inspect(owner: Arena) -> int:
@@ -85,7 +85,7 @@ func TestAnalyzePreservesOptimizationFactsThroughAllocatedFieldProjectionExpress
 
 def inspect(buf: array[i32, 4]) -> int:
 	region scratch(1024)
-	boxed: Views& @scratch = new[scratch] Views(buf[0:2], buf[2:4])
+	boxed: Views& @scratch = new[scratch] Views{left: buf[0:2], right: buf[2:4]}
 	left_alloc: view[i32] = boxed.left
 	right_alloc: view[i32] = boxed.right
 	return 0
@@ -126,7 +126,7 @@ def inspect(owner: Arena, buf: array[i32, 4]) -> int:
 	region scratch(1024)
 	store: Expr.Store[Local] = Expr.Store(owner)
 	child: Expr = new[store] Expr.Int(value: 1)
-	boxed: Box& @scratch = new[scratch] Box(new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child))
+	boxed: Box& @scratch = new[scratch] Box{node: new[store] Expr.HoldViews(left: buf[0:2], right: buf[2:4], child: child)}
 	frozen: Expr.Store[Frozen] = freeze(move store)
 	move boxed.node in frozen as Expr.HoldViews(left, right, child_alias)
 	left_copy: view[i32] = left
@@ -176,7 +176,7 @@ func TestAnalyzePreservesOptimizationFactsThroughIndexedFieldProjectionExpressio
 	right: view[i32]
 
 def inspect(buf: array[i32, 4]) -> int:
-	items: array[Views, 1] = [Views(buf[0:2], buf[2:4])]
+	items: array[Views, 1] = [Views{left: buf[0:2], right: buf[2:4]}]
 	left_indexed: view[i32] = items[0].left
 	right_indexed: view[i32] = items[0].right
 	return 0
@@ -316,7 +316,7 @@ func TestAnalyzePreservesOptimizationFactsThroughHelperReturnedIndexedFieldProje
 struct ViewHolder:
 	items: array[Views, 1]
 
-@borrows_return_field(items[0].left, left, items[0].right, right)
+@borrows_return(field, items[0].left, left, items[0].right, right)
 extern wrap_indexed_views(left: view[i32], right: view[i32]) -> ViewHolder
 
 def inspect(buf: array[i32, 4]) -> int:
@@ -360,7 +360,7 @@ struct ViewHolder:
 struct NestedHolder:
 	holder: ViewHolder
 
-@borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
+@borrows_return(field, holder.items[0].left, left, holder.items[0].right, right)
 extern wrap_nested_indexed_views(left: view[i32], right: view[i32]) -> NestedHolder
 
 def inspect(buf: array[i32, 4]) -> int:
@@ -401,11 +401,11 @@ func TestAnalyzePreservesOptimizationFactsThroughRebasedHelperReturnedIndexedFie
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern wrap_sub(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 4]) -> int:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
 	left_indexed: view[i32] = wrapped.items[0].left
 	right_indexed: view[i32] = wrapped.items[0].right
@@ -443,11 +443,11 @@ func TestAnalyzePreservesOptimizationFactsThroughWildcardRebasedHelperReturnedIn
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
 	left_indexed: view[i32] = wrapped.items[0].left
 	right_indexed: view[i32] = wrapped.items[0].right
@@ -485,11 +485,11 @@ func TestAnalyzeKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturnedIndexe
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def inspect(values: array[i32, 8]) -> int:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
 	left_overlap: view[i32] = wrapped.items[0].left
 	right_overlap: view[i32] = wrapped.items[0].right

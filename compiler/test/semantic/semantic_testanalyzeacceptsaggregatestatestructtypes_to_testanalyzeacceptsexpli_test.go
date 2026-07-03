@@ -83,7 +83,7 @@ def take_dead(player: Player[Dead]) -> int:
 	return player.health
 
 def make_alive() -> Player:
-	return Player(5)
+	return Player{health: 5}
 
 def route(player: Player) -> int:
 	if player is Player[Alive]:
@@ -111,7 +111,7 @@ func TestAnalyzeRejectsExplicitDerivedStateConstructorMismatch(t *testing.T) {
 		Dead when self.health <= 0
 
 def bad() -> Player[Alive]:
-	return Player[Alive](0)
+	return Player[Alive]{health: 0}
 `
 	_, errs := parseAndAnalyze(t, "derived_struct_state_constructor_reject.elisa", src)
 	if len(errs) == 0 {
@@ -385,9 +385,9 @@ func TestAnalyzeRejectsUsingStaleReadyStateAfterParserRefCallMutation(t *testing
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: mutable ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void ensures job => Failed:
 	job.checksum <- 7
-	job.stage <- 1
+	job.stage <- 2
 
 def bad(job: mutable ParseJob[Pending]) -> int:
 	finish_ok((&job).cast[mutable ParseJob[Pending]&])
@@ -398,7 +398,7 @@ def bad(job: mutable ParseJob[Pending]) -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "expects ParseJob[Ready], got ParseJob[Pending | Ready | Failed]") {
+	if !strings.Contains(all, "expects ParseJob[Ready], got ParseJob[Failed]") {
 		t.Fatalf("expected parser ref-call mutation derived-state diagnostic, got:\n%s", all)
 	}
 }
@@ -415,7 +415,7 @@ func TestAnalyzeAcceptsReprovingReadyStateAfterParserRefCallMutation(t *testing.
 def take_ready(job: ParseJob[Ready]) -> int:
 	return job.checksum
 
-def finish_ok(job: mutable ParseJob[Pending]&) -> void:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void ensures job => Ready:
 	job.checksum <- 7
 	job.stage <- 1
 
@@ -442,7 +442,7 @@ func TestAnalyzeRejectsUsingStaleOpenStateAfterSocketCloseRefCall(t *testing.T) 
 def take_open(sock: Socket[Open]) -> int:
 	return sock.bytes_sent
 
-def close_socket(sock: mutable Socket[Open]&) -> void:
+def close_socket(sock: mutable Socket[Open]&) -> void ensures sock => Closed:
 	sock.fd <- -1
 
 def bad(sock: mutable Socket[Open]) -> int:
@@ -454,11 +454,11 @@ def bad(sock: mutable Socket[Open]) -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "expects Socket[Open], got Socket[Open | Closed]") {
+	if !strings.Contains(all, "expects Socket[Open], got Socket[Closed]") {
 		t.Fatalf("expected socket ref-call mutation derived-state diagnostic, got:\n%s", all)
 	}
 }
-func TestAnalyzeRejectsUsingStaleInitializedStateAfterBufferInitRefCall(t *testing.T) {
+func TestAnalyzeAcceptsInitializedStateAfterBufferInitRefCall(t *testing.T) {
 	src := `struct ScratchBuffer[state Uninitialized | Initialized]:
 	capacity: mutable int
 	used: mutable int
@@ -470,22 +470,18 @@ func TestAnalyzeRejectsUsingStaleInitializedStateAfterBufferInitRefCall(t *testi
 def take_initialized(buf: ScratchBuffer[Initialized]) -> int:
 	return buf.capacity - buf.used
 
-def init_buffer(buf: mutable ScratchBuffer[Uninitialized]&) -> void:
+def init_buffer(buf: mutable ScratchBuffer[Uninitialized]&) -> void ensures buf => Initialized:
 	buf.capacity <- 64
 	buf.used <- 0
 
-def bad(buf: mutable ScratchBuffer[Uninitialized]) -> int:
+def ok(buf: mutable ScratchBuffer[Uninitialized]) -> int:
 	init_buffer((&buf).cast[mutable ScratchBuffer[Uninitialized]&])
 	return take_initialized(buf)
 `
-	_, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_mutation_reject.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "expects ScratchBuffer[Initialized], got ScratchBuffer[Uninitialized | Initialized]") {
-		t.Fatalf("expected buffer ref-call mutation derived-state diagnostic, got:\n%s", all)
-	}
+	result, errs := parseAndAnalyze(t, "derived_struct_state_buffer_ref_call_init_ok.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+	requireFunctionReturnTypeString(t, result, "ok", "int")
 }
 func TestAnalyzeFunctionTypePermissionsParticipateInMatching(t *testing.T) {
 	src := `extern puts(text: u8&) -> int can[Console.Write]
@@ -531,14 +527,16 @@ func TestAnalyzeAcceptsFunctionValueErasureCasts(t *testing.T) {
     return value + 1
 
 def call_erased(raw: void&, value: i64) -> i64:
-	fn: fn(i64) -> i64 = raw.cast[fn(i64) -> i64]
-    return fn(value)
+	trusted Unsafe.PointerCast:
+		fn: fn(i64) -> i64 = raw.cast[fn(i64) -> i64]
+		return fn(value)
 
 def run() -> i64:
-	raw: void& = inc.cast[void&]
-	bits: uintptr = raw.cast[uintptr]
-	fn: fn(i64) -> i64 = bits.cast[fn(i64) -> i64]
-	return call_erased(fn.cast[void&], 40)
+	trusted Unsafe.PointerCast:
+		raw: void& = inc.cast[void&]
+		bits: uintptr = raw.cast[uintptr]
+		fn: fn(i64) -> i64 = bits.cast[fn(i64) -> i64]
+		return call_erased(fn.cast[void&], 40)
 `
 	result, errs := parseAndAnalyze(t, "function_value_erasure_casts.elisa", src)
 	requireNoErrors(t, errs)
@@ -571,7 +569,7 @@ def first[T, N: usize](value: Fixed[T, N]) -> T:
     return value.items[0]
 
 def run(values: i32[4]) -> i32:
-    fixed: Fixed[i32, 4] = Fixed[i32, 4](values)
+    fixed: Fixed[i32, 4] = Fixed[i32, 4]{items: values}
     return first[i32, 4](fixed)
 `
 	result, errs := parseAndAnalyze(t, "value_generic_struct_function.elisa", src)

@@ -218,7 +218,7 @@ struct PoolHolder:
 struct PoolWrapper:
 	inner: PoolHolder
 
-@borrows_return_field(inner.pool_ref, holder.pool_ref)
+@borrows_return(field, inner.pool_ref, holder.pool_ref)
 extern wrap_holder(holder: PoolHolder) -> PoolWrapper
 
 def work(value: i64) -> i64:
@@ -251,7 +251,8 @@ extern keep_holder(holder: GroupHolder) -> GroupHolder
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
 	alias_holder: GroupHolder = keep_holder(holder)
 	task_group_add(alias_holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_returned_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -265,13 +266,14 @@ extern task_group_wait_all(group: TaskGroup&) -> void
 struct GroupHolder:
 	group_ref: TaskGroup&
 
-@borrows_return_rebased(items)
+@borrows_return(rebased, items)
 extern sub_items(items: view[GroupHolder], start: usize, end: usize) -> view[GroupHolder]
 
 def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 	sub: view[GroupHolder] = sub_items(items, 1, 2)
 	task_group_add(sub[0].group_ref, move task)
-	wait all items[1].group_ref
+	trusted Unsafe.PointerCast:
+		wait all items[1].group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_rebased_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -288,13 +290,14 @@ struct GroupHolder:
 struct GroupWindow:
 	items: view[GroupHolder]
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern wrap_sub(src: view[GroupHolder], start: usize, end: usize) -> GroupWindow
 
 def ok(items: view[GroupHolder], task: Task[i64, Pending]) -> void:
 	window: GroupWindow = wrap_sub(items, 1, 2)
 	task_group_add(window.items[0].group_ref, move task)
-	wait all items[1].group_ref
+	trusted Unsafe.PointerCast:
+		wait all items[1].group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_extern_field_rebased_aggregate_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -365,7 +368,8 @@ func TestAnalyzeAcceptsWaitAllSyntax(t *testing.T) {
 	src := `extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup) -> void:
-    wait all group
+    trusted Unsafe.PointerCast:
+        wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_group_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -447,8 +451,9 @@ def work(value: i64) -> i64:
 def ok() -> i64:
 	can Pool.Create, Pool.Shutdown, Pool.Submit, Pool.Await:
 		pool workers(2):
-			task: Task[i64, Pending] = submit work(7)
-			return await task
+			trusted Unsafe.PointerCast:
+				task: Task[i64, Pending] = submit work(7)
+				return await task
 `
 	result, errs := parseAndAnalyze(t, "submit_syntax_ok.elisa", src)
 	requireNoErrors(t, errs)

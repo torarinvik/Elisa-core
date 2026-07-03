@@ -13,13 +13,13 @@ struct Builder[T]:
     make: fn(T) -> Box[T]
 
 def make_i64_box(value: i64) -> Box[i64]:
-    return Box[i64](value)
+    return Box[i64]{value: value}
 
 def wrap[T](builder: Builder[T], value: T) -> Box[T]:
     return builder.make(value)
 
 def run() -> i64:
-    builder: Builder[i64] = Builder[i64](make_i64_box)
+    builder: Builder[i64] = Builder[i64]{make: make_i64_box}
     boxed: Box[i64] = wrap(builder, 7)
     return boxed.value
 `
@@ -276,8 +276,9 @@ func TestAnalyzeAcceptsWaitAllAfterTaskGroupAdd(t *testing.T) {
 extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	task_group_add((&group).cast[TaskGroup&], move task)
-    wait all group
+	trusted Unsafe.PointerCast:
+		task_group_add((&group).cast[TaskGroup&], move task)
+		wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -289,9 +290,10 @@ func TestAnalyzeAcceptsWaitAllAfterTaskGroupAddViaBorrowedAlias(t *testing.T) {
 extern task_group_wait_all(group: TaskGroup&) -> void
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	group_ref: TaskGroup& = (&group).cast[TaskGroup&]
-	task_group_add(group_ref, move task)
-	wait all group
+	trusted Unsafe.PointerCast:
+		group_ref: TaskGroup& = (&group).cast[TaskGroup&]
+		task_group_add(group_ref, move task)
+		wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -306,9 +308,10 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 def ok(group: mutable TaskGroup, task: Task[i64, Pending]) -> void:
-	holder: GroupHolder = GroupHolder((&group).cast[TaskGroup&])
-	task_group_add(holder.group_ref, move task)
-	wait all group
+	trusted Unsafe.PointerCast:
+		holder: GroupHolder = GroupHolder{group_ref: (&group).cast[TaskGroup&]}
+		task_group_add(holder.group_ref, move task)
+		wait all group
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_projected_alias_ok.elisa", src)
 	requireNoErrors(t, errs)
@@ -323,8 +326,9 @@ struct GroupHolder:
 	group_ref: TaskGroup&
 
 def ok(holder: GroupHolder, task: Task[i64, Pending]) -> void:
-	task_group_add(holder.group_ref, move task)
-	wait all holder.group_ref
+	trusted Unsafe.PointerCast:
+		task_group_add(holder.group_ref, move task)
+		wait all holder.group_ref
 `
 	result, errs := parseAndAnalyze(t, "wait_all_after_task_group_add_aggregate_param_alias_ok.elisa", src)
 	requireNoErrors(t, errs)

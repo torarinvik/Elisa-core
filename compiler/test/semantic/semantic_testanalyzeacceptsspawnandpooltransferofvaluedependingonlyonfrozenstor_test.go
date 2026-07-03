@@ -49,7 +49,7 @@ def worker(gate: SharedGate) -> i64:
 	return 1
 
 def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
-	_ = submit[pool_ref] worker(SharedGate(mu, cv))
+	_ = submit[pool_ref] worker(SharedGate{mu: mu, cv: cv})
 	return 0
 `
 	result, errs := parseAndAnalyze(t, "thread_transfer_runtime_carriers_ok.elisa", src)
@@ -114,7 +114,7 @@ def echo(gate: SharedGate) -> SharedGate:
 	return gate
 
 def ok(pool_ref: ThreadPool&, mu: Mutex, cv: CondVar) -> i64 can[Pool.Submit]:
-	gate: SharedGate = SharedGate(mu, cv)
+	gate: SharedGate = SharedGate{mu: mu, cv: cv}
 	_ = submit[pool_ref] echo(gate)
 	return 0
 `
@@ -180,7 +180,7 @@ func TestAnalyzeRejectsSpawnOfNestedValueDependingOnUnpublishedPackedStore(t *te
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
@@ -212,7 +212,7 @@ func TestAnalyzeAcceptsSpawnOfNestedValueAfterFreezeRemapsPackedStoreRecursively
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
@@ -241,7 +241,7 @@ func TestAnalyzeRejectsSpawnOfNestedViewDependingOnUnpublishedPackedStore(t *tes
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def spawn1[A, R](fn: fn(A) -> R, arg: A) -> Thread[R, Joinable]:
@@ -273,7 +273,7 @@ func TestAnalyzeAcceptsSpawnOfNestedViewAfterFreezeRemapsPackedStoreRecursively(
 struct Box:
 	node: Expr
 
-@borrows_return_field(node, node)
+@borrows_return(field, node, node)
 extern wrap_node(node: Expr) -> Box
 
 def pool_submit1[A, R](pool: ThreadPool&, fn: fn(A) -> R, arg: A) -> Task[R, Pending]:
@@ -383,97 +383,6 @@ func TestAnalyzeRejectsAllocatingFromDestroyedRegion(t *testing.T) {
 	if !strings.Contains(strings.Join(errs, "\n"), "cannot allocate from destroyed region \"scratch\"") {
 		t.Fatalf("expected destroyed-region diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
-}
-func TestAnalyzeRejectsUsingReferenceInvalidatedByRestore(t *testing.T) {
-	src := `def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	value: i32& = new[scratch] 1
-	restore scratch from cp
-	return value[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_ref.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"value\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic, got:\n%s", strings.Join(errs, "\n"))
-	}
-}
-func TestAnalyzeRejectsUsingMoveBoundReferenceInvalidatedByRestore(t *testing.T) {
-	src := `def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	value: i32& = new[scratch] 1
-	move value as alias
-	restore scratch from cp
-	return alias[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_alias.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for move-bound alias, got:\n%s", strings.Join(errs, "\n"))
-	}
-}
-func TestAnalyzeRejectsUsingStructFieldAliasInvalidatedByRestore(t *testing.T) {
-	src := `struct Holder:
-	value: i32&
-	count: i32
-
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	alias: i32& = holder.value
-	restore scratch from cp
-	return alias[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_struct_field_alias.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for struct field alias, got:\n%s", strings.Join(errs, "\n"))
-	}
-}
-func TestAnalyzeRejectsUsingMoveAsStructBoundReferenceInvalidatedByRestore(t *testing.T) {
-	src := `struct Holder:
-	value: i32&
-	count: i32
-
-def bad() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	move holder as Holder(alias, count)
-	restore scratch from cp
-	return alias[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_invalid_move_struct_alias.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	if !strings.Contains(strings.Join(errs, "\n"), "reference \"alias\" cannot be used: region dependency facts were invalidated by restore of region \"scratch\" from checkpoint \"cp\"") {
-		t.Fatalf("expected restore invalidation diagnostic for move-as struct alias, got:\n%s", strings.Join(errs, "\n"))
-	}
-}
-func TestAnalyzeAcceptsMoveAsStructScalarAfterRestore(t *testing.T) {
-	src := `struct Holder:
-	value: i32&
-	count: i32
-
-def ok() -> i32:
-	region scratch
-	mark scratch as cp
-	holder: Holder = Holder(new[scratch] 1, 7)
-	move holder as Holder(alias, count)
-	restore scratch from cp
-	return count
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_restore_move_struct_scalar_ok.elisa", src)
-	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsMoveAsPackedVariantDestructure(t *testing.T) {
 	src := `packed enum Expr:

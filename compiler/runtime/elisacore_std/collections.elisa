@@ -818,10 +818,11 @@ def ctx_hash_cstr(s: cstr) -> u64:
 def ctx_hash_sview(view: sview) -> u64:
     h: mutable u64 = 0xcbf29ce484222325
     i: mutable i64 = 0
-    while i < view.len:
-        h <- h ^ view.data[i.usize()].u64()
-        h <- h * 0x100000001b3
-        i <- i + 1
+    trusted Unsafe.UncheckedIndex:
+        while i < view.len:
+            h <- h ^ view.data[i.usize()].u64()
+            h <- h * 0x100000001b3
+            i <- i + 1
     return h
 
 def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
@@ -829,13 +830,14 @@ def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
     i: mutable usize = 0
     len: usize = view.len.usize()
     remaining: mutable usize = len
-    while remaining > 0:
-        decreases remaining
-        if text[i] != view.data[i]:
-            return false
-        i <- i + 1
-        remaining <- remaining - 1
-    return text[len] == 0
+    trusted Unsafe.UncheckedIndex:
+        while remaining > 0:
+            decreases remaining
+            if text[i] != view.data[i]:
+                return false
+            i <- i + 1
+            remaining <- remaining - 1
+        return text[len] == 0
 
 def ctx_hash_u64(value: u64) -> u64:
     h: mutable u64 = value
@@ -936,7 +938,8 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
 
         owner: mutable Arena& = m.arena if m.arena != null else a
         if m.arena == null:
-            m.arena as & <- owner
+            trusted Unsafe.Alias:
+                m.arena as & <- owner
 
         old_items_opt: mutable DictBucket[K, T]&? = m.items
         old_capacity: usize = m.capacity
@@ -946,16 +949,21 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
 
         # Switch to the fresh table, then re-probe every live entry into it. Rehashing drops
         # tombstones, so `used` is reset to the live count as entries are placed.
-        m.items as & <- new_items
+        trusted Unsafe.Alias:
+            m.items as & <- new_items
         m.capacity <- target_capacity
         m.count <- 0.usize()
         m.used <- 0.usize()
 
         if old_items_opt != null and old_capacity > 0:
-            old_items: mutable DictBucket[K, T]& = old_items_opt
-            for i in 0..<old_capacity:
-                if old_items[i].state == 1:
-                    arena_dict_place_fresh(m, old_items[i].key, old_items[i].value)
+            # Rehash reads the OLD bucket array (captured before `m.items` was repointed to
+            # `new_items`) while inserting into the fresh table; the two allocations are disjoint,
+            # so the old/new aliasing the checker sees is safe.
+            trusted Unsafe.Alias:
+                old_items: mutable DictBucket[K, T]& = old_items_opt
+                for i in 0..<old_capacity:
+                    if old_items[i].state == 1:
+                        arena_dict_place_fresh(m, old_items[i].key, old_items[i].value)
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
@@ -1220,7 +1228,8 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
 
         owner: mutable Arena& = s.arena if s.arena != null else a
         if s.arena == null:
-            s.arena as & <- owner
+            trusted Unsafe.Alias:
+                s.arena as & <- owner
 
         old_items_opt: mutable SetBucket[T]&? = s.items
         old_capacity: usize = s.capacity
@@ -1228,16 +1237,21 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(owner, target_capacity * size_of(SetBucket[T])))
         arena_set_zero_buckets(new_items, target_capacity)
 
-        s.items as & <- new_items
+        trusted Unsafe.Alias:
+            s.items as & <- new_items
         s.capacity <- target_capacity
         s.count <- 0.usize()
         s.used <- 0.usize()
 
         if old_items_opt != null and old_capacity > 0:
-            old_items: mutable SetBucket[T]& = old_items_opt
-            for i in 0..<old_capacity:
-                if old_items[i].state == 1:
-                    arena_set_place_fresh(s, old_items[i].key)
+            # Rehash reads the OLD bucket array (captured before `s.items` was repointed to
+            # `new_items`) while inserting into the fresh table; the two allocations are disjoint,
+            # so the old/new aliasing the checker sees is safe.
+            trusted Unsafe.Alias:
+                old_items: mutable SetBucket[T]& = old_items_opt
+                for i in 0..<old_capacity:
+                    if old_items[i].state == 1:
+                        arena_set_place_fresh(s, old_items[i].key)
         return
 
 def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]:

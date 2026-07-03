@@ -35,7 +35,7 @@ def contextual_call() -> f32:
 	return passthrough(7.25 + 8.25)
 
 def contextual_struct() -> FloatPair:
-	return FloatPair(9.25 + 10.25, 11.25 + 12.25)
+	return FloatPair{left: 9.25 + 10.25, right: 11.25 + 12.25}
 
 def contextual_array() -> f32[2]:
 	return [13.25 + 14.25, 15.25 + 16.25]
@@ -156,7 +156,7 @@ const F64_TOTAL: f64 = 3.25 + 4.25
 
 global g_f32: f32 = 5.25 + 6.25
 global g_f64: f64 = 7.25 + 8.25
-global g_pair: FloatPair = FloatPair(9.25 + 10.25, 11.25 + 12.25)
+global g_pair: FloatPair = FloatPair{left: 9.25 + 10.25, right: 11.25 + 12.25}
 global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
 `
 	result, errs := parseAndAnalyze(t, "contextual_float_literal_arithmetic_toplevel_ok.elisa", src)
@@ -324,7 +324,7 @@ def contextual_call() -> i32:
 	return passthrough(2)
 
 def contextual_struct() -> Pair:
-	return Pair(3, 4)
+	return Pair{left: 3, right: 4}
 
 def contextual_array() -> i32[2]:
 	return [5, 6]
@@ -394,7 +394,7 @@ def contextual_unary() -> i32:
 }
 func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 	src := `def ok() -> usize:
-	which: usize = 1
+	which: usize = 1i32
 	return which
 `
 	result, errs := parseAndAnalyze(t, "contextual_int_literal_suffix_override_ok.elisa", src)

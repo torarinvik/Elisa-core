@@ -239,7 +239,7 @@ func typeStr(t ast.TypeExpr) string {
 		if n.Return != nil {
 			ret = " -> " + typeStr(n.Return)
 		}
-		return "func(" + strings.Join(parts, ", ") + ")" + ret + formatPermissionRefs(n.Permissions)
+		return "fn(" + strings.Join(parts, ", ") + ")" + ret + formatPermissionRefs(n.Permissions)
 	case *ast.ErrorSetExpr:
 		parts := make([]string, 0, len(n.Tags)+1)
 		for _, tag := range n.Tags {

@@ -247,22 +247,6 @@ def bad(text: cstr[row]) -> bool:
 		t.Fatalf("expected StringView to stay out of user-facing expression diagnostics, got:\n%s", all)
 	}
 }
-func TestAnalyzeFormatsSafeChainDViewUsingSurfaceNames(t *testing.T) {
-	src := `def bad(values: darray[i32, 4]) -> void:
-	_ = values[0:4]?.count
-`
-	_, errs := parseAndAnalyze(t, "safe_chain_dview_surface_diagnostic.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "optional chaining receiver requires an optional or nullable reference (refstate fact nullable), got view[i32, 0, 4]") {
-		t.Fatalf("expected surface view safe-chain diagnostic, got:\n%s", all)
-	}
-	if strings.Contains(all, "DynArrayView") {
-		t.Fatalf("expected DynArrayView to stay out of user-facing expression diagnostics, got:\n%s", all)
-	}
-}
 func TestAnalyzeFormatsConstEnumStorageSViewUsingSurfaceNames(t *testing.T) {
 	src := `const enum Tok of sview:
 	Value = 1

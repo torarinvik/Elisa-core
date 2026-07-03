@@ -402,29 +402,29 @@ extern darray_remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
 extern remove_at[T](da: mutable darray[T]&, index: usize) -> T
 
-extern any_of[T](da: darray[T], pred: func(T) -> bool) -> bool
+extern any_of[T](da: darray[T], pred: fn(T) -> bool) -> bool
 
-extern all_of[T](da: darray[T], pred: func(T) -> bool) -> bool
+extern all_of[T](da: darray[T], pred: fn(T) -> bool) -> bool
 
-extern count_if[T](da: darray[T], pred: func(T) -> bool) -> usize
+extern count_if[T](da: darray[T], pred: fn(T) -> bool) -> usize
 
-extern find_if[T](da: darray[T], pred: func(T) -> bool) -> T?
+extern find_if[T](da: darray[T], pred: fn(T) -> bool) -> T?
 
-extern darray_sift_down[T](da: mutable darray[T]&, less: func(T, T) -> bool, start: usize, end: usize)
+extern darray_sift_down[T](da: mutable darray[T]&, less: fn(T, T) -> bool, start: usize, end: usize)
 
-extern sort[T](da: mutable darray[T]&, less: func(T, T) -> bool)
+extern sort[T](da: mutable darray[T]&, less: fn(T, T) -> bool)
 
 extern reverse[T](da: mutable darray[T]&)
 
-extern is_sorted[T](da: darray[T], less: func(T, T) -> bool) -> bool
+extern is_sorted[T](da: darray[T], less: fn(T, T) -> bool) -> bool
 
-extern min_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
+extern min_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?
 
-extern max_element[T](da: darray[T], less: func(T, T) -> bool) -> T?
+extern max_element[T](da: darray[T], less: fn(T, T) -> bool) -> T?
 
-extern lower_bound[T](da: darray[T], target: T, less: func(T, T) -> bool) -> usize
+extern lower_bound[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> usize
 
-extern binary_search[T](da: darray[T], target: T, less: func(T, T) -> bool) -> bool
+extern binary_search[T](da: darray[T], target: T, less: fn(T, T) -> bool) -> bool
 
 extern arena_da_append_many[T](a: mutable Arena&, da: mutable darray[T, shape_in]&, new_items: T&, new_items_count: usize) -> mutable darray[T, shape_out]&
 

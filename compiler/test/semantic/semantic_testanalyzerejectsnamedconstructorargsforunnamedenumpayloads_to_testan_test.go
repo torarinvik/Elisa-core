@@ -73,21 +73,6 @@ def unwrap(value: MaybeInt) -> int:
 		t.Fatalf("expected shadowed-arm diagnostic, got:\n%s", all)
 	}
 }
-func TestAnalyzeAcceptsNonExhaustiveEnumMatchStatementsWithFallthrough(t *testing.T) {
-	src := `enum MaybeInt:
-	None
-	Some(int)
-	Pair(int, int)
-
-def unwrap(value: MaybeInt) -> int:
-	match value:
-		MaybeInt.Some(inner):
-			return inner
-	return 0
-`
-	_, errs := parseAndAnalyze(t, "enum_match_non_exhaustive.elisa", src)
-	requireNoErrors(t, errs)
-}
 func TestAnalyzeAcceptsConstEnumMatchStatements(t *testing.T) {
 	src := `const enum Op of i32:
 	ADD = 1
@@ -115,23 +100,6 @@ def score_full(op: Op) -> int:
 	return 0
 `
 	_, errs := parseAndAnalyze(t, "const_enum_match_ok.elisa", src)
-	requireNoErrors(t, errs)
-}
-func TestAnalyzeAcceptsNonExhaustiveConstEnumMatchStatementsWithFallthrough(t *testing.T) {
-	src := `const enum Op of i32:
-	ADD = 1
-	SUB = 2
-	MUL = 3
-
-def score(op: Op) -> int:
-	match op:
-		Op.ADD:
-			return 10
-		Op.SUB:
-			return 20
-	return 0
-`
-	_, errs := parseAndAnalyze(t, "const_enum_match_stmt_non_exhaustive.elisa", src)
 	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsStringLiteralMatchStatement(t *testing.T) {

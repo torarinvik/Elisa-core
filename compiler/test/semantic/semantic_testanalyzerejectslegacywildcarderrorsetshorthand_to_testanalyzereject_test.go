@@ -312,12 +312,12 @@ def checked_pair(slot: stack ScratchPair&) -> int error[ProbeError]:
 
 
 def from_local_field() -> int:
-		holder: ScratchHolder = ScratchHolder(ScratchPair(1, 2))
+		holder: ScratchHolder = ScratchHolder{pair: ScratchPair{left: 1, right: 2}}
 		return try checked_pair(&holder.pair) else 0
 
 
 def from_local_array_elem() -> int:
-		values: ScratchPair[2] = [ScratchPair(1, 2), ScratchPair(5, 6)]
+		values: ScratchPair[2] = [ScratchPair{left: 1, right: 2}, ScratchPair{left: 5, right: 6}]
 		return try checked_pair(&values[1]) else 0
 `
 	_, errs := parseAndAnalyze(t, "stack_storage_local_subobjects.elisa", src)
@@ -399,7 +399,8 @@ func TestAnalyzePinsCollectionsDictContracts(t *testing.T) {
 	requireNoErrors(t, errs)
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "arena_dict_new__i64", "dict[cstr[key_shape], i64]")
-	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "mutable i64&?")
+	requireFunctionReturnTypeString(t, result, "arena_dict_get__i64", "i64&?")
+	requireFunctionReturnTypeString(t, result, "arena_dict_get_mut__i64", "mutable i64&?")
 }
 func TestAnalyzeStrictUnsafeCollectionsCastsStayInternal(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
@@ -509,7 +510,7 @@ func TestAnalyzeAcceptsOptionalNullChecksAndSmartCastUse(t *testing.T) {
 
 def maybe_box(flag: bool) -> Box?:
 	if flag:
-		return Box(7)
+		return Box{value: 7}
 	return null
 
 

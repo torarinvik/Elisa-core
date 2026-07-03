@@ -14,7 +14,7 @@ func TestAnalyzeLambdaContextualTypingCapturesOuterValue(t *testing.T) {
 
 def run() -> i64:
     offset: i64 = 1
-    return apply(lambda value: value + offset, 41)
+    return apply(fn(value) => value + offset, 41)
 `
 
 	result, errs := parseAndAnalyze(t, "lambda_contextual_capture.elisa", src)
@@ -54,7 +54,7 @@ def run() -> i64:
 
 func TestAnalyzeBlockLambdaRequiresReturnTypeOrContext(t *testing.T) {
 	src := `def run() -> void:
-    _ = lambda value:
+    _ = fn(value):
         return value
 `
 

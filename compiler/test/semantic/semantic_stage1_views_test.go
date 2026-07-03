@@ -13,7 +13,7 @@ func TestAnalyzeStage1StringViewWrappersSupportBoundedViews(t *testing.T) {
 	len: mutable i64
 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
-	return StringView("", 0)
+	return StringView{data: "", len: 0}
 
 def string_view_len(view: StringView) -> i64:
 	return view.len
@@ -61,7 +61,7 @@ func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
 	len: mutable i64
 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
-	return StringView("", 0)
+	return StringView{data: "", len: 0}
 
 def string_view_len(view: StringView) -> i64:
 	return view.len

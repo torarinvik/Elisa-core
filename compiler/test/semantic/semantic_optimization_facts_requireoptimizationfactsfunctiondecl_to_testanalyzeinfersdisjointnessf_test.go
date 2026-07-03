@@ -179,8 +179,9 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		trusted Unsafe.PointerCast:
+			return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	_ = start
@@ -196,7 +197,7 @@ def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
-	return StringView("", 0)
+	return StringView{data: "", len: 0}
 
 def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	_ = start
@@ -370,7 +371,7 @@ def make_box(owner: Arena) -> FrozenBox:
 		right: Expr = new Expr.Lit(span: 2, value: 4)
 		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return FrozenBox(frozen)
+	return FrozenBox{store: frozen}
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
@@ -429,7 +430,7 @@ def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
-	return StringView("", 0)
+	return StringView{data: "", len: 0}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)

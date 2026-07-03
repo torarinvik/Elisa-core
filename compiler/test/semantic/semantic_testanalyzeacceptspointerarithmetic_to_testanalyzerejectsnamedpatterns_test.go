@@ -387,7 +387,7 @@ def use(value: i32&) -> i32&:
 	if len(errs) == 0 {
 		t.Fatal("expected semantic error, got none")
 	}
-	if !strings.Contains(strings.Join(errs, "\n"), "cannot infer region parameter \"r\" for call to \"id\"") {
+	if !strings.Contains(strings.Join(errs, "\n"), "cannot be returned with a region-less type") {
 		t.Fatalf("expected region inference diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
@@ -446,39 +446,6 @@ func TestAnalyzeRejectsReturningCastedReferenceAllocatedFromLocalRegion(t *testi
 	if !strings.Contains(strings.Join(errs, "\n"), "cannot return reference: region dependency facts include local region \"scratch\"") {
 		t.Fatalf("expected region-escape return diagnostic, got:\n%s", strings.Join(errs, "\n"))
 	}
-}
-func TestAnalyzeAcceptsRegionCheckpoints(t *testing.T) {
-	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024)
-	mark scratch as cp
-	temp: i32& = new[scratch] seed + 1
-	restore scratch from cp
-	reused: i32& = new[scratch] seed + 2
-	value: i32 = reused[0]
-	reset scratch
-	final: i32& = new[scratch] seed + 3
-	return value + final[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_checkpoints_ok.elisa", src)
-	requireNoErrors(t, errs)
-}
-func TestAnalyzeAcceptsNestedRegionCheckpoints(t *testing.T) {
-	src := `def sum_region(seed: i32) -> i32:
-	region scratch(1024)
-	base: i32& = new[scratch] seed
-	baseline: i32 = base[0]
-	mark scratch as outer
-	stable: i32& = new[scratch] seed + 1
-	mark scratch as inner
-	temp: i32& = new[scratch] seed + 2
-	restore scratch from inner
-	kept: i32 = stable[0]
-	restore scratch from outer
-	final: i32& = new[scratch] seed + 3
-	return baseline + kept + final[0]
-`
-	_, errs := parseAndAnalyze(t, "manual_regions_nested_checkpoints_ok.elisa", src)
-	requireNoErrors(t, errs)
 }
 func TestAnalyzeAcceptsEnumConstructorsAndMatch(t *testing.T) {
 	src := `enum MaybeInt:

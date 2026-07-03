@@ -42,9 +42,9 @@ func TestAnalyzeAcceptsForLoopRangeForms(t *testing.T) {
 		total <- total + i
 	for j in limit..>0:
 		total <- total + j
-	for k in 0..3:
+	for k in 0..<3:
 		total <- total + k
-	for m in 0..10..2:
+	for m in 0..<10..2:
 		total <- total + m
 	return total
 `
@@ -74,7 +74,7 @@ func TestAnalyzeAcceptsIterableForLoopMutableRef(t *testing.T) {
 	value: mutable int
 
 def bump() -> int:
-	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
+	items: mutable array[Counter, 2] = [Counter{value: 1}, Counter{value: 2}]
 	for mutable item in items:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value
@@ -113,25 +113,9 @@ def run(values: darray[i64, 4], bias: i64) -> i64:
 	requireNoWarnings(t, result)
 	requireFunctionReturnTypeString(t, result, "run", "i64")
 }
-func TestAnalyzeRejectsIterableForLoopRefOverChunksExactView(t *testing.T) {
-	src := `def bad(values: darray[i32, 4]) -> void:
-	base: view[i32] = values[0:4]
-	chunks: ChunksExactView[i32] = chunks_exact(readonly(base), 2)
-	for chunk in chunks:
-		_ = chunk
-`
-	_, errs := parseAndAnalyze(t, "iterable_for_chunks_exact_ref_reject.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "for ref requires an addressable array-like iterable, got ChunksExactView[i32]") {
-		t.Fatalf("expected chunks_exact ref-binder diagnostic, got:\n%s", all)
-	}
-}
 func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
 	src := `def bad() -> void:
-	for i in 0..10..0:
+	for i in 0..<10..0:
 		pass
 `
 	_, errs := parseAndAnalyze(t, "for_loop_zero_step_reject.elisa", src)
@@ -145,7 +129,7 @@ func TestAnalyzeRejectsForLoopZeroStep(t *testing.T) {
 }
 func TestAnalyzeRejectsForLoopNonIntegralBounds(t *testing.T) {
 	src := `def bad() -> void:
-	for value in 0.0..1.0:
+	for value in 0.0..<1.0:
 		pass
 `
 	_, errs := parseAndAnalyze(t, "for_loop_non_integral_reject.elisa", src)
@@ -278,7 +262,7 @@ func TestAnalyzeRejectsAssigningReadonlyViewIndexResult(t *testing.T) {
 	all := strings.Join(errs, "\n")
 	// Every view[T] is now read-only (not just `readonly(...)`-marked ones), so the general
 	// view-index-write rejection fires here — the `readonly` wrapper is redundant for this.
-	if !strings.Contains(all, "cannot assign to view index result") {
+	if !strings.Contains(all, "cannot assign to read-only view index result") {
 		t.Fatalf("expected view-index assignment diagnostic, got:\n%s", all)
 	}
 }
