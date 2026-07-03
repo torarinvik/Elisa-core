@@ -603,6 +603,114 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	}, true
 }
 
+// fusedFilteredExtendComprehensionBlock is the FILTERED counterpart of
+// fusedExtendComprehensionBlock: `dst.extend([ v for x in src if cond ])`. The output length isn't
+// known ahead (the filter selects a subset), so it can't presize exactly — instead it reserves the
+// UPPER bound (`dst.count + src.count`) in one growth, then conditionally pushes into the reserved
+// capacity. Still no intermediate darray and no memcpy (unlike the materialized extend, which
+// builds a temp by push then memcpy's it). reserve (capacity only, count unchanged) avoids the
+// zero-fill that a resize-to-upper-bound would do on container-element tails; the pushes into the
+// pre-reserved buffer never realloc, so their capacity check is a predictable never-taken branch.
+// Returns ok=false (materialized fallback) unless: dst a plain ident, and a FILTERED list
+// comprehension over a plain darray-source ident (range/dict/set fall back).
+//
+// The source is iterated BY INDEX over a snapshotted bound `__n = src.count` (not a live iterator),
+// so self-filtered-extend (`xs.extend([v for v in xs if c])`, where src IS dst) is correct: the
+// source semantics evaluate the comprehension fully before extend appends, and snapshotting the
+// bound reproduces that — the loop reads the original front [0,__n) while pushes land in the
+// reserved tail [__base, __base+__n), disjoint since __base>=__n, with no realloc to move the
+// buffer. A live `for v in src` would instead re-read the growing count and re-consume its own
+// appended elements.
+//
+//	{ __n = src.count; __base = dst.count; dst.reserve(__base + __n);
+//	  for __i in 0..<__n: name = src[__i]; <bindings>; if cond: dst.push(value); 0 }
+func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.Expr, dstDarray *semantic.DArrayType) (*ast.ExprBlock, bool) {
+	if dstDarray == nil {
+		return nil, false
+	}
+	dstIdent, ok := dstExpr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	inner := arg
+	for {
+		if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+			inner = p.Inner
+			continue
+		}
+		break
+	}
+	comp, ok := inner.(*ast.ListComprehensionExpr)
+	// This path is specifically the FILTERED list comprehension (Filter != nil). Filter-free goes
+	// to fusedExtendComprehensionBlock; range/dict/set fall back to the materialized extend.
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter == nil || comp.RangeEnd != nil {
+		return nil, false
+	}
+	srcIdent, ok := comp.Source.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	srcType := s.exprType(srcIdent)
+	if ref, ok := srcType.(*semantic.RefType); ok && ref != nil {
+		srcType = ref.Elem
+	}
+	srcDarray, ok := srcType.(*semantic.DArrayType)
+	if !ok || srcDarray == nil {
+		return nil, false
+	}
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	if usizeType == nil {
+		return nil, false
+	}
+	pos := comp.Position
+	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = t
+		}
+		return e
+	}
+	nName := s.g.nextSyntheticName("extend.n.")
+	baseName := s.g.nextSyntheticName("extend.base.")
+	idxName := s.g.nextSyntheticName("extend.i.")
+	nIdent := reg(&ast.Ident{Position: pos, Name: nName}, usizeType)
+	baseIdent := reg(&ast.Ident{Position: pos, Name: baseName}, usizeType)
+	idxIdent := reg(&ast.Ident{Position: pos, Name: idxName}, usizeType)
+
+	nDecl := &ast.VarDeclStmt{Position: pos, Name: nName, Value: reg(&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}, usizeType)}
+	baseDecl := &ast.VarDeclStmt{Position: pos, Name: baseName, Value: reg(&ast.FieldExpr{Position: pos, Object: dstIdent, Field: "count"}, usizeType)}
+	// Upper bound = __base + __n. reserve grows capacity once; the filtered pushes stay within it.
+	reserveCall := &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "reserve"}, Args: []ast.Expr{reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: nIdent}, usizeType)}}
+
+	bindName := comp.Name
+	if bindName == "_" {
+		bindName = s.g.nextSyntheticName("extend.elem.")
+	}
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: reg(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent}, srcDarray.Elem)}
+	pushCall := &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "push"}, Args: []ast.Expr{comp.Value}}
+	pushStmt := &ast.ExprStmt{Position: pos, Expr: pushCall}
+
+	body := []ast.Stmt{ast.Stmt(elemDecl)}
+	body = append(body, comp.Bindings...)
+	body = append(body, &ast.IfStmt{Position: pos, Cond: comp.Filter, Then: []ast.Stmt{pushStmt}})
+
+	startLit := reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType)
+	loop := &ast.ForStmt{Position: pos, Name: idxName, Start: startLit, End: nIdent, Op: lexer.TOKEN_RANGE_LT, Body: body}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			nDecl,
+			baseDecl,
+			&ast.ExprStmt{Position: pos, Expr: reserveCall},
+			loop,
+		},
+		Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType),
+	}, true
+}
+
 // exprContainsCall reports whether an expression contains a function/method call. Used to gate the
 // AutovecExpected marker: a call in the loop body legitimately blocks auto-vectorization (the
 // callee may not inline), so warning about it would be noise rather than a real defect. Unknown

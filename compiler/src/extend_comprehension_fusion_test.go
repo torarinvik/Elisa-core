@@ -8,12 +8,11 @@ import (
 	"testing"
 )
 
-// `dst.extend([ v for x in src ])` — a filter-free list comprehension over a darray source — fuses:
-// it appends the mapped elements DIRECTLY into `dst` (presize once + indexed-store fill) instead of
-// materializing the comprehension into a temp darray and memcpy-ing it. This pins the VALUE
-// semantics of the fused path: append order/contents, self-extend aliasing, a growth that crosses a
-// region-capacity boundary, and that the non-fusable shapes (filtered comprehension, plain darray
-// source) still work via the materialized fallback.
+// `dst.extend([ v for x in src ])` fuses: the comprehension is appended DIRECTLY into `dst` with no
+// intermediate darray / memcpy. Two fused shapes: filter-free (presize once + indexed-store fill,
+// vectorizable) and filtered (reserve the upper bound + conditional push). This pins the VALUE
+// semantics of both: append order/contents, self-extend aliasing, a growth that crosses a region-
+// capacity boundary, the filtered subset, and that a plain darray source still uses materialized memcpy.
 func TestExtendComprehensionFusionRuntime(t *testing.T) {
 	t.Parallel()
 	// checksum accumulates distinctive values from each scenario; main returns it as the exit code
@@ -35,10 +34,16 @@ def scenarios() -> i64 can[Memory.Allocate, Abort.Panic]:
         dst.extend([v + 1 for v in src])
         check(dst.count == 401 and dst[0] == 42 and dst[1] == 1 and dst[400] == 400, "boundary")
 
-        # filtered comprehension: not fusable, must still work via the materialized fallback
+        # filtered comprehension: fused via reserve-upper-bound + conditional push
         filt: mutable darray[i64] = []
         filt.extend([v for v in src if v > 2])
         check(filt.count == 397 and filt[0] == 3, "filtered")
+
+        # self-FILTERED-extend: source IS dst — the snapshotted bound must reproduce the
+        # evaluate-comprehension-then-append semantics (not re-consume appended elements)
+        sf: mutable darray[i64] = [1, 2, 3, 4, 5]
+        sf.extend([v * 100 for v in sf if v > 2])
+        check(sf.count == 8 and sf[4] == 5 and sf[5] == 300 and sf[7] == 500, "self-filtered")
 
         # plain darray source: not a comprehension, materialized memcpy path
         plain: mutable darray[i64] = [7]
@@ -51,7 +56,7 @@ def main() -> int can[Memory.Allocate, Abort.Panic]:
     return scenarios().int()
 `)
 	if strings.Contains(out, "assert failed") || strings.Contains(out, "self-extend") || strings.Contains(out, "boundary") ||
-		strings.Contains(out, "filtered") || strings.Contains(out, "plain") {
+		strings.Contains(out, "filtered") || strings.Contains(out, "plain") || strings.Contains(out, "self-filtered") {
 		t.Fatalf("fused extend produced a wrong result: status=%s out=%q", status, out)
 	}
 	// scenarios() returns 17 -> exit code 17.
@@ -92,5 +97,37 @@ func TestExtendComprehensionFusionEmitsNoTemp(t *testing.T) {
 	// The fused fill is a resize followed by an indexed-store loop over the source.
 	if !strings.Contains(ir, "resize") && !strings.Contains(ir, "ensure") {
 		t.Fatalf("expected a presize (resize/ensure-capacity) in the fused extend, got:\n%s", ir)
+	}
+}
+
+// The FILTERED fused path (`dst.extend([ v for x in src if cond ])`) reserves the upper bound and
+// conditionally pushes — no materialized temp / memcpy either.
+func TestExtendFilteredComprehensionFusionEmitsNoTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_filtered_fusion.elisa")
+	prog := "def build() -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        src: darray[i64] = [1, 2, 3, 4, 5, 6]\n" +
+		"        dst: mutable darray[i64] = [0]\n" +
+		"        dst.extend([v * 2 for v in src if v > 3])\n" +
+		"        return dst.count\n\n" +
+		"def main() -> i64:\n" +
+		"    return build().i64()\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected filtered fused-extend fixture to compile, stderr:\n%s", stderr.String())
+	}
+	ir := stdout.String()
+	for _, banned := range []string{"list.comp.result", "darray.extend.memcpy"} {
+		if strings.Contains(ir, banned) {
+			t.Fatalf("filtered fused extend still emitted %q (materialized path not skipped):\n%s", banned, ir)
+		}
+	}
+	if !strings.Contains(ir, "reserve") {
+		t.Fatalf("expected an upper-bound reserve in the filtered fused extend, got:\n%s", ir)
 	}
 }

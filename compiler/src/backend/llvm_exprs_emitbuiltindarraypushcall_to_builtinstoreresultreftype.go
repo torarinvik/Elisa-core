@@ -213,7 +213,11 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	// memcpy the general path below would do. resize/index-store resolve `dst`'s arena themselves,
 	// so this needs no owner/source resolution. Falls through to the materialized path when the
 	// argument is not a fusable comprehension.
-	if fused, ok := s.fusedExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType); ok {
+	fused, fusedOK := s.fusedExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
+	if !fusedOK {
+		fused, fusedOK = s.fusedFilteredExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
+	}
+	if fusedOK {
 		if _, _, err := s.emitExprBlock(fused, s.g.result.NamedTypes["usize"]); err != nil {
 			return nil, nil, true, err
 		}
