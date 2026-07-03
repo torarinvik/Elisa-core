@@ -172,6 +172,102 @@ func TestExtendRangeComprehensionFusionEmitsNoTemp(t *testing.T) {
 	}
 }
 
+// Dict-source extend fusion (a bespoke presize+indexed-store path, mirroring the darray-source fast
+// path) was attempted and reverted after discovering a PRE-EXISTING, unrelated bug: `for k, v in
+// someDict:` iterates more times than `dict.count` (see task_dcf0ced9). A presized fast path would
+// silently write past its buffer under that bug, so dict sources currently fall through to the
+// always-safe generic push fallback (see fusedPushExtendComprehensionBlock in the backend) instead —
+// no dedicated test here until the iteration-count bug is fixed upstream.
+
+// A FILTERED range (`dst.extend([ v for i in start..<end if cond ])`) is not caught by the
+// filter-free range fast path; it falls to the generic push-direct fusion — no temp/memcpy, just
+// pushing straight into dst instead of a discarded intermediate darray.
+func TestExtendFilteredRangeComprehensionFusionRuntime(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def check(cond: bool, msg: cstr) -> void can[Abort.Panic]:
+    if not cond:
+        panic(msg)
+
+def scenarios() -> int can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        dst: mutable darray[int] = [42]
+        dst.extend([i for i in 0..<20 if i % 3 == 0])
+        check(dst.count == 8 and dst[0] == 42 and dst[1] == 0 and dst[7] == 18, "filtered-range")
+
+        # inclusive range, unfiltered — also routes through the generic push fallback
+        inc: mutable darray[int] = []
+        inc.extend([i for i in 1..=3])
+        check(inc.count == 3 and inc[0] == 1 and inc[2] == 3, "inclusive-range")
+
+        # stepped range, unfiltered
+        stepped: mutable darray[int] = []
+        stepped.extend([i for i in 0..<10..3])
+        check(stepped.count == 4 and stepped[3] == 9, "stepped-range")
+
+        return 31
+
+def main() -> int can[Memory.Allocate, Abort.Panic]:
+    return scenarios()
+`)
+	if strings.Contains(out, "assert failed") || strings.Contains(out, "filtered-range") || strings.Contains(out, "inclusive-range") || strings.Contains(out, "stepped-range") {
+		t.Fatalf("fused filtered/stepped/inclusive range extend produced a wrong result: status=%s out=%q", status, out)
+	}
+	if status != "RUNERR" || !strings.Contains(out, "exit status 31") {
+		t.Fatalf("expected clean exit code 31, got status=%s out=%q", status, out)
+	}
+}
+
+// The generic push fallback for a filtered range skips the materialized temp/memcpy — dst.push is
+// called directly from the loop body.
+func TestExtendFilteredRangeComprehensionFusionEmitsNoTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_filtered_range_fusion.elisa")
+	prog := "def build() -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        dst: mutable darray[int] = [9]\n" +
+		"        dst.extend([i for i in 0..<20 if i % 2 == 0])\n" +
+		"        return dst.count\n\n" +
+		"def main() -> i64:\n" +
+		"    return build().i64()\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected fused filtered-range-extend fixture to compile, stderr:\n%s", stderr.String())
+	}
+	ir := stdout.String()
+	for _, banned := range []string{"list.comp.result", "darray.extend.memcpy"} {
+		if strings.Contains(ir, banned) {
+			t.Fatalf("fused filtered range extend still emitted %q (materialized path not skipped):\n%s", banned, ir)
+		}
+	}
+}
+
+// The expected-type propagation fix: extend's argument comprehension now gets dst's element type as
+// its expected type, so `darray[i64].extend([i for i in range])` (loop var default `int`) typechecks
+// instead of being rejected as darray[int] vs darray[i64].
+func TestExtendComprehensionElementTypeCoercion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_elem_coerce.elisa")
+	prog := "def build() -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        dst: mutable darray[i64] = [1]\n" +
+		"        dst.extend([i for i in 0..<5])\n" +
+		"        return dst.count\n\n" +
+		"def main() -> i64:\n" +
+		"    return build().i64()\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected darray[i64].extend([range comprehension]) to typecheck via propagated expected type, stderr:\n%s", stderr.String())
+	}
+}
+
 // The FILTERED fused path (`dst.extend([ v for x in src if cond ])`) reserves the upper bound and
 // conditionally pushes — no materialized temp / memcpy either.
 func TestExtendFilteredComprehensionFusionEmitsNoTemp(t *testing.T) {

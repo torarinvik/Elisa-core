@@ -603,6 +603,20 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	}, true
 }
 
+// A dict-source presize+indexed-store fusion (the dict analogue of fusedExtendComprehensionBlock)
+// was attempted here and reverted: verifying it exposed a PRE-EXISTING, unrelated bug where plain
+// `for k, v in someDict:` iteration runs more times than `dict.count` (confirmed against the
+// known-good TestRunCLIDictIterationYieldsKeyValuePairs by adding a bare iteration counter — it
+// undercounts against the loop's own already-passing per-entry checks, meaning the loop body runs
+// with more iterations than real entries). A presized `dst.resize(base + src.count)` fast path
+// would silently WRITE PAST that buffer under the same bug (an out-of-bounds store, worse than the
+// materialized fallback's safe amortized-growth push) — see task_dcf0ced9 for the dict-iteration
+// fix. Once that lands, this reduces to a straightforward copy of fusedExtendComprehensionBlock with
+// `srcIdent[idxIdent]` swapped for a running-counter store and `comp.Source` gated to *DictType.
+// Until then, dict-source extend (filter-free or filtered) falls through to
+// fusedPushExtendComprehensionBlock below, which only ever pushes (safe regardless of iteration
+// count, matching the materialized path's safety envelope) rather than presizing.
+
 // fusedFilteredExtendComprehensionBlock is the FILTERED counterpart of
 // fusedExtendComprehensionBlock: `dst.extend([ v for x in src if cond ])`. The output length isn't
 // known ahead (the filter selects a subset), so it can't presize exactly — instead it reserves the
@@ -839,6 +853,80 @@ func (s *functionState) fusedRangeExtendComprehensionBlock(dstExpr, arg ast.Expr
 			loop,
 		},
 		Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType),
+	}, true
+}
+
+// fusedPushExtendComprehensionBlock is the general catch-all fusion: for any list comprehension
+// (not a dict/set-RESULT comprehension) not already handled by a more specific fast path above —
+// notably filtered/stepped/inclusive ranges and a filtered dict source — it pushes each element
+// DIRECTLY into `dst` instead of materializing a temp darray that extend then memcpy's and discards.
+// It reuses `comprehensionLoopStmt` verbatim (the same iteration/filter/bindings construction the
+// materialized fresh-init path already uses and this file already exercises), swapping only the sink
+// from "append to a fresh result" to "push onto dst":
+//
+//	<comprehensionLoopStmt's loop, with sink = dst.push(value)>
+//
+// No presize here (the exact or upper-bound count generally isn't knowable for a stepped/inclusive
+// range or a filtered iterable without reimplementing that arithmetic) — the win is solely skipping
+// the intermediate darray and its memcpy; dst's push still grows by amortized doubling.
+//
+// SAFETY — self-extend / iterator invalidation: growing `dst` while iterating a live darray that
+// aliases it would invalidate the iterator mid-loop (a hazard the materialized path never has, since
+// it iterates the SOURCE while writing into a separate temp, not dst). This function is reached only
+// for comprehensions the earlier, more specific fused paths declined: those already cover every case
+// where `comp.Source` is a plain-ident darray (filter-free and filtered, self-extend-safe by
+// construction). So by the time we get here, a darray-typed source can only be a non-ident expression
+// (its potential aliasing with dst can't be proven) — REJECTED, falls back to the fully materialized
+// path. Range/dict/set sources can never alias a darray dst, so no restriction is needed there.
+func (s *functionState) fusedPushExtendComprehensionBlock(dstExpr, arg ast.Expr, dstDarray *semantic.DArrayType) (*ast.ExprBlock, bool) {
+	if dstDarray == nil {
+		return nil, false
+	}
+	dstIdent, ok := dstExpr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	inner := arg
+	for {
+		if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+			inner = p.Inner
+			continue
+		}
+		break
+	}
+	comp, ok := inner.(*ast.ListComprehensionExpr)
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Parallel {
+		return nil, false
+	}
+	if comp.RangeEnd == nil {
+		srcType := s.exprType(comp.Source)
+		if ref, ok := srcType.(*semantic.RefType); ok && ref != nil {
+			srcType = ref.Elem
+		}
+		if _, isDArray := srcType.(*semantic.DArrayType); isDArray {
+			srcIdent, identOK := comp.Source.(*ast.Ident)
+			if !identOK || srcIdent.Name == dstIdent.Name {
+				return nil, false
+			}
+		}
+	}
+	pos := comp.Position
+	pushCall := &ast.CallExpr{Position: pos, Func: &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "push"}, Args: []ast.Expr{comp.Value}}
+	loop := comprehensionLoopStmt(comp, pushCall)
+
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	value := ast.Expr(&ast.IntLit{Position: pos, Value: "0"})
+	if usizeType != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+		s.g.result.ExprTypes[value] = usizeType
+	}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts:    []ast.Stmt{loop},
+		Value:    value,
 	}, true
 }
 

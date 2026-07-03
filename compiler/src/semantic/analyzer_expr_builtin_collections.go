@@ -337,6 +337,21 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	return resultType, true
 }
 
+// isPlainListComprehensionArg reports whether e (after unwrapping parens) is a list comprehension
+// (not a dict/set comprehension, which infer their key/value/element types independently and don't
+// want a DArrayType expected-type hint forced onto them).
+func isPlainListComprehensionArg(e ast.Expr) bool {
+	for {
+		p, ok := e.(*ast.ParenExpr)
+		if !ok || p == nil {
+			break
+		}
+		e = p.Inner
+	}
+	comp, ok := e.(*ast.ListComprehensionExpr)
+	return ok && comp != nil && comp.Key == nil && !comp.Set
+}
+
 func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, bool) {
 	if a == nil || expr == nil {
 		return nil, false
@@ -374,6 +389,13 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 	var expectedSource Type
 	if list, ok := expr.Args[0].(*ast.ListLitExpr); ok && list != nil {
 		expectedSource = &ArrayType{Elem: darrayType.Elem, Size: strconv.FormatInt(int64(len(list.Elems)), 10), HasConstSize: true, ConstSize: int64(len(list.Elems))}
+	} else if isPlainListComprehensionArg(expr.Args[0]) {
+		// A list comprehension source has no inherent element type of its own — e.g. a range
+		// comprehension's loop var defaults to `int` — so without a hint `dst: darray[i64]).extend([i
+		// for i in range])` would infer `darray[int]` and be rejected by the source-compatibility
+		// check below even though the comprehension COULD legally produce i64. Propagate dst's
+		// element type as the expected result, exactly as a `dst: darray[T] = [...]` var decl would.
+		expectedSource = &DArrayType{Elem: darrayType.Elem, Shape: &WildcardShape{}, SurfaceName: "darray"}
 	}
 	sourceType := a.analyzeValueExpr(expr.Args[0], expectedSource)
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
