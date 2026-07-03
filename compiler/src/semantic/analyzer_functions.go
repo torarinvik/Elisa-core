@@ -194,6 +194,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkAtomicHotLoops(fn)
 	a.checkAwaitHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)
+	a.checkPushLoopExtendable(fn)
 	a.checkNarrowableHandleWidths(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {
