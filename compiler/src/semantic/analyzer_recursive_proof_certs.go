@@ -54,6 +54,21 @@ func (a *Analyzer) directNumericTerminationCertificate(fn *ast.FuncDecl, call *a
 	}
 	subst := a.substForSelfCall(fn, call)
 	if !a.proveMeasureDecreases(fn.Decreases, subst) {
+		// docs/118 (118-2/118-4): argument substitution reports the measure unchanged when the recursive
+		// call re-passes the same `mutable T&` param — the decrease lives in a callee's side effect. Try
+		// composing the callee's `ensure` summary into the decrease proof (single measure component only).
+		if measures := decreaseMeasureComponents(fn.Decreases); len(measures) == 1 &&
+			a.proveDecreaseViaCalleeSummary(fn, call, measures[0]) {
+			return recursiveProofCertificate{
+				Kind:    recursiveProofDirectNumeric,
+				Caller:  fn,
+				Callee:  fn,
+				Call:    call,
+				Measure: fn.Decreases[0],
+				Reason:  "measure decreases via a callee `ensure` summary",
+				Outcome: ProofProvenSMT,
+			}, true
+		}
 		if a.directNumericSyntacticDecrease(fn, call) {
 			return recursiveProofCertificate{
 				Kind:    recursiveProofDirectNumeric,

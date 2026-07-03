@@ -172,7 +172,10 @@ func (a *Analyzer) currentFuncSingleRefRoot() bool {
 	}
 	refCount := 0
 	for _, p := range a.currentFuncDecl.Params {
-		if _, ok := p.Type.(*ast.RefType); ok {
+		// `mutable T&` wraps the RefType in a MutableType, so a bare `p.Type.(*ast.RefType)` would MISS a
+		// mutable reference and undercount — letting two `mutable T&` params (which CAN alias two field
+		// paths) slip past this aliasing gate. typeExprIsReference unwraps the modifier.
+		if typeExprIsReference(p.Type) {
 			refCount++
 		}
 	}

@@ -111,3 +111,23 @@ def back(c: mutable Cursor&) changes c:
 		t.Fatalf("a decrementing field place must not prove `>= old`, got: %v", errs)
 	}
 }
+
+// SOUNDNESS (aliasing gate): with TWO reference-typed parameters, two syntactic field paths (`a.pos`,
+// `b.pos`) could denote the SAME location, so a WP-threaded write to one could miss the aliased read of
+// the other. Field-place WP must DECLINE here — the monotone postcondition is rejected even though it
+// looks locally true, because `mutable T&` reference params are correctly counted (they wrap in a
+// MutableType). A false accept would be an aliasing unsoundness.
+func TestWPFieldPlaceTwoRefParamsDeclined(t *testing.T) {
+	src := `
+struct Cursor:
+    pos: mutable usize
+
+def bump(a: mutable Cursor&, b: mutable Cursor&) changes a.pos:
+    ensure a.pos >= old(a.pos)
+    a.pos <- a.pos + 1
+`
+	errs := strings.Join(analyzeContractStrict(t, "wp_two_ref.elisa", src).Errors(), "\n")
+	if !strings.Contains(errs, "could not be proven statically") {
+		t.Fatalf("field-place WP must decline with 2 reference params (aliasing), got: %v", errs)
+	}
+}
