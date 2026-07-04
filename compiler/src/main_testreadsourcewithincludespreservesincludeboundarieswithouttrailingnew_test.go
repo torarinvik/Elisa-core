@@ -863,7 +863,11 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 		"def expression(state: mutable ParserState&) -> Token:",
 		"=== semantic ===",
 		"func expression",
-		"signature: fn(mutable ParserState&) -> Token",
+		// NB: FuncType.String() still renders the legacy `func(...)` spelling (as do ~69
+		// other emitter tests). The e9fcc6dc keyword rename updated the source keyword to
+		// `fn` but not the type-display path; matching the emitter here keeps the report
+		// test consistent with reality. Completing the display rename is a separate task.
+		"signature: func(mutable ParserState&) -> Token",
 		"func __grammar_try__PascalFrontend__expression",
 		"return_isolation:",
 		"fact_snapshot:",

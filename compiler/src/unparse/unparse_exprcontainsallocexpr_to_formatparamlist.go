@@ -568,7 +568,7 @@ func formatExportTargetName(name string) string {
 }
 
 func formatExportFuncHeader(n *ast.ExportFuncDecl) string {
-	line := "export func " + n.Name + "(" + formatExplicitParamList(n.Params, false) + ")"
+	line := "export fn " + n.Name + "(" + formatExplicitParamList(n.Params, false) + ")"
 	if n.ReturnType != nil {
 		line += " -> " + formatTypeExpr(n.ReturnType)
 	}
