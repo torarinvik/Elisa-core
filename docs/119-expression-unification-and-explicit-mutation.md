@@ -580,6 +580,36 @@ is immutable. Nothing requires reading a body to know what changes.
 
 ## 8. Implementation plan
 
+### 8.0 Implementation status (stage0) — LANDED
+
+All six changes plus E4 and W1 are implemented in the stage0 compiler and locked with
+runtime goldens + semantic/parser tests; zero regressions across stage1, wolf3d,
+shadps4, nes.
+
+- **§1 void unbindable** (E1/E2) — `analyzer_void_binding.go`.
+- **§2 block expressions** — bare `x =` NEWLINE+INDENT blocks; `do:` deprecated.
+- **§4 if/match expressions** (E6 via TernaryExpr unification, E7 mandatory else) —
+  `parser/if_expression.go`; trailing `if`/block-`match` is the block value.
+- **§3 loop headers** — `parser/loop_header.go`; yield/statement forms, break-yields-state.
+- **§5 `rebind`** — `parser/rebind.go`; bare target = existing mutable (reassign; E8 =
+  the existing reassign-undefined/immutable error), `name: T` = fresh binding. Desugars
+  onto a temp-tuple bind + per-target reassign/decl (guaranteed-move via the affine
+  reassignment path). Single-target binds the scalar directly.
+- **E4 value-block purity** — `semantic/analyzer_value_block_e4.go`; direct writes to an
+  outer binding inside a value block are rejected (the mutating-CALL half is deferred).
+- **§6 `|capture|`** — landed as the **E4-licensing (in-place) form**, NOT the §6.1
+  move-shadow desugar. A captured mutable is recorded on `ExprBlock.Captures` and exempt
+  from E4; E10/E11 require it to be an existing mutable. This is sound with zero AST
+  rewriting and no LHS-binding coordination, and delivers the headline benefit (the
+  header is the loop's mutation contract). The move-in/out shadow semantics of §6.1
+  remain available explicitly via `rebind` (§5). The mutating-call licensing row of §6.2
+  lands with the deferred call-side E4 half.
+- **W1 discarded value** — opt-in `-Wunused` (`semantic/analyzer_discarded_value.go`).
+
+Remaining (future): the mutating-CALL half of E4/§6.2 (needs call-signature reasoning);
+the §6.1 move-shadow desugar if the alias-free guarantee is ever wanted for captures;
+§6.4 frame-condition integration; stage1-frontend parity for the new forms; LSP tokens.
+
 ### 8.1 Landing order (each step independently shippable, parity-gated)
 
 1. **§1 void unification** — stage0 type-checker rule (`void` unbindable, E1–E3,
