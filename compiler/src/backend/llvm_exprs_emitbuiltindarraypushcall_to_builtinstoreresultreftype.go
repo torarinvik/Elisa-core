@@ -318,7 +318,7 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 	sourceType := s.exprType(arg)
 	baseType, ok := builtinDArrayExtendSourceType(sourceType)
 	if !ok || baseType == nil {
-		return nil, nil, fmt.Errorf("darray extend expects a compatible darray or array source")
+		return nil, nil, fmt.Errorf("darray extend expects a compatible darray, array, or view source")
 	}
 	switch tt := baseType.(type) {
 	case *semantic.DArrayType:
@@ -362,6 +362,29 @@ func (s *functionState) emitBuiltinDArrayExtendSource(arg ast.Expr, elemType sem
 		}
 		data := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("darray.extend.src.data"))
 		count := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("darray.extend.src.len"))
+		return data, count, nil
+	case *semantic.SViewType:
+		// sview is the same {data, len} fat pointer as a view[u8] — extract its bytes and
+		// feed the memcpy path (identical to the ViewType case above).
+		var sviewValue C.LLVMValueRef
+		if refType, ok := sourceType.(*semantic.RefType); ok && refType != nil {
+			ptr, _, err := s.emitExpr(arg, sourceType)
+			if err != nil {
+				return nil, nil, err
+			}
+			sviewValue, err = s.loadValue(ptr, tt, "darray.extend.src.sview")
+			if err != nil {
+				return nil, nil, err
+			}
+		} else {
+			var err error
+			sviewValue, _, err = s.emitExpr(arg, tt)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+		data := C.LLVMBuildExtractValue(s.builder, sviewValue, 0, cStringFree("darray.extend.src.data"))
+		count := C.LLVMBuildExtractValue(s.builder, sviewValue, 1, cStringFree("darray.extend.src.len"))
 		return data, count, nil
 	case *semantic.ArrayType:
 		arrayType, arrayPtr, ok, err := s.fixedArraySliceBase(arg)

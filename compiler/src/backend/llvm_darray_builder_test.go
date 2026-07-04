@@ -77,6 +77,30 @@ func TestGenerateLLVMIRLowersDArrayExtendSugar(t *testing.T) {
 	}
 }
 
+// A contiguous VIEW source (view[T]) is a fat pointer over its elements, so
+// `dst.extend(view)` copies its bytes into dst via the same arena_memcpy a darray
+// source uses — no per-element fill loop. (Reading a view's contents is a plain value
+// copy; the view is a read-only borrow, untouched by the append.)
+func TestGenerateLLVMIRLowersDArrayExtendFromView(t *testing.T) {
+	src := `def build(owner: Arena, src: darray[i64]) -> usize:
+    alloc: mutable Arena& = (&owner).cast[mutable Arena&]
+    in alloc:
+        xs: mutable darray[i64] = []
+        xr: mutable darray[i64]& = (&xs).cast[mutable darray[i64]&]
+        v: view[i64] = src[0:src.count]
+        xr.extend(v)
+        return xs.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_extend_view.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	if !strings.Contains(output, "@arena_memcpy") || !strings.Contains(output, "darray.extend.memcpy") {
+		t.Fatalf("expected extend-from-view to lower to arena_memcpy, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersDArrayLiteralWithExplicitOwner(t *testing.T) {
 	src := `def build(owner: Arena) -> usize:
     alloc: mutable Arena& = (&owner).cast[mutable Arena&]

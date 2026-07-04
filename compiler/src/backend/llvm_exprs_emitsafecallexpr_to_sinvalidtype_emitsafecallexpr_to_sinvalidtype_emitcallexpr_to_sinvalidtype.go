@@ -500,14 +500,16 @@ func builtinDArrayExtendSourceType(t semantic.Type) (semantic.Type, bool) {
 	if t == nil {
 		return nil, false
 	}
-	// Views are NOT extend sources (see builtinDArrayExtendSourceCompatible in the analyzer): a
-	// view is a read-only borrow, so only owning/array containers can be bulk-appended from.
+	// Contiguous element sequences are extend sources: darray, fixed array, or a view
+	// (see builtinDArrayExtendSourceCompatible in the analyzer). A view source lowers
+	// through the ViewType case in emitBuiltinDArrayExtendSource to the same memcpy a
+	// darray source uses — reading a view's bytes into `dst` is a plain value copy.
 	switch tt := t.(type) {
-	case *semantic.DArrayType, *semantic.ArrayType:
+	case *semantic.DArrayType, *semantic.ArrayType, *semantic.ViewType, *semantic.SViewType:
 		return t, true
 	case *semantic.RefType:
 		switch tt.Elem.(type) {
-		case *semantic.DArrayType, *semantic.ArrayType:
+		case *semantic.DArrayType, *semantic.ArrayType, *semantic.ViewType, *semantic.SViewType:
 			return tt.Elem, true
 		}
 	}

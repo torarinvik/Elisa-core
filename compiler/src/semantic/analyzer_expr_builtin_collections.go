@@ -416,7 +416,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		sourceType = a.analyzeValueExpr(expr.Args[0], expectedSource)
 	}
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
-		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray or array source of %s, got %s", darrayType.Elem, sourceType)
+		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, array, or view source of %s, got %s", darrayType.Elem, sourceType)
 	}
 	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
@@ -921,17 +921,23 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 	if elemType == nil || sourceType == nil {
 		return false
 	}
-	// Only owning/array containers are valid extend SOURCES. A view (`view[T]`/`sview`) is a
-	// read-only borrow (fat pointer, no owned backing) and is deliberately NOT accepted: to bulk-
-	// append elements you pass the owning `mutable darray[T]&`, not a view over it. (Appending a
-	// view's contents is still expressible via a comprehension, `dst.extend([x for x in v])`, which
-	// is a darray-typed source and fuses to a zero-copy read — but the view itself is not an extend
-	// participant.)
+	// Valid extend SOURCES are contiguous element sequences: an owning darray, a fixed
+	// array, or a view (`view[T]`/`sview`). A view is a read-only BORROW, so it can never
+	// be the extend TARGET — but reading its bytes into `dst` is a plain value copy
+	// (`dst` owns the result, the view is untouched), and a contiguous view lowers to the
+	// same `arena_memcpy` a darray source does. Element region-escape and affine-move
+	// safety are enforced separately by the caller (checkNestedRegionBulkStoreEscape /
+	// the affine-element check), so this only governs shape compatibility.
 	switch tt := sourceType.(type) {
 	case *DArrayType:
 		return SameType(elemType, tt.Elem)
 	case *ArrayType:
 		return SameType(elemType, tt.Elem)
+	case *ViewType:
+		return SameType(elemType, tt.Elem)
+	case *SViewType:
+		// sview is a contiguous u8 byte view; its element is always u8.
+		return isExtendU8Elem(elemType)
 	case *RefType:
 		if tt == nil || tt.Elem == nil {
 			return false
@@ -941,9 +947,18 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 			return SameType(elemType, inner.Elem)
 		case *ArrayType:
 			return SameType(elemType, inner.Elem)
+		case *ViewType:
+			return SameType(elemType, inner.Elem)
+		case *SViewType:
+			return isExtendU8Elem(elemType)
 		}
 	}
 	return false
+}
+
+func isExtendU8Elem(elemType Type) bool {
+	b, ok := StripAggregateStateType(elemType).(*BuiltinType)
+	return ok && b != nil && b.Name == "u8"
 }
 
 func darrayElemPrefersListLiteralAsSingleValue(elemType Type) bool {
