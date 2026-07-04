@@ -79,6 +79,20 @@ func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
 	a.errorf(arg.Pos(), "value block may not mutate the outer binding %q through a call (docs/119 E4); pass it by value, capture it in the header (`|%s|`), or thread the update with `rebind`", name, name)
 }
 
+// exprBlockPureOverOuter reports whether a value block is provably pure over OUTER
+// state (docs/119 §6.4): with an empty capture set, E4 has already rejected every
+// direct write and every mutating call to a non-local binding, and there is no
+// captured binding licensed for mutation — so the block cannot change any state that
+// outlives it. This structural fact is what the WP engine, loop-invariant inference,
+// and the docs/86/118 termination provers want: a pure-over-outer-state loop body means
+// the measure can only move through the loop's own header accumulators, and any fact
+// about an outer place survives the block unconditionally. (The per-variable fact
+// model already preserves untouched-variable facts; this makes the guarantee explicit
+// and queryable rather than incidental.)
+func exprBlockPureOverOuter(expr *ast.ExprBlock) bool {
+	return expr != nil && len(expr.Captures) == 0
+}
+
 // checkValueBlockMutatingBuiltinMethod is the builtin-collection-method arm of the
 // mutating-call E4 (docs/119 §6.2): a mutating builtin (`xs.push(v)`, `d.clear()`,
 // `s.add(x)`) models its receiver as a VALUE, not a `mutable T&` arg, so it slips past

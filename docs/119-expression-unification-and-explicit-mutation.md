@@ -606,9 +606,22 @@ shadps4, nes.
   lands with the deferred call-side E4 half.
 - **W1 discarded value** — opt-in `-Wunused` (`semantic/analyzer_discarded_value.go`).
 
-Remaining (future): the mutating-CALL half of E4/§6.2 (needs call-signature reasoning);
-the §6.1 move-shadow desugar if the alias-free guarantee is ever wanted for captures;
-§6.4 frame-condition integration; stage1-frontend parity for the new forms; LSP tokens.
+- **Mutating-call half of E4/§6.2** — LANDED. Inside a value block, passing an outer
+  binding by `mutable T&` (incl. a mutating method receiver `outer.push(v)`) is E4,
+  reusing the analyzer's resolved param mutability + a value-block allowed-name stack.
+- **§6.4 frame integration** — LANDED. Obligation 1 (a captured `mutable T&` place
+  mutated in the block must lie in the enclosing `changes` clause) is enforced for free:
+  the block's statements analyze normally, so the write reaches the existing frame
+  check. Obligation 2 (an empty-capture block is pure over outer state) is exposed as
+  `exprBlockPureOverOuter` for the provers; the per-variable fact model already
+  preserves untouched-outer facts across such a block, so the guarantee holds by
+  construction.
+- **`func`→`fn` type display** — LANDED (FuncType.String() + diagnosticTypeString).
+- **stage1-frontend parity** — LANDED (Elisa-compiler repo): all five forms parse+resolve.
+- **LSP `rebind` token** — LANDED (Elisa-LSP repo).
+
+Remaining (future): the §6.1 move-shadow desugar if the alias-free guarantee is ever
+wanted for captures (the E4-licensing form is sound today); an LSP capture-list hover.
 
 ### 8.1 Landing order (each step independently shippable, parity-gated)
 
