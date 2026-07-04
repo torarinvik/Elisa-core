@@ -28,37 +28,37 @@ func TestRunCLIListsAnnotatedFunctionsByKind(t *testing.T) {
 		{
 			name:     "tests",
 			args:     []string{"-emit", "tests", fixturePath},
-			contains: []string{"alpha_case\tfunc() -> void"},
+			contains: []string{"alpha_case\tfn() -> void"},
 			omits:    []string{"shared_seed", "bench_hot_loop"},
 		},
 		{
 			name:     "benches",
 			args:     []string{"-emit", "benches", fixturePath},
-			contains: []string{"bench_hot_loop\tfunc() -> void"},
+			contains: []string{"bench_hot_loop\tfn() -> void"},
 			omits:    []string{"alpha_case", "shared_seed"},
 		},
 		{
 			name:     "fixtures",
 			args:     []string{"-emit", "fixtures", fixturePath},
-			contains: []string{"shared_seed\tfunc() -> int"},
+			contains: []string{"shared_seed\tfn() -> int"},
 			omits:    []string{"alpha_case", "bench_hot_loop"},
 		},
 		{
 			name:     "tests filtered",
 			args:     []string{"-emit", "tests", "-filter", "alpha", fixturePath},
-			contains: []string{"alpha_case\tfunc() -> void"},
+			contains: []string{"alpha_case\tfn() -> void"},
 			omits:    []string{"bench_hot_loop", "shared_seed"},
 		},
 		{
 			name:     "benches filtered",
 			args:     []string{"-emit", "benches", "-filter", "hot", fixturePath},
-			contains: []string{"bench_hot_loop\tfunc() -> void"},
+			contains: []string{"bench_hot_loop\tfn() -> void"},
 			omits:    []string{"alpha_case", "shared_seed"},
 		},
 		{
 			name:     "fixtures filtered",
 			args:     []string{"-emit", "fixtures", "-filter", "seed", fixturePath},
-			contains: []string{"shared_seed\tfunc() -> int"},
+			contains: []string{"shared_seed\tfn() -> int"},
 			omits:    []string{"alpha_case", "bench_hot_loop"},
 		},
 	}

@@ -169,7 +169,7 @@ func TestRunCLIProjectBuildRunTestBenchAndView(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Fatalf("expected no stderr output during bench listing, got:\n%s", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "hot_loop\tfunc() -> void") {
+	if !strings.Contains(stdout.String(), "hot_loop\tfn() -> void") {
 		t.Fatalf("expected bench listing to include hot_loop, got:\n%s", stdout.String())
 	}
 

@@ -151,7 +151,7 @@ func (t *FuncType) String() string {
 		withClause = " with " + strings.Join(implicitParts, ", ")
 	}
 	if t.Return == nil {
-		return fmt.Sprintf("func%s(%s)%s%s", prefix, strings.Join(parts, ", "), withClause, permissionFamiliesString(t.Permissions))
+		return fmt.Sprintf("fn%s(%s)%s%s", prefix, strings.Join(parts, ", "), withClause, permissionFamiliesString(t.Permissions))
 	}
-	return fmt.Sprintf("func%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, t.Return.String(), permissionFamiliesString(t.Permissions))
+	return fmt.Sprintf("fn%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, t.Return.String(), permissionFamiliesString(t.Permissions))
 }

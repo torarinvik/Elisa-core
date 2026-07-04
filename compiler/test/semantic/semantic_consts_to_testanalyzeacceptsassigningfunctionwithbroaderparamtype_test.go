@@ -636,7 +636,7 @@ def bad() -> int:
 		t.Fatal("expected semantic error, got none")
 	}
 	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `func(Box&?) -> int`) || !strings.Contains(all, `func(Box&) -> int`) {
+	if !strings.Contains(all, `variable "wider" expects`) || !strings.Contains(all, `fn(Box&?) -> int`) || !strings.Contains(all, `fn(Box&) -> int`) {
 		t.Fatalf("expected contravariant function assignment diagnostic, got:\n%s", all)
 	}
 }

@@ -154,7 +154,7 @@ def main() -> i64:
 
 // Regression: a protocol impl may RENAME the protocol's declared parameters — names are not part of a
 // function's type. `Sub` declares `__sub__(self, other)`; an impl naming the second param `o` must
-// still conform (previously rejected with a baffling "expects func(T,T)->T, got func(T,T)->T" because
+// still conform (previously rejected with a baffling "expects fn(T,T)->T, got fn(T,T)->T" because
 // SameType compared parameter names). Found dogfooding operator overloading in the wolf3d port.
 func TestProtocolImplRenamedParamConforms(t *testing.T) {
 	ok := analyzeOverloadSource(t, `

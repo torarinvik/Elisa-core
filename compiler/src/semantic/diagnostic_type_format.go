@@ -240,9 +240,9 @@ func diagnosticTypeString(t Type) string {
 			withClause = " with " + strings.Join(implicitParts, ", ")
 		}
 		if tt.Return == nil {
-			return fmt.Sprintf("func%s(%s)%s%s", prefix, strings.Join(parts, ", "), withClause, permissionFamiliesString(tt.Permissions))
+			return fmt.Sprintf("fn%s(%s)%s%s", prefix, strings.Join(parts, ", "), withClause, permissionFamiliesString(tt.Permissions))
 		}
-		return fmt.Sprintf("func%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, diagnosticTypeString(tt.Return), permissionFamiliesString(tt.Permissions))
+		return fmt.Sprintf("fn%s(%s)%s -> %s%s", prefix, strings.Join(parts, ", "), withClause, diagnosticTypeString(tt.Return), permissionFamiliesString(tt.Permissions))
 	default:
 		return safeDiagnosticTypeFallback(t)
 	}
