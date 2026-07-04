@@ -397,7 +397,24 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		// element type as the expected result, exactly as a `dst: darray[T] = [...]` var decl would.
 		expectedSource = &DArrayType{Elem: darrayType.Elem, Shape: &WildcardShape{}, SurfaceName: "darray"}
 	}
-	sourceType := a.analyzeValueExpr(expr.Args[0], expectedSource)
+	// A comprehension argument to `extend` FUSES — its elements are pushed straight
+	// into the receiver, no standalone temp is allocated. So analyze it with the
+	// receiver as the allocation context: the (fused) comprehension inherits the
+	// receiver's growth region and doesn't independently demand an ambient `in <arena>:`
+	// scope — which is what let a ref-param receiver's push loop compile but its
+	// equivalent `.extend([… for …])` (the -Wperf-suggested form) fail. The extend's own
+	// growth-region check (above) already validated the receiver.
+	var sourceType Type
+	if isPlainListComprehensionArg(expr.Args[0]) {
+		savedAllocExpr := a.currentAllocExpr
+		if a.currentAllocExpr == nil {
+			a.currentAllocExpr = fieldExpr.Object
+		}
+		sourceType = a.analyzeValueExpr(expr.Args[0], expectedSource)
+		a.currentAllocExpr = savedAllocExpr
+	} else {
+		sourceType = a.analyzeValueExpr(expr.Args[0], expectedSource)
+	}
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
 		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray or array source of %s, got %s", darrayType.Elem, sourceType)
 	}
