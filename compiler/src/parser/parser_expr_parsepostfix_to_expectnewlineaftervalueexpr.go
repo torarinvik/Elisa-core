@@ -648,6 +648,25 @@ func (p *Parser) parseBraceMembershipCandidateExpr() ast.Expr {
 }
 func (p *Parser) parseExprBlockValue(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expect(lexer.TOKEN_COLON)
+	return p.parseExprBlockBody(pos, flattenSingle)
+}
+
+// parseBareExprBlockValue parses the docs/119 §2 bare block-expression form: the
+// RHS of `x =` / `x: T =` is NEWLINE+INDENT stmts with a tail expression (no
+// `do:` introducer). Caller has verified the NEWLINE+INDENT lookahead.
+func (p *Parser) parseBareExprBlockValue(pos lexer.Pos) ast.Expr {
+	return p.parseExprBlockBody(pos, false)
+}
+
+// bareExprBlockAhead reports whether the RHS position starts a bare block
+// expression: the `=` is immediately followed by NEWLINE then INDENT. Today
+// that sequence is a guaranteed parse error, so claiming it is backward
+// compatible.
+func (p *Parser) bareExprBlockAhead() bool {
+	return p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_INDENT
+}
+
+func (p *Parser) parseExprBlockBody(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expectNewline()
 	body := p.parseBlock()
 	if len(body) == 0 {

@@ -527,7 +527,12 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 				if owner != nil {
 					p.errorf("builder owner declarations cannot also use an initializer")
 				}
-				value = p.parseValueExprAllowTuple()
+				if p.bareExprBlockAhead() {
+					// docs/119 §2: `x: T =` NEWLINE INDENT ... — bare block expression.
+					value = p.parseBareExprBlockValue(pos)
+				} else {
+					value = p.parseValueExprAllowTuple()
+				}
 			}
 			p.expectNewlineAfterValueExpr(value)
 			value = desugarDStrStringLiteralInit(typ, value)
@@ -539,7 +544,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		name := p.cur().Text
 		p.advance()
 		p.advance()
-		value := p.parseValueExprAllowTuple()
+		var value ast.Expr
+		if p.bareExprBlockAhead() {
+			// docs/119 §2: `x =` NEWLINE INDENT ... — bare block expression.
+			value = p.parseBareExprBlockValue(pos)
+		} else {
+			value = p.parseValueExprAllowTuple()
+		}
 		p.expectNewlineAfterValueExpr(value)
 		return &ast.VarDeclStmt{Position: pos, Name: name, Value: value}
 	}
