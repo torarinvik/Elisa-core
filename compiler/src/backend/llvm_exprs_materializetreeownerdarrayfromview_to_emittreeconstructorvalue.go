@@ -81,10 +81,18 @@ import (
 	"strings"
 )
 
-func (s *functionState) emitTupleExpr(expr *ast.TupleExpr) (C.LLVMValueRef, semantic.Type, error) {
+func (s *functionState) emitTupleExpr(expr *ast.TupleExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	tupleType, ok := semantic.StripAggregateStateType(s.exprType(expr)).(*semantic.TupleType)
 	if !ok || tupleType == nil {
 		return nil, nil, fmt.Errorf("tuple expression requires a tuple type, got %s", s.exprType(expr))
+	}
+	// Prefer a compatible EXPECTED tuple type: a match-expression arm's tuple is
+	// emitted with the merged arm type, whose fields may adapt an element (a string
+	// literal recorded as static u8& lowering into an sview field). Emitting each
+	// element with the expected FIELD type triggers the same literal→view conversion
+	// as a typed declaration, and the result struct matches the phi's type.
+	if expectedTuple, ok := semantic.StripAggregateStateType(expected).(*semantic.TupleType); ok && expectedTuple != nil && len(expectedTuple.Fields) == len(tupleType.Fields) {
+		tupleType = expectedTuple
 	}
 	llvmType, err := s.g.lowerType(tupleType)
 	if err != nil {

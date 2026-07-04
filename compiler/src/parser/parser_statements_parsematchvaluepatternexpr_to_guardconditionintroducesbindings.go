@@ -323,7 +323,9 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		p.expectNewlineAfterValueExpr(value)
 	} else {
 		value = p.parseValueExprAllowTuple()
-		p.expectNewline()
+		// Not the plain expectNewline: a multi-line match-expression RHS ends with its
+		// arm block's DEDENT (the trailing newline was consumed inside the final arm).
+		p.expectNewlineAfterValueExpr(value)
 	}
 	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
 }

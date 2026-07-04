@@ -139,7 +139,63 @@ func (a *Analyzer) mergeMatchExprArmTypes(resultType, armType Type, arms []ast.M
 	if isStaticStringLiteralRefType(resultType) && isStringViewType(armType) && matchArmTailsAllStringLiterals(arms[:index]) {
 		return armType
 	}
+	// Tuple-yielding arms: adapt string-literal FIELDS to a string-view field, so a
+	// multi-output classifier merges: `is_x, name = match k: 1: true, "one"; _: false, v`.
+	// Same literal-only rule per field, consulting the arm tail's TupleExpr elements.
+	if rt, ok := resultType.(*TupleType); ok {
+		if at, ok := armType.(*TupleType); ok && len(rt.Fields) == len(at.Fields) {
+			fields := make([]TupleField, len(rt.Fields))
+			for i := range rt.Fields {
+				fm := MergeTypes(rt.Fields[i].Type, at.Fields[i].Type)
+				if IsInvalidType(fm) {
+					switch {
+					case isStringViewType(rt.Fields[i].Type) && isStaticStringLiteralRefType(at.Fields[i].Type) && matchArmTupleElemIsStringLiteral(arms[index].Body, i):
+						fm = rt.Fields[i].Type
+					case isStaticStringLiteralRefType(rt.Fields[i].Type) && isStringViewType(at.Fields[i].Type) && matchArmTupleElemsAllStringLiterals(arms[:index], i):
+						fm = at.Fields[i].Type
+					default:
+						return invalidType
+					}
+				}
+				name := rt.Fields[i].Name
+				if name == "" {
+					name = at.Fields[i].Name
+				}
+				fields[i] = TupleField{Name: name, Type: fm}
+			}
+			return &TupleType{Fields: fields}
+		}
+	}
 	return invalidType
+}
+
+// matchArmTupleElemIsStringLiteral reports whether an arm body's value is a TupleExpr
+// whose i-th element is a bare string literal.
+func matchArmTupleElemIsStringLiteral(body []ast.Stmt, i int) bool {
+	if len(body) == 0 {
+		return false
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return false
+	}
+	tup, ok := exprStmt.Expr.(*ast.TupleExpr)
+	if !ok || tup == nil || i >= len(tup.Elems) {
+		return false
+	}
+	_, ok = tup.Elems[i].(*ast.StringLit)
+	return ok
+}
+
+// matchArmTupleElemsAllStringLiterals reports whether EVERY given arm yields a tuple
+// whose i-th element is a bare string literal.
+func matchArmTupleElemsAllStringLiterals(arms []ast.MatchArm, i int) bool {
+	for _, arm := range arms {
+		if !matchArmTupleElemIsStringLiteral(arm.Body, i) {
+			return false
+		}
+	}
+	return len(arms) > 0
 }
 
 // isStaticStringLiteralRefType reports the TYPE a string literal carries:

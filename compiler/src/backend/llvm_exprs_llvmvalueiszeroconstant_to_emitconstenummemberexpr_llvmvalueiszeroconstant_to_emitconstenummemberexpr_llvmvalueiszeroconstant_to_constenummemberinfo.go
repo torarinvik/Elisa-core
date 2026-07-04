@@ -448,7 +448,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	case *ast.LambdaExpr:
 		value, actualType, err = s.emitLambdaExpr(n)
 	case *ast.TupleExpr:
-		value, actualType, err = s.emitTupleExpr(n)
+		value, actualType, err = s.emitTupleExpr(n, expected)
 	case *ast.ParenExpr:
 		value, actualType, err = s.emitExpr(n.Inner, expected)
 	case *ast.CanExpr:

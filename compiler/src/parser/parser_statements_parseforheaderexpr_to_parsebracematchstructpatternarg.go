@@ -318,8 +318,17 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 		// match-expressions compose (docs/119 §4). A plain expression tail is unchanged.
 		body = p.valueBlockTail(p.parseBlock())
 	} else {
-		// Inline value arm: `Pattern: <expr>`. The value becomes the arm's yielded expression.
+		// Inline value arm: `Pattern: <expr>`. The value becomes the arm's yielded
+		// expression. A top-level comma builds a TupleExpr so a tuple-bind can
+		// destructure the match (`a, b = match k: 1: 10, 20`).
 		value := p.parseExpr()
+		if p.peek() == lexer.TOKEN_COMMA {
+			elems := []ast.Expr{value}
+			for p.match(lexer.TOKEN_COMMA) {
+				elems = append(elems, p.parseExpr())
+			}
+			value = &ast.TupleExpr{Position: value.Pos(), Elems: elems}
+		}
 		p.expectNewline()
 		body = []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
 	}
