@@ -71,6 +71,64 @@ func implMethodContracts(member ast.Node) methodValueContracts {
 	return c
 }
 
+// implMethodParamNames returns the impl method's parameter names in declaration order.
+func implMethodParamNames(member ast.Node) []string {
+	var params []ast.ParamDecl
+	switch n := member.(type) {
+	case *ast.FuncDecl:
+		params = n.Params
+	case *ast.ExternFuncDecl:
+		params = n.Params
+	default:
+		return nil
+	}
+	names := make([]string, len(params))
+	for i, p := range params {
+		names[i] = p.Name
+	}
+	return names
+}
+
+// implToProtocolParamRename builds the substitution mapping each impl parameter name to the
+// protocol's parameter name at the same position (from the protocol method's signature). Only
+// positions where the names actually differ are included; identical names are skipped. Returns nil
+// when either side's names are unavailable or lengths disagree (the caller then compares as-is).
+func implToProtocolParamRename(methodInfo *StaticInterfaceMethod, member ast.Node) map[string]ast.Expr {
+	if methodInfo == nil || methodInfo.Signature == nil {
+		return nil
+	}
+	protoNames := methodInfo.Signature.ExplicitParamNames
+	implNames := implMethodParamNames(member)
+	if len(protoNames) == 0 || len(protoNames) != len(implNames) {
+		return nil
+	}
+	var subst map[string]ast.Expr
+	for i, implName := range implNames {
+		protoName := protoNames[i]
+		if implName == "" || protoName == "" || implName == protoName {
+			continue
+		}
+		if subst == nil {
+			subst = map[string]ast.Expr{}
+		}
+		subst[implName] = &ast.Ident{Name: protoName}
+	}
+	return subst
+}
+
+// renameContractClauses alpha-renames each clause's free identifiers per `rename` (impl→protocol
+// param names), leaving the originals untouched (substituteIdents returns fresh nodes).
+func renameContractClauses(clauses []ast.Expr, rename map[string]ast.Expr) []ast.Expr {
+	if len(clauses) == 0 || len(rename) == 0 {
+		return clauses
+	}
+	out := make([]ast.Expr, len(clauses))
+	for i, c := range clauses {
+		out[i] = substituteIdents(c, rename)
+	}
+	return out
+}
+
 // checkProtocolImplContractVariance enforces behavioral subtyping for one impl method against its
 // protocol method declaration. It emits an error when the impl strengthens a precondition or
 // weakens a postcondition. `methodInfo` is the protocol-side method; `member` is the impl AST node;
@@ -81,6 +139,17 @@ func (a *Analyzer) checkProtocolImplContractVariance(methodInfo *StaticInterface
 	}
 	proto := protocolMethodContracts(methodInfo)
 	impl := implMethodContracts(member)
+
+	// The entailment primitive assumes premises and goal reference the SAME parameter names (a shared
+	// `self`/`factor`/… symbol on both sides). Since an impl may RENAME the protocol's declared
+	// parameters (names are not part of a function's type — see sameSignatureModuloParamNames), first
+	// alpha-rename the impl's contract clauses from the impl's parameter names to the protocol's,
+	// positionally. Without this, `requires f > 0` in an impl that renamed the protocol's `factor`
+	// would compare `f` against `factor` as distinct free symbols and spuriously fail contravariance.
+	if rename := implToProtocolParamRename(methodInfo, member); len(rename) > 0 {
+		impl.requires = renameContractClauses(impl.requires, rename)
+		impl.ensures = renameContractClauses(impl.ensures, rename)
+	}
 
 	// Precondition (contravariant): protocol.requires ⟹ each impl.requires conjunct.
 	// If the protocol has NO precondition the premise set is empty (the function's own facts only),

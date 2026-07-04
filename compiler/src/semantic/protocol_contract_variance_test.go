@@ -43,6 +43,31 @@ impl Indexable for Ring:
 	}
 }
 
+// Regression: an impl may RENAME the protocol's declared parameters (names are not part of a
+// function's type). A renamed parameter that appears in an equivalent `requires` must still be
+// accepted — the variance check alpha-renames the impl's clauses to the protocol's parameter names
+// before the entailment. Without that, `requires f > 0` (impl renamed `factor`->`f`) would compare
+// `f` against `factor` as distinct free symbols and spuriously report a strengthened precondition.
+func TestProtocolContractRenamedParamConforms(t *testing.T) {
+	src := `
+struct Box:
+    w: i64
+
+protocol Scaler:
+    def scale(self: Self, factor: i64) -> i64
+        requires factor > 0
+
+impl Scaler for Box:
+    def scale(self: Box, f: i64) -> i64:
+        requires f > 0
+        return self.w * f
+`
+	r := analyzeProtocolVariance(t, "proto_renamed_param.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("impl renaming the protocol's `factor` param to `f` with an equivalent `requires` should be accepted, got:\n%s", allDiagnostics(r))
+	}
+}
+
 // Strengthened precondition — REJECTED (contravariance violation).
 func TestProtocolContractStrengthenedPreconditionRejected(t *testing.T) {
 	src := `
