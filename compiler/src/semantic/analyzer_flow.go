@@ -57,7 +57,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			} else {
 				valueType = a.analyzeValueExpr(n.Value, declType)
 			}
-			if declType == nil {
+			if a.checkVoidBinding(n.Pos(), n.Name, declType, valueType, true) {
+				declType = invalidType
+				valueType = invalidType
+			} else if declType == nil {
 				declType = valueType
 			} else if !AssignableTo(declType, valueType) {
 				a.errorf(n.Pos(), "variable %q expects %s, got %s", n.Name, declType, valueType)
@@ -71,6 +74,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.checkFreshContainerStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, declType, n.Value)
 		} else if declType == nil {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
+			declType = invalidType
+		} else if a.checkVoidBinding(n.Pos(), n.Name, declType, nil, false) {
 			declType = invalidType
 		}
 		bindingType := declType
@@ -266,6 +271,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				continue
 			}
 			if n.Declare {
+				a.checkVoidTupleBinding(binding.Position, binding.Name, fields[i].Type)
 				sym := &Symbol{Name: binding.Name, Kind: SymbolLocal, Type: fields[i].Type, Node: n, Mutable: false}
 				a.defineLocal(sym, binding.Position)
 				a.recordValueBinding(sym, fieldExpr)
