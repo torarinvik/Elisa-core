@@ -404,6 +404,19 @@ style at function granularity; it is advisory, off by default.
 
 ## 6. Change 6 — `|capture|` header sugar
 
+> **Implementation decision (landed): capture is E4-LICENSING, not move-shadow.** The
+> §6.1 move-shadow desugar below is the original design; the shipped implementation
+> instead records captures on `ExprBlock.Captures` and exempts them from E4, letting the
+> body mutate them *in place*. This was chosen after confirming the in-place form is
+> strictly at least as capable AND safe: field mutation (`w.f <- …`), mutating-method
+> calls (`w.push(x)`), and whole-value replacement (`w <- combine(w, x)`) all work in
+> place and clone-free, and alias-freedom still holds (E4 forbids taking an escaping
+> mutable ref to any non-captured outer, and a captured var is mutated by name, never
+> aliased). Move-shadow would add **zero** capability or safety while forcing moves/copies
+> (a principle-#1 regression) and requiring either unsound body-identifier rewriting or
+> whole-statement LHS coordination. It is therefore **deliberately not implemented**; the
+> explicit `rebind` (§5) remains available when a caller genuinely wants the move form.
+
 ### 6.1 Syntax and desugaring
 
 A bare `name` in a `|...|` header (block §2, loop §3, `if`/`match` branch §4) is a
