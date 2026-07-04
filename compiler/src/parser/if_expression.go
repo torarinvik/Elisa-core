@@ -27,9 +27,46 @@ func (p *Parser) tailStmtToExpr(s ast.Stmt) (ast.Expr, bool) {
 	case *ast.IfStmt:
 		return p.ifStmtToExpr(n)
 	case *ast.MatchStmt:
-		return &ast.MatchExpr{Position: n.Position, Value: n.Value, Store: n.Store, Arms: n.Arms}, true
+		// docs/119 §4: a block-tail `match` becomes the block's value. Its arm bodies were
+		// parsed as statements, so recursively convert each arm's tail into a value
+		// expression (an inner `match`/`if` arm yields, composing nested match-expressions).
+		return &ast.MatchExpr{Position: n.Position, Value: n.Value, Store: n.Store, Arms: p.matchArmsToValueArms(n.Arms)}, true
 	}
 	return nil, false
+}
+
+// matchArmsToValueArms rewrites each arm body so its tail statement yields a value
+// (docs/119 §4). An arm whose tail is already an expression is unchanged; an arm whose
+// tail is a nested `match`/`if` is converted so the arm composes as a value. Arms that
+// cannot yield are left as-is — analyzeMatchExprArmBody reports the precise diagnostic.
+func (p *Parser) matchArmsToValueArms(arms []ast.MatchArm) []ast.MatchArm {
+	out := make([]ast.MatchArm, len(arms))
+	for i, arm := range arms {
+		out[i] = arm
+		out[i].Body = p.valueBlockTail(arm.Body)
+	}
+	return out
+}
+
+// valueBlockTail rewrites a block's final statement so it yields a value (docs/119 §4):
+// a trailing `match`/`if` becomes a MatchExpr/TernaryExpr wrapped in an ExprStmt, which
+// the analyzer/backend already treat as the block's value. A body whose tail is already
+// an expression, or is not a value-yielding form, is returned unchanged (the analyzer
+// then reports the precise "arm must end with an expression" diagnostic).
+func (p *Parser) valueBlockTail(body []ast.Stmt) []ast.Stmt {
+	if len(body) == 0 {
+		return body
+	}
+	last := body[len(body)-1]
+	if _, ok := last.(*ast.ExprStmt); ok {
+		return body
+	}
+	value, ok := p.tailStmtToExpr(last)
+	if !ok {
+		return body
+	}
+	newBody := append([]ast.Stmt(nil), body[:len(body)-1]...)
+	return append(newBody, &ast.ExprStmt{Position: last.Pos(), Expr: value})
 }
 
 // ifStmtToExpr converts an `if`/`elif`/`else` statement into a nested TernaryExpr.

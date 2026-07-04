@@ -314,7 +314,9 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 		// Indented block-body arm: reuse the statement-block parser; its final statement
 		// supplies the arm value (enforced by the analyzer).
 		p.expectNewline()
-		body = p.parseBlock()
+		// Convert a trailing `match`/`if` in the arm block into the arm's value, so nested
+		// match-expressions compose (docs/119 §4). A plain expression tail is unchanged.
+		body = p.valueBlockTail(p.parseBlock())
 	} else {
 		// Inline value arm: `Pattern: <expr>`. The value becomes the arm's yielded expression.
 		value := p.parseExpr()
