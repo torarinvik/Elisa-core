@@ -168,6 +168,13 @@ func (a *Analyzer) analyzeUnaryExpr(expr *ast.UnaryExpr) Type {
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_MINUS, lexer.TOKEN_TILDE:
 		if !IsNumericType(operand) {
+			// Unary `-` on a user type that impls `Neg` (declaring `__neg__`) desugars to
+			// `T.__neg__(x)`, recorded as LoweredCall — same mechanism as the binary operators.
+			if expr.Op == lexer.TOKEN_MINUS {
+				if result, ok := a.analyzeUnaryOverload(expr, "__neg__", operand); ok {
+					return result
+				}
+			}
 			a.errorf(expr.Pos(), "unary operator requires numeric operand")
 		}
 		if expr.Op == lexer.TOKEN_TILDE && !IsIntegralStorageType(operand) {

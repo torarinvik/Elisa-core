@@ -288,6 +288,33 @@ func (a *Analyzer) buildOverloadCall(expr *ast.BinaryExpr, methodName string, le
 	return &ast.CallExpr{Position: expr.Position, Func: field, Args: []ast.Expr{expr.Left, expr.Right}}, true
 }
 
+// analyzeUnaryOverload dispatches an overloaded unary operator (`-x` -> `__neg__`) to the user type's
+// dunder: `-x` desugars to `T.__neg__(x)`, recorded as expr.LoweredCall. Resolves through a concrete
+// `impl Neg for T` OR a bounded type parameter (`def f[T: Neg]`), mirroring buildOverloadCall.
+func (a *Analyzer) analyzeUnaryOverload(expr *ast.UnaryExpr, methodName string, operand Type) (Type, bool) {
+	if a == nil || expr == nil || operand == nil || IsInvalidType(operand) {
+		return nil, false
+	}
+	var typePath ast.Expr
+	if impl, ok := a.staticImplMethodForReceiver(operand, methodName, nil); ok && impl != nil {
+		typePath = staticTypeExprForType(expr.Position, operand)
+	} else if tp, ok := StripAggregateStateType(unwrapReceiverRef(operand)).(*TypeParamType); ok && tp != nil && tp.Name != "" {
+		if iface, ok := a.lookupTypeParamInterface(tp.Name); ok && iface != nil {
+			if m, ok := iface.Methods[methodName]; ok && m != nil {
+				typePath = &ast.Ident{Position: expr.Position, Name: tp.Name}
+			}
+		}
+	}
+	if typePath == nil {
+		return nil, false
+	}
+	field := &ast.FieldExpr{Position: expr.Position, Object: typePath, Field: methodName}
+	call := &ast.CallExpr{Position: expr.Position, Func: field, Args: []ast.Expr{expr.Operand}}
+	result := a.analyzeExpr(call)
+	expr.LoweredCall = call
+	return result, true
+}
+
 // analyzeArithmeticOverload dispatches a value-returning binary operator (`+`/`-`/`*`) to its dunder
 // (`__add__`/`__sub__`/`__mul__`). `a OP b` desugars to `T.OP(a, b)`, recorded as expr.LoweredCall so
 // the backend emits the call and effect/region obligations thread to the operator site.

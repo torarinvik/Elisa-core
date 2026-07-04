@@ -551,6 +551,9 @@ func (c *progressCallCollector) collectExpr(expr ast.Expr) {
 		}
 	case *ast.UnaryExpr:
 		c.collectExpr(n.Operand)
+		if n.LoweredCall != nil {
+			c.collectExpr(n.LoweredCall)
+		}
 	case *ast.MoveExpr:
 		c.collectExpr(n.Operand)
 	case *ast.CallExpr:

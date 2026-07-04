@@ -630,6 +630,11 @@ type UnaryExpr struct {
 	Position lexer.Pos
 	Op       lexer.TokenKind
 	Operand  Expr
+	// LoweredCall, when non-nil, is the analyzer's desugar of an overloaded unary operator
+	// (`-x` on a type impl-ing `Neg` -> `T.__neg__(x)`). The backend emits it in place of the
+	// primitive unary op, and the effect/region collectors thread the callee's obligations to the
+	// operator site. Mirrors BinaryExpr.LoweredCall.
+	LoweredCall *CallExpr
 }
 type MoveExpr struct {
 	Position lexer.Pos

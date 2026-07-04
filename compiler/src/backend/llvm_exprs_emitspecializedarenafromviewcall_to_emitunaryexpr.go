@@ -592,6 +592,10 @@ func (s *functionState) emitUnaryExpr(expr *ast.UnaryExpr) (C.LLVMValueRef, sema
 		}
 		return nil, nil, fmt.Errorf("cannot emit unary expression %s with nil operand at %s", lexer.TokenName(op), pos)
 	}
+	// Overloaded unary operator (`-x` on a user type): emit the analyzer's desugared `T.__neg__(x)`.
+	if expr.LoweredCall != nil {
+		return s.emitExpr(expr.LoweredCall, s.exprType(expr))
+	}
 	operandType := s.exprType(expr.Operand)
 	value, _, err := s.emitExpr(expr.Operand, operandType)
 	if err != nil {

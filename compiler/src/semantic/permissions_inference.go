@@ -259,6 +259,11 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			c.addRefs(unsafePointerArithmeticRefs(n.Position))
 		}
 	case *ast.UnaryExpr:
+		// An overloaded unary operator (`-x` -> `T.__neg__(x)`) carries the callee's effects.
+		if n.LoweredCall != nil {
+			c.collectExpr(n.LoweredCall)
+			break
+		}
 		c.collectExpr(n.Operand)
 	case *ast.CallExpr:
 		c.collectExpr(n.Func)

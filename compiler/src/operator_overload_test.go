@@ -58,6 +58,100 @@ def use(a: P, b: P) -> i64:
 	}
 }
 
+// Unary `-` overloading: `-x` on a type impl-ing a protocol declaring `__neg__` desugars to
+// `T.__neg__(x)` (recorded as UnaryExpr.LoweredCall), while a type without `__neg__` keeps the
+// numeric-operand error — no accidental blanket unary overloading.
+func TestUnaryNegOverloadTypesAndRegression(t *testing.T) {
+	ok := analyzeOverloadSource(t, `
+struct V:
+    x: i64
+
+protocol Neg:
+    def __neg__(self: Self) -> Self
+
+impl Neg for V:
+    def __neg__(self: V) -> V:
+        return V{x: 0 - self.x}
+
+def flip(a: V) -> V:
+    return -a
+
+def gen[T: Neg](a: T) -> T:
+    return -a
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("V with a __neg__ impl must accept `-a` (concrete and generic), got: %v", errs)
+	}
+
+	bad := analyzeOverloadSource(t, `
+struct P:
+    x: i64
+
+def use(a: P) -> i64:
+    b: P = -a
+    return b.x
+`)
+	if !strings.Contains(strings.Join(bad.Errors(), "\n"), "unary operator requires numeric operand") {
+		t.Fatalf("a struct without __neg__ must keep the numeric-operand error, got: %v", bad.Errors())
+	}
+}
+
+// End-to-end: compile and RUN `-x` on a value type, both directly and through a `[T: Neg]` bound.
+func TestRunCLIUnaryNegNative(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "neg.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("rel runtime path: %v", err)
+	}
+	src := "# include \"" + filepath.ToSlash(runtimeInclude) + "\"\n" + `
+struct V:
+    x: i64
+
+impl Neg for V:
+    def __neg__(self: V) -> V:
+        return V{x: 0 - self.x}
+
+def negate[T: Neg](a: T) -> T:
+    return -a
+
+def main() -> i64:
+    a: V = V{x: 7}
+    r: mutable i64 = 0
+    if (-a).x == 0 - 7:
+        r <- r + 1
+    b: V = negate(a)
+    if b.x == 0 - 7:
+        r <- r + 2
+    return r
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	objPath := filepath.Join(fixtureDir, "neg.o")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "obj", "-o", objPath, fixturePath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
+	}
+	exePath := filepath.Join(fixtureDir, "neg")
+	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
+		t.Fatalf("link failed: %v\n%s", err, out)
+	}
+	got := 0
+	if ee, ok := exec.Command(exePath).Run().(*exec.ExitError); ok {
+		got = ee.ExitCode()
+	}
+	if got != 3 {
+		t.Fatalf("expected direct `-a` and generic negate[T:Neg] both correct (3), got %d", got)
+	}
+}
+
 // End-to-end: compile and RUN a value-type `a + b`, asserting the componentwise result.
 func TestRunCLIOperatorOverloadNative(t *testing.T) {
 	t.Parallel()
