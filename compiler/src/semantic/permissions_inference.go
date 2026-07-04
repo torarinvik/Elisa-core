@@ -245,6 +245,14 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 			}
 		}
 	case *ast.BinaryExpr:
+		// An operator lowered to a protocol-impl call (`a + b` -> `T.__add__(a, b)`) carries the
+		// callee's effects: collect the lowered call (which contains the operands as its args) INSTEAD
+		// of the operands directly, so an allocating `__add__` requires `can Memory.Allocate` at the
+		// operator site. Mirrors the postfix-shorthand-call handling.
+		if n.LoweredCall != nil {
+			c.collectExpr(n.LoweredCall)
+			break
+		}
 		c.collectExpr(n.Left)
 		c.collectExpr(n.Right)
 		if c.analyzer.enforceUnsafePermissions && binaryExprRequiresUnsafePointerArithmetic(n.Op, c.analyzer.exprTypes[n.Left], c.analyzer.exprTypes[n.Right]) {

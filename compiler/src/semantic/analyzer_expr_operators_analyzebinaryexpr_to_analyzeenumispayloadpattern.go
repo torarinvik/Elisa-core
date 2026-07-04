@@ -102,6 +102,12 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 				return result
 			}
 		}
+		// User arithmetic types: `a + b` -> `T.__add__(a, b)` when `a`'s type impls the dunder.
+		if expr.Op == lexer.TOKEN_PLUS {
+			if result, ok := a.analyzeOperatorOverload(expr, "__add__", left, right); ok {
+				return result
+			}
+		}
 		left = valueContextOperandType(left)
 		right = valueContextOperandType(right)
 		if !IsNumericType(left) || !IsNumericType(right) {
@@ -219,6 +225,43 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 	expr.LoweredCall = call
 	return result, true
 }
+// analyzeOperatorOverload dispatches a binary operator to a user protocol impl when the left operand's
+// type provides the operator's dunder method (`+` -> `__add__`, …). It desugars `a OP b` to the static
+// interface-method call `T.__add__(a, b)` and records it as `expr.LoweredCall`, so the backend emits the
+// call and the effect/permission collectors thread the callee's effects (an allocating `__add__` on a
+// user type makes `a + b` legitimately require `can Memory.Allocate`). Mirrors the built-in SpanLike
+// path, generalized to any type carrying the dunder via `impl <SomeProtocol> for T`.
+//
+// This is DELIBERATELY value-type-first (docs: operator overloading): the flagship legitimate use is
+// user arithmetic types (Vec3, Complex, fixed-point) whose ops are O(1). String `+` is intentionally NOT
+// provided — f-strings own concatenation, and a naive `a + b + c` chain would be quadratic (Principle 1);
+// were a string `Add` impl ever added, it should ship with a `-Wperf` chained-concat nudge and lower to a
+// single presized fill (the `__fstr` shape), not N buffers.
+func (a *Analyzer) analyzeOperatorOverload(expr *ast.BinaryExpr, methodName string, left, right Type) (Type, bool) {
+	if a == nil || expr == nil || left == nil || IsInvalidType(left) {
+		return nil, false
+	}
+	// A silent probe (nil pos): only commit to the overload when the left type actually carries the
+	// dunder via some protocol impl. Numeric operands never reach here (handled by the arithmetic path).
+	impl, ok := a.staticImplMethodForReceiver(left, methodName, nil)
+	if !ok || impl == nil {
+		return nil, false
+	}
+	typePath := staticTypeExprForType(expr.Position, left)
+	if typePath == nil {
+		return nil, false
+	}
+	field := &ast.FieldExpr{Position: expr.Position, Object: typePath, Field: methodName}
+	call := &ast.CallExpr{
+		Position: expr.Position,
+		Func:     field,
+		Args:     []ast.Expr{expr.Left, expr.Right},
+	}
+	result := a.analyzeExpr(call)
+	expr.LoweredCall = call
+	return result, true
+}
+
 func (a *Analyzer) analyzeSpanLikeProtocolExpr(expr *ast.BinaryExpr, spanType Type) (Type, bool) {
 	if a == nil || expr == nil || spanType == nil {
 		return nil, false
