@@ -315,8 +315,16 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		p.pos = savedPos
 		return nil
 	}
-	value := p.parseValueExprAllowTuple()
-	p.expectNewline()
+	var value ast.Expr
+	if p.bareExprBlockAhead() {
+		// docs/119 §2: `c, d =` NEWLINE INDENT ... — bare block expression whose
+		// tail tuple binds the targets.
+		value = p.parseBareExprBlockValue(pos)
+		p.expectNewlineAfterValueExpr(value)
+	} else {
+		value = p.parseValueExprAllowTuple()
+		p.expectNewline()
+	}
 	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
 }
 func (p *Parser) parseLetDestructureStmt() ast.Stmt {

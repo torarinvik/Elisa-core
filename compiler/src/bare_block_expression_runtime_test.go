@@ -33,6 +33,20 @@ def typed_form() -> i64:
         base + 2
     return v
 
+def tuple_form() -> i64:
+    c, d =
+        a: i64 = 40
+        b: i64 = 2
+        a, b
+    return c + d
+
+def assign_form() -> i64:
+    m: mutable i64 = 0
+    m <-
+        base: i64 = 40
+        base + 2
+    return m
+
 @test
 def bare_block_expression() -> void:
     can Abort.Panic:
@@ -44,6 +58,10 @@ def bare_block_expression() -> void:
             panic("match zero arm inside block")
         if typed_form() != 42:
             panic("typed bare block")
+        if tuple_form() != 42:
+            panic("tuple-bind bare block")
+        if assign_form() != 42:
+            panic("assign bare block")
 `
 
 func TestBareBlockExpression(t *testing.T) {

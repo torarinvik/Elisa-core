@@ -482,6 +482,10 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.cur().Text == "do" && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
 			pos := p.cur().Pos
+			// docs/119 §2: the bare block form (`x =` NEWLINE INDENT ... tail) supersedes
+			// `do:`. In positions the bare form cannot express (call arguments, list
+			// elements), bind the block to a local first and pass the local.
+			p.noticeAt(pos, "`do:` expression blocks are deprecated; use the bare block form (`x =` followed by an indented block) or bind to a local first (docs/119)")
 			p.advance()
 			return p.parseExprBlockValue(pos, false)
 		}
@@ -668,7 +672,9 @@ func (p *Parser) bareExprBlockAhead() bool {
 
 func (p *Parser) parseExprBlockBody(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expectNewline()
+	p.exprBlockDepth++
 	body := p.parseBlock()
+	p.exprBlockDepth--
 	if len(body) == 0 {
 		p.errorf("expression block requires a final expression statement in the block")
 		return &ast.NullLit{Position: pos}

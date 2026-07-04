@@ -617,7 +617,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	switch p.peek() {
 	case lexer.TOKEN_LARROW:
 		p.advance()
-		value := p.parseValueExprAllowTuple()
+		var value ast.Expr
+		if p.bareExprBlockAhead() {
+			// docs/119 §2: `x <-` NEWLINE INDENT ... — bare block expression.
+			value = p.parseBareExprBlockValue(pos)
+		} else {
+			value = p.parseValueExprAllowTuple()
+		}
 		p.expectNewlineAfterValueExpr(value)
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
@@ -647,6 +653,15 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		value := p.parseValueExprAllowTuple()
 		p.expectNewlineAfterValueExpr(value)
 		return &ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value}
+	}
+
+	// docs/119 §2: inside an expression block a bare `a, b` line is a tuple
+	// expression statement (the block's tail tuple). Only inside expression
+	// blocks — everywhere else a top-level comma stays an error.
+	if p.exprBlockDepth > 0 && p.peek() == lexer.TOKEN_COMMA {
+		tuple := p.parseTupleExprFromFirst(expr.Pos(), expr)
+		p.expectNewlineAfterValueExpr(tuple)
+		return &ast.ExprStmt{Position: pos, Expr: tuple}
 	}
 
 	if ident, ok := expr.(*ast.Ident); ok && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {

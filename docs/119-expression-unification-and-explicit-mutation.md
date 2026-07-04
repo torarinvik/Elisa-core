@@ -551,6 +551,7 @@ These stay legal — statement-position code keeps today's semantics — but sto
 | mutable index leaked past a `while` | `while cond \|i = 0\|:` (§3.2) |
 | mutable temp assigned from `if`/`match` branches | `if`/`match` expression (§4.2) |
 | helper function or leaked intermediates for a multi-step init | block expression (§2.3) |
+| `do:` expression blocks (pre-119 stage0 form) | bare block form; in argument/element positions (where bare can't apply) bind to a local first. Parser emits a deprecation notice on `do:` |
 | statement `match` + mutable result as the expr-match workaround | `match` expression (§4.2) — the workaround's reason (codegen gap) is gone |
 | `mutable T&` out-param on a *small result* (scalar/pair) where the ref exists only to return a second value | return a tuple / `rebind` at the caller |
 

@@ -12,6 +12,7 @@ type Parser struct {
 	pos                int
 	errors             []string
 	notices            []string
+	exprBlockDepth     int
 	poolScopes         []string
 	nurseryGroupByPool map[string]string
 	nurseryCounter     int
@@ -190,6 +191,13 @@ func (p *Parser) errorf(format string, args ...interface{}) {
 func (p *Parser) errorAt(pos lexer.Pos, format string, args ...interface{}) {
 	msg := fmt.Sprintf("%s: %s", pos, fmt.Sprintf(format, args...))
 	p.errors = append(p.errors, msg)
+}
+
+// noticeAt records a non-fatal parse-time diagnostic (deprecation warning),
+// surfaced to stderr via Notices().
+func (p *Parser) noticeAt(pos lexer.Pos, format string, args ...interface{}) {
+	msg := fmt.Sprintf("%s: warning: %s", pos, fmt.Sprintf(format, args...))
+	p.notices = append(p.notices, msg)
 }
 func (p *Parser) skipNewlines() {
 	for p.peek() == lexer.TOKEN_NEWLINE {
