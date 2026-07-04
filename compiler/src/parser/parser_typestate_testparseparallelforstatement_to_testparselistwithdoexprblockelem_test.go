@@ -748,14 +748,13 @@ func TestParseDoExprBlock(t *testing.T) {
 		t.Fatalf("expected formatter to preserve do expression block syntax, got:\n%s", formatted)
 	}
 }
-func TestParseRejectsDoExprBlockFinalMatchStatement(t *testing.T) {
+// docs/119 §4: a block-bodied `match` (or `if`) as the final statement of an
+// expression block is now the block's value — it maps onto MatchExpr — rather than
+// the old "block requires a final expression" error.
+func TestParseExprBlockFinalMatchIsValue(t *testing.T) {
 	_, errs := parseSourceFile(t, "const enum Op of i32:\n    ADD = 1\n    SUB = 2\n\ndef keep(op: Op) -> i64:\n    return do:\n        match op:\n            Op.ADD:\n                10\n            Op.SUB:\n                20\n")
-	if len(errs) == 0 {
-		t.Fatal("expected parser error for final match statement in do expression block, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "expression block requires a final expression statement in the block") {
-		t.Fatalf("expected final-expression diagnostic, got:\n%s", all)
+	if len(errs) != 0 {
+		t.Fatalf("a final block-bodied match is now the block value (docs/119 §4), got errors: %v", errs)
 	}
 }
 func TestParseDirectMatchExprSyntax(t *testing.T) {

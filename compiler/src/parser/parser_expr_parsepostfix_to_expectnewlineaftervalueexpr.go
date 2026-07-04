@@ -679,16 +679,14 @@ func (p *Parser) parseExprBlockBody(pos lexer.Pos, flattenSingle bool) ast.Expr 
 		p.errorf("expression block requires a final expression statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
-	var value ast.Expr
-	switch tail := body[len(body)-1].(type) {
-	case *ast.ExprStmt:
-		if tail == nil || tail.Expr == nil {
+	// docs/119 §4: a trailing `if`/`match` statement is the block's value.
+	value, ok := p.tailStmtToExpr(body[len(body)-1])
+	if !ok {
+		if _, isIf := body[len(body)-1].(*ast.IfStmt); !isIf {
+			// ifStmtToExpr already emitted the specific E7 diagnostic for a
+			// value `if` without `else`; don't pile the generic error on top.
 			p.errorf("expression block requires a final expression statement in the block")
-			return &ast.NullLit{Position: pos}
 		}
-		value = tail.Expr
-	default:
-		p.errorf("expression block requires a final expression statement in the block")
 		return &ast.NullLit{Position: pos}
 	}
 	if flattenSingle && len(body) == 1 {
