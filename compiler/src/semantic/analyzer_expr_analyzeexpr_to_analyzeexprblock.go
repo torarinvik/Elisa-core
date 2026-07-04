@@ -717,6 +717,13 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		}
 		merged := MergeTypes(left, right)
 		if IsInvalidType(merged) {
+			// Literal-aware fallback, mirroring mergeMatchExprArmTypes: a bare
+			// string-LITERAL branch adapts to a string-view branch even without a
+			// contextual expected type (e.g. a ternary nested inside a match arm).
+			// Non-literal `static u8&` values stay incompatible.
+			merged = mergeTernaryBranchTypes(left, right, n.Value, n.Alt)
+		}
+		if IsInvalidType(merged) {
 			a.errorf(n.Pos(), "ternary branches are incompatible: %s and %s", left, right)
 		}
 		result = merged

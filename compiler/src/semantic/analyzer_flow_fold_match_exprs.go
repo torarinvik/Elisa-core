@@ -178,3 +178,23 @@ func matchArmTailsAllStringLiterals(arms []ast.MatchArm) bool {
 	}
 	return len(arms) > 0
 }
+
+// mergeTernaryBranchTypes is the ternary's literal-aware fallback when MergeTypes
+// rejects its branches: a bare string-LITERAL branch adapts to a string-view branch
+// (either side), the same rule mergeMatchExprArmTypes applies to match arms. Used by
+// the PLAIN ternary path — the contextual path (expected type known) already adapts
+// literals via contextualStringLiteralType.
+func mergeTernaryBranchTypes(left, right Type, leftExpr, rightExpr ast.Expr) Type {
+	if isStringViewType(left) && isStaticStringLiteralRefType(right) && isBareStringLit(rightExpr) {
+		return left
+	}
+	if isStaticStringLiteralRefType(left) && isStringViewType(right) && isBareStringLit(leftExpr) {
+		return right
+	}
+	return invalidType
+}
+
+func isBareStringLit(expr ast.Expr) bool {
+	_, ok := expr.(*ast.StringLit)
+	return ok
+}

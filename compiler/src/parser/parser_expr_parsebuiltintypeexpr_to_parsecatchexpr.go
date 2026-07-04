@@ -125,7 +125,16 @@ func (p *Parser) parseExpr() ast.Expr {
 	if p.allowWhereExpr && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "where" {
 		return p.parseWhereViewExpr(expr)
 	}
-	if p.allowTernary && p.peek() == lexer.TOKEN_IF {
+	// Postfix ternary `A if C else B` — but NOT when the expression just closed an
+	// indented block form (a multi-line match-expression's arms end in a DEDENT that
+	// sits directly before the next statement's tokens). In that stream shape an `if`
+	// is the NEXT STATEMENT, not a ternary condition:
+	//
+	//	s: sview = match k:
+	//	    1: "one"
+	//	    _: v
+	//	if s == "":        # statement, previously swallowed as `v if s == "" else ...`
+	if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
 		pos := p.cur().Pos
 		p.advance()
 		cond := p.parseOr()
@@ -1168,4 +1177,12 @@ func (p *Parser) parseCatchExpr() ast.Expr {
 	value := p.withInMembershipDisabled(p.parseExpr)
 	success, arms := p.parseCatchArms()
 	return &ast.CatchExpr{Position: pos, Value: value, Success: success, Arms: arms}
+}
+
+// prevTokenIsDedent reports whether the token consumed immediately before the current
+// position was a DEDENT — the boundary a multi-line block expression (match arms, an
+// indented value block) leaves behind. A postfix-ternary `if` directly after that
+// boundary belongs to the NEXT statement.
+func (p *Parser) prevTokenIsDedent() bool {
+	return p.pos > 0 && p.tokens[p.pos-1].Kind == lexer.TOKEN_DEDENT
 }
