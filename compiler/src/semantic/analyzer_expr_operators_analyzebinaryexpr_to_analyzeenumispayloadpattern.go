@@ -130,9 +130,15 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
-		// User arithmetic types: `a * b` -> `T.__mul__(a, b)` (only `*`; div/mod/bitwise stay numeric).
+		// User arithmetic types: `a * b` -> `Mul.__mul__`, `a / b` -> `Div.__div__` (mod/bitwise stay
+		// numeric).
 		if expr.Op == lexer.TOKEN_STAR {
 			if result, ok := a.analyzeArithmeticOverload(expr, "__mul__", left); ok {
+				return result
+			}
+		}
+		if expr.Op == lexer.TOKEN_SLASH {
+			if result, ok := a.analyzeArithmeticOverload(expr, "__div__", left); ok {
 				return result
 			}
 		}
@@ -262,11 +268,19 @@ func (a *Analyzer) buildOverloadCall(expr *ast.BinaryExpr, methodName string, le
 	if a == nil || expr == nil || leftType == nil || IsInvalidType(leftType) {
 		return nil, false
 	}
-	impl, ok := a.staticImplMethodForReceiver(leftType, methodName, nil)
-	if !ok || impl == nil {
-		return nil, false
+	var typePath ast.Expr
+	if impl, ok := a.staticImplMethodForReceiver(leftType, methodName, nil); ok && impl != nil {
+		// Concrete type carrying the dunder via `impl <Protocol> for T`.
+		typePath = staticTypeExprForType(expr.Position, leftType)
+	} else if tp, ok := StripAggregateStateType(unwrapReceiverRef(leftType)).(*TypeParamType); ok && tp != nil && tp.Name != "" {
+		// A bounded type parameter whose interface declares the dunder — so `a + b` works INSIDE a
+		// generic `def f[T: Add](a: T, b: T)`, resolving to the concrete impl at monomorphization.
+		if iface, ok := a.lookupTypeParamInterface(tp.Name); ok && iface != nil {
+			if m, ok := iface.Methods[methodName]; ok && m != nil {
+				typePath = &ast.Ident{Position: expr.Position, Name: tp.Name}
+			}
+		}
 	}
-	typePath := staticTypeExprForType(expr.Position, leftType)
 	if typePath == nil {
 		return nil, false
 	}

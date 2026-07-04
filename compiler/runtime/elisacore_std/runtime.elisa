@@ -150,6 +150,35 @@ const enum FileDescriptor of int:
 @link_name(write)
 extern runtime_write(fd: FileDescriptor, buf: void&, count: usize) -> isize can[Console.Write]
 
+# ------------------------------------------------------------
+# Operator protocols (operator overloading)
+# ------------------------------------------------------------
+# A type opts into an operator by impl-ing the matching protocol; the compiler
+# lowers `a OP b` to the protocol's dunder method. A value-returning op is a
+# direct call to the impl. The inverses are DERIVED, so a type never redeclares
+# them: `Eq`'s single `__eq__` yields both `==` and `!=` (negated), and `Ord`'s
+# single `__cmp__` (which returns <0 / 0 / >0) yields all of `<` `>` `<=` `>=`.
+# These are ordinary protocols — so they double as generic bounds, e.g.
+# `def sum[T: Add](xs: darray[T]) -> T`. Value-type-first: strings use f-strings,
+# not `+` (a naive concat chain would be quadratic).
+protocol Add:
+    def __add__(self: Self, other: Self) -> Self
+
+protocol Sub:
+    def __sub__(self: Self, other: Self) -> Self
+
+protocol Mul:
+    def __mul__(self: Self, other: Self) -> Self
+
+protocol Div:
+    def __div__(self: Self, other: Self) -> Self
+
+protocol Eq:
+    def __eq__(self: Self, other: Self) -> bool
+
+protocol Ord:
+    def __cmp__(self: Self, other: Self) -> i64
+
 protocol Str:
     def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
 

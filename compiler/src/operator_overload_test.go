@@ -136,3 +136,94 @@ def main() -> i64:
 		t.Fatalf("expected all of +,-,*,==,!=,<,<=,> correct (255), got exit %d", got)
 	}
 }
+
+// The canonical std operator protocols (Add/Sub/Mul/Div/Eq/Ord in runtime.elisa) drive all operators,
+// including `/` via Div; `Eq`'s single __eq__ derives ==/!=, `Ord`'s single __cmp__ derives </></<=/>=;
+// and the protocols double as generic bounds (`[T: Add]`). Compiled+run: each op contributes a bit,
+// all correct -> 255.
+func TestRunCLICanonicalOperatorProtocols(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	repoRoot := repoRootFromMainTest(t)
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "canon_ops.elisa")
+	runtimePath := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	runtimeInclude, err := filepath.Rel(fixtureDir, runtimePath)
+	if err != nil {
+		t.Fatalf("rel runtime path: %v", err)
+	}
+	src := "# include \"" + filepath.ToSlash(runtimeInclude) + "\"\n" + `
+struct Q:
+    n: i64
+
+impl Add for Q:
+    def __add__(self: Q, other: Q) -> Q:
+        return Q{n: self.n + other.n}
+impl Sub for Q:
+    def __sub__(self: Q, other: Q) -> Q:
+        return Q{n: self.n - other.n}
+impl Mul for Q:
+    def __mul__(self: Q, other: Q) -> Q:
+        return Q{n: self.n * other.n}
+impl Div for Q:
+    def __div__(self: Q, other: Q) -> Q:
+        return Q{n: self.n / other.n}
+impl Eq for Q:
+    def __eq__(self: Q, other: Q) -> bool:
+        return self.n == other.n
+impl Ord for Q:
+    def __cmp__(self: Q, other: Q) -> i64:
+        return self.n - other.n
+
+def add3[T: Add](a: T, b: T, c: T) -> T:
+    return a + b + c
+
+def main() -> i64:
+    a: Q = Q{n: 12}
+    b: Q = Q{n: 4}
+    r: mutable i64 = 0
+    sum: Q = a + b
+    dif: Q = a - b
+    prod: Q = a * b
+    quot: Q = a / b
+    if sum.n == 16:
+        r <- r + 1
+    if dif.n == 8:
+        r <- r + 2
+    if prod.n == 48:
+        r <- r + 4
+    if quot.n == 3:
+        r <- r + 8
+    if a == Q{n: 12}:
+        r <- r + 16
+    if a != b:
+        r <- r + 32
+    if b < a:
+        r <- r + 64
+    g: Q = add3(a, b, b)
+    if g.n == 20:
+        r <- r + 128
+    return r
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	objPath := filepath.Join(fixtureDir, "canon.o")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "obj", "-o", objPath, fixturePath}, &stdout, &stderr); code != 0 {
+		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
+	}
+	exePath := filepath.Join(fixtureDir, "canon")
+	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
+		t.Fatalf("link failed: %v\n%s", err, out)
+	}
+	got := 0
+	if ee, ok := exec.Command(exePath).Run().(*exec.ExitError); ok {
+		got = ee.ExitCode()
+	}
+	if got != 255 {
+		t.Fatalf("expected canonical protocols + Div + generic [T:Add] all correct (255), got %d", got)
+	}
+}
