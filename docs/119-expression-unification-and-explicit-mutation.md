@@ -417,6 +417,18 @@ style at function granularity; it is advisory, off by default.
 > whole-statement LHS coordination. It is therefore **deliberately not implemented**; the
 > explicit `rebind` (§5) remains available when a caller genuinely wants the move form.
 
+> **Scope decision (landed): captures live on LOOP headers only — not on bare blocks or
+> `if`/`match`.** Inside a loop's `for … |…|:` / `while … |…|:` the `|…|` sits in an
+> unambiguous grammar slot. On an `if` condition or a bare block, a `|caps|` header
+> collides with a bitwise `|` and would need invasive changes to the core expression
+> parser to disambiguate — AND it is redundant with `rebind`: a value-yielding
+> conditional that updates outer state is written with `rebind` over an `if`-expression
+> (each branch yields the new outer value(s) + the produced value). That IS the §5.3
+> clamp, verified end-to-end: `rebind pos, applied: i64 = if v > max: Vec2{…}, max else:
+> Vec2{…}, v`. So `rebind` is the explicit, unambiguous form for conditionals/blocks and
+> `|capture|` is the loop-only convenience. (Dogfooding gap #2 — resolved this way rather
+> than by adding if/block-capture parsing.)
+
 ### 6.1 Syntax and desugaring
 
 A bare `name` in a `|...|` header (block §2, loop §3, `if`/`match` branch §4) is a
