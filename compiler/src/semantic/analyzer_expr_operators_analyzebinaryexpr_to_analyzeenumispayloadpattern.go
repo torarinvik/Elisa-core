@@ -46,6 +46,10 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		// User types: `a == b` -> `T.__eq__(a, b)` (`!=` -> `not __eq__`) when the type impls `__eq__`.
+		if result, ok := a.analyzeComparisonOverload(expr, left); ok {
+			return result
+		}
 		compareLeft := left
 		compareRight := right
 		if !typesComparableForEquality(compareLeft, compareRight) && !IsNullType(left) && !IsNullType(right) {
@@ -76,6 +80,10 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		// User types: `a < b` -> `(a.__cmp__(b)) < 0` (and >, <=, >=) when the type impls `__cmp__`.
+		if result, ok := a.analyzeComparisonOverload(expr, left); ok {
+			return result
+		}
 		left = valueContextOperandType(left)
 		right = valueContextOperandType(right)
 		if !IsNumericType(left) || !IsNumericType(right) {
@@ -102,9 +110,13 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 				return result
 			}
 		}
-		// User arithmetic types: `a + b` -> `T.__add__(a, b)` when `a`'s type impls the dunder.
-		if expr.Op == lexer.TOKEN_PLUS {
-			if result, ok := a.analyzeOperatorOverload(expr, "__add__", left, right); ok {
+		// User arithmetic types: `a + b` -> `T.__add__(a, b)` / `a - b` -> `T.__sub__(a, b)`.
+		{
+			method := "__add__"
+			if expr.Op == lexer.TOKEN_MINUS {
+				method = "__sub__"
+			}
+			if result, ok := a.analyzeArithmeticOverload(expr, method, left); ok {
 				return result
 			}
 		}
@@ -118,6 +130,12 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	case lexer.TOKEN_STAR, lexer.TOKEN_SLASH, lexer.TOKEN_PERCENT,
 		lexer.TOKEN_CARET, lexer.TOKEN_PIPE, lexer.TOKEN_AMPERSAND,
 		lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		// User arithmetic types: `a * b` -> `T.__mul__(a, b)` (only `*`; div/mod/bitwise stay numeric).
+		if expr.Op == lexer.TOKEN_STAR {
+			if result, ok := a.analyzeArithmeticOverload(expr, "__mul__", left); ok {
+				return result
+			}
+		}
 		left = valueContextOperandType(left)
 		right = valueContextOperandType(right)
 		requiresIntegral := expr.Op == lexer.TOKEN_PERCENT || expr.Op == lexer.TOKEN_CARET || expr.Op == lexer.TOKEN_PIPE || expr.Op == lexer.TOKEN_AMPERSAND || expr.Op == lexer.TOKEN_LSHIFT || expr.Op == lexer.TOKEN_RSHIFT
@@ -237,29 +255,75 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 // provided — f-strings own concatenation, and a naive `a + b + c` chain would be quadratic (Principle 1);
 // were a string `Add` impl ever added, it should ship with a `-Wperf` chained-concat nudge and lower to a
 // single presized fill (the `__fstr` shape), not N buffers.
-func (a *Analyzer) analyzeOperatorOverload(expr *ast.BinaryExpr, methodName string, left, right Type) (Type, bool) {
-	if a == nil || expr == nil || left == nil || IsInvalidType(left) {
+// buildOverloadCall returns the synthesized static-impl call `T.method(left, right)` when the left
+// operand's type carries `method` via a protocol impl (silent probe, nil pos), else ok=false. Numeric
+// operands never reach here (the builtin arithmetic/comparison paths handle them first).
+func (a *Analyzer) buildOverloadCall(expr *ast.BinaryExpr, methodName string, leftType Type) (*ast.CallExpr, bool) {
+	if a == nil || expr == nil || leftType == nil || IsInvalidType(leftType) {
 		return nil, false
 	}
-	// A silent probe (nil pos): only commit to the overload when the left type actually carries the
-	// dunder via some protocol impl. Numeric operands never reach here (handled by the arithmetic path).
-	impl, ok := a.staticImplMethodForReceiver(left, methodName, nil)
+	impl, ok := a.staticImplMethodForReceiver(leftType, methodName, nil)
 	if !ok || impl == nil {
 		return nil, false
 	}
-	typePath := staticTypeExprForType(expr.Position, left)
+	typePath := staticTypeExprForType(expr.Position, leftType)
 	if typePath == nil {
 		return nil, false
 	}
 	field := &ast.FieldExpr{Position: expr.Position, Object: typePath, Field: methodName}
-	call := &ast.CallExpr{
-		Position: expr.Position,
-		Func:     field,
-		Args:     []ast.Expr{expr.Left, expr.Right},
+	return &ast.CallExpr{Position: expr.Position, Func: field, Args: []ast.Expr{expr.Left, expr.Right}}, true
+}
+
+// analyzeArithmeticOverload dispatches a value-returning binary operator (`+`/`-`/`*`) to its dunder
+// (`__add__`/`__sub__`/`__mul__`). `a OP b` desugars to `T.OP(a, b)`, recorded as expr.LoweredCall so
+// the backend emits the call and effect/region obligations thread to the operator site.
+func (a *Analyzer) analyzeArithmeticOverload(expr *ast.BinaryExpr, methodName string, left Type) (Type, bool) {
+	call, ok := a.buildOverloadCall(expr, methodName, left)
+	if !ok {
+		return nil, false
 	}
 	result := a.analyzeExpr(call)
 	expr.LoweredCall = call
 	return result, true
+}
+
+// analyzeComparisonOverload dispatches the comparison operators to a user type's `__eq__`/`__cmp__`:
+//
+//	a == b  ->  T.__eq__(a, b)                         (bool; recorded as LoweredCall)
+//	a != b  ->  (T.__eq__(a, b)) == false              (rewritten in place, re-analyzed)
+//	a < b   ->  (T.__cmp__(a, b)) < 0                   (and >, <=, >= — __cmp__ returns <0 / 0 / >0)
+//
+// The relational forms REWRITE the BinaryExpr's operands into a plain bool/numeric comparison and
+// re-analyze it, so no new AST/backend machinery is needed — the __cmp__/__eq__ call's own effects
+// thread through the rewritten operand. Value-type-first, same as arithmetic.
+func (a *Analyzer) analyzeComparisonOverload(expr *ast.BinaryExpr, left Type) (Type, bool) {
+	switch expr.Op {
+	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ:
+		call, ok := a.buildOverloadCall(expr, "__eq__", left)
+		if !ok {
+			return nil, false
+		}
+		if expr.Op == lexer.TOKEN_EQEQ {
+			result := a.analyzeExpr(call)
+			expr.LoweredCall = call
+			return result, true
+		}
+		// `a != b`  ->  `(a.__eq__(b)) == false`
+		expr.Left = call
+		expr.Right = &ast.BoolLit{Position: expr.Position, Value: false}
+		expr.Op = lexer.TOKEN_EQEQ
+		return a.analyzeBinaryExpr(expr), true
+	case lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		call, ok := a.buildOverloadCall(expr, "__cmp__", left)
+		if !ok {
+			return nil, false
+		}
+		// `a OP b`  ->  `(a.__cmp__(b)) OP 0`  (op preserved; a plain integer comparison).
+		expr.Left = call
+		expr.Right = &ast.IntLit{Position: expr.Position, Value: "0"}
+		return a.analyzeBinaryExpr(expr), true
+	}
+	return nil, false
 }
 
 func (a *Analyzer) analyzeSpanLikeProtocolExpr(expr *ast.BinaryExpr, spanType Type) (Type, bool) {

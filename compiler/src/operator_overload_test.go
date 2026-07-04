@@ -66,24 +66,51 @@ func TestRunCLIOperatorOverloadNative(t *testing.T) {
 	}
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "operator_overload.elisa")
+	// Each of the 5 operators contributes a distinct bit; a fully-correct run returns 255.
 	src := `
-struct Vec3:
+struct V:
     x: i64
-    y: i64
-    z: i64
 
-protocol Add:
+protocol Ops:
     def __add__(self: Self, other: Self) -> Self
+    def __sub__(self: Self, other: Self) -> Self
+    def __mul__(self: Self, other: Self) -> Self
+    def __eq__(self: Self, other: Self) -> bool
+    def __cmp__(self: Self, other: Self) -> i64
 
-impl Add for Vec3:
-    def __add__(self: Vec3, other: Vec3) -> Vec3:
-        return Vec3{x: self.x + other.x, y: self.y + other.y, z: self.z + other.z}
+impl Ops for V:
+    def __add__(self: V, other: V) -> V:
+        return V{x: self.x + other.x}
+    def __sub__(self: V, other: V) -> V:
+        return V{x: self.x - other.x}
+    def __mul__(self: V, other: V) -> V:
+        return V{x: self.x * other.x}
+    def __eq__(self: V, other: V) -> bool:
+        return self.x == other.x
+    def __cmp__(self: V, other: V) -> i64:
+        return self.x - other.x
 
 def main() -> i64:
-    a: Vec3 = Vec3{x: 1, y: 2, z: 3}
-    b: Vec3 = Vec3{x: 10, y: 20, z: 30}
-    c: Vec3 = a + b + a
-    return c.x + c.y + c.z
+    a: V = V{x: 7}
+    b: V = V{x: 3}
+    r: mutable i64 = 0
+    if (a + b).x == 10:
+        r <- r + 1
+    if (a - b).x == 4:
+        r <- r + 2
+    if (a * b).x == 21:
+        r <- r + 4
+    if a == V{x: 7}:
+        r <- r + 8
+    if a != b:
+        r <- r + 16
+    if b < a:
+        r <- r + 32
+    if a <= a:
+        r <- r + 64
+    if a > b:
+        r <- r + 128
+    return r
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fixture: %v", err)
@@ -97,7 +124,7 @@ def main() -> i64:
 	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
-	// c = a+b+a = (12,24,36); sum 72 is the exit code.
+	// All 5 operators correct -> each contributes a distinct bit -> 255.
 	err := exec.Command(exePath).Run()
 	got := 0
 	if ee, ok := err.(*exec.ExitError); ok {
@@ -105,7 +132,7 @@ def main() -> i64:
 	} else if err != nil {
 		t.Fatalf("run failed: %v", err)
 	}
-	if got != 72 {
-		t.Fatalf("expected a+b+a componentwise sum 72, got exit %d", got)
+	if got != 255 {
+		t.Fatalf("expected all of +,-,*,==,!=,<,<=,> correct (255), got exit %d", got)
 	}
 }
