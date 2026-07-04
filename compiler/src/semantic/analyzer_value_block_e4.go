@@ -43,13 +43,24 @@ func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) map[string]
 		switch {
 		case !found || sym == nil:
 			a.errorf(expr.Pos(), "capture %q names no binding in scope (docs/119 E11)", c)
-		case !sym.Mutable:
+		case !sym.Mutable && !isMutableRefBinding(sym):
 			a.errorf(expr.Pos(), "capture %q is not a `mutable` binding; only mutables can be threaded through a value block (docs/119 E10)", c)
 		}
 		local[c] = true
 	}
 	a.walkValueBlockMutations(expr.Stmts, local)
 	return local
+}
+
+// isMutableRefBinding reports whether a symbol's type is a `mutable T&` reference — a
+// `mutable Parser&` parameter binds an immutable reference cell (sym.Mutable is false, the
+// binding can't be rebound), but mutating THROUGH it is exactly the capability a capture
+// licenses (docs/119 §6). So such a binding is a legal capture target for E10.
+func isMutableRefBinding(sym *Symbol) bool {
+	if ref, ok := sym.Type.(*RefType); ok {
+		return ref.Mutable
+	}
+	return false
 }
 
 // checkValueBlockMutatingCall is the mutating-CALL half of E4 (docs/119 §6.2): inside a
