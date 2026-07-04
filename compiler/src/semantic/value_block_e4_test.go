@@ -46,6 +46,54 @@ def f(xs: darray[i64]) -> i64:
 `, `value block may not mutate the outer binding "outer"`)
 }
 
+func TestValueBlockMutatingCallOnOuterIsE4(t *testing.T) {
+	// Passing an outer var as `mutable T&` inside a value block is a hidden write.
+	requireOneErrorContaining(t, `
+def bump(x: mutable i64&) -> void:
+    x <- x + 1
+
+def f() -> i64:
+    outer: mutable i64 = 0
+    r: i64 =
+        for i in 0..<3 |acc = 0| -> acc:
+            bump(outer)
+            acc <- acc + 1
+    return r + outer
+`, `may not mutate the outer binding "outer" through a call`)
+}
+
+func TestValueBlockMutatingBuiltinMethodOnOuterIsE4(t *testing.T) {
+	// A mutating builtin collection method models its receiver as a value, but a
+	// `.push` on an uncaptured outer container is still a hidden write.
+	requireOneErrorContaining(t, `
+def f() -> i64:
+    xs: mutable darray[i64] = []
+    r: i64 =
+        for i in 0..<3 |acc = 0| -> acc:
+            xs.push(i)
+            acc <- acc + 1
+    return r
+`, `may not mutate the outer binding "xs" through a call`)
+}
+
+func TestValueBlockCapturedMutatingCallStaysLegal(t *testing.T) {
+	// A captured container licenses mutating-method calls on it.
+	errs := semanticErrorsFor(t, `
+def f() -> i64:
+    xs: mutable darray[i64] = []
+    r: i64 =
+        for i in 0..<3 |acc = 0, xs| -> acc:
+            xs.push(i)
+            acc <- acc + 1
+    return r
+`)
+	for _, e := range errs {
+		if strings.Contains(e, "value block may not mutate") {
+			t.Fatalf("a captured container must license mutating calls, got: %v", errs)
+		}
+	}
+}
+
 func TestValueBlockLocalMutationStaysLegal(t *testing.T) {
 	// Writing the block's own accumulator (declared inside the block) is fine — this is
 	// exactly the loop-expression header shape.

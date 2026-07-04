@@ -807,13 +807,16 @@ func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	a.currentScope = NewScope(savedScope)
 	// docs/119 E4: a value block is pure over outer state — reject direct writes to
 	// enclosing bindings before analyzing the body (locals aren't defined yet, so an
-	// outer name still resolves to its ancestor-scope binding).
-	a.checkValueBlockOuterMutation(expr)
+	// outer name still resolves to its ancestor-scope binding). The returned allowed-set
+	// is pushed so the mutating-CALL half of E4 can consult it during body analysis.
+	allowed := a.checkValueBlockOuterMutation(expr)
+	a.valueBlockAllowed = append(a.valueBlockAllowed, allowed)
 	var result Type
 	for _, stmt := range expr.Stmts {
 		a.analyzeStmt(stmt)
 	}
 	result = a.analyzeExpr(expr.Value)
+	a.valueBlockAllowed = a.valueBlockAllowed[:len(a.valueBlockAllowed)-1]
 	a.currentScope = savedScope
 	return result
 }

@@ -65,6 +65,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	// …and the same value-receiver write must be enforced against the function's `changes`/`preserves`
 	// frame — `b.items.push(v)` writes b.items just as `b.items <- …` does.
 	defer a.checkFrameForMutatingBuiltinMethod(expr)
+	// docs/119 §6.2: the same value-receiver mutation is a hidden write when it targets an
+	// outer binding inside a value block — `xs.push(v)` on an uncaptured outer `xs` is E4.
+	defer a.checkValueBlockMutatingBuiltinMethod(expr)
 	// A relocating dict insert invalidates any live interior reference returned by an earlier
 	// arena_dict_get (the bucket array can move on resize). Run before dispatch so it applies on
 	// every call path.
@@ -606,6 +609,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		if i < len(appliedType.Params) {
 			if rt, ok := appliedType.Params[i].(*RefType); ok && rt != nil && rt.Mutable {
 				a.checkFrameMutableRefArg(loweredArgs[i], calleeFrameSuffixesForParam(appliedType, i))
+				// docs/119 §6.2: inside a value block, passing an outer binding by mutable
+				// ref (incl. a mutating method receiver) is a hidden write — E4.
+				a.checkValueBlockMutatingCall(loweredArgs[i])
 				// Iterator invalidation across a callee boundary: passing an actively-iterated
 				// relocatable container by MUTABLE ref lets the callee push/clear/relocate its
 				// buffer mid-iteration, which the function-local lock cannot see (the callee is

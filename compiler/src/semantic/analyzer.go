@@ -440,7 +440,11 @@ type Analyzer struct {
 	enforceStrictProofs         bool
 	emitProofHoleHints          bool
 	warnDiscardedValues         bool
-	requireExternContracts      bool
+	// valueBlockAllowed is a stack of the innermost value block's allowed-mutation names
+	// (block-local bindings + licensed captures), used by the mutating-CALL half of E4
+	// (docs/119 §6.2). Empty ⇒ not inside a value block.
+	valueBlockAllowed []map[string]bool
+	requireExternContracts bool
 	// requiresReport gates the -requires-report aggregation (docs c3): per requires-bearing function,
 	// how many direct call sites statically discharge the precondition vs fall back to a runtime check.
 	// OFF by default; when off, requiresReportData/Order stay nil and nothing else changes.

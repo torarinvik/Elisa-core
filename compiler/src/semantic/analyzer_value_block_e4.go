@@ -24,9 +24,14 @@ import (
 // is merely the pre-119 status quo; a false positive would break working code, so the
 // pass errs toward permissiveness where the two conflict.
 
-func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) {
+// checkValueBlockOuterMutation runs the direct-write E4 pass and returns the block's
+// "allowed" name set (block-local bindings + licensed captures). analyzeExprBlock
+// pushes that set for the duration of body analysis so the mutating-CALL half of E4
+// (a call passing an outer var as `mutable T&`, incl. a mutating method receiver) can
+// consult it from the call-analysis path.
+func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) map[string]bool {
 	if expr == nil {
-		return
+		return nil
 	}
 	local := map[string]bool{}
 	collectBlockBoundNames(expr.Stmts, local)
@@ -44,6 +49,47 @@ func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) {
 		local[c] = true
 	}
 	a.walkValueBlockMutations(expr.Stmts, local)
+	return local
+}
+
+// checkValueBlockMutatingCall is the mutating-CALL half of E4 (docs/119 §6.2): inside a
+// value block, passing a non-local, non-captured outer binding as a `mutable T&`
+// argument — including as the receiver of a mutating method (`outer.push(x)`) — is the
+// hidden-write shape Elian complains about, and is rejected. Called from the
+// call-analysis arg loop, where param mutability is already resolved. `arg` is the
+// argument expression bound to a mutable-ref parameter.
+func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
+	if len(a.valueBlockAllowed) == 0 {
+		return
+	}
+	allowed := a.valueBlockAllowed[len(a.valueBlockAllowed)-1]
+	name, ok := rootIdentName(arg)
+	if !ok || name == "" || name == "_" || allowed[name] {
+		return
+	}
+	sym, found := a.currentScope.Lookup(name)
+	if !found || sym == nil {
+		return
+	}
+	switch sym.Kind {
+	case SymbolLocal, SymbolParam:
+	default:
+		return
+	}
+	a.errorf(arg.Pos(), "value block may not mutate the outer binding %q through a call (docs/119 E4); pass it by value, capture it in the header (`|%s|`), or thread the update with `rebind`", name, name)
+}
+
+// checkValueBlockMutatingBuiltinMethod is the builtin-collection-method arm of the
+// mutating-call E4 (docs/119 §6.2): a mutating builtin (`xs.push(v)`, `d.clear()`,
+// `s.add(x)`) models its receiver as a VALUE, not a `mutable T&` arg, so it slips past
+// the ref-arg hook — mirror checkFrameForMutatingBuiltinMethod to catch it.
+func (a *Analyzer) checkValueBlockMutatingBuiltinMethod(expr *ast.CallExpr) {
+	if len(a.valueBlockAllowed) == 0 {
+		return
+	}
+	if recv, ok := a.mutatingBuiltinMethodReceiver(expr); ok {
+		a.checkValueBlockMutatingCall(recv)
+	}
 }
 
 // collectBlockBoundNames gathers every name introduced by a binding within the block
