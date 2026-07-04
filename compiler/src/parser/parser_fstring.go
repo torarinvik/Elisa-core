@@ -106,14 +106,14 @@ func (p *Parser) desugarFString(tok lexer.Token) ast.Expr {
 	}
 	flushChunk()
 
-	// A no-interpolation f-string is just its (single, possibly empty) literal.
+	// Every f-string lowers through `__fstr`, so `f"…"` has ONE type — the owned
+	// formatted string (darray[u8]) — whether or not it interpolates. (A prior
+	// optimization returned a bare static-string literal for the no-interpolation case,
+	// which typed as `static u8&` and would not unify with interpolated arms in a
+	// match/if expression — docs/119 dogfooding gap #3.) An empty `f""` becomes
+	// `__fstr("")`.
 	if len(args) == 0 {
-		return &ast.StringLit{Position: tok.Pos, Value: ""}
-	}
-	if len(args) == 1 {
-		if lit, ok := args[0].(*ast.StringLit); ok {
-			return lit
-		}
+		args = append(args, &ast.StringLit{Position: tok.Pos, Value: ""})
 	}
 	return &ast.CallExpr{
 		Position: tok.Pos,

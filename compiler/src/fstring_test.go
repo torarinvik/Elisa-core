@@ -66,15 +66,28 @@ def f(name: sview) -> dstr:
 		t.Fatalf("last chunk must decode {{}} to %q, got %q", "b{c}", lit.Value)
 	}
 
-	// No interpolation -> plain string literal (no __fstr call).
+	// docs/119 gap #3: EVERY f-string lowers through __fstr, so `f"…"` has one type (the
+	// owned formatted string) whether or not it interpolates — no more static-literal
+	// shortcut for the no-interpolation case (which typed as `static u8&` and broke
+	// match/if-expression arm unification against interpolated arms).
 	file2 := parseFStringSource(t, `
-def g() -> cstr:
+def g() -> dstr:
     return f"plain"
 `)
 	fn2 := file2.Decls[0].(*ast.FuncDecl)
 	ret2 := fn2.Body[len(fn2.Body)-1].(*ast.ReturnStmt)
-	if lit, ok := ret2.Value.(*ast.StringLit); !ok || lit.Value != "plain" {
-		t.Fatalf("no-interpolation f-string must collapse to a string literal, got %v", ret2.Value)
+	call2, ok := ret2.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("no-interpolation f-string must still lower to a __fstr call, got %T", ret2.Value)
+	}
+	if id, ok := call2.Func.(*ast.Ident); !ok || id.Name != "__fstr" {
+		t.Fatalf("no-interpolation f-string must call __fstr, got %v", call2.Func)
+	}
+	if len(call2.Args) != 1 {
+		t.Fatalf("no-interpolation f-string must have one literal part, got %d", len(call2.Args))
+	}
+	if lit, ok := call2.Args[0].(*ast.StringLit); !ok || lit.Value != "plain" {
+		t.Fatalf("the single part must be the literal %q, got %v", "plain", call2.Args[0])
 	}
 }
 
