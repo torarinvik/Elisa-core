@@ -13,6 +13,7 @@ type Parser struct {
 	errors             []string
 	notices            []string
 	exprBlockDepth     int
+	rebindCounter      int
 	poolScopes         []string
 	nurseryGroupByPool map[string]string
 	nurseryCounter     int

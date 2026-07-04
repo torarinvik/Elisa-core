@@ -239,6 +239,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeParallelForStmt() {
 				return p.parseParallelForStmt()
 			}
+		case "rebind":
+			if p.looksLikeRebindStmt() {
+				return p.parseRebindStmt()
+			}
 		case "lock":
 			if p.looksLikeLockStmt() {
 				return p.parseLockStmt()
