@@ -102,6 +102,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if resultType, ok := a.analyzeConstReflectionCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeBuiltinFStrCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
 		return resultType
 	}

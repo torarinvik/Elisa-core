@@ -58,6 +58,37 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
         return out
 
 # ------------------------------------------------------------
+# f-string interpolation support
+# ------------------------------------------------------------
+# The backend lowers an f-string expression `f"a{x}b"` to one ctx_fstr_alloc
+# (presized to the exact total length — a single allocation) followed by one
+# ctx_fstr_append per part. The payload is perm-allocated, exactly like
+# concat2's string results; the returned header is an ordinary dstr
+# (count == capacity), so growth-by-push in the caller goes through the
+# caller's own region machinery (arena_realloc copies out of perm).
+
+def ctx_fstr_alloc(total: usize) -> dstr:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable dstr = zeroed
+        if total == 0:
+            return out
+        buf: mutable u8& = alloc_perm(total.i64()).cast[mutable u8&]
+        out.items as & <- buf
+        out.count <- 0
+        out.capacity <- total
+        return out
+
+def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
+    can Memory.Allocate, Abort.Panic:
+        if ptr == null or len == 0:
+            return
+        if out.items == null:
+            return
+        assert out.count + len <= out.capacity
+        arena_memcpy(collections_mutable_void_from_items_at[u8](out.items, out.count), ptr.cast[void&], len)
+        out.count <- out.count + len
+
+# ------------------------------------------------------------
 # String operations
 # ------------------------------------------------------------
 

@@ -87,6 +87,12 @@ func (l *Lexer) NextToken() Token {
 		return l.NextToken()
 	}
 
+	// f-string interpolation: `f"...{EXPR}..."` — only when the `f` is IMMEDIATELY followed by a
+	// double quote; otherwise `f` lexes as an ordinary identifier.
+	if ch == 'f' && l.peekAt(1) == '"' {
+		return l.readFString()
+	}
+
 	// String literals
 	if ch == '"' {
 		return l.readString()

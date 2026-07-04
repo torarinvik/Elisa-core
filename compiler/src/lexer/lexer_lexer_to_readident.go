@@ -681,3 +681,71 @@ func (l *Lexer) readIdent() Token {
 	l.pendingGroupedBlock = kind == TOKEN_IDENT && isImmediateGroupedBlockIntroducer(text)
 	return l.finishToken(Token{Kind: kind, Text: text, Pos: p})
 }
+
+// readFString lexes an f-string literal `f"...{EXPR}..."` into a single TOKEN_FSTRING_LIT whose Text
+// is the RAW interior (between the quotes, escapes and `{EXPR}` spans undecoded). The parser splits the
+// interior into literal chunks and embedded expressions and desugars to a `__fstr(...)` builtin call —
+// so the lexer only needs to find the closing quote. Scanning is brace- and string-aware: a `"` inside
+// `{...}` belongs to an embedded string literal and does not terminate the f-string; `\"` in literal
+// text is an escape (left undecoded here). Single-line only.
+func (l *Lexer) readFString() Token {
+	p := l.curPos()
+	l.advance() // consume f
+	l.advance() // consume opening "
+	start := l.pos
+	braceDepth := 0
+	for l.pos < len(l.src) {
+		ch := l.peek()
+		if ch == '\n' {
+			break
+		}
+		if braceDepth == 0 {
+			switch ch {
+			case '"':
+				raw := bytesToStringView(l.src[start:l.pos])
+				l.advance() // consume closing "
+				return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: raw, Pos: p})
+			case '\\':
+				l.advance()
+				if l.pos < len(l.src) && l.peek() != '\n' {
+					l.advance()
+				}
+				continue
+			case '{':
+				// `{{` is a literal brace; a single `{` opens an embedded expression.
+				if l.peekAt(1) == '{' {
+					l.advance()
+					l.advance()
+					continue
+				}
+				braceDepth++
+			case '}':
+				if l.peekAt(1) == '}' {
+					l.advance()
+					l.advance()
+					continue
+				}
+			}
+			l.advance()
+			continue
+		}
+		// Inside `{...}`: track nesting and skip embedded string literals wholesale.
+		switch ch {
+		case '{':
+			braceDepth++
+		case '}':
+			braceDepth--
+		case '"':
+			l.advance()
+			for l.pos < len(l.src) && l.peek() != '"' && l.peek() != '\n' {
+				if l.peek() == '\\' {
+					l.advance()
+				}
+				l.advance()
+			}
+		}
+		l.advance()
+	}
+	l.reportErrorAt(p.WithEnd(l.curPos()), "unterminated f-string literal")
+	return l.finishToken(Token{Kind: TOKEN_FSTRING_LIT, Text: bytesToStringView(l.src[start:l.pos]), Pos: p})
+}

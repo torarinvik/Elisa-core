@@ -132,7 +132,8 @@ const (
 	TOKEN_SEMICOLON // ;
 	// Appended at the END of the enum on purpose: the dogfooded Elisa frontend lexer's parity checksum
 	// keys on token-kind ordinals, so a new token must not shift any existing ordinal. New tokens go here.
-	TOKEN_RANGE_LE // ..= (inclusive range)
+	TOKEN_RANGE_LE    // ..= (inclusive range)
+	TOKEN_FSTRING_LIT // f"a{x}b" — Text holds the RAW interior (escapes + {expr} spans undecoded)
 )
 
 var tokenNames = map[TokenKind]string{
@@ -146,6 +147,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_FLOAT_LIT:  "FLOAT",
 	TOKEN_HEX_LIT:    "HEX",
 	TOKEN_STRING_LIT: "STRING",
+	TOKEN_FSTRING_LIT: "FSTRING",
 	TOKEN_CHAR_LIT:   "CHAR",
 
 	TOKEN_DEF:      "def",
