@@ -46,6 +46,14 @@ def while_private(n: i64) -> i64:
         i <- i + 1
     return count
 
+def typed_acc(xs: darray[i64]) -> u64:
+    # docs/119 §3: an accumulator may carry an explicit type when its initializer
+    # can't pin it down.
+    total: u64 =
+        for x in xs |acc: u64 = 0| -> acc:
+            acc <- acc + x.u64()
+    return total
+
 @test
 def loop_expression_headers() -> void:
     can Abort.Panic:
@@ -62,6 +70,8 @@ def loop_expression_headers() -> void:
             panic("range_fold")
         if while_private(7) != 7:
             panic("while_private")
+        if typed_acc(xs) != 15:
+            panic("typed_acc")
 `
 
 func TestLoopExpressionHeaders(t *testing.T) {

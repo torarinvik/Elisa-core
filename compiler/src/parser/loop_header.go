@@ -66,10 +66,14 @@ func (p *Parser) captureHeaderAt(i int) bool {
 				return j+1 < len(p.tokens) &&
 					(p.tokens[j+1].Kind == lexer.TOKEN_COLON || p.tokens[j+1].Kind == lexer.TOKEN_ARROW)
 			}
-		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_COLON:
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
 			if depth == 0 {
-				return false // reached the body opener without a closing pipe
+				return false // reached line end without a closing pipe — not a header
 			}
+			// NB: a `:` is NOT a scan terminator — a typed accumulator (`|n: T = 0|`)
+			// carries a depth-0 `:` inside the header, before the closing pipe. The
+			// single-line NEWLINE bound already keeps the scan from reaching the loop
+			// body, and the closing-pipe test still requires a following `:`/`->`.
 		}
 	}
 	return false
@@ -87,7 +91,16 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 	p.expect(lexer.TOKEN_PIPE)
 	for {
 		nameTok := p.expect(lexer.TOKEN_IDENT)
+		// Optional `: T` type annotation on an accumulator (`|n: u32 = 0|`) — for when
+		// the accumulator's type can't be inferred from its initializer alone.
+		var declType ast.TypeExpr
+		if p.match(lexer.TOKEN_COLON) {
+			declType = p.parseTypeExpr()
+		}
 		if !p.match(lexer.TOKEN_ASSIGN) {
+			if declType != nil {
+				p.errorf("loop accumulator %q needs an initializer (write `%s: T = init`)", nameTok.Text, nameTok.Text)
+			}
 			// Bare name — a capture of an outer mutable (docs/119 §6).
 			hdr.captures = append(hdr.captures, nameTok.Text)
 			if !p.match(lexer.TOKEN_COMMA) {
@@ -117,7 +130,7 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 			end++
 		}
 		init := p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
-		hdr.decls = append(hdr.decls, &ast.VarDeclStmt{Position: nameTok.Pos, Name: nameTok.Text, Mutable: true, Value: init})
+		hdr.decls = append(hdr.decls, &ast.VarDeclStmt{Position: nameTok.Pos, Name: nameTok.Text, Mutable: true, Type: declType, Value: init})
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
 		}
