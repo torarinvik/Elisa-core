@@ -152,6 +152,31 @@ def main() -> i64:
 	}
 }
 
+// Regression: a protocol impl may RENAME the protocol's declared parameters — names are not part of a
+// function's type. `Sub` declares `__sub__(self, other)`; an impl naming the second param `o` must
+// still conform (previously rejected with a baffling "expects func(T,T)->T, got func(T,T)->T" because
+// SameType compared parameter names). Found dogfooding operator overloading in the wolf3d port.
+func TestProtocolImplRenamedParamConforms(t *testing.T) {
+	ok := analyzeOverloadSource(t, `
+struct Vec2:
+    x: i32
+    y: i32
+
+protocol Sub:
+    def __sub__(self: Self, other: Self) -> Self
+
+impl Sub for Vec2:
+    def __sub__(self: Vec2, o: Vec2) -> Vec2:
+        return Vec2{x: self.x - o.x, y: self.y - o.y}
+
+def use(a: Vec2, b: Vec2) -> Vec2:
+    return a - b
+`)
+	if errs := ok.Errors(); len(errs) != 0 {
+		t.Fatalf("impl renaming the protocol's `other` param to `o` must conform, got: %v", errs)
+	}
+}
+
 // End-to-end: compile and RUN a value-type `a + b`, asserting the componentwise result.
 func TestRunCLIOperatorOverloadNative(t *testing.T) {
 	t.Parallel()

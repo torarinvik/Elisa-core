@@ -293,6 +293,27 @@ func SameType(a, b Type) bool {
 	}
 }
 
+// sameSignatureModuloParamNames compares two function signatures for structural equality while
+// IGNORING parameter names (both the explicit and implicit name lists). Parameter names are not part
+// of a function's type, so this is the right notion for protocol-impl conformance: an impl may rename
+// the protocol's declared parameters (`__sub__(self, other)` satisfied by `__sub__(self, o)`). For
+// non-function types it falls back to plain SameType. It blanks names on shallow copies, so the
+// argument FuncTypes are left untouched.
+func sameSignatureModuloParamNames(a, b Type) bool {
+	fa, aok := a.(*FuncType)
+	fb, bok := b.(*FuncType)
+	if !aok || !bok {
+		return SameType(a, b)
+	}
+	blankNames := func(f *FuncType) *FuncType {
+		clone := *f
+		clone.ExplicitParamNames = make([]string, len(f.ExplicitParamNames))
+		clone.ImplicitParamNames = make([]string, len(f.ImplicitParamNames))
+		return &clone
+	}
+	return SameType(blankNames(fa), blankNames(fb))
+}
+
 func sameConstValue(a ConstValue, b ConstValue) bool {
 	if a.Kind != b.Kind || a.Int != b.Int || a.Float != b.Float || a.Bool != b.Bool || a.String != b.String || a.Some != b.Some || len(a.Elems) != len(b.Elems) || len(a.Fields) != len(b.Fields) {
 		return false

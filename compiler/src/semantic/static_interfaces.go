@@ -664,7 +664,10 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 					// Structural signature match ignores the effect/error channels (they are checked
 					// with SUBSET variance below, not invariant equality) so a conforming impl that
 					// uses a strict subset of the protocol's capabilities / error modes still matches.
-					if !SameType(stripEffectChannels(expectedSig), stripEffectChannels(actualSig)) {
+					// It also ignores PARAMETER NAMES: `def __sub__(self, other)` in the protocol is
+					// satisfied by `def __sub__(self, o)` in the impl — names are not part of a
+					// function's type, so the impl is free to rename its parameters.
+					if !sameSignatureModuloParamNames(stripEffectChannels(expectedSig), stripEffectChannels(actualSig)) {
 						a.errorf(pos.Pos(), "impl method %q for interface %q expects %s, got %s", name, interfaceName, expectedSig, actualSig)
 						continue
 					}
