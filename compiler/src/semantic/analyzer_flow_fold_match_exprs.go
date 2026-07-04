@@ -77,7 +77,7 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
@@ -111,4 +111,70 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 		return neverType
 	}
 	return resultType
+}
+
+// mergeMatchExprArmTypes merges a match-expression's accumulated result type with the
+// next arm's type. On top of the plain MergeTypes lattice it adapts STRING-LITERAL
+// arms to a string-view result, in either arm order:
+//
+//	s: sview = match k:
+//	    1: "one"        # static u8& literal arm — adapts to sview
+//	    _: v            # sview
+//
+// This mirrors the contextual ternary (`s: sview = "lit" if c else v`, which adapts
+// literal branches via contextualStringLiteralType); without it, expression-form match
+// rejects the mix that its statement/ternary equivalents accept. Only LITERAL-tailed
+// arms adapt — a non-literal `static u8&` value (a static byte-ref binding) has no
+// knowable length, so it stays incompatible, exactly as in the ternary. The backend
+// needs no change: each arm body is emitted with the merged type as its expected type,
+// which triggers the same literal→view lowering as a typed declaration.
+func (a *Analyzer) mergeMatchExprArmTypes(resultType, armType Type, arms []ast.MatchArm, index int) Type {
+	merged := MergeTypes(resultType, armType)
+	if !IsInvalidType(merged) {
+		return merged
+	}
+	if isStringViewType(resultType) && isStaticStringLiteralRefType(armType) && matchArmTailIsStringLiteral(arms[index].Body) {
+		return resultType
+	}
+	if isStaticStringLiteralRefType(resultType) && isStringViewType(armType) && matchArmTailsAllStringLiterals(arms[:index]) {
+		return armType
+	}
+	return invalidType
+}
+
+// isStaticStringLiteralRefType reports the TYPE a string literal carries:
+// `static u8&` (RefType{Elem: u8, Storage: static}).
+func isStaticStringLiteralRefType(t Type) bool {
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil || ref.Storage != RefStorageStatic {
+		return false
+	}
+	elem, ok := ref.Elem.(*BuiltinType)
+	return ok && elem != nil && elem.Name == "u8"
+}
+
+// matchArmTailIsStringLiteral reports whether an arm body's value expression is a
+// bare string literal (the only static-u8& shape the literal→view adaptation covers).
+func matchArmTailIsStringLiteral(body []ast.Stmt) bool {
+	if len(body) == 0 {
+		return false
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return false
+	}
+	_, ok = exprStmt.Expr.(*ast.StringLit)
+	return ok
+}
+
+// matchArmTailsAllStringLiterals reports whether EVERY given arm yields a bare string
+// literal — required before adapting an accumulated static-u8& result to a view (the
+// accumulated type alone cannot distinguish literal arms from static byte-ref arms).
+func matchArmTailsAllStringLiterals(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if !matchArmTailIsStringLiteral(arm.Body) {
+			return false
+		}
+	}
+	return len(arms) > 0
 }

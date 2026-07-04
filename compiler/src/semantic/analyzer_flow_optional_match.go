@@ -145,7 +145,7 @@ func (a *Analyzer) analyzeOptionalMatchExpr(expr *ast.MatchExpr, optionalType *O
 			resultType = armType
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType

@@ -144,7 +144,7 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
@@ -332,7 +332,7 @@ func (a *Analyzer) analyzeIntegerMatchExpr(expr *ast.MatchExpr, valueType Type) 
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
@@ -635,7 +635,7 @@ func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) T
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
@@ -725,7 +725,7 @@ func (a *Analyzer) analyzeTupleMatchExpr(expr *ast.MatchExpr, valueType Type) Ty
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType

@@ -453,7 +453,7 @@ func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
@@ -544,7 +544,7 @@ func (a *Analyzer) analyzeErrorSetMatchExpr(expr *ast.MatchExpr, valueType Type,
 			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
-		merged := MergeTypes(resultType, armType)
+		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
