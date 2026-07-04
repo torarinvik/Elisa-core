@@ -17,21 +17,62 @@ import (
 // already-tested ExprBlock/ScopeStmt paths.
 
 type loopHeader struct {
-	pos   lexer.Pos
-	decls []ast.Stmt
-	yield ast.Expr
+	pos      lexer.Pos
+	decls    []ast.Stmt
+	captures []string // docs/119 §6: outer mutables threaded through the loop
+	yield    ast.Expr
 }
 
-// loopHeaderDeclsAt reports whether tokens[i:] begins a loop-header decl list:
-// `| IDENT =`. The `IDENT =` requirement is what disambiguates from a bitwise
-// `|` in the iterable/condition expression — `=` cannot appear inside an
-// expression, so `xs | mask` can never match. (Bare-name captures relax this
-// in the docs/119 §6 batch.)
+// loopHeaderDeclsAt reports whether tokens[i:] begins a loop-header. Two shapes are
+// accepted, both disambiguated from a bitwise `|` in the iterable/condition:
+//
+//   - a decl-led header `| IDENT = …` — `=` cannot appear inside an expression, so
+//     `xs | mask` can never match; and
+//   - a capture header `| IDENT … |` whose CLOSING pipe is immediately followed by `:`
+//     or `->` (docs/119 §6). A bitwise `a | b | c` never satisfies this: its second
+//     top-level pipe is followed by another operand, not the loop's `:`/`->`.
 func (p *Parser) loopHeaderDeclsAt(i int) bool {
-	return i+2 < len(p.tokens) &&
+	if i+2 < len(p.tokens) &&
 		p.tokens[i].Kind == lexer.TOKEN_PIPE &&
 		p.tokens[i+1].Kind == lexer.TOKEN_IDENT &&
-		p.tokens[i+2].Kind == lexer.TOKEN_ASSIGN
+		p.tokens[i+2].Kind == lexer.TOKEN_ASSIGN {
+		return true
+	}
+	return p.captureHeaderAt(i)
+}
+
+// captureHeaderAt reports whether tokens[i:] is a `| item, … |` header terminated by a
+// closing pipe immediately followed by `:` or `->`. Items begin with an identifier; a
+// top-level `|` (outside ()[]{}) closes the header, so an init with a bitwise `|` must
+// be parenthesized (same rule as decl headers).
+func (p *Parser) captureHeaderAt(i int) bool {
+	if i+1 >= len(p.tokens) ||
+		p.tokens[i].Kind != lexer.TOKEN_PIPE ||
+		p.tokens[i+1].Kind != lexer.TOKEN_IDENT {
+		return false
+	}
+	depth := 0
+	for j := i + 1; j < len(p.tokens); j++ {
+		switch p.tokens[j].Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_PIPE:
+			if depth == 0 {
+				// Closing pipe — a header only if the loop body / yield follows directly.
+				return j+1 < len(p.tokens) &&
+					(p.tokens[j+1].Kind == lexer.TOKEN_COLON || p.tokens[j+1].Kind == lexer.TOKEN_ARROW)
+			}
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_COLON:
+			if depth == 0 {
+				return false // reached the body opener without a closing pipe
+			}
+		}
+	}
+	return false
 }
 
 func (p *Parser) loopHeaderDeclsAhead() bool {
@@ -46,7 +87,14 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 	p.expect(lexer.TOKEN_PIPE)
 	for {
 		nameTok := p.expect(lexer.TOKEN_IDENT)
-		p.expect(lexer.TOKEN_ASSIGN)
+		if !p.match(lexer.TOKEN_ASSIGN) {
+			// Bare name — a capture of an outer mutable (docs/119 §6).
+			hdr.captures = append(hdr.captures, nameTok.Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+			continue
+		}
 		// The initializer ends at the first top-level `,` or `|` (a bitwise `|`
 		// inside an initializer needs parens) — sub-parse the slice so the
 		// expression grammar cannot eat the header's closing pipe as an operator.
@@ -88,7 +136,10 @@ func (p *Parser) wrapLoopHeader(hdr *loopHeader, loop ast.Stmt) ast.Stmt {
 	}
 	stmts := append(append([]ast.Stmt(nil), hdr.decls...), loop)
 	if hdr.yield != nil {
-		return &ast.ExprStmt{Position: hdr.pos, Expr: &ast.ExprBlock{Position: hdr.pos, Stmts: stmts, Value: hdr.yield}}
+		// docs/119 §6: a value-form loop is an ExprBlock; captures license the loop body
+		// to mutate the named outer bindings (E4 exemption). The header is the loop's
+		// mutation contract.
+		return &ast.ExprStmt{Position: hdr.pos, Expr: &ast.ExprBlock{Position: hdr.pos, Stmts: stmts, Value: hdr.yield, Captures: hdr.captures}}
 	}
 	// Statement form (no `->`): the decls are loop-private but there is no value.
 	// `if true:` is the scoped wrapper (folded at O2); ScopeStmt requires a guard.

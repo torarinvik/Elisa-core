@@ -30,6 +30,19 @@ func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) {
 	}
 	local := map[string]bool{}
 	collectBlockBoundNames(expr.Stmts, local)
+	// docs/119 §6: a captured outer binding IS licensed to be updated here — that is the
+	// whole point of a capture. Each capture must name an existing MUTABLE outer binding
+	// (E10 immutable / E11 undefined); then treat it as local for E4.
+	for _, c := range expr.Captures {
+		sym, found := a.currentScope.Lookup(c)
+		switch {
+		case !found || sym == nil:
+			a.errorf(expr.Pos(), "capture %q names no binding in scope (docs/119 E11)", c)
+		case !sym.Mutable:
+			a.errorf(expr.Pos(), "capture %q is not a `mutable` binding; only mutables can be threaded through a value block (docs/119 E10)", c)
+		}
+		local[c] = true
+	}
 	a.walkValueBlockMutations(expr.Stmts, local)
 }
 

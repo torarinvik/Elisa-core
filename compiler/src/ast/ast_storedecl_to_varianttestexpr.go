@@ -618,6 +618,12 @@ type ExprBlock struct {
 	Position lexer.Pos
 	Stmts    []Stmt
 	Value    Expr
+	// Captures names the outer mutable bindings a `|capture|` header (docs/119 §6)
+	// threads through this block: the moved-in shadow's final value is written back to
+	// the outer binding by a synthesized tail assignment. E4 (value-block purity)
+	// exempts writes to these names — a capture is the sanctioned way a value block
+	// updates outer state, sugar over `rebind`. Empty for ordinary blocks.
+	Captures []string
 }
 type BinaryExpr struct {
 	Position    lexer.Pos
