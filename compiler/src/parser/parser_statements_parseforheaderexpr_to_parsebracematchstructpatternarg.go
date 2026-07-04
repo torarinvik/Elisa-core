@@ -45,6 +45,13 @@ func (p *Parser) parseForHeaderExpr() ast.Expr {
 			if depth == 0 {
 				return p.parseForHeaderSlice(end, tok.Pos)
 			}
+		case lexer.TOKEN_PIPE:
+			// docs/119 §3: `|acc = 0|` loop-header decls end the iterable expression.
+			// Disambiguated from a bitwise `|` by the `IDENT =` lookahead (assignment
+			// cannot appear inside an expression).
+			if depth == 0 && p.loopHeaderDeclsAt(end) {
+				return p.parseForHeaderSlice(end, tok.Pos)
+			}
 		case lexer.TOKEN_IDENT:
 			// A trailing `step N` ends the range-bound expression so the loop parser can reject it
 			// with a directed diagnostic (the stride is spelled on the range: `lo..<hi..N`). Without

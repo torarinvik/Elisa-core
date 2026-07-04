@@ -1057,8 +1057,8 @@ func (p *Parser) parseForStmt() ast.Stmt {
 				p.errorAt(byPos, "expected `par` after `by`, got %q", mode)
 			}
 		}
-		body := p.parseForStmtBody()
-		return &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body}
+		body, hdr := p.parseForStmtBodyWithHeader()
+		return p.wrapLoopHeader(hdr, &ast.ForStmt{Position: pos, Reverse: reverse, Name: namePattern.Name, Start: startOrSource, End: end, Step: step, Op: op.Kind, Body: body})
 	}
 	var patternFilter ast.MatchPattern
 	var patternFilterSubject string
@@ -1128,7 +1128,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 			p.errorAt(byPos, "expected `par` after `by`, got %q", marker)
 		}
 	}
-	body := p.parseForStmtBody()
+	body, hdr := p.parseForStmtBodyWithHeader()
 	// `for x in move c:` is a consuming move-drain. The `move c` source parses as a MoveExpr;
 	// unwrap it to the container and flag MovedSource (Mode stays IterBindValue so the binding is
 	// by value and backend lowering is reused). Only the value-binding form supports a moved
@@ -1142,7 +1142,7 @@ func (p *Parser) parseForStmt() ast.Stmt {
 		source = moveExpr.Operand
 		movedSource = true
 	}
-	return &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: source, MovedSource: movedSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body}
+	return p.wrapLoopHeader(hdr, &ast.IterForStmt{Position: pos, Reverse: reverse, Pattern: pattern, Mode: mode, Source: source, MovedSource: movedSource, PatternFilter: patternFilter, PatternFilterSubject: patternFilterSubject, WhereFilter: whereFilter, Filter: filter, Body: body})
 }
 
 func (p *Parser) peekForWhereSubjectPattern(pattern ast.MoveBindPattern) (string, bool) {
@@ -1260,12 +1260,26 @@ func (p *Parser) buildParallelCollectionFor(pos lexer.Pos, name string, src ast.
 }
 
 func (p *Parser) parseForStmtBody() []ast.Stmt {
+	body, hdr := p.parseForStmtBodyWithHeader()
+	if hdr != nil {
+		p.errorAt(hdr.pos, "loop-header decls are not supported on this loop form")
+	}
+	return body
+}
+
+// parseForStmtBodyWithHeader parses an optional docs/119 §3 loop header
+// (`|name = init, ...| [-> yield]`) before the loop's `:` and body.
+func (p *Parser) parseForStmtBodyWithHeader() ([]ast.Stmt, *loopHeader) {
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "for" {
-		return []ast.Stmt{p.parseForStmt()}
+		return []ast.Stmt{p.parseForStmt()}, nil
+	}
+	var hdr *loopHeader
+	if p.loopHeaderDeclsAhead() {
+		hdr = p.parseLoopHeader()
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	return p.parseBlock()
+	return p.parseBlock(), hdr
 }
 
 func (p *Parser) peekForWherePatternFilter() bool {

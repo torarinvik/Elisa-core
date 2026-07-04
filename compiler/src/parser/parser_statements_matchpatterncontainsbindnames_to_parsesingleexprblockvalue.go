@@ -207,15 +207,51 @@ func buildOptionalIfLetChain(pos lexer.Pos, bindings []optionalIfBinding, cond a
 		Else:     elseBlock,
 	}
 }
-func (p *Parser) parseWhile() *ast.WhileStmt {
+func (p *Parser) parseWhile() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_WHILE)
 	hint := p.parseBranchHint()
-	cond := p.parseExpr()
+	// docs/119 §3: a `|i = 0|` loop header ends the condition expression (the
+	// condition may reference the header's decls). Scan for the boundary pipe
+	// so `cond | i` bitwise-or is not mis-consumed; `IDENT =` disambiguates.
+	var cond ast.Expr
+	condEnd := p.pos
+	depth := 0
+	boundary := -1
+scan:
+	for condEnd < len(p.tokens) {
+		switch p.tokens[condEnd].Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_PIPE:
+			if depth == 0 && p.loopHeaderDeclsAt(condEnd) {
+				boundary = condEnd
+				break scan
+			}
+		case lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			if depth == 0 {
+				break scan
+			}
+		}
+		condEnd++
+	}
+	if boundary >= 0 {
+		cond = p.parseForHeaderSlice(boundary, p.tokens[boundary].Pos)
+	} else {
+		cond = p.parseExpr()
+	}
+	var hdr *loopHeader
+	if p.loopHeaderDeclsAhead() {
+		hdr = p.parseLoopHeader()
+	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.WhileStmt{Position: pos, Hint: hint, Cond: cond, Body: body}
+	return p.wrapLoopHeader(hdr, &ast.WhileStmt{Position: pos, Hint: hint, Cond: cond, Body: body})
 }
 func (p *Parser) parseStaticStmt() ast.Stmt {
 	pos := p.cur().Pos
