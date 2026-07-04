@@ -911,6 +911,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if isUnhandledErrorUnionType(exprType) {
 			a.errorf(n.Pos(), "error union result must be handled with `try`, `match`, or `catch`, or propagated with `return`; it cannot be silently dropped")
 		}
+		a.checkDiscardedValue(n, exprType)
 	case *ast.StaticIfStmt:
 		for _, stmt := range a.activeStmtBranch(n) {
 			a.analyzeStmt(stmt)

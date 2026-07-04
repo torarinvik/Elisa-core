@@ -439,6 +439,7 @@ type Analyzer struct {
 	enforcePerfLints            bool
 	enforceStrictProofs         bool
 	emitProofHoleHints          bool
+	warnDiscardedValues         bool
 	requireExternContracts      bool
 	// requiresReport gates the -requires-report aggregation (docs c3): per requires-bearing function,
 	// how many direct call sites statically discharge the precondition vs fall back to a runtime check.
@@ -689,6 +690,11 @@ type AnalyzeOptions struct {
 	// churn) from warnings to hard errors — the `-Wperf` graduated-strictness level for
 	// shipped code (docs/70). Off by default so prototyping stays fluid.
 	EnforcePerfLints bool
+	// WarnDiscardedValues turns on docs/119 W1: a statement-position expression whose non-void value
+	// is silently discarded warns (`_ = expr` to discard on purpose, or use it). OFF by default — the
+	// corpus has many intentional side-effecting calls that also return a value, so this is an opt-in
+	// tidiness channel, not a default lint.
+	WarnDiscardedValues bool
 	// EnforceStrictProofs promotes the refinement-proof diagnostic from a warning to a hard error
 	// (docs/85: the `-strict` safety channel). When a refinement obligation cannot be discharged
 	// statically it falls back to a runtime check; by default that emits a WARNING so the user
@@ -834,6 +840,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforcePerfLints:                  options.EnforcePerfLints,
 		enforceStrictProofs:               options.EnforceStrictProofs,
 		emitProofHoleHints:                options.EmitProofHoleHints,
+		warnDiscardedValues:               options.WarnDiscardedValues,
 		requiresReport:                    options.RequiresReport,
 		requireExternContracts:            options.RequireExternContracts,
 		smtEnabled:                        options.EnableSMT,

@@ -241,6 +241,7 @@ type cliOptions struct {
 	strictPolicy      bool
 	perfStrict        bool
 	proofStrict       bool
+	warnUnused        bool
 	strictExterns     bool
 	explainProofs     bool
 	explainHole       bool
@@ -334,6 +335,11 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.
 			options.perfStrict = true
+		case arg == "-Wunused":
+			// docs/119 W1: warn when a statement-position expression's non-void value is
+			// silently discarded. Opt-in — the corpus has many side-effecting calls that
+			// also return a value, so this is a tidiness channel, not a default lint.
+			options.warnUnused = true
 		case arg == "-requires-report":
 			// docs c3: per requires-bearing function, report how many direct call sites statically
 			// discharge the precondition vs fall back to a runtime check (with the unprovable sites).
