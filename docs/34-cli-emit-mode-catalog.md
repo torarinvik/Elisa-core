@@ -108,4 +108,4 @@ token-kind FNV checksum. It is the **parity oracle** for the self-hosted stage1
 not supported.
 
 For HTTP server behavior behind `-emit serve`, see
-[37-compile-server-api-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/37-compile-server-api-surface.md).
+[37-compile-server-api-surface.md](37-compile-server-api-surface.md).

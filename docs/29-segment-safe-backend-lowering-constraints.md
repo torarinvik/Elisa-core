@@ -57,4 +57,4 @@ When annotating functions as segment-agnostic or segment-establishing:
 - treat backend rejection as contract protection, not just optimization detail
 
 For source-level segment-owner semantics and annotations, see
-[27-segment-owner-safety-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/27-segment-owner-safety-surface.md).
+[27-segment-owner-safety-surface.md](27-segment-owner-safety-surface.md).

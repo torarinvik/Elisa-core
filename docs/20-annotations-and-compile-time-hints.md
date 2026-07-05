@@ -225,7 +225,7 @@ Current rules:
 - reachable `Blocking.*` paths from a `@main_thread` function are progress errors
 - intentional blocking on main thread should be wrapped in a local trusted block such as `trusted Unsafe.BlockMain:`
 
-For full progress-safety behavior, see [25-progress-safety.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/25-progress-safety.md).
+For full progress-safety behavior, see [25-progress-safety.md](25-progress-safety.md).
 
 ## Extension-method, visibility, and constructor annotations
 
@@ -369,7 +369,7 @@ Current rules:
 - async-entry functions must explicitly handle segment-owner assumptions and reentrant safety
 - externs that mutate active segment state require explicit `@segment_transition(...)` so owner transitions are typed contracts
 
-For complete segment-owner behavior and permission examples, see [27-segment-owner-safety-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/27-segment-owner-safety-surface.md).
+For complete segment-owner behavior and permission examples, see [27-segment-owner-safety-surface.md](27-segment-owner-safety-surface.md).
 
 ## Branch hints
 

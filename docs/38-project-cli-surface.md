@@ -111,11 +111,11 @@ emits a structured dependency report including:
 - link flags
 
 Full JSON field schema is documented in
-[41-project-deps-report-schema.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/41-project-deps-report-schema.md).
+[41-project-deps-report-schema.md](41-project-deps-report-schema.md).
 
 Native lint command details for `project abi-lint` and `project easm-lint` are
 documented in
-[39-project-native-lint-surfaces.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/39-project-native-lint-surfaces.md).
+[39-project-native-lint-surfaces.md](39-project-native-lint-surfaces.md).
 
 ## Option behavior highlights
 

@@ -97,7 +97,7 @@ Current behavior:
 - returns non-zero when report contains error-severity issues
 
 For the EASM source language and verifier contract itself, see
-[40-easm-language-and-verifier-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/40-easm-language-and-verifier-surface.md).
+[40-easm-language-and-verifier-surface.md](40-easm-language-and-verifier-surface.md).
 
 Text report includes sections like:
 

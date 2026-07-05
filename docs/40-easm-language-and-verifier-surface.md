@@ -335,5 +335,5 @@ Current EASM verifier and parser can report these issue codes:
 
 ## Related surfaces
 
-- project report integration: [39-project-native-lint-surfaces.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/39-project-native-lint-surfaces.md)
-- unsafe summary integration (`EASM.Requires.*`): [31-unsafe-report-and-budget-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/31-unsafe-report-and-budget-surface.md)
+- project report integration: [39-project-native-lint-surfaces.md](39-project-native-lint-surfaces.md)
+- unsafe summary integration (`EASM.Requires.*`): [31-unsafe-report-and-budget-surface.md](31-unsafe-report-and-budget-surface.md)

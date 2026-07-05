@@ -1,4 +1,4 @@
-include "/Users/torarinvikbjarko/Documents/Coding Projects/Go projects/Elisa-core/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "../../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
 extern printf(fmt: u8&, ...) -> int can[Console.Write]
 

@@ -79,5 +79,5 @@ Each item in `dependencies` currently includes:
 
 ## Related docs
 
-- command-level overview: [38-project-cli-surface.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/38-project-cli-surface.md)
-- native lint reports: [39-project-native-lint-surfaces.md](/Users/torarinvikbjarko/Documents/Coding%20Projects/Go%20projects/Elisa-core/docs/39-project-native-lint-surfaces.md)
+- command-level overview: [38-project-cli-surface.md](38-project-cli-surface.md)
+- native lint reports: [39-project-native-lint-surfaces.md](39-project-native-lint-surfaces.md)
