@@ -217,7 +217,9 @@ def use() -> void:
     rebind x: i64, lx = plain(&lx)
     _ = x
 `)
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "does not declare lmut threading") {
+	// A `mutable Lexer&` param (the escape hatch) is not lmut, so the claim is invalid
+	// under both declared and implicit threading.
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "neither declares lmut threading") {
 		t.Fatalf("expected false-claim error, got: %s", all)
 	}
 }
@@ -272,5 +274,60 @@ def combine(x: lmut Counter, y: lmut Counter) -> void:
 def use() -> void:
     p: mutable Pair = Pair{a: Counter{value: 1}, b: Counter{value: 2}}
     combine(p.a, p.b)
+`)
+}
+
+// docs/120 implicit threading: every lmut param is a compile-time thread slot — a
+// rebind claim against a plain (undeclared) lmut callee is valid; the remaining
+// target binds the real return.
+func TestLmutImplicitClaimRebindClean(t *testing.T) {
+	analyzeTreeTestSource(t, "lmut_implicit_rebind.elisa", `struct Lexer:
+    position: mutable i64
+
+def read_suffix(lexer: lmut Lexer) -> i64:
+    lexer.position <- lexer.position + 1
+    return lexer.position
+
+def use() -> void:
+    lx: mutable Lexer = Lexer{position: 0}
+    rebind s: i64, lx = lx.read_suffix()
+    _ = s
+`)
+}
+
+// The arrow spelling of the same claim: `lx, s <- lx.read_suffix()` — the lmut
+// target claims the implicit thread, the value target binds the return.
+func TestLmutImplicitClaimArrowClean(t *testing.T) {
+	analyzeTreeTestSource(t, "lmut_implicit_arrow.elisa", `struct Lexer:
+    position: mutable i64
+
+def read_suffix(lexer: lmut Lexer) -> i64:
+    lexer.position <- lexer.position + 1
+    return lexer.position
+
+def use() -> void:
+    lx: mutable Lexer = Lexer{position: 0}
+    s: mutable i64 = 0
+    lx, s <- lx.read_suffix()
+    _ = s
+`)
+}
+
+// docs/120 §6 single-place: `x <- if …` where every branch threads x or yields it
+// unchanged compiles (erases to a statement-if) and satisfies §10 enforcement.
+func TestLmutSingleThreadAssignClean(t *testing.T) {
+	t.Setenv("ELISA_LINEAR_MUTATION", "1")
+	analyzeTreeTestSource(t, "lmut_single_thread.elisa", `struct Lexer:
+    position: mutable i64
+
+def advance_char(lexer: lmut Lexer) -> void:
+    lexer.position <- lexer.position + 1
+
+def step(lexer: lmut Lexer, wide: bool) -> void:
+    lexer <-
+        if wide:
+            lexer.advance_char()
+        else:
+            lexer
 `)
 }

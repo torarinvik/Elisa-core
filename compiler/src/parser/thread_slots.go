@@ -188,6 +188,107 @@ func (p *Parser) desugarThreadSlots(pos lexer.Pos, places []ast.Expr, value ast.
 	return p.buildPureMultiPlaceAssign(pos, keptPlaces, value), true
 }
 
+// docs/120 — single-place thread assignment: §6 thread slots extended from multi-place
+// tuples to the single-target form `x <- <branchy RHS>`. This is the total-mutation
+// value-if spelling of the linear model:
+//
+//	lexer <-
+//	    if width > 1:
+//	        lexer.advance_chars(width)   # thread: effect in place, "yields" lexer
+//	    elif width == 1:
+//	        lexer.advance_char()
+//	    else:
+//	        lexer                        # neutral: yields lexer unchanged (no-op)
+//
+// Every leaf of the RHS must account for x: a mutating call rooted at x THREADS
+// (implicitly yielding its receiver — the compile-time-only return of an lmut
+// mutation), and the bare binding is NEUTRAL. The whole construct then erases to a
+// plain statement-if over the in-place mutations — zero overhead; the notation exists
+// so the dataflow is total and visible on every path. Mixing a thread leaf with an
+// unrelated-value leaf is the §6 arm-consistency error. An RHS with no thread leaf
+// is a pure §1 value assignment and is left untouched (handled=false).
+//
+// Only branchy RHS shapes (value-if / expression block) are intercepted here: a bare
+// call RHS (`x <- x.f()`) stays the §8 arg-manifest, whose semantic validation checks
+// the callee's void return — the parser cannot see return types, so it must not guess.
+func (p *Parser) desugarSingleThreadAssign(target ast.Expr, value ast.Expr) (ast.Stmt, bool) {
+	id, ok := target.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	switch value.(type) {
+	case *ast.TernaryExpr, *ast.ExprBlock:
+	default:
+		return nil, false
+	}
+	threads, values, enumerable := classifySingleLeaves(value, id.Name)
+	if !enumerable || threads == 0 {
+		return nil, false
+	}
+	if values > 0 {
+		p.errorAt(target.Pos(), "some branches thread %q but others yield an unrelated value; every branch must either mutate %q in place or yield it unchanged (docs/120 §6)", id.Name, id.Name)
+		return &ast.ExprStmt{Position: target.Pos(), Expr: value}, true
+	}
+	stmts := singleThreadStmts(value, id.Name)
+	if len(stmts) == 0 {
+		// All leaves neutral is threads==0 above; reaching here means effects exist.
+		return nil, false
+	}
+	p.pendingStmts = append(p.pendingStmts, stmts[1:]...)
+	return stmts[0], true
+}
+
+// classifySingleLeaves walks the single-place RHS's branch structure and counts leaf
+// classifications against the target name. enumerable=false for a shape the walk
+// cannot decompose (the pure path applies).
+func classifySingleLeaves(value ast.Expr, name string) (threads, values int, enumerable bool) {
+	switch n := value.(type) {
+	case *ast.TernaryExpr:
+		t1, v1, ok1 := classifySingleLeaves(n.Value, name)
+		t2, v2, ok2 := classifySingleLeaves(n.Alt, name)
+		return t1 + t2, v1 + v2, ok1 && ok2
+	case *ast.ExprBlock:
+		if n.Value == nil {
+			return 0, 0, false
+		}
+		return classifySingleLeaves(n.Value, name)
+	default:
+		switch classifySlot(value, name) {
+		case slotThread:
+			return 1, 0, true
+		case slotNeutral:
+			return 0, 0, true
+		default:
+			return 0, 1, true
+		}
+	}
+}
+
+// singleThreadStmts converts the all-thread/neutral RHS into plain statements: a
+// value-if becomes a statement if, an expression block contributes its pre-tail
+// statements, a thread leaf becomes its bare (marked) mutating call, and a neutral
+// leaf (the bare binding) erases to nothing.
+func singleThreadStmts(value ast.Expr, name string) []ast.Stmt {
+	switch n := value.(type) {
+	case *ast.TernaryExpr:
+		thenStmts := singleThreadStmts(n.Value, name)
+		elseStmts := singleThreadStmts(n.Alt, name)
+		if len(thenStmts) == 0 {
+			thenStmts = []ast.Stmt{&ast.PassStmt{Position: n.Position}}
+		}
+		return []ast.Stmt{&ast.IfStmt{Position: n.Position, Cond: n.Cond, Then: thenStmts, Else: elseStmts}}
+	case *ast.ExprBlock:
+		stmts := append([]ast.Stmt(nil), n.Stmts...)
+		return append(stmts, singleThreadStmts(n.Value, name)...)
+	default:
+		if id, ok := value.(*ast.Ident); ok && id.Name == name {
+			return nil // neutral: yields the binding unchanged — erases
+		}
+		markThreadEffect(value)
+		return []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
+	}
+}
+
 // threadOnlyStmts converts an all-slots-thread RHS into plain statements: a value-if
 // becomes a statement if whose branch bodies are the branches' pre-tail statements
 // plus their hoisted thread effects.

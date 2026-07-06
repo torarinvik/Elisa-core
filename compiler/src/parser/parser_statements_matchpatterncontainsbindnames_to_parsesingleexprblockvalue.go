@@ -675,6 +675,11 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			value = p.parseValueExprAllowTuple()
 		}
 		p.expectNewlineAfterValueExpr(value)
+		// docs/120 §6 single-place: a branchy RHS whose every leaf threads the target
+		// (a mutating call rooted at it) or yields it unchanged erases to a statement-if.
+		if stmt, handled := p.desugarSingleThreadAssign(expr, value); handled {
+			return stmt
+		}
 		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
 
 	case lexer.TOKEN_QASSIGN:

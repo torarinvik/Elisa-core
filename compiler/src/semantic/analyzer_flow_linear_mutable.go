@@ -141,11 +141,39 @@ func (a *Analyzer) checkLmutThreadClaims(expr *ast.CallExpr, args []ast.Expr) {
 			a.errorf(expr.Pos(), "%q declares lmut threading of %q; the call must claim it with the rebind form: `rebind ..., %s = ...`", decl.Name, slot.ParamName, root.Name)
 		}
 	}
+	// Implicit slots (docs/120: every `lmut` parameter is a compile-time thread slot,
+	// no declaration needed): a claim naming the root of an argument bound to an lmut
+	// parameter is valid — the mutation is in place, the claim is the visible thread.
+	// This is what makes `rebind suffix, lexer = lexer.read_type_suffix()` work for a
+	// plain `(lexer: lmut Lexer) -> sview?` callee: `lexer` claims the implicit slot,
+	// `suffix` binds the real return.
 	for i, c := range expr.LmutRebindClaims {
-		if !used[i] {
-			a.errorf(c.Position, "rebind target %q claims a threaded slot, but %q does not declare lmut threading for it", c.Name, decl.Name)
+		if used[i] {
+			continue
+		}
+		for pi, prm := range decl.Params {
+			if pi >= len(args) || !astParamIsLmut(prm.Type) {
+				continue
+			}
+			root, _, ok := a.namedStateMutationTargetPath(args[pi])
+			if ok && root != nil && root.Name == c.Name {
+				used[i] = true
+				break
+			}
 		}
 	}
+	for i, c := range expr.LmutRebindClaims {
+		if !used[i] {
+			a.errorf(c.Position, "rebind target %q claims a threaded slot, but %q neither declares lmut threading for it nor passes it to an `lmut` parameter", c.Name, decl.Name)
+		}
+	}
+}
+
+// astParamIsLmut reports whether a parameter's AST type is the `lmut T` mode
+// (MutableType{Linear} — the parser's desugar of `lmut`).
+func astParamIsLmut(t ast.TypeExpr) bool {
+	mt, ok := t.(*ast.MutableType)
+	return ok && mt != nil && mt.Linear
 }
 
 // linearStepPathString renders a place path to a canonical, comparable string. Field steps become

@@ -381,6 +381,33 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		if stmt, handled := p.desugarThreadSlots(pos, places, value); handled {
 			return stmt
 		}
+		// docs/120 implicit threading — mixed claim form: `lexer, suffix <-
+		// lexer.read_type_suffix()`. When the RHS is a single direct call, a target
+		// naming an argument (or UFCS receiver) root claims that lmut thread — the
+		// mutation is in place, so the target has no value slot: drop it from the
+		// bind and record the claim for the semantic layer to validate (mirrors the
+		// rebind form; a claim on a non-lmut argument is a compile error there).
+		// The remaining targets bind the call's real return.
+		if call, isCall := value.(*ast.CallExpr); isCall {
+			roots := callArgRootNames(call)
+			kept := names[:0]
+			for _, nm := range names {
+				if roots[nm.Name] {
+					call.LmutRebindClaims = append(call.LmutRebindClaims, ast.LmutRebindClaim{Position: nm.Position, Name: nm.Name})
+					continue
+				}
+				kept = append(kept, nm)
+			}
+			names = kept
+			switch len(names) {
+			case 0:
+				// Every target was a claimed thread: the call stands alone.
+				return &ast.ExprStmt{Position: pos, Expr: value}
+			case 1:
+				// One value target: the return is a scalar — plain reassignment.
+				return &ast.AssignStmt{Position: names[0].Position, Target: &ast.Ident{Position: names[0].Position, Name: names[0].Name}, Value: value}
+			}
+		}
 	}
 	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
 }

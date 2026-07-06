@@ -198,3 +198,59 @@ Known limitation: the tree-walking **interpreter** copies the struct in the
 ExprBlock/rebind branch path, so `-emit interpret` under-threads the nested-rebind arm.
 The native/LLVM backend (the shipping target) is correct; the interpreter divergence is a
 pre-existing value-block limitation, tracked separately.
+
+## §11 — Implicit threading: every lmut param is a compile-time return slot (LANDED)
+
+The uniform model (user, 2026-07-06): an `lmut` parameter implicitly appends itself to
+the function's compile-time return type — no §2 notation needed. `def read_type_suffix
+(lexer: lmut Lexer) -> sview?` has implicit type `-> (lexer: lmut Lexer, sview?)`;
+a void lmut mutator's implicit type is just its threaded receivers. All of it is
+NOTATION — codegen is unchanged (in-place mutable refs, real return only). The tuple
+exists so the dataflow typechecks and can be tracked root-to-leaf.
+
+Call-site spellings (both landed):
+
+    lexer <- lexer.advance_char()                 # void: §8 manifest (unchanged)
+    lexer, suffix <- lexer.read_type_suffix()     # arrow claim: lexer threads, suffix binds
+    rebind suffix: sview?, lexer = lexer.read_type_suffix()   # rebind claim (fresh binding)
+
+- Claims are now valid against ANY lmut argument (checkLmutThreadClaims implicit-slot
+  pass; astParamIsLmut) — §2 declaration no longer required. §2 notation remains legal
+  but is redundant; must-use stays ungated only for explicitly-declared functions
+  (the §10 gate covers the rest).
+- The arrow spelling: tryParseTupleBindStmt's `<-` path extracts targets naming an
+  arg/receiver root of a single-call RHS as claims (mirrors parseRebindStmt); the
+  remaining target(s) bind the real return (1 → plain AssignStmt, n → TupleBindStmt).
+  Convention note: naming your own binding as a target of a call-RHS `<-` IS a thread
+  claim (same convention as rebind and §6 slots) — a claim on a non-lmut arg errors.
+
+## §12 — Single-place thread assignment: the total value-if (LANDED)
+
+The strict conditional form: mutation of an lmut value under a conditional is a TOTAL
+value-if — every branch either threads the value in place or yields it unchanged:
+
+    lexer <-
+        if width > 1:
+            lexer.advance_chars(width)   # thread: effect in place, yields lexer
+        elif width == 1:
+            lexer.advance_char()
+        else:
+            lexer                        # neutral: yields lexer unchanged (no-op)
+
+§6 thread slots extended from multi-place tuples to the single-target form
+(parser desugarSingleThreadAssign in thread_slots.go): every leaf of a branchy RHS
+(TernaryExpr / ExprBlock) is classified against the target — a mutating call rooted at
+it THREADS (implicitly yielding its receiver, §11), the bare binding is NEUTRAL, and
+anything else is a VALUE. All-thread/neutral ⇒ erases to a plain statement-if over the
+in-place mutations (zero overhead; `else: lexer` compiles to nothing). Thread+value
+mixed ⇒ arm-consistency error. No thread leaves ⇒ untouched §1 value assignment
+(`total <- if c: total + 5 else: total` still works). A bare call RHS is NOT
+intercepted (stays the §8 manifest, whose semantic void-check disambiguates).
+
+E7 (value-if requires else) gives the totality for free: the no-op path must be
+written `else: lexer`, making "this path leaves lexer unchanged" visible.
+
+Goldens: src/single_thread_assign_runtime_test.go (all arms, native),
+src/implicit_thread_claims_runtime_test.go (both claim spellings, native).
+Known: the tree-walking interpreter under-threads these forms (pre-existing
+value-block copy limitation); the LLVM backend is correct and authoritative.
