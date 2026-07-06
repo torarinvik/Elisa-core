@@ -76,7 +76,7 @@ func (p *Parser) parseRebindStmt() ast.Stmt {
 	// record the claim on the call for the semantic layer to validate (a claim on a
 	// non-threading callee, or an unclaimed declared thread, is a compile error there —
 	// which is what makes this syntactic matching sound).
-	if call, isCall := value.(*ast.CallExpr); isCall {
+	if call := claimableCall(value); call != nil {
 		kept := targets[:0]
 		for _, t := range targets {
 			if t.typ == nil && callArgRootNames(call)[t.name] {
@@ -132,6 +132,29 @@ func (p *Parser) rebindTargetStmt(t rebindTarget, value ast.Expr) ast.Stmt {
 		Name:     t.name,
 		Type:     t.typ,
 		Value:    value,
+	}
+}
+
+// claimableCall unwraps a rebind/arrow RHS to the direct call a thread claim can
+// attach to: the call itself, possibly wrapped in parens or a plain `get` unwrap
+// (`rebind cond: Ast::Expr, parser = get parser.expr()` — the claim belongs to the
+// inner call; `get` only unwraps its optional result). A `get` with a fallback or
+// recovery clause is not a plain unwrap and is not seen through.
+func claimableCall(e ast.Expr) *ast.CallExpr {
+	for {
+		switch n := e.(type) {
+		case *ast.CallExpr:
+			return n
+		case *ast.ParenExpr:
+			e = n.Inner
+		case *ast.GetExpr:
+			if n.Fallback != nil || n.Recovery != nil {
+				return nil
+			}
+			e = n.Value
+		default:
+			return nil
+		}
 	}
 }
 

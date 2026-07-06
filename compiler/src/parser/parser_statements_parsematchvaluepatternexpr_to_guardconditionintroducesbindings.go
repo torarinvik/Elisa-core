@@ -388,7 +388,7 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		// bind and record the claim for the semantic layer to validate (mirrors the
 		// rebind form; a claim on a non-lmut argument is a compile error there).
 		// The remaining targets bind the call's real return.
-		if call, isCall := value.(*ast.CallExpr); isCall {
+		if call := claimableCall(value); call != nil {
 			roots := callArgRootNames(call)
 			kept := names[:0]
 			for _, nm := range names {
