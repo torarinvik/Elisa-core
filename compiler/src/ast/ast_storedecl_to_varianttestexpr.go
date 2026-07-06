@@ -578,6 +578,14 @@ type LmutThreadSlot struct {
 	ParamName  string
 }
 
+// LmutRebindClaim is one rebind target claiming a threaded lmut argument of a call
+// (docs/120 §3). Name is the claimed binding (must equal the root of the argument
+// bound to a declared thread slot); Position locates the target for diagnostics.
+type LmutRebindClaim struct {
+	Position lexer.Pos
+	Name     string
+}
+
 type TupleTypeExpr struct {
 	Position lexer.Pos
 	Fields   []TupleTypeField
@@ -684,6 +692,16 @@ type CallExpr struct {
 	// `pool_submit1` call). User code never wrote the raw primitive, so the
 	// raw-concurrency-surface-removed diagnostic must not fire on it.
 	SafeConcurrencySugar bool
+	// LmutRebindClaims records rebind targets that name a threaded lmut argument of
+	// this call (docs/120 §3): `rebind ch, lexer = lexer.advance_char()` claims the
+	// `lexer` thread. The parser drops a claimed target from the value bind (the
+	// thread is in-place; there is no slot to bind) and records it here; the semantic
+	// layer validates each claim against the callee's declared LmutThreadSlots — a
+	// claim on a non-threading callee, or a declared thread left unclaimed (the
+	// must-use rule), is a compile error. This is what keeps the parser's purely
+	// syntactic target-vs-argument matching sound: a wrong guess cannot misbind, it
+	// can only be rejected.
+	LmutRebindClaims []LmutRebindClaim
 
 	ResolvedArgsValid         bool
 	ResolvedArgs              []Expr

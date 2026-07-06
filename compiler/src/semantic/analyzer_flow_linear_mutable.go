@@ -87,6 +87,67 @@ func (a *Analyzer) checkLinearMutableCallArgs(params []Type, args []ast.Expr) {
 	}
 }
 
+// checkLmutThreadClaims validates the docs/120 §3 call-site contract for declared
+// lmut threading, in both directions:
+//
+//   - MUST-USE: a call to a function whose signature declares lmut threading
+//     (`-> (ch: char, lexer: lmut Lexer)`) must claim every declared thread via the
+//     rebind form (`rebind ch, lexer = lexer.advance_char()`). The signature opts the
+//     function into manifest-required — that is the whole trackability payoff.
+//   - NO FALSE CLAIMS: a rebind target that claimed a threaded argument (matched
+//     syntactically by the parser) must correspond to a slot the callee actually
+//     declares. This is what keeps the parser's name-matching sound: a wrong guess
+//     is rejected here, never silently misbound.
+//
+// args is the position-aligned argument list (UFCS receiver already prepended).
+// Conservative: an unresolvable callee (indirect call, overload ambiguity) skips
+// must-use, and rejects any claims (they cannot be validated).
+func (a *Analyzer) checkLmutThreadClaims(expr *ast.CallExpr, args []ast.Expr) {
+	if a == nil || expr == nil {
+		return
+	}
+	decl, resolved := a.resolveDirectCallFuncDecl(expr)
+	var slots []ast.LmutThreadSlot
+	if resolved && decl != nil {
+		slots = decl.LmutThreadSlots
+	}
+	if len(expr.LmutRebindClaims) == 0 && len(slots) == 0 {
+		return
+	}
+	if !resolved {
+		for _, c := range expr.LmutRebindClaims {
+			a.errorf(c.Position, "rebind target %q claims a threaded slot, but the callee cannot be resolved to a single declared-threading function", c.Name)
+		}
+		return
+	}
+	used := make([]bool, len(expr.LmutRebindClaims))
+	for _, slot := range slots {
+		if slot.ParamIndex >= len(args) {
+			continue
+		}
+		root, _, ok := a.namedStateMutationTargetPath(args[slot.ParamIndex])
+		if !ok || root == nil {
+			continue
+		}
+		claimed := false
+		for i, c := range expr.LmutRebindClaims {
+			if !used[i] && c.Name == root.Name {
+				used[i] = true
+				claimed = true
+				break
+			}
+		}
+		if !claimed {
+			a.errorf(expr.Pos(), "%q declares lmut threading of %q; the call must claim it with the rebind form: `rebind ..., %s = ...`", decl.Name, slot.ParamName, root.Name)
+		}
+	}
+	for i, c := range expr.LmutRebindClaims {
+		if !used[i] {
+			a.errorf(c.Position, "rebind target %q claims a threaded slot, but %q does not declare lmut threading for it", c.Name, decl.Name)
+		}
+	}
+}
+
 // linearStepPathString renders a place path to a canonical, comparable string. Field steps become
 // ".field"; constant index steps "[n]"; a wildcard/dynamic index "[*]" (conservatively overlaps any
 // sibling index, since we cannot prove two dynamic indices distinct).

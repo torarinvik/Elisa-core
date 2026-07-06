@@ -120,6 +120,60 @@ def f() -> void:
 	}
 }
 
+// docs/120 §3 must-use: a call to a declared-threading function must claim every
+// declared thread via the rebind form; a plain call is an error.
+func TestLmutDeclaredThreadingMustUse(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "lmut_mustuse.elisa", `struct Lexer:
+    position: mutable i64
+
+def advance_char(lexer: lmut Lexer) -> (ch: i64, lexer: lmut Lexer):
+    lexer.position <- lexer.position + 1
+    return 65, lexer
+
+def use() -> void:
+    lx: mutable Lexer = Lexer{position: 0}
+    c: i64 = advance_char(lx)
+    _ = c
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "must claim it with the rebind form") {
+		t.Fatalf("expected must-use error, got: %s", all)
+	}
+}
+
+// docs/120 §3 rebind form: claiming the thread satisfies must-use and binds the
+// value slots; a false claim (callee declares no threading) is rejected.
+func TestLmutDeclaredThreadingRebindFormClean(t *testing.T) {
+	analyzeTreeTestSource(t, "lmut_rebindform.elisa", `struct Lexer:
+    position: mutable i64
+
+def advance_char(lexer: lmut Lexer) -> (ch: i64, lexer: lmut Lexer):
+    lexer.position <- lexer.position + 1
+    return 65, lexer
+
+def use() -> void:
+    lx: mutable Lexer = Lexer{position: 0}
+    rebind c: i64, lx = lx.advance_char()
+    _ = c
+`)
+}
+
+func TestLmutFalseThreadClaimRejected(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "lmut_falseclaim.elisa", `struct Lexer:
+    position: mutable i64
+
+def plain(lx: mutable Lexer&) -> (a: i64, b: i64):
+    return 1, 2
+
+def use() -> void:
+    lx: mutable Lexer = Lexer{position: 0}
+    rebind x: i64, lx = plain(&lx)
+    _ = x
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "does not declare lmut threading") {
+		t.Fatalf("expected false-claim error, got: %s", all)
+	}
+}
+
 // Soundness-contract pin: an `lmut` parameter cannot be dropped/consumed whole. `move c` on an
 // lmut param is a whole-value move out of a reference, which the ordinary typecheck rejects
 // (a ref is not an owning binding) — so the "always threads back, no persistent consume" guarantee

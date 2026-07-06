@@ -37,15 +37,19 @@ def touch(lx: lmut Lexer) -> (lx: lmut Lexer):
 @test
 def declared_threading_erases_to_plain_lmut() -> void:
     lx: mutable Lexer = Lexer{position: 0, line: 1, column: 1}
-    c: u8 = advance_char(lx)
+    # docs/120 §3 must-use: a declaring fn is called via the rebind form, which
+    # claims the threaded arg (in place, erased) and binds the value slots.
+    rebind c: u8, lx = lx.advance_char()
     if c != 65:
         panic("returned char wrong")
     if lx.position != 1 or lx.column != 2 or lx.line != 1:
         panic("lexer did not thread in place")
-    _ = advance_char(lx)
-    _ = advance_char(lx)
+    rebind c2: u8, lx = lx.advance_char()
+    rebind c3: u8, lx = lx.advance_char()
+    if c2 != c3:
+        panic("steady advance wrong")
     # position hits the EOF bound; the early-return path also threads
-    eof: u8 = advance_char(lx)
+    rebind eof: u8, lx = lx.advance_char()
     if eof != NULL_CHAR:
         panic("eof path wrong")
     if lx.position != 3:
@@ -54,8 +58,8 @@ def declared_threading_erases_to_plain_lmut() -> void:
 @test
 def all_slots_threaded_erases_to_void() -> void:
     lx: mutable Lexer = Lexer{position: 0, line: 1, column: 1}
-    touch(lx)
-    touch(lx)
+    rebind lx = touch(lx)
+    rebind lx = touch(lx)
     if lx.position != 2:
         panic("void-erased threading broken")
 `

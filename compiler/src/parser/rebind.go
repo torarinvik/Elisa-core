@@ -69,6 +69,29 @@ func (p *Parser) parseRebindStmt() ast.Stmt {
 	}
 	p.expectNewlineAfterValueExpr(value)
 
+	// docs/120 §3: a bare target that names an argument (or UFCS receiver) root of a
+	// direct-call RHS claims that argument's declared lmut thread — `rebind ch, lexer =
+	// lexer.advance_char()`. The thread is in-place (the callee's lmut slot was erased,
+	// docs/120 §2), so the target has no value slot to bind: drop it from the bind and
+	// record the claim on the call for the semantic layer to validate (a claim on a
+	// non-threading callee, or an unclaimed declared thread, is a compile error there —
+	// which is what makes this syntactic matching sound).
+	if call, isCall := value.(*ast.CallExpr); isCall {
+		kept := targets[:0]
+		for _, t := range targets {
+			if t.typ == nil && callArgRootNames(call)[t.name] {
+				call.LmutRebindClaims = append(call.LmutRebindClaims, ast.LmutRebindClaim{Position: t.pos, Name: t.name})
+				continue
+			}
+			kept = append(kept, t)
+		}
+		targets = kept
+		// Every target was a claimed thread: nothing to bind — the call stands alone.
+		if len(targets) == 0 {
+			return &ast.ExprStmt{Position: pos, Expr: value}
+		}
+	}
+
 	// Single target: the block yields a scalar (not a 1-tuple), so bind it directly
 	// — no destructuring temp needed.
 	if len(targets) == 1 {
@@ -110,6 +133,36 @@ func (p *Parser) rebindTargetStmt(t rebindTarget, value ast.Expr) ast.Stmt {
 		Type:     t.typ,
 		Value:    value,
 	}
+}
+
+// callArgRootNames collects the root identifier names of a call's arguments and its
+// UFCS receiver (`lexer.advance_char()` — the receiver is the Field object, which the
+// semantic UFCS rewrite later prepends to the argument list). Used to spot rebind
+// targets that claim a threaded lmut argument.
+func callArgRootNames(call *ast.CallExpr) map[string]bool {
+	roots := map[string]bool{}
+	add := func(e ast.Expr) {
+		for {
+			switch n := e.(type) {
+			case *ast.Ident:
+				roots[n.Name] = true
+				return
+			case *ast.ParenExpr:
+				e = n.Inner
+			case *ast.AddrOfExpr:
+				e = n.Operand
+			default:
+				return
+			}
+		}
+	}
+	for _, arg := range call.Args {
+		add(arg)
+	}
+	if field, ok := call.Func.(*ast.FieldExpr); ok {
+		add(field.Object)
+	}
+	return roots
 }
 
 // freshRebindName mints a collision-free temp name for one rebind tuple slot.

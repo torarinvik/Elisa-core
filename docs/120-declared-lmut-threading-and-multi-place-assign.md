@@ -1,6 +1,15 @@
 # docs/120 — Declared `lmut` threading and multi-place assignment
 
-Status: §1 (multi-place `<-`) LANDED. §2–§3 (declared threading + rebind call sites) DESIGNED, not yet implemented.
+Status: §1 (multi-place `<-`), §2 (declared threading, erased), §3 (rebind call sites + must-use) LANDED in stage0. Stage1 port + Parser-boundary dogfood remain.
+
+Implementation notes vs the original design:
+- Return-tuple fields are NAMED (`(ch: char, lexer: lmut Lexer)`) — tuple types in
+  Elisa require field names, and the name doubles as the param match.
+- §3 call sites work by CLAIMS: the parser drops a bare rebind target that names an
+  argument/receiver root of a direct-call RHS and records it as an LmutRebindClaim
+  on the CallExpr; the semantic layer validates claims against the callee's
+  LmutThreadSlots in both directions (must-use + no-false-claims), which makes the
+  syntactic matching sound — a wrong guess is rejected, never misbound.
 
 ## Motivation
 

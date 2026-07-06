@@ -558,6 +558,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	callAliasArgs = append(callAliasArgs, expr.ResolvedImplicitArgs...)
 	a.validateCallArgAliasAccess(expr, appliedType.Params, callAliasArgs)
 	a.checkLinearMutableCallArgs(appliedType.Params, callAliasArgs)
+	a.checkLmutThreadClaims(expr, callAliasArgs)
 	a.recordCallArgDisjoint(expr, appliedType.Params, callAliasArgs)
 	a.dischargeCallArgRefinements(expr, callAliasArgs)
 	a.dischargeCallRequires(expr, callAliasArgs)
