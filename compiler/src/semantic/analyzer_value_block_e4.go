@@ -1,6 +1,8 @@
 package semantic
 
 import (
+	"strings"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -48,6 +50,14 @@ func (a *Analyzer) checkValueBlockOuterMutation(expr *ast.ExprBlock) map[string]
 		}
 		local[c] = true
 	}
+	// A nested value block (an if/match value branch inside a captured block) inherits
+	// the enclosing block's licensed names: a `|capture|` on the outer binding site
+	// licenses the whole RHS subtree, including its branch blocks (docs/119 §6).
+	if len(a.valueBlockAllowed) > 0 {
+		for name := range a.valueBlockAllowed[len(a.valueBlockAllowed)-1] {
+			local[name] = true
+		}
+	}
 	a.walkValueBlockMutations(expr.Stmts, local)
 	return local
 }
@@ -76,6 +86,13 @@ func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
 	allowed := a.valueBlockAllowed[len(a.valueBlockAllowed)-1]
 	name, ok := rootIdentName(arg)
 	if !ok || name == "" || name == "_" || allowed[name] {
+		return
+	}
+	// Compiler-synthesized bindings (`__region_auto`, `__rg_*` region threading, …)
+	// are not user state — region inference threads them into allocating calls
+	// inside value blocks, and user code cannot name or capture a `__` binding.
+	// E4 is about user-visible outer mutation, so these are exempt.
+	if strings.HasPrefix(name, "__") {
 		return
 	}
 	sym, found := a.currentScope.Lookup(name)

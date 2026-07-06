@@ -62,8 +62,8 @@ func (p *Parser) parseRebindStmt() ast.Stmt {
 	p.expect(lexer.TOKEN_ASSIGN)
 
 	var value ast.Expr
-	if p.bareExprBlockAhead() {
-		value = p.parseBareExprBlockValue(pos)
+	if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+		value = blockValue
 	} else {
 		value = p.parseValueExprAllowTuple()
 	}

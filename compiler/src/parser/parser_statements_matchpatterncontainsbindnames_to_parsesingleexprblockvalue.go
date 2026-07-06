@@ -563,9 +563,9 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 				if owner != nil {
 					p.errorf("builder owner declarations cannot also use an initializer")
 				}
-				if p.bareExprBlockAhead() {
-					// docs/119 §2: `x: T =` NEWLINE INDENT ... — bare block expression.
-					value = p.parseBareExprBlockValue(pos)
+				if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+					// docs/119 §2/§6: `x: T = [|caps|]` NEWLINE INDENT ... — (captured) block expression.
+					value = blockValue
 				} else {
 					value = p.parseValueExprAllowTuple()
 				}
@@ -581,9 +581,9 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		p.advance()
 		p.advance()
 		var value ast.Expr
-		if p.bareExprBlockAhead() {
-			// docs/119 §2: `x =` NEWLINE INDENT ... — bare block expression.
-			value = p.parseBareExprBlockValue(pos)
+		if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+			// docs/119 §2/§6: `x = [|caps|]` NEWLINE INDENT ... — (captured) block expression.
+			value = blockValue
 		} else {
 			value = p.parseValueExprAllowTuple()
 		}
@@ -654,9 +654,9 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	case lexer.TOKEN_LARROW:
 		p.advance()
 		var value ast.Expr
-		if p.bareExprBlockAhead() {
-			// docs/119 §2: `x <-` NEWLINE INDENT ... — bare block expression.
-			value = p.parseBareExprBlockValue(pos)
+		if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+			// docs/119 §2/§6: `x <- [|caps|]` NEWLINE INDENT ... — (captured) block expression.
+			value = blockValue
 		} else {
 			value = p.parseValueExprAllowTuple()
 		}

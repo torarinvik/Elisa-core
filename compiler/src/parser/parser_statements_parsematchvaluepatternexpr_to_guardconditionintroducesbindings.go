@@ -316,10 +316,10 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		return nil
 	}
 	var value ast.Expr
-	if p.bareExprBlockAhead() {
-		// docs/119 §2: `c, d =` NEWLINE INDENT ... — bare block expression whose
-		// tail tuple binds the targets.
-		value = p.parseBareExprBlockValue(pos)
+	if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+		// docs/119 §2/§6: `c, d = [|caps|]` NEWLINE INDENT ... — (captured) block
+		// expression whose tail tuple binds the targets.
+		value = blockValue
 		p.expectNewlineAfterValueExpr(value)
 	} else {
 		value = p.parseValueExprAllowTuple()

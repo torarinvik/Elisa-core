@@ -427,6 +427,29 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 					return true
 				}
 			}
+		case *ast.TernaryExpr:
+			// docs/119 §4: a value `if` — either branch producing a region-allocated
+			// value makes the whole conditional region-allocated.
+			if regiony(e.Value) || regiony(e.Alt) {
+				return true
+			}
+		case *ast.MatchExpr:
+			// docs/119 §4: a match-expression — an arm whose tail value is
+			// region-allocated makes the whole match region-allocated (arm bodies'
+			// interior returns are seen by the statement walk below).
+			for _, arm := range e.Arms {
+				if len(arm.Body) == 0 {
+					continue
+				}
+				if tail, ok := arm.Body[len(arm.Body)-1].(*ast.ExprStmt); ok && tail != nil && regiony(tail.Expr) {
+					return true
+				}
+			}
+		case *ast.ExprBlock:
+			// docs/119 §2: a block expression's value is the block's result.
+			if regiony(e.Value) {
+				return true
+			}
 		}
 		return a.exprResultIsRegionAllocated(value)
 	}
@@ -499,6 +522,13 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 			switch s := stmt.(type) {
 			case *ast.ReturnStmt:
 				check(s.Value)
+				// docs/119 §4: a returned match-expression carries statement arm
+				// bodies — walk them so an arm's interior `return <alloc>` classifies.
+				if me, ok := unwrapParenForRegionPoly(s.Value).(*ast.MatchExpr); ok && me != nil {
+					for _, arm := range me.Arms {
+						walk(arm.Body)
+					}
+				}
 			case *ast.IfStmt:
 				walk(s.Then)
 				for _, elif := range s.Elifs {

@@ -670,6 +670,64 @@ func (p *Parser) bareExprBlockAhead() bool {
 	return p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_INDENT
 }
 
+// valueCaptureHeaderAhead reports whether the RHS position starts a captured
+// block expression (docs/119 §6 applied to value blocks): `|IDENT(, IDENT)*|`
+// immediately followed by NEWLINE INDENT. A leading `|` directly after `=`/`<-`
+// is a guaranteed parse error today (no prefix `|` operator), so claiming it is
+// backward compatible — and requiring the block form keeps the claim airtight.
+func (p *Parser) valueCaptureHeaderAhead() bool {
+	if p.peek() != lexer.TOKEN_PIPE {
+		return false
+	}
+	i := p.pos + 1
+	for {
+		if i >= len(p.tokens) || p.tokens[i].Kind != lexer.TOKEN_IDENT {
+			return false
+		}
+		i++
+		if i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_COMMA {
+			i++
+			continue
+		}
+		break
+	}
+	return i+2 < len(p.tokens) &&
+		p.tokens[i].Kind == lexer.TOKEN_PIPE &&
+		p.tokens[i+1].Kind == lexer.TOKEN_NEWLINE &&
+		p.tokens[i+2].Kind == lexer.TOKEN_INDENT
+}
+
+// parseValueBlockRHS parses the two block-expression RHS forms every `=`/`<-`
+// site shares: the docs/119 §2 bare block (`=` NEWLINE INDENT …) and the §6
+// captured block (`= |caps|` NEWLINE INDENT …), where the header licenses the
+// named outer mutables for mutation inside the block (E4) — the value-block
+// analogue of the loop capture header. Returns (nil, false) when neither form
+// is ahead so the caller falls through to its normal value-expression parse.
+func (p *Parser) parseValueBlockRHS(pos lexer.Pos) (ast.Expr, bool) {
+	if p.valueCaptureHeaderAhead() {
+		p.expect(lexer.TOKEN_PIPE)
+		var captures []string
+		for {
+			captures = append(captures, p.expect(lexer.TOKEN_IDENT).Text)
+			if !p.match(lexer.TOKEN_COMMA) {
+				break
+			}
+		}
+		p.expect(lexer.TOKEN_PIPE)
+		value := p.parseBareExprBlockValue(pos)
+		if block, ok := value.(*ast.ExprBlock); ok {
+			block.Captures = captures
+		} else {
+			value = &ast.ExprBlock{Position: pos, Captures: captures, Value: value}
+		}
+		return value, true
+	}
+	if p.bareExprBlockAhead() {
+		return p.parseBareExprBlockValue(pos), true
+	}
+	return nil, false
+}
+
 func (p *Parser) parseExprBlockBody(pos lexer.Pos, flattenSingle bool) ast.Expr {
 	p.expectNewline()
 	p.exprBlockDepth++

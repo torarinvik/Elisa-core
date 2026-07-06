@@ -365,9 +365,16 @@ func TestAnalyzeTernaryPropagatesExpectedDarrayTypeToEmptyListBranch(t *testing.
 	requireNoWarnings(t, result)
 
 	decl := requireFuncDecl(t, result, "choose")
-	varDecl, ok := decl.Body[0].(*ast.VarDeclStmt)
+	// choose builds a local container (through the ternary) and returns it, so the
+	// region-poly classifier wraps its body in a synthesized auto region the caller
+	// adopts — look through the wrapper to the declaration.
+	body := decl.Body
+	if region, ok := body[0].(*ast.RegionStmt); ok {
+		body = region.Body
+	}
+	varDecl, ok := body[0].(*ast.VarDeclStmt)
 	if !ok {
-		t.Fatalf("expected var decl, got %T", decl.Body[0])
+		t.Fatalf("expected var decl, got %T", body[0])
 	}
 	ter, ok := varDecl.Value.(*ast.TernaryExpr)
 	if !ok {

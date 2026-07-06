@@ -441,8 +441,16 @@ func lowerAllocatingGrammarExpr(ctx lowerContext, pos lexer.Pos, typ ast.TypeExp
 		return nil, false
 	}
 	valueName := ctx.fresh("expr_value")
+	// The synthesized block allocates through the grammar env's alloc binding (`in alloc:` +
+	// allocating calls in `expr`). License that mutation for the E4 value-block purity pass the
+	// same way a user-written `|alloc|` capture header would — Captures is consumed only by E4.
+	var captures []string
+	if allocIdent, ok := ctx.allocExpr.(*ast.Ident); ok && allocIdent.Name != "" {
+		captures = []string{allocIdent.Name}
+	}
 	return &ast.ExprBlock{
 		Position: pos,
+		Captures: captures,
 		Stmts: []ast.Stmt{
 			&ast.VarDeclStmt{Position: pos, Name: valueName, Type: valueType, Mutable: true, Value: &ast.ZeroedLit{Position: pos}},
 			&ast.InStoreStmt{
