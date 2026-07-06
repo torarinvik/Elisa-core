@@ -117,3 +117,78 @@ func (p *Parser) freshRebindName(pos lexer.Pos, slot int) string {
 	p.rebindCounter++
 	return "__rb_" + itoa(p.rebindCounter) + "_" + itoa(slot)
 }
+
+// multiPlaceArrowAhead reports whether the comma at the current position is a
+// multi-place-assign separator: a top-level `<-` appears later on this line. A bare
+// `expr, expr` line with no arrow is a value block's tuple tail and must not be
+// consumed. Pure token scan (no expression parsing, no side effects); brackets nest,
+// and the scan stops at the first top-level newline/indent boundary.
+func (p *Parser) multiPlaceArrowAhead() bool {
+	depth := 0
+	for i := p.pos; i < len(p.tokens); i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			depth--
+		case lexer.TOKEN_LARROW:
+			if depth == 0 {
+				return true
+			}
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_INDENT, lexer.TOKEN_DEDENT:
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+// docs/120 — multi-place mutation: `place1, place2 <- <tuple expr>`.
+//
+// The sibling of `rebind` for PLACES (field paths / index targets) rather than bindings:
+// several places are updated from one tuple-valued RHS, so a conditional update reads as
+// pure values flowing into exactly one visible mutation point:
+//
+//	lexer.line, lexer.column <-
+//	    if ch == '\n':
+//	        lexer.line + 1, 1
+//	    else:
+//	        lexer.line, lexer.column + 1
+//
+// Desugar (pure parser, mirrors parseRebindStmt): the whole RHS binds to fresh temps via
+// the §2 temp-tuple bind, then each `place <- temp` assignment rides pendingStmts so it
+// lands flat after the bind. Evaluating the RHS fully before any place is written gives
+// simultaneous-assignment semantics (a swap `a.x, a.y <- a.y, a.x` is correct), and every
+// existing `<-` check (mutability, invariants, named-state transitions, E4) applies to
+// the individual assignments unchanged.
+//
+// The first place has already been parsed by the caller (it is the expression before the
+// first comma); this consumes the remaining places, the `<-`, and the RHS.
+func (p *Parser) parseMultiPlaceAssignStmt(pos lexer.Pos, first ast.Expr) ast.Stmt {
+	places := []ast.Expr{first}
+	for p.match(lexer.TOKEN_COMMA) {
+		places = append(places, p.parseExpr())
+	}
+	p.expect(lexer.TOKEN_LARROW)
+
+	var value ast.Expr
+	if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+		value = blockValue
+	} else {
+		value = p.parseValueExprAllowTuple()
+	}
+	p.expectNewlineAfterValueExpr(value)
+
+	tempNames := make([]ast.TupleBindName, len(places))
+	for i, place := range places {
+		nm := p.freshRebindName(pos, i)
+		tempNames[i] = ast.TupleBindName{Position: place.Pos(), Name: nm}
+		p.pendingStmts = append(p.pendingStmts, &ast.AssignStmt{
+			Position: place.Pos(),
+			Target:   place,
+			Value:    &ast.Ident{Position: place.Pos(), Name: nm},
+		})
+	}
+	return &ast.TupleBindStmt{Position: pos, Names: tempNames, Declare: true, Value: value}
+}

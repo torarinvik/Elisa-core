@@ -651,6 +651,20 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	}
 
 	switch p.peek() {
+	case lexer.TOKEN_COMMA:
+		// docs/120: multi-place mutation `place1, place2 <- <tuple expr>` — several places
+		// updated from one tuple-valued RHS (typically a value-if), so the branches stay
+		// pure values and mutation happens at exactly one visible `<-`. Desugars like
+		// `rebind`: the RHS binds to fresh temps via the §2 temp-tuple bind, then one
+		// `place <- temp` per target rides pendingStmts.
+		//
+		// Guarded by a token scan: the comma is a place separator ONLY when a top-level
+		// `<-` follows on this line. A bare `expr, expr` (a value block's tuple TAIL —
+		// exactly what rebind/if-value branches yield) must fall through untouched.
+		if p.multiPlaceArrowAhead() {
+			return p.parseMultiPlaceAssignStmt(pos, expr)
+		}
+
 	case lexer.TOKEN_LARROW:
 		p.advance()
 		var value ast.Expr
