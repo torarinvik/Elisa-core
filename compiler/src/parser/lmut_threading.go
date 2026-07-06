@@ -79,16 +79,17 @@ func (p *Parser) applyDeclaredLmutThreading(fn *ast.FuncDecl) {
 	fn.LmutThreadSlots = slots
 }
 
-// rewriteLmutThreadReturns walks every statement list reachable from body (via
-// reflection, so no container shape — if/match arms/can blocks/loops — is missed),
-// validates each return against the declared manifest, and erases the threaded
-// slots from its tuple. Lambda bodies are NOT entered: statement lists are only
-// reachable through Stmt fields, and a lambda body hangs off an expression, which
-// the walk never descends into — its returns belong to the lambda.
+// rewriteLmutThreadReturns walks every return statement reachable from body,
+// validates it against the declared manifest, and erases the threaded slots from
+// its tuple. The walk is a generic deep reflection traversal — a return can hide
+// inside ANY statement container (if/match/can/loops) and also inside statement
+// bodies that hang off EXPRESSIONS (a match-expression arm, a value block): those
+// returns exit the enclosing function, so they carry the threading obligation too.
+// The only stops are lambda and nested function nodes, whose returns belong to the
+// lambda/function itself.
 func (p *Parser) rewriteLmutThreadReturns(body []ast.Stmt, declaredArity int, slots []ast.LmutThreadSlot) bool {
 	ok := true
-	var walkStmt func(s ast.Stmt)
-	var walkStructLists func(v reflect.Value)
+	var walk func(v reflect.Value)
 
 	isThreadSlot := func(i int) (ast.LmutThreadSlot, bool) {
 		for _, s := range slots {
@@ -99,7 +100,14 @@ func (p *Parser) rewriteLmutThreadReturns(body []ast.Stmt, declaredArity int, sl
 		return ast.LmutThreadSlot{}, false
 	}
 
+	// A multi-pattern match arm (`"public" | "private": …`) shares one body across
+	// its alternatives, so the walk can reach the same return twice — rewrite once.
+	rewritten := map[*ast.ReturnStmt]bool{}
 	rewriteReturn := func(ret *ast.ReturnStmt) {
+		if rewritten[ret] {
+			return
+		}
+		rewritten[ret] = true
 		var elems []ast.Expr
 		var tuplePos = ret.Position
 		if tup, isTuple := ret.Value.(*ast.TupleExpr); isTuple {
@@ -139,47 +147,38 @@ func (p *Parser) rewriteLmutThreadReturns(body []ast.Stmt, declaredArity int, sl
 		}
 	}
 
-	// Reflection walk: from a statement struct, recurse into every []ast.Stmt field
-	// and into struct-slice fields (match arms, catch arms, …) that themselves hold
-	// statement lists. Expression fields are never descended into.
-	walkStructLists = func(v reflect.Value) {
-		if v.Kind() == reflect.Ptr {
+	walk = func(v reflect.Value) {
+		switch v.Kind() {
+		case reflect.Interface:
 			if v.IsNil() {
 				return
 			}
-			v = v.Elem()
-		}
-		if v.Kind() != reflect.Struct {
-			return
-		}
-		stmtSliceType := reflect.TypeOf([]ast.Stmt(nil))
-		for i := 0; i < v.NumField(); i++ {
-			f := v.Field(i)
-			switch {
-			case f.Type() == stmtSliceType:
-				for j := 0; j < f.Len(); j++ {
-					if s, isStmt := f.Index(j).Interface().(ast.Stmt); isStmt {
-						walkStmt(s)
-					}
-				}
-			case f.Kind() == reflect.Slice && f.Type().Elem().Kind() == reflect.Struct:
-				for j := 0; j < f.Len(); j++ {
-					walkStructLists(f.Index(j).Addr())
-				}
+			walk(v.Elem())
+		case reflect.Ptr:
+			if v.IsNil() {
+				return
+			}
+			switch n := v.Interface().(type) {
+			case *ast.ReturnStmt:
+				rewriteReturn(n)
+			case *ast.LambdaExpr, *ast.FuncDecl:
+				// A nested function's returns are its own.
+			default:
+				walk(v.Elem())
+			}
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice:
+			for j := 0; j < v.Len(); j++ {
+				walk(v.Index(j))
 			}
 		}
 	}
 
-	walkStmt = func(s ast.Stmt) {
-		if ret, isRet := s.(*ast.ReturnStmt); isRet {
-			rewriteReturn(ret)
-			return
-		}
-		walkStructLists(reflect.ValueOf(s))
-	}
-
 	for _, s := range body {
-		walkStmt(s)
+		walk(reflect.ValueOf(s))
 	}
 	return ok
 }
