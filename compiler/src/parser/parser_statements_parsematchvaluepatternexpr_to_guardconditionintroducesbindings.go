@@ -327,6 +327,18 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		// arm block's DEDENT (the trailing newline was consumed inside the final arm).
 		p.expectNewlineAfterValueExpr(value)
 	}
+	// docs/120 §6: in the `<-` (reassign) form, a slot naming its own target — the bare
+	// binding or a mutating call on it — is a THREAD slot and erases; only value slots
+	// remain bound. The `=` (declare) form introduces fresh names and never threads.
+	if !declare {
+		places := make([]ast.Expr, len(names))
+		for i, nm := range names {
+			places[i] = &ast.Ident{Position: nm.Position, Name: nm.Name}
+		}
+		if stmt, handled := p.desugarThreadSlots(pos, places, value); handled {
+			return stmt
+		}
+	}
 	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
 }
 func (p *Parser) parseLetDestructureStmt() ast.Stmt {

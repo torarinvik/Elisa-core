@@ -233,6 +233,21 @@ func (p *Parser) parseMultiPlaceAssignStmt(pos lexer.Pos, first ast.Expr) ast.St
 	}
 	p.expectNewlineAfterValueExpr(value)
 
+	// docs/120 §6: thread slots. A slot whose expression is the target binding itself, or a
+	// mutating call on it, is a THREAD — its effects execute in place and the slot erases.
+	if stmt, handled := p.desugarThreadSlots(pos, places, value); handled {
+		return stmt
+	}
+	return p.buildPureMultiPlaceAssign(pos, places, value)
+}
+
+// buildPureMultiPlaceAssign is the docs/120 §1 desugar for value-only slots: the whole
+// RHS binds to fresh temps (fully evaluated before any write — simultaneous assignment),
+// then one `place <- temp` per target rides pendingStmts.
+func (p *Parser) buildPureMultiPlaceAssign(pos lexer.Pos, places []ast.Expr, value ast.Expr) ast.Stmt {
+	if len(places) == 1 {
+		return &ast.AssignStmt{Position: places[0].Pos(), Target: places[0], Value: value}
+	}
 	tempNames := make([]ast.TupleBindName, len(places))
 	for i, place := range places {
 		nm := p.freshRebindName(pos, i)

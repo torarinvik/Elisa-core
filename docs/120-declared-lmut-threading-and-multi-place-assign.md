@@ -21,6 +21,46 @@ Dogfood also hardened §2 itself: returns nested in match-EXPRESSION arms carry 
 obligation (generic walk, lambdas excluded), and multi-pattern arms share a body so
 the rewrite is once-per-node (9f2c7311).
 
+## §6 — Thread slots: the manifest as dataflow (LANDED)
+
+The user-driven extension of §1: block-level mutation manifests without capture
+headers. In a multi-place `<-`, a slot naming its own target — the bare binding, or
+a (chained) mutating call on it — is a THREAD SLOT:
+
+	parser, out <-
+	    if d_opt is d:
+	        parser, out.push(d)
+	    else:
+	        parser.advance(), out
+
+A mutating call "yields" its receiver notationally (the §2 erased-return model
+extended from function returns to expression slots): the effect executes in place,
+the slot erases, no assignment is emitted — zero overhead with value-semantics
+reading. The target list is the mutation manifest; the branches are dataflow.
+Slots whose root is not their target stay VALUE slots with §1 simultaneous
+semantics, and both kinds mix freely (`p, count <- p.advance(), count + 1`).
+
+Rules:
+- **Arm consistency**: every branch must classify slot i the same way. The bare
+  target binding is NEUTRAL (thread-erase ≡ self-assign no-op) and matches either.
+- **No cross-reads**: a value slot may not be rooted at a binding a thread slot of
+  the same assignment mutates — bind it before the `<-`.
+- **All-thread form**: when every slot threads, nothing remains to bind and the
+  construct desugars to a plain statement-if (E4 does not apply at all).
+- **Mixed form**: thread effects hoist into the branch blocks as statements; the
+  thread targets join those blocks' `Captures`, making "the target list is the
+  capture header" literal (E10 still validates each is a mutable binding).
+
+Implementation: parser/thread_slots.go (classification, cross-read guard, the
+statement-form and mixed-form desugars), hooked from both multi-place entry points
+(the all-bare-ident tuple-reassign path and the place-list path). Goldens:
+src/thread_slots_runtime_test.go. Dogfooded: stage1's parse_decl_unit runs the
+flagship form in production parsing (self-resolve 0, 28/28 smokes).
+
+Still open (§7 candidate): the strictness tier — in a declaring function (or under
+an opt-in flag), any outer-state mutation not at a manifest point (`<-`, rebind,
+claimed call, thread slot, capture) becomes an error steering to these forms.
+
 Implementation notes vs the original design:
 - Return-tuple fields are NAMED (`(ch: char, lexer: lmut Lexer)`) — tuple types in
   Elisa require field names, and the name doubles as the param match.
