@@ -99,7 +99,7 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if IsInvalidType(elem) {
 			return invalidType
 		}
-		return &RefType{Elem: elem, Mutable: n.Mutable, State: state, Storage: storage, Region: region, ExplicitStorage: n.ExplicitStorage}
+		return &RefType{Elem: elem, Mutable: n.Mutable, State: state, Storage: storage, Region: region, ExplicitStorage: n.ExplicitStorage, Linear: n.Linear}
 	case *ArrayType:
 		elem := a.substituteTypeWithDepth(n.Elem, bindings, shapeBindings, regionBindings, permissionBindings, depth+1)
 		if IsInvalidType(elem) {

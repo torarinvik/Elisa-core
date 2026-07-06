@@ -178,6 +178,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if ref, ok := elemType.(*RefType); ok {
 			cloned := cloneRefType(ref)
 			cloned.Mutable = true
+			// Carry the `lmut T` linear-mutable bit onto the resolved reference so the linear
+			// checker can spot it at every call site (codegen is unchanged — same mutable ref).
+			if n.Linear {
+				cloned.Linear = true
+			}
 			return cloned
 		}
 		// `mutable view[T]` is a writable borrow (like `&mut [T]`); mark the view mutable so

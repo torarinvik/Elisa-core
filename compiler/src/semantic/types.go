@@ -195,6 +195,11 @@ type RefType struct {
 	Storage         RefStorage
 	Region          string
 	ExplicitStorage bool
+	// Linear marks a reference resolved from the `lmut T` (linear-mutable) parameter mode.
+	// Layout and codegen are identical to `mutable T&`; the bit only tells the linear checker
+	// (analyzer_flow_linear_mutable.go) to require the argument be a movable mutable place and
+	// to forbid it aliasing any other argument of the same call — the single-live-binding rule.
+	Linear bool
 }
 
 type ArrayType struct {

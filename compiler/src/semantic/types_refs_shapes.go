@@ -4,7 +4,7 @@ func cloneRefTypeWithState(ref *RefType, state RefState) *RefType {
 	if ref == nil {
 		return nil
 	}
-	return &RefType{Elem: ref.Elem, Mutable: ref.Mutable, State: state, Storage: ref.Storage, Region: ref.Region, ExplicitStorage: ref.ExplicitStorage}
+	return &RefType{Elem: ref.Elem, Mutable: ref.Mutable, State: state, Storage: ref.Storage, Region: ref.Region, ExplicitStorage: ref.ExplicitStorage, Linear: ref.Linear}
 }
 
 func cloneRefType(ref *RefType) *RefType {
