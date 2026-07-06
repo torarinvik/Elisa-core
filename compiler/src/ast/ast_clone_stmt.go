@@ -102,7 +102,7 @@ func CloneStmtSubst(stmt Stmt, subst map[string]Expr) Stmt {
 		if !ok {
 			return nil
 		}
-		return &WhileStmt{Position: n.Position, Hint: n.Hint, Cond: cond, Body: body}
+		return &WhileStmt{Position: n.Position, Hint: n.Hint, Cond: cond, Body: body, Captures: append([]string(nil), n.Captures...)}
 	default:
 		return nil
 	}

@@ -155,6 +155,11 @@ func (p *Parser) wrapLoopHeader(hdr *loopHeader, loop ast.Stmt) ast.Stmt {
 		return &ast.ExprStmt{Position: hdr.pos, Expr: &ast.ExprBlock{Position: hdr.pos, Stmts: stmts, Value: hdr.yield, Captures: hdr.captures}}
 	}
 	// Statement form (no `->`): the decls are loop-private but there is no value.
+	// The captures ride the loop node as its declared mutation manifest
+	// (`while parser.accept(k) |parser|:` — docs/120 §9/§10 licensing).
+	if w, ok := loop.(*ast.WhileStmt); ok && len(hdr.captures) > 0 {
+		w.Captures = append([]string(nil), hdr.captures...)
+	}
 	// `if true:` is the scoped wrapper (folded at O2); ScopeStmt requires a guard.
 	return &ast.IfStmt{Position: hdr.pos, Cond: &ast.BoolLit{Position: hdr.pos, Value: true}, Then: stmts}
 }

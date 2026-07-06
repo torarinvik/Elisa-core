@@ -450,6 +450,12 @@ type Analyzer struct {
 	// a call that mutates an lmut place named here — the mutation IS reassigned, which is
 	// exactly the invariant. Set around the value analysis of an AssignStmt / TupleBindStmt.
 	reassignTargets map[string]bool
+	// loopCaptureAllowed is the stack of statement-loop capture manifests
+	// (`while parser.accept(k) |parser|:` — docs/120 §9): a mutating call on a
+	// captured binding anywhere in the loop (condition or body) is licensed, the
+	// capture being the loop's visible mutation manifest. One frame per nested
+	// captured loop.
+	loopCaptureAllowed []map[string]bool
 	// enforceLinearMutation gates the docs/120 §10 uniform rule (a bare lmut-mutating call
 	// is an error). Off until the frontend is fully converted to the reassignment form.
 	enforceLinearMutation bool

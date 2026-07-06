@@ -349,6 +349,10 @@ type WhileStmt struct {
 	Hint     BranchHint
 	Cond     Expr
 	Body     []Stmt
+	// Captures are the loop-header capture names (`while cond |parser|:`, docs/119 §6):
+	// the loop's declared mutation manifest. Notation only — no codegen effect; the
+	// §10 linear-mutation checker licenses mutating calls on captured bindings.
+	Captures []string
 }
 type ForStmt struct {
 	Position lexer.Pos

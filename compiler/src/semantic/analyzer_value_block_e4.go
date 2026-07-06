@@ -170,6 +170,19 @@ func (a *Analyzer) checkLinearMutation(call *ast.CallExpr, arg ast.Expr) {
 	if callThreadsName(call, name) {
 		return
 	}
+	// Licensed: a capture header names the binding (`while parser.accept(k) |parser|:`,
+	// docs/119 §6 / docs/120 §9) — the capture IS the visible mutation manifest for the
+	// whole loop/block, so mutating calls on the captured binding inside it are threaded.
+	// Value-form loops carry captures on their ExprBlock (valueBlockAllowed); statement
+	// loops on the WhileStmt manifest stack. Any enclosing frame licenses.
+	if len(a.valueBlockAllowed) > 0 && a.valueBlockAllowed[len(a.valueBlockAllowed)-1][name] {
+		return
+	}
+	for _, frame := range a.loopCaptureAllowed {
+		if frame[name] {
+			return
+		}
+	}
 	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", name, name)
 }
 

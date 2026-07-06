@@ -855,6 +855,17 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.LockStmt:
 		a.analyzeLockStmt(n)
 	case *ast.WhileStmt:
+		// Loop-capture manifest (docs/120 §9/§10): `while cond |parser|:` licenses
+		// mutating calls on the captured bindings across the whole loop (cond + body).
+		// analyzeStmt handles one statement per call, so the defer pops at case end.
+		if len(n.Captures) > 0 {
+			captured := make(map[string]bool, len(n.Captures))
+			for _, c := range n.Captures {
+				captured[c] = true
+			}
+			a.loopCaptureAllowed = append(a.loopCaptureAllowed, captured)
+			defer func() { a.loopCaptureAllowed = a.loopCaptureAllowed[:len(a.loopCaptureAllowed)-1] }()
+		}
 		bodyPermissionRefStart := len(a.currentFunctionUsedPermissionRefs)
 		progressObligationIndex := a.recordProgressLoopObligation(n)
 		condType := a.analyzeCondExpr(n.Cond)
