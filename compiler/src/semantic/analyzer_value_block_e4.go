@@ -132,6 +132,56 @@ func (a *Analyzer) isLmutArgManifest(names []ast.TupleBindName, value ast.Expr, 
 	return a.namesAreMutableArgRoots(names, call)
 }
 
+// isPlaceMutatingBuiltinManifest recognizes the docs/120 §8 place-manifest form
+// `place <- place.push(v)` — a `<-` whose RHS is a mutating builtin collection method
+// (`push`/`truncate`/`put`/…) whose receiver is the SAME place as the target. Unlike the
+// void arg-manifest, a mutating builtin returns its receiver ref (`mutable darray&`), not
+// void, so it can never satisfy AssignableTo against the place's value type — yet the
+// statement is exactly the visible-reassignment the linear model asks for. It mutates the
+// place in-place and the returned ref is redundant, so it erases to just the call.
+//
+// The target and the receiver must be the same rooted place (`b.items` == `b.items`), and
+// the root must be a mutable binding (`isMutableBinding`) — otherwise it is not a place we
+// may mutate through. Works for a bare-ident place (`xs <- xs.push(v)`) and a field path
+// (`b.items <- b.items.push(v)`) alike.
+func (a *Analyzer) isPlaceMutatingBuiltinManifest(target, value ast.Expr) bool {
+	call, ok := value.(*ast.CallExpr)
+	if !ok {
+		return false
+	}
+	recv, ok := a.mutatingBuiltinMethodReceiver(call)
+	if !ok {
+		return false
+	}
+	troot, tfields, ok := exprPlacePath(target)
+	if !ok {
+		return false
+	}
+	rroot, rfields, ok := exprPlacePath(recv)
+	if !ok || troot != rroot || len(tfields) != len(rfields) {
+		return false
+	}
+	for i := range tfields {
+		if tfields[i] != rfields[i] {
+			return false
+		}
+	}
+	return a.isMutableBinding(troot)
+}
+
+// exprPlacePath returns the rooted field path of a place expression: a bare ident yields
+// (name, nil), a field chain yields (root, fields). Non-place expressions return ok=false.
+func exprPlacePath(e ast.Expr) (string, []string, bool) {
+	switch n := stripOptimizationParens(e).(type) {
+	case *ast.Ident:
+		return n.Name, nil, true
+	case *ast.FieldExpr:
+		return fieldPlacePath(n)
+	default:
+		return "", nil, false
+	}
+}
+
 // tupleBindTargetSet collects the non-wildcard target names of a tuple-bind statement.
 func tupleBindTargetSet(names []ast.TupleBindName) map[string]bool {
 	set := map[string]bool{}

@@ -467,6 +467,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			n.ArgManifest = true // codegen emits only the call; nothing to assign
 			return
 		}
+		// docs/120 §8 place-manifest: `place <- place.push(v)` — a mutating builtin whose
+		// receiver is the same place as the target. The builtin returns a ref (never void), so
+		// this bypasses the void arg-manifest above; erase to the in-place call all the same.
+		if a.isPlaceMutatingBuiltinManifest(n.Target, n.Value) {
+			n.ArgManifest = true
+			return
+		}
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
