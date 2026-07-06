@@ -404,7 +404,12 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 				// Every target was a claimed thread: the call stands alone.
 				return &ast.ExprStmt{Position: pos, Expr: value}
 			case 1:
-				// One value target: the return is a scalar — plain reassignment.
+				// One value target: the return is a scalar. `_` discards it explicitly
+				// (`parser, _ <- parser.advance()` — the thread is claimed, the Token
+				// dropped visibly); otherwise a plain reassignment.
+				if names[0].Name == "_" {
+					return &ast.DiscardStmt{Position: pos, Value: value}
+				}
 				return &ast.AssignStmt{Position: names[0].Position, Target: &ast.Ident{Position: names[0].Position, Name: names[0].Name}, Value: value}
 			}
 		}
