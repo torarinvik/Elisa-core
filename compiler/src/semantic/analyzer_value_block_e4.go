@@ -79,13 +79,20 @@ func isMutableRefBinding(sym *Symbol) bool {
 // hidden-write shape Elian complains about, and is rejected. Called from the
 // call-analysis arg loop, where param mutability is already resolved. `arg` is the
 // argument expression bound to a mutable-ref parameter.
-func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
+func (a *Analyzer) checkValueBlockMutatingCall(call *ast.CallExpr, arg ast.Expr) {
 	if len(a.valueBlockAllowed) == 0 {
 		return
 	}
 	allowed := a.valueBlockAllowed[len(a.valueBlockAllowed)-1]
 	name, ok := rootIdentName(arg)
 	if !ok || name == "" || name == "_" || allowed[name] {
+		return
+	}
+	// Licensed threading: the call is a §6 thread-slot effect or a §3 claimed
+	// declared-threading call naming this receiver (`rebind …, x = x.method()`).
+	// The rebind IS the sanctioned way to thread an outer binding through a value
+	// block — exactly what the E4 diagnostic points users toward.
+	if callThreadsName(call, name) {
 		return
 	}
 	// Compiler-synthesized bindings (`__region_auto`, `__rg_*` region threading, …)
@@ -160,17 +167,29 @@ func (a *Analyzer) checkLinearMutation(call *ast.CallExpr, arg ast.Expr) {
 		return
 	}
 	// Licensed: §6 thread-slot effect / §3 claimed declared-threading call.
-	if call != nil && call.LmutThreadEffect {
+	if callThreadsName(call, name) {
 		return
 	}
-	if call != nil {
-		for _, c := range call.LmutRebindClaims {
-			if c.Name == name {
-				return
-			}
+	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", name, name)
+}
+
+// callThreadsName reports whether call is a sanctioned threading of the binding `name`:
+// a §6 thread-slot effect (LmutThreadEffect), or a §3 declared-threading call whose rebind
+// claims name that binding. Both erase to an in-place mutation whose dataflow is visible on
+// the enclosing `<-`/`rebind`, so they are exempt from the E4 and §10 hidden-mutation rules.
+func callThreadsName(call *ast.CallExpr, name string) bool {
+	if call == nil {
+		return false
+	}
+	if call.LmutThreadEffect {
+		return true
+	}
+	for _, c := range call.LmutRebindClaims {
+		if c.Name == name {
+			return true
 		}
 	}
-	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", name, name)
+	return false
 }
 
 // namesAreMutableArgRoots reports whether every name is passed to the call (as an argument
@@ -262,7 +281,7 @@ func (a *Analyzer) checkValueBlockMutatingBuiltinMethod(expr *ast.CallExpr) {
 	if len(a.valueBlockAllowed) == 0 {
 		return
 	}
-	a.checkValueBlockMutatingCall(recv)
+	a.checkValueBlockMutatingCall(expr, recv)
 }
 
 // isLmutParam reports whether name resolves to an `lmut` parameter of the current function.

@@ -143,3 +143,58 @@ Spelling notes vs the original sketch (`while cond |p| -> p:` returning `p`):
 - Remaining polish (not blocking): claiming a declared-threading call inside a loop body
   (`item, p <- p.next()`) still needs the `rebind` spelling (§3), and the inline
   `= while`/`return while` sugar is unimplemented (the block-RHS form is the spelling).
+
+## §10 — Return-position value-if threading (LANDED)
+
+The §7 linear model wants branches to be pure values and mutation to land on exactly
+one visible `<-`. For a declared-threading function whose result depends on a condition,
+the flat fall-through
+
+    def read_op(lexer: lmut Lexer, m: bool) -> (tok: Token, lexer: lmut Lexer):
+        if m:
+            return make_token(1), lexer
+        rebind rest, lexer = lexer.read_rest()
+        return rest, lexer
+
+reads better as an explicit-branch value-`if` whose value is returned:
+
+    def read_op(lexer: lmut Lexer, m: bool) -> (tok: Token, lexer: lmut Lexer):
+        return if m:
+            make_token(1), lexer
+        else:
+            rebind rest, lexer = lexer.read_rest()   # branch carries a claim…
+            rest, lexer                              # …then yields the thread tuple
+
+What this required (the gap the earlier dogfood hit):
+1. **Parser** — `return if cond:` was being swallowed by the bare postfix guard
+   `return if cond` (docs/postfix-guard). Disambiguated by lookahead: a `:` at bracket
+   depth 0 before the newline is the value-if block; a newline is the guard
+   (`returnIfIsValueForm`). The value-if branches parse in expression-block context so a
+   branch tail may be a bare `a, b` tuple (docs/119 §2).
+2. **Declared-threading erasure** (§2) — the return value is now a `TernaryExpr` (or
+   `ExprBlock`/`MatchExpr`) wrapping the tuple leaves, not a flat literal tuple. The
+   erasure recurses through the value-expression shape and erases the threaded slots at
+   each yielding leaf (`rewriteReturnValue`).
+3. **E4 + §10 exemptions** — a branch's `rebind …, lexer = lexer.read_rest()` mutates the
+   outer `lexer` through a call *inside a value block*. That call carries the §3 rebind
+   claim, so it is the sanctioned thread, not a hidden write: `callThreadsName` exempts
+   §6 thread-slot effects and §3 claimed calls from both the E4 mutating-call rule and
+   the §10 uniform rule.
+
+Zero-overhead is preserved: both branches lower to in-place mutation on the same
+`mutable Lexer&`; the tuple notation erases. Verified running on the native backend:
+src/return_value_if_thread_runtime_test.go (true arm and the nested-rebind else arm both
+thread every in-place mutation back to the caller).
+
+Form status (the three return shapes considered):
+- **Form 1** (explicit `else`, `return` per branch): works, simplest.
+- **Form 2** (`return if …`, THIS section): now works, including a branch that carries a
+  `rebind` claim before its tail tuple.
+- **Form 3** (ML/Rust bare trailing-expression return, no `return` keyword): still needs
+  a general "function trailing-expression return" language feature (`def f() -> i64: 5`
+  is an error) — deferred as its own proposal, since it changes every function.
+
+Known limitation: the tree-walking **interpreter** copies the struct in the
+ExprBlock/rebind branch path, so `-emit interpret` under-threads the nested-rebind arm.
+The native/LLVM backend (the shipping target) is correct; the interpreter divergence is a
+pre-existing value-block limitation, tracked separately.

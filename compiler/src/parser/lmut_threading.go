@@ -4,6 +4,7 @@ import (
 	"reflect"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // docs/120 §2 — declared lmut threading: `lmut` in return position is NOTATION.
@@ -102,26 +103,23 @@ func (p *Parser) rewriteLmutThreadReturns(body []ast.Stmt, declaredArity int, sl
 
 	// A multi-pattern match arm (`"public" | "private": …`) shares one body across
 	// its alternatives, so the walk can reach the same return twice — rewrite once.
-	rewritten := map[*ast.ReturnStmt]bool{}
-	rewriteReturn := func(ret *ast.ReturnStmt) {
-		if rewritten[ret] {
-			return
-		}
-		rewritten[ret] = true
+	// rewriteLeafTuple validates one concrete return tuple against the manifest and
+	// returns it with the threaded slots erased (bare expr / smaller tuple / nil).
+	rewriteLeafTuple := func(value ast.Expr, pos lexer.Pos) ast.Expr {
 		var elems []ast.Expr
-		var tuplePos = ret.Position
-		if tup, isTuple := ret.Value.(*ast.TupleExpr); isTuple {
+		tuplePos := pos
+		if tup, isTuple := value.(*ast.TupleExpr); isTuple {
 			elems = tup.Elems
 			tuplePos = tup.Position
-		} else if declaredArity == 1 && ret.Value != nil {
+		} else if declaredArity == 1 && value != nil {
 			// A 1-slot declaration returns a bare expression (a 1-tuple has no
 			// literal spelling) — treat it as the single slot.
-			elems = []ast.Expr{ret.Value}
+			elems = []ast.Expr{value}
 		}
 		if len(elems) != declaredArity {
-			p.errorAt(ret.Position, "a function with declared lmut threading must return a literal tuple of all %d declared slots (threaded params in their declared positions)", declaredArity)
+			p.errorAt(pos, "a function with declared lmut threading must return a literal tuple of all %d declared slots (threaded params in their declared positions)", declaredArity)
 			ok = false
-			return
+			return value
 		}
 		var keptElems []ast.Expr
 		for i, el := range elems {
@@ -134,17 +132,59 @@ func (p *Parser) rewriteLmutThreadReturns(body []ast.Stmt, declaredArity int, sl
 			if !isIdent || ident.Name != slot.ParamName {
 				p.errorAt(el.Pos(), "threaded return slot %d must be exactly the lmut parameter %q", i+1, slot.ParamName)
 				ok = false
-				return
+				return value
 			}
 		}
 		switch len(keptElems) {
 		case 0:
-			ret.Value = nil
+			return nil
 		case 1:
-			ret.Value = keptElems[0]
+			return keptElems[0]
 		default:
-			ret.Value = &ast.TupleExpr{Position: tuplePos, Elems: keptElems}
+			return &ast.TupleExpr{Position: tuplePos, Elems: keptElems}
 		}
+	}
+
+	// rewriteReturnValue descends through the return value's compound value-expression
+	// shape — a value-`if` (TernaryExpr), a value block (ExprBlock), a value `match`
+	// (MatchExpr) — so each yielding LEAF tuple carries the threading manifest and is
+	// erased. This is what lets a `return if cond: A, p else: …; B, p` thread through
+	// its branches (docs/120 §10 / docs/119 §4) rather than only a flat literal tuple.
+	var rewriteReturnValue func(value ast.Expr, pos lexer.Pos) ast.Expr
+	rewriteReturnValue = func(value ast.Expr, pos lexer.Pos) ast.Expr {
+		switch e := value.(type) {
+		case *ast.TernaryExpr:
+			e.Value = rewriteReturnValue(e.Value, e.Value.Pos())
+			e.Alt = rewriteReturnValue(e.Alt, e.Alt.Pos())
+			return e
+		case *ast.ExprBlock:
+			if e.Value != nil {
+				e.Value = rewriteReturnValue(e.Value, e.Value.Pos())
+			}
+			return e
+		case *ast.MatchExpr:
+			for ai := range e.Arms {
+				body := e.Arms[ai].Body
+				if len(body) == 0 {
+					continue
+				}
+				if tail, isExpr := body[len(body)-1].(*ast.ExprStmt); isExpr && tail.Expr != nil {
+					tail.Expr = rewriteReturnValue(tail.Expr, tail.Expr.Pos())
+				}
+			}
+			return e
+		default:
+			return rewriteLeafTuple(value, pos)
+		}
+	}
+
+	rewritten := map[*ast.ReturnStmt]bool{}
+	rewriteReturn := func(ret *ast.ReturnStmt) {
+		if rewritten[ret] {
+			return
+		}
+		rewritten[ret] = true
+		ret.Value = rewriteReturnValue(ret.Value, ret.Position)
 	}
 
 	walk = func(v reflect.Value) {

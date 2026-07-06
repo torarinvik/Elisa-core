@@ -50,3 +50,27 @@ func TestRebindAsIdentifierStillWorks(t *testing.T) {
 		t.Fatalf("`rebind` as an identifier must still parse, got: %v", errs)
 	}
 }
+
+// docs/120 §10: `return if cond: … else: …` is a value-if whose branch value is
+// returned — distinct from the bare postfix guard `return if cond` (which has no
+// `:`). A branch may carry statements (e.g. a `rebind` claim) before its tail tuple.
+func TestReturnIfValueFormParses(t *testing.T) {
+	src := "struct L:\n    pos: mutable i64\n" +
+		"def rest(l: lmut L) -> (t: i64, l: lmut L):\n    l.pos <- l.pos + 1\n    return 9, l\n" +
+		"def op(l: lmut L, m: bool) -> (t: i64, l: lmut L):\n" +
+		"    return if m:\n        1, l\n    else:\n        rebind r: i64, l = l.rest()\n        r, l\n"
+	_, errs, _ := parseSourceWithNotices(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for return-if value form: %v", errs)
+	}
+}
+
+// The bare postfix guard `return if cond` (no `:`) must still parse as a guard, not
+// be swallowed by the value-if path.
+func TestReturnIfBareGuardStillParses(t *testing.T) {
+	src := "def f(x: i64) -> void:\n    return if x > 5\n    _ = x\n"
+	_, errs, _ := parseSourceWithNotices(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for bare return guard: %v", errs)
+	}
+}

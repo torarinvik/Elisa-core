@@ -241,10 +241,25 @@ func (p *Parser) parseReturn() ast.Stmt {
 		p.skipRemovedQuestionStmtTail()
 		return &ast.ReturnStmt{Position: pos}
 	}
-	// Bare postfix guard: `return if <cond>` desugars to `if <cond>: return`. Since a
-	// bare return has no value, an `if` immediately after `return` is unambiguously a
-	// guard (never a ternary, which needs a preceding value). Mirrors `break if`.
+	// An `if` immediately after `return` is one of two forms, disambiguated by whether the
+	// condition line ends in a `:` (a block header) or a newline:
+	//   • `return if <cond>` NEWLINE      → bare postfix guard, desugars to `if <cond>: return`.
+	//   • `return if <cond>: A else: B`   → value-if block whose branch value is returned
+	//     (docs/120 §10 / docs/119 §4). Branches may carry statements before their tail, so a
+	//     `rebind` claim can thread an lmut value inside a branch before yielding the tuple.
 	if p.peek() == lexer.TOKEN_IF {
+		if p.returnIfIsValueForm() {
+			// The branches are value blocks: their tail may be a bare `a, b` tuple (the
+			// threaded slots), so parse them in expression-block context (docs/119 §2).
+			p.exprBlockDepth++
+			ifStmt := p.parseIf()
+			p.exprBlockDepth--
+			value, ok := p.tailStmtToExpr(ifStmt)
+			if !ok {
+				return &ast.ReturnStmt{Position: pos}
+			}
+			return &ast.ReturnStmt{Position: pos, Value: value}
+		}
 		p.advance()
 		cond := p.parseExpr()
 		p.expectNewlineAfterValueExpr(cond)
@@ -256,6 +271,34 @@ func (p *Parser) parseReturn() ast.Stmt {
 	}
 	p.expectNewlineAfterValueExpr(value)
 	return &ast.ReturnStmt{Position: pos, Value: value}
+}
+
+// returnIfIsValueForm decides whether the `if` following `return` opens a value-if block
+// (`return if cond: …`) rather than a bare postfix guard (`return if cond` NEWLINE). It
+// scans the condition tokens (from the `if`) and reports true iff a `:` appears at bracket
+// depth 0 before the line-ending newline — a colon inside `()`/`[]`/`{}` (a dict literal,
+// call, or index) does not count.
+func (p *Parser) returnIfIsValueForm() bool {
+	depth := 0
+	for i := p.pos + 1; i < len(p.tokens); i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_COLON:
+			if depth == 0 {
+				return true
+			}
+		case lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF, lexer.TOKEN_DEDENT:
+			if depth == 0 {
+				return false
+			}
+		}
+	}
+	return false
 }
 
 func (p *Parser) skipRemovedQuestionStmtTail() {
