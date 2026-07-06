@@ -175,6 +175,13 @@ type FuncDecl struct {
 	Params        []ParamDecl
 	ReturnType    TypeExpr
 	Body          []Stmt
+	// LmutThreadSlots records the declared lmut-threading manifest (docs/120 §2): return-tuple
+	// fields spelled `name: lmut T` that were validated against the same-named `lmut` parameters
+	// and ERASED — from ReturnType and from every return expression — by the parser post-pass
+	// (applyDeclaredLmutThreading). The notation is checker-enforced and codegen-erased: the
+	// emitted function threads those params in place exactly like plain lmut. Retained here so
+	// the semantic layer can enforce the docs/120 §3 call-site rules (rebind form, must-use).
+	LmutThreadSlots []LmutThreadSlot
 	// Changes holds the frame condition `changes <path>, ...` (docs/87): the upper bound on which
 	// caller-visible places the function may write. Each path is param-rooted (reusing EnsuresPath).
 	// An empty slice means no clause (unconstrained); a present clause is enforced — a write outside
@@ -563,6 +570,14 @@ type OptionalTypeExpr struct {
 	Position lexer.Pos
 	Value    TypeExpr
 }
+// LmutThreadSlot is one erased `name: lmut T` slot of a declared-threading return tuple
+// (docs/120 §2): the slot's original tuple index and the lmut parameter it threads.
+type LmutThreadSlot struct {
+	TupleIndex int
+	ParamIndex int
+	ParamName  string
+}
+
 type TupleTypeExpr struct {
 	Position lexer.Pos
 	Fields   []TupleTypeField

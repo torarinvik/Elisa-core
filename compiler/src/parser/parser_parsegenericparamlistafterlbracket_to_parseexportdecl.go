@@ -359,7 +359,11 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	return &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, ReturnType: retType, Body: body}
+	fn := &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, ReturnType: retType, Body: body}
+	// docs/120 §2: validate and erase a declared lmut-threading return manifest
+	// (`-> (ch: char, lexer: lmut Lexer)`) before anything downstream sees the type.
+	p.applyDeclaredLmutThreading(fn)
+	return fn
 }
 
 // liftLeadingContracts pulls leading `requires`/`ensure` value-contract statements (parsed as
