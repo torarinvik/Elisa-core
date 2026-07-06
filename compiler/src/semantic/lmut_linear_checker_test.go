@@ -73,6 +73,25 @@ def use() -> void:
 	}
 }
 
+// Soundness-contract pin: an `lmut` parameter cannot be dropped/consumed whole. `move c` on an
+// lmut param is a whole-value move out of a reference, which the ordinary typecheck rejects
+// (a ref is not an owning binding) — so the "always threads back, no persistent consume" guarantee
+// holds by construction, not by a bespoke lmut check. Documents that this case is vacuous.
+func TestLmutWholeMoveRejected(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "lmut_wholemove.elisa", `struct C:
+    value: mutable i64
+
+def sink(x: C) -> void:
+    _ = move x
+
+def f(c: lmut C) -> void:
+    sink(move c)
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "C") {
+		t.Fatalf("expected whole-move of an lmut param to be rejected; got: %s", all)
+	}
+}
+
 // The lexer's real pattern: an `lmut` parameter forwarded via a UFCS method-call receiver to
 // another `lmut` parameter. A forwarded param is a single, non-aliasing, valid pass — must stay
 // clean even though an lmut/mutable-ref param binding is not itself Symbol.Mutable.

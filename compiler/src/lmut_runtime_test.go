@@ -74,6 +74,37 @@ def mutref_threads_in_place() -> void:
         panic("mutable& did not thread the mutation in place")
 `
 
+// lmut and `rebind` are two spellings of the SAME invalidate-and-reacquire model: `rebind`
+// threads state through a return (the explicit manifest, for coarse boundaries) while `lmut`
+// threads it in place through a parameter (silent, for hot paths). They compose — a coarse-
+// boundary `rebind` line may call a function that threads one of its arguments via lmut, and both
+// the returned manifest binding and the in-place lmut thread take effect. This pins that story so
+// the "explicit at coarse boundaries, silent on hot paths" design stays intact.
+const lmutRebindComposeBody = `
+struct Lexer:
+    pos: mutable i64
+
+def advance(lx: lmut Lexer) -> i64:
+    lx.pos <- lx.pos + 1
+    return lx.pos
+
+@test
+def lmut_rebind_compose() -> void:
+    lx: mutable Lexer = Lexer{pos: 0}
+    rebind advanced: i64 = advance(lx)
+    if advanced != 1:
+        panic("rebind manifest wrong")
+    if lx.pos != 1:
+        panic("lmut did not thread through the rebind boundary")
+`
+
+func TestLmutRebindCompose(t *testing.T) {
+	exit, stdout, stderr := runLmutProgram(t, "lmut_rebind", lmutRebindComposeBody)
+	if exit != 0 || !strings.Contains(stdout, "failed=0") || !strings.Contains(stdout, "[       OK ] lmut_rebind_compose") {
+		t.Fatalf("lmut+rebind composition did not pass cleanly: exit=%d\nstdout:\n%s\nstderr:\n%s", exit, stdout, stderr)
+	}
+}
+
 func TestLmutParamThreadsInPlace(t *testing.T) {
 	exit, stdout, stderr := runLmutProgram(t, "lmut_threads", lmutThreadingBody)
 	if exit != 0 || !strings.Contains(stdout, "failed=0") || !strings.Contains(stdout, "[       OK ] lmut_threads_in_place") {
