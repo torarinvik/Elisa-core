@@ -875,9 +875,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
-	// docs/120 §10: the uniform linear-mutation rule is gated during rollout. Enabled by
-	// env var until the frontend is fully converted to the reassignment form, then default-on.
-	a.enforceLinearMutation = os.Getenv("ELISA_LINEAR_MUTATION") == "1"
+	// docs/120 §10: the uniform linear-mutation rule is default-on now that the whole
+	// self-hosted frontend is converted to the reassignment form. `ELISA_LINEAR_MUTATION=0`
+	// is the explicit off-switch (escape hatch during any residual migration).
+	a.enforceLinearMutation = os.Getenv("ELISA_LINEAR_MUTATION") != "0"
 	a.registerBuiltins()
 	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)

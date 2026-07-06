@@ -41,8 +41,8 @@ def bump(c: lmut Counter, by: i64) -> i64:
 @test
 def lmut_threads_in_place() -> void:
     c: mutable Counter = Counter{value: 10}
-    r1: i64 = bump(c, 5)
-    r2: i64 = bump(c, 100)
+    rebind r1: i64, c = c.bump(5)
+    rebind r2: i64, c = c.bump(100)
     if r1 != 15:
         panic("r1 wrong")
     if r2 != 115:
@@ -91,7 +91,7 @@ def advance(lx: lmut Lexer) -> i64:
 @test
 def lmut_rebind_compose() -> void:
     lx: mutable Lexer = Lexer{pos: 0}
-    rebind advanced: i64 = advance(lx)
+    rebind advanced: i64, lx = lx.advance()
     if advanced != 1:
         panic("rebind manifest wrong")
     if lx.pos != 1:

@@ -22,10 +22,10 @@ def advance(lx: lmut Lexer, nl: bool) -> void:
 @test
 def multi_place_conditional() -> void:
     lx: mutable Lexer = Lexer{line: 1, column: 5}
-    advance(lx, false)
+    lx <- lx.advance(false)
     if lx.line != 1 or lx.column != 6:
         panic("plain advance wrong")
-    advance(lx, true)
+    lx <- lx.advance(true)
     if lx.line != 2 or lx.column != 1:
         panic("newline advance wrong")
 

@@ -30,10 +30,10 @@ def collect(p: lmut P, out: mutable darray[Decl]&, d_opt: Decl?) -> void:
 def thread_slots_all_thread() -> void:
     p: mutable P = P{x: 0}
     out: mutable darray[Decl] = []
-    collect(p, out, Decl.Func(7))
+    p <- collect(p, out, Decl.Func(7))
     if out.count != 1 or p.x != 0:
         panic("push arm wrong")
-    collect(p, out, null)
+    p <- collect(p, out, null)
     if out.count != 1 or p.x != 1:
         panic("advance arm wrong")
 

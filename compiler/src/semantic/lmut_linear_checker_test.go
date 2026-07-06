@@ -25,8 +25,8 @@ func TestLmutThreadMutableSourceIsClean(t *testing.T) {
 	analyzeTreeTestSource(t, "lmut_clean.elisa", lmutCheckerPrelude+`
 def use() -> void:
     c: mutable Counter = Counter{value: 10}
-    _ = bump(c, 5)
-    _ = bump(c, 100)
+    c, _ <- c.bump(5)
+    c, _ <- c.bump(100)
 `)
 }
 
@@ -92,8 +92,8 @@ def sink(h: Handle) -> void:
 
 def f() -> void:
     h: mutable Handle = make()
-    bump(h)
-    bump(h)
+    h <- h.bump()
+    h <- h.bump()
     sink(move h)
 `)
 }
@@ -254,8 +254,8 @@ def advance(lx: lmut Lexer) -> void:
     lx.pos <- lx.pos + 1
 
 def scan(lx: lmut Lexer) -> void:
-    lx.advance()
-    lx.advance()
+    lx <- lx.advance()
+    lx <- lx.advance()
 `)
 }
 
@@ -273,7 +273,7 @@ def combine(x: lmut Counter, y: lmut Counter) -> void:
 
 def use() -> void:
     p: mutable Pair = Pair{a: Counter{value: 1}, b: Counter{value: 2}}
-    combine(p.a, p.b)
+    p <- combine(p.a, p.b)
 `)
 }
 
