@@ -152,6 +152,10 @@ func claimableCall(e ast.Expr) *ast.CallExpr {
 				return nil
 			}
 			e = n.Value
+		case *ast.CanExpr:
+			// `call() can Effects` — the effect grant wraps the call; the thread claim
+			// belongs to the inner call. Erasure re-emits the whole CanExpr (grant kept).
+			e = n.Expr
 		default:
 			return nil
 		}

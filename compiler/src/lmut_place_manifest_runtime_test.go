@@ -19,6 +19,9 @@ def add_bare(xs: lmut darray[i64], v: i64) -> void:
 def add_field(b: lmut Bag, v: i64) -> void:
     b.items <- b.items.push(v)
 
+def add_can(b: lmut Bag, v: i64) -> void can[Memory.Allocate]:
+    b.items <- b.items.push(v) can Memory.Allocate
+
 @test
 def place_manifest_bare() -> void:
     xs: mutable darray[i64] = []
@@ -35,10 +38,18 @@ def place_manifest_field() -> void:
     b <- add_field(b, 5)
     if b.items.count != 3 or b.items[0] != 3 or b.items[2] != 5:
         panic("field-place push manifest wrong")
+
+@test
+def place_manifest_can() -> void can[Memory.Allocate]:
+    b: mutable Bag = Bag{items: []}
+    b <- add_can(b, 9)
+    b <- add_can(b, 9)
+    if b.items.count != 2 or b.items[1] != 9:
+        panic("can-wrapped place manifest wrong")
 `
 
 func TestLmutPlaceManifest(t *testing.T) {
 	t.Parallel()
 	exit, stdout, stderr := runStressProgram(t, "place_manifest", placeManifestBody)
-	assertAllPassed(t, exit, stdout, stderr, "place_manifest_bare", "place_manifest_field")
+	assertAllPassed(t, exit, stdout, stderr, "place_manifest_bare", "place_manifest_field", "place_manifest_can")
 }

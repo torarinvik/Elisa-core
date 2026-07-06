@@ -125,7 +125,7 @@ func (a *Analyzer) isLmutArgManifest(names []ast.TupleBindName, value ast.Expr, 
 	if declare || !isVoidType(valueType) {
 		return false
 	}
-	call, ok := value.(*ast.CallExpr)
+	call, ok := unwrapToCall(value)
 	if !ok {
 		return false
 	}
@@ -145,7 +145,7 @@ func (a *Analyzer) isLmutArgManifest(names []ast.TupleBindName, value ast.Expr, 
 // may mutate through. Works for a bare-ident place (`xs <- xs.push(v)`) and a field path
 // (`b.items <- b.items.push(v)`) alike.
 func (a *Analyzer) isPlaceMutatingBuiltinManifest(target, value ast.Expr) bool {
-	call, ok := value.(*ast.CallExpr)
+	call, ok := unwrapToCall(value)
 	if !ok {
 		return false
 	}
@@ -167,6 +167,23 @@ func (a *Analyzer) isPlaceMutatingBuiltinManifest(target, value ast.Expr) bool {
 		}
 	}
 	return a.isMutableBinding(troot)
+}
+
+// unwrapToCall peels a manifest RHS to the direct call a manifest attaches to: the call
+// itself, or one wrapped in a `can Effects` grant (`x.push(v) can Memory.Allocate`). The
+// grant is preserved by erasure (the backend re-emits the whole RHS); only recognition
+// needs to see the inner call.
+func unwrapToCall(e ast.Expr) (*ast.CallExpr, bool) {
+	for {
+		switch n := e.(type) {
+		case *ast.CallExpr:
+			return n, true
+		case *ast.CanExpr:
+			e = n.Expr
+		default:
+			return nil, false
+		}
+	}
 }
 
 // exprPlacePath returns the rooted field path of a place expression: a bare ident yields
