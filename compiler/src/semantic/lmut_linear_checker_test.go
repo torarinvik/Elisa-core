@@ -73,6 +73,53 @@ def use() -> void:
 	}
 }
 
+// `lmut` × `linear` pairing: a `linear` type (must-consume, single-owner) threaded through an
+// `lmut` parameter is NOT consumed — it threads back, so it may be mutated in place across several
+// calls and the must-consume obligation still holds. This is the airtight story: `linear` gives
+// global single-ownership, `lmut` lets you mutate that owned resource in place without ceremony.
+func TestLmutThreadsLinearValueConsumedClean(t *testing.T) {
+	analyzeTreeTestSource(t, "lmut_linear_ok.elisa", `linear struct Handle:
+    fd: mutable i64
+
+def make() -> Handle:
+    return Handle{fd: 1}
+
+def bump(h: lmut Handle) -> void:
+    h.fd <- h.fd + 1
+
+def sink(h: Handle) -> void:
+    _ = move h
+
+def f() -> void:
+    h: mutable Handle = make()
+    bump(h)
+    bump(h)
+    sink(move h)
+`)
+}
+
+// The other half of the pairing: because `lmut` threads the linear value back (does not consume
+// it), a body that mutates it via lmut but never consumes it must STILL be flagged must-consume.
+// This pins that lmut does not silently satisfy the linear obligation.
+func TestLmutDoesNotConsumeLinearValue(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "lmut_linear_leak.elisa", `linear struct Handle:
+    fd: mutable i64
+
+def make() -> Handle:
+    return Handle{fd: 1}
+
+def bump(h: lmut Handle) -> void:
+    h.fd <- h.fd + 1
+
+def f() -> void:
+    h: mutable Handle = make()
+    bump(h)
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "must be consumed") {
+		t.Fatalf("expected linear value threaded via lmut to still require consumption; got: %s", all)
+	}
+}
+
 // Soundness-contract pin: an `lmut` parameter cannot be dropped/consumed whole. `move c` on an
 // lmut param is a whole-value move out of a reference, which the ordinary typecheck rejects
 // (a ref is not an owning binding) — so the "always threads back, no persistent consume" guarantee
