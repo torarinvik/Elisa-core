@@ -107,3 +107,39 @@ Goldens: src/lmut_arg_manifest_runtime_test.go.
 Next: §9 — the uniform enforcement (a bare `lmut`-mutating call/pass is an error
 steering to the §8 reassignment), landed together with the frontend conversion so
 the tree stays green.
+
+## §9 — Loop-expression threading (LANDED — composes from existing machinery)
+
+A loop is itself a link in the linear dataflow chain. A `while cond |p, …|:` capture
+header (docs/119 §6, already implemented) threads the outer `lmut` bindings through
+the loop: each iteration's §8 arg-manifest reassignment mutates them in place, and the
+header writes the final state back to the outer binding.
+
+    def skip_ws(p: lmut Parser) -> void:
+        while p.more() |p|:
+            p <- p.advance()          # §8 arg-manifest, licensed by the |p| capture
+
+    def collect(p: lmut Parser, items: lmut List) -> void:
+        while p.more() |p, items|:
+            p <- p.advance()
+            items <- items.push(p.pos)
+
+    # caller manifests the whole call (§8):
+    p <- skip_ws(p)
+    p, items <- collect(p, items)
+
+No new machinery: the loop capture header (docs/119 §6) + the §8 arg-manifest
+reassignment + the §8 caller manifest compose to give full loop-level threading, all
+in-place and zero-overhead. Verified running: src/lmut_loop_thread_runtime_test.go.
+
+Spelling notes vs the original sketch (`while cond |p| -> p:` returning `p`):
+- Elisa function bodies require an explicit `return` (no bare trailing-expression
+  return — `def f() -> i64: 5` is an error), and the loop-expression *value* form binds
+  via `x =` NEWLINE INDENT `loop` (docs/119 §3), not an inline `= while …` / `return
+  while …`. So the value/return-threading variant is spelled with the block-RHS binding.
+- The simplest form (used above) is a **void** function that threads in place via the
+  capture; the caller manifests with `p <- f(p)`. This avoids a declared-threading
+  return entirely and is the recommended shape.
+- Remaining polish (not blocking): claiming a declared-threading call inside a loop body
+  (`item, p <- p.next()`) still needs the `rebind` spelling (§3), and the inline
+  `= while`/`return while` sugar is unimplemented (the block-RHS form is the spelling).
