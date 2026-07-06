@@ -1,6 +1,25 @@
 # docs/120 — Declared `lmut` threading and multi-place assignment
 
-Status: §1 (multi-place `<-`), §2 (declared threading, erased), §3 (rebind call sites + must-use) LANDED in stage0. Stage1 port + Parser-boundary dogfood remain.
+Status: §1 (multi-place `<-`), §2 (declared threading, erased), §3 (rebind call sites + must-use) LANDED in stage0. §4: stage1 already parses all three forms (named tuple types, lmut prefix, rebind — no new work needed). §5 dogfood DONE — verdict below.
+
+## §5 dogfood verdict (stage1 parser, cf293e9)
+
+Converted: `decl()` (value+thread form; 1 call site) and `parse_decl_unit()` (void
+form; 5 call sites incl. recursion). Both read well — the rebind line at the
+boundary is a genuine manifest, and `return parser` at each early exit makes the
+thread-back points visible.
+
+Evaluated and REJECTED: `stmt()` — its 7 call sites live in EXPRESSION position
+(`if parser.stmt() is s:`, `elif … is`, two bare discards). The rebind form forces
+condition restructuring and unused bindings there. Rule of thumb for the style
+guide: **declare threading for statement-position boundaries whose results are
+bound; keep expression-position helpers silent-lmut.** Also: the postfix
+`return if COND` guard cannot thread (its desugared return is bare) — a declaring
+function spells such exits as explicit `if COND: return <thread>`.
+
+Dogfood also hardened §2 itself: returns nested in match-EXPRESSION arms carry the
+obligation (generic walk, lambdas excluded), and multi-pattern arms share a body so
+the rewrite is once-per-node (9f2c7311).
 
 Implementation notes vs the original design:
 - Return-tuple fields are NAMED (`(ch: char, lexer: lmut Lexer)`) — tuple types in
