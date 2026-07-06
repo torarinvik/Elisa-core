@@ -125,6 +125,54 @@ func (a *Analyzer) isLmutArgManifest(names []ast.TupleBindName, value ast.Expr, 
 	return a.namesAreMutableArgRoots(names, call)
 }
 
+// tupleBindTargetSet collects the non-wildcard target names of a tuple-bind statement.
+func tupleBindTargetSet(names []ast.TupleBindName) map[string]bool {
+	set := map[string]bool{}
+	for _, b := range names {
+		if b.Name != "" && b.Name != "_" {
+			set[b.Name] = true
+		}
+	}
+	return set
+}
+
+// checkLinearMutation is the docs/120 §10 uniform enforcement: a call that mutates an
+// `lmut` value (passes it to an `lmut` parameter, or a mutating builtin on an lmut-param
+// receiver) must appear as a REASSIGNMENT naming that value — `x <- x.method(…)` /
+// `t, x <- f(…, x, …)`. A bare mutating call is the "silent mutation" the linear model
+// forbids. Called from the same mutating-call sites as the E4 checks. `arg` is the
+// receiver/argument being mutated; `call` is the enclosing call.
+//
+// Exempt (already a reassignment / manifest): the mutated place is a target of the
+// enclosing reassignment statement (reassignTargets), a §6 thread-slot effect
+// (LmutThreadEffect), or a §3 claimed declared-threading call (LmutRebindClaim). Plain
+// `mutable T&` params are the escape hatch and never reach here (only lmut callees do).
+func (a *Analyzer) checkLinearMutation(call *ast.CallExpr, arg ast.Expr) {
+	if a == nil || !a.enforceLinearMutation {
+		return
+	}
+	name, ok := rootIdentName(arg)
+	if !ok || name == "" || name == "_" || strings.HasPrefix(name, "__") {
+		return
+	}
+	// Licensed: the mutation is named on the left of the enclosing reassignment.
+	if a.reassignTargets[name] {
+		return
+	}
+	// Licensed: §6 thread-slot effect / §3 claimed declared-threading call.
+	if call != nil && call.LmutThreadEffect {
+		return
+	}
+	if call != nil {
+		for _, c := range call.LmutRebindClaims {
+			if c.Name == name {
+				return
+			}
+		}
+	}
+	a.errorf(arg.Pos(), "mutation of `lmut` value %q must be a reassignment (docs/120 §10): write `%s <- …` so the dataflow is visible (a bare mutating call is a hidden mutation)", name, name)
+}
+
 // namesAreMutableArgRoots reports whether every name is passed to the call (as an argument
 // or the receiver) and is a mutable binding the call can mutate through — a mutable local,
 // or an lmut / mutable-ref parameter. This is the structural core of the §8 arg-manifest
@@ -200,12 +248,34 @@ func exprBlockPureOverOuter(expr *ast.ExprBlock) bool {
 // `s.add(x)`) models its receiver as a VALUE, not a `mutable T&` arg, so it slips past
 // the ref-arg hook — mirror checkFrameForMutatingBuiltinMethod to catch it.
 func (a *Analyzer) checkValueBlockMutatingBuiltinMethod(expr *ast.CallExpr) {
+	recv, ok := a.mutatingBuiltinMethodReceiver(expr)
+	if !ok {
+		return
+	}
+	// docs/120 §10: a mutating builtin (`items.push(v)`) on an `lmut` parameter mutates it
+	// in place — it must be a reassignment `items <- items.push(v)`, not a bare call.
+	if a.enforceLinearMutation {
+		if name, ok := rootIdentName(recv); ok && a.isLmutParam(name) {
+			a.checkLinearMutation(expr, recv)
+		}
+	}
 	if len(a.valueBlockAllowed) == 0 {
 		return
 	}
-	if recv, ok := a.mutatingBuiltinMethodReceiver(expr); ok {
-		a.checkValueBlockMutatingCall(recv)
+	a.checkValueBlockMutatingCall(recv)
+}
+
+// isLmutParam reports whether name resolves to an `lmut` parameter of the current function.
+func (a *Analyzer) isLmutParam(name string) bool {
+	if a.currentScope == nil {
+		return false
 	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil || sym.Kind != SymbolParam {
+		return false
+	}
+	ref, ok := sym.Type.(*RefType)
+	return ok && ref != nil && ref.Linear
 }
 
 // collectBlockBoundNames gathers every name introduced by a binding within the block

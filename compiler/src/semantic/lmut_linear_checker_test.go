@@ -120,6 +120,54 @@ def f() -> void:
 	}
 }
 
+const strictMutPrelude = `struct P:
+    n: mutable i64
+
+def advance(p: lmut P) -> void:
+    p.n <- p.n + 1
+
+def push(p: lmut P, v: i64) -> void:
+    p.n <- p.n + v
+`
+
+// docs/120 §10 uniform enforcement: a bare mutating call on an lmut value is a hidden
+// mutation — it must be a reassignment. (Enabled via the rollout env toggle.)
+func TestLinearMutationBareCallFlagged(t *testing.T) {
+	t.Setenv("ELISA_LINEAR_MUTATION", "1")
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "lin_bare.elisa", strictMutPrelude+`
+def f(p: lmut P) -> void:
+    p.advance()
+`)
+	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "must be a reassignment") {
+		t.Fatalf("expected §10 bare-mutation error, got: %s", all)
+	}
+}
+
+// The §8 reassignment form satisfies §10; direct writes and reads are unaffected.
+func TestLinearMutationReassignmentClean(t *testing.T) {
+	t.Setenv("ELISA_LINEAR_MUTATION", "1")
+	analyzeTreeTestSource(t, "lin_ok.elisa", strictMutPrelude+`
+def f(p: lmut P) -> void:
+    p <- p.advance()
+    p <- p.push(5)
+    p.n <- p.n + 1
+`)
+}
+
+// A plain `mutable T&` param is the escape hatch — never enforced.
+func TestLinearMutationMutableRefUnaffected(t *testing.T) {
+	t.Setenv("ELISA_LINEAR_MUTATION", "1")
+	analyzeTreeTestSource(t, "lin_escape.elisa", `struct P:
+    n: mutable i64
+
+def advance(p: mutable P&) -> void:
+    p.n <- p.n + 1
+
+def f(p: mutable P&) -> void:
+    p.advance()
+`)
+}
+
 // docs/120 §3 must-use: a call to a declared-threading function must claim every
 // declared thread via the rebind form; a plain call is an error.
 func TestLmutDeclaredThreadingMustUse(t *testing.T) {

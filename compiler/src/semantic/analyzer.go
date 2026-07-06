@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"os"
 	"elisacore/src/ast"
 	"elisacore/src/easm"
 	"elisacore/src/grammar"
@@ -444,6 +445,14 @@ type Analyzer struct {
 	// (block-local bindings + licensed captures), used by the mutating-CALL half of E4
 	// (docs/119 §6.2). Empty ⇒ not inside a value block.
 	valueBlockAllowed []map[string]bool
+	// reassignTargets holds the root names on the left of the reassignment statement
+	// currently being analyzed (`p <- …` / `t, p <- …`). docs/120 §10 enforcement exempts
+	// a call that mutates an lmut place named here — the mutation IS reassigned, which is
+	// exactly the invariant. Set around the value analysis of an AssignStmt / TupleBindStmt.
+	reassignTargets map[string]bool
+	// enforceLinearMutation gates the docs/120 §10 uniform rule (a bare lmut-mutating call
+	// is an error). Off until the frontend is fully converted to the reassignment form.
+	enforceLinearMutation bool
 	requireExternContracts bool
 	// requiresReport gates the -requires-report aggregation (docs c3): per requires-bearing function,
 	// how many direct call sites statically discharge the precondition vs fall back to a runtime check.
@@ -860,6 +869,9 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		sinkParamInferenceInProgress:      map[*ast.FuncDecl]bool{},
 		conditionalCallPoststateOriginals: make(map[*ast.CallExpr]map[*Symbol]Type, exprCapacity/16+8),
 	}
+	// docs/120 §10: the uniform linear-mutation rule is gated during rollout. Enabled by
+	// env var until the frontend is fully converted to the reassignment form, then default-on.
+	a.enforceLinearMutation = os.Getenv("ELISA_LINEAR_MUTATION") == "1"
 	a.registerBuiltins()
 	a.populateTargetConstValues(options.TargetTriple, options.TargetDebug)
 	activeDecls := a.flattenScopedDecls(activeFile.Decls, "", nil)

@@ -614,6 +614,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				// docs/119 §6.2: inside a value block, passing an outer binding by mutable
 				// ref (incl. a mutating method receiver) is a hidden write — E4.
 				a.checkValueBlockMutatingCall(loweredArgs[i])
+				// docs/120 §10: passing a place to an `lmut` parameter mutates it in place —
+				// the mutation must be a reassignment (`x <- f(…, x, …)`), not a bare call.
+				if rt.Linear {
+					a.checkLinearMutation(expr, loweredArgs[i])
+				}
 				// Iterator invalidation across a callee boundary: passing an actively-iterated
 				// relocatable container by MUTABLE ref lets the callee push/clear/relocate its
 				// buffer mid-iteration, which the function-local lock cannot see (the callee is

@@ -256,7 +256,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			expectedTuple = &TupleType{Fields: expectedFields}
 		}
+		savedReassign := a.reassignTargets
+		a.reassignTargets = tupleBindTargetSet(n.Names)
 		valueType := a.analyzeValueExpr(n.Value, expectedTuple)
+		a.reassignTargets = savedReassign
 		if manifestCandidate && isVoidType(valueType) {
 			n.ArgManifest = true // codegen emits only the call; nothing to destructure
 			return
@@ -445,7 +448,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.currentAllocExpr = &ast.Ident{Position: n.Value.Pos(), Name: "perm"}
 			restoreAllocExpr = true
 		}
+		savedReassignTargets := a.reassignTargets
+		if root, ok := rootIdentName(n.Target); ok && root != "" {
+			a.reassignTargets = map[string]bool{root: true}
+		}
 		valueType := a.analyzeValueExpr(n.Value, targetType)
+		a.reassignTargets = savedReassignTargets
 		if restoreAllocExpr {
 			a.currentAllocExpr = savedAllocExpr
 		}
