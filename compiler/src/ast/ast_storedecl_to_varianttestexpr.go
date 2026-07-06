@@ -472,6 +472,13 @@ type StateSetTypeExpr struct {
 type MutableType struct {
 	Position lexer.Pos
 	Elem     TypeExpr
+	// Linear marks the `lmut T` mode: a linear-mutable parameter/binding. Layout and
+	// codegen are identical to a `mutable T&` reference (in-place mutation through an
+	// exclusive pointer); the distinction is enforced by the linear checker, which
+	// invalidates the source binding when an `lmut` argument is passed (a move) and
+	// reacquires it after the call. `lmut T` desugars to MutableType{Elem: RefType{T},
+	// Linear: true} at parse time so all existing mutable-ref handling applies unchanged.
+	Linear bool
 }
 
 // RefinementTypeExpr is `Base is Pred[…], …` (docs/85): a base type refined by one or more law

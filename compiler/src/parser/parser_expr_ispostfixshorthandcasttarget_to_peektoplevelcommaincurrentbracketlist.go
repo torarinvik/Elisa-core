@@ -77,6 +77,17 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		elem := p.parseTypeExpr()
 		return &ast.MutableType{Position: elem.Pos(), Elem: elem}
 	}
+	// `lmut T` — linear-mutable mode. Layout/codegen identical to `mutable T&`, so we
+	// desugar to a mutable reference here (injecting the `&` the source omits, since
+	// `lmut` is move-semantics-in-the-source, in-place-in-codegen) and tag it Linear for
+	// the linear checker. If the user already wrote a reference (`lmut T&`), don't double-wrap.
+	if p.match(lexer.TOKEN_LMUT) {
+		elem := p.parseTypeExpr()
+		if _, isRef := elem.(*ast.RefType); !isRef {
+			elem = &ast.RefType{Position: elem.Pos(), Elem: elem, State: ast.RefStateNonNull, Storage: ast.RefStorageAny}
+		}
+		return &ast.MutableType{Position: elem.Pos(), Elem: elem, Linear: true}
+	}
 	if p.match(lexer.TOKEN_TAIL) {
 		elem := p.parseTypeExpr()
 		return &ast.TailType{Position: elem.Pos(), Elem: elem}

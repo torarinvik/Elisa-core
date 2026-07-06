@@ -39,6 +39,7 @@ const (
 	TOKEN_STACK
 	TOKEN_STATIC
 	TOKEN_MUTABLE
+	TOKEN_LMUT
 	TOKEN_REPR
 	TOKEN_PACKED
 	TOKEN_ALIGNED // reserved enum slot; intentionally NOT a keyword (see keyword map) so `aligned` is a usable identifier
@@ -170,6 +171,7 @@ var tokenNames = map[TokenKind]string{
 	TOKEN_STACK:    "stack",
 	TOKEN_STATIC:   "static",
 	TOKEN_MUTABLE:  "mutable",
+	TOKEN_LMUT:     "lmut",
 	TOKEN_REPR:     "repr",
 	TOKEN_PACKED:   "packed",
 	TOKEN_PASS:     "pass",
@@ -276,6 +278,7 @@ var keywords = map[string]TokenKind{
 	"stack":     TOKEN_STACK,
 	"static":    TOKEN_STATIC,
 	"mutable":   TOKEN_MUTABLE,
+	"lmut":      TOKEN_LMUT,
 	"repr":      TOKEN_REPR,
 	"packed":    TOKEN_PACKED,
 	"pass":      TOKEN_PASS,
