@@ -508,6 +508,17 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	if bodyContainsAutoAlloc(stmts) {
 		return true
 	}
+	// Value blocks (docs/119): a loop EXPRESSION (`for … |acc| -> acc:`), a multi-line
+	// if/match expression branch, or a bare block binding carries its statements inside
+	// an ExprBlock EXPRESSION, which the statement walk below never reaches — so a
+	// container built inside one (`seen: darray[T] = []` in a value-loop body) was left
+	// with no ambient region at all ("push requires an active in <arena>: scope").
+	// Statement-position loop headers desugar to IfStmt/WhileStmt and are walked
+	// directly; this covers the value forms. Over-wrap (a block nested inside its own
+	// region scope) is a harmless lazy no-op region, same as bodyContainsAutoAlloc.
+	if exprBlocksNeedAutoRegion(stmts) {
+		return true
+	}
 	// A struct-constructed local whose address is forwarded to a call (`x = T(...)`/`x = Builder()`;
 	// `grow(&x)`) has its region-less container fields grown INTERPROCEDURALLY by a (region-poly)
 	// callee. The growth is invisible to the syntactic allocation checks above, so without an ambient
@@ -748,6 +759,50 @@ func bodyContainsAutoAlloc(stmts []ast.Stmt) bool {
 			if alloc, ok := v.Interface().(*ast.AllocExpr); ok && alloc != nil && (alloc.AutoRegion || alloc.Owner == nil) {
 				found = true
 				return
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(stmts))
+	return found
+}
+
+// exprBlocksNeedAutoRegion reports whether any value-position ExprBlock nested anywhere
+// in stmts contains a region-less allocation, by running the statement-level scan on each
+// block's own statement list. ExprBlocks live in EXPRESSION position (a decl/assign RHS,
+// an ExprStmt, a match-expression arm), so the reflect walk mirrors bodyContainsAutoAlloc:
+// find every block wherever it hides, then reuse functionBodyNeedsAutoRegion on its Stmts
+// (which handles the sibling-context checks and recurses into deeper blocks in turn).
+func exprBlocksNeedAutoRegion(stmts []ast.Stmt) bool {
+	found := false
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if eb, ok := v.Interface().(*ast.ExprBlock); ok && eb != nil && len(eb.Stmts) > 0 {
+				if functionBodyNeedsAutoRegion(eb.Stmts) {
+					found = true
+					return
+				}
 			}
 			rec(v.Elem())
 		case reflect.Interface:
