@@ -702,6 +702,12 @@ type CallExpr struct {
 	// syntactic target-vs-argument matching sound: a wrong guess cannot misbind, it
 	// can only be rejected.
 	LmutRebindClaims []LmutRebindClaim
+	// LmutThreadEffect marks a mutating call the parser hoisted out of a docs/120 §6
+	// thread slot (`parser.advance()` from `parser <- parser.advance()`). Its effect is
+	// part of the visible multi-place manifest, so the §7 strict tier treats it as a
+	// manifest point even when the all-thread desugar leaves it as a bare statement
+	// (no value block whose captures would otherwise license it).
+	LmutThreadEffect bool
 
 	ResolvedArgsValid         bool
 	ResolvedArgs              []Expr

@@ -133,6 +133,7 @@ func (p *Parser) desugarThreadSlots(pos lexer.Pos, places []ast.Expr, value ast.
 				continue
 			}
 			if _, isBare := el.(*ast.Ident); !isBare {
+				markThreadEffect(el)
 				out = append(out, &ast.ExprStmt{Position: el.Pos(), Expr: el})
 			}
 		}
@@ -209,6 +210,24 @@ func threadOnlyStmts(value ast.Expr, hoistsOf func(*ast.TupleExpr) []ast.Stmt) [
 		return []ast.Stmt{ifStmt}
 	}
 	return nil
+}
+
+// markThreadEffect flags every call in a thread-slot expression's receiver chain as a
+// §6 thread effect, so the §7 strict tier treats it as a manifest point (a chained
+// `p.advance().skip_spaces()` threads through each in-place mutation).
+func markThreadEffect(e ast.Expr) {
+	for {
+		call, ok := e.(*ast.CallExpr)
+		if !ok {
+			return
+		}
+		call.LmutThreadEffect = true
+		field, ok := call.Func.(*ast.FieldExpr)
+		if !ok {
+			return
+		}
+		e = field.Object
+	}
 }
 
 type slotClass int

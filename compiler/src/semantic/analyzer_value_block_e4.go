@@ -107,6 +107,63 @@ func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
 	a.errorf(arg.Pos(), "value block may not mutate the outer binding %q through a call (docs/119 E4); pass it by value, capture it in the header (`|%s|`), or thread the update with `rebind`", name, name)
 }
 
+// checkStrictThreadedParamMutation is the docs/120 §7 strict manifest tier. A function
+// that DECLARES lmut threading (its signature returns one or more `lmut` params — so
+// currentFuncDecl.LmutThreadSlots is non-empty) opts those params into
+// manifest-required: every mutation of a declared-threaded param must be visible as a
+// manifest point. A bare mutating call on the param, or passing it by mutable ref
+// outside a manifest, is a hidden mutation and an error. The licensed manifest forms:
+//
+//   - a §6 thread slot (`p, ... <- p.method(), ...`) — the parser marks the hoisted
+//     call LmutThreadEffect, and the mixed form additionally captures the param in the
+//     branch value block (valueBlockAllowed);
+//   - a claimed declared-threading call (`rebind ... p = p.decl()`) — the call carries
+//     the LmutRebindClaim for p.
+//
+// Silent-tier functions (an `lmut` param but no threading declaration) and plain
+// `mutable T&` params are unaffected — this is what keeps hot paths ceremony-free.
+// Called from the same mutating-call sites as the E4 checks (ref-arg and mutating
+// builtin), so it sees every hidden write to a threaded param. `call` is the enclosing
+// call; `arg` is the receiver/argument bound to a mutable-ref parameter.
+func (a *Analyzer) checkStrictThreadedParamMutation(call *ast.CallExpr, arg ast.Expr) {
+	if a == nil || a.currentFuncDecl == nil || len(a.currentFuncDecl.LmutThreadSlots) == 0 {
+		return
+	}
+	name, ok := rootIdentName(arg)
+	if !ok || name == "" || name == "_" {
+		return
+	}
+	threaded := false
+	for _, s := range a.currentFuncDecl.LmutThreadSlots {
+		if s.ParamName == name {
+			threaded = true
+			break
+		}
+	}
+	if !threaded {
+		return
+	}
+	// Licensed: a §6 thread-slot effect (marked by the parser — covers the all-thread
+	// form, which desugars to a bare statement-if with no licensing value block).
+	if call != nil && call.LmutThreadEffect {
+		return
+	}
+	// Licensed: inside a value block that captures/threads this param (the §6 mixed
+	// form and explicit `|capture|` both land the name here).
+	if len(a.valueBlockAllowed) > 0 && a.valueBlockAllowed[len(a.valueBlockAllowed)-1][name] {
+		return
+	}
+	// Licensed: a claimed declared-threading call threading this param (§3 rebind form).
+	if call != nil {
+		for _, c := range call.LmutRebindClaims {
+			if c.Name == name {
+				return
+			}
+		}
+	}
+	a.errorf(arg.Pos(), "mutation of threaded parameter %q is not at a manifest point (docs/120 §7): thread it as a slot (`%s, … <- %s.method(), …`) or claim it (`rebind …, %s = %s.f()`) so the call site shows what it mutates", name, name, name, name, name)
+}
+
 // exprBlockPureOverOuter reports whether a value block is provably pure over OUTER
 // state (docs/119 §6.4): with an empty capture set, E4 has already rejected every
 // direct write and every mutating call to a non-local binding, and there is no
@@ -126,12 +183,17 @@ func exprBlockPureOverOuter(expr *ast.ExprBlock) bool {
 // `s.add(x)`) models its receiver as a VALUE, not a `mutable T&` arg, so it slips past
 // the ref-arg hook — mirror checkFrameForMutatingBuiltinMethod to catch it.
 func (a *Analyzer) checkValueBlockMutatingBuiltinMethod(expr *ast.CallExpr) {
+	recv, ok := a.mutatingBuiltinMethodReceiver(expr)
+	if !ok {
+		return
+	}
+	// docs/120 §7: a mutating builtin (`p.buf.push(v)`) on a declared-threaded param is a
+	// hidden write too — check it regardless of value-block context.
+	a.checkStrictThreadedParamMutation(expr, recv)
 	if len(a.valueBlockAllowed) == 0 {
 		return
 	}
-	if recv, ok := a.mutatingBuiltinMethodReceiver(expr); ok {
-		a.checkValueBlockMutatingCall(recv)
-	}
+	a.checkValueBlockMutatingCall(recv)
 }
 
 // collectBlockBoundNames gathers every name introduced by a binding within the block

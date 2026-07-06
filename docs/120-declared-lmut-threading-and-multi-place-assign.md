@@ -57,9 +57,45 @@ statement-form and mixed-form desugars), hooked from both multi-place entry poin
 src/thread_slots_runtime_test.go. Dogfooded: stage1's parse_decl_unit runs the
 flagship form in production parsing (self-resolve 0, 28/28 smokes).
 
-Still open (§7 candidate): the strictness tier — in a declaring function (or under
-an opt-in flag), any outer-state mutation not at a manifest point (`<-`, rebind,
-claimed call, thread slot, capture) becomes an error steering to these forms.
+## §7 — The strict manifest tier (LANDED)
+
+A function that DECLARES lmut threading (its signature returns one or more `lmut`
+params, so `FuncDecl.LmutThreadSlots` is non-empty) opts those params into
+*manifest-required*: every mutation of a declared-threaded param must be visible at a
+manifest point. A bare mutating call on the param, or passing it by mutable ref
+outside a manifest, is a hidden mutation and an error. Licensed forms:
+
+  - a §6 thread slot (`p, … <- p.method(), …`) — the parser marks the hoisted call
+    `LmutThreadEffect` (covers the all-thread form, which desugars to a bare
+    statement-if with no licensing value block), and the mixed form also captures the
+    param in the branch value block;
+  - a claimed declared-threading call (`rebind …, p = p.f()`) — via `LmutRebindClaim`.
+
+Silent-tier functions (an `lmut` param but no threading declaration) and plain
+`mutable T&` params are unaffected — hot paths stay ceremony-free. Implemented as a
+generalization of the E4 mutating-call check (analyzer_value_block_e4.go
+`checkStrictThreadedParamMutation`), run at the same ref-arg and mutating-builtin
+sites; scoped to the threaded-param roots. Only mutating CALLS / ref-passes are
+covered — a direct `p.field <- v` is already a visible `<-`.
+
+### Dogfood finding: declaring-threading is for CLEAN boundaries only
+
+Applying §7 to stage1's `parse_decl_unit` (which the §5/§6 dogfood had made a
+declaring function) flagged ~30 naked `parser` mutations: it calls
+`parse_decorators()`, `advance()`, `using_decl()`, `visibility_section()`,
+`error_at()`, … — dozens of void mutations of `parser`. Even `decl()` delegates via
+`parser.func_decl()` and reports via `parser.error_at()`. Threading every such call
+as a manifest slot is impractical.
+
+That is the strict tier working as a LINT: these decl-collection functions are not
+clean manifest boundaries — they do too much ambient parser mutation. So they were
+reverted to silent-tier `lmut Parser` (the §5/§6 declaring-threading dogfood undone;
+the plain forms restored). The rule for the style guide: **declare threading only for
+a boundary whose threaded-param mutations are few and all naturally expressible as
+thread slots / claims** (a dispatcher that returns one sub-result and threads, not a
+driver that mutates the parser through many internal helpers). §7 is validated by
+unit tests (semantic/lmut_linear_checker_test.go: TestStrict*); a clean production
+boundary to dogfood it on is future work.
 
 Implementation notes vs the original design:
 - Return-tuple fields are NAMED (`(ch: char, lexer: lmut Lexer)`) — tuple types in
