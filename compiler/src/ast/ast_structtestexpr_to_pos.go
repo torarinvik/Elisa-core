@@ -257,6 +257,11 @@ type AssignStmt struct {
 	// emits that call and ignores Target/Value, so the write lowers byte-identically to the
 	// hand-written store. Mirrors IndexExpr.AsOverlayCall for the read form.
 	AsOverlayCall *CallExpr
+	// ArgManifest marks a docs/120 §8 arg-manifest `x <- x.method(…)`: the RHS is a void
+	// call that mutates x in place (x is its receiver/argument), so there is nothing to
+	// assign — the target is a manifest of what the call mutates. Set by the semantic pass;
+	// codegen/interpret emit only Value (the call).
+	ArgManifest bool
 }
 type AugAssignStmt struct {
 	Position lexer.Pos
@@ -297,6 +302,11 @@ type TupleBindStmt struct {
 	Names    []TupleBindName
 	Declare  bool
 	Value    Expr
+	// ArgManifest marks a docs/120 §8 arg-manifest `t1, … <- call(…)`: the RHS is a void
+	// call that mutates the named mutable bindings in place (they are its arguments), so
+	// there is nothing to destructure — the names manifest what the call mutates. Set by the
+	// semantic pass; codegen/interpret emit only Value (the call).
+	ArgManifest bool
 }
 type MoveBindStmt struct {
 	Position lexer.Pos

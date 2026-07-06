@@ -107,62 +107,79 @@ func (a *Analyzer) checkValueBlockMutatingCall(arg ast.Expr) {
 	a.errorf(arg.Pos(), "value block may not mutate the outer binding %q through a call (docs/119 E4); pass it by value, capture it in the header (`|%s|`), or thread the update with `rebind`", name, name)
 }
 
-// checkStrictThreadedParamMutation is the docs/120 §7 strict manifest tier. A function
-// that DECLARES lmut threading (its signature returns one or more `lmut` params — so
-// currentFuncDecl.LmutThreadSlots is non-empty) opts those params into
-// manifest-required: every mutation of a declared-threaded param must be visible as a
-// manifest point. A bare mutating call on the param, or passing it by mutable ref
-// outside a manifest, is a hidden mutation and an error. The licensed manifest forms:
-//
-//   - a §6 thread slot (`p, ... <- p.method(), ...`) — the parser marks the hoisted
-//     call LmutThreadEffect, and the mixed form additionally captures the param in the
-//     branch value block (valueBlockAllowed);
-//   - a claimed declared-threading call (`rebind ... p = p.decl()`) — the call carries
-//     the LmutRebindClaim for p.
-//
-// Silent-tier functions (an `lmut` param but no threading declaration) and plain
-// `mutable T&` params are unaffected — this is what keeps hot paths ceremony-free.
-// Called from the same mutating-call sites as the E4 checks (ref-arg and mutating
-// builtin), so it sees every hidden write to a threaded param. `call` is the enclosing
-// call; `arg` is the receiver/argument bound to a mutable-ref parameter.
-func (a *Analyzer) checkStrictThreadedParamMutation(call *ast.CallExpr, arg ast.Expr) {
-	if a == nil || a.currentFuncDecl == nil || len(a.currentFuncDecl.LmutThreadSlots) == 0 {
-		return
+// isLmutArgManifest recognizes the docs/120 §8 arg-manifest form
+// `t1, …, tn <- call(…)`: a `<-` (reassign, not declare) whose RHS is a single call
+// returning void, where every target is a mutable-reference parameter passed as an
+// argument (or the receiver) of that call. Such a statement mutates the listed params in
+// place via the call's references — the `<-` targets are a self-documenting manifest of
+// what the call mutates, replacing a "# mutates x, y" comment. It erases to just the call
+// (already analyzed by the caller), so it is zero-overhead.
+func (a *Analyzer) isLmutArgManifest(names []ast.TupleBindName, value ast.Expr, valueType Type, declare bool) bool {
+	if declare || !isVoidType(valueType) {
+		return false
 	}
-	name, ok := rootIdentName(arg)
-	if !ok || name == "" || name == "_" {
-		return
+	call, ok := value.(*ast.CallExpr)
+	if !ok {
+		return false
 	}
-	threaded := false
-	for _, s := range a.currentFuncDecl.LmutThreadSlots {
-		if s.ParamName == name {
-			threaded = true
-			break
-		}
-	}
-	if !threaded {
-		return
-	}
-	// Licensed: a §6 thread-slot effect (marked by the parser — covers the all-thread
-	// form, which desugars to a bare statement-if with no licensing value block).
-	if call != nil && call.LmutThreadEffect {
-		return
-	}
-	// Licensed: inside a value block that captures/threads this param (the §6 mixed
-	// form and explicit `|capture|` both land the name here).
-	if len(a.valueBlockAllowed) > 0 && a.valueBlockAllowed[len(a.valueBlockAllowed)-1][name] {
-		return
-	}
-	// Licensed: a claimed declared-threading call threading this param (§3 rebind form).
-	if call != nil {
-		for _, c := range call.LmutRebindClaims {
-			if c.Name == name {
-				return
-			}
-		}
-	}
-	a.errorf(arg.Pos(), "mutation of threaded parameter %q is not at a manifest point (docs/120 §7): thread it as a slot (`%s, … <- %s.method(), …`) or claim it (`rebind …, %s = %s.f()`) so the call site shows what it mutates", name, name, name, name, name)
+	return a.namesAreMutableArgRoots(names, call)
 }
+
+// namesAreMutableArgRoots reports whether every name is passed to the call (as an argument
+// or the receiver) and is a mutable binding the call can mutate through — a mutable local,
+// or an lmut / mutable-ref parameter. This is the structural core of the §8 arg-manifest
+// (the void-return check is applied by the caller).
+func (a *Analyzer) namesAreMutableArgRoots(names []ast.TupleBindName, call *ast.CallExpr) bool {
+	if len(names) == 0 {
+		return false
+	}
+	roots := callMutableArgRoots(call)
+	for _, b := range names {
+		if b.Name == "_" || !roots[b.Name] || !a.isMutableBinding(b.Name) {
+			return false
+		}
+	}
+	return true
+}
+
+// isMutableBinding reports whether name resolves to a mutable binding: a reassignable
+// local/binding (sym.Mutable) or a mutable-reference parameter (lmut / `mutable T&`).
+func (a *Analyzer) isMutableBinding(name string) bool {
+	if a.currentScope == nil {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	if !ok || sym == nil {
+		return false
+	}
+	if sym.Mutable {
+		return true
+	}
+	ref, ok := sym.Type.(*RefType)
+	return ok && ref != nil && ref.Mutable
+}
+
+// callMutableArgRoots collects the root identifier names of a call's arguments and its
+// UFCS receiver — the places the call could mutate through a mutable-ref parameter.
+func callMutableArgRoots(call *ast.CallExpr) map[string]bool {
+	roots := map[string]bool{}
+	add := func(e ast.Expr) {
+		if name, ok := rootIdentName(e); ok && name != "" {
+			roots[name] = true
+		}
+	}
+	for _, arg := range call.Args {
+		add(arg)
+	}
+	for _, arg := range call.ResolvedArgs {
+		add(arg)
+	}
+	if field, ok := call.Func.(*ast.FieldExpr); ok {
+		add(field.Object)
+	}
+	return roots
+}
+
 
 // exprBlockPureOverOuter reports whether a value block is provably pure over OUTER
 // state (docs/119 §6.4): with an empty capture set, E4 has already rejected every
@@ -183,17 +200,12 @@ func exprBlockPureOverOuter(expr *ast.ExprBlock) bool {
 // `s.add(x)`) models its receiver as a VALUE, not a `mutable T&` arg, so it slips past
 // the ref-arg hook — mirror checkFrameForMutatingBuiltinMethod to catch it.
 func (a *Analyzer) checkValueBlockMutatingBuiltinMethod(expr *ast.CallExpr) {
-	recv, ok := a.mutatingBuiltinMethodReceiver(expr)
-	if !ok {
-		return
-	}
-	// docs/120 §7: a mutating builtin (`p.buf.push(v)`) on a declared-threaded param is a
-	// hidden write too — check it regardless of value-block context.
-	a.checkStrictThreadedParamMutation(expr, recv)
 	if len(a.valueBlockAllowed) == 0 {
 		return
 	}
-	a.checkValueBlockMutatingCall(recv)
+	if recv, ok := a.mutatingBuiltinMethodReceiver(expr); ok {
+		a.checkValueBlockMutatingCall(recv)
+	}
 }
 
 // collectBlockBoundNames gathers every name introduced by a binding within the block

@@ -57,165 +57,53 @@ statement-form and mixed-form desugars), hooked from both multi-place entry poin
 src/thread_slots_runtime_test.go. Dogfooded: stage1's parse_decl_unit runs the
 flagship form in production parsing (self-resolve 0, 28/28 smokes).
 
-## §7 — The strict manifest tier (LANDED)
+## §7 — The linear model: mutation IS reassignment (DESIGN)
 
-A function that DECLARES lmut threading (its signature returns one or more `lmut`
-params, so `FuncDecl.LmutThreadSlots` is non-empty) opts those params into
-*manifest-required*: every mutation of a declared-threaded param must be visible at a
-manifest point. A bare mutating call on the param, or passing it by mutable ref
-outside a manifest, is a hidden mutation and an error. Licensed forms:
+The unifying principle behind §1–§6, stated directly: an `lmut` value has **affine
+value semantics at the source level and in-place mutation at the machine level.**
 
-  - a §6 thread slot (`p, … <- p.method(), …`) — the parser marks the hoisted call
-    `LmutThreadEffect` (covers the all-thread form, which desugars to a bare
-    statement-if with no licensing value block), and the mixed form also captures the
-    param in the branch value block;
-  - a claimed declared-threading call (`rebind …, p = p.f()`) — via `LmutRebindClaim`.
+- Source level: the value threads through the code as a chain of reassignments —
+  every mutation names the value on the left of a `<-`, so its whole transformation
+  history is readable in the text. `parser <- … <- …`.
+- Machine level: because the value is linear (one live binding, each reassignment
+  targeting the same place), the compiler erases the "move" and mutates in place.
+  Zero copies, proven byte-identical IR.
 
-Silent-tier functions (an `lmut` param but no threading declaration) and plain
-`mutable T&` params are unaffected — hot paths stay ceremony-free. Implemented as a
-generalization of the E4 mutating-call check (analyzer_value_block_e4.go
-`checkStrictThreadedParamMutation`), run at the same ref-arg and mutating-builtin
-sites; scoped to the threaded-param roots. Only mutating CALLS / ref-passes are
-covered — a direct `p.field <- v` is already a visible `<-`.
+The bridging invariant: **nothing is mutated without being reassigned.** The only
+ways to mutate an `lmut` value are `x.field <- v` (direct place write), or a call
+that names it: `x <- x.method(…)` / `t, b <- f(…, t, …, b, …)` (§8). A bare
+`x.method()` / `f(x)` that mutates `x` without reassigning it is the "silent
+mutation" the design eliminates.
 
-### Dogfood finding: declaring-threading is for CLEAN boundaries only
+Earlier drafts (a §6 heuristic "flag mutations buried in asymmetric conditionals")
+were abandoned: measured across the stage1 frontend they over-fired on legitimate
+sequential multi-param code (974 → 322 → 60 sites, still mostly legitimate), because
+"a conditional mutates two params" is normal imperative code, not a separable
+antipattern. The linear model replaces the heuristic with a uniform rule — a
+mutation is a reassignment or it is an error — which needs no conditional analysis.
 
-Applying §7 to stage1's `parse_decl_unit` (which the §5/§6 dogfood had made a
-declaring function) flagged ~30 naked `parser` mutations: it calls
-`parse_decorators()`, `advance()`, `using_decl()`, `visibility_section()`,
-`error_at()`, … — dozens of void mutations of `parser`. Even `decl()` delegates via
-`parser.func_decl()` and reports via `parser.error_at()`. Threading every such call
-as a manifest slot is impractical.
+## §8 — The arg-manifest form (LANDED)
 
-That is the strict tier working as a LINT: these decl-collection functions are not
-clean manifest boundaries — they do too much ambient parser mutation. So they were
-reverted to silent-tier `lmut Parser` (the §5/§6 declaring-threading dogfood undone;
-the plain forms restored). The rule for the style guide: **declare threading only for
-a boundary whose threaded-param mutations are few and all naturally expressible as
-thread slots / claims** (a dispatcher that returns one sub-result and threads, not a
-driver that mutates the parser through many internal helpers). §7 is validated by
-unit tests (semantic/lmut_linear_checker_test.go: TestStrict*); a clean production
-boundary to dogfood it on is future work.
+The spelling that makes a mutating call a reassignment:
 
-Implementation notes vs the original design:
-- Return-tuple fields are NAMED (`(ch: char, lexer: lmut Lexer)`) — tuple types in
-  Elisa require field names, and the name doubles as the param match.
-- §3 call sites work by CLAIMS: the parser drops a bare rebind target that names an
-  argument/receiver root of a direct-call RHS and records it as an LmutRebindClaim
-  on the CallExpr; the semantic layer validates claims against the callee's
-  LmutThreadSlots in both directions (must-use + no-false-claims), which makes the
-  syntactic matching sound — a wrong guess is rejected, never misbound.
+    x <- x.push(v)                       # single target
+    table, bound <- walk(value, table, bound)   # multi target
 
-## Motivation
+A `<-` (reassign, not declare) whose RHS is a **void** call, where every target is a
+mutable binding passed to the call (as an argument or the receiver). The `<-`
+targets are a self-documenting manifest of what the call mutates — replacing a
+"# mutates table, bound" comment — and the statement **erases** to just the call
+(its references do the in-place mutation), so it is zero-overhead: proven to emit
+byte-identical IR to the bare call.
 
-docs/119 established `rebind` (explicit mutation threading for bindings) and the lmut
-work established `lmut T` (linear-mutable parameter mode, codegen-identical to
-`mutable T&`, checked for call-site non-aliasing). This doc completes the style the
-language wants to encourage — mutation that is explicit and trackable at the
-granularity where explicitness pays:
+Recognized in the semantic pass (analyzer_value_block_e4.go `isLmutArgManifest` /
+`namesAreMutableArgRoots`): the void-return check disambiguates a manifest
+(`bound <- bound.push(v)`) from an ordinary value-reassign
+(`variants <- parser.enum_variant_block()`), and from a real tuple destructure
+(`a, b <- swap(a, b)`). The recognized statement is marked `ArgManifest` on the
+TupleBindStmt / AssignStmt; codegen and the interpreter emit only the call.
+Goldens: src/lmut_arg_manifest_runtime_test.go.
 
-```
-def advance_char(lexer: lmut Lexer) -> (char, lmut Lexer):
-    if lexer.is_eof():
-        NULL_CHAR, lexer
-    else:
-        ch: char = lexer.current_char()
-        lexer.position <- lexer.position + 1
-        lexer.line, lexer.column <-
-            if ch == '\n':
-                lexer.line + 1, 1
-            else:
-                lexer.line, lexer.column + 1
-        ch, lexer
-
-rebind character, lexer = lexer.advance_char()
-```
-
-Three pieces, in dependency order.
-
-## §1 — Multi-place assignment (LANDED)
-
-```
-place1, place2 <- <tuple-valued expr>
-```
-
-Several PLACES (field paths, index targets, locals — anything `<-` already accepts)
-updated from one tuple-valued RHS, typically a value-if. The branches stay pure
-values; mutation happens at exactly one visible `<-`. The sibling of `rebind` for
-places rather than bindings.
-
-Semantics:
-- **Simultaneous assignment**: the RHS is fully evaluated before any place is
-  written, so `a.x, a.y <- a.y, a.x` is a correct swap.
-- Every existing `<-` check (mutability, struct invariants, named-state transitions,
-  E4 value-block rules) applies to each individual place unchanged.
-
-Implementation (pure parser desugar, mirrors `parseRebindStmt`): the RHS binds to
-fresh temps via the docs/119 §2 temp-tuple bind; one `place <- temp` per target rides
-`pendingStmts`. Disambiguation: a comma after a statement-leading expression is a
-place separator ONLY when a top-level `<-` follows on the same line
-(`multiPlaceArrowAhead`, a pure token scan) — a bare `expr, expr` line remains a
-value block's tuple tail (which rebind/if-value branches yield; the first
-implementation hijacked those and broke every tuple tail inside value blocks).
-
-Files: `parser/rebind.go` (`parseMultiPlaceAssignStmt`, `multiPlaceArrowAhead`),
-`parser/parser_statements_...` (TOKEN_COMMA case in `parseExprOrAssignStmt`).
-Goldens: `src/multi_place_assign_runtime_test.go`.
-
-## §2 — Declared threading: `lmut` in return position (DESIGN)
-
-```
-def advance_char(lexer: lmut Lexer) -> (char, lmut Lexer):
-```
-
-**The `lmut T` return slot is notation, not a value slot.** It is a declared thread:
-the checker enforces it, codegen erases it. The emitted function returns only `char`
-and takes the lexer as the same exclusive mutable reference as today. Rationale:
-a real tuple return would copy a darray-owning struct (or demand the affine
-move-in-place lowering on every return path) and change the ABI — pure ceremony
-bought with real cost, violating the zero-overhead principle. Erasure buys the
-manifest for free; the equivalence is already empirically pinned (lmut ≡ mutable&
-byte-for-byte).
-
-Checker rules (what makes the manifest TRUE rather than decorative):
-1. Each `lmut T` return entry must name-match an `lmut` parameter (by type; with two
-   same-typed lmut params, by position).
-2. Every return path must thread every declared-lmut param exactly once, in tail
-   position (`ch, lexer` / `NULL_CHAR, lexer`). Anything else in that slot is an
-   error.
-3. The threaded name must be the parameter itself — not a copy, not a field.
-
-## §3 — `rebind` call sites for declared-threading functions (DESIGN)
-
-```
-rebind character, lexer = lexer.advance_char()
-```
-
-- Rebind targets match the return tuple POSITIONALLY (value slots and lmut slots in
-  declared order). The lmut-slot target must be **the same binding** passed as the
-  lmut argument — receiving into a different name would be a real move and break the
-  erasure. Desugar: the lmut slots erase; the remaining value slots bind exactly as
-  today's `rebind`; the call itself is an ordinary lmut call.
-- **Must-use**: if a function DECLARES the explicit form, a direct call must use the
-  `rebind` form (an ordinary call-and-ignore is an error). This is the trackability
-  payoff: the signature opts the function into manifest-required.
-
-## Tiering (unchanged from the lmut design)
-
-Ceremony is opt-in per function, preserving the two-tier story:
-- `def advance(lx: lmut Lexer) -> char` — silent thread, hot path (188 call sites),
-  call sites unchanged.
-- `def parse_statement(p: lmut Parser) -> (Stmt, lmut Parser)` — declared thread,
-  coarse boundary, call sites must `rebind`.
-
-Same mode, same codegen; one bit of signature ceremony chooses visibility.
-
-## Rollout
-
-1. §1 multi-place `<-` — DONE (stage0).
-2. §2 erased return notation + threading checker (stage0).
-3. §3 rebind call-site form + must-use rule (stage0).
-4. Port §1–§3 syntax to stage1 (lexer/parser; checker where feasible).
-5. Dogfood: flip a handful of coarse Parser boundaries (`parse_statement`,
-   `parse_decl`) to the declared form; keep `advance`/`accept`/`expect` silent;
-   evaluate readability on real code before writing the style guide.
+Next: §9 — the uniform enforcement (a bare `lmut`-mutating call/pass is an error
+steering to the §8 reassignment), landed together with the frontend conversion so
+the tree stays green.

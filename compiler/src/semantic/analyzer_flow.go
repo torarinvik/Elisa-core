@@ -228,9 +228,22 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.LetDestructureStmt:
 		a.analyzeLetDestructureStmt(n)
 	case *ast.TupleBindStmt:
+		// docs/120 §8 arg-manifest candidacy: `t1, … <- call(…, t1, …)` where every target is
+		// a mutable binding passed to the call. If so, analyze the RHS with NO expected tuple
+		// (a void mutator would otherwise be corrupted into a type error by the expected
+		// tuple), then erase when it is void — the call mutates the targets in place and the
+		// `<-` is the manifest. A non-void RHS (a real `a, b <- swap(a, b)` tuple destructure)
+		// falls through to the normal path using the already-analyzed type.
+		manifestCandidate := false
+		if !n.Declare {
+			if call, ok := n.Value.(*ast.CallExpr); ok && a.namesAreMutableArgRoots(n.Names, call) {
+				manifestCandidate = true
+			}
+		}
+
 		var expectedTuple Type
 		targetTypes := make([]Type, len(n.Names))
-		if !n.Declare {
+		if !n.Declare && !manifestCandidate {
 			expectedFields := make([]TupleField, 0, len(n.Names))
 			for i, binding := range n.Names {
 				if binding.Name == "_" {
@@ -244,6 +257,19 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			expectedTuple = &TupleType{Fields: expectedFields}
 		}
 		valueType := a.analyzeValueExpr(n.Value, expectedTuple)
+		if manifestCandidate && isVoidType(valueType) {
+			n.ArgManifest = true // codegen emits only the call; nothing to destructure
+			return
+		}
+		if !n.Declare && manifestCandidate {
+			// A non-void candidate is a real destructure; recover the target types the
+			// normal path expects (they were skipped above to keep the RHS uncoerced).
+			for i, binding := range n.Names {
+				if binding.Name != "_" {
+					targetTypes[i] = a.assignmentTargetType(&ast.Ident{Position: binding.Position, Name: binding.Name})
+				}
+			}
+		}
 		fields, ok := a.resolvedStructFields(valueType)
 		if !ok {
 			a.errorf(n.Pos(), "tuple destructuring requires a tuple value, got %s", valueType)
@@ -422,6 +448,16 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		valueType := a.analyzeValueExpr(n.Value, targetType)
 		if restoreAllocExpr {
 			a.currentAllocExpr = savedAllocExpr
+		}
+		// docs/120 §8 single-target arg-manifest `x <- x.method(…)`: a `<-` whose RHS is a
+		// void call that mutates x in place (x passed as its receiver/arg). Nothing to
+		// assign — the `x <-` is a manifest of what the call mutates. Erase to the
+		// already-analyzed call (zero overhead), so `x <- x.push(v)` reads as the
+		// reassignment the linear model requires while compiling to the in-place push.
+		if id, ok := n.Target.(*ast.Ident); ok &&
+			a.isLmutArgManifest([]ast.TupleBindName{{Position: id.Position, Name: id.Name}}, n.Value, valueType, false) {
+			n.ArgManifest = true // codegen emits only the call; nothing to assign
+			return
 		}
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
@@ -718,7 +754,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		entryRangeFacts := a.visibleRangeFacts()
 		rangeBranches := make([]map[string]numRange, 0, len(n.Elifs)+2)
-		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
+				thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)

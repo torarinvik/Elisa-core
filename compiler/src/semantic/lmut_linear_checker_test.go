@@ -120,69 +120,6 @@ def f() -> void:
 	}
 }
 
-const strictThreadPrelude = `enum Decl:
-    Func(name: i64)
-    Bad
-
-struct P:
-    x: mutable i64
-
-def advance(p: lmut P) -> void:
-    p.x <- p.x + 1
-
-def sub(p: lmut P) -> (d: Decl?, p: lmut P):
-    return null, p
-`
-
-// docs/120 §7 strict tier: in a function declaring lmut threading, a bare mutating call
-// on a threaded param (buried in a branch, not at a manifest point) is a hidden mutation.
-func TestStrictThreadedMutationFlagged(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "strict_naked.elisa", strictThreadPrelude+`
-def collect(p: lmut P, out: mutable darray[Decl]&, d_opt: Decl?) -> (p: lmut P):
-    if d_opt is d:
-        out.push(d)
-    else:
-        p.advance()
-    return p
-`)
-	if all := strings.Join(result.Errors(), "\n"); !strings.Contains(all, "not at a manifest point") {
-		t.Fatalf("expected §7 hidden-mutation error, got: %s", all)
-	}
-}
-
-// The §6 thread-slot form (all-thread and mixed) satisfies the strict tier.
-func TestStrictThreadSlotFormClean(t *testing.T) {
-	analyzeTreeTestSource(t, "strict_threadslot.elisa", strictThreadPrelude+`
-def collect(p: lmut P, out: mutable darray[Decl]&, d_opt: Decl?) -> (p: lmut P):
-    p, out <-
-        if d_opt is d:
-            p, out.push(d)
-        else:
-            p.advance(), out
-    return p
-`)
-}
-
-// A claimed declared-threading call satisfies the strict tier.
-func TestStrictClaimedCallClean(t *testing.T) {
-	analyzeTreeTestSource(t, "strict_claim.elisa", strictThreadPrelude+`
-def collect(p: lmut P) -> (p: lmut P):
-    rebind d_opt: Decl?, p = p.sub()
-    _ = d_opt
-    return p
-`)
-}
-
-// A silent-tier function (an lmut param but NO threading declaration) is unaffected:
-// a bare mutating call on the param is fine.
-func TestStrictSilentTierUnaffected(t *testing.T) {
-	analyzeTreeTestSource(t, "strict_silent.elisa", strictThreadPrelude+`
-def scan(p: lmut P) -> void:
-    p.advance()
-    p.advance()
-`)
-}
-
 // docs/120 §3 must-use: a call to a declared-threading function must claim every
 // declared thread via the rebind form; a plain call is an error.
 func TestLmutDeclaredThreadingMustUse(t *testing.T) {

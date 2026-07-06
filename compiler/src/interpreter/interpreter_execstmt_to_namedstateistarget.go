@@ -40,6 +40,14 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		frame.locals[n.Name] = value
 		return controlSignal{}, nil
 	case *ast.AssignStmt:
+		if n.ArgManifest {
+			// docs/120 §8: `x <- x.method(…)` — evaluate the void call (its refs mutate x in
+			// place); the target is only a manifest, nothing to assign.
+			if _, err := i.evalExpr(frame, n.Value); err != nil {
+				return controlSignal{}, annotateRuntimeError(n.Pos(), err)
+			}
+			return controlSignal{}, nil
+		}
 		if n.Optional {
 			if err := i.execOptionalAssignStmt(frame, n); err != nil {
 				return controlSignal{}, annotateRuntimeError(n.Pos(), err)

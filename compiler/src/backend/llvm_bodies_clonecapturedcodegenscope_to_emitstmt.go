@@ -674,6 +674,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.LetDestructureStmt:
 		return s.emitLetDestructureStmt(n)
 	case *ast.TupleBindStmt:
+		if n.ArgManifest {
+			// docs/120 §8: the names are a manifest of what a void call mutates in place —
+			// emit only the call (its refs do the mutation), discard the (void) result.
+			_, _, err := s.emitExpr(n.Value, nil)
+			return err
+		}
 		return s.emitTupleBindStmt(n)
 	case *ast.MoveBindStmt:
 		return s.emitMoveBindStmt(n)
@@ -751,6 +757,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 	case *ast.PromoteStmt:
 		return s.emitPromoteStmt(n)
 	case *ast.AssignStmt:
+		if n.ArgManifest {
+			// docs/120 §8: `x <- x.method(…)` — the target manifests what a void call mutates
+			// in place; emit only the call, discard the (void) result.
+			_, _, err := s.emitExpr(n.Value, nil)
+			return err
+		}
 		if n.AsOverlayCall != nil {
 			// Guest-overlay write (docs/107): `base.field[mem] = value` was desugared by the analyzer
 			// to a MemoryManager_WriteU<N> call. Emit that call in place of the store; the lowering is
