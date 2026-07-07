@@ -796,6 +796,8 @@ func collectMachineCallArgRoots(stmt ast.Stmt, overRoots, out map[string]bool) {
 		case *ast.IndexExpr:
 			visit(n.Object)
 			visit(n.Index)
+		case *ast.CastExpr:
+			visit(n.Operand)
 		}
 	}
 	switch s := stmt.(type) {
@@ -849,6 +851,10 @@ func collectExprRootIdents(expr ast.Expr, out map[string]bool) {
 	case *ast.IndexExpr:
 		collectExprRootIdents(e.Object, out)
 		collectExprRootIdents(e.Index, out)
+	case *ast.CastExpr:
+		// A postfix value cast/ctor (`box.data[i].char()`) is a CastExpr, not a method
+		// call — the driven resource is rooted in its operand (`box`), so descend.
+		collectExprRootIdents(e.Operand, out)
 	case *ast.BinaryExpr:
 		collectExprRootIdents(e.Left, out)
 		collectExprRootIdents(e.Right, out)
@@ -884,6 +890,8 @@ func exprMentionsIdent(expr ast.Expr, name string) bool {
 		case *ast.IndexExpr:
 			walk(n.Object)
 			walk(n.Index)
+		case *ast.CastExpr:
+			walk(n.Operand)
 		case *ast.BinaryExpr:
 			walk(n.Left)
 			walk(n.Right)

@@ -276,6 +276,27 @@ func TestMachineRefusalForeignMutation(t *testing.T) {
 	}
 }
 
+// A postfix value cast/ctor (`buf.data[i].char()`) parses as a CastExpr, not a method
+// call. The driven resource is rooted in the cast's operand (`buf`), so an arm mutating
+// `buf` must be allowed — before the CastExpr case in collectExprRootIdents, the base was
+// dropped and the machine's own driven resource was misreported as foreign state.
+func TestMachineDrivenRootThroughCast(t *testing.T) {
+	src := "def scan(buf: mutable Buf&) -> i64:\n" + `    idx: mutable usize = 0
+    end: usize = buf.data.count
+    machine over buf.data[idx].char() while idx < end:
+        state Text
+        start Text
+        Text, _:
+            buf.errs <- buf.errs + 1
+            idx <- idx + 1
+            -> Text
+` + "\n    return 0\n"
+	_, errs := parseSourceFile(t, src)
+	if strings.Contains(strings.Join(errs, "\n"), "foreign state") {
+		t.Fatalf("driven resource reached through a cast was misclassified as foreign: %v", errs)
+	}
+}
+
 func TestMachineRefusalPayloadDirectAssign(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Expr(depth: usize)
