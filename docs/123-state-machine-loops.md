@@ -45,10 +45,10 @@ Two additional payoffs the lint tier can never deliver:
 
 ---
 
-## 2. Syntax
+## 2. Syntax (as implemented)
 
 ```
-machine over INPUT_EXPR:
+machine over INPUT_EXPR [while COND_EXPR] [-> YIELD_EXPR]:
     state Name1
     state Name2(payload: Type where REFINEMENT, ...)
     ...
@@ -59,8 +59,32 @@ machine over INPUT_EXPR:
         -> NameJ(args)        # transition (tail position, mandatory)
 
     Name2(payload_pat), PATTERN:
-        return EXPR           # or: break EXPR (expression form), break, return
+        return EXPR           # or: break (bare), return
 ```
+
+Two clauses were added during implementation (both discovered against the real stage1
+lexer, not invented):
+
+- **`while COND`** — the loop condition. Every real scanner needs one (`while not
+  lexer.is_end_of_source()`): without it, `over lexer.current_char()` reads past EOF.
+  When the condition fails, control falls out of the machine to the following statement
+  (the pilot's post-loop unterminated-token return). Omitted → `while true`.
+- **`-> YIELD` replaces the spec's `break value`** — `break` carries no value anywhere in
+  Elisa; loops yield via the docs/119 header-arrow instead, evaluated against the final
+  payload state on exit. A yield-form machine is consumed as a decl RHS exactly like a
+  value loop:
+
+  ```
+  total: usize =
+      machine over source[cursor] while cursor < source.count -> count:
+          state Skipping(count: usize)
+          start Skipping(0)
+          Skipping(count), ' ':
+              cursor <- cursor + 1
+              -> Skipping(count + 1)
+          Skipping(count), _:
+              break
+  ```
 
 - **`machine over EXPR:`** — `EXPR` is the *input expression*, re-evaluated once per
   step (e.g. `lexer.get_char()`). The input is machine input, **not** state payload — no
@@ -197,32 +221,58 @@ def skip_trivia(lexer: lmut Lexer) -> usize:
 
 ---
 
-## 4. Semantics via desugar (zero overhead)
+## 4. Semantics via desugar (zero overhead) — as implemented
 
-A `machine` desugars mechanically to the shape the read_fstring pilot already validated
-bit-exact (docs/121):
+The desugar is **scalarized**: the synthesized mode enum is payload-LESS, and every
+payload field becomes one loop-header mutable local, shared across states that declare
+the same field name (same type required). This was forced by two stage0 facts and turned
+out strictly better than the spec sketch:
+
+- stage0 enum payload decls carry no `where` refinements — but a **local's type** can be
+  a refinement type (`depth: usize where depth > 0`), so scalarized payloads get their
+  refinements edge-checked by the existing typed-local machinery for free (§5.7 without
+  machine-specific code);
+- the payload-less enum + scalar accumulators is the read_fstring pilot's exact
+  bit-pattern, so zero overhead is inherited, not re-proven.
+
+The actual lowering of §2's brace counter (real `-emit lowered` output shape):
 
 ```
-enum __MachineState:                  # synthesized, function-local
+enum __MachineMode_<uniq>:            # hoisted to file scope, payload-less
     Text
-    Expr(depth: usize where depth > 0)
-    StringInExpr(depth: usize where depth > 0)
+    Expr
 
-__st = __MachineState.Text            # `start`
-while true:
-    __in = lexer.get_char()           # the `over` expression, once per step
-    match __st, __in:
-        __MachineState.Text, '"':
-            return fstring_token()
-        __MachineState.Text, '{':
-            lexer <- lexer.advance(1)
-            __st <- __MachineState.Expr(1)   # `->` = rebind; loop continues
-        ...
+# wrapLoopHeader scoped wrapper (docs/119) holds the machine-private decls:
+__machine_mode = __MachineMode.Text   # `start Text(0)`
+found: mutable i64 = 0                #   start arg seeds the payload local
+depth: mutable usize = zeroed         #   non-start payloads init zeroed
+while cursor < source.count:          # the `while` clause (default: true)
+    __machine_input = source[cursor]  # the `over` expression, once per step
+    match __machine_mode:
+        __MachineMode.Text:
+            if __machine_input == '{' and cursor + 1 < source.count and ...:
+                cursor <- cursor + 2                     # self-transition: mode rebind ELIDED
+            elif __machine_input == '{':
+                cursor <- cursor + 1
+                depth <- 1
+                __machine_mode <- __MachineMode.Expr     # `-> Expr(found, 1)`
+            else:
+                cursor <- cursor + 1
+        __MachineMode.Expr:
+            ...
+found                                  # `-> found` yield = ExprBlock value
 ```
 
-`->` is rebind-and-continue; `break value` is the value-loop exit (docs/119). Codegen is
-identical to the hand-written automaton — the construct adds **checks only**, no runtime
-representation. Zero-overhead claim inherits from the pilot's bit-exact result.
+Per-state arm chains lower to one `if`/`elif`/`else` ladder whose conditions are
+`payload-pattern AND input == lit [or ...] AND guard`; payload literal patterns
+(`Expr(found, 1)`) become equality tests, payload refinement patterns (`Expr(found,
+depth > 1)`) are used verbatim as conditions over the scalar local. Self-transitions
+elide the mode rebind and `field <- field` no-op assigns; multi-arg transitions evaluate
+args into temps before any field assign (so `-> Swap(b, a)` reads pre-transition values).
+The whole thing rides `wrapLoopHeader`, so licensing/analysis/codegen are the tested
+docs/119 paths. Verified: `-Wflow-strict` is silent on the lowering, and the native
+`-emit test` smoke (multi-state, guards, literal + refinement payload patterns, yield
+form, unterminated input) passes.
 
 ---
 

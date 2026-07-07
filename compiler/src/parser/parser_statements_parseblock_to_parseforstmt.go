@@ -100,6 +100,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && (p.tokens[p.pos+1].Text == "one" || p.tokens[p.pos+1].Text == "all") {
 				return p.parseNotifyStmt()
 			}
+		case "machine":
+			if p.looksLikeMachineStmt() {
+				return p.parseMachineStmt()
+			}
 		case "pool":
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()
