@@ -2,6 +2,7 @@ package main
 
 import (
 	"elisacore/src/backend"
+	"elisacore/src/semantic"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -79,6 +80,7 @@ type projectCLIOptions struct {
 	recordTrace       bool
 	strictPolicy      bool
 	perfStrict        bool
+	flowLintMode      semantic.FlowLintMode
 	concurrencyStrict bool
 	progressStrict    bool
 	proofStrict       bool
@@ -176,6 +178,7 @@ type resolvedProjectTarget struct {
 	packedProfile         backend.PackedLoweringProfile
 	strictPolicy          bool
 	perfStrict            bool
+	flowLintMode          semantic.FlowLintMode
 	concurrencyStrict     bool
 	progressStrict        bool
 	proofStrict           bool
@@ -269,6 +272,7 @@ func runProjectCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 		recordTrace:       options.recordTrace,
 		strictPolicy:      target.strictPolicy,
 		perfStrict:        target.perfStrict,
+		flowLintMode:      target.flowLintMode,
 		concurrencyStrict: target.concurrencyStrict,
 		progressStrict:    target.progressStrict,
 		proofStrict:       target.proofStrict,
@@ -449,6 +453,12 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 			_ = os.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
 		case arg == "-Wperf":
 			options.perfStrict = true
+		case arg == "-Wflow":
+			// docs/121: flow-checked-loop lints, warn tier (Phase A). See the single-file CLI parser
+			// for the full note. The declarative `[warnings] flow` manifest field lands in Phase C.
+			options.flowLintMode = semantic.FlowLintWarn
+		case arg == "-Wflow-strict":
+			options.flowLintMode = semantic.FlowLintStrict
 		case arg == "-Wconcurrency":
 			options.concurrencyStrict = true
 		case arg == "-Wprogress":

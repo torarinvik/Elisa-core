@@ -536,6 +536,7 @@ func semanticOptionsForCLI(options cliOptions) semantic.AnalyzeOptions {
 		EnforceUnsafePermissions: options.strictPolicy,
 		EnforceProgressSafety:    options.progressStrict || options.strictPolicy,
 		EnforcePerfLints:         options.perfStrict,
+		FlowLintMode:             options.flowLintMode,
 		EnforceStrictConcurrency: options.concurrencyStrict,
 		EnforceStrictProofs:      options.proofStrict,
 		WarnDiscardedValues:      options.warnUnused,

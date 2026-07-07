@@ -249,6 +249,7 @@ type cliOptions struct {
 	concurrencyStrict bool
 	progressStrict    bool
 	requiresReport    bool
+	flowLintMode      semantic.FlowLintMode
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -335,6 +336,16 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/70): promote the performance-friction lints
 			// (pointer-graph, allocation churn) from warnings to hard errors for shipped code.
 			options.perfStrict = true
+		case arg == "-Wflow":
+			// docs/121: the flow-checked-loop lints — messy scanner/parser loops that hide an
+			// untyped state machine, scatter cursor advancement, or pyramid their branches. Phase A
+			// is warn-only behind this dial; the eventual default is strict (downgraded to warn by
+			// -permissive). The `can ComplexFlow:` grant silences a covered loop at any level.
+			options.flowLintMode = semantic.FlowLintWarn
+		case arg == "-Wflow-strict":
+			// Explicit strict flow lints (hard errors) — the Phase C default, available now for
+			// projects that want to ban the anti-patterns outright before the default flips.
+			options.flowLintMode = semantic.FlowLintStrict
 		case arg == "-Wunused":
 			// docs/119 W1: warn when a statement-position expression's non-void value is
 			// silently discarded. Opt-in — the corpus has many side-effecting calls that

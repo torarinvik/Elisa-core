@@ -201,6 +201,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 		a.validateCurrentFuncPoststates()
 	}
 	a.checkSentinelIndex(fn)
+	a.checkFlowComplexity(fn)
 	a.checkAllocationChurn(fn)
 	a.checkPoolChurn(fn)
 	a.checkTaskGroupChurn(fn)

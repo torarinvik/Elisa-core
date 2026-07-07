@@ -438,6 +438,7 @@ type Analyzer struct {
 	enforceProgressSafety       bool
 	enforceStrictConcurrency    bool
 	enforcePerfLints            bool
+	flowLintMode                FlowLintMode
 	enforceStrictProofs         bool
 	emitProofHoleHints          bool
 	warnDiscardedValues         bool
@@ -709,6 +710,12 @@ type AnalyzeOptions struct {
 	// churn) from warnings to hard errors — the `-Wperf` graduated-strictness level for
 	// shipped code (docs/70). Off by default so prototyping stays fluid.
 	EnforcePerfLints bool
+	// FlowLintMode drives the flow-checked-loop lints (docs/121): messy scanner/parser loops
+	// that hide an untyped state machine, scatter cursor advancement, or pyramid their branches.
+	// FlowLintOff (default in Phase A) disables them; FlowLintWarn (`-Wflow`) nudges; FlowLintStrict
+	// (the eventual default, downgraded to warn by `-permissive`) rejects. The `can ComplexFlow:`
+	// grant silences a covered loop at any level.
+	FlowLintMode FlowLintMode
 	// WarnDiscardedValues turns on docs/119 W1: a statement-position expression whose non-void value
 	// is silently discarded warns (`_ = expr` to discard on purpose, or use it). OFF by default — the
 	// corpus has many intentional side-effecting calls that also return a value, so this is an opt-in
@@ -857,6 +864,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		enforceProgressSafety:             options.EnforceProgressSafety,
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,
+		flowLintMode:                      options.FlowLintMode,
 		enforceStrictProofs:               options.EnforceStrictProofs,
 		emitProofHoleHints:                options.EmitProofHoleHints,
 		warnDiscardedValues:               options.WarnDiscardedValues,

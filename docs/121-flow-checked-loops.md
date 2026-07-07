@@ -247,6 +247,43 @@ two-options pattern (disjoint_param_perf_lint_test.go:18 shape,
    accepted as progress evidence; same helper without it is not.
 6. Hook into `make test-semantic` (these are plain semantic tests, ~10s tier).
 
+## 4b. Phase A calibration results (LANDED)
+
+Ran `-Wflow` over the full stage1 tree (36 files). First pass: **28 warnings**. Every one was a
+false-positive *class*, not a genuine bug (stage1 was already hand-converted to clean scoped
+loops), so each was eliminated by a principled exemption — not by weakening the rule:
+
+1. **Balanced counters (R2, 15 hits — `depth`/`type_depth`).** A bracket/nesting counter steps
+   both directions (`depth+1`/`depth-1`) and is checked `depth == 0` in several places, clearing
+   the int thresholds. Fix: `bindingIsMonotoneCounter` exempts a binding whose every mutation is a
+   ±constant step, INCLUDING bidirectional — the mark of a real discriminant is assigning distinct
+   constants (`state <- 2`), never a step.
+2. **Sticky latches (R2, 5 hits — `saw_explicit_arg`/`terminated`).** A bool set `true` in several
+   branches and never reset is a one-way fact, not a toggled machine; an enum rewrite is wrong
+   advice. Fix: `bindingIsStickyLatch` exempts a bool assigned only ONE literal across the body. A
+   genuine flag (`in_string`) is assigned both `true` and `false`.
+3. **Per-arm scanners (R3, 6 hits — including the `read_fstring` REWRITE itself).** The original R3
+   "advance in > K arms" trigger fired on any typed-mode scanner, which advances once per match arm
+   — the exact shape R2 pushes toward. Contradictory guidance. Fix: **dropped the arm-count trigger
+   entirely**; R3 now flags only an *unguarded repeated advance* — two advances of the same cursor
+   in one block with no `if`/`match`/`return`/`break`/`continue` between them (the real double-skip
+   bug). The escape-consumes-two idiom (`advance; if at_end: return; advance`) is guard-separated
+   and passes.
+4. **Threaded accumulators (R3, 2 hits — `table`).** `table <- walk_expression(entry.key, table,…)`
+   threads state as a NON-receiver argument, syntactically resembling a cursor advance. Fix:
+   `advanceOfAssign` requires the binding to be the call's RECEIVER (`lexer <- lexer.advance_char()`),
+   not an incidental argument.
+
+Second pass after the four fixes: **0 warnings on stage1** — a precise lint over already-clean code
+correctly finds nothing, while the unit tests (`flow_complexity_test.go`) prove both rules fire on
+the genuine patterns (`in_string` toggle, back-to-back double-advance). Each exemption has a locked
+negative-test fixture. Broad corpus (shadps4/wolf3d `while`-loop files) is a supplementary sweep.
+
+Wiring note: `-Wflow`/`-Wflow-strict` are parsed in BOTH the single-file CLI and the project-system
+CLI. The declarative manifest `[warnings] flow` field is deferred to Phase C (when the default flips
+and manifest control becomes meaningful) — there is no divergence risk while the lints are
+off-by-default.
+
 ## 5. Calibration (the gate before any default flips)
 
 1. Run `-Wflow` over the **stage1 tree** (36 files — the tree was just

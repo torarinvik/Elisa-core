@@ -39,6 +39,13 @@ func (a *Analyzer) registerBuiltinPermissions() {
 	// on purpose" escape hatch. Nothing ever REQUIRES Scalar, so granting it never propagates to
 	// callers; it only silences the vectorization expectation for the code it lexically covers.
 	a.registerBuiltinPermission("Scalar", []string{"Loop"})
+	// ComplexFlow acknowledges a loop whose control flow trips the flow-checked-loop lints
+	// (docs/121): an untyped state-flag automaton, scattered cursor advancement, a nesting
+	// pyramid, or too many divergent exits. Like Scalar it is a pure acknowledgment grant —
+	// nothing ever REQUIRES it, so granting it never propagates to callers; it only silences
+	// the flow diagnostics for the loop(s) it lexically covers. Wrap the single offending loop,
+	// not the whole function, so the hatch stays narrow and greppable.
+	a.registerBuiltinPermission("ComplexFlow", nil)
 	a.registerBuiltinPermission("Segment", []string{"Host", "Guest"})
 	a.registerBuiltinPermission("Global", []string{"Read", "Write"})
 	a.registerBuiltinPermission("Unsafe", []string{"PointerCast", "PointerArithmetic", "GuestHostPointerCast", "IndirectCall", "UncheckedIndex", "RawExtern", "MutableGlobal", "ThreadShare", "StaleRef", "Alias", "BufferReinterpret", "Assembly", "ExecutableCodePublish", "MachineCodeBuilder", "SegmentMutation", "GuestSegmentInstall", "NonProgress", "BlockMain", "AssumeProgress", "Leak"})
