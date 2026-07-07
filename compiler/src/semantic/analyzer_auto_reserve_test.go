@@ -464,3 +464,69 @@ func TestAutoReserveForInReservesAllProvableTargets(t *testing.T) {
 		t.Fatalf("expected reserves for ys and zs, got %v", found)
 	}
 }
+
+// A nested counting loop whose bound is an outer-loop BODY local must NOT lift that bound
+// into a pre-loop reserve — the local does not exist at the emission point. Regression:
+// `out.reserve(xs.count * n)` was synthesized before the outer loop and errored
+// "undefined identifier n" (an unknown-identifier LLVM-lowering crash under -permissive).
+func TestAutoReserveNestedBoundBodyLocalSkipped(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(xs: darray[i64]&) -> usize:
+    out: mutable darray[i64] = []
+    for i in 0..<xs.count:
+        n: usize = i + 1
+        for j in 0..<n:
+            out.push(xs[i])
+    return out.count
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve != nil || len(loop.PreReserves) != 0 {
+		t.Fatal("reserve bound referencing a loop-body local must not be hoisted")
+	}
+}
+
+// Same shape via an iter-for outer loop whose inner bound references the loop VARIABLE
+// (a struct with a darray field — the original stage1 machine-port reproducer).
+func TestAutoReserveIterNestedBoundLoopVarSkipped(t *testing.T) {
+	file := analyzeAndGetFile(t, `struct Item:
+    name: sview
+    parts: darray[sview]
+
+def collect(items: darray[Item], key: sview) -> darray[sview]:
+    out: mutable darray[sview] = []
+    for index in 0..<items.count:
+        if items[index].name == key:
+            found: Item = items[index]
+            for part_index in 0..<found.parts.count:
+                out.push(found.parts[part_index])
+    return out
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve != nil || len(loop.PreReserves) != 0 {
+		t.Fatal("reserve bound referencing a nested struct-copy local must not be hoisted")
+	}
+}
+
+// Positive control: a nested bound that DOES resolve before the outer loop (a parameter)
+// still hoists — the resolvability gate must not disable legitimate nested presizing.
+func TestAutoReserveNestedBoundOuterScopeStillHoists(t *testing.T) {
+	file := analyzeAndGetFile(t, `def g(n: usize, m: usize) -> usize:
+    out: mutable darray[i64] = []
+    for i in 0..<n:
+        for j in 0..<m:
+            out.push(1)
+    return out.count
+`)
+	loop := firstForStmt(file)
+	if loop == nil {
+		t.Fatal("no ForStmt found")
+	}
+	if loop.PreReserve == nil {
+		t.Fatal("expected nested reserve n*m to hoist when both bounds resolve in the outer scope")
+	}
+}

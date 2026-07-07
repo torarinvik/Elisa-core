@@ -60,6 +60,9 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		if !semanticReserveExprIsIntOne(growth) {
 			bound = semanticMultiplyReserveExpr(bound, growth, stmt.Position)
 		}
+		if !a.reserveBoundResolvableHere(bound) {
+			continue
+		}
 		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
 	}
 	if len(preReserves) == 0 {
@@ -125,6 +128,9 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		if !semanticReserveExprIsIntOne(growth) {
 			bound = semanticMultiplyReserveExpr(bound, growth, stmt.Pos())
 		}
+		if !a.reserveBoundResolvableHere(bound) {
+			continue
+		}
 		preReserves = append(preReserves, semanticMakeReserveStmt(stmt.Position, name, bound))
 	}
 	if len(preReserves) == 0 {
@@ -138,6 +144,54 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		return
 	}
 	stmt.PreReserves = preReserves
+}
+
+// reserveBoundResolvableHere reports whether every identifier in a synthesized reserve
+// bound resolves in the CURRENT scope — the point just before the loop where the
+// `ys.reserve(bound)` statement is emitted. A bound lifted out of a NESTED counting loop
+// (collectGrowthTargetCounts multiplies the inner loop's `0..<n` bound into the growth)
+// may reference outer-loop BODY locals — `n` in
+//
+//	for i in 0..<xs.count:
+//	    n: usize = i + 1
+//	    for j in 0..<n:        # inner bound `n` does not exist before the outer loop
+//	        out.push(...)
+//
+// Hoisting such a bound produced `out.reserve(xs.count * n)` before the outer loop and
+// errored "undefined identifier n" (surfacing as an unknown-identifier LLVM-lowering
+// crash under -permissive). An unresolvable bound skips the reserve — the target falls
+// back to the ordinary grow-on-push path and, for iter fills, the perf lint.
+func (a *Analyzer) reserveBoundResolvableHere(bound ast.Expr) bool {
+	resolvable := true
+	var walk func(v reflect.Value)
+	walk = func(v reflect.Value) {
+		if !resolvable || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer, reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			if ident, ok := v.Interface().(*ast.Ident); ok {
+				if _, ok := a.currentScope.Lookup(ident.Name); !ok {
+					resolvable = false
+				}
+				return
+			}
+			walk(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(bound))
+	return resolvable
 }
 
 func semanticMakeReserveStmt(pos lexer.Pos, target string, bound ast.Expr) ast.Stmt {
