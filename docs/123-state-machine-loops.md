@@ -375,16 +375,26 @@ object). `machine` is opt-in; there is no pressure to force code into it.
 
 ---
 
-## 10. Phasing
+## 10. Phasing (status)
 
-- **Phase 0** — land prerequisites §8.1/§8.2 scoped to `machine` arms.
-- **Phase 1** — parser + desugar to `while`+`match` (semantics via existing pipeline),
-  refusals §5.1–5.3/5.6.
-- **Phase 2** — exhaustiveness + reachability over the transition graph (§5.4/5.5),
-  refinement edge checks (§5.7).
+- **Phase 0 — DONE.** Arm guards + payload literal/refinement patterns + input BIND
+  patterns (`Scanning, character if character.is_ident():`), scoped to `machine`.
+- **Phase 1 — DONE.** Parser + scalarized desugar (§4), refusals §5.1–5.3/5.6, plus
+  §5.4/5.5 in their per-state form (irrefutable-final-arm exhaustiveness, unreachable
+  arms) and §5.7 via refinement types on the scalarized locals.
+- **Phase 2 (remaining)** — transition-graph artifacts: dead-state reachability,
+  input-domain totality beyond the wildcard rule.
 - **Phase 3** — verification hooks (§6): `decreases` over states, graph artifacts.
-- **Phase 4** — docs/121 R2 diagnostic rewording to suggest `machine`; dogfood on the
-  stage1 lexer's real f-string scanner and `skip_trivia`.
+- **Phase 4 — DONE (dogfood).** The stage1 lexer's 7 dispatchful scanners are machines:
+  read_fstring (3-state, the FStringMode enum retired), read_string, read_char,
+  skip_block_comment, skip_spaces, measure_indent (yield form), read_identifier.
+  Bit-exact by the stage0/stage1 token-parity harness (13 fixtures). Condition-only
+  scans (digit runs, blank-line/newline collapse, line-directive probes) deliberately
+  stay plain loops — no body dispatch means a machine adds only boilerplate.
+- **Phase 5 — DONE.** Stage1 self-hosted parser port (parser_stmt_machine.elisa):
+  same desugar shape with an `if mode == Enum.State:` dispatch chain; breadth
+  self-parse 37 files / 0 errors, all 30 parity smokes green.
+- **Remaining** — docs/121 R2 diagnostic rewording to suggest `machine`.
 
 ---
 
