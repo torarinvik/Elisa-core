@@ -365,3 +365,37 @@ func TestMachineContextualKeywordFallthrough(t *testing.T) {
 		t.Fatalf("plain `machine` variable failed to parse: %v", errs)
 	}
 }
+
+// Input bind pattern: `Scanning, character if character.is_ident():` — binds the input
+// for call-predicate dispatch; the bind hoists above the guard ladder.
+func TestMachineInputBindPattern(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Scanning
+        start Scanning
+        Scanning, character if character.is_letter():
+            lexer <- lexer.advance_char()
+            -> Scanning
+        Scanning, _:
+            break
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("input bind failed to parse: %v", errs)
+	}
+	var fn *ast.FuncDecl
+	for _, d := range file.Decls {
+		if f, ok := d.(*ast.FuncDecl); ok {
+			fn = f
+		}
+	}
+	wrapper := fn.Body[0].(*ast.IfStmt)
+	loop := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
+	matchStmt := loop.Body[1].(*ast.MatchStmt)
+	bind, ok := matchStmt.Arms[0].Body[0].(*ast.VarDeclStmt)
+	if !ok || bind.Name != "character" {
+		t.Fatalf("expected hoisted input-bind decl, got %#v", matchStmt.Arms[0].Body[0])
+	}
+	if _, ok := matchStmt.Arms[0].Body[1].(*ast.IfStmt); !ok {
+		t.Fatalf("expected guard ladder after bind, got %T", matchStmt.Arms[0].Body[1])
+	}
+}

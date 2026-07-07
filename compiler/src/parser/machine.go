@@ -78,6 +78,7 @@ type machineArm struct {
 	payload   []machinePayloadPat
 	inputs    []ast.Expr // literal alternatives (`'a' | 'b'`); nil when inputWild
 	inputWild bool
+	inputBind string // input bind pattern: names the input value for guard/body
 	guard     ast.Expr
 	body      []ast.Stmt // statements before the exit; excludes the transition line
 	exit      machineExitKind
@@ -249,10 +250,19 @@ func (p *Parser) parseMachineArm(states []machineState) machineArm {
 		p.expect(lexer.TOKEN_RPAREN)
 	}
 	p.expect(lexer.TOKEN_COMMA)
-	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
+	switch {
+	case p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_":
 		p.advance()
 		arm.inputWild = true
-	} else {
+	case p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) &&
+		(p.tokens[p.pos+1].Kind == lexer.TOKEN_IF || p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON):
+		// Input BIND pattern: `Scanning, character if character.is_identifier_char():` —
+		// matches any input (like `_`) and names it for the guard/body, so call-predicate
+		// dispatch reads the input once. A qualified member (`TokenKind.Ident`) has a `.`
+		// after the ident and takes the literal path below instead.
+		arm.inputBind = p.advance().Text
+		arm.inputWild = true
+	default:
 		arm.inputs = append(arm.inputs, p.parseMatchValuePatternExpr())
 		for p.match(lexer.TOKEN_PIPE) {
 			arm.inputs = append(arm.inputs, p.parseMatchValuePatternExpr())
@@ -375,6 +385,12 @@ func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 		p.errorf("machine arms cannot `continue` — every arm ends in `-> State`, `return`, or `break` (docs/123 §5)")
 	case *ast.IfStmt, *ast.MatchStmt, *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
 		p.errorf("machine arms cannot branch or loop (docs/123 §5) — move the condition into the arm header (`State, input if guard:`) or split into separate arms")
+	case *ast.CanStmt:
+		// A postfix `can Effect` clause wraps its statement in a CanStmt — a transparent
+		// effect-licensing wrapper, not a branch. Validate the licensed statements.
+		for _, inner := range s.Body {
+			p.validateMachineArmStmt(inner, arm)
+		}
 	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.ExprStmt:
 		_ = s // allowed straight-line forms; mutation targets are checked at desugar time
 	default:
@@ -496,34 +512,7 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 		for _, arg := range arms[i].args {
 			collectMachineCallArgRoots(&ast.ExprStmt{Expr: arg}, overRoots, mutatedRoots)
 		}
-		for _, stmt := range arms[i].body {
-			// A driven-resource root passed to any call may be mutated THROUGH the call
-			// (`advance(scanner, 1)` with a `mutable&` param) — the loop/value-block E4
-			// licensing needs it in the capture manifest just like an assigned root.
-			collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
-			switch s := stmt.(type) {
-			case *ast.VarDeclStmt:
-				armLocals[s.Name] = true
-			case *ast.AssignStmt:
-				root := assignRootIdent(s.Target)
-				if root == "" {
-					p.errorf("machine arm assignment target is not rooted in a named binding")
-					continue
-				}
-				if armLocals[root] {
-					continue
-				}
-				if _, isField := fieldByName[root]; isField {
-					p.errorf("machine arm assigns payload field %q directly — payloads change only through `-> State(args)` transitions (docs/123 §5)", root)
-					continue
-				}
-				if !overRoots[root] {
-					p.errorf("machine arms may only mutate the driven resource (%s) — %q is foreign state (docs/123 §5)", strings.Join(sortedKeys(overRoots), ", "), root)
-					continue
-				}
-				mutatedRoots[root] = true
-			}
-		}
+		p.checkMachineArmMutations(arms[i].body, armLocals, fieldByName, overRoots, mutatedRoots)
 	}
 
 	// --- construction ---
@@ -563,13 +552,23 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 	for i := range states {
 		st := &states[i]
 		var loweredArms []loweredMachineArm
+		// Input BIND names are hoisted to the head of the state's match arm — a bound
+		// input is referenced from arm GUARDS (if-ladder conditions), which run before
+		// any per-arm body statement could declare it.
+		var bindDecls []ast.Stmt
+		bindSeen := map[string]bool{}
 		for _, idx := range armsByState[st.name] {
-			loweredArms = append(loweredArms, p.lowerMachineArm(&arms[idx], st, stateByName, enumMember, inputVar, modeVar))
+			arm := &arms[idx]
+			if arm.inputBind != "" && !bindSeen[arm.inputBind] {
+				bindSeen[arm.inputBind] = true
+				bindDecls = append(bindDecls, &ast.VarDeclStmt{Position: arm.pos, Name: arm.inputBind, Value: &ast.Ident{Position: arm.pos, Name: inputVar}})
+			}
+			loweredArms = append(loweredArms, p.lowerMachineArm(arm, st, stateByName, enumMember, inputVar, modeVar))
 		}
 		matchArms = append(matchArms, ast.MatchArm{
 			Position: st.pos,
 			Pattern:  &ast.MatchVariantPattern{Position: st.pos, EnumName: enumName, Variant: st.name},
-			Body:     buildMachineArmChain(st.pos, loweredArms),
+			Body:     append(bindDecls, buildMachineArmChain(st.pos, loweredArms)...),
 		})
 	}
 
@@ -588,6 +587,40 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 
 	hdr := &loopHeader{pos: pos, decls: decls, captures: sortedKeys(mutatedRoots), yield: yield}
 	return p.wrapLoopHeader(hdr, loop)
+}
+
+// checkMachineArmMutations enforces the foreign-mutation refusal over an arm body
+// (recursing through transparent CanStmt wrappers) and records driven roots that need
+// capture licensing. A driven root passed to any call may be mutated THROUGH the call
+// (`advance(scanner, 1)` with a `mutable&` param), so those join the capture set too.
+func (p *Parser) checkMachineArmMutations(stmts []ast.Stmt, armLocals map[string]bool, fieldByName map[string]machineField, overRoots, mutatedRoots map[string]bool) {
+	for _, stmt := range stmts {
+		collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
+		switch s := stmt.(type) {
+		case *ast.CanStmt:
+			p.checkMachineArmMutations(s.Body, armLocals, fieldByName, overRoots, mutatedRoots)
+		case *ast.VarDeclStmt:
+			armLocals[s.Name] = true
+		case *ast.AssignStmt:
+			root := assignRootIdent(s.Target)
+			if root == "" {
+				p.errorf("machine arm assignment target is not rooted in a named binding")
+				continue
+			}
+			if armLocals[root] {
+				continue
+			}
+			if _, isField := fieldByName[root]; isField {
+				p.errorf("machine arm assigns payload field %q directly — payloads change only through `-> State(args)` transitions (docs/123 §5)", root)
+				continue
+			}
+			if !overRoots[root] {
+				p.errorf("machine arms may only mutate the driven resource (%s) — %q is foreign state (docs/123 §5)", strings.Join(sortedKeys(overRoots), ", "), root)
+				continue
+			}
+			mutatedRoots[root] = true
+		}
+	}
 }
 
 // machineArmIrrefutable reports whether an arm matches every (payload, input) with no
