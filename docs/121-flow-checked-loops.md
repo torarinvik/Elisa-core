@@ -284,6 +284,48 @@ CLI. The declarative manifest `[warnings] flow` field is deferred to Phase C (wh
 and manifest control becomes meaningful) — there is no divergence risk while the lints are
 off-by-default.
 
+## 4c. Phase B calibration results (LANDED)
+
+Phase B (R1 nesting, R4 exit budget, R5 progress, R6 single-mutation) ran `-Wflow` over the full
+stage1 frontend (`test/breadth/parse_report.elisa`, which `include`s the whole tree). First pass:
+**35 warnings** (R1 29, R5 5, R6 1, R4 0). Every one was a false-positive *class* driven by how
+stage0 lowers real branchy parser/resolver code — each fixed by a principled recalibration, not by
+weakening the rule. R4 was clean out of the gate (stage1 exits are one constructor or `raise`).
+
+1. **`match` is transparent to R1 (nested-dispatch, 6 hits incl. `read_fstring` itself).** Counting
+   a `match` as a nesting level fired R1 on the gold-standard rewrite (`match mode → match character
+   → guard if` = depth 3) — the same contradiction Phase A found in R3. A `match` is structured
+   typed dispatch, the clean shape R2/R3 steer toward, not a decision tree. Fix: only `if`-nesting
+   accrues budget; a `match` contributes its arms' inner if-depth but adds no level of its own.
+2. **`elif` chains collapse in R1 (desugar miscount, ~15 hits).** The runtime parser lowers
+   `if/elif/elif/else` into NESTED `else: if …` (…parsesingleexprblockvalue.go:185), not a flat
+   Elifs slice — so a single readable N-way dispatch read as depth N and tripped R1 everywhere. Fix:
+   `flowStmtDepth` walks the `else: if` chain and counts it as ONE level (`flowElseIfContinuation`).
+3. **R1 threshold raised to > 3 (calibration knob, ~4 hits).** After 1+2, the survivors were genuine
+   three-deep `if` guards (`if x is Ident: … elif op: if type != "": …`) that read fine in real
+   resolver code. Stage1 is the clean reference; if it nests pattern guards three deep routinely,
+   depth-3 is clean and the mess worth flagging is deeper. Threshold is now `> 3`
+   (`flowMaxNestingDepth = 3`). Four genuine depth-4 arrow-code loops remain — real findings within
+   the < 5 budget, left as warnings (to flatten or hatch before the Phase C strict flip).
+4. **R5 exempts thread-slot loops (erasure, 5 hits).** The docs/120 §6 thread-slot desugar ERASES a
+   threaded rebind (`parser, _ <- parser.expression()`): the mutating call runs in place, no
+   assignment survives, and the advance can be hoisted out of the branch it was written in. So R5's
+   structural per-branch progress check cannot see the progress and false-positived on every clean
+   threaded parser loop. Fix: R5 skips a loop when a carried/captured binding is a call RECEIVER
+   anywhere in the body (`flowLoopCallsOnCarried`) — the erasure-proof marker of a threaded loop,
+   whose termination is the progress-safety prover's job (the R5 spec's intended Change 2), not this
+   sharpening. R5 keeps the catch for plain index loops (unit-tested).
+5. **R6 counts only fall-through mutations (guard-continue, 1 hit).** `if c: n <- n+2; continue`
+   branches are mutually exclusive — control never reaches two in one iteration — so they don't
+   compound. Fix: `flowArmMutatesAndFallsThrough` ignores a mutating arm that ends in
+   `continue`/`return`/`break`/`raise`; only fall-through mutations count toward the ≥ 2 threshold.
+
+Second pass after the five fixes: **4 warnings on stage1, all genuine R1 depth-4 findings** — under
+the < 5 budget. Each recalibration is locked by a negative-test fixture in
+`flow_complexity_phaseb_test.go`. The headline lesson repeats Phase A's: a lint that steers toward a
+shape (typed `match` dispatch) must not punish that shape (R1's original match-counting), and stage0
+desugars (elif-nesting, thread-slot erasure) are the dominant false-positive source on real code.
+
 ## 5. Calibration (the gate before any default flips)
 
 1. Run `-Wflow` over the **stage1 tree** (36 files — the tree was just
@@ -299,8 +341,10 @@ off-by-default.
 
 ## 6. Rollout
 
-- **Phase A** (P0 + R2 + R3): warnings behind `-Wflow`. Calibrate per §5.
-- **Phase B** (R1 + R4 + R5): still `-Wflow`. Second calibration sweep.
+- **Phase A** (P0 + R2 + R3): warnings behind `-Wflow`. Calibrate per §5. **LANDED** (§4b).
+- **Phase B** (R1 + R4 + R5 + R6): still `-Wflow`. Second calibration sweep. **LANDED** (§4c) —
+  R6 folded in here (a warn-only rule; no reason to defer it to its own phase). Stage1 sits at 4
+  genuine R1 depth-4 warnings, under the < 5 budget.
 - **Phase C**: default flips to strict error; `-permissive` → warning;
   `-Wflow` becomes a no-op alias. Stage1 must be 0-warnings-or-hatched first.
   Gate: full smoke suite + `make test-full` + lexer bench unchanged.

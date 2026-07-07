@@ -38,6 +38,7 @@ func (a *Analyzer) checkFlowStateFlag(info *loopFlowInfo) {
 		if isBoolFlag && info.bindingIsStickyLatch(name) {
 			continue // a one-way latch (see bindingIsStickyLatch), not a toggled 2-state machine
 		}
+		info.r2Fired = true // suppress R1 on this loop — the enum rewrite collapses the nesting too
 		a.flowLint(info.pos, "%s", flowStateFlagMessage(name, isBoolFlag))
 	}
 }

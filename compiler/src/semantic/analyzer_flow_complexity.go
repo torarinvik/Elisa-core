@@ -29,8 +29,8 @@ const (
 )
 
 // flowLint emits a flow-complexity diagnostic at the configured severity: nothing when the
-// lints are off, a warning under `-Wflow`, a hard error under strict mode. All six rules emit
-// only through here so the graduation is uniform.
+// lints are off, a warning under `-Wflow`, a hard error under strict mode. R1-R5 emit only
+// through here so the graduation is uniform.
 func (a *Analyzer) flowLint(pos lexer.Pos, format string, args ...interface{}) {
 	switch a.flowLintMode {
 	case FlowLintStrict:
@@ -38,6 +38,16 @@ func (a *Analyzer) flowLint(pos lexer.Pos, format string, args ...interface{}) {
 	case FlowLintWarn:
 		a.warnf(pos, format, args...)
 	}
+}
+
+// flowLintWarnOnly emits a flow-complexity diagnostic that stays a warning even in strict
+// mode. R6 (single-mutation-per-path) uses this: it is the least-certain rule and docs/121 §1
+// fixes it at warn-tier in v1 (never a hard error), so it must not gate a strict build.
+func (a *Analyzer) flowLintWarnOnly(pos lexer.Pos, format string, args ...interface{}) {
+	if a.flowLintMode == FlowLintOff {
+		return
+	}
+	a.warnf(pos, format, args...)
 }
 
 // refsGrantComplexFlow reports whether a `can …:` grant acknowledges complex flow — the
@@ -155,11 +165,35 @@ type loopFlowInfo struct {
 	// and match-arm, at any nesting). A rule that counts "distinct branches mutating b" counts
 	// arms whose direct statements assign b.
 	arms []flowArm
+
+	// exits is every `return`/`break`/`raise` reachable in the loop body (at any nesting, but
+	// not inside a nested loop). R4 (exit budget) classifies their result shapes; R5 counts an
+	// exit as per-path progress.
+	exits []flowExit
+
+	// r2Fired records that R2 (state-flag ban) flagged this loop. When it did, R1 (nesting
+	// budget) is suppressed: the enum-state rewrite R2 prescribes collapses the nesting too, so
+	// one combined diagnostic (R2's) beats two (docs/121 §3-R1, §7).
+	r2Fired bool
 }
 
 type flowArm struct {
 	pos  lexer.Pos
 	body []ast.Stmt // the arm's direct statements
+}
+
+type flowExitKind int
+
+const (
+	flowExitReturn flowExitKind = iota
+	flowExitBreak
+	flowExitRaise
+)
+
+type flowExit struct {
+	kind  flowExitKind
+	pos   lexer.Pos
+	value ast.Expr // the returned expression for flowExitReturn; nil otherwise
 }
 
 func (a *Analyzer) buildLoopFlowInfo(kind loopKind, pos lexer.Pos, cond ast.Expr, body []ast.Stmt, captures []string) *loopFlowInfo {
@@ -184,7 +218,44 @@ func (a *Analyzer) buildLoopFlowInfo(kind loopKind, pos lexer.Pos, cond ast.Expr
 		info.carried[name] = true
 	}
 	collectFlowArms(body, &info.arms)
+	collectFlowExits(body, &info.exits)
 	return info
+}
+
+// collectFlowExits records every return/break/raise reachable in the loop body. A `raise` is an
+// ExprStmt wrapping a RaiseExpr (raise is an expression, ast_structtestexpr_to_pos.go:27). Does
+// not descend into nested loops — an inner loop's exits belong to that loop's jurisdiction.
+func collectFlowExits(stmts []ast.Stmt, out *[]flowExit) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.ReturnStmt:
+			*out = append(*out, flowExit{kind: flowExitReturn, pos: n.Position, value: n.Value})
+		case *ast.BreakStmt:
+			*out = append(*out, flowExit{kind: flowExitBreak, pos: n.Position})
+		case *ast.ExprStmt:
+			if raise, ok := n.Expr.(*ast.RaiseExpr); ok {
+				*out = append(*out, flowExit{kind: flowExitRaise, pos: raise.Position})
+			}
+		case *ast.IfStmt:
+			collectFlowExits(n.Then, out)
+			for _, elif := range n.Elifs {
+				collectFlowExits(elif.Body, out)
+			}
+			collectFlowExits(n.Else, out)
+		case *ast.MatchStmt:
+			for _, arm := range n.Arms {
+				collectFlowExits(arm.Body, out)
+			}
+		case *ast.ScopeStmt:
+			collectFlowExits(n.Body, out)
+		case *ast.CanStmt:
+			collectFlowExits(n.Body, out)
+		case *ast.InStoreStmt:
+			collectFlowExits(n.Body, out)
+		case *ast.RegionStmt:
+			collectFlowExits(n.Body, out)
+		}
+	}
 }
 
 // collectBodyLocalDecls records names declared inside the loop body. A name declared in the
@@ -319,6 +390,10 @@ func (a *Analyzer) runFlowRules(info *loopFlowInfo) {
 	if info == nil {
 		return
 	}
-	a.checkFlowStateFlag(info) // R2
+	a.checkFlowStateFlag(info)         // R2 (sets info.r2Fired)
+	a.checkFlowNestingBudget(info)     // R1 (suppressed when R2 fired)
 	a.checkFlowDuplicatedAdvance(info) // R3
+	a.checkFlowExitBudget(info)        // R4
+	a.checkFlowProgress(info)          // R5
+	a.checkFlowSingleMutation(info)    // R6 (warn-only)
 }
