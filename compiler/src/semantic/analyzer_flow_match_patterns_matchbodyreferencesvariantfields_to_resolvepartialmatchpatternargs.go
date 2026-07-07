@@ -408,7 +408,7 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			indexExpr := &ast.IndexExpr{
 				Position: elem.Pos(),
 				Object:   valueExpr,
-				Index:    &ast.IntLit{Position: elem.Pos(), Value: fmt.Sprintf("%d", i), Suffix: "u"},
+				Index:    &ast.IntLit{Position: elem.Pos(), Value: fmt.Sprintf("%d", i)},
 			}
 			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
 		}

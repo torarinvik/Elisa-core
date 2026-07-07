@@ -195,7 +195,7 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 			indexExpr := &ast.IndexExpr{
 				Position: elem.Pos(),
 				Object:   valueExpr,
-				Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i), Suffix: "u"},
+				Index:    &ast.IntLit{Position: elem.Pos(), Value: strconv.Itoa(i)},
 			}
 			a.analyzeNestedMatchPattern(elem, elemType, indexExpr, scope)
 		}
