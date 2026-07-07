@@ -1550,7 +1550,11 @@ func staticMatchStmtAlwaysTerminates(stmt *ast.MatchStmt) bool {
 	for _, arm := range stmt.Arms {
 		switch arm.Pattern.(type) {
 		case *ast.MatchWildcardPattern, *ast.MatchBindPattern:
-			hasWildcard = true
+			// docs/122 §5.1: a guarded catch-all can fail, so it does not guarantee
+			// the match terminates.
+			if arm.Guard == nil {
+				hasWildcard = true
+			}
 		}
 		if !staticStmtBlockAlwaysTerminates(arm.Body) {
 			return false

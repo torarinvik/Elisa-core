@@ -187,6 +187,19 @@ type MatchOrPattern struct {
 }
 type MatchRestPattern struct {
 	Position lexer.Pos
+	// Name binds the tail (docs/122 §5.3: `[first, ...rest]`) as a view over the
+	// unmatched elements. Empty for the discard-only `...` marker.
+	Name string
+}
+
+// MatchRangePattern is a numeric/char range arm (docs/122 §5.2): `'a'..<'z'` /
+// `0..=127`. Lo and Hi are literal exprs (same restrictions as MatchLiteralPattern
+// values); Inclusive distinguishes `..=` from `..<`.
+type MatchRangePattern struct {
+	Position  lexer.Pos
+	Lo        Expr
+	Hi        Expr
+	Inclusive bool
 }
 type MatchStructPattern struct {
 	Position     lexer.Pos
@@ -194,6 +207,11 @@ type MatchStructPattern struct {
 	Args         []MatchPatternArg
 	Brace        bool
 	ResolvedArgs []*MatchPatternArg
+	// Rest is the explicit `_` final arg (docs/122 §5.7): match the named fields,
+	// ignore the remainder — the positional form's opt-in to partial coverage.
+	Rest bool
+	// As binds the whole matched value alongside the destructure (docs/122 §5.4).
+	As string
 }
 type MatchVariantPattern struct {
 	Position     lexer.Pos
@@ -201,6 +219,13 @@ type MatchVariantPattern struct {
 	Variant      string
 	Args         []MatchPatternArg
 	ResolvedArgs []*MatchPatternArg
+	// As binds the whole matched value at the narrowed variant type alongside the
+	// destructure (docs/122 §5.4: `Expr.Binary(l, op, r) as whole:`).
+	As string
+	// Rest is the explicit final `_` after named args (docs/122 §5.7:
+	// `KeyEvent(key: k, _)`) — match the named fields, ignore the remainder. Only
+	// meaningful alongside named args; pure-positional `_` stays a one-field wildcard.
+	Rest bool
 }
 type MatchPatternArg struct {
 	Position lexer.Pos
@@ -462,6 +487,10 @@ type MatchArm struct {
 	Position lexer.Pos
 	Pattern  MatchPattern
 	Body     []Stmt
+	// Guard is the optional arm-header guard (docs/122 §5.1: `Pattern if cond:`).
+	// Pattern bindings are in scope; a guarded arm never discharges exhaustiveness.
+	// Fanned-out `A | B:` alternatives share the same Guard expr (like Body).
+	Guard Expr
 }
 type PassStmt struct {
 	Position lexer.Pos

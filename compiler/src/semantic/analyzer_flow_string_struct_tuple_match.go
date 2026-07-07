@@ -41,9 +41,10 @@ func (a *Analyzer) analyzeStringMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelStringMatchPattern(arm.Pattern, valueType, scope, i, len(stmt.Arms)) {
+		if a.analyzeTopLevelStringMatchPattern(arm.Pattern, valueType, scope, i, len(stmt.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -62,7 +63,10 @@ func (a *Analyzer) analyzeStringMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -121,9 +125,10 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelStringMatchPattern(arm.Pattern, valueType, scope, i, len(expr.Arms)) {
+		if a.analyzeTopLevelStringMatchPattern(arm.Pattern, valueType, scope, i, len(expr.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -141,18 +146,27 @@ func (a *Analyzer) analyzeStringMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -221,12 +235,15 @@ func (a *Analyzer) analyzeIntegerMatchStmt(stmt *ast.MatchStmt, valueType Type) 
 		scope := NewScope(a.currentScope)
 		isWildcard := a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(stmt.Arms))
 		if isWildcard {
-			hasWildcard = true
+			if arm.Guard == nil {
+				hasWildcard = true
+			}
 		} else {
 			// Seed the equality range fact for literal arms so the arm body can prove
 			// refinement obligations that follow from the matched value (docs/85 1d-2).
 			a.seedIntegerMatchArmFact(stmt.Value, arm.Pattern, scope)
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -245,7 +262,10 @@ func (a *Analyzer) analyzeIntegerMatchStmt(stmt *ast.MatchStmt, valueType Type) 
 				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -308,10 +328,13 @@ func (a *Analyzer) analyzeIntegerMatchExpr(expr *ast.MatchExpr, valueType Type) 
 		scope := NewScope(a.currentScope)
 		isWildcard := a.analyzeTopLevelIntegerMatchPattern(arm.Pattern, valueType, scope, i, len(expr.Arms))
 		if isWildcard {
-			hasWildcard = true
+			if arm.Guard == nil {
+				hasWildcard = true
+			}
 		} else {
 			a.seedIntegerMatchArmFact(expr.Value, arm.Pattern, scope)
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -329,18 +352,27 @@ func (a *Analyzer) analyzeIntegerMatchExpr(expr *ast.MatchExpr, valueType Type) 
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -398,9 +430,10 @@ func (a *Analyzer) analyzeStructMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelStructMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) {
+		if a.analyzeTopLevelStructMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -416,7 +449,10 @@ func (a *Analyzer) analyzeStructMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -469,9 +505,10 @@ func (a *Analyzer) analyzeTupleMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) {
+		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -487,7 +524,10 @@ func (a *Analyzer) analyzeTupleMatchStmt(stmt *ast.MatchStmt, valueType Type) {
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -540,9 +580,10 @@ func (a *Analyzer) analyzeSequenceMatchStmt(stmt *ast.MatchStmt, valueType Type)
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelSequenceMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) {
+		if a.analyzeTopLevelSequenceMatchPattern(arm.Pattern, valueType, stmt.Value, scope, i, len(stmt.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -558,7 +599,10 @@ func (a *Analyzer) analyzeSequenceMatchStmt(stmt *ast.MatchStmt, valueType Type)
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -612,9 +656,10 @@ func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) T
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelStructMatchPattern(arm.Pattern, valueType, expr.Value, scope, i, len(expr.Arms)) {
+		if a.analyzeTopLevelStructMatchPattern(arm.Pattern, valueType, expr.Value, scope, i, len(expr.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -632,18 +677,27 @@ func (a *Analyzer) analyzeStructMatchExpr(expr *ast.MatchExpr, valueType Type) T
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()
@@ -702,9 +756,10 @@ func (a *Analyzer) analyzeTupleMatchExpr(expr *ast.MatchExpr, valueType Type) Ty
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, expr.Value, scope, i, len(expr.Arms)) {
+		if a.analyzeTopLevelTupleMatchPattern(arm.Pattern, valueType, expr.Value, scope, i, len(expr.Arms)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -722,18 +777,27 @@ func (a *Analyzer) analyzeTupleMatchExpr(expr *ast.MatchExpr, valueType Type) Ty
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !hasWildcard {
 		cloneBaseline()

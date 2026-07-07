@@ -25,6 +25,10 @@ func backendMatchPatternIsNull(pattern ast.MatchPattern) bool {
 
 func optionalMatchHasPayloadWildcard(arms []ast.MatchArm) bool {
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
+			continue
+		}
 		if backendMatchPatternIsNull(arm.Pattern) {
 			continue
 		}
@@ -37,6 +41,9 @@ func optionalMatchHasPayloadWildcard(arms []ast.MatchArm) bool {
 
 func optionalMatchHasNullArm(arms []ast.MatchArm) bool {
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			continue
+		}
 		if backendMatchPatternIsNull(arm.Pattern) {
 			return true
 		}
@@ -89,6 +96,10 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -160,6 +171,10 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()

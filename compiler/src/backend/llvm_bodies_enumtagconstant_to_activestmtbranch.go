@@ -291,6 +291,10 @@ func (s *functionState) evalStaticMatchStmt(stmt *ast.MatchStmt, allowReturn boo
 	if !ok {
 		return semantic.ConstValue{}, false, false
 	}
+	if matchArmsHaveGuard(stmt.Arms) {
+		// docs/122 §5.1 guards need runtime evaluation; fall back to normal emission.
+		return semantic.ConstValue{}, false, false
+	}
 	for _, arm := range stmt.Arms {
 		matched, bindings, ok := s.evalStaticMatchPattern(arm.Pattern, value)
 		if !ok {

@@ -57,6 +57,10 @@ destructuring work).
 | Tuple | `a, b, c:` (top-level comma) | `MatchTuplePattern` |
 | List | `[a, b, c]:` | `MatchListPattern` |
 | List rest | `[first, second, ...]:` (final element only) | `MatchRestPattern` |
+| Bound list rest | `[first, ...rest]:` (binds the tail as a read-only view) | `MatchRestPattern{Name}` |
+| Range | `'a'..<'z':` `0..=127:` (int/char; `..<` exclusive, `..=` inclusive) | `MatchRangePattern` |
+| As-binding | `Enum.V(a, b) as whole:` / `Type{f: p} as whole:` (nested too) | `MatchVariantPattern.As` / `MatchStructPattern.As` |
+| Struct/variant rest | `Type(field: k, _):` (named args + final `_` ignores the rest) | `.Rest` on struct/variant patterns |
 | Or / alternation | `A | B | C:` | `MatchOrPattern` |
 | Named arg + nested pattern | `Type(field: Nested(x)):` | `MatchPatternArg{Name, Pattern}` |
 
@@ -75,10 +79,27 @@ match node:
         node
 ```
 
-### 2.2 Guards live in the body
+### 2.2 Arm-header guards
 
-There is **no arm-header guard clause** today. A value-dependent condition is a plain `if`
-(or `if … is …` refinement bind) as the arm's first statement:
+`Pattern if cond:` guards the arm as part of its dispatch; pattern bindings are in
+scope in the guard, and a failed guard falls through to the NEXT arm's test:
+
+```
+match node:
+    Expr.Binary(l, op, r) if is_commutative(op):
+        reassociate(l, op, r)
+    Expr.Binary(l, op, r):
+        keep(l, op, r)
+```
+
+Rules:
+- A guarded arm **never discharges exhaustiveness** (the guard can fail) — a match whose
+  only catch-all is guarded is a compile error.
+- A guarded arm never shadows later arms (no false "unreachable arm").
+- Fanned-out `A | B if cond:` alternatives share the guard.
+- Guards are read-only dispatch and may not introduce `is`-bindings (§5.8): bind in the
+  body with `if value is name:` instead. The body-`if` form below remains available and
+  the R1 flow lint still carves out a single trailing guard `if` for free:
 
 ```
 match node:
@@ -86,9 +107,6 @@ match node:
         if left is Expr.Literal(v) and is_commutative(op):
             reassociate(v, op, right)
 ```
-
-The R1 flow lint (docs/121) accommodates this: `match` is transparent to the nesting
-counter and a single trailing guard `if` in an arm is carved out for free.
 
 ### 2.3 Refinement binding outside `match`
 
@@ -121,83 +139,47 @@ Checked today:
 - **Integer match expressions** — open scalar; require `_` (docs/119).
 - **`catch` over an error set** — missing errors named, or requires `error e:` catch-all.
 
-A `_` wildcard discharges the exhaustiveness obligation everywhere.
+An **unguarded** `_` wildcard discharges the exhaustiveness obligation everywhere; a
+guarded arm never does (§2.2).
 
 ---
 
 ## 5. Wanted — not yet supported
 
-Ordered roughly by how often the absence bites while dogfooding. Each is a candidate for
-its own implementation pass; none are implemented today.
+Landed 2026-07-07 (moved up to §2 with examples): arm-header guards (§5.1), range
+patterns (§5.2, spelled `..<`/`..=`; a bare `..` is diagnosed toward the explicit
+forms), bound list rest (§5.3, binds a read-only view over the tail; darray/view
+sources), as-bindings (§5.4, variant + struct patterns, nested positions included),
+struct/variant rest `_` (§5.7, named args + explicit final `_`). Binding or-patterns
+(§5.5) turned out to already work — top-level alternation fans out into arms sharing a
+body, and nested `MatchOrPattern` alternatives must bind the same names at compatible
+types — so it was documentation debt, now locked in by regression tests.
 
-### 5.1 Arm-header guards
-Rust-style `Pattern if cond:` (or a `where` clause) directly on the arm, so the guard reads
-as part of the dispatch instead of a nested body `if`:
-```
-match node:
-    Expr.Binary(l, op, r) if is_commutative(op):   # WANTED
-        …
-```
-Design tension: this partially re-introduces the body-`if` nesting the flow lint steers
-away from, but as an *arm header* it stays one level and reads as dispatch. Exhaustiveness
-must treat a guarded arm as *non*-covering (a guard can fail), matching Rust.
+Still wanted:
 
-### 5.2 Range patterns
-Numeric / char ranges as a pattern:
-```
-match c:
-    '0'..'9':   digit()      # WANTED
-    'a'..'z':   lower()
-    0..=127:    ascii()
-```
-Needs a `MatchRangePattern` node, range exhaustiveness for bounded integer/char domains,
-and a decision on inclusive vs half-open spelling (lean `..<` / `..=` to match the loop
-range syntax).
-
-### 5.3 Binding the list rest
-`MatchRestPattern` matches but discards. We want to **bind** the tail:
-```
-match tokens:
-    [first, ...rest]:   process(first, rest)   # WANTED (rest currently unnamed)
-```
-
-### 5.4 `@` / as-bindings (bind whole *and* destructure)
-Bind the entire matched value at a narrowed type while also destructuring it. The category
-binder `SubCategory s:` does this only at the **top-level arm**; we want it nested:
-```
-match node:
-    Expr.Binary(l, op, r) as whole:   # WANTED — `whole` bound to the Binary, plus its parts
-        rewrite(whole, l, op, r)
-```
-
-### 5.5 Or-patterns that bind
-`A | B` works for value patterns, but alternation that **binds a common variable** across
-arms (each alternative must bind the same names at compatible types) is not supported:
-```
-match tok:
-    Token.Ident(name) | Token.Keyword(name):   # WANTED — `name` unified across alternatives
-        use(name)
-```
-
-### 5.6 Deep exhaustiveness
+### 5.1 Deep exhaustiveness (was §5.6)
 Exhaustiveness today reasons about **top-level** variant coverage. Nested/literal
-exhaustiveness — proving that a set of nested patterns covers all constructor combinations,
-or that literal arms cover a bounded domain — is not checked; such matches need a `_`.
+exhaustiveness — proving that a set of nested patterns covers all constructor
+combinations, or that literal/range arms cover a bounded domain (a `u8` fully tiled by
+ranges still needs `_`) — is not checked. This is its own analysis pass (constructor
+matrices à la Maranget); deliberately deferred rather than half-shipped: matches keep
+needing a `_` until coverage is *proved*, which is the sound default.
 
-### 5.7 Struct rest (`_`) in struct/variant patterns
-Match a struct while ignoring unmentioned fields explicitly:
-```
-match ev:
-    KeyEvent(key: k, _):   # WANTED — ignore the rest of the fields
-        …
-```
+### 5.2 Guards that bind (was §5.8)
+Arm guards are read-only dispatch: `Pattern if value is name:` is refused (the parser
+diagnoses it). Allowing an `is`-binding usable by the arm body needs binding-scope
+plumbing through every match emitter's guard path — revisit if dogfooding keeps asking
+for it; the body `if … is name:` form covers the need today.
 
-### 5.8 Guards with bindings in the refinement position
-`guardConditionIntroducesBindings` currently *rejects* bindings inside the standalone
-`guard … else` condition, steering to `if … is name:`. If arm-header guards (§5.1) land,
-revisit whether a guard may itself introduce an `is`-binding usable by the arm body.
+### 5.3 Positional struct/variant rest
+`_`-rest applies to named-args patterns only (`Tok.Num(value: v, _)`); in pure
+positional patterns a trailing `_` keeps its established one-field-wildcard meaning.
+A positional rest would need a different spelling (`..`?) — not worth the ambiguity yet.
 
----
+### 5.4 Rest binding over strings and fixed arrays
+`[x, ...rest]` binds for darray/view sources. String-likes (dstr/cstr) and fixed
+arrays are rejected with a clear diagnostic for now (fixed arrays would need an
+addressable-base view; strings a char-view decision).
 
 ## 6. Non-goals
 

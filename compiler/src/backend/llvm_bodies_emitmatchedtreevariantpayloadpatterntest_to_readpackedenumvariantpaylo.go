@@ -23,6 +23,12 @@ func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.Matc
 	if enumType == nil || len(arms) == 0 {
 		return false
 	}
+	// docs/122 §5.1: a failed guard falls through to the NEXT arm, which a
+	// one-dispatch-per-tag switch cannot express — guarded matches take the
+	// sequential path.
+	if matchArmsHaveGuard(arms) {
+		return false
+	}
 	seen := map[string]bool{}
 	for i, arm := range arms {
 		switch pattern := arm.Pattern.(type) {
@@ -31,6 +37,11 @@ func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.Matc
 				return false
 			}
 			if _, ok := enumType.Variant(pattern.Variant); !ok {
+				return false
+			}
+			// docs/122 §5.4: as-bindings are emitted by emitMatchPatternTest on the
+			// sequential path; the tag-switch path would silently drop them.
+			if pattern.As != "" {
 				return false
 			}
 			seen[pattern.Variant] = true
@@ -72,6 +83,13 @@ func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, act
 		}
 		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
 		return nil
+	case *ast.MatchRangePattern:
+		// docs/122 §5.2 range arm over an integer/char scrutinee: two chained comparisons.
+		actualValue, _, err := s.emitExpr(actualExpr, actualType)
+		if err != nil {
+			return err
+		}
+		return s.emitRangeMatchPatternTest(p, actualValue, actualType, successBB, failureBB)
 	default:
 		return fmt.Errorf("unsupported scalar match pattern %T", pattern)
 	}
@@ -179,7 +197,9 @@ func (s *functionState) resolveMatchPatternArgs(pattern *ast.MatchVariantPattern
 			missing = append(missing, variant.PayloadLabel(i))
 		}
 	}
-	if len(missing) > 0 {
+	// docs/122 §5.7: an explicit final `_` (pattern.Rest) matches the named fields and
+	// ignores the remainder — unmatched positions simply aren't destructured.
+	if len(missing) > 0 && !pattern.Rest {
 		sort.Strings(missing)
 		return nil, fmt.Errorf("match arm %s.%s is missing named payload patterns for: %s", pattern.EnumName, pattern.Variant, strings.Join(missing, ", "))
 	}
@@ -242,6 +262,12 @@ func (s *functionState) matchIsExhaustive(enumType *semantic.EnumType, arms []as
 	covered := map[string]bool{}          // bare variant names (flat enum)
 	coveredQualified := map[string]bool{} // Owner.Variant (hierarchy)
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			// docs/122 §5.1: a guarded arm can fail at runtime, so it never covers.
+			// (Semantic already rejects matches relying on guarded coverage, but under
+			// -permissive codegen continues — an `unreachable` here would miscompile.)
+			continue
+		}
 		switch pattern := arm.Pattern.(type) {
 		case *ast.MatchWildcardPattern:
 			return true
@@ -298,6 +324,10 @@ func constEnumMatchIsExhaustive(constEnumType *semantic.ConstEnumType, arms []as
 	}
 	covered := map[string]bool{}
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
+			continue
+		}
 		switch pattern := arm.Pattern.(type) {
 		case *ast.MatchWildcardPattern:
 			return true

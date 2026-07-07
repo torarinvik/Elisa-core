@@ -40,16 +40,22 @@ func (a *Analyzer) analyzeOptionalMatchStmt(stmt *ast.MatchStmt, optionalType *O
 	for i, arm := range stmt.Arms {
 		scope := NewScope(a.currentScope)
 		if isNullMatchPattern(arm.Pattern) {
-			hasNull = true
+			// docs/122 §5.1: a guarded arm can fail, so it never discharges coverage.
+			if arm.Guard == nil {
+				hasNull = true
+			}
 		} else {
 			if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
 				if i != len(stmt.Arms)-1 {
 					a.errorf(arm.Pattern.Pos(), "wildcard match arm must be the final arm")
 				}
-				hasPayloadWildcard = true
+				if arm.Guard == nil {
+					hasPayloadWildcard = true
+				}
 			}
 			a.analyzeNestedMatchPattern(arm.Pattern, optionalType.Value, nil, scope)
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -116,16 +122,22 @@ func (a *Analyzer) analyzeOptionalMatchExpr(expr *ast.MatchExpr, optionalType *O
 	for i, arm := range expr.Arms {
 		scope := NewScope(a.currentScope)
 		if isNullMatchPattern(arm.Pattern) {
-			hasNull = true
+			// docs/122 §5.1: a guarded arm can fail, so it never discharges coverage.
+			if arm.Guard == nil {
+				hasNull = true
+			}
 		} else {
 			if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
 				if i != len(expr.Arms)-1 {
 					a.errorf(arm.Pattern.Pos(), "wildcard match arm must be the final arm")
 				}
-				hasPayloadWildcard = true
+				if arm.Guard == nil {
+					hasPayloadWildcard = true
+				}
 			}
 			a.analyzeNestedMatchPattern(arm.Pattern, optionalType.Value, nil, scope)
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {

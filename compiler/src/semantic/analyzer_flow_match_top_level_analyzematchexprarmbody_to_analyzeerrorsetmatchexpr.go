@@ -94,6 +94,13 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 		if owner != enumType {
 			a.bindRefinedExprType(scope, valueExpr, owner)
 		}
+		// docs/122 §5.4: `Enum.Variant(...) as whole` binds the entire matched value at
+		// the (possibly narrowed) owner type alongside the destructure.
+		if p.As != "" {
+			sym := &Symbol{Name: p.As, Kind: SymbolLocal, Type: owner, Node: p, Mutable: false}
+			a.defineLocal(sym, p.Pos())
+			a.recordValueBinding(sym, valueExpr)
+		}
 		orderedArgs := a.resolveMatchPatternArgs(p, variant, qualified, false)
 		for i, arg := range orderedArgs {
 			if arg == nil {
@@ -275,9 +282,10 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelConstEnumMatchPattern(arm.Pattern, constEnumType, scope, i, len(stmt.Arms), covered) {
+		if a.analyzeTopLevelConstEnumMatchPattern(arm.Pattern, constEnumType, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -296,7 +304,10 @@ func (a *Analyzer) analyzeConstEnumMatchStmt(stmt *ast.MatchStmt, valueType Type
 				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !a.matchCoversAllVariants(constEnumType, covered, hasWildcard) {
 		a.reportNonExhaustiveMatch(stmt.Pos(), constEnumType, covered, hasWildcard)
@@ -356,9 +367,10 @@ func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type,
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(stmt.Arms), covered) {
+		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -374,7 +386,10 @@ func (a *Analyzer) analyzeErrorSetMatchStmt(stmt *ast.MatchStmt, valueType Type,
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !a.matchCoversAllVariants(errorSetType, covered, hasWildcard) {
 		a.reportNonExhaustiveMatch(stmt.Pos(), errorSetType, covered, hasWildcard)
@@ -430,9 +445,10 @@ func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelConstEnumMatchPattern(arm.Pattern, constEnumType, scope, i, len(expr.Arms), covered) {
+		if a.analyzeTopLevelConstEnumMatchPattern(arm.Pattern, constEnumType, scope, i, len(expr.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -450,18 +466,27 @@ func (a *Analyzer) analyzeConstEnumMatchExpr(expr *ast.MatchExpr, valueType Type
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !a.matchCoversAllVariants(constEnumType, covered, hasWildcard) {
 		cloneBaseline()
@@ -521,9 +546,10 @@ func (a *Analyzer) analyzeErrorSetMatchExpr(expr *ast.MatchExpr, valueType Type,
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(expr.Arms), covered) {
+		if a.analyzeTopLevelErrorSetMatchPattern(arm.Pattern, errorSetType, scope, i, len(expr.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
 			if !hasFallthrough {
@@ -541,18 +567,27 @@ func (a *Analyzer) analyzeErrorSetMatchExpr(expr *ast.MatchExpr, valueType Type,
 		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
+			if arm.Guard == nil {
+				// A guarded arm can fail at runtime, so it never shadows later arms.
+				priorPatterns = append(priorPatterns, arm.Pattern)
+			}
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !a.matchCoversAllVariants(errorSetType, covered, hasWildcard) {
 		cloneBaseline()

@@ -493,7 +493,10 @@ func stmtDefinitelyExits(stmt ast.Stmt) bool {
 		hasWildcard := false
 		for _, arm := range n.Arms {
 			if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
-				hasWildcard = true
+				// docs/122 §5.1: a guarded catch-all can fail, so the match may fall through.
+				if arm.Guard == nil {
+					hasWildcard = true
+				}
 			}
 			if !blockDefinitelyExits(arm.Body) {
 				return false

@@ -16,6 +16,10 @@ import (
 
 func matchHasWildcard(arms []ast.MatchArm) bool {
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
+			continue
+		}
 		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
 			return true
 		}
@@ -41,6 +45,10 @@ func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err

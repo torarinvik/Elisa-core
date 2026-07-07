@@ -37,6 +37,10 @@ func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType sema
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -113,6 +117,10 @@ func (s *functionState) emitStructMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -168,6 +176,10 @@ func (s *functionState) emitTupleMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -223,6 +235,10 @@ func (s *functionState) emitSequenceMatch(stmt *ast.MatchStmt) error {
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -279,6 +295,10 @@ func (s *functionState) emitStructMatchExpr(expr *ast.MatchExpr, resultType sema
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -356,6 +376,10 @@ func (s *functionState) emitTupleMatchExpr(expr *ast.MatchExpr, resultType seman
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()

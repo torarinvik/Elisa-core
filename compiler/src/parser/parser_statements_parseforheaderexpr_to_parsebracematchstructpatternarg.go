@@ -308,6 +308,7 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 		p.advance()
 	}
 	patterns := p.parseTopLevelMatchPatterns()
+	guard := p.parseOptionalMatchArmGuard()
 	p.expect(lexer.TOKEN_COLON)
 	var body []ast.Stmt
 	if p.peek() == lexer.TOKEN_NEWLINE {
@@ -334,7 +335,7 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 	}
 	arms := make([]ast.MatchArm, 0, len(patterns))
 	for _, pattern := range patterns {
-		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body})
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body, Guard: guard})
 	}
 	return arms
 }
@@ -1225,14 +1226,32 @@ func (p *Parser) parseMatchArm() []ast.MatchArm {
 		p.advance()
 	}
 	patterns := p.parseTopLevelMatchPatterns()
+	guard := p.parseOptionalMatchArmGuard()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
 	arms := make([]ast.MatchArm, 0, len(patterns))
 	for _, pattern := range patterns {
-		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body})
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body, Guard: guard})
 	}
 	return arms
+}
+
+// parseOptionalMatchArmGuard parses the docs/122 §5.1 arm-header guard `Pattern if cond:`.
+// The guard expression ends at the arm's `:`; pattern bindings are in scope inside it
+// (checked by the analyzer). Fanned-out `A | B if cond:` alternatives share the guard.
+// Guards are read-only dispatch: a guard that itself introduces `is`-bindings is
+// refused (docs/122 §5.8 stays a body `if … is name:` for now).
+func (p *Parser) parseOptionalMatchArmGuard() ast.Expr {
+	if p.peek() != lexer.TOKEN_IF {
+		return nil
+	}
+	p.advance()
+	guard := p.parseExpr()
+	if guardConditionIntroducesBindings(guard) {
+		p.errorf("match arm guards cannot introduce bindings; bind in the arm body with `if value is name:` (docs/122 §5.8)")
+	}
+	return guard
 }
 func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
 	patterns := []ast.MatchPattern{p.parseMatchPatternNoOr()}
@@ -1273,10 +1292,10 @@ func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
 		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
 	}
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchBindPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchRangePattern, *ast.MatchBindPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
 		return pattern
 	default:
-		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a literal, a binding, a tuple pattern, a list pattern, or _")
+		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a literal, a range, a binding, a tuple pattern, a list pattern, or _")
 		return pattern
 	}
 }
@@ -1301,7 +1320,19 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() == lexer.TOKEN_INT_LIT || p.peek() == lexer.TOKEN_FLOAT_LIT || p.peek() == lexer.TOKEN_HEX_LIT ||
 		p.peek() == lexer.TOKEN_CHAR_LIT || p.peek() == lexer.TOKEN_TRUE || p.peek() == lexer.TOKEN_FALSE ||
 		p.peek() == lexer.TOKEN_NULL || p.peek() == lexer.TOKEN_MINUS || p.peek() == lexer.TOKEN_LPAREN {
-		return &ast.MatchLiteralPattern{Position: pos, Value: p.parseMatchValuePatternExpr()}
+		value := p.parseMatchValuePatternExpr()
+		// docs/122 §5.2 range pattern: `LO..<HI` / `LO..=HI` over int/char literals. The
+		// spelling matches loop ranges; a bare `..` is diagnosed toward the explicit forms.
+		switch p.peek() {
+		case lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_LE:
+			inclusive := p.advance().Kind == lexer.TOKEN_RANGE_LE
+			return &ast.MatchRangePattern{Position: pos, Lo: value, Hi: p.parseMatchValuePatternExpr(), Inclusive: inclusive}
+		case lexer.TOKEN_RANGE:
+			p.errorf("range pattern needs an explicit bound spelling: use `..<` (exclusive) or `..=` (inclusive)")
+			p.advance()
+			return &ast.MatchRangePattern{Position: pos, Lo: value, Hi: p.parseMatchValuePatternExpr(), Inclusive: true}
+		}
+		return &ast.MatchLiteralPattern{Position: pos, Value: value}
 	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" {
 		p.advance()
@@ -1341,7 +1372,52 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 		}
 		p.expect(lexer.TOKEN_RPAREN)
 	}
-	return &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+	variantPat := &ast.MatchVariantPattern{Position: pos, EnumName: name, Variant: variant, Args: args}
+	variantPat.Rest = detachTrailingRestArg(&variantPat.Args)
+	variantPat.As = p.parseOptionalPatternAsBinding()
+	return variantPat
+}
+
+// detachTrailingRestArg implements docs/122 §5.7 for named-args patterns: a final bare
+// `_` after at least one NAMED arg is the struct-rest marker ("match these fields,
+// ignore the remainder"), not a positional one-field wildcard — pure-positional
+// patterns keep the existing wildcard-per-field meaning. Returns true (and drops the
+// marker arg) when the rest form applies.
+func detachTrailingRestArg(args *[]ast.MatchPatternArg) bool {
+	list := *args
+	if len(list) < 2 {
+		return false
+	}
+	last := list[len(list)-1]
+	if last.Name != "" {
+		return false
+	}
+	if _, wild := last.Pattern.(*ast.MatchWildcardPattern); !wild {
+		return false
+	}
+	named := false
+	for _, a := range list[:len(list)-1] {
+		if a.Name != "" {
+			named = true
+			break
+		}
+	}
+	if !named {
+		return false
+	}
+	*args = list[:len(list)-1]
+	return true
+}
+
+// parseOptionalPatternAsBinding parses the docs/122 §5.4 as-binding suffix
+// (`Pattern as whole`) on a variant/struct pattern: bind the entire matched value at
+// the narrowed type while also destructuring it.
+func (p *Parser) parseOptionalPatternAsBinding() string {
+	if p.peek() != lexer.TOKEN_AS {
+		return ""
+	}
+	p.advance()
+	return p.expect(lexer.TOKEN_IDENT).Text
 }
 func (p *Parser) parseMatchListPattern(pos lexer.Pos) ast.MatchPattern {
 	p.expect(lexer.TOKEN_LBRACKET)
@@ -1350,7 +1426,12 @@ func (p *Parser) parseMatchListPattern(pos lexer.Pos) ast.MatchPattern {
 		for {
 			if p.peek() == lexer.TOKEN_ELLIPSIS {
 				restPos := p.advance().Pos
-				elems = append(elems, &ast.MatchRestPattern{Position: restPos})
+				// docs/122 §5.3: `...rest` binds the unmatched tail; bare `...` discards it.
+				restName := ""
+				if p.peek() == lexer.TOKEN_IDENT && p.cur().Text != "_" {
+					restName = p.advance().Text
+				}
+				elems = append(elems, &ast.MatchRestPattern{Position: restPos, Name: restName})
 				if p.peek() != lexer.TOKEN_RBRACKET {
 					p.errorf("list pattern rest marker must be the final element")
 				}
@@ -1393,8 +1474,21 @@ func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string
 		p.errorf("struct pattern expects (...) or {...}")
 	}
 	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(close))
+	rest := false
 	if p.peek() != close {
 		for {
+			// docs/122 §5.7: a bare `_` arg is the struct-rest marker — match the named
+			// fields, ignore the remainder. It must be the final arg. (`count(...)` keeps
+			// its positional grammar untouched.)
+			if typeName != "count" && p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_" &&
+				p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == close || p.tokens[p.pos+1].Kind == lexer.TOKEN_COMMA) {
+				p.advance()
+				rest = true
+				if p.peek() != close {
+					p.errorf("struct pattern rest marker `_` must be the final field")
+				}
+				break
+			}
 			if brace {
 				args = append(args, p.parseBraceMatchStructPatternArg())
 			} else if typeName == "count" {
@@ -1411,7 +1505,9 @@ func (p *Parser) parseMatchStructPatternAfterName(pos lexer.Pos, typeName string
 		}
 	}
 	p.expect(close)
-	return &ast.MatchStructPattern{Position: pos, TypeName: typeName, Args: args, Brace: brace}
+	structPat := &ast.MatchStructPattern{Position: pos, TypeName: typeName, Args: args, Brace: brace, Rest: rest}
+	structPat.As = p.parseOptionalPatternAsBinding()
+	return structPat
 }
 func (p *Parser) parseMatchStructPatternArg() ast.MatchPatternArg {
 	if p.peek() != lexer.TOKEN_IDENT || p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_COLON {

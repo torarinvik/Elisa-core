@@ -53,9 +53,10 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, expr.Value, scope, i, len(expr.Arms), covered) {
+		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, expr.Value, scope, i, len(expr.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, expr.Value, arm.Body, scope)
 		armType, armSnapshot := a.analyzeMatchExprArmBodyWithAffineSnapshot(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
@@ -72,20 +73,21 @@ func (a *Analyzer) analyzeEnumMatchExpr(expr *ast.MatchExpr, valueType Type, enu
 				mergedSpecializedValueTypes = a.mergeSpecializedValueTypeBindings(mergedSpecializedValueTypes, armSnapshot.SpecializedValueTypes)
 			}
 		}
+		// A guarded arm can fail at runtime, so it never shadows later arms.
+		if arm.Guard == nil {
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 		if resultType == nil {
 			resultType = armType
-			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
 		merged := a.mergeMatchExprArmTypes(resultType, armType, expr.Arms, i)
 		if IsInvalidType(merged) {
 			a.errorf(arm.Position, "match expression arms are incompatible: %s and %s", resultType, armType)
 			resultType = invalidType
-			priorPatterns = append(priorPatterns, arm.Pattern)
 			continue
 		}
 		resultType = merged
-		priorPatterns = append(priorPatterns, arm.Pattern)
 	}
 	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
 		cloneBaseline()

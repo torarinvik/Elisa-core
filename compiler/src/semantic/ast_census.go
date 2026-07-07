@@ -336,6 +336,7 @@ func (c *analyzerASTCensus) countExpr(expr ast.Expr) {
 func (c *analyzerASTCensus) countArms(arms []ast.MatchArm) {
 	for _, arm := range arms {
 		c.countMatchPattern(arm.Pattern)
+		c.countExpr(arm.Guard)
 		c.countStmts(arm.Body)
 	}
 }
@@ -351,6 +352,9 @@ func (c *analyzerASTCensus) countMatchPattern(pattern ast.MatchPattern) {
 	switch n := pattern.(type) {
 	case *ast.MatchLiteralPattern:
 		c.countExpr(n.Value)
+	case *ast.MatchRangePattern:
+		c.countExpr(n.Lo)
+		c.countExpr(n.Hi)
 	case *ast.MatchTuplePattern:
 		for _, elem := range n.Elems {
 			c.countMatchPattern(elem)

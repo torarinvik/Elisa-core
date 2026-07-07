@@ -16,6 +16,35 @@ import (
 	"fmt"
 )
 
+// emitMatchArmGuard emits the docs/122 §5.1 arm-header guard: evaluated after the
+// arm's pattern test and bindings (so pattern binds are visible), branching to failBB
+// when the guard is false. The builder must be positioned in the arm's body block; on
+// a nil error it leaves the builder in a fresh block where the guarded body belongs.
+// No-op for unguarded arms.
+func (s *functionState) emitMatchArmGuard(guard ast.Expr, failBB C.LLVMBasicBlockRef) error {
+	if guard == nil {
+		return nil
+	}
+	guardedBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.arm.guarded"))
+	if err := s.emitConditionBranchWithBindings(guard, guardedBB, failBB, ast.BranchHintNone); err != nil {
+		return err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, guardedBB)
+	return nil
+}
+
+// matchArmsHaveGuard reports whether any arm carries a docs/122 §5.1 guard — such a
+// match cannot use the tag-switch fast path (a failed guard must fall through to the
+// NEXT arm, which a one-dispatch-per-tag switch cannot express).
+func matchArmsHaveGuard(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if arm.Guard != nil {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.EnumType) error {
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, stmt.Value, stmt.Store)
 	if err != nil {
@@ -173,6 +202,10 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 		if hasValuePath && !preloadedCommonValues.empty() {
 			s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
 		}
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -231,6 +264,10 @@ func (s *functionState) emitConstEnumMatch(stmt *ast.MatchStmt, constEnumType *s
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err
@@ -266,6 +303,10 @@ func errorSetMatchIsExhaustive(errorSetType *semantic.ErrorSetType, arms []ast.M
 	covered := make(map[string]bool, len(errorSetType.Tags))
 	hasWildcard := false
 	for _, arm := range arms {
+		if arm.Guard != nil {
+			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
+			continue
+		}
 		switch pattern := arm.Pattern.(type) {
 		case *ast.MatchWildcardPattern:
 			hasWildcard = true
@@ -315,6 +356,10 @@ func (s *functionState) emitErrorSetMatch(stmt *ast.MatchStmt, errorSetType *sem
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return err
+		}
 		if err := s.emitBlockInCurrentScope(arm.Body); err != nil {
 			s.popScope()
 			return err

@@ -32,10 +32,28 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 		return false
 	}
 }
+// analyzeMatchRangePattern validates a docs/122 §5.2 range arm (`'a'..<'z'` /
+// `0..=127`): both bounds must be integer/char literals assignable to the scrutinee
+// type, analyzed against it so they lower at the scrutinee's width.
+func (a *Analyzer) analyzeMatchRangePattern(p *ast.MatchRangePattern, valueType Type) {
+	for _, bound := range []ast.Expr{p.Lo, p.Hi} {
+		if bound == nil {
+			continue
+		}
+		boundType := a.analyzeValueExpr(bound, valueType)
+		if !IsIntegralType(StripAggregateStateType(boundType)) {
+			a.errorf(bound.Pos(), "range pattern bound expects an integer or char literal, got %s", boundType)
+		} else if !AssignableTo(valueType, boundType) {
+			a.errorf(bound.Pos(), "range pattern bound of type %s is not assignable to the matched %s", boundType, valueType)
+		}
+	}
+}
+
 // analyzeTopLevelIntegerMatchPattern validates one arm of an integer `match`. Each arm must be an
-// integer-literal pattern (`0xA9:`) or the wildcard `_`. The literal is analyzed against the
-// scrutinee type so it lowers at the scrutinee's width (a bare `0xA9` becomes a u8 when matching a
-// u8), and must be assignable to it. Returns true for the wildcard arm.
+// integer-literal pattern (`0xA9:`), a range pattern (`'a'..<'z'`, docs/122 §5.2), or the wildcard
+// `_`. The literal is analyzed against the scrutinee type so it lowers at the scrutinee's width (a
+// bare `0xA9` becomes a u8 when matching a u8), and must be assignable to it. Returns true for the
+// wildcard arm.
 func (a *Analyzer) analyzeTopLevelIntegerMatchPattern(pattern ast.MatchPattern, valueType Type, scope *Scope, index int, armCount int) bool {
 	savedScope := a.currentScope
 	a.currentScope = scope
@@ -53,6 +71,9 @@ func (a *Analyzer) analyzeTopLevelIntegerMatchPattern(pattern ast.MatchPattern, 
 		} else if !AssignableTo(valueType, armType) {
 			a.errorf(p.Pos(), "integer match arm value of type %s is not assignable to the matched %s", armType, valueType)
 		}
+		return false
+	case *ast.MatchRangePattern:
+		a.analyzeMatchRangePattern(p, valueType)
 		return false
 	case *ast.MatchStringLiteralPattern:
 		a.errorf(p.Pos(), "top-level integer match arm must use an integer literal or _")
@@ -83,6 +104,12 @@ func (a *Analyzer) analyzeTopLevelStructMatchPattern(pattern ast.MatchPattern, v
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, valueType)
 		if !ok {
 			return false
+		}
+		// docs/122 §5.4: `Type(...) as whole` binds the entire matched struct value.
+		if p.As != "" {
+			sym := &Symbol{Name: p.As, Kind: SymbolLocal, Type: valueType, Node: p, Mutable: false}
+			a.defineLocal(sym, p.Pos())
+			a.recordValueBinding(sym, valueExpr)
 		}
 		for i, arg := range orderedArgs {
 			if arg == nil {
@@ -149,9 +176,19 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 			return false
 		}
 		for i, elem := range p.Elems {
-			if _, ok := elem.(*ast.MatchRestPattern); ok {
+			if rest, ok := elem.(*ast.MatchRestPattern); ok {
 				if i != len(p.Elems)-1 {
 					a.errorf(elem.Pos(), "list pattern rest marker must be the final element")
+				}
+				// docs/122 §5.3: `...rest` binds the unmatched tail as a read-only view.
+				if rest.Name != "" {
+					restType, ok := RestViewTypeForSequence(valueType, elemType)
+					if !ok {
+						a.errorf(rest.Pos(), "rest binding requires an array, darray, or view value, got %s", valueType)
+						continue
+					}
+					sym := &Symbol{Name: rest.Name, Kind: SymbolLocal, Type: restType, Node: rest, Mutable: false}
+					a.defineLocal(sym, rest.Pos())
 				}
 				continue
 			}

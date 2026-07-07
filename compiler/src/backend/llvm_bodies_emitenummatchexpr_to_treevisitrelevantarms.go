@@ -211,6 +211,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		if hasValuePath && !preloadedCommonValues.empty() {
 			s.bindPackedCommonFieldValues(valuePath, enumType, preloadedCommonValues)
 		}
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -291,6 +295,10 @@ func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType s
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()
@@ -371,6 +379,10 @@ func (s *functionState) emitErrorSetMatchExpr(expr *ast.MatchExpr, resultType se
 
 		C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
 		s.pushScope()
+		if err := s.emitMatchArmGuard(arm.Guard, nextBB); err != nil {
+			s.popScope()
+			return nil, nil, err
+		}
 		armValue, reachable, err := s.emitMatchExprArmBody(arm.Body, resultType)
 		if err != nil {
 			s.popScope()

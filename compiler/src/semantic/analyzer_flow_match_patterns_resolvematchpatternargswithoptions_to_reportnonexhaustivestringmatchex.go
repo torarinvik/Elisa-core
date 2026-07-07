@@ -62,9 +62,11 @@ func (a *Analyzer) resolveMatchPatternArgsWithOptions(pattern *ast.MatchVariantP
 			missing = append(missing, variant.PayloadLabel(i))
 		}
 	}
-	if len(missing) > 0 && !allowPartialNamed {
+	// docs/122 §5.7: an explicit final `_` (pattern.Rest) opts in to matching the named
+	// fields and ignoring the remainder.
+	if len(missing) > 0 && !allowPartialNamed && !pattern.Rest {
 		sort.Strings(missing)
-		a.errorf(pattern.Pos(), "%s is missing named payload patterns for: %s", matchPatternContext(qualified, nested), strings.Join(missing, ", "))
+		a.errorf(pattern.Pos(), "%s is missing named payload patterns for: %s (or ignore them explicitly with a final `_`)", matchPatternContext(qualified, nested), strings.Join(missing, ", "))
 	}
 	pattern.ResolvedArgs = ordered
 	return ordered

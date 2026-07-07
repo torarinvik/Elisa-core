@@ -309,6 +309,9 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 	switch p := pattern.(type) {
 	case *ast.MatchWildcardPattern:
 		return
+	case *ast.MatchRangePattern:
+		a.analyzeMatchRangePattern(p, expected)
+		return
 	case *ast.MatchOrPattern:
 		if _, ok := a.collectOrPatternBindingTypes(p, expected); !ok || len(p.Options) == 0 {
 			return
@@ -341,6 +344,13 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			if !ok {
 				a.errorf(p.Pos(), "enum %q has no variant %q", variantBase.Name, p.Variant)
 				return
+			}
+			// docs/122 §5.4: `Enum.Variant(...) as whole` binds the entire matched
+			// payload value alongside the destructure.
+			if p.As != "" {
+				sym := &Symbol{Name: p.As, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
+				a.defineLocal(sym, p.Pos())
+				a.recordValueBinding(sym, valueExpr)
 			}
 			orderedArgs := a.resolveMatchPatternArgs(p, variant, variantBase.Name+"."+variant.Name, true)
 			for i, arg := range orderedArgs {
@@ -377,9 +387,21 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 			return
 		}
 		for i, elem := range p.Elems {
-			if _, ok := elem.(*ast.MatchRestPattern); ok {
+			if rest, ok := elem.(*ast.MatchRestPattern); ok {
 				if i != len(p.Elems)-1 {
 					a.errorf(elem.Pos(), "list pattern rest marker must be the final element")
+				}
+				// docs/122 §5.3: `...rest` binds the unmatched tail as a read-only view
+				// over the source sequence (the type analyzeSliceExpr would give
+				// `xs[i:]`); bare `...` keeps discarding it.
+				if rest.Name != "" {
+					restType, ok := RestViewTypeForSequence(expected, elemType)
+					if !ok {
+						a.errorf(rest.Pos(), "rest binding requires an array, darray, or view value, got %s", expected)
+						continue
+					}
+					sym := &Symbol{Name: rest.Name, Kind: SymbolLocal, Type: restType, Node: rest, Mutable: false}
+					a.defineLocal(sym, rest.Pos())
 				}
 				continue
 			}
@@ -397,6 +419,12 @@ func (a *Analyzer) analyzeNestedMatchPattern(pattern ast.MatchPattern, expected 
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, expected)
 		if !ok {
 			return
+		}
+		// docs/122 §5.4: `Type(...) as whole` binds the entire matched struct value.
+		if p.As != "" {
+			sym := &Symbol{Name: p.As, Kind: SymbolLocal, Type: expected, Node: p, Mutable: false}
+			a.defineLocal(sym, p.Pos())
+			a.recordValueBinding(sym, valueExpr)
 		}
 		for i, arg := range orderedArgs {
 			if arg == nil {
@@ -436,6 +464,28 @@ func (a *Analyzer) analyzeCountMatchPattern(pattern *ast.MatchStructPattern, exp
 	}
 	return true
 }
+// RestViewTypeForSequence is the type a docs/122 §5.3 bound list rest (`[x, ...rest]`)
+// gives `rest`: a read-only view over the source sequence's elements, mirroring what
+// analyzeSliceExpr returns for `xs[i:]` (region threaded through from the source).
+// Exported so the backend binds the rest at the exact type the analyzer declared.
+func RestViewTypeForSequence(actual Type, elemType Type) (*ViewType, bool) {
+	switch t := StripAggregateStateType(actual).(type) {
+	case *ArrayType:
+		return &ViewType{Elem: elemType, SurfaceName: "view"}, true
+	case *DArrayType:
+		return &ViewType{Elem: elemType, SurfaceName: "view", Region: t.Region}, true
+	case *ViewType:
+		return &ViewType{Elem: elemType, SurfaceName: t.SurfaceName, Region: t.Region}, true
+	case *RefType:
+		if t.State != RefStateNonNull {
+			return nil, false
+		}
+		return RestViewTypeForSequence(t.Elem, elemType)
+	default:
+		return nil, false
+	}
+}
+
 func SequenceMatchElementType(actual Type) (Type, bool) {
 	actual = StripAggregateStateType(actual)
 	switch t := actual.(type) {

@@ -445,6 +445,12 @@ func matchPatternSummary(pattern ast.MatchPattern) string {
 		return p.Value
 	case *ast.MatchLiteralPattern:
 		return matchLiteralPatternSummary(p.Value)
+	case *ast.MatchRangePattern:
+		sep := "..<"
+		if p.Inclusive {
+			sep = "..="
+		}
+		return matchLiteralPatternSummary(p.Lo) + sep + matchLiteralPatternSummary(p.Hi)
 	case *ast.MatchTuplePattern:
 		parts := make([]string, 0, len(p.Elems))
 		for _, elem := range p.Elems {

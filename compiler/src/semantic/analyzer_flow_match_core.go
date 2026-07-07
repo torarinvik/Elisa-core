@@ -9,6 +9,32 @@ import (
 	"elisacore/src/lexer"
 )
 
+// analyzeMatchArmGuard type-checks the docs/122 §5.1 arm-header guard (`Pattern if
+// cond:`) inside the arm's pattern scope, so pattern bindings are visible to the
+// guard expression. No-op for unguarded arms.
+func (a *Analyzer) analyzeMatchArmGuard(guard ast.Expr, scope *Scope) {
+	if guard == nil {
+		return
+	}
+	saved := a.currentScope
+	a.currentScope = scope
+	condType := a.analyzeCondExpr(guard)
+	a.currentScope = saved
+	if !IsBoolType(condType) {
+		a.errorf(guard.Pos(), "match arm guard must be bool, got %s", condType)
+	}
+}
+
+// matchArmCoverageSink implements the docs/122 §5.1 exhaustiveness rule: a guarded
+// arm can fail at runtime, so it never discharges coverage. Guarded arms write their
+// variant marks into a throwaway map; callers must also ignore their wildcard signal.
+func matchArmCoverageSink(guard ast.Expr, covered map[string]bool) map[string]bool {
+	if guard == nil {
+		return covered
+	}
+	return map[string]bool{}
+}
+
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	valueType := a.analyzeExpr(stmt.Value)
 	enumType, _, ok := resolveMatchableEnumType(valueType)
@@ -234,9 +260,10 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 			a.errorf(arm.Position, "match arm %q is unreachable because an earlier arm already matches it", matchPatternSummary(arm.Pattern))
 		}
 		scope := NewScope(a.currentScope)
-		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), covered) {
+		if a.analyzeTopLevelMatchPattern(arm.Pattern, enumType, stmt.Value, scope, i, len(stmt.Arms), matchArmCoverageSink(arm.Guard, covered)) && arm.Guard == nil {
 			hasWildcard = true
 		}
+		a.analyzeMatchArmGuard(arm.Guard, scope)
 		a.bindPackedVariantViewAliasForBody(arm.Pattern, enumType, stmt.Value, arm.Body, scope)
 		armSnapshot := a.analyzeBlockWithAffineClone(arm.Body, scope)
 		if !blockDefinitelyExits(arm.Body) {
@@ -256,7 +283,10 @@ func (a *Analyzer) analyzeEnumMatchStmt(stmt *ast.MatchStmt, valueType Type, enu
 				mergedAliasCarriers, mergedAliasCarrierFieldOverrides = mergeAliasCarrierSnapshot(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, armSnapshot)
 			}
 		}
-		priorPatterns = append(priorPatterns, arm.Pattern)
+		if arm.Guard == nil {
+			// A guarded arm can fail at runtime, so it never shadows later arms.
+			priorPatterns = append(priorPatterns, arm.Pattern)
+		}
 	}
 	if !a.matchCoversAllVariants(enumType, covered, hasWildcard) {
 		a.reportNonExhaustiveMatch(stmt.Pos(), enumType, covered, hasWildcard)
