@@ -64,6 +64,13 @@ func flowBlockDepth(stmts []ast.Stmt) int {
 func flowStmtDepth(stmt ast.Stmt) int {
 	switch n := stmt.(type) {
 	case *ast.IfStmt:
+		// The scoped-loop-header desugar wraps a `while … |caps|:` / value-form loop in a synthetic
+		// `if true: [decls, loop]` (parser/loop_header.go:164). That wrapper is loop scaffolding,
+		// not a real branch, so it is TRANSPARENT — otherwise every scoped inner loop adds a phantom
+		// level and stage1 (all scoped loops) trips R1 on desugar artifacts, not real nesting.
+		if flowIsConstTrueGuard(n) {
+			return maxInt(flowBlockDepth(n.Then), flowBlockDepth(n.Else))
+		}
 		// An `if`/`elif`/`else` chain is ONE nesting level. The runtime parser desugars `elif`
 		// into a nested `else: if …` (parser …parsesingleexprblockvalue.go:185) rather than
 		// filling the flat Elifs slice, so the chain must be walked and collapsed here — otherwise
@@ -111,6 +118,20 @@ func flowStmtDepth(stmt ast.Stmt) int {
 	}
 	// Nested loops (While/For/IterFor) and plain statements do not add conditional depth.
 	return 0
+}
+
+// flowIsConstTrueGuard reports whether an `if` is the `if true:` scoped-loop-header wrapper (a
+// literal-true condition) — scaffolding the depth counter must see through.
+func flowIsConstTrueGuard(ifStmt *ast.IfStmt) bool {
+	lit, ok := ifStmt.Cond.(*ast.BoolLit)
+	return ok && lit.Value
+}
+
+func maxInt(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // flowElseIfContinuation returns the inner `if` when an `else` block is exactly one `if` — the
