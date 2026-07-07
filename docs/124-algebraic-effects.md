@@ -218,16 +218,20 @@ there would be an error ("handled here with residual Fs.Write — declare that")
 The genuinely novel piece — possible because no other effects language has
 Elisa's region model.
 
-A capability may **carry a region**; operations that produce values may declare
-their results live in the handler's region:
+A capability may **carry a region**; `@handler` is a **region parameter**,
+declared in the operation's generic bracket like any region-polymorphic
+function, and referenced in the types that live in it:
 
 ```
 permission Alloc:
-    buffer(n: usize) -> darray[u8] @handler
+    buffer[@handler](n: usize) -> darray[u8] @handler
 ```
 
-`@handler` on a result type means "allocated in the region the handler was
-constructed over." At the handle site:
+The bracket declares the region parameter; `@handler` in the return type is an
+ordinary use of it — "allocated in the region the handler was constructed
+over." Same surface as region-poly fns (docs/74), so no new type-system notion:
+the handler *binds* the region argument once at the handle site instead of the
+caller passing it at every call. At the handle site:
 
 ```
 handle Alloc with ArenaAlloc(frame_region):
@@ -340,9 +344,12 @@ before its ergonomics is just friction).
 3. **Residual display.** Diagnostics should show the translation chain
    (`can[Log] handled by file_log → can[Fs.Write]`) or debugging boundary-row
    errors will be miserable.
-4. **`@handler` result types** vs an explicit region parameter spelling on the
-   permission (`permission Alloc over r:`) — pick during P3, after P1 usage
-   data.
+4. **RESOLVED:** `@handler` is a region *parameter* declared in the operation's
+   generic bracket (`buffer[@handler](n: usize) -> darray[u8] @handler`), not a
+   bare result annotation — reuses the region-poly fn surface; the handle site
+   binds the region argument. Remaining sub-question for P3: whether the
+   permission itself may also be region-parametric (`permission Alloc[@r]:`)
+   when several ops share one region, or per-op brackets suffice.
 5. **Multiple simultaneous handles of the same permission** (shadowing): allow
    with innermost-wins (lexical, predictable) — but confirm no interaction
    surprise with monomorphization caching.
