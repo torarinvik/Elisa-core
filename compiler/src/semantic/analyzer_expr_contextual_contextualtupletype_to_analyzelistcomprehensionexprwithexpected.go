@@ -120,6 +120,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if ternary, ok := expr.(*ast.TernaryExpr); ok && expected != nil {
 		return a.analyzeContextualTernaryExpr(ternary, expected)
 	}
+	if matchExpr, ok := expr.(*ast.MatchExpr); ok && expected != nil {
+		return a.analyzeContextualMatchExpr(matchExpr, expected)
+	}
 	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
 		// A compile-time integer being adapted to a narrower integer type must be
 		// representable: `y: i8 = 1000` silently truncated to -24 before. There is no

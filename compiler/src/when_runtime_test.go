@@ -120,3 +120,52 @@ def tuple_string_columns() -> void:
 	exit, stdout, stderr := runStressProgram(t, "tuple_match_string_column", body)
 	assertAllPassed(t, exit, stdout, stderr, "tuple_string_columns")
 }
+
+// An ALL-string-literal decision table returned as `sview`: every arm yields a bare
+// literal, so the bottom-up join is `static u8&` with no arm supplying a view to adapt
+// toward. The expected (return) type supplies it — each literal lowers to a view. This
+// is the common string-classifier shape among the migratable elif ladders. Also checks
+// the mixed literal+view table (one arm is a view) still lowers correctly.
+func TestWhenAllStringLiteralTableRuntime(t *testing.T) {
+	body := `
+const enum TK of u8:
+    Int
+    Float
+    Bool
+
+def family_when(k: TK) -> sview:
+    return when k:
+        TK.Int -> "int"
+        TK.Float -> "float"
+        _ -> ""
+
+def family_match(k: TK) -> sview:
+    return match k:
+        TK.Int: "int"
+        TK.Float: "float"
+        _: ""
+
+def mixed(k: TK, v: sview) -> sview:
+    return when k:
+        TK.Int -> "int"
+        _ -> v
+
+@test
+def all_literal_string_table() -> void:
+    can Abort.Panic:
+        if family_when(TK.Int) != "int":
+            panic("when int")
+        if family_when(TK.Float) != "float":
+            panic("when float")
+        if family_when(TK.Bool) != "":
+            panic("when default")
+        if family_match(TK.Int) != "int":
+            panic("match int")
+        if mixed(TK.Int, "dyn") != "int":
+            panic("mixed literal arm")
+        if mixed(TK.Bool, "dyn") != "dyn":
+            panic("mixed view arm")
+`
+	exit, stdout, stderr := runStressProgram(t, "when_all_string_literal_table", body)
+	assertAllPassed(t, exit, stdout, stderr, "all_literal_string_table")
+}

@@ -237,6 +237,48 @@ func matchArmTailsAllStringLiterals(arms []ast.MatchArm) bool {
 	return len(arms) > 0
 }
 
+// matchArmTailStringLit returns an arm body's tail string-literal expression, or nil.
+func matchArmTailStringLit(body []ast.Stmt) *ast.StringLit {
+	if len(body) == 0 {
+		return nil
+	}
+	exprStmt, ok := body[len(body)-1].(*ast.ExprStmt)
+	if !ok || exprStmt == nil {
+		return nil
+	}
+	lit, _ := exprStmt.Expr.(*ast.StringLit)
+	return lit
+}
+
+// analyzeContextualMatchExpr analyzes a match/when expression in a position that supplies
+// an expected type (a return, a typed binding). It runs the normal bottom-up analysis,
+// then adapts the ALL-STRING-LITERAL case: when every arm yields a bare literal, the join
+// is `static u8&` (no arm supplies a view for mergeMatchExprArmTypes to adapt toward), so
+// a `def f(...) -> sview: return when k: 0 -> "a"; _ -> ""` was rejected even though the
+// same table with one `sview` arm is accepted. The expected string-carrier type supplies
+// the missing target: each arm literal is re-recorded at the expected type (so the backend
+// applies the same literal→view lowering a typed declaration triggers), and so is the whole
+// expression. Non-string or mixed tables fall through with their normal bottom-up type.
+func (a *Analyzer) analyzeContextualMatchExpr(expr *ast.MatchExpr, expected Type) Type {
+	// analyzeMatchExpr is called directly (not via analyzeExpr), so its deferred
+	// exprTypes recording is bypassed — every return below must record the expr type
+	// itself, or the backend's match-expr phi is left untyped.
+	result := a.analyzeMatchExpr(expr)
+	if isStaticStringLiteralRefType(result) && matchArmTailsAllStringLiterals(expr.Arms) {
+		if contextualExpected, ok := contextualStringLiteralType(expected); ok {
+			for _, arm := range expr.Arms {
+				if lit := matchArmTailStringLit(arm.Body); lit != nil {
+					a.recordAnalyzedExprType(lit, contextualExpected)
+				}
+			}
+			a.recordAnalyzedExprType(expr, contextualExpected)
+			return contextualExpected
+		}
+	}
+	a.recordAnalyzedExprType(expr, result)
+	return result
+}
+
 // mergeTernaryBranchTypes is the ternary's literal-aware fallback when MergeTypes
 // rejects its branches: a bare string-LITERAL branch adapts to a string-view branch
 // (either side), the same rule mergeMatchExprArmTypes applies to match arms. Used by
