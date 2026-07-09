@@ -411,7 +411,15 @@ Notes:
    shape; per the machine-port philosophy the R1/R2/R3 refusals are NOT
    re-emitted (stage0 owns them) — the stage1 parse is purely structural.
    Gates green (self-hostable 0/130, breadth 127/0, 31 parity smokes +
-   when_smoke). Remaining: migrate the 138 elif-ladder census sites to `when`.
+   when_smoke).
+   ✅ DOGFOOD BATCH 1: 3 stage1 elif ladders migrated — `precedence`
+   (9-way operator table, `in {…}` groups → `|` or-columns incl. a `.Pipe`
+   tag beside the `|` separator), `literal_outside_range` (7-way type→bounds
+   table), `family_of_kind` (6-way TypeKind→string table). The last exposed a
+   pre-existing match/when-expression gap: an ALL-string-literal table joins to
+   `static u8&` (no arm supplies a view) and couldn't be returned as `sview`;
+   fixed by a contextual match-expr path that adopts the expected string type
+   (stage0 ddce717d). Remaining: the other ~135 census sites.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
 5. **`machine from`** — generalizes docs/123 (states from transitions instead
