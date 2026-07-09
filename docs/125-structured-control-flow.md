@@ -202,6 +202,22 @@ Acyclic machine ⇒ pure jump threading; no state variable materializes.
 Cyclic machine ⇒ the same loop-over-branch a hand-written state variable
 produces. Payloads live in registers/stack slots exactly as locals would.
 
+### Status
+
+✅ **MVP LANDED (stage0**, this increment): `machine from START [decreases M]:`
+as a real `MachineFromExpr` node (states are the variants of an existing enum, so
+`mode` reuses that enum — no synthesis). The analyzer owns the lowering: it runs
+the graph refusals, determines the result type from the binding/return context
+(the doc-canonical inferred form, `kind: T = machine from …`) or the join of the
+`done` values, then builds the loop/mode/match desugar into `Lowered` and the
+backend emits it — **zero new codegen** (the `LoweredCall` pattern). Refusals
+enforced: R2 (every arm ends in `next`/`done`, last unguarded), R4 (dead states),
+R3 (a `next`-graph cycle demands a `decreases`; the measure's presence is checked
+here, discharge deferred to the docs/118 prover). Threaded mutation is licensed by
+the loop's inferred captures. Deferred: **state payloads** (`Num.Exponent(digits)`
+— v1 is payload-less states), R5 declared out-edge sets, stage1 port, and the
+lexer/parser scanner migrations.
+
 ## 4. `when` — order-independence as a declaration
 
 A decision-table construct. Choosing `when` over `match` *declares* the arms
@@ -453,6 +469,10 @@ Notes:
    of sequence elements) + transition-graph checks (R2–R5) + cycle/`decreases`
    integration with docs/118 + branch-totality enforcement at edges (§1c).
    Migrate the lexer/parser flag scanners.
+   ✅ MVP LANDED stage0: `MachineFromExpr` node, analyzer-owned lowering to a
+   loop/mode/match desugar (inferred result type, zero new codegen), refusals
+   R2/R3/R4. Deferred: state payloads, R5 out-edge declarations, stage1 port,
+   scanner migrations.
 6. **`-Wflow=strict` graduation** — off → warn → stage1 becomes the first
    strict-flow project; the syntactic detectors keep it clean.
 

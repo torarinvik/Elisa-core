@@ -118,6 +118,43 @@ type MatchExpr struct {
 	Store    Expr
 	Arms     []MatchArm
 }
+
+// MachineFromExpr is a docs/125 §5 `machine from START [decreases E]:` state machine
+// expression: states are an enum's variants, each arm ends in `next State` or `done VALUE`,
+// and the whole form yields the joined `done` value. Unlike `machine over` (docs/123, a
+// pure parser desugar), the result TYPE is only known after analysis, so this is a real
+// node: the analyzer determines the type (from context or the `done` values), builds the
+// loop/mode/match desugar into `Lowered`, and the backend emits `Lowered` — the LoweredCall
+// pattern. `StartEnum` is the state enum's name, `StartState` the entry variant.
+type MachineFromExpr struct {
+	Position   lexer.Pos
+	StartEnum  string
+	StartState string
+	Decreases  Expr // machine-level termination measure (docs/118); nil when absent
+	Arms       []MachineFromArm
+	// Lowered is the analyzer-built ExprBlock desugar; the backend emits it in place of
+	// this node (the mode enum decl is hoisted to pendingDecls at parse time).
+	Lowered Expr
+}
+
+// MachineFromArm is one state's handler: body statements run unconditionally, then a
+// trailing run of `next`/`done` terminators resolves the arm (the last one unguarded).
+type MachineFromArm struct {
+	Position    lexer.Pos
+	State       string
+	Body        []Stmt
+	Terminators []MachineFromTerminator
+}
+
+// MachineFromTerminator is one `next State [if COND]` transition or `done VALUE [if COND]`
+// exit. Exactly one of Target (next) / Value (done) is set; Guard is nil when unguarded.
+type MachineFromTerminator struct {
+	Position lexer.Pos
+	IsDone   bool
+	Target   string // next: the successor state variant
+	Value    Expr   // done: the yielded value
+	Guard    Expr   // optional `if COND`; nil when unguarded
+}
 type FoldExpr struct {
 	Position       lexer.Pos
 	Keyword        string

@@ -123,6 +123,9 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if matchExpr, ok := expr.(*ast.MatchExpr); ok && expected != nil {
 		return a.analyzeContextualMatchExpr(matchExpr, expected)
 	}
+	if mf, ok := expr.(*ast.MachineFromExpr); ok {
+		return a.analyzeMachineFromExpr(mf, expected)
+	}
 	if contextualExpected, ok := contextualIntLiteralType(expected); ok {
 		// A compile-time integer being adapted to a narrower integer type must be
 		// representable: `y: i8 = 1000` silently truncated to -24 before. There is no

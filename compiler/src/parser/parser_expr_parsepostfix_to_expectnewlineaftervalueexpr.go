@@ -480,6 +480,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.cur().Text == "when" && p.looksLikeWhenConstruct() {
 			return p.parseWhenExpr()
 		}
+		if p.cur().Text == "machine" && p.looksLikeMachineFromExpr() {
+			return p.parseMachineFromExpr()
+		}
 		if p.looksLikeQueryExpr() {
 			return p.parseQueryExpr()
 		}
@@ -888,6 +891,12 @@ func (p *Parser) expectNewlineAfterValueExpr(expr ast.Expr) {
 	// (COLON NEWLINE INDENT … DEDENT); the trailing newline was consumed inside the
 	// final arm, so there is none left here — same as ExprBlock / CatchExpr.
 	if _, ok := expr.(*ast.MatchExpr); ok {
+		return
+	}
+	// A `machine from …:` expression ends with its arm block (COLON NEWLINE INDENT …
+	// DEDENT) exactly like `match`; the trailing newline was consumed inside the final
+	// arm, so there is none left here.
+	if _, ok := expr.(*ast.MachineFromExpr); ok {
 		return
 	}
 	if exprHasBlockRecovery(expr) {

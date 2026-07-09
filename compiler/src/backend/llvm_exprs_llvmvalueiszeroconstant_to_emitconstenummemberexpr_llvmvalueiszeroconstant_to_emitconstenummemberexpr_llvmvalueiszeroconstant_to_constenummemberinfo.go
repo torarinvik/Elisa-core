@@ -417,6 +417,9 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 		value, actualType, err = s.emitAllocExpr(n)
 	case *ast.MatchExpr:
 		value, actualType, err = s.emitMatchExpr(n)
+	case *ast.MachineFromExpr:
+		// docs/125 §5: the analyzer built the loop/mode/match desugar into Lowered.
+		value, actualType, err = s.emitExpr(n.Lowered, expected)
 	case *ast.FoldExpr:
 		value, actualType, err = s.emitFoldExpr(n)
 	case *ast.EmitExpr:

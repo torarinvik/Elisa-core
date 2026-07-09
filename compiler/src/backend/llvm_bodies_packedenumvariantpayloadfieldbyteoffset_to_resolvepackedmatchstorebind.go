@@ -350,6 +350,8 @@ func exprReadsMatchedValueField(name string, expr ast.Expr) bool {
 		return exprReadsMatchedValueField(name, n.Owner) || exprReadsMatchedValueField(name, n.Value)
 	case *ast.MatchExpr:
 		return exprReadsMatchedValueField(name, n.Value) || exprReadsMatchedValueField(name, n.Store) || matchArmsReadMatchedValueField(name, n.Arms)
+	case *ast.MachineFromExpr:
+		return exprReadsMatchedValueField(name, n.Lowered)
 	case *ast.FoldExpr:
 		if exprReadsMatchedValueField(name, n.Value) {
 			return true

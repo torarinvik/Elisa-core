@@ -433,6 +433,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	case *ast.MatchExpr:
 		result = a.analyzeMatchExpr(n)
 		return
+	case *ast.MachineFromExpr:
+		result = a.analyzeMachineFromExpr(n, nil)
+		return
 	case *ast.FoldExpr:
 		result = a.analyzeFoldExpr(n)
 		return

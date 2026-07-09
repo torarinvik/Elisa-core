@@ -116,8 +116,9 @@ func (n *OptionalBindExpr) Pos() lexer.Pos {
 }
 func (n *AllocExpr) Pos() lexer.Pos { return n.Position }
 func (n *CanExpr) Pos() lexer.Pos   { return n.Position }
-func (n *MatchExpr) Pos() lexer.Pos { return n.Position }
-func (n *FoldExpr) Pos() lexer.Pos  { return n.Position }
+func (n *MatchExpr) Pos() lexer.Pos       { return n.Position }
+func (n *MachineFromExpr) Pos() lexer.Pos { return n.Position }
+func (n *FoldExpr) Pos() lexer.Pos        { return n.Position }
 func (n *EmitExpr) Pos() lexer.Pos  { return n.Position }
 func (n *MatchWildcardPattern) Pos() lexer.Pos {
 	return n.Position
@@ -325,6 +326,7 @@ func (*OptionalBindExpr) nodeTag()                     {}
 func (*AllocExpr) nodeTag()                            {}
 func (*CanExpr) nodeTag()                              {}
 func (*MatchExpr) nodeTag()                            {}
+func (*MachineFromExpr) nodeTag()                      {}
 func (*FoldExpr) nodeTag()                             {}
 func (*EmitExpr) nodeTag()                             {}
 func (*MatchWildcardPattern) nodeTag()                 {}
@@ -542,6 +544,7 @@ func (*TypeExprExpr) exprTag()                         {}
 func (*ParenExpr) exprTag()                            {}
 func (*RaiseExpr) exprTag()                            {}
 func (*MatchExpr) exprTag()                            {}
+func (*MachineFromExpr) exprTag()                      {}
 func (*FoldExpr) exprTag()                             {}
 func (*EmitExpr) exprTag()                             {}
 func (*MatchStmt) stmtTag()                            {}
