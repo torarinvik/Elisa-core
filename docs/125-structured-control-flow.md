@@ -387,6 +387,14 @@ Notes:
    + the syntactic block-`if` detector + a census sweep of stage1 pricing the
    strict-flow migration: how many block-ifs are guards-in-disguise or value
    selections (fixable today) vs genuine state machines (need `machine from`).
+   ✅ PARTIAL: generalized postfix guards landed both stages (stage0 0a349414,
+   stage1 9ef477a); census done (1687 block-ifs: 419 multi-stmt, 332 effect-
+   guards, 320 exit-guards, 284 is-bindings, 194 value-selects, 138 elif
+   ladders). The load-bearing **ternary-requires-else invariant** is now
+   enforced on BOTH stages (stage0 always had it; stage1 gained
+   `IfValueMissingElse`, error code 138) — an else-less `if` at a statement
+   site is therefore unambiguously a postfix guard on both compilers.
+   Remaining: the syntactic block-`if` detector itself (fold into 6).
 3. **`when`** — parser + disjointness/totality checker; reuses the range
    prover. Migrate `literal_fits_in_type`-shaped tables.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
