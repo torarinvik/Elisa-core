@@ -396,6 +396,13 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		// check below even though the comprehension COULD legally produce i64. Propagate dst's
 		// element type as the expected result, exactly as a `dst: darray[T] = [...]` var decl would.
 		expectedSource = &DArrayType{Elem: darrayType.Elem, Shape: &WildcardShape{}, SurfaceName: "darray"}
+	} else if isStringLitExtendArg(expr.Args[0]) && isExtendU8Elem(darrayType.Elem) {
+		// A string LITERAL has a compile-time-known length, so — unlike a bare `static u8&`
+		// byte pointer (a NUL-terminated pointer whose length is NOT in its type) — it is a
+		// bounded source safe to bulk-copy. Adapt it to an sview (the u8 byte view): the
+		// contextual-string-literal path retypes the literal, then the existing view extend
+		// path memcpies exactly its bytes. Mirrors the match-fold literal->sview adaptation.
+		expectedSource = &SViewType{}
 	}
 	// A comprehension argument to `extend` FUSES — its elements are pushed straight
 	// into the receiver, no standalone temp is allocated. So analyze it with the
@@ -416,7 +423,14 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		sourceType = a.analyzeValueExpr(expr.Args[0], expectedSource)
 	}
 	if !builtinDArrayExtendSourceCompatible(darrayType.Elem, sourceType) {
-		a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, array, or view source of %s, got %s", darrayType.Elem, sourceType)
+		if isStaticStringLiteralRefType(sourceType) {
+			// A bare `static u8&` byte-ref binding that ISN'T a literal (a literal adapts
+			// above): its length is not in its type, so extend cannot bound the copy. Point
+			// at the two length-carrying fixes instead of the opaque shape error.
+			a.errorf(expr.Args[0].Pos(), "darray extend source is an unbounded `static u8&` byte pointer with no length; wrap it in a bounded view (`sview`/`view[u8]`) or build a length-carrying string such as an f-string `f\"...\"`")
+		} else {
+			a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, array, or view source of %s, got %s", darrayType.Elem, sourceType)
+		}
 	}
 	if a.containsAffineHandleValues(darrayType.Elem, map[string]bool{}) {
 		a.errorf(expr.Args[0].Pos(), "darray extend does not support affine element type %s; push elements individually with explicit move", darrayType.Elem)
@@ -959,6 +973,25 @@ func builtinDArrayExtendSourceCompatible(elemType Type, sourceType Type) bool {
 func isExtendU8Elem(elemType Type) bool {
 	b, ok := StripAggregateStateType(elemType).(*BuiltinType)
 	return ok && b != nil && b.Name == "u8"
+}
+
+// isStringLitExtendArg reports whether an extend argument is a bare string literal
+// (peeling parentheses) — the only static-u8& shape whose length is a compile-time
+// constant, hence the only one safe to adapt to a bounded view source.
+func isStringLitExtendArg(e ast.Expr) bool {
+	for {
+		switch n := e.(type) {
+		case *ast.StringLit:
+			return true
+		case *ast.ParenExpr:
+			if n == nil {
+				return false
+			}
+			e = n.Inner
+		default:
+			return false
+		}
+	}
 }
 
 func darrayElemPrefersListLiteralAsSingleValue(elemType Type) bool {

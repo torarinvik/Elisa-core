@@ -36,6 +36,13 @@ func TestExtendAcceptsViewSourceAsMemcpy(t *testing.T) {
     can Memory.Allocate, Abort.Panic:
         buf.extend(sv)
 `},
+		// A string LITERAL has a compile-time-known length, so it is a bounded source: it
+		// adapts to an sview and lowers to the SAME arena_memcpy a view source does (unlike
+		// a bare `static u8&` byte pointer, which has no length and is rejected).
+		{"string_literal.elisa", `def x(buf: mutable darray[u8]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        buf.extend("hello")
+`},
 	}
 	for _, c := range cases {
 		src := write(c.name, c.body)
@@ -46,5 +53,31 @@ func TestExtendAcceptsViewSourceAsMemcpy(t *testing.T) {
 		if !strings.Contains(stdout.String(), "arena_memcpy") {
 			t.Fatalf("%s: extend from a view must lower to arena_memcpy, got:\n%s", c.name, stdout.String())
 		}
+	}
+}
+
+// A bare `static u8&` byte-ref binding (NOT a literal) has no length in its type, so it
+// cannot bound the copy — it stays rejected, but with an actionable diagnostic that names
+// the two length-carrying fixes (a bounded view, or a length-carrying string) instead of
+// the opaque shape error.
+func TestExtendRejectsUnboundedStaticU8Ref(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	std := filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa")
+	rel, _ := filepath.Rel(dir, std)
+	src := filepath.Join(dir, "unbounded_ref.elisa")
+	body := "# include \"" + filepath.ToSlash(rel) + "\"\n" + `def x(buf: mutable darray[u8]&, s: static u8&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        buf.extend(s)
+`
+	if err := os.WriteFile(src, []byte(body), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "semantic", "-O0", src}, &stdout, &stderr); code == 0 {
+		t.Fatalf("extend from an unbounded static u8& must be rejected, got clean compile")
+	}
+	if !strings.Contains(stderr.String(), "unbounded") || !strings.Contains(stderr.String(), "bounded view") {
+		t.Fatalf("expected the sharpened unbounded-pointer diagnostic, got:\n%s", stderr.String())
 	}
 }
