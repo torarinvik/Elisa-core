@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
@@ -85,5 +86,42 @@ func TestMatchWithoutWithUnchanged(t *testing.T) {
 	match := fn.Body[0].(*ast.ReturnStmt).Value.(*ast.MatchExpr)
 	if _, ok := match.Arms[0].Body[0].(*ast.VarDeclStmt); ok {
 		t.Fatal("plain or-arm must not gain a prepended VarDeclStmt")
+	}
+}
+
+// docs/125 §5 refusal R1 — every alternative of a `with`-arm must bind the same constants.
+// A body reading a constant only some alternatives supply would resolve for those siblings
+// and fail late as `undefined identifier` on the others; catch it early at the arm.
+func TestMatchWithBindingParityR1(t *testing.T) {
+	// Mismatched names, missing on the other side, and a superset all error; identical sets
+	// and `with`-free or-arms are accepted (zero-false-positive on existing patterns).
+	cases := []struct {
+		name    string
+		arm     string
+		wantErr bool
+	}{
+		{"different-names", "E.Lit(m) with x = 1 | E.Neg(m) with y = 2: x", true},
+		{"missing-on-one", "E.Lit(m) with x = 1 | E.Neg(m): m", true},
+		{"superset", "E.Lit(m) with x = 1 | E.Neg(m) with x = 2, y = 3: x", true},
+		{"identical-set", "E.Lit(m) with x = 1 | E.Neg(m) with x = 2: x", false},
+		{"no-with-orarm", "E.Lit(m) | E.Neg(m): m", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			src := "def f(e: E) -> i64:\n" +
+				"    return match e:\n" +
+				"        " + tc.arm + "\n" +
+				"        _: 0\n"
+			_, errs := parseSourceFile(t, src)
+			gotErr := false
+			for _, e := range errs {
+				if strings.Contains(e, "with`-arm must bind the same constants") {
+					gotErr = true
+				}
+			}
+			if gotErr != tc.wantErr {
+				t.Fatalf("R1 diagnostic present = %v, want %v (errs: %v)", gotErr, tc.wantErr, errs)
+			}
+		})
 	}
 }

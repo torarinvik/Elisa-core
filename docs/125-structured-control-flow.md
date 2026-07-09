@@ -348,7 +348,16 @@ one `MatchArm` per `|` alternative, each with its constants prepended to a fresh
 body copy. Two stage1-specific wrinkles the port handles: the constant value is
 parsed at the postfix level (not `expression()`) so a following `|` isn't swallowed
 as bit-or, and the continuation-line `|` separator is found across the un-suppressed
-layout newline (`next_nonnewline_is_pipe`). Deferred: the R1
+layout newline (`next_nonnewline_is_pipe`). **Dogfood outcome — principled
+decline:** a sweep of the self-hosted parser found exactly one candidate
+(`parser_expr.elisa` `True | False` → `BoolLit(kind == TokenKind.True)`), and
+converting it is a wash — the re-test is already the clearer one-line form, and
+every other or-arm in the tree deliberately erases the alternative distinction via
+uniform dispatch/derivation. `with` is a user-code feature (large shared bodies that
+genuinely re-branch), not a compiler-source one. The one *untested shape* the sweep
+surfaced — bare-member (payload-free) or-arm `with` in value position — was verified
+end-to-end and locked in as additive stage0 runtime coverage (commit e12138f9).
+Deferred: the R1
 diagnostic (or-alternatives that bind different names currently fail late as
 `undefined identifier` only when the body uses the missing binding — an early,
 clear error needs a zero-FP corpus sweep since strict identical-binding would

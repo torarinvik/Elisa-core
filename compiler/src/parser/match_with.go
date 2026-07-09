@@ -1,6 +1,8 @@
 package parser
 
 import (
+	"sort"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
@@ -33,6 +35,7 @@ import (
 type matchArmAlternative struct {
 	pattern   ast.MatchPattern
 	withDecls []ast.Stmt
+	pos       lexer.Pos // start of this alternative, for R1 diagnostics
 }
 
 // parseTopLevelMatchArmAlternatives parses `PATTERN [with …] (| PATTERN [with …])*`, the
@@ -45,12 +48,98 @@ func (p *Parser) parseTopLevelMatchArmAlternatives() []matchArmAlternative {
 		p.advance()
 		alts = append(alts, p.parseMatchArmAlternative())
 	}
+	p.checkWithBindingParity(alts)
 	return alts
 }
 
 func (p *Parser) parseMatchArmAlternative() matchArmAlternative {
+	pos := p.cur().Pos
 	pattern := p.parseMatchPatternNoOr()
-	return matchArmAlternative{pattern: pattern, withDecls: p.parseOptionalWithBindings()}
+	return matchArmAlternative{pos: pos, pattern: pattern, withDecls: p.parseOptionalWithBindings()}
+}
+
+// checkWithBindingParity is docs/125 §5 refusal R1: when an or-arm's alternatives share a
+// body via `with` constants, every alternative must bind the IDENTICAL set of names —
+// otherwise a body reading a constant that only some alternatives bind resolves for those
+// siblings and fails as a late, confusing `undefined identifier` on the others (or leaves a
+// dead binding). Reporting the mismatch here, at the point the alternatives are known,
+// turns that into one clear error at the arm.
+//
+// Zero-false-positive: the check is inert unless SOME alternative carries a `with`, so plain
+// or-arms (`A(x) | B(_):`, no `with` anywhere) are never touched — payload/pattern captures
+// are a separate concern the analyzer already owns. Names are compared as a set (order and
+// the literal values are irrelevant to whether the body can name the constant).
+func (p *Parser) checkWithBindingParity(alts []matchArmAlternative) {
+	if len(alts) < 2 {
+		return
+	}
+	anyWith := false
+	for _, alt := range alts {
+		if len(alt.withDecls) > 0 {
+			anyWith = true
+			break
+		}
+	}
+	if !anyWith {
+		return
+	}
+	first := withBindingNameSet(alts[0].withDecls)
+	for _, alt := range alts[1:] {
+		got := withBindingNameSet(alt.withDecls)
+		if missing, extra, ok := diffNameSets(first, got); !ok {
+			p.errorAt(alt.pos, "%s", withBindingParityMessage(missing, extra))
+		}
+	}
+}
+
+func withBindingNameSet(decls []ast.Stmt) map[string]bool {
+	set := make(map[string]bool, len(decls))
+	for _, d := range decls {
+		if vd, ok := d.(*ast.VarDeclStmt); ok {
+			set[vd.Name] = true
+		}
+	}
+	return set
+}
+
+// diffNameSets reports names present in want but not got (missing) and in got but not want
+// (extra); ok is true when the sets are equal.
+func diffNameSets(want, got map[string]bool) (missing, extra []string, ok bool) {
+	for n := range want {
+		if !got[n] {
+			missing = append(missing, n)
+		}
+	}
+	for n := range got {
+		if !want[n] {
+			extra = append(extra, n)
+		}
+	}
+	sort.Strings(missing)
+	sort.Strings(extra)
+	return missing, extra, len(missing) == 0 && len(extra) == 0
+}
+
+func withBindingParityMessage(missing, extra []string) string {
+	msg := "every alternative of a `with`-arm must bind the same constants, so the shared body can read them uniformly"
+	if len(missing) > 0 {
+		msg += "; this alternative is missing " + quoteNameList(missing)
+	}
+	if len(extra) > 0 {
+		msg += "; this alternative also binds " + quoteNameList(extra) + " which the first alternative does not"
+	}
+	return msg
+}
+
+func quoteNameList(names []string) string {
+	out := ""
+	for i, n := range names {
+		if i > 0 {
+			out += ", "
+		}
+		out += "`" + n + "`"
+	}
+	return out
 }
 
 // parseOptionalWithBindings parses a trailing `with NAME = LITERAL [, NAME = LITERAL]*`
