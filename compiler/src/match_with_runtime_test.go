@@ -31,6 +31,20 @@ def report(e: E, out: mutable i64&) -> void:
         _:
             out <- 0
 
+enum Tok:
+    Yes
+    No
+    Other
+
+# Bare-member (payload-free) or-arm with-discriminator in value position — the shape
+# a dogfood sweep of the self-hosted parser surfaced (match on a scalar enum kind,
+# each alternative distinguished only by its discriminating constant).
+def flag(t: Tok) -> i64:
+    return match t:
+        Tok.Yes with bit = 1 | Tok.No with bit = 0:
+            bit
+        _: 2
+
 @test
 def with_discriminator() -> void:
     can Abort.Panic:
@@ -53,7 +67,17 @@ def with_statement_form() -> void:
         report(E.Lit(8), &r)
         if r != 8:
             panic("stmt lit")
+
+@test
+def with_bare_member() -> void:
+    can Abort.Panic:
+        if flag(Tok.Yes) != 1:
+            panic("yes -> 1")
+        if flag(Tok.No) != 0:
+            panic("no -> 0")
+        if flag(Tok.Other) != 2:
+            panic("other -> 2")
 `
 	exit, stdout, stderr := runStressProgram(t, "match_with_discriminator", body)
-	assertAllPassed(t, exit, stdout, stderr, "with_discriminator", "with_statement_form")
+	assertAllPassed(t, exit, stdout, stderr, "with_discriminator", "with_statement_form", "with_bare_member")
 }
