@@ -483,7 +483,20 @@ Notes:
    pre-existing match/when-expression gap: an ALL-string-literal table joins to
    `static u8&` (no arm supplies a view) and couldn't be returned as `sview`;
    fixed by a contextual match-expr path that adopts the expected string type
-   (stage0 ddce717d). Remaining: the other ~135 census sites.
+   (stage0 ddce717d).
+   ✅ DOGFOOD BATCH 2 (stage1 6e3d8ad): 9 more value-selection ladders migrated —
+   `token_text`, `literal_never_fits`, `firm_never_fits` (resolve_types),
+   the three `machine_*_name` int-slot tables (parser_stmt_machine),
+   `int_fits_storage` (const-enum), the inline result-RHS operator table
+   (check_constant_comparison), and `literal_fits_in_type` (signed arms folded to
+   `A if is_negative else B` ternaries). FINDING: not every elif ladder wants
+   `when` — two all-`-> true` predicates (`is_mutation_operator`,
+   `is_primitive_type`) are set membership, so they became `x in {…}` instead
+   (confirmed string-set membership compiles+runs). Census showed the true pure-
+   table pool is ~a dozen, not 135: most remaining elif chains are token-scanner
+   state machines (effects/multi-statement) — `machine from` territory, not `when`.
+   Remaining table sites are now few; the bulk of §7.6 strict-flow debt is scanner
+   ladders awaiting `machine from` state-payload support.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
    ✅ PARTIAL: deep nested / payload-literal / shared-name or-patterns were
@@ -496,8 +509,9 @@ Notes:
    Migrate the lexer/parser flag scanners.
    ✅ MVP LANDED stage0: `MachineFromExpr` node, analyzer-owned lowering to a
    loop/mode/match desugar (inferred result type, zero new codegen), refusals
-   R2/R3/R4. Deferred: state payloads, R5 out-edge declarations, stage1 port,
-   scanner migrations.
+   R2/R3/R4. ✅ stage1 port LANDED (c339d93); scanner migrations concluded N/A
+   (the flag scanners were already flat value-form). Deferred: state payloads,
+   R5 out-edge declarations.
 6. **`-Wflow=strict` graduation** — off → warn → stage1 becomes the first
    strict-flow project; the syntactic detectors keep it clean.
 
