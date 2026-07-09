@@ -406,7 +406,12 @@ Notes:
    vacuous-`_` check remain future work); R3 rejects bindings, destructuring,
    guards, and pinned values at parse time. Fixed en route: string patterns in
    tuple-match columns emitted an invalid aggregate icmp (now lower through the
-   runtime string-equality helper). Remaining: stage1 port + table migrations.
+   runtime string-equality helper).
+   ✅ STAGE1 LANDED: same contextual-keyword + parser-only-desugar-to-Match
+   shape; per the machine-port philosophy the R1/R2/R3 refusals are NOT
+   re-emitted (stage0 owns them) — the stage1 parse is purely structural.
+   Gates green (self-hostable 0/130, breadth 127/0, 31 parity smokes +
+   when_smoke). Remaining: migrate the 138 elif-ladder census sites to `when`.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
 5. **`machine from`** — generalizes docs/123 (states from transitions instead
