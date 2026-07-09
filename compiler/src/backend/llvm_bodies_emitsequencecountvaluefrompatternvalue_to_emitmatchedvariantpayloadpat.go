@@ -650,6 +650,15 @@ func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actual
 	}
 	actualType = semantic.StripAggregateStateType(actualType)
 	literalType := s.exprType(literalExpr)
+	// A string pattern nested inside a tuple/payload position is a parser/backend-synthesized
+	// StringLit with no analyzer type-table entry; without a type it would fall through to the
+	// scalar icmp below and compare the view AGGREGATE (invalid IR). Compare it as the
+	// scrutinee field's own string-carrier kind instead.
+	if literalType == nil {
+		if _, isStr := literalExpr.(*ast.StringLit); isStr && classifyRuntimeStringCompareKind(actualType) != runtimeStringCompareNone {
+			literalType = actualType
+		}
+	}
 	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(actualType, literalType); ok {
 		cmp, err := s.emitRuntimeStringCompareLiteralValue(actualValue, literalExpr, literalType, helperName, firstType, secondType, swap)
 		if err != nil {

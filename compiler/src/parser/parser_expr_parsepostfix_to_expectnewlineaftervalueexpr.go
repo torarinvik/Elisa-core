@@ -477,6 +477,9 @@ func (p *Parser) parsePrimary() ast.Expr {
 		errExpr := p.parseOr()
 		return &ast.RaiseExpr{Position: pos, Error: errExpr}
 	case lexer.TOKEN_IDENT:
+		if p.cur().Text == "when" && p.looksLikeWhenConstruct() {
+			return p.parseWhenExpr()
+		}
 		if p.looksLikeQueryExpr() {
 			return p.parseQueryExpr()
 		}

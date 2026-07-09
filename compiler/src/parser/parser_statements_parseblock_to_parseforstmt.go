@@ -104,6 +104,10 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeMachineStmt() {
 				return p.parseMachineStmt()
 			}
+		case "when":
+			if p.looksLikeWhenConstruct() {
+				return p.parseWhenStmt()
+			}
 		case "pool":
 			if p.looksLikePoolStmt() {
 				return p.parsePoolStmt()

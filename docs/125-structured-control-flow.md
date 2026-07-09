@@ -397,6 +397,16 @@ Notes:
    Remaining: the syntactic block-`if` detector itself (fold into 6).
 3. **`when`** — parser + disjointness/totality checker; reuses the range
    prover. Migrate `literal_fits_in_type`-shaped tables.
+   ✅ STAGE0 LANDED: contextual keyword (machine precedent — parser-only,
+   desugars to `match`, zero AST/semantic/backend footprint). `|` binds within
+   a column, `,` separates columns; the `_` default row is emitted last so a
+   mid-table default cannot swallow arms. R1 = syntactic pairwise disjointness
+   over literals/ranges/tags (opaque atoms never claim overlap — zero-FP); R2
+   inherited from match exhaustiveness (range-union totality proving and the
+   vacuous-`_` check remain future work); R3 rejects bindings, destructuring,
+   guards, and pinned values at parse time. Fixed en route: string patterns in
+   tuple-match columns emitted an invalid aggregate icmp (now lower through the
+   runtime string-equality helper). Remaining: stage1 port + table migrations.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
 5. **`machine from`** — generalizes docs/123 (states from transitions instead
