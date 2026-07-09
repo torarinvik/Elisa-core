@@ -592,10 +592,19 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 	}
 
 	var expr ast.Expr
+	p.stmtGuardArmed = true
 	if p.peekIdentText("move") {
 		expr = p.withInMembershipDisabled(p.parseExpr)
 	} else {
 		expr = p.parseExpr()
+	}
+	p.stmtGuardArmed = false
+	if p.stmtGuardCond != nil {
+		// docs/125 §6b: `EXPR if COND` — a guarded expression statement. The guard was
+		// recorded at a statement terminator, so no assignment/postfix continuation can
+		// follow; wrap and finish.
+		p.expectNewlineAfterValueExpr(expr)
+		return p.takeStmtGuard(&ast.ExprStmt{Position: pos, Expr: expr})
 	}
 
 	if _, ok := expr.(*ast.MoveExpr); ok {
@@ -672,15 +681,19 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			// docs/119 §2/§6: `x <- [|caps|]` NEWLINE INDENT ... — (captured) block expression.
 			value = blockValue
 		} else {
+			// docs/125 §6b: the RHS admits a postfix statement guard — `x <- v if cond`
+			// is do-or-skip assignment (a ternary still spells its `else`).
+			p.stmtGuardArmed = true
 			value = p.parseValueExprAllowTuple()
+			p.stmtGuardArmed = false
 		}
 		p.expectNewlineAfterValueExpr(value)
 		// docs/120 §6 single-place: a branchy RHS whose every leaf threads the target
 		// (a mutating call rooted at it) or yields it unchanged erases to a statement-if.
 		if stmt, handled := p.desugarSingleThreadAssign(expr, value); handled {
-			return stmt
+			return p.takeStmtGuard(stmt)
 		}
-		return &ast.AssignStmt{Position: pos, Target: expr, Value: value}
+		return p.takeStmtGuard(&ast.AssignStmt{Position: pos, Target: expr, Value: value})
 
 	case lexer.TOKEN_QASSIGN:
 		p.advance()
@@ -692,9 +705,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		lexer.TOKEN_CARETEQ, lexer.TOKEN_PIPEEQ, lexer.TOKEN_AMPEQ,
 		lexer.TOKEN_LSHIFTEQ, lexer.TOKEN_RSHIFTEQ:
 		op := p.advance()
+		// docs/125 §6b: compound assignment admits a postfix statement guard too
+		// (`total += i if keep(i)`).
+		p.stmtGuardArmed = true
 		value := p.parseExpr()
+		p.stmtGuardArmed = false
 		p.expectNewlineAfterValueExpr(value)
-		return &ast.AugAssignStmt{Position: pos, Op: op.Kind, Target: expr, Value: value}
+		return p.takeStmtGuard(&ast.AugAssignStmt{Position: pos, Op: op.Kind, Target: expr, Value: value})
 
 	case lexer.TOKEN_AS:
 		p.advance()

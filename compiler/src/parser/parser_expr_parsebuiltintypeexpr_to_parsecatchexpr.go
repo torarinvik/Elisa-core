@@ -138,8 +138,24 @@ func (p *Parser) parseExpr() ast.Expr {
 		pos := p.cur().Pos
 		p.advance()
 		cond := p.parseOr()
+		// Generalized postfix statement guard (docs/125 §6b): while the statement parser has
+		// armed the guard window, `EXPR if COND` ending at a statement terminator is a
+		// do-or-skip guard on the enclosing statement, not a malformed ternary. The
+		// statement-end test keeps bracketed contexts (`f(a if c)`) on the ternary path.
+		if p.stmtGuardArmed && p.peek() != lexer.TOKEN_ELSE && p.stmtEndAhead() {
+			p.stmtGuardArmed = false
+			p.stmtGuardCond = cond
+			return expr
+		}
+		// Suspend the guard window around the alt parse only: a chained
+		// `a if c else b if c2` still demands its second `else` (the alt parses unarmed),
+		// while a COMPLETED ternary can still take a statement guard afterwards
+		// (`x <- (a if c else b) if cond`).
+		savedGuardArmed := p.stmtGuardArmed
+		p.stmtGuardArmed = false
 		p.expect(lexer.TOKEN_ELSE)
 		alt := p.parseExpr()
+		p.stmtGuardArmed = savedGuardArmed
 		return &ast.TernaryExpr{Position: pos, Value: expr, Cond: cond, Alt: alt}
 	}
 	if p.peek() == lexer.TOKEN_ELSE {

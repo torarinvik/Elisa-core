@@ -41,6 +41,40 @@ type Parser struct {
 	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer
 	// after each parseDecl so the synthesized decls land flat at file scope.
 	pendingDecls []ast.Decl
+	// stmtGuardArmed enables the generalized postfix statement guard (docs/125 §6b): while armed,
+	// a postfix `if COND` with NO `else` whose condition ends at a statement terminator is not a
+	// malformed ternary but a do-or-skip guard on the enclosing statement. Armed only around the
+	// statement-level expression parses that admit guards (expression statements, `<-` RHS,
+	// compound-assign RHS) — never around declarations, which must bind unconditionally. The flag
+	// disarms on the FIRST ternary engagement (guard recorded OR `else` seen), so a statement has
+	// at most one guard and `a if c else b if c2` stays an error rather than a surprising guard.
+	stmtGuardArmed bool
+	// stmtGuardCond holds the recorded guard condition until the statement parser wraps the
+	// finished statement in `if COND: <stmt>` (parse-time desugar, like break/continue/return-if).
+	stmtGuardCond ast.Expr
+}
+
+// takeStmtGuard consumes a recorded postfix statement guard, if any, wrapping the finished
+// statement in the equivalent IfStmt. Also disarms the guard window unconditionally.
+func (p *Parser) takeStmtGuard(stmt ast.Stmt) ast.Stmt {
+	p.stmtGuardArmed = false
+	if p.stmtGuardCond == nil {
+		return stmt
+	}
+	cond := p.stmtGuardCond
+	p.stmtGuardCond = nil
+	return &ast.IfStmt{Position: stmt.Pos(), Cond: cond, Then: []ast.Stmt{stmt}}
+}
+
+// stmtEndAhead reports whether the next token terminates a statement — the disambiguator that
+// keeps the postfix statement guard from ever firing inside a bracketed context (there the next
+// token is always `)`/`,`/`]`/... instead).
+func (p *Parser) stmtEndAhead() bool {
+	switch p.peek() {
+	case lexer.TOKEN_NEWLINE, lexer.TOKEN_DEDENT, lexer.TOKEN_EOF:
+		return true
+	}
+	return false
 }
 
 func New(tokens []lexer.Token) *Parser {
@@ -986,6 +1020,7 @@ func (p *Parser) parseTypeAliasDecl() ast.Decl {
 	p.expectNewline()
 	return &ast.TypeAliasDecl{Position: pos, Name: name, TypeParams: typeParams, Target: target}
 }
+
 // parseLayoutStructDeclWithAnnotations handles the REMOVED prefix form
 // `layout soa struct Name:` — the layout clause is a postfix header clause now
 // (`struct Name layout(soa):`, one grammar across struct/enum/overlay). Directed
