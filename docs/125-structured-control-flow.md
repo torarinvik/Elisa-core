@@ -214,9 +214,11 @@ backend emits it — **zero new codegen** (the `LoweredCall` pattern). Refusals
 enforced: R2 (every arm ends in `next`/`done`, last unguarded), R4 (dead states),
 R3 (a `next`-graph cycle demands a `decreases`; the measure's presence is checked
 here, discharge deferred to the docs/118 prover). Threaded mutation is licensed by
-the loop's inferred captures. Deferred: **state payloads** (`Num.Exponent(digits)`
-— v1 is payload-less states), R5 declared out-edge sets, stage1 port, and the
-lexer/parser scanner migrations.
+the loop's inferred captures. ✅ **stage1 port LANDED** (parser-only desugar to a
+value `Expr.Block`: frontend, so no codegen and the graph refusals aren't
+re-emitted — stage0 owns them). Deferred: **state payloads** (`Num.Exponent(digits)`
+— v1 is payload-less states), R5 declared out-edge sets, and the lexer/parser
+scanner migrations (now unblocked — stage1 parses `machine from`).
 
 ## 4. `when` — order-independence as a declaration
 
