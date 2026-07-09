@@ -307,6 +307,29 @@ produced depth 14; once deep arm patterns exist, that shape is flagged.
 
 Same tag-test chain the nested `is` ladder compiles to today. Zero overhead.
 
+### Status
+
+Deep nested patterns, payload-literal patterns, and or-patterns binding a shared
+name were already delivered by docs/122 — the only new syntax §5 needs is the
+`with` discriminator. ✅ **`with NAME = LITERAL` LANDED (stage0**, commit
+24d14243): a parser-level desugar — the top-level `|` already fans an or-arm
+into one `MatchArm` per alternative sharing the body, so a `with` clause
+prepends its `NAME = LITERAL` bindings (immutable, type-inferred locals) to that
+alternative's body copy. No AST/semantic/backend change; `with` is a
+reserved-but-unused keyword. Works in statement and expression match.
+
+Scope landed: `with` binds at the arm-ALTERNATIVE (top) level. The §5 depth-14
+example nests the `with` inside a payload arg's or-group; that nested form is
+deferred (it needs the backend or-pattern matcher to bind the constant deep in
+the pattern), and the same table is expressible by lifting the or to the arm
+level. Deferred: stage1 port (stage1 keeps `|` as a single `Pattern.Or` node, so
+the port needs a decl accumulator threaded through the pattern parser); the R1
+diagnostic (or-alternatives that bind different names currently fail late as
+`undefined identifier` only when the body uses the missing binding — an early,
+clear error needs a zero-FP corpus sweep since strict identical-binding would
+also flag existing `A(x) | B(_)` arms whose body uses neither); R2 (the
+shape-retest lint) belongs with the §6 detectors.
+
 ## 6. `can ComplexFlow` — unrestricted forms become the visible exception
 
 Same social technology as `trusted`, `can Scalar`, and the raw-concurrency
@@ -422,6 +445,10 @@ Notes:
    (stage0 ddce717d). Remaining: the other ~135 census sites.
 4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
+   ✅ PARTIAL: deep nested / payload-literal / shared-name or-patterns were
+   already delivered by docs/122; `with NAME = LITERAL` arm-alternative
+   discriminators LANDED stage0 (24d14243). Remaining: stage1 `with` port,
+   nested-`with`, the R1 early diagnostic, and the check_* ladder migrations.
 5. **`machine from`** — generalizes docs/123 (states from transitions instead
    of sequence elements) + transition-graph checks (R2–R5) + cycle/`decreases`
    integration with docs/118 + branch-totality enforcement at edges (§1c).
