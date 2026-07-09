@@ -357,12 +357,19 @@ uniform dispatch/derivation. `with` is a user-code feature (large shared bodies 
 genuinely re-branch), not a compiler-source one. The one *untested shape* the sweep
 surfaced — bare-member (payload-free) or-arm `with` in value position — was verified
 end-to-end and locked in as additive stage0 runtime coverage (commit e12138f9).
-Deferred: the R1
-diagnostic (or-alternatives that bind different names currently fail late as
-`undefined identifier` only when the body uses the missing binding — an early,
-clear error needs a zero-FP corpus sweep since strict identical-binding would
-also flag existing `A(x) | B(_)` arms whose body uses neither); R2 (the
-shape-retest lint) belongs with the §6 detectors.
+✅ **R1 LANDED both stages** (stage0 5010ed92 `checkWithBindingParity`; stage1
+f66c3bd `check_with_binding_parity`): every alternative of a `with`-arm must bind
+the IDENTICAL set of constant names — a name only some alternatives supply resolves
+for those siblings and fails late as a confusing `undefined identifier` on the
+others, so the mismatch is reported once, clearly, at the arm (naming the
+missing/extra constants in stage0). Zero-false-positive by construction: the check
+is *inert unless some alternative carries a `with`*, so plain or-arms
+(`A(x) | B(_):`, no `with` anywhere) are never touched — the feared collision with
+existing pattern-capture arms cannot occur, because those have no `with` clause.
+This is the key insight that made the "zero-FP corpus sweep" unnecessary: R1 keys on
+the new `with` construct, not on pattern bindings. stage1 wires a new
+`SyntaxMismatchedWithBindings` DiagnosticKind through the full 6-point path. Still
+deferred: R2 (the shape-retest lint) belongs with the §6 detectors.
 
 ## 6. `can ComplexFlow` — unrestricted forms become the visible exception
 
