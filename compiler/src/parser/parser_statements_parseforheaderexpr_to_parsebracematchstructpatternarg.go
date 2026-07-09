@@ -307,7 +307,7 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
 		p.advance()
 	}
-	patterns := p.parseTopLevelMatchPatterns()
+	alternatives := p.parseTopLevelMatchArmAlternatives()
 	guard := p.parseOptionalMatchArmGuard()
 	p.expect(lexer.TOKEN_COLON)
 	var body []ast.Stmt
@@ -333,9 +333,9 @@ func (p *Parser) parseMatchExprArm() []ast.MatchArm {
 		p.expectNewline()
 		body = []ast.Stmt{&ast.ExprStmt{Position: value.Pos(), Expr: value}}
 	}
-	arms := make([]ast.MatchArm, 0, len(patterns))
-	for _, pattern := range patterns {
-		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body, Guard: guard})
+	arms := make([]ast.MatchArm, 0, len(alternatives))
+	for _, alt := range alternatives {
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: alt.pattern, Body: matchArmAlternativeBody(alt.withDecls, body), Guard: guard})
 	}
 	return arms
 }
@@ -1225,14 +1225,14 @@ func (p *Parser) parseMatchArm() []ast.MatchArm {
 		p.errorAt(pos, "match arms do not use a `case` keyword; write the pattern directly (e.g. `E.A(v: v):`)")
 		p.advance()
 	}
-	patterns := p.parseTopLevelMatchPatterns()
+	alternatives := p.parseTopLevelMatchArmAlternatives()
 	guard := p.parseOptionalMatchArmGuard()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	arms := make([]ast.MatchArm, 0, len(patterns))
-	for _, pattern := range patterns {
-		arms = append(arms, ast.MatchArm{Position: pos, Pattern: pattern, Body: body, Guard: guard})
+	arms := make([]ast.MatchArm, 0, len(alternatives))
+	for _, alt := range alternatives {
+		arms = append(arms, ast.MatchArm{Position: pos, Pattern: alt.pattern, Body: matchArmAlternativeBody(alt.withDecls, body), Guard: guard})
 	}
 	return arms
 }
