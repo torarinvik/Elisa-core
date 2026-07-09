@@ -29,6 +29,72 @@ means**, and the gap is where mistakes live.
 Therefore the design is **obligations-first**: each construct below is specified
 by what it makes *unwritable*, with the diagnostic it emits. Syntax is packaging.
 
+### 1b. Higher-order branching
+
+The unifying principle. **First-order branching** (block `if`) selects the next
+*statement*; after the join the program is back in the undifferentiated
+"anything next" state — the decision's outcome evaporates, which is exactly why
+flow flags exist (the programmer manually re-materializes the outcome into a
+`mutable bool` because the language threw it away). **Higher-order branching**
+selects the next *decision space*: taking a branch restricts which branches are
+legal afterward, so the outcome persists as a constraint on the future.
+
+Existing Elisa machinery already does this in fragments: refinement facts
+(`if x is Small:` makes later `x > 100` branches vacuous — a restricted decision
+space at the value level), typestate (docs/96 — a value's state restricts which
+method-branches exist), affine handles (the successor set after `consume` is
+empty). `machine` makes it explicit at the control level: a state IS a bundle
+of allowed decisions, and its transitions ARE the declared successor relation.
+
+Block `if` is banned under strict flow (§6b) not for aesthetics but because it
+is the one branching form with a trivial successor relation (every branch →
+everything). Equivalently: **every branch must state what survives it** — a
+value selection survives as the value, a guard survives as a refinement fact, a
+match arm survives as bindings + facts, a transition survives as the state.
+Nothing survives a block `if`.
+
+### 1c. Branch totality (the semantic core)
+
+In strict flow mode every branch arm is a **total function**
+
+```
+arm : (state payload, threaded resources) -> next State'(payload') | done VALUE
+```
+
+with no third option — specifically, no "fall through having mutated ambient
+state." Anything that crosses a flow point crosses *explicitly*: in the
+successor's payload, or as a linearly-threaded resource (`lmut` receiver,
+`mutable T&`, affine handle). A branch produces a legal state — or one of its
+declared *set* of legal states (§3 R5) — or it produces a value and leaves the
+flow. Dataflow is thereby unambiguous.
+
+This is SSA discipline surfaced as language semantics: machine payloads are phi
+nodes, arms are basic blocks with arguments (the form MLIR/Cranelift use
+internally because optimizers want it). Consequences:
+
+- **Zero overhead in the strongest sense**: strict-flow source is isomorphic to
+  the optimizer's IR; there is no lowering gap, and nothing for `-O2` to
+  reconstruct out of mutable-flag soup (and fail at, under aliasing).
+- **Fact-flow precision where it is currently weakest**: joins are where facts
+  die today, because the checker must havoc over ambient mutable state it
+  cannot track (the recurring dogfooding friction: "fact/range propagation
+  through loops/joins"). Under branch totality, joins receive only declared
+  payloads and threaded resources, so facts ride the edges — a payload
+  `Num.Exponent(digits: usize)` carries its refinements into the arm.
+- **Linear conservation across transitions**: a must-consume handle that enters
+  a machine must leave every arm — via payload, threaded ref, or the `done`
+  value. An arm that drops it is a compile error at the transition boundary
+  (a far better place to catch a leak than function end). Same conservation
+  aesthetic as effect rows (docs/124).
+- Reference-typed payloads pass the same region-escape checks as match-arm
+  bindings (existing storage-class-union / ReturnIsolation machinery, applied
+  at transition edges).
+
+Elisa precedents being closed over, not invented: loop accumulator pipes
+(`|table, position: usize = 0| -> table`), `rebind value, lexer = ...`
+threading, `lmut` receivers. Today these are opt-in idioms coexisting with
+ambient mutation; strict flow makes them the only way state crosses an edge.
+
 Two hard constraints carry over unchanged from the rest of the language:
 
 - **Zero overhead.** Every blessed form must lower to exactly the code the
@@ -120,10 +186,15 @@ compile-time error.
 **R4 — dead states are errors.** A state unreachable from the entry state means
 the graph in the programmer's head and the graph in the code diverged.
 
-**R5 (later increment) — declared transition contracts.** An arm may declare
-its out-edges (`Num.Integer -> {Fraction, Exponent}` in a header block); the
-body may then only take declared transitions. Diffs to control flow become
-diffs to a declared table. Natural hook for typestate/protocols (docs/96).
+**R5 — declared transition contracts (core, not bolt-on).** The transition
+relation is the primary semantic artifact of `machine` (§1b: a branch decision
+with declared restrictions on the branches it may execute afterwards). v1
+*infers* the successor sets from `next` sites; v2 lets an arm *declare* its
+out-edges (`Num.Integer -> {Fraction, Exponent}`), and the body may then only
+take declared transitions — diffs to control flow become diffs to a declared
+table. All graph checks (R2–R4, cycle/`decreases`) are queries against this
+relation. Mirrors how regions went: inferred by default, annotated where the
+contract should be visible. Natural hook for typestate/protocols (docs/96).
 
 ### Lowering
 
@@ -267,21 +338,65 @@ Greppable, auditable, and its *absence* is a machine-checked guarantee. Each
 detector must meet the zero-FP bar on the stage1 corpus before it ships
 (precedent: every `check_*` diagnostic's corpus sweep).
 
+### 6b. Strict flow mode (`-Wflow=strict`)
+
+The full discipline, as a graduated project-level mode (same ladder as
+`-Wperf`; `can ComplexFlow` remains the per-function escape). Under strict
+flow, every decision must be **a value, an exit, an arm, or a transition**:
+
+| Form | The branch IS | Strict flow |
+|---|---|---|
+| `x = A if cond else B` (expression-if) | value selection | allowed |
+| `return false if not valid` (postfix guard) | early exit | allowed |
+| `STMT if COND` (generalized postfix guard) | do-or-skip effect | allowed |
+| `if EXPR is NAME:` (refinement binding, docs/80) | checked destructure | allowed |
+| `match` / `when` | shape/table decision | allowed |
+| `machine` | state transition | allowed |
+| `for` / `while` | iteration | allowed |
+| block `if cond:` / `elif` / `else` statements | anything | **banned** |
+
+Notes:
+
+- **Prerequisite: postfix `if` generalizes** from `break`/`continue`/`return`
+  to all simple statements (assignment, expression-statement, `rebind`). No
+  postfix `else` — a postfix guard is do-or-skip, never two-way (two-way is a
+  value selection or a match). Without this, conditional mutation has no home
+  and people write `x <- a if c else x` — a fake ternary with a no-op arm,
+  worse than the `if` it replaces.
+- **`if EXPR is NAME:` is exempt** because it is not a decision but a checked
+  destructure — a guard with a binding — and it is the canonical refinement
+  spelling (docs/80).
+- The ban is **syntactic**, so the detector is zero-FP by definition.
+- The ban creates the demand that `machine from` and `when` supply: a
+  5-statement conditional block can no longer hide — it must become a guard
+  ladder, an extracted function, a match/when arm, or a machine state. The
+  restriction and the ergonomic constructs must therefore land together.
+- Branch totality (§1c) is enforced in strict flow at machine/loop edges: no
+  ambient mutable local may cross a transition; whatever crosses is payload or
+  linearly threaded. The FlowFlagStateMachine lint (shipped, code 137) is the
+  first, weakest enforcement of this rule.
+
 ## 7. Increment plan
 
-1. **Probe (no new syntax).** Prototype the three `-Wflow` detectors as stage1
-   diagnostics on existing syntax; sweep the 214-file corpus; hand-rewrite the
-   three exemplar offenders to measure the ergonomic delta. Kill criteria: a
-   detector that cannot reach zero FP, or rewrites that read worse.
-2. **`when`** — smallest new surface; parser + disjointness/totality checker;
-   reuses the range prover. Migrate `literal_fits_in_type`-shaped tables.
-3. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
+1. **Probe (no new syntax).** ✅ DONE (first detector): FlowFlagStateMachine
+   (code 137) shipped as a stage1 diagnostic; 131-file sweep found 2 hits, both
+   true positives, zero FP; both offenders flattened to value-form state
+   (lexer parity bit-identical). Remaining probe detectors: shape-retest
+   ladders, shadow-prone elif tables.
+2. **Postfix-guard generalization** (stage0, small — extends a landed feature)
+   + the syntactic block-`if` detector + a census sweep of stage1 pricing the
+   strict-flow migration: how many block-ifs are guards-in-disguise or value
+   selections (fixable today) vs genuine state machines (need `machine from`).
+3. **`when`** — parser + disjointness/totality checker; reuses the range
+   prover. Migrate `literal_fits_in_type`-shaped tables.
+4. **Deep arm patterns + `with`** — extends docs/122 machinery; migrate the
    `check_*` extraction ladders.
-4. **`machine from`** — generalizes docs/123 (states from transitions instead
-   of sequence elements) + transition-graph checks (R2–R4) + cycle/`decreases`
-   integration with docs/118. Migrate the lexer/parser flag scanners.
-5. **`-Wflow` graduation** — off → warn → project default, with `can
-   ComplexFlow` from day one. R5 (declared transitions) after real usage.
+5. **`machine from`** — generalizes docs/123 (states from transitions instead
+   of sequence elements) + transition-graph checks (R2–R5) + cycle/`decreases`
+   integration with docs/118 + branch-totality enforcement at edges (§1c).
+   Migrate the lexer/parser flag scanners.
+6. **`-Wflow=strict` graduation** — off → warn → stage1 becomes the first
+   strict-flow project; the syntactic detectors keep it clean.
 
 ## 8. Open questions
 
