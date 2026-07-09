@@ -340,8 +340,15 @@ Scope landed: `with` binds at the arm-ALTERNATIVE (top) level. The §5 depth-14
 example nests the `with` inside a payload arg's or-group; that nested form is
 deferred (it needs the backend or-pattern matcher to bind the constant deep in
 the pattern), and the same table is expressible by lifting the or to the arm
-level. Deferred: stage1 port (stage1 keeps `|` as a single `Pattern.Or` node, so
-the port needs a decl accumulator threaded through the pattern parser); the R1
+level. ✅ **stage1 port LANDED** (commit 50fed61, `parser_stmt_with.elisa`): a
+lookahead gate (`arm_header_has_with`) takes a fan-out path ONLY when the arm
+header carries a top-level `with`, so every `with`-less arm stays byte-for-byte on
+the existing `parse_pattern`/`Pattern.Or` path. When present, the arm fans out into
+one `MatchArm` per `|` alternative, each with its constants prepended to a fresh
+body copy. Two stage1-specific wrinkles the port handles: the constant value is
+parsed at the postfix level (not `expression()`) so a following `|` isn't swallowed
+as bit-or, and the continuation-line `|` separator is found across the un-suppressed
+layout newline (`next_nonnewline_is_pipe`). Deferred: the R1
 diagnostic (or-alternatives that bind different names currently fail late as
 `undefined identifier` only when the body uses the missing binding — an early,
 clear error needs a zero-FP corpus sweep since strict identical-binding would
