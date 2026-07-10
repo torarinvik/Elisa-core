@@ -428,7 +428,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 			// above): its length is not in its type, so extend cannot bound the copy. Point
 			// at the two length-carrying fixes instead of the opaque shape error.
 			a.errorf(expr.Args[0].Pos(), "darray extend source is an unbounded `static u8&` byte pointer with no length; wrap it in a bounded view (`sview`/`view[u8]`) or build a length-carrying string such as an f-string `f\"...\"`")
-		} else {
+		} else if !IsInvalidType(sourceType) {
 			a.errorf(expr.Args[0].Pos(), "darray extend expects a compatible darray, array, or view source of %s, got %s", darrayType.Elem, sourceType)
 		}
 	}

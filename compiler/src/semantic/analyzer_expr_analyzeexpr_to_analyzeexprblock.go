@@ -386,7 +386,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		} else if optionalType, ok := valueType.(*OptionalType); ok {
 			resultType = optionalType.Value
 		} else {
-			a.errorf(n.Pos(), "else recovery requires an optional or nullable reference (refstate fact nullable), got %s", valueType)
+			if !IsInvalidType(valueType) {
+				a.errorf(n.Pos(), "else recovery requires an optional or nullable reference (refstate fact nullable), got %s", valueType)
+			}
 			result = invalidType
 			return
 		}
@@ -418,7 +420,9 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				// the match can never fail, so the bind is meaningless.
 				operation = "`is` binding"
 			}
-			a.errorf(n.Pos(), nullableRefRequirementMessage(operation, valueType.String()))
+			if !IsInvalidType(valueType) {
+				a.errorf(n.Pos(), nullableRefRequirementMessage(operation, valueType.String()))
+			}
 			result = invalidType
 			return
 		}
@@ -702,7 +706,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return boolType
 	case *ast.TernaryExpr:
 		condType := a.analyzeCondExpr(n.Cond)
-		if !IsBoolType(condType) {
+		if !IsBoolType(condType) && !IsInvalidType(condType) {
 			a.errorf(n.Pos(), "ternary condition must be bool, got %s", condType)
 		}
 		mergedAffine := a.cloneAffineValueStates()

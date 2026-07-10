@@ -88,7 +88,7 @@ func (a *Analyzer) analyzeStaticAssert(pos lexer.Pos, cond ast.Expr, message ast
 	a.staticContextDepth++
 	defer func() { a.staticContextDepth-- }()
 	condType := a.analyzeCondExpr(cond)
-	if !IsBoolType(condType) {
+	if !IsBoolType(condType) && !IsInvalidType(condType) {
 		a.errorf(pos, "static assert condition must be bool, got %s", condType)
 		return
 	}

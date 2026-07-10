@@ -287,7 +287,9 @@ func (a *Analyzer) analyzeGetExpr(n *ast.GetExpr) Type {
 			resultType = cloneRefTypeWithState(refType, RefStateNonNull)
 			break
 		}
-		a.errorf(n.Pos(), "get requires an optional, a nullable reference, or a container index, got %s", valueType)
+		if !IsInvalidType(valueType) {
+			a.errorf(n.Pos(), "get requires an optional, a nullable reference, or a container index, got %s", valueType)
+		}
 		return invalidType
 	}
 

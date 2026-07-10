@@ -76,7 +76,9 @@ func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 		a.analyzeStructMatchStmt(stmt, valueType)
 		return
 	}
-	a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, optional, integer, string, tuple, sequence, or struct value, got %s", valueType)
+	if !IsInvalidType(valueType) {
+		a.errorf(stmt.Pos(), "match requires an enum, const enum, error set, optional, integer, string, tuple, sequence, or struct value, got %s", valueType)
+	}
 	for _, arm := range stmt.Arms {
 		a.analyzeBlockWithRegionClone(arm.Body, NewScope(a.currentScope))
 	}
@@ -344,7 +346,9 @@ func (a *Analyzer) analyzeMatchExpr(expr *ast.MatchExpr) Type {
 	if _, ok := a.resolvedStructFields(valueType); ok {
 		return a.analyzeStructMatchExpr(expr, valueType)
 	}
-	a.errorf(expr.Pos(), "match requires an enum, const enum, error set, optional, integer, string, tuple, or struct value, got %s", valueType)
+	if !IsInvalidType(valueType) {
+		a.errorf(expr.Pos(), "match requires an enum, const enum, error set, optional, integer, string, tuple, or struct value, got %s", valueType)
+	}
 	for _, arm := range expr.Arms {
 		a.analyzeMatchExprArmBody(arm.Body, NewScope(a.currentScope))
 	}

@@ -144,7 +144,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		field.Type = a.substituteType(field.Type, bindings, nil, regionBindings, nil)
 		return field, true
 	default:
-		if emitDiagnostics {
+		if emitDiagnostics && !IsInvalidType(objType) {
 			a.errorf(pos, "field access requires struct type, got %s", objType)
 		}
 		return Field{}, false

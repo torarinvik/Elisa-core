@@ -749,7 +749,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)
-		if !IsBoolType(condType) {
+		if !IsBoolType(condType) && !IsInvalidType(condType) {
 			a.errorf(n.Pos(), "if condition must be bool, got %s", condType)
 		}
 		// The post-if affine state is the meet of the branch outcomes, NOT the
@@ -782,7 +782,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		for _, elif := range n.Elifs {
 			elifType := a.analyzeExpr(elif.Cond)
-			if !IsBoolType(elifType) {
+			if !IsBoolType(elifType) && !IsInvalidType(elifType) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType)
 			}
 			elifSnapshot := a.analyzeBlockWithConditionAffineClone(elif.Body, a.currentScope, elif.Cond, true)
@@ -876,7 +876,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		bodyPermissionRefStart := len(a.currentFunctionUsedPermissionRefs)
 		progressObligationIndex := a.recordProgressLoopObligation(n)
 		condType := a.analyzeCondExpr(n.Cond)
-		if !IsBoolType(condType) {
+		if !IsBoolType(condType) && !IsInvalidType(condType) {
 			a.errorf(n.Pos(), "while condition must be bool, got %s", condType)
 		}
 		mergedAffine := a.cloneAffineValueStates()
@@ -947,7 +947,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			if a.ghostReadSeen {
 				a.markGhostContract(n.Expr)
 			}
-			if !IsBoolType(condType) {
+			if !IsBoolType(condType) && !IsInvalidType(condType) {
 				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
 			}
 			// docs/98 — proof holes: under strict proofs a plain `assert` is held to the same
