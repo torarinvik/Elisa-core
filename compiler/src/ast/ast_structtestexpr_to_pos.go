@@ -418,6 +418,12 @@ type IfStmt struct {
 	Then     []Stmt
 	Elifs    []ElifClause
 	Else     []Stmt
+	// FromSource marks an IfStmt the programmer WROTE as a block `if:` statement — set
+	// only at the source-if lowering site (lowerIfClauses' plain-condition path). Every
+	// synthetic IfStmt (postfix-guard desugar, loop-header wrapper, machine lowering,
+	// comprehension filters, …) leaves it false, so the strict-flow block-`if` ban
+	// (docs/125 §6b) is zero-FP by construction: it can only fire on written syntax.
+	FromSource bool
 }
 type WhileStmt struct {
 	Position lexer.Pos

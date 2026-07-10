@@ -1,0 +1,226 @@
+//go:build cgo
+
+package semantic
+
+import (
+	"strings"
+	"testing"
+)
+
+// docs/125 §6/§6b — function-scoped flow detectors: the strict block-`if` ban, shape
+// re-test ladders, and shadow-prone elif tables.
+
+// ---- strict block-`if` ban (§6b) ---------------------------------------------------------
+
+const blockIfSrc = `def f(x: i64) -> i64:
+    if x > 0:
+        return 1
+    return 0
+`
+
+// A written block `if` is fine under warn, an error under strict.
+func TestStrictBlockIfBan(t *testing.T) {
+	warn := flowWarn(t, "blockif_warn.elisa", blockIfSrc)
+	if len(warn.Errors()) != 0 {
+		t.Fatalf("block if must not error under -Wflow (warn), got:\n%v", warn.Errors())
+	}
+	if strings.Contains(allDiagnostics(warn), "block `if`") {
+		t.Fatalf("block-if ban must be strict-only, got warning:\n%s", allDiagnostics(warn))
+	}
+
+	strict := flowStrict(t, "blockif_strict.elisa", blockIfSrc)
+	all := strings.Join(strict.Errors(), "\n")
+	if !strings.Contains(all, "block `if`") {
+		t.Fatalf("expected strict block-if error, got:\n%v", strict.Errors())
+	}
+}
+
+// A postfix guard desugars to an IfStmt but is NOT source syntax — never banned.
+func TestStrictBlockIfExemptsPostfixGuard(t *testing.T) {
+	src := `def f(x: i64) -> i64:
+    i: mutable i64 = 0
+    while i < 10 |i|:
+        break if x > 0
+        i <- i + 1
+    return i
+`
+	strict := flowStrict(t, "blockif_postfix.elisa", src)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("postfix guard must not trip the block-if ban, got:\n%v", strict.Errors())
+	}
+}
+
+// `if EXPR is PATTERN:` is a checked destructure — exempt (docs/80), including its else.
+func TestStrictBlockIfExemptsIsBinding(t *testing.T) {
+	src := `enum E:
+    A
+    B(i64)
+
+def f(e: E) -> i64:
+    if e is E.B(v):
+        return v
+    else:
+        return 0
+`
+	strict := flowStrict(t, "blockif_is.elisa", src)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("if-is destructure must be exempt from the block-if ban, got:\n%v", strict.Errors())
+	}
+}
+
+// `can ComplexFlow:` states the exception and silences the ban.
+func TestStrictBlockIfComplexFlowGrant(t *testing.T) {
+	src := `def f(x: i64) -> i64:
+    can ComplexFlow:
+        if x > 0:
+            return 1
+    return 0
+`
+	strict := flowStrict(t, "blockif_grant.elisa", src)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("can ComplexFlow must silence the block-if ban, got:\n%v", strict.Errors())
+	}
+}
+
+// ---- shape re-tests (§6) -----------------------------------------------------------------
+
+const shapeRetestPreamble = `enum Expr2:
+    IntLit(i64)
+    Unary(i64, Expr2)
+    Paren(Expr2)
+
+`
+
+// Three nested if-is probes, each re-probing a value the previous pattern bound.
+func TestShapeRetestLadderWarns(t *testing.T) {
+	src := shapeRetestPreamble + `def f(e: Expr2) -> i64:
+    if e is Expr2.Unary(op, operand):
+        if operand is Expr2.Paren(inner):
+            if inner is Expr2.IntLit(v):
+                return v
+    return 0
+`
+	warn := flowWarn(t, "retest_warn.elisa", src)
+	all := allDiagnostics(warn)
+	if !strings.Contains(all, "one deep pattern") {
+		t.Fatalf("expected shape-retest warning, got:\n%s", all)
+	}
+}
+
+// Two levels stay under the threshold; a hand-written match is never counted.
+func TestShapeRetestBelowThresholdSilent(t *testing.T) {
+	src := shapeRetestPreamble + `def f(e: Expr2) -> i64:
+    if e is Expr2.Unary(op, operand):
+        if operand is Expr2.IntLit(v):
+            return v
+    return 0
+
+def g(e: Expr2) -> i64:
+    return match e:
+        Expr2.Unary(op, operand):
+            match operand:
+                Expr2.IntLit(v):
+                    v
+                _:
+                    0
+        _:
+            0
+`
+	warn := flowWarn(t, "retest_silent.elisa", src)
+	if all := allDiagnostics(warn); strings.Contains(all, "one deep pattern") {
+		t.Fatalf("2-deep ladder / hand-written match must stay silent, got:\n%s", all)
+	}
+}
+
+// Probing a DIFFERENT value (not bound by the outer pattern) is not a re-test chain.
+func TestShapeRetestUnrelatedProbeSilent(t *testing.T) {
+	src := shapeRetestPreamble + `def f(e: Expr2, other: Expr2) -> i64:
+    if e is Expr2.Unary(op, operand):
+        if other is Expr2.Paren(inner):
+            if inner is Expr2.IntLit(v):
+                return v
+    return 0
+`
+	warn := flowWarn(t, "retest_unrelated.elisa", src)
+	if all := allDiagnostics(warn); strings.Contains(all, "one deep pattern") {
+		t.Fatalf("probe of an unrelated value must not chain, got:\n%s", all)
+	}
+}
+
+// ---- shadow-prone elif tables (§6) --------------------------------------------------------
+
+// A 4-arm string-equality ladder over one scrutinee is a decision table.
+func TestShadowElifTableWarns(t *testing.T) {
+	src := `def f(name: sview) -> i64:
+    if name == "a":
+        return 1
+    elif name == "b":
+        return 2
+    elif name == "c" or name == "d":
+        return 3
+    elif name == "e":
+        return 4
+    return 0
+`
+	warn := flowWarn(t, "table_warn.elisa", src)
+	all := allDiagnostics(warn)
+	if !strings.Contains(all, "decision table") || !strings.Contains(all, "name") {
+		t.Fatalf("expected shadow-elif-table warning naming the scrutinee, got:\n%s", all)
+	}
+	if len(warn.Errors()) != 0 {
+		t.Fatalf("table detector must warn (not error) under -Wflow, got:\n%v", warn.Errors())
+	}
+}
+
+// Mixed scrutinees, non-equality conditions, and short ladders stay silent.
+func TestShadowElifTableSilentCases(t *testing.T) {
+	src := `def mixed(a: i64, b: i64) -> i64:
+    if a == 1:
+        return 1
+    elif b == 2:
+        return 2
+    elif a == 3:
+        return 3
+    return 0
+
+def ranges(a: i64) -> i64:
+    if a == 1:
+        return 1
+    elif a > 2:
+        return 2
+    elif a == 3:
+        return 3
+    return 0
+
+def short_ladder(a: i64) -> i64:
+    if a == 1:
+        return 1
+    elif a == 2:
+        return 2
+    return 0
+`
+	warn := flowWarn(t, "table_silent.elisa", src)
+	if all := allDiagnostics(warn); strings.Contains(all, "decision table") {
+		t.Fatalf("mixed/non-equality/short ladders must stay silent, got:\n%s", all)
+	}
+}
+
+// Comparing against a member reference or another variable is NOT a table (v1 literal-only).
+func TestShadowElifTableNonLiteralSilent(t *testing.T) {
+	src := `struct Pair:
+    kind: i64
+
+def f(p: Pair&, q: Pair&) -> i64:
+    if p.kind == q.kind:
+        return 1
+    elif p.kind == 2:
+        return 2
+    elif p.kind == 3:
+        return 3
+    return 0
+`
+	warn := flowWarn(t, "table_nonliteral.elisa", src)
+	if all := allDiagnostics(warn); strings.Contains(all, "decision table") {
+		t.Fatalf("field-vs-field head must break the chain (3 literal arms remain: 2,3 = below threshold), got:\n%s", all)
+	}
+}

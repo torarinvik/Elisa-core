@@ -1,0 +1,350 @@
+package semantic
+
+import (
+	"elisacore/src/ast"
+	"elisacore/src/lexer"
+)
+
+// docs/125 §6/§6b — function-scoped flow detectors, run alongside the loop-scoped R1–R6
+// (docs/121) from checkFlowComplexity. Three rules, all keyed on PARSER-SET marks so they
+// are zero-FP by construction (they can only ever fire on syntax the programmer wrote,
+// never on a desugar):
+//
+//   - Strict block-`if` ban (§6b, strict mode ONLY): a written block `if:` statement is an
+//     error — every decision must be a value, an exit, an arm, or a transition. Keys on
+//     IfStmt.FromSource (set only in lowerIfClauses' plain-condition path); postfix-guard
+//     desugars, loop-header wrappers, machine lowerings etc. never carry the mark. A
+//     condition containing an `is`-test is exempt (the checked-destructure family, docs/80).
+//
+//   - Shape re-tests (§6, warn tier): a ladder of source `if … is PATTERN:` probes ≥3 deep,
+//     each level re-probing a value bound by the previous level's pattern — this is ONE deep
+//     pattern (docs/122). Keys on MatchStmt.FromSourceIf.
+//
+//   - Shadow-prone elif tables (§6, warn tier): a source if/elif chain ≥3 conditions long
+//     whose conditions are ALL equality tests of the same scrutinee against literals — this
+//     is a decision table; `when` declares the disjointness/totality the ladder only implies.
+//
+// The `can ComplexFlow:` grant silences all three for the statements it lexically covers.
+
+// checkFlowFunctionShapes is the per-function entry, called from checkFlowComplexity (so it
+// is a no-op when the flow lints are off).
+func (a *Analyzer) checkFlowFunctionShapes(fn *ast.FuncDecl) {
+	if a == nil || fn == nil || a.flowLintMode == FlowLintOff {
+		return
+	}
+	seenChain := map[*ast.IfStmt]bool{}
+	a.walkFlowFunctionStmts(fn.Body, false, seenChain)
+}
+
+func (a *Analyzer) walkFlowFunctionStmts(stmts []ast.Stmt, inGrant bool, seenChain map[*ast.IfStmt]bool) {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.IfStmt:
+			if n.FromSource && !inGrant && !seenChain[n] {
+				a.checkShadowElifTable(n, seenChain)
+				a.checkShapeRetestLadder(n, seenChain)
+				a.checkStrictBlockIf(n)
+			}
+			a.walkFlowFunctionStmts(n.Then, inGrant, seenChain)
+			for _, elif := range n.Elifs {
+				a.walkFlowFunctionStmts(elif.Body, inGrant, seenChain)
+			}
+			a.walkFlowFunctionStmts(n.Else, inGrant, seenChain)
+		case *ast.MatchStmt:
+			for _, arm := range n.Arms {
+				a.walkFlowFunctionStmts(arm.Body, inGrant, seenChain)
+			}
+		case *ast.WhileStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.ForStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.IterForStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.ScopeStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.InStoreStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.RegionStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.PoolStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.LockStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.DeferStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
+		case *ast.CanStmt:
+			a.walkFlowFunctionStmts(n.Body, inGrant || refsGrantComplexFlow(n.Permissions), seenChain)
+		}
+	}
+}
+
+// --- strict block-`if` ban (§6b) ---
+
+// checkStrictBlockIf errors on a written block `if:` under strict flow. Exempt when any
+// condition in the chain contains an `is`-test: `if EXPR is …` is a checked destructure
+// (a guard with a binding), not a decision — the canonical refinement spelling (docs/80).
+func (a *Analyzer) checkStrictBlockIf(n *ast.IfStmt) {
+	if a.flowLintMode != FlowLintStrict {
+		return
+	}
+	if condContainsIsTest(n.Cond) {
+		return
+	}
+	a.errorf(n.Position, "strict flow [-Wflow-strict]: block `if` statement — every decision must be "+
+		"a value, an exit, an arm, or a transition (docs/125 §6b). Use a postfix guard (`STMT if COND`), "+
+		"a value selection (`x = A if c else B`, `when`), a `match` arm, or a `machine` state; or state "+
+		"the exception with `can ComplexFlow:`")
+}
+
+// condContainsIsTest reports whether a condition tree contains an `is` refinement test —
+// `x is E.A`, `x is E.B(v)` — as a bare operand or under not/and/or/parens.
+func condContainsIsTest(cond ast.Expr) bool {
+	switch e := cond.(type) {
+	case *ast.BinaryExpr:
+		if e.Op == lexer.TOKEN_IS {
+			return true
+		}
+		if e.Op == lexer.TOKEN_AND || e.Op == lexer.TOKEN_OR {
+			return condContainsIsTest(e.Left) || condContainsIsTest(e.Right)
+		}
+	case *ast.UnaryExpr:
+		if e.Op == lexer.TOKEN_NOT {
+			return condContainsIsTest(e.Operand)
+		}
+	case *ast.ParenExpr:
+		return condContainsIsTest(e.Inner)
+	case *ast.VariantTestExpr:
+		return true
+	case *ast.StructTestExpr:
+		return true
+	}
+	return false
+}
+
+// --- shape re-tests (§6) ---
+
+// checkShapeRetestLadder warns when source `if … is PATTERN:` probes nest ≥3 deep, each
+// level re-probing a value the previous probe's pattern bound — one deep pattern (docs/122)
+// expresses the whole ladder in a single arm. A probe is an IfStmt whose ENTIRE condition
+// is one `is`-test (a mixed `a > 0 and x is P` condition is not cleanly mergeable, so it
+// never counts), and depth counts only DIRECT nesting (the next probe is a direct statement
+// of the previous probe's then-block) — both restrictions serve the zero-FP bar. Fires once,
+// at the ladder head; members are recorded so they are not re-reported as sub-ladders.
+func (a *Analyzer) checkShapeRetestLadder(n *ast.IfStmt, seenChain map[*ast.IfStmt]bool) {
+	const shapeRetestDepth = 3
+	if _, ok := isProbeCondition(n.Cond); !ok {
+		return
+	}
+	if depth := ifIsProbeDepth(n, seenChain); depth >= shapeRetestDepth {
+		a.flowLint(n.Position, "flow warning [-Wflow]: %d nested `if … is PATTERN:` probes, each "+
+			"re-probing a value bound by the previous pattern — this is one deep pattern; write it as a "+
+			"single `match` arm (docs/122 nested patterns: `Expr.Unary(TokenKind.Minus, Expr.IntLit(v), _)`). "+
+			"To keep the ladder, wrap it in `can ComplexFlow:`", depth)
+	}
+}
+
+// ifIsProbeDepth returns the longest probe chain rooted at n, marking every chained member
+// in seenChain. The next link must be a DIRECT statement of n's then-block, itself a source
+// if-is probe, and its probed value must be a name n's pattern bound.
+func ifIsProbeDepth(n *ast.IfStmt, seenChain map[*ast.IfStmt]bool) int {
+	binds, ok := isProbeCondition(n.Cond)
+	if !ok {
+		return 0
+	}
+	seenChain[n] = true
+	best := 0
+	for _, stmt := range n.Then {
+		inner, isIf := stmt.(*ast.IfStmt)
+		if !isIf || !inner.FromSource {
+			continue
+		}
+		probed, isProbe := probedValueName(inner.Cond)
+		if !isProbe || !binds[probed] {
+			continue
+		}
+		if d := ifIsProbeDepth(inner, seenChain); d > best {
+			best = d
+		}
+	}
+	return 1 + best
+}
+
+// isProbeCondition reports whether cond is exactly one `is`-test and returns the names its
+// pattern side binds: `x is name` binds `name`; `x is E.B(v, _)` binds the bare-identifier
+// payload args. Parens are transparent; anything else (and/or/not, comparisons) is not a
+// pure probe.
+func isProbeCondition(cond ast.Expr) (map[string]bool, bool) {
+	switch e := cond.(type) {
+	case *ast.ParenExpr:
+		return isProbeCondition(e.Inner)
+	case *ast.BinaryExpr:
+		if e.Op != lexer.TOKEN_IS {
+			return nil, false
+		}
+		binds := map[string]bool{}
+		collectIsRHSBindNames(e.Right, binds)
+		return binds, true
+	}
+	return nil, false
+}
+
+// probedValueName returns the probed value's name when cond is a pure `is`-test over a bare
+// identifier (`operand is …`).
+func probedValueName(cond ast.Expr) (string, bool) {
+	switch e := cond.(type) {
+	case *ast.ParenExpr:
+		return probedValueName(e.Inner)
+	case *ast.BinaryExpr:
+		if e.Op != lexer.TOKEN_IS {
+			return "", false
+		}
+		if name := identNameOf(e.Left); name != "" {
+			return name, true
+		}
+	}
+	return "", false
+}
+
+// collectIsRHSBindNames records the names an `is` right-hand side binds. A variant test
+// (`x is E.B(v, _)`) carries a real MatchVariantPattern — its bind-pattern args and as-alias
+// are the binds; a struct test likewise; a bare identifier binds the whole value
+// (`v is value`); a bare member reference (`x is E.A`) binds nothing.
+func collectIsRHSBindNames(rhs ast.Expr, out map[string]bool) {
+	switch e := rhs.(type) {
+	case *ast.Ident:
+		if e.Name != "" && e.Name != "_" {
+			out[e.Name] = true
+		}
+	case *ast.VariantTestExpr:
+		if e.Pattern != nil {
+			collectMatchPatternBindNames(e.Pattern, out)
+		}
+	case *ast.StructTestExpr:
+		if e.Pattern != nil {
+			collectMatchPatternBindNames(e.Pattern, out)
+		}
+	case *ast.ParenExpr:
+		collectIsRHSBindNames(e.Inner, out)
+	}
+}
+
+// collectMatchPatternBindNames records the names a match pattern binds — bind args of a
+// variant/struct pattern (recursively) and as-aliases.
+func collectMatchPatternBindNames(pattern ast.MatchPattern, out map[string]bool) {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		if p.Name != "" && p.Name != "_" {
+			out[p.Name] = true
+		}
+	case *ast.MatchVariantPattern:
+		if p.As != "" {
+			out[p.As] = true
+		}
+		for _, arg := range p.Args {
+			collectMatchPatternBindNames(arg.Pattern, out)
+		}
+	case *ast.MatchStructPattern:
+		for _, arg := range p.Args {
+			collectMatchPatternBindNames(arg.Pattern, out)
+		}
+	}
+}
+
+// --- shadow-prone elif tables (§6) ---
+
+// checkShadowElifTable warns when a source if/elif chain of ≥3 conditions tests ONE scrutinee
+// for equality against literals in every condition — a decision table wearing a ladder. The
+// ladder silently allows shadowing (an earlier arm swallowing a later one); `when` declares
+// the disjointness and totality outright. Fires once, at the chain head; the chain's member
+// IfStmts are recorded so they are not re-reported as heads of their own sub-chains.
+func (a *Analyzer) checkShadowElifTable(head *ast.IfStmt, seenChain map[*ast.IfStmt]bool) {
+	const shadowTableLen = 3
+	scrutinee := ""
+	length := 0
+	node := head
+	for node != nil {
+		path := equalityScrutineePath(node.Cond)
+		if path == "" {
+			break
+		}
+		if scrutinee == "" {
+			scrutinee = path
+		} else if path != scrutinee {
+			break
+		}
+		length++
+		seenChain[node] = true
+		// The parser flattens `elif` into a single nested IfStmt in Else.
+		if len(node.Else) == 1 {
+			if next, ok := node.Else[0].(*ast.IfStmt); ok && next.FromSource {
+				node = next
+				continue
+			}
+		}
+		node = nil
+	}
+	if length >= shadowTableLen {
+		a.flowLint(head.Position, "flow warning [-Wflow]: %d-arm elif ladder testing `%s` for equality "+
+			"against literals — this is a decision table; `when %s:` declares the disjointness and totality "+
+			"the ladder only implies (docs/125 §4). To keep the ladder, wrap it in `can ComplexFlow:`",
+			length, scrutinee, scrutinee)
+	}
+}
+
+// equalityScrutineePath returns the rendered path of the single scrutinee a condition tests
+// for equality against literals ("" when the condition is any other shape). Accepts
+// `SCRUT == LIT` and or-chains `SCRUT == L1 or SCRUT == L2` over the same scrutinee — the
+// exact shapes a `when` row expresses (`L1 | L2`).
+func equalityScrutineePath(cond ast.Expr) string {
+	switch e := cond.(type) {
+	case *ast.ParenExpr:
+		return equalityScrutineePath(e.Inner)
+	case *ast.BinaryExpr:
+		switch e.Op {
+		case lexer.TOKEN_EQEQ:
+			if isFlowTableLiteral(e.Right) {
+				return flowScrutineePath(e.Left)
+			}
+			if isFlowTableLiteral(e.Left) {
+				return flowScrutineePath(e.Right)
+			}
+		case lexer.TOKEN_OR:
+			left := equalityScrutineePath(e.Left)
+			if left != "" && left == equalityScrutineePath(e.Right) {
+				return left
+			}
+		}
+	}
+	return ""
+}
+
+// isFlowTableLiteral reports whether an expression is a literal a `when` row could carry:
+// int/char/string literals ONLY. Bool literals are excluded (`flag == true` ladders are
+// R2's flow-flag jurisdiction). Member references (`TokenKind.Plus`) are deliberately
+// excluded in v1: syntactically they are indistinguishable from a variable field or module
+// constant (`other.kind`, `Limits.max`) — the former makes the rewrite advice wrong, the
+// latter isn't even a legal `when` pattern (R3 rejects pinned values) — and a wrong
+// suggestion is a false positive. Enum-tag tables need the semantic member check first.
+func isFlowTableLiteral(e ast.Expr) bool {
+	switch e.(type) {
+	case *ast.IntLit, *ast.CharLit, *ast.StringLit:
+		return true
+	}
+	return false
+}
+
+// flowScrutineePath renders an Ident / FieldExpr chain (`lexer.kind`, `token.text`) as a
+// stable path string for same-scrutinee comparison; "" for any other expression shape.
+func flowScrutineePath(e ast.Expr) string {
+	switch v := e.(type) {
+	case *ast.Ident:
+		return v.Name
+	case *ast.FieldExpr:
+		if base := flowScrutineePath(v.Object); base != "" {
+			return base + "." + v.Field
+		}
+	case *ast.ParenExpr:
+		return flowScrutineePath(v.Inner)
+	}
+	return ""
+}

@@ -64,6 +64,7 @@ func (a *Analyzer) checkFlowComplexity(fn *ast.FuncDecl) {
 		return
 	}
 	a.walkFlowLoops(fn.Body, false)
+	a.checkFlowFunctionShapes(fn) // docs/125 §6/§6b function-scoped detectors
 }
 
 // walkFlowLoops descends the statement tree. At each loop it builds a loopFlowInfo and runs

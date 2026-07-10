@@ -182,7 +182,9 @@ func lowerIfClauses(clauses []ifClause, elseBlock []ast.Stmt) ast.Stmt {
 			tail = []ast.Stmt{buildOptionalIfLetChain(clause.Position, clause.OptionalBindings, clause.Cond, clause.Body, tail, 0)}
 			continue
 		}
-		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Hint: clause.Hint, Cond: clause.Cond, Then: clause.Body, Else: tail}}
+		// FromSource: this is the ONE site where a written block `if:`/`elif:` becomes an
+		// IfStmt — the strict-flow ban (docs/125 §6b) keys on it (synthetic ifs stay false).
+		tail = []ast.Stmt{&ast.IfStmt{Position: clause.Position, Hint: clause.Hint, Cond: clause.Cond, Then: clause.Body, Else: tail, FromSource: true}}
 	}
 	if len(tail) == 0 {
 		return &ast.PassStmt{}
