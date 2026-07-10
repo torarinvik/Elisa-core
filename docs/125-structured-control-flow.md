@@ -216,9 +216,30 @@ R3 (a `next`-graph cycle demands a `decreases`; the measure's presence is checke
 here, discharge deferred to the docs/118 prover). Threaded mutation is licensed by
 the loop's inferred captures. ✅ **stage1 port LANDED** (parser-only desugar to a
 value `Expr.Block`: frontend, so no codegen and the graph refusals aren't
-re-emitted — stage0 owns them). Deferred: **state payloads** (`Num.Exponent(digits)`
-— v1 is payload-less states), R5 declared out-edge sets, and the lexer/parser
-scanner migrations (now unblocked — stage1 parses `machine from`).
+re-emitted — stage0 owns them).
+
+✅ **STATE PAYLOADS LANDED both stages** (§8 resolved: named enum variant fields
+now, anonymous inline enums later). A state may carry data legal only in that state:
+`next Num.Exponent(was_fraction)` constructs the successor variant, the arm header
+`Num.Exponent(was_fraction):` binds it — the flattened replacement for a nested `if`
+kept in scope purely to remember "we already checked X". Reuses existing machinery
+entirely: stage0 lowers `next State(args)` to an ordinary enum construction and binds
+the arm via a variant-pattern destructure on `mode` (so refinement facts seed per-arm
+and the graph checks, which key on the target name, are unchanged); stage1 dispatches
+via `if mode is Enum.State(binds):` — the refinement `is`-pattern selects the arm and
+binds the payload while keeping the exhaustiveness-free if-chain. The entry state may
+carry a payload too (`machine from Once.Only(seed)`).
+
+✅ **R5 declared out-edges LANDED** (`State -> {A, B}:`, stage0-enforced): an arm may
+declare its successor set and then only `next` a listed target; every declared target
+must be a real variant. The transition relation becomes a declared table, so a
+control-flow change that adds an edge must change the declaration too — inferred by
+default, annotated where the contract should be visible (mirrors regions). Compile-only,
+zero runtime cost; R3/R4 still query the actual `next` graph. stage1 consumes the clause
+structurally.
+
+Deferred: the lexer/parser scanner migrations (now unblocked — stage1 parses
+`machine from` incl. payloads); anonymous inline state enums (§8, a future sugar).
 
 ## 4. `when` — order-independence as a declaration
 
@@ -509,9 +530,11 @@ Notes:
    Migrate the lexer/parser flag scanners.
    ✅ MVP LANDED stage0: `MachineFromExpr` node, analyzer-owned lowering to a
    loop/mode/match desugar (inferred result type, zero new codegen), refusals
-   R2/R3/R4. ✅ stage1 port LANDED (c339d93); scanner migrations concluded N/A
-   (the flag scanners were already flat value-form). Deferred: state payloads,
-   R5 out-edge declarations.
+   R2/R3/R4. ✅ stage1 port LANDED (c339d93). ✅ STATE PAYLOADS LANDED both stages
+   (stage0 d4e78c74; stage1 eb65c39): `next State(args)` constructs, arm header
+   `State(binds):` binds, entry payload supported. ✅ R5 declared out-edges LANDED
+   (stage0 22c8eb32, `State -> {A, B}:`). Deferred: anonymous inline state enums
+   (§8 future sugar); the flag-scanner migrations (were already flat value-form).
 6. **`-Wflow=strict` graduation** — off → warn → stage1 becomes the first
    strict-flow project; the syntactic detectors keep it clean.
 
