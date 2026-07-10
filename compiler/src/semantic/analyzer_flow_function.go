@@ -263,7 +263,7 @@ func (a *Analyzer) checkShadowElifTable(head *ast.IfStmt, seenChain map[*ast.IfS
 	length := 0
 	node := head
 	for node != nil {
-		path := equalityScrutineePath(node.Cond)
+		path := a.equalityScrutineePath(node.Cond)
 		if path == "" {
 			break
 		}
@@ -295,22 +295,24 @@ func (a *Analyzer) checkShadowElifTable(head *ast.IfStmt, seenChain map[*ast.IfS
 // for equality against literals ("" when the condition is any other shape). Accepts
 // `SCRUT == LIT` and or-chains `SCRUT == L1 or SCRUT == L2` over the same scrutinee — the
 // exact shapes a `when` row expresses (`L1 | L2`).
-func equalityScrutineePath(cond ast.Expr) string {
+func (a *Analyzer) equalityScrutineePath(cond ast.Expr) string {
 	switch e := cond.(type) {
 	case *ast.ParenExpr:
-		return equalityScrutineePath(e.Inner)
+		return a.equalityScrutineePath(e.Inner)
 	case *ast.BinaryExpr:
 		switch e.Op {
 		case lexer.TOKEN_EQEQ:
-			if isFlowTableLiteral(e.Right) {
+			// A literal on BOTH sides is a constant-vs-constant comparison, not a
+			// scrutinee test — no table here.
+			if a.isFlowTableLiteral(e.Right) && !a.isFlowTableLiteral(e.Left) {
 				return flowScrutineePath(e.Left)
 			}
-			if isFlowTableLiteral(e.Left) {
+			if a.isFlowTableLiteral(e.Left) && !a.isFlowTableLiteral(e.Right) {
 				return flowScrutineePath(e.Right)
 			}
 		case lexer.TOKEN_OR:
-			left := equalityScrutineePath(e.Left)
-			if left != "" && left == equalityScrutineePath(e.Right) {
+			left := a.equalityScrutineePath(e.Left)
+			if left != "" && left == a.equalityScrutineePath(e.Right) {
 				return left
 			}
 		}
@@ -318,17 +320,28 @@ func equalityScrutineePath(cond ast.Expr) string {
 	return ""
 }
 
-// isFlowTableLiteral reports whether an expression is a literal a `when` row could carry:
-// int/char/string literals ONLY. Bool literals are excluded (`flag == true` ladders are
-// R2's flow-flag jurisdiction). Member references (`TokenKind.Plus`) are deliberately
-// excluded in v1: syntactically they are indistinguishable from a variable field or module
-// constant (`other.kind`, `Limits.max`) — the former makes the rewrite advice wrong, the
-// latter isn't even a legal `when` pattern (R3 rejects pinned values) — and a wrong
-// suggestion is a false positive. Enum-tag tables need the semantic member check first.
-func isFlowTableLiteral(e ast.Expr) bool {
+// isFlowTableLiteral reports whether an expression is a value a `when` row could carry:
+// int/char/string literals, or a payload-less enum-tag reference (`TokenKind.Plus`).
+// Bool literals are excluded (`flag == true` ladders are R2's flow-flag jurisdiction).
+//
+// The enum-tag case is SEMANTIC, not syntactic: `Obj.Field` only counts when Obj resolves
+// through the TYPE namespace to an enum whose Field is a payload-free variant, AND the
+// analyzer actually typed the expression as that enum (a member reference) — so a variable
+// field (`other.kind`) or module constant (`Limits.max`) never matches, and neither does a
+// payload-carrying variant (not a legal `when` row; R3 forbids destructuring). This keeps
+// the rewrite advice exactly as strong as what `when` accepts (whenAtomTag).
+func (a *Analyzer) isFlowTableLiteral(e ast.Expr) bool {
 	switch e.(type) {
 	case *ast.IntLit, *ast.CharLit, *ast.StringLit:
 		return true
+	}
+	if fieldExpr, ok := isEnumVariantExpr(e); ok && a != nil {
+		enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+		if ok && enumType != nil && variant != nil && len(variant.Payload) == 0 {
+			if recorded, typed := a.exprTypes[ast.Expr(fieldExpr)]; typed && SameType(recorded, Type(enumType)) {
+				return true
+			}
+		}
 	}
 	return false
 }

@@ -224,3 +224,54 @@ def f(p: Pair&, q: Pair&) -> i64:
 		t.Fatalf("field-vs-field head must break the chain (3 literal arms remain: 2,3 = below threshold), got:\n%s", all)
 	}
 }
+
+// A ladder testing one scrutinee against payload-less enum tags IS a table — `when` rows
+// accept bare tags (whenAtomTag), so the rewrite advice holds.
+func TestShadowElifTableEnumTags(t *testing.T) {
+	src := `enum Kind:
+    A
+    B
+    C
+    D
+
+def f(k: Kind) -> i64:
+    if k == Kind.A:
+        return 1
+    elif k == Kind.B:
+        return 2
+    elif k == Kind.C or k == Kind.D:
+        return 3
+    return 0
+`
+	warn := flowWarn(t, "table_enumtag.elisa", src)
+	all := allDiagnostics(warn)
+	if !strings.Contains(all, "decision table") || !strings.Contains(all, "`k`") {
+		t.Fatalf("expected shadow-elif-table warning for enum-tag ladder, got:\n%s", all)
+	}
+}
+
+// The RHS must be a MEMBER REFERENCE: a variable field that merely has enum type
+// (`other.kind`) is a computed value — `when` cannot express it (R3), so no warning.
+func TestShadowElifTableEnumFieldSilent(t *testing.T) {
+	src := `enum Kind:
+    A
+    B
+    C
+
+struct Tok:
+    kind: Kind
+
+def f(k: Kind, a: Tok&, b: Tok&, c: Tok&) -> i64:
+    if k == a.kind:
+        return 1
+    elif k == b.kind:
+        return 2
+    elif k == c.kind:
+        return 3
+    return 0
+`
+	warn := flowWarn(t, "table_enumfield.elisa", src)
+	if all := allDiagnostics(warn); strings.Contains(all, "decision table") {
+		t.Fatalf("enum-typed variable fields are computed values, must stay silent, got:\n%s", all)
+	}
+}
