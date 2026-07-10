@@ -238,8 +238,8 @@ default, annotated where the contract should be visible (mirrors regions). Compi
 zero runtime cost; R3/R4 still query the actual `next` graph. stage1 consumes the clause
 structurally.
 
-Deferred: the lexer/parser scanner migrations (now unblocked — stage1 parses
-`machine from` incl. payloads); anonymous inline state enums (§8, a future sugar).
+Anonymous inline state enums: declined (§8 — payloads settled the trade in
+favor of named enums). The construct is complete.
 
 ## 4. `when` — order-independence as a declaration
 
@@ -533,16 +533,49 @@ Notes:
    R2/R3/R4. ✅ stage1 port LANDED (c339d93). ✅ STATE PAYLOADS LANDED both stages
    (stage0 d4e78c74; stage1 eb65c39): `next State(args)` constructs, arm header
    `State(binds):` binds, entry payload supported. ✅ R5 declared out-edges LANDED
-   (stage0 22c8eb32, `State -> {A, B}:`). Deferred: anonymous inline state enums
-   (§8 future sugar); the flag-scanner migrations (were already flat value-form).
+   (stage0 22c8eb32, `State -> {A, B}:`). Anonymous inline state enums DECLINED
+   (§8); flag-scanner migrations N/A (already flat value-form). Increment complete.
 6. **`-Wflow=strict` graduation** — off → warn → stage1 becomes the first
    strict-flow project; the syntactic detectors keep it clean.
 
 ## 8. Open questions
 
-- Anonymous state enums for `machine from` (declare states inline at first
-  `next`?) vs requiring a named `const enum` — inline is lighter; named gives
-  payload types a place to live.
+- ~~Anonymous state enums for `machine from`~~ — **RESOLVED: declined.** The
+  trade was "inline is lighter; named gives payload types a place to live", and
+  landing state payloads settled it: an anonymous state with a payload must
+  write the field type *somewhere* — either inferred at first `next` (use-site
+  inference, worse diagnostics, order sensitivity) or via an inline field
+  syntax that reinvents the enum declaration with fewer letters. The named form
+  costs ~4 lines and buys a declaration site for payload types (and future
+  per-state invariants — the docs/96 typestate hook wants named states), reuse
+  across machines, and diagnostics that name something the programmer wrote
+  rather than a synthesized `__MachineState_3`. Dogfood evidence agrees: the
+  scanner audit found zero internal `machine from` targets, so a second
+  parallel state-declaration path would be speculative surface with no
+  demonstrated demand. Purely additive — revisit only if a real corpus site
+  shows the named enum being genuine friction.
+
+- **Active patterns (F#-style) — considered, mechanism declined, need
+  acknowledged.** The need (abstracting over match *shapes* so patterns
+  compose) is real, but arbitrary user functions executing in pattern position
+  collide with both prime directives. (1) Zero-FP refusals: `when` R1/R2,
+  match exhaustiveness, and guarded-arms-never-cover all depend on the
+  compiler *knowing* disjointness and totality; two active patterns are opaque
+  predicates it cannot relate — F# concedes exactly this by giving up
+  exhaustiveness for partial active patterns, a concession that would poison
+  the analyses everything else here stands on. (2) Zero overhead: hidden user
+  code running during matching breaks "the blessed form lowers to what you'd
+  hand-write" — the match stops being a discrimination tree and becomes an
+  invisible call sequence. The sound core already exists in Elisa today: a
+  *total* active pattern is a classifier fn returning an enum (`match
+  classify(x):` — exhaustiveness comes back for free, from the enum); a
+  *partial* one is an option-returning fn (`if parse_int(s) is v:` — the
+  refinement-`is` binding). If pattern abstraction ever earns dedicated
+  syntax, the Elisa-shaped candidate is `match x via classify:` — sugar that
+  REQUIRES the classifier to be a total, enum-returning (spec-tier pure)
+  function, so totality/disjointness come from the enum, not from trusting a
+  predicate. Wait for a dogfood case where the `match classify(x)` spelling is
+  demonstrably clunky before adding even that.
 - `when` over non-tuple scrutinees with refinement types: does totality consult
   the refined range (e.g. scrutinee `Small` means arms need only cover 0..9)?
   (Yes in spirit — reuses the vacuity machinery.)
