@@ -108,3 +108,35 @@ def entry_state_payload() -> void:
 	exit, stdout, stderr := runStressProgram(t, "machine_from_payload", body)
 	assertAllPassed(t, exit, stdout, stderr, "payload_threads_through_states", "entry_state_payload")
 }
+
+// docs/125 §5 R5 — declared out-edges (`State -> {A, B}:`) are a compile-time contract with
+// zero runtime cost: a machine whose transitions honor its declarations lowers and runs
+// exactly as the undeclared form would. Combined here with an entry-state payload.
+func TestMachineFromDeclaredOutRuntime(t *testing.T) {
+	body := `
+enum Route:
+    In(i64)
+    Left
+    Right
+
+def route(x: i64) -> i64:
+    return machine from Route.In(x):
+        Route.In(v) -> {Left, Right}:
+            next Route.Left if v > 0
+            next Route.Right
+        Route.Left:
+            done 1
+        Route.Right:
+            done 2
+
+@test
+def declared_out_runs() -> void:
+    can Abort.Panic:
+        if route(5) != 1:
+            panic("positive routes Left")
+        if route(-1) != 2:
+            panic("nonpositive routes Right")
+`
+	exit, stdout, stderr := runStressProgram(t, "machine_from_declared_out", body)
+	assertAllPassed(t, exit, stdout, stderr, "declared_out_runs")
+}

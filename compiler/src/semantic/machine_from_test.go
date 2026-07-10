@@ -96,6 +96,57 @@ def f(x: i64) -> i64:
 	}
 }
 
+// R5 — an arm that declares its out-edges (`-> {…}`) may only take a listed transition.
+func TestMachineFromDeclaredOutViolationErrors(t *testing.T) {
+	all := machineFromDiag(t, "r5_violation.elisa", `
+def f(x: i64) -> i64:
+    return machine from S.A:
+        S.A -> {B}:
+            next S.B if x > 0
+            next S.C
+        S.B:
+            done 1
+        S.C:
+            done 2
+`)
+	if !strings.Contains(all, "declared out-edges") || !strings.Contains(all, "next C") {
+		t.Fatalf("expected R5 undeclared-transition error, got:\n%s", all)
+	}
+}
+
+// R5 — a declared out-edge that is not a variant of the state enum is a compile error.
+func TestMachineFromDeclaredOutNonVariantErrors(t *testing.T) {
+	all := machineFromDiag(t, "r5_nonvariant.elisa", `
+def f(x: i64) -> i64:
+    return machine from S.A:
+        S.A -> {Zzz}:
+            next S.B
+        S.B:
+            done 1
+`)
+	if !strings.Contains(all, "out-edge") || !strings.Contains(all, "not a variant") {
+		t.Fatalf("expected R5 non-variant out-edge error, got:\n%s", all)
+	}
+}
+
+// R5 — an arm whose actual transitions exactly match its declared set is accepted.
+func TestMachineFromDeclaredOutHonoredOk(t *testing.T) {
+	all := machineFromDiag(t, "r5_ok.elisa", `
+def f(x: i64) -> i64:
+    return machine from S.A:
+        S.A -> {B, C}:
+            next S.B if x > 0
+            next S.C
+        S.B:
+            done 1
+        S.C:
+            done 2
+`)
+	if strings.Contains(all, "declared out-edges") || strings.Contains(all, "out-edge") {
+		t.Fatalf("declared out-edges honored must be accepted, got:\n%s", all)
+	}
+}
+
 // An arm state that is not a variant of the start enum is a compile error.
 func TestMachineFromUnknownStateErrors(t *testing.T) {
 	all := machineFromDiag(t, "unknown.elisa", `

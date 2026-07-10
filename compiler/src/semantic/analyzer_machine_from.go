@@ -137,6 +137,29 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 				ok = false
 			}
 		}
+
+		// R5 — declared out-edges (`State -> {A, B}:`). When an arm declares its
+		// successor set, every `next` it takes must be listed, and every listed target
+		// must be a real variant. The declared table becomes the contract graph checks
+		// query; a control-flow change that adds a transition now has to change the
+		// declaration too, so the intended graph and the code cannot silently diverge.
+		if arm.HasDeclaredOut {
+			declared := map[string]bool{}
+			for _, target := range arm.DeclaredOut {
+				if !valid[target] {
+					a.errorf(arm.Position, "machine arm %q declares out-edge %q which is not a variant of %s", arm.State, target, expr.StartEnum)
+					ok = false
+					continue
+				}
+				declared[target] = true
+			}
+			for _, term := range arm.Terminators {
+				if !term.IsDone && valid[term.Target] && !declared[term.Target] {
+					a.errorf(term.Position, "machine arm %q transitions `next %s`, but its declared out-edges are {%s} — add %s to the arm's `-> {…}` set or remove the transition (docs/125 §5 R5)", arm.State, term.Target, machineDeclaredOutList(arm.DeclaredOut), term.Target)
+					ok = false
+				}
+			}
+		}
 	}
 	if !ok {
 		return false
@@ -178,6 +201,19 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 		ok = false
 	}
 	return ok
+}
+
+// machineDeclaredOutList renders an arm's declared out-edge set for a diagnostic (`A, B`),
+// or `∅` when the arm declared an empty set (a terminal arm that promises no transitions).
+func machineDeclaredOutList(targets []string) string {
+	if len(targets) == 0 {
+		return "∅"
+	}
+	out := targets[0]
+	for _, t := range targets[1:] {
+		out += ", " + t
+	}
+	return out
 }
 
 // machineFromCycle returns a state name on some transition cycle, or "" if the `next` graph
