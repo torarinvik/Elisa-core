@@ -130,8 +130,11 @@ type MachineFromExpr struct {
 	Position   lexer.Pos
 	StartEnum  string
 	StartState string
-	Decreases  Expr // machine-level termination measure (docs/118); nil when absent
-	Arms       []MachineFromArm
+	// StartArgs constructs the entry state's payload (docs/125 §5 state payloads):
+	// `machine from Num.Exponent(false)`. Empty when the start variant is payload-free.
+	StartArgs []Expr
+	Decreases Expr // machine-level termination measure (docs/118); nil when absent
+	Arms      []MachineFromArm
 	// Lowered is the analyzer-built ExprBlock desugar; the backend emits it in place of
 	// this node (the mode enum decl is hoisted to pendingDecls at parse time).
 	Lowered Expr
@@ -140,10 +143,19 @@ type MachineFromExpr struct {
 // MachineFromArm is one state's handler: body statements run unconditionally, then a
 // trailing run of `next`/`done` terminators resolves the arm (the last one unguarded).
 type MachineFromArm struct {
-	Position    lexer.Pos
-	State       string
-	Body        []Stmt
-	Terminators []MachineFromTerminator
+	Position lexer.Pos
+	State    string
+	// Bindings names the state's payload fields, bound for the arm body (docs/125 §5:
+	// `Num.Exponent(was_fraction):`). Empty when the state carries no payload. Lowered
+	// to a variant-pattern destructure on the `mode` local.
+	Bindings []string
+	// DeclaredOut is the R5 out-edge contract (`State -> {A, B}:`): the arm may only
+	// `next` a listed successor. HasDeclaredOut distinguishes an empty declared set
+	// (a terminal arm that promises no transitions) from an absent one (inferred).
+	DeclaredOut    []string
+	HasDeclaredOut bool
+	Body           []Stmt
+	Terminators    []MachineFromTerminator
 }
 
 // MachineFromTerminator is one `next State [if COND]` transition or `done VALUE [if COND]`
@@ -152,6 +164,7 @@ type MachineFromTerminator struct {
 	Position lexer.Pos
 	IsDone   bool
 	Target   string // next: the successor state variant
+	Args     []Expr // next: payload construction args for the target state; empty when none
 	Value    Expr   // done: the yielded value
 	Guard    Expr   // optional `if COND`; nil when unguarded
 }

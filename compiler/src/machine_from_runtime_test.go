@@ -58,3 +58,53 @@ def cyclic_machine_with_decreases() -> void:
 	exit, stdout, stderr := runStressProgram(t, "machine_from", body)
 	assertAllPassed(t, exit, stdout, stderr, "acyclic_machine", "cyclic_machine_with_decreases")
 }
+
+// docs/125 §5 state payloads — a state that carries data legal only in that state: `next`
+// constructs the successor's payload, the arm header binds it. States are variants of a
+// regular (non-const) enum so variants can carry fields. Covers a `next`-constructed
+// payload threaded through an arm binding, and a payload on the entry state itself.
+func TestMachineFromPayloadRuntime(t *testing.T) {
+	body := `
+enum Phase:
+    Start
+    Mid(bool)
+    End(i64)
+
+def run(x: i64) -> i64:
+    return machine from Phase.Start:
+        Phase.Start:
+            next Phase.Mid(true) if x > 0
+            next Phase.Mid(false)
+        Phase.Mid(flag):
+            next Phase.End(10) if flag
+            next Phase.End(20)
+        Phase.End(val):
+            done val
+
+enum Once:
+    Only(i64)
+
+def echo(seed: i64) -> i64:
+    return machine from Once.Only(seed):
+        Once.Only(val):
+            done val
+
+@test
+def payload_threads_through_states() -> void:
+    can Abort.Panic:
+        if run(5) != 10:
+            panic("positive routes Mid(true) -> End(10)")
+        if run(-1) != 20:
+            panic("nonpositive routes Mid(false) -> End(20)")
+
+@test
+def entry_state_payload() -> void:
+    can Abort.Panic:
+        if echo(42) != 42:
+            panic("start payload binds and yields")
+        if echo(-7) != -7:
+            panic("start payload negative")
+`
+	exit, stdout, stderr := runStressProgram(t, "machine_from_payload", body)
+	assertAllPassed(t, exit, stdout, stderr, "payload_threads_through_states", "entry_state_payload")
+}

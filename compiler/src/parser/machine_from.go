@@ -40,6 +40,9 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	p.expectIdentText("from")
 
 	startEnum, startState := p.parseMachineFromStateRef()
+	// Entry-state payload: `machine from Num.Exponent(seed)` constructs the start
+	// variant with args (docs/125 §5). Payload-free start states omit the parens.
+	startArgs := p.parseMachineFromCallArgs()
 	var decreases ast.Expr
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "decreases" {
 		p.advance()
@@ -59,7 +62,66 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.MachineFromExpr{Position: pos, StartEnum: startEnum, StartState: startState, Decreases: decreases, Arms: arms}
+	return &ast.MachineFromExpr{Position: pos, StartEnum: startEnum, StartState: startState, StartArgs: startArgs, Decreases: decreases, Arms: arms}
+}
+
+// parseMachineFromCallArgs parses an optional `(EXPR, EXPR, …)` payload-construction
+// argument list following a state reference (start state or a `next` target). Returns nil
+// when no `(` follows, so a payload-free state stays a bare reference.
+func (p *Parser) parseMachineFromCallArgs() []ast.Expr {
+	if p.peek() != lexer.TOKEN_LPAREN {
+		return nil
+	}
+	p.advance() // (
+	var args []ast.Expr
+	for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+		args = append(args, p.parseExpr())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return args
+}
+
+// parseMachineFromArmBindings parses an optional `(name, name, …)` payload BINDING list in
+// an arm header (`Num.Exponent(was_fraction):`). Unlike call args these are identifiers the
+// arm body binds, so they lower to a variant-pattern destructure, not a construction.
+func (p *Parser) parseMachineFromArmBindings() []string {
+	if p.peek() != lexer.TOKEN_LPAREN {
+		return nil
+	}
+	p.advance() // (
+	names := []string{}
+	for p.peek() != lexer.TOKEN_RPAREN && p.peek() != lexer.TOKEN_EOF {
+		names = append(names, p.expect(lexer.TOKEN_IDENT).Text)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RPAREN)
+	return names
+}
+
+// parseMachineFromDeclaredOut parses the optional R5 out-edge contract `-> {A, B}` after an
+// arm header's state (and payload bindings). Returns (targets, true) when present so an
+// empty `-> {}` (a terminal arm) is distinguishable from an omitted clause.
+func (p *Parser) parseMachineFromDeclaredOut() ([]string, bool) {
+	if !(p.peek() == lexer.TOKEN_ARROW) {
+		return nil, false
+	}
+	p.advance() // ->
+	p.expect(lexer.TOKEN_LBRACE)
+	targets := []string{}
+	for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
+		_, target := p.parseMachineFromStateRef()
+		targets = append(targets, target)
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	return targets, true
 }
 
 // parseMachineFromStateRef parses `Enum.State` (or a bare `State`, whose enum defaults to
@@ -75,6 +137,8 @@ func (p *Parser) parseMachineFromStateRef() (string, string) {
 func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 	pos := p.cur().Pos
 	_, state := p.parseMachineFromStateRef()
+	bindings := p.parseMachineFromArmBindings()
+	declaredOut, hasDeclaredOut := p.parseMachineFromDeclaredOut()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -99,7 +163,7 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return ast.MachineFromArm{Position: pos, State: state, Body: body, Terminators: terminators}
+	return ast.MachineFromArm{Position: pos, State: state, Bindings: bindings, DeclaredOut: declaredOut, HasDeclaredOut: hasDeclaredOut, Body: body, Terminators: terminators}
 }
 
 func (p *Parser) parseMachineFromTerminator() ast.MachineFromTerminator {
@@ -112,6 +176,8 @@ func (p *Parser) parseMachineFromTerminator() ast.MachineFromTerminator {
 		term.Value = p.parseMachineFromValueExpr()
 	} else {
 		_, term.Target = p.parseMachineFromStateRef()
+		// `next Num.Exponent(was_fraction)` constructs the successor's payload.
+		term.Args = p.parseMachineFromCallArgs()
 	}
 	if p.match(lexer.TOKEN_IF) {
 		term.Guard = p.parseExpr()

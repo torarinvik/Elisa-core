@@ -225,14 +225,24 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 	doneVar := "__mf_done_" + suffix
 	modeVar := "__mf_mode_" + suffix
 
-	enumMember := func(state string) ast.Expr {
-		return &ast.FieldExpr{Position: pos, Object: &ast.Ident{Position: pos, Name: expr.StartEnum}, Field: state}
+	// stateValue builds `Enum.State` — or `Enum.State(args)` when the target carries a
+	// payload (docs/125 §5). A payload-free state stays a bare member; a payload state is
+	// an ordinary enum construction, reusing existing call/construct analysis and codegen.
+	stateValue := func(state string, args []ast.Expr, at lexer.Pos) ast.Expr {
+		member := &ast.FieldExpr{Position: at, Object: &ast.Ident{Position: at, Name: expr.StartEnum}, Field: state}
+		if len(args) == 0 {
+			return member
+		}
+		return &ast.CallExpr{Position: at, Func: member, Args: args}
+	}
+	enumMember := func(state string, args []ast.Expr) ast.Expr {
+		return stateValue(state, args, pos)
 	}
 	ident := func(name string) ast.Expr { return &ast.Ident{Position: pos, Name: name} }
 
 	// Per-arm mode/done rebinds share these action builders.
-	setMode := func(state string, at lexer.Pos) ast.Stmt {
-		return &ast.AssignStmt{Position: at, Target: &ast.Ident{Position: at, Name: modeVar}, Value: &ast.FieldExpr{Position: at, Object: &ast.Ident{Position: at, Name: expr.StartEnum}, Field: state}}
+	setMode := func(state string, args []ast.Expr, at lexer.Pos) ast.Stmt {
+		return &ast.AssignStmt{Position: at, Target: &ast.Ident{Position: at, Name: modeVar}, Value: stateValue(state, args, at)}
 	}
 	setDone := func(value ast.Expr, at lexer.Pos) []ast.Stmt {
 		return []ast.Stmt{
@@ -244,7 +254,7 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 		if term.IsDone {
 			return setDone(term.Value, term.Position)
 		}
-		return []ast.Stmt{setMode(term.Target, term.Position)}
+		return []ast.Stmt{setMode(term.Target, term.Args, term.Position)}
 	}
 
 	// Collect mutated roots across arm bodies so the loop captures license the mutation.
@@ -257,9 +267,19 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 		covered[arm.State] = true
 		body := append([]ast.Stmt(nil), arm.Body...)
 		body = append(body, buildMachineFromTerminatorChain(arm.Terminators, termAction)...)
+		// A payload arm binds its fields by destructuring the `mode` variant: each binding
+		// becomes a positional variant-pattern arg (`Num.Exponent(was_fraction)`), so the
+		// binding is an ordinary typed local the body reads — refinement facts seed per-arm.
+		var patternArgs []ast.MatchPatternArg
+		for _, name := range arm.Bindings {
+			patternArgs = append(patternArgs, ast.MatchPatternArg{
+				Position: arm.Position,
+				Pattern:  &ast.MatchBindPattern{Position: arm.Position, Name: name},
+			})
+		}
 		matchArms = append(matchArms, ast.MatchArm{
 			Position: arm.Position,
-			Pattern:  &ast.MatchVariantPattern{Position: arm.Position, EnumName: expr.StartEnum, Variant: arm.State},
+			Pattern:  &ast.MatchVariantPattern{Position: arm.Position, EnumName: expr.StartEnum, Variant: arm.State, Args: patternArgs},
 			Body:     body,
 		})
 	}
@@ -284,7 +304,7 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 	stmts := []ast.Stmt{
 		&ast.VarDeclStmt{Position: pos, Name: resultVar, Mutable: true, Type: astTypeExprForBuiltinMethodRewrite(pos, resultType), Value: &ast.ZeroedLit{Position: pos}},
 		&ast.VarDeclStmt{Position: pos, Name: doneVar, Mutable: true, Type: &ast.NamedType{Position: pos, Name: "bool"}, Value: &ast.BoolLit{Position: pos, Value: false}},
-		&ast.VarDeclStmt{Position: pos, Name: modeVar, Mutable: true, Value: enumMember(expr.StartState)},
+		&ast.VarDeclStmt{Position: pos, Name: modeVar, Mutable: true, Value: enumMember(expr.StartState, expr.StartArgs)},
 		loop,
 	}
 	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: ident(resultVar), Captures: captures}
