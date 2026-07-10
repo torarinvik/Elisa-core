@@ -466,8 +466,18 @@ Notes:
 1. **Probe (no new syntax).** ✅ DONE (first detector): FlowFlagStateMachine
    (code 137) shipped as a stage1 diagnostic; 131-file sweep found 2 hits, both
    true positives, zero FP; both offenders flattened to value-form state
-   (lexer parity bit-identical). Remaining probe detectors: shape-retest
-   ladders, shadow-prone elif tables.
+   (lexer parity bit-identical). ✅ REMAINING DETECTORS LANDED (stage0
+   1ccee352, under `-Wflow`): **shape-retest** (≥3 nested `if … is PATTERN:`
+   probes each re-probing a value the previous pattern bound → one docs/122
+   deep pattern; pure-is conditions + direct nesting only) and
+   **shadow-prone elif tables** (≥3-arm chain, every condition an equality
+   test of one scrutinee against int/char/string literals → `when`; member
+   references excluded in v1 — syntactically ambiguous with variable fields,
+   where the advice would be wrong). Both keyed on the parser-set
+   `IfStmt.FromSource` mark → zero-FP by construction. Calibration: 132-file
+   sweep, 3 hits, 3 TP, 0 FP; all three fixed (Elisa-compiler b1a5c64 — the
+   Call→Field→Ident ladder became one deep pattern; the two
+   `diagnostic.expected` message tables became `when` expressions).
 2. **Postfix-guard generalization** (stage0, small — extends a landed feature)
    + the syntactic block-`if` detector + a census sweep of stage1 pricing the
    strict-flow migration: how many block-ifs are guards-in-disguise or value
@@ -479,7 +489,14 @@ Notes:
    enforced on BOTH stages (stage0 always had it; stage1 gained
    `IfValueMissingElse`, error code 138) — an else-less `if` at a statement
    site is therefore unambiguously a postfix guard on both compilers.
-   Remaining: the syntactic block-`if` detector itself (fold into 6).
+   ✅ COMPLETE: the syntactic block-`if` detector LANDED (stage0 1ccee352,
+   fires ONLY under `-Wflow-strict`): a written block `if` errors unless its
+   condition contains an `is`-test (checked destructure, exempt per §6b) or a
+   `can ComplexFlow:` covers it. Zero-FP by construction via the
+   `IfStmt.FromSource` parser mark — postfix-guard desugars, loop-header
+   wrappers, and machine lowerings never carry it. Fresh strict census:
+   **1295 block-if sites in stage1 src/** (excl. stdlib) — the priced
+   increment-6 migration debt.
 3. **`when`** — parser + disjointness/totality checker; reuses the range
    prover. Migrate `literal_fits_in_type`-shaped tables.
    ✅ STAGE0 LANDED: contextual keyword (machine precedent — parser-only,
