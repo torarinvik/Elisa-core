@@ -58,6 +58,20 @@ func (c *permissionEffectCollector) refs() []ast.PermissionRef {
 	return canonicalizePermissionRefs(c.seen)
 }
 
+// withoutAcknowledgmentRefs drops acknowledgment-only permissions (ComplexFlow, Scalar)
+// from a grant's refs: they exist purely to silence diagnostics for the code they
+// lexically cover and never propagate to callers.
+func withoutAcknowledgmentRefs(refs []ast.PermissionRef) []ast.PermissionRef {
+	out := make([]ast.PermissionRef, 0, len(refs))
+	for _, ref := range refs {
+		if ref.Name == "ComplexFlow" || ref.Name == "Scalar" {
+			continue
+		}
+		out = append(out, ref)
+	}
+	return out
+}
+
 func (c *permissionEffectCollector) addRefs(refs []ast.PermissionRef) {
 	if len(refs) == 0 {
 		return
@@ -153,7 +167,11 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 			})
 			break
 		}
-		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))
+		// Acknowledgment-only grants (ComplexFlow, Scalar) silence local diagnostics;
+		// nothing ever REQUIRES them, so they must not join the function's inferred
+		// effect row (they would otherwise cascade `can[ComplexFlow]` obligations up
+		// every caller chain — see registerBuiltinPermission's contract for both).
+		c.addRefs(withoutAcknowledgmentRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false)))
 		c.collectStmts(n.Body)
 	case *ast.SignalStmt:
 		c.addRefs(c.analyzer.resolvePermissionRefs(n.Permissions, false))

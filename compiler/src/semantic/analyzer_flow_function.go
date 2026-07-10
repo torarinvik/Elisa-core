@@ -117,6 +117,13 @@ func condContainsIsTest(cond ast.Expr) bool {
 		return true
 	case *ast.StructTestExpr:
 		return true
+	case *ast.OptionalBindExpr:
+		// The bare refinement bind `if maybe is value:` (docs/80) parses to its own
+		// node, not a TOKEN_IS BinaryExpr — same checked-destructure family, same
+		// exemption.
+		return true
+	case *ast.IsAliasExpr:
+		return true
 	}
 	return false
 }

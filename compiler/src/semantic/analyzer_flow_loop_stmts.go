@@ -14,7 +14,11 @@ func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 		return
 	}
 	if !stmt.SuppressPermissionInference {
-		a.recordFunctionPermissionRefs(refs)
+		// Acknowledgment-only grants (ComplexFlow, Scalar) silence local diagnostics
+		// and must NOT surface in the function's inferred effects — nothing ever
+		// REQUIRES them, so recording them would cascade can[…] obligations up
+		// every caller chain (see registerBuiltinPermission's contract for both).
+		a.recordFunctionPermissionRefs(withoutAcknowledgmentRefs(refs))
 		// A tracked `can Unsafe.StaleRef:` grant discharges the forwarded-ref-store
 		// check within its scope (like `trusted`), but — unlike `trusted` — the
 		// recordFunctionPermissionRefs above surfaces Unsafe.StaleRef in the function's

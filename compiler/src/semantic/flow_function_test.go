@@ -50,6 +50,46 @@ func TestStrictBlockIfExemptsPostfixGuard(t *testing.T) {
 	}
 }
 
+// `can ComplexFlow:` is a pure acknowledgment grant — it must NOT join the function's
+// inferred effect row, so callers never see a `can[ComplexFlow]` obligation.
+func TestComplexFlowGrantDoesNotPropagate(t *testing.T) {
+	src := `def helper(x: i64) -> i64:
+    can ComplexFlow:
+        if x > 0:
+            return 2
+    return 0
+
+def caller(x: i64) -> i64:
+    return helper(x)
+`
+	strict := flowStrict(t, "ackgrant.elisa", src)
+	if all := allDiagnostics(strict); strings.Contains(all, "ComplexFlow]") || strings.Contains(all, "effect facts") {
+		t.Fatalf("ComplexFlow grant must not propagate to callers, got:\n%s", all)
+	}
+	if len(strict.Errors()) != 0 {
+		t.Fatalf("granted block-if must be clean under strict, got:\n%v", strict.Errors())
+	}
+}
+
+// The bare optional bind `if maybe is value:` is the same checked-destructure family —
+// it parses to OptionalBindExpr, not a TOKEN_IS BinaryExpr, and must be exempt too.
+func TestStrictBlockIfExemptsOptionalBind(t *testing.T) {
+	src := `def pick(x: i64) -> i64?:
+    null return if x < 0
+    return x
+
+def f(x: i64) -> i64:
+    maybe: i64? = pick(x)
+    if maybe is value:
+        return value
+    return 0
+`
+	strict := flowStrict(t, "blockif_optbind.elisa", src)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("bare optional bind must not trip the block-if ban, got:\n%v", strict.Errors())
+	}
+}
+
 // `if EXPR is PATTERN:` is a checked destructure — exempt (docs/80), including its else.
 func TestStrictBlockIfExemptsIsBinding(t *testing.T) {
 	src := `enum E:
