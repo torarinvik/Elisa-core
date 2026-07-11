@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 )
 
 // machineSrc wraps a machine body in a host function with a driven `lexer` resource.
@@ -246,6 +247,48 @@ func TestMachineFromStraightLineArmAccepted(t *testing.T) {
 	_, errs := parseSourceFile(t, src)
 	if len(errs) != 0 {
 		t.Fatalf("expected blessed machine-from arm to parse, got %v", errs)
+	}
+}
+
+// A range input alternative (`Num, '0'..<'9':`, docs/122 §5.2 shared grammar) lowers to a
+// bounds test on the input var — `lo <= input and input < hi` — not an equality. Exclusive
+// `..<` uses `<` on the upper bound; inclusive `..=` uses `<=`.
+func TestMachineRangeArmLowering(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char() while not lexer.is_end_of_source():
+        state Num
+        start Num
+        Num, '0'..<'9':
+            lexer <- lexer.advance_char()
+            -> Num
+        Num, _:
+            break
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	var fn *ast.FuncDecl
+	for _, d := range file.Decls {
+		if n, ok := d.(*ast.FuncDecl); ok {
+			fn = n
+		}
+	}
+	wrapper := fn.Body[0].(*ast.IfStmt)
+	loop := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
+	matchStmt := loop.Body[1].(*ast.MatchStmt)
+	// Num state: range arm + wildcard `break` → if/else. The range arm is the `if` cond.
+	numIf := matchStmt.Arms[0].Body[0].(*ast.IfStmt)
+	and, ok := numIf.Cond.(*ast.BinaryExpr)
+	if !ok || and.Op != lexer.TOKEN_AND {
+		t.Fatalf("range arm cond must be an AND of two bounds, got %#v", numIf.Cond)
+	}
+	lo := and.Left.(*ast.BinaryExpr)
+	hi := and.Right.(*ast.BinaryExpr)
+	if lo.Op != lexer.TOKEN_LTEQ {
+		t.Fatalf("lower bound must be `lo <= input`, got op %v", lo.Op)
+	}
+	if hi.Op != lexer.TOKEN_LT {
+		t.Fatalf("exclusive upper bound must be `input < hi`, got op %v", hi.Op)
 	}
 }
 

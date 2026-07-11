@@ -365,8 +365,12 @@ object). `machine` is opt-in; there is no pressure to force code into it.
 **Verified arm-pattern matrix (2026-07-11):** literals ✓, alternation `'a' | 'b'` ✓,
 input bind + guard (`c if c.is_digit()`) ✓, enum tags ✓ (an enum-returning scrutinee
 dispatches today — docs/125 §9), payload literal/refinement patterns ✓, `_` ✓
-(mandatory per state); **ranges `'0'..='9'` ✗ (hard parse error)** — ranges belong in
-a classifier's `when`, which has them (docs/125 §9.4).
+(mandatory per state); **ranges `'0'..='9'` / `'0'..<'9'` ✓ (LANDED, this pass)** —
+the docs/122 §5.2 range grammar now parses in machine arm headers and lowers to a
+bounds test (`lo <= input and input <(=) hi`) OR'd with the arm's literal alternatives,
+so `Num, '0'..='9' | 'a'..<'g' | '_':` is one arm. Bound spelling is explicit (`..=`
+inclusive / `..<` exclusive; bare `..` is a hard error), matching match/when. This
+unifies the pattern grammar across all three dispatch constructs (roadmap Phase-1 step 1).
 
 ---
 

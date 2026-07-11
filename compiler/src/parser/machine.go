@@ -73,18 +73,29 @@ const (
 )
 
 type machineArm struct {
+	pos         lexer.Pos
+	state       string
+	payload     []machinePayloadPat
+	inputs      []ast.Expr          // literal alternatives (`'a' | 'b'`); nil when inputWild
+	inputRanges []machineInputRange // range alternatives (`'0'..='9'`), OR'd with inputs
+	inputWild   bool
+	inputBind   string // input bind pattern: names the input value for guard/body
+	guard       ast.Expr
+	body        []ast.Stmt // statements before the exit; excludes the transition line
+	exit        machineExitKind
+	target      string // transition target state
+	targetPos   lexer.Pos
+	args        []ast.Expr // transition payload args
+}
+
+// machineInputRange is a range alternative in a machine arm header (`Num, '0'..='9':`),
+// shared with the docs/122 pattern grammar. It lowers to a bounds test on the input var
+// (`lo <= input and input <(=) hi`), OR'd with the arm's literal alternatives.
+type machineInputRange struct {
 	pos       lexer.Pos
-	state     string
-	payload   []machinePayloadPat
-	inputs    []ast.Expr // literal alternatives (`'a' | 'b'`); nil when inputWild
-	inputWild bool
-	inputBind string // input bind pattern: names the input value for guard/body
-	guard     ast.Expr
-	body      []ast.Stmt // statements before the exit; excludes the transition line
-	exit      machineExitKind
-	target    string     // transition target state
-	targetPos lexer.Pos
-	args      []ast.Expr // transition payload args
+	lo        ast.Expr
+	hi        ast.Expr
+	inclusive bool
 }
 
 // looksLikeMachineStmt gates the contextual keyword: `machine` begins a machine statement
@@ -263,9 +274,9 @@ func (p *Parser) parseMachineArm(states []machineState) machineArm {
 		arm.inputBind = p.advance().Text
 		arm.inputWild = true
 	default:
-		arm.inputs = append(arm.inputs, p.parseMatchValuePatternExpr())
+		p.parseMachineInputAlt(&arm)
 		for p.match(lexer.TOKEN_PIPE) {
-			arm.inputs = append(arm.inputs, p.parseMatchValuePatternExpr())
+			p.parseMachineInputAlt(&arm)
 		}
 	}
 	if p.peek() == lexer.TOKEN_IF {
@@ -278,6 +289,27 @@ func (p *Parser) parseMachineArm(states []machineState) machineArm {
 	p.parseMachineArmBody(&arm)
 	p.expect(lexer.TOKEN_DEDENT)
 	return arm
+}
+
+// parseMachineInputAlt parses one input alternative in a machine arm header: a literal (or
+// literal-valued expression), or a `LO..<HI` / `LO..=HI` range (docs/122 §5.2 range
+// pattern, shared with match/when). The spelling matches match arms — a bare `..` is
+// diagnosed toward the explicit bounds. Ranges are collected separately and OR'd into the
+// arm's input condition alongside the equality alternatives.
+func (p *Parser) parseMachineInputAlt(arm *machineArm) {
+	pos := p.cur().Pos
+	lo := p.parseMatchValuePatternExpr()
+	switch p.peek() {
+	case lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_LE:
+		inclusive := p.advance().Kind == lexer.TOKEN_RANGE_LE
+		arm.inputRanges = append(arm.inputRanges, machineInputRange{pos: pos, lo: lo, hi: p.parseMatchValuePatternExpr(), inclusive: inclusive})
+	case lexer.TOKEN_RANGE:
+		p.errorf("machine arm range needs an explicit bound spelling: use `..<` (exclusive) or `..=` (inclusive)")
+		p.advance()
+		arm.inputRanges = append(arm.inputRanges, machineInputRange{pos: pos, lo: lo, hi: p.parseMatchValuePatternExpr(), inclusive: true})
+	default:
+		arm.inputs = append(arm.inputs, lo)
+	}
 }
 
 // parseMachinePayloadPat parses one payload-argument pattern: `_`, a plain-ident bind, or
@@ -680,13 +712,27 @@ func (p *Parser) lowerMachineArm(arm *machineArm, st *machineState, stateByName 
 	}
 	if !arm.inputWild {
 		var inputCond ast.Expr
-		for _, alt := range arm.inputs {
-			eq := &ast.BinaryExpr{Position: arm.pos, Op: lexer.TOKEN_EQEQ, Left: &ast.Ident{Position: arm.pos, Name: inputVar}, Right: alt}
+		orIn := func(c ast.Expr) {
 			if inputCond == nil {
-				inputCond = eq
+				inputCond = c
 			} else {
-				inputCond = &ast.BinaryExpr{Position: arm.pos, Op: lexer.TOKEN_OR, Left: inputCond, Right: eq}
+				inputCond = &ast.BinaryExpr{Position: arm.pos, Op: lexer.TOKEN_OR, Left: inputCond, Right: c}
 			}
+		}
+		for _, alt := range arm.inputs {
+			orIn(&ast.BinaryExpr{Position: arm.pos, Op: lexer.TOKEN_EQEQ, Left: &ast.Ident{Position: arm.pos, Name: inputVar}, Right: alt})
+		}
+		for _, r := range arm.inputRanges {
+			// `lo <= input and input <(=) hi` — the input var is read twice, but it is a
+			// plain synthesized local (the classified enum tag / current char), so there is
+			// no re-evaluation cost.
+			hiOp := lexer.TOKEN_LT
+			if r.inclusive {
+				hiOp = lexer.TOKEN_LTEQ
+			}
+			lower := &ast.BinaryExpr{Position: r.pos, Op: lexer.TOKEN_LTEQ, Left: r.lo, Right: &ast.Ident{Position: r.pos, Name: inputVar}}
+			upper := &ast.BinaryExpr{Position: r.pos, Op: hiOp, Left: &ast.Ident{Position: r.pos, Name: inputVar}, Right: r.hi}
+			orIn(&ast.BinaryExpr{Position: r.pos, Op: lexer.TOKEN_AND, Left: lower, Right: upper})
 		}
 		cond = andJoin(cond, inputCond)
 	}
