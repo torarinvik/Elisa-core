@@ -344,10 +344,11 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 	loopBody = append(loopBody, &ast.MatchStmt{Position: pos, Value: ident(modeVar), Arms: matchArms})
 
 	loop := &ast.WhileStmt{
-		Position: pos,
-		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: ident(doneVar)},
-		Body:     loopBody,
-		Captures: captures,
+		Position:                pos,
+		Cond:                    &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: ident(doneVar)},
+		Body:                    loopBody,
+		Captures:                captures,
+		RuntimeProgressBackstop: expr.Decreases != nil,
 	}
 
 	stmts := []ast.Stmt{

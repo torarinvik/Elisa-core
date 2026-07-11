@@ -434,6 +434,13 @@ type WhileStmt struct {
 	// the loop's declared mutation manifest. Notation only — no codegen effect; the
 	// §10 linear-mutation checker licenses mutating calls on captured bindings.
 	Captures []string
+	// RuntimeProgressBackstop marks a synthesized loop whose `decreases` measure is a
+	// runtime-backstopped CLAIM, not a proof obligation (docs/125 §5: a `machine from`
+	// cycle's measure). The measure is still type-checked, and proved when the body is
+	// straight-line, but an unprovable measure is recorded ProofRuntime SILENTLY — no
+	// advisory lint, no -strict escalation — because the machine's runtime progress check
+	// (and `can Unsafe.AssumeProgress`) is the intended mechanism. Only the desugarer sets it.
+	RuntimeProgressBackstop bool
 }
 type ForStmt struct {
 	Position lexer.Pos

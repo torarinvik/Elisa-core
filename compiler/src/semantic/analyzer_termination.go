@@ -310,7 +310,8 @@ func (a *Analyzer) checkLoopTermination(stmt *ast.WhileStmt) {
 	// suppressed and the proof is recorded as ProofRuntime (auditable: the `can` surfaces
 	// Unsafe.AssumeProgress/NonProgress in the function's effect signature — see analyzeCanStmt).
 	terminationAssumed := a.currentGrantedAssumeProgressDepth > 0 || a.currentTrustedAssumeProgressDepth > 0 ||
-		a.currentGrantedNonProgressDepth > 0 || a.currentTrustedNonProgressDepth > 0
+		a.currentGrantedNonProgressDepth > 0 || a.currentTrustedNonProgressDepth > 0 ||
+		stmt.RuntimeProgressBackstop
 	measures := make([]ast.Expr, 0, len(decs))
 	for _, d := range decs {
 		measures = append(measures, decreaseMeasureComponents([]ast.Expr{d.Cond})...)
