@@ -1,6 +1,12 @@
 # docs/125 — Structured Control Flow: Refusals as the Product
 
-Status: DESIGN (nothing implemented)
+Status: **LANDED + ACTIVE** (originally DESIGN; this header lagged the tree — see §7
+for per-increment status). Implemented on BOTH stages: postfix guards, the
+ternary-requires-else invariant (code 138), `when` (R1/R2/R3 stage0-owned),
+`with` (+R1), `machine from` (+state payloads, R5 declared out-edges), and the §6b
+strict block-`if` ban under `-Wflow-strict` (calibrated 3/3-TP, 0-FP). Strict census
+2026-07-11: 884 sites in stage1 `src/` (lexer 8→0 DONE; parser 201, semantic 675
+remain). Active design increment: §9 classified dispatch.
 Depends on: `machine over` (docs/123), pattern features (docs/122: guards, ranges,
 rest/as-bindings), expression unification (docs/119: statement-position exprs,
 block/loop exprs, `rebind`), interprocedural termination summaries (docs/118),
@@ -95,6 +101,32 @@ Elisa precedents being closed over, not invented: loop accumulator pipes
 threading, `lmut` receivers. Today these are opt-in idioms coexisting with
 ambient mutation; strict flow makes them the only way state crosses an edge.
 
+### 1d. The join rule (the one unratified article)
+
+Branch totality (§1c) states the law for machines. Its generalization to ALL
+control flow, in one sentence:
+
+> **Any value whose meaning differs between incoming control-flow paths must
+> cross the join explicitly.**
+
+The legal crossings already exist — this names them as the closed set: the
+*value* of an `if`/`match` expression, a `rebind`, a machine state payload, a
+loop-header accumulator (`|sum = 0| -> sum`), or a declared threaded resource
+(`lmut` receiver, `mutable T&`, a `changes`-listed set). What the rule forbids
+is the one remaining implicit channel: **statement-join ambient mutation** — an
+ordinary `match` whose arms mutate three outer variables differently and then
+fall through the join, leaving the checker to reconstruct phi nodes from
+ambient writes. Most articles of this constitution are ratified and enforced
+(`rebind`; capture manifests; the docs/120 §10 `lmut` reassignment discipline —
+a bare mutating call in return position is a hard error; frame conditions,
+docs/87). Statement joins are the gap.
+
+Enforcement is deliberately deferred behind measurement (the §7 pattern:
+census → warn-tier detector calibrated to 0-FP → strict). The loop-header
+mandate (`while cond |outer_a, outer_b|:` as a complete local frame condition)
+is the natural strict-tier form for loops, and the highest-ergonomic-risk item
+on the list — it graduates only if the census supports it.
+
 Two hard constraints carry over unchanged from the rest of the language:
 
 - **Zero overhead.** Every blessed form must lower to exactly the code the
@@ -155,6 +187,19 @@ transition is `next` at arm tail position.
 ```
 error: machine state is not a value; transitions occur only via `next`
 ```
+
+> **CONFIRMED ENFORCEMENT GAP (2026-07-11, highest-priority fix).** R1 as
+> implemented covers only the *mode* variable. `machine from` arm BODIES accept
+> arbitrary statements today: a nested `if a: if b: outer <- …` before the
+> terminator passes semantic analysis silently (probe-verified; the parser's
+> `machine_from` path performs zero arm-statement validation, while `machine
+> over` enforces both the no-nested-branching rule and the foreign-state
+> mutation ban "may only mutate the driven resource", docs/123 §5). This
+> undermines `machine from` as the non-loop sibling of the strict machine. Fix:
+> ONE shared arm law for both forms — straight-line computation, then guarded
+> transition rows, then one total fallback; no nested branch, no loop, no
+> foreign mutation. `validateMachineArmStmt` already exists; it needs a call
+> site in the `machine from` path plus the foreign-state scan.
 
 **R2 — every arm must resolve.** Falling off an arm's end is neither "stay" nor
 "exit"; it is a compile error. "I forgot to decide" is unrepresentable.
@@ -592,7 +637,11 @@ Notes:
   REQUIRES the classifier to be a total, enum-returning (spec-tier pure)
   function, so totality/disjointness come from the enum, not from trusting a
   predicate. Wait for a dogfood case where the `match classify(x)` spelling is
-  demonstrably clunky before adding even that.
+  demonstrably clunky before adding even that. → **PROGRESSED (2026-07-11): the
+  dogfood case arrived (the number lexer's strict-flow migration) and the probes
+  showed even `via` is unnecessary — `machine over classify(c)` with enum-tag
+  arms parses, checks, and runs on the current compiler. The classifier hatch
+  graduates to a full design increment: §9.**
 - `when` over non-tuple scrutinees with refinement types: does totality consult
   the refined range (e.g. scrutinee `Small` means arms need only cover 0..9)?
   (Yes in spirit — reuses the vacuity machinery.)
@@ -600,3 +649,115 @@ Notes:
   region-backed containers (should be identical to `match` arm bindings).
 - Whether `_` per-column (`"u8", _`) participates in overlap checking as
   "everything" (proposed: yes, it is just a total range for that column).
+
+## 9. Classified dispatch — total classifiers as scrutinees
+
+Added 2026-07-11, graduated from the §8 active-patterns entry. The dogfood case was
+the number lexer's strict-flow migration: numeric literals are a genuine state
+machine (`Int → Frac → Exp → Suffix`), but its transitions fire on **character
+classes** (`is_digit`, `is_hex_digit`) — and no dispatch construct could take a
+class as scrutinee, so the machine collapsed into `while is_digit()` loops and the
+modelling evaporated. The gap is not syntax; it is that dispatch could not see
+through a *derived classification* of the input.
+
+### 9.1 The discovery: this already runs
+
+Probed on the shipping compiler (2026-07-11): `machine over classify(c)` where
+`classify: char -> CharClass` returns a plain enum, with enum-tag arms
+(`Scanning, CharClass.Digit:`), **parses, type-checks, and executes correctly
+today** — end-to-end native test green. The feature is therefore NOT new grammar.
+What is missing is exactly three guarantees:
+
+1. **Tag-coverage totality.** The machine totality checker demands a final
+   unguarded `State, _:` wildcard even when the arms cover the closed enum
+   exactly. For enum scrutinees this is backwards: `_` **erases the
+   add-a-variant safety net** (extend `CharClass` and every machine silently
+   routes the new class to the wildcard instead of failing to compile). Rule:
+   when the input type is a closed enum, per-state coverage = `match`'s tag
+   totality; the wildcard becomes optional and *discouraged*.
+2. **Classifier qualification — three existing facts, no annotation.** A
+   scrutinee former qualifies as a classifier when (a) its effect row is empty
+   (pure), (b) it has a termination summary (docs/118 / the 4-increment
+   prover), (c) its return type is a closed enum. All three are facts the
+   compiler already tracks; the conjunction needs no keyword, no `@classifier`,
+   no new checker. **The carrot rule:** qualification is what *upgrades*
+   coverage checking from wildcard-mode to tag-mode. An impure or unproven
+   former keeps today's wildcard rules — zero breakage; the stricter checking
+   is what classifier discipline earns.
+3. **Table folding — the performance proof.** A pure total `char -> Class`
+   function constant-folds into a 256-byte class table — exactly what
+   production lexers hand-write (`switch(char_class[c])`). The declarative
+   spec should lower to something *faster* than the hand-rolled branch chain,
+   not merely equal. `-Wperf` flags a classifier too complex to fold.
+
+### 9.2 Evaluation rule
+
+The scrutinee expression (`classify(cur())`) is evaluated **exactly once per
+step** — the machine's existing `over` contract. Purity makes the classification
+coherent within the step; guards run after classification and may *read* driven
+resources (lookahead) but never mutate. Division of labor, stated once:
+
+> **`when` classifies values into classes; `machine` sequences classes into
+> states; guards consult context.** Patterns never hide user code (the §8
+> active-patterns refusal stands); classifiers never hide partiality (totality
+> is machine-checked, not promised).
+
+This is the one sound corner of the views / active-patterns design space:
+Wadler-style views broke equational reasoning, Haskell pattern-synonym
+`COMPLETE` pragmas are unchecked promises, Scala `unapply` is opaque, F#
+partial active patterns concede exhaustiveness. Elisa's version is checkable
+because the provers it leans on (purity via effect rows, termination via
+docs/118, totality via closed enums) already shipped.
+
+### 9.3 Payload-carrying classes
+
+`Digit(d: u8)` — the classifier *parses as it partitions*. Arms receive the
+decoded payload with its refinement facts (`d <= 9`) feeding the arithmetic
+prover. Payloads subsume the remaining wants:
+
+- **Value capture** without re-deriving from the raw input in the arm.
+- **The radix fork enters the machine.** The hex/decimal lead that otherwise
+  needs a pre-machine block-`if` (today: `can ComplexFlow:` in `read_number`)
+  becomes an ordinary `Lead` state: `Lead, Digit if lexer.current_char() == '0'
+  and lexer.peek(1) in {'x','X'}: … -> Hex` — guards already work in machine
+  arms. No `start from` construct needed.
+- **Refinement flow**: `parse_int_literal_value`'s digit-decode ternary chain
+  is the second client.
+
+Ergonomic follow-on: leading-dot tag shorthand in arm position
+(`Lead, .Digit:`), consistent with the existing shorthand-member forms.
+
+### 9.4 Verified pattern-support matrix (machine arms, 2026-07-11)
+
+Probed individually — earlier cascade errors had blurred this:
+
+| In arm input position     | Status |
+|----------------------------|--------|
+| literals (`'"'`, `'m'`)    | ✓ |
+| alternation (`' ' \| '\t'`)| ✓ |
+| bind + guard (`c if c.is_digit()`) | ✓ |
+| enum tags (`CharClass.Digit`) | ✓ (runs today) |
+| payload literal/refinement patterns | ✓ |
+| `_` wildcard               | ✓ (currently *mandatory* per state) |
+| **range (`'0'..='9'`)**    | **✗ hard parse error** |
+| duplicate/shadowed arms rejected | **✗ two identical `'m'` arms pass** |
+
+The range gap is why classifiers matter more than pattern-grammar expansion:
+ranges belong in the classifier's `when` (which has them), not in the machine's
+arms. Unifying the grammar (roadmap Phase 1) is still right for delimiter
+machines, but the classifier makes it non-blocking. The duplicate-arm gap is a
+§5.5 (docs/123) enforcement hole to close alongside tag-coverage.
+
+### 9.5 Increments
+
+- **C0 — pilot (no compiler change).** `read_number` as a classifier machine
+  with `_` arms; `@inline(always)` classifier (inlining is load-bearing in the
+  stage1 lexer, ~10%). Acceptance: token-parity byte-identical, `lexer_bench`
+  non-regression, the `can ComplexFlow:` grant in `read_number` REMOVED,
+  strict census stays 0.
+- **C1 — tag-coverage** for closed-enum scrutinees + duplicate-arm rejection
+  (stage0, then stage1). Flip the pilot's `_` arms to explicit tags.
+- **C2 — qualification gating** (the carrot rule) + leading-dot arm shorthand.
+- **C3 — table folding** + `-Wperf` foldability lint; benchmark vs the
+  hand-written branch chain — the "declarative and faster" claim is
+  demonstrated here, not asserted.

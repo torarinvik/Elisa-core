@@ -6,7 +6,12 @@ powerful one: each arm is exactly one (state, input) decision ending in exactly 
 transition or exit, and the compiler refuses everything else. General `match` + `while`
 remain the flexible tools; `machine` is the constrained rung between them and `for`.
 
-Status: **DESIGN**. Nothing here is implemented. Prerequisites in §8.
+Status: **SHIPPED** (Phases 0/1/4/5 — parser, scalarized desugar, refusals, both
+stages; this header long lagged §10, which has the truthful per-phase record). The
+stage1 lexer's 7 dispatchful scanners are production `machine`s, bit-exact by the
+stage0/stage1 token-parity harness. Remaining: Phase 2 graph artifacts (dead states,
+tag-coverage totality for closed-enum inputs — see docs/125 §9, duplicate-arm
+rejection §5.5) and Phase 3 verification hooks.
 
 ---
 
@@ -305,7 +310,10 @@ These are the construct's identity — each is a hard compile error inside `mach
 4. **Non-exhaustive state × input.** Every declared state must handle every input value
    (a final `State, _:` arm per state discharges it). A state with no arms is an error.
 5. **Unreachable arms.** An arm shadowed by earlier patterns/guards is an error, not dead
-   code.
+   code. **KNOWN GAP (verified 2026-07-11): only the irrefutable-arm-before-others case
+   is caught today — two literally identical arms (`Scanning, 'm':` twice) pass
+   silently. General pairwise reachability is Phase 2 work, alongside tag-coverage
+   (docs/125 §9.1).**
 6. **Undeclared transition targets.** `->` may only name a declared `state`.
 7. **Refinement violations at edges.** Every `-> State(args)` must discharge the target
    payload refinements (via the arm's pattern facts, e.g. `Expr(depth > 1)` proving
@@ -342,17 +350,23 @@ object). `machine` is opt-in; there is no pressure to force code into it.
 
 ---
 
-## 8. Prerequisites (not yet implemented anywhere)
+## 8. Prerequisites (status: 1 and 2 LANDED in Phase 0; 3 partially)
 
-1. **Arm-header guards** — `State(pat), input_pat if COND:` (docs/122 §5.1). Without
-   them, lookahead conditions (`lexer.peek(1) == '{'`) force nested `if`s and the
-   construct collapses. Guarded arms are non-covering for exhaustiveness.
-2. **Payload refinement patterns** — `Expr(depth > 1)` as a pattern (comparison against
-   the payload), plus payload literal patterns `Expr(1)` (may already work via nested
-   `MatchLiteralPattern`; verify).
-3. **State × input exhaustiveness** — per-state coverage of the input domain
-   (docs/122 §5.6 deep exhaustiveness, restricted to the machine's finite state set —
-   much easier than the general problem).
+1. **Arm-header guards** — `State(pat), input_pat if COND:` (docs/122 §5.1). ✅ DONE.
+   Guarded arms are non-covering for exhaustiveness.
+2. **Payload refinement patterns** — `Expr(depth > 1)` + payload literals `Expr(1)`.
+   ✅ DONE (via the scalarized desugar, §4).
+3. **State × input exhaustiveness** — per-state coverage of the input domain. PARTIAL:
+   the per-state irrefutable-final-arm rule ships; true domain totality is Phase 2.
+   For closed-enum inputs the cheap complete form is tag-coverage (docs/125 §9.1) —
+   strictly easier than the general char-range problem and it removes the wildcard
+   mandate that erases the add-a-variant safety net.
+
+**Verified arm-pattern matrix (2026-07-11):** literals ✓, alternation `'a' | 'b'` ✓,
+input bind + guard (`c if c.is_digit()`) ✓, enum tags ✓ (an enum-returning scrutinee
+dispatches today — docs/125 §9), payload literal/refinement patterns ✓, `_` ✓
+(mandatory per state); **ranges `'0'..='9'` ✗ (hard parse error)** — ranges belong in
+a classifier's `when`, which has them (docs/125 §9.4).
 
 ---
 
@@ -383,8 +397,13 @@ object). `machine` is opt-in; there is no pressure to force code into it.
   §5.4/5.5 in their per-state form (irrefutable-final-arm exhaustiveness, unreachable
   arms) and §5.7 via refinement types on the scalarized locals.
 - **Phase 2 (remaining)** — transition-graph artifacts: dead-state reachability,
-  input-domain totality beyond the wildcard rule.
+  input-domain totality beyond the wildcard rule (for closed-enum inputs:
+  tag-coverage, docs/125 §9.1 — makes the wildcard optional and discouraged),
+  and general duplicate/shadowed-arm rejection (§5.5 known gap).
 - **Phase 3** — verification hooks (§6): `decreases` over states, graph artifacts.
+  For `machine from` cycles, presence of `decreases` is already required (R3);
+  discharge should wire into the EXISTING provers (4-increment + docs/118
+  summaries) rather than new machinery.
 - **Phase 4 — DONE (dogfood).** The stage1 lexer's 7 dispatchful scanners are machines:
   read_fstring (3-state, the FStringMode enum retired), read_string, read_char,
   skip_block_comment, skip_spaces, measure_indent (yield form), read_identifier.
