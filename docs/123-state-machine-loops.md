@@ -400,10 +400,15 @@ unifies the pattern grammar across all three dispatch constructs (roadmap Phase-
 - **Phase 1 — DONE.** Parser + scalarized desugar (§4), refusals §5.1–5.3/5.6, plus
   §5.4/5.5 in their per-state form (irrefutable-final-arm exhaustiveness, unreachable
   arms) and §5.7 via refinement types on the scalarized locals.
-- **Phase 2 (remaining)** — transition-graph artifacts: dead-state reachability,
-  input-domain totality beyond the wildcard rule (for closed-enum inputs:
-  tag-coverage, docs/125 §9.1 — makes the wildcard optional and discouraged),
-  and general duplicate/shadowed-arm rejection (§5.5 known gap).
+- **Phase 2 (remaining)** — transition-graph artifacts: dead-state reachability
+  (DONE for `machine from`, R4), input-domain totality beyond the wildcard rule
+  (for closed-enum inputs: tag-coverage, docs/125 §9.1 — makes the wildcard
+  optional and discouraged; still TODO). **Duplicate-arm rejection — LANDED**
+  (2026-07-11): two unconditional arms in one state that handle the same literal
+  or enum tag (`Go, 'm': … Go, 'm': …`) are rejected as unreachable. Exact-match
+  only (0-FP): a guard or a distinguishing payload condition exempts the arm, and
+  overlapping ranges are not compared. Tests `TestMachineRefusalDuplicateLiteralArm`,
+  `TestMachineGuardedArmSharesLiteralAccepted`.
 - **Phase 3** — verification hooks (§6): `decreases` over states, graph artifacts.
   For `machine from` cycles, presence of `decreases` is already required (R3);
   discharge should wire into the EXISTING provers (4-increment + docs/118

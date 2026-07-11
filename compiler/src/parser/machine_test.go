@@ -292,6 +292,44 @@ func TestMachineRangeArmLowering(t *testing.T) {
 	}
 }
 
+// Two unconditional arms handling the same literal in one state: the second is unreachable
+// (docs/123 §5.5 duplicate-arm rejection). Previously both compiled silently.
+func TestMachineRefusalDuplicateLiteralArm(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char() while not lexer.is_end_of_source():
+        state Go
+        start Go
+        Go, 'm':
+            -> Go
+        Go, 'm':
+            -> Go
+        Go, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "repeats input 'm'") {
+		t.Fatalf("expected duplicate-literal-arm refusal, got %v", errs)
+	}
+}
+
+// A literal shared between a guarded arm and an unguarded arm is NOT a duplicate — the
+// guard distinguishes them (0-FP discipline).
+func TestMachineGuardedArmSharesLiteralAccepted(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char() while not lexer.is_end_of_source():
+        state Go
+        start Go
+        Go, 'm' if lexer.peek(1) == 'x':
+            -> Go
+        Go, 'm':
+            -> Go
+        Go, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("guarded+unguarded same-literal arms must be accepted, got %v", errs)
+	}
+}
+
 func TestMachineRefusalNoDecision(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Text

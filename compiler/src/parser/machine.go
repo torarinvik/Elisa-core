@@ -516,6 +516,7 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 			p.errorf("machine state %q has no arms — every state must handle every input (docs/123 §5)", st.name)
 			continue
 		}
+		seenInputs := map[string]bool{}
 		for j, idx := range idxs {
 			arm := &arms[idx]
 			irrefutable := machineArmIrrefutable(arm)
@@ -526,6 +527,19 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 			} else if irrefutable {
 				p.errorf("machine arm %d for state %q is unreachable — an earlier arm already matches every input (docs/123 §5)", j+2, st.name)
 				break
+			}
+			// Duplicate-arm rejection: an unconditional literal/tag alternative already handled
+			// by an earlier arm in this state can never match here (docs/123 §5.5). A guard OR a
+			// payload condition (`Expr(depth > 1), '}':`) makes the arm conditional, so it does
+			// not claim exclusive coverage of the literal — only fully unconditional arms do.
+			if arm.guard == nil && machinePayloadUnconditional(arm) {
+				for _, key := range machineArmInputLiteralKeys(arm) {
+					if seenInputs[key] {
+						p.errorf("machine arm for state %q repeats input %s — an earlier arm already handles it, so this arm is unreachable (docs/123 §5)", st.name, machineInputLiteralDisplay(key))
+					} else {
+						seenInputs[key] = true
+					}
+				}
 			}
 		}
 	}
@@ -667,6 +681,80 @@ func machineArmIrrefutable(arm *machineArm) bool {
 		}
 	}
 	return true
+}
+
+// machinePayloadUnconditional reports whether an arm's payload patterns impose no condition
+// (every field is `_` or a plain bind), so the arm's coverage is decided entirely by its
+// input alternatives. A payload condition (`Expr(depth > 1)`) means two arms sharing a
+// literal are distinguished by the payload, not duplicates.
+func machinePayloadUnconditional(arm *machineArm) bool {
+	for _, pat := range arm.payload {
+		if pat.cond != nil {
+			return false
+		}
+	}
+	return true
+}
+
+// machineArmInputLiteralKeys returns a canonical coverage key for each of an arm's literal
+// or enum-tag input alternatives (`'a'`, `7`, `true`, `TokenKind.Ident`). Ranges and
+// non-literal expressions yield no key — duplicate detection is intentionally exact
+// (0-FP): it fires only when the SAME literal is handled twice, not on possibly-overlapping
+// ranges, which the analyzer cannot compare without the value domain.
+func machineArmInputLiteralKeys(arm *machineArm) []string {
+	var keys []string
+	for _, alt := range arm.inputs {
+		if k, ok := machineLiteralKey(alt); ok {
+			keys = append(keys, k)
+		}
+	}
+	return keys
+}
+
+// machineLiteralKey canonicalizes a literal / qualified-enum-member expression to a stable
+// string key, returning ok=false for anything else.
+func machineLiteralKey(e ast.Expr) (string, bool) {
+	switch n := e.(type) {
+	case *ast.CharLit:
+		return "char:" + n.Value, true
+	case *ast.IntLit:
+		if n.IsHex {
+			return "int:hex:" + n.Value, true
+		}
+		return "int:" + n.Value, true
+	case *ast.StringLit:
+		return "str:" + n.Value, true
+	case *ast.BoolLit:
+		if n.Value {
+			return "bool:true", true
+		}
+		return "bool:false", true
+	case *ast.FieldExpr:
+		// A qualified enum member `Enum.Variant` (classified-dispatch tags).
+		if obj, ok := n.Object.(*ast.Ident); ok {
+			return "tag:" + obj.Name + "." + n.Field, true
+		}
+	}
+	return "", false
+}
+
+// machineInputLiteralDisplay renders a coverage key back to a readable form for diagnostics.
+func machineInputLiteralDisplay(key string) string {
+	switch {
+	case strings.HasPrefix(key, "char:"):
+		return "'" + strings.TrimPrefix(key, "char:") + "'"
+	case strings.HasPrefix(key, "int:hex:"):
+		return strings.TrimPrefix(key, "int:hex:")
+	case strings.HasPrefix(key, "int:"):
+		return strings.TrimPrefix(key, "int:")
+	case strings.HasPrefix(key, "str:"):
+		return "\"" + strings.TrimPrefix(key, "str:") + "\""
+	case strings.HasPrefix(key, "bool:"):
+		return strings.TrimPrefix(key, "bool:")
+	case strings.HasPrefix(key, "tag:"):
+		return strings.TrimPrefix(key, "tag:")
+	}
+	return key
 }
 
 type loweredMachineArm struct {
