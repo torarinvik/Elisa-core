@@ -408,6 +408,30 @@ type ReturnStmt struct {
 type BreakStmt struct {
 	Position lexer.Pos
 }
+
+// MachineCoverageStmt is a compile-time-only obligation emitted by the `machine over`
+// desugar (docs/125 §9.1): it carries, per state, the input-domain coverage the analyzer
+// must verify once the input's TYPE is known. It has NO runtime effect (the real dispatch
+// is the desugared if-ladder); the analyzer resolves `Input`'s type and enforces:
+//   - closed const-enum input → every state must spell all variants as explicit tags; an
+//     unguarded `_` is REJECTED (a wildcard erases the add-a-variant safety net), and a
+//     missing tag is a hard error naming it;
+//   - open input (char/int) → every state must end in the unguarded wildcard `_` (the
+//     Tier-1 totality rule, moved here from the parser so both tiers share one check).
+type MachineCoverageStmt struct {
+	Position lexer.Pos
+	Input    Expr // the machine's input expression; its resolved type selects the tier
+	States   []MachineCoverageState
+}
+
+// MachineCoverageState is one state's input coverage: the enum-member names it handles via
+// unguarded, payload-unconditional tag arms, and whether it has such an unguarded wildcard.
+type MachineCoverageState struct {
+	Position    lexer.Pos
+	Name        string
+	Tags        []string // enum-member names covered by unguarded tag arms
+	HasWildcard bool     // an unguarded, payload-unconditional `_` arm is present
+}
 type ContinueStmt struct {
 	Position lexer.Pos
 }

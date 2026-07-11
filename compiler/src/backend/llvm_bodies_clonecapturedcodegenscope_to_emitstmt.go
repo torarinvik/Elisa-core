@@ -1111,6 +1111,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		return nil
 	case *ast.StaticBlockStmt:
 		return s.emitStaticBlock(n.Body)
+	case *ast.MachineCoverageStmt:
+		// Compile-time-only: the machine's input coverage was verified in analysis (docs/125
+		// §9.1). The real dispatch is the desugared if-ladder; this carries no runtime effect.
+		return nil
 	default:
 		return fmt.Errorf("unsupported statement %T", stmt)
 	}

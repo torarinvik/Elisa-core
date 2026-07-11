@@ -780,13 +780,24 @@ machines, but the classifier makes it non-blocking. The duplicate-arm gap is a
   win. C3's table folding should also consider mode-dispatch ordering by
   execution frequency, or profile-free heuristics (self-transitioning states
   first).
-- **C1 — tag-coverage** for closed-enum scrutinees; duplicate-arm rejection
-  ✅ DONE (stage0 `063f385e`): two unconditional same-literal/tag arms in one
-  state are rejected as unreachable (0-FP: guard / payload-cond / cross-state /
-  ranges exempt). Range patterns also now parse in machine arms (`3eb5d3c5`),
-  unifying the match/when/machine grammar. REMAINING: tag-coverage totality to
-  flip the pilot's `_` arms to explicit tags (needs relaxing the mandatory-`_`
-  rule + deferring exhaustiveness to semantic; safety net = `else: break`).
+- **C1 — tag-coverage** for closed-enum scrutinees ✅ DONE. Two-tier totality,
+  strictly *stronger* than before (not a relaxation):
+  - **Tier 1 (open input — char/int/range):** the final unguarded `_` stays
+    mandatory. The parser proves this without types and errors early.
+  - **Tier 2 (closed const-enum input — classified dispatch):** every state must
+    spell **all** the enum's variants as explicit tags. A missing variant is a
+    hard error naming it (the add-a-variant safety net); an unguarded `_` is
+    **rejected** ("spell the tags" — a wildcard is exactly what erases the net).
+    The parser can't see types, so the desugar emits a `MachineCoverageStmt`
+    (compile-time-only, no codegen) carrying per-state {tags, hasWildcard} and the
+    input expr; the analyzer resolves the input type and enforces the tier. A
+    wildcard-less state lowers with a defensive `else: break` — dead code under a
+    proven-total dispatch, but the machine can never spin even if a hole slipped
+    past. Also: duplicate same-literal/tag arm rejection (`063f385e`) and range
+    patterns in machine arms (`3eb5d3c5`). The pilot's `read_number` was flipped
+    from `_` arms to explicit `NumberClass` tags (Elisa-compiler); parity
+    byte-identical. Tests: `TestMachineCoverageClosedEnum{Complete,MissingTag,
+    WildcardRejected}`.
 - **C2 — qualification gating** (the carrot rule); leading-dot arm shorthand
   ✅ ALREADY WORKS (`Go, .Digit:` resolves via the scrutinee enum type; a bogus
   `.Member` errors). Qualification gating (empty-effect + termination +

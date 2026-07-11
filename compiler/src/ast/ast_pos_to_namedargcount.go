@@ -164,6 +164,7 @@ func (n *CanStmt) Pos() lexer.Pos                      { return n.Position }
 func (n *PoolStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *LockStmt) Pos() lexer.Pos                     { return n.Position }
 func (n *PassStmt) Pos() lexer.Pos                     { return n.Position }
+func (n *MachineCoverageStmt) Pos() lexer.Pos          { return n.Position }
 func (n *SignalStmt) Pos() lexer.Pos                   { return n.Position }
 func (n *PanicStmt) Pos() lexer.Pos                    { return n.Position }
 func (n *ExprStmt) Pos() lexer.Pos                     { return n.Position }
@@ -368,6 +369,7 @@ func (*ScopeStmt) nodeTag()                            {}
 func (*PoolStmt) nodeTag()                             {}
 func (*LockStmt) nodeTag()                             {}
 func (*PassStmt) nodeTag()                             {}
+func (*MachineCoverageStmt) nodeTag()                  {}
 func (*SignalStmt) nodeTag()                           {}
 func (*PanicStmt) nodeTag()                            {}
 func (*ExprStmt) nodeTag()                             {}
@@ -578,6 +580,7 @@ func (*ScopeStmt) stmtTag()                            {}
 func (*PoolStmt) stmtTag()                             {}
 func (*LockStmt) stmtTag()                             {}
 func (*PassStmt) stmtTag()                             {}
+func (*MachineCoverageStmt) stmtTag()                  {}
 func (*SignalStmt) stmtTag()                           {}
 func (*PanicStmt) stmtTag()                            {}
 func (*ExprStmt) stmtTag()                             {}

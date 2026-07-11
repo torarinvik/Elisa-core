@@ -510,29 +510,38 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 		}
 		armsByState[arm.state] = append(armsByState[arm.state], i)
 	}
+	// Per-state input coverage, verified later against the input's TYPE (docs/125 §9): the
+	// totality rule depends on whether the input is an open domain (char/int — needs a final
+	// `_`) or a closed const enum (needs all tags spelled, `_` rejected). The parser can't
+	// see types, so it records coverage and a MachineCoverageStmt carries it to the analyzer.
+	var coverageStates []ast.MachineCoverageState
 	for _, st := range states {
 		idxs := armsByState[st.name]
 		if len(idxs) == 0 {
 			p.errorf("machine state %q has no arms — every state must handle every input (docs/123 §5)", st.name)
 			continue
 		}
+		cover := ast.MachineCoverageState{Position: st.pos, Name: st.name}
 		seenInputs := map[string]bool{}
+		hasOpenDomainInput := false
 		for j, idx := range idxs {
 			arm := &arms[idx]
-			irrefutable := machineArmIrrefutable(arm)
-			if j == len(idxs)-1 {
-				if !irrefutable {
-					p.errorf("machine state %q does not cover all inputs — its final arm must be the unguarded wildcard `%s, _:` (docs/123 §5)", st.name, st.name)
-				}
-			} else if irrefutable {
-				p.errorf("machine arm %d for state %q is unreachable — an earlier arm already matches every input (docs/123 §5)", j+2, st.name)
-				break
+			if machineArmHasOpenDomainInput(arm) {
+				hasOpenDomainInput = true
 			}
-			// Duplicate-arm rejection: an unconditional literal/tag alternative already handled
-			// by an earlier arm in this state can never match here (docs/123 §5.5). A guard OR a
-			// payload condition (`Expr(depth > 1), '}':`) makes the arm conditional, so it does
-			// not claim exclusive coverage of the literal — only fully unconditional arms do.
+			irrefutable := machineArmIrrefutable(arm)
+			if irrefutable {
+				cover.HasWildcard = true
+				if j != len(idxs)-1 {
+					p.errorf("machine arm %d for state %q is unreachable — an earlier arm already matches every input (docs/123 §5)", j+2, st.name)
+					break
+				}
+			}
+			// Unguarded, payload-unconditional arms discharge coverage. A guard or a payload
+			// condition (`Expr(depth > 1), '}':`) makes the arm conditional, so it neither
+			// claims exclusive coverage of a literal (duplicate check) nor a tag (totality).
 			if arm.guard == nil && machinePayloadUnconditional(arm) {
+				cover.Tags = append(cover.Tags, machineArmTagNames(arm)...)
 				for _, key := range machineArmInputLiteralKeys(arm) {
 					if seenInputs[key] {
 						p.errorf("machine arm for state %q repeats input %s — an earlier arm already handles it, so this arm is unreachable (docs/123 §5)", st.name, machineInputLiteralDisplay(key))
@@ -542,6 +551,13 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 				}
 			}
 		}
+		// Early Tier-1 diagnosis: an open-domain state (char/int/range arms) with no `_` can
+		// never be exhaustive, and the parser can prove it without types. Enum-tag states are
+		// left to the coverage check, which knows the enum and its full variant set.
+		if !cover.HasWildcard && hasOpenDomainInput {
+			p.errorf("machine state %q does not cover all inputs — its final arm must be the unguarded wildcard `%s, _:` (docs/123 §5)", st.name, st.name)
+		}
+		coverageStates = append(coverageStates, cover)
 	}
 
 	// Foreign-mutation check: arm bodies may assign only to (a) roots of the driven
@@ -622,13 +638,19 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 	if loopCond == nil {
 		loopCond = &ast.BoolLit{Position: pos, Value: true}
 	}
+	loopBody := []ast.Stmt{
+		&ast.VarDeclStmt{Position: pos, Name: inputVar, Value: input},
+	}
+	// The coverage obligation reads the input's resolved type (docs/125 §9): it sits after
+	// the input var decl so `input` is analyzed first, and carries no runtime effect.
+	if len(coverageStates) > 0 {
+		loopBody = append(loopBody, &ast.MachineCoverageStmt{Position: pos, Input: input, States: coverageStates})
+	}
+	loopBody = append(loopBody, &ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: modeVar}, Arms: matchArms})
 	loop := &ast.WhileStmt{
 		Position: pos,
 		Cond:     loopCond,
-		Body: []ast.Stmt{
-			&ast.VarDeclStmt{Position: pos, Name: inputVar, Value: input},
-			&ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: modeVar}, Arms: matchArms},
-		},
+		Body:     loopBody,
 	}
 
 	hdr := &loopHeader{pos: pos, decls: decls, captures: sortedKeys(mutatedRoots), yield: yield}
@@ -694,6 +716,43 @@ func machinePayloadUnconditional(arm *machineArm) bool {
 		}
 	}
 	return true
+}
+
+// machineArmHasOpenDomainInput reports whether an arm names any OPEN-domain input — a
+// char/int/bool/string literal or a range. Such a state cannot be exhaustive without the
+// wildcard `_`, and (unlike an enum-tag state) the parser can prove that without types, so
+// a missing `_` is diagnosed early rather than deferred to the coverage check (docs/125 §9).
+func machineArmHasOpenDomainInput(arm *machineArm) bool {
+	if len(arm.inputRanges) > 0 {
+		return true
+	}
+	for _, alt := range arm.inputs {
+		switch alt.(type) {
+		case *ast.CharLit, *ast.IntLit, *ast.BoolLit, *ast.StringLit:
+			return true
+		}
+	}
+	return false
+}
+
+// machineArmTagNames returns the enum-member names an arm's input alternatives name, when
+// they are enum-tag patterns: a qualified `Enum.Member` (FieldExpr) or a leading-dot
+// `.Member` (ShorthandMemberExpr). A non-tag input (a char/int literal) contributes nothing.
+// Used to build the per-state tag-coverage set for the closed-enum totality check (docs/125
+// §9); the caller restricts this to unguarded, payload-unconditional arms.
+func machineArmTagNames(arm *machineArm) []string {
+	var names []string
+	for _, alt := range arm.inputs {
+		switch n := alt.(type) {
+		case *ast.FieldExpr:
+			names = append(names, n.Field)
+		case *ast.ShorthandMemberExpr:
+			if len(n.Parts) > 0 {
+				names = append(names, n.Parts[len(n.Parts)-1])
+			}
+		}
+	}
+	return names
 }
 
 // machineArmInputLiteralKeys returns a canonical coverage key for each of an arm's literal
@@ -875,18 +934,27 @@ func lowerMachineTransition(arm *machineArm, target *machineState, enumMember fu
 }
 
 // buildMachineArmChain folds a state's lowered arms into a single if/elif/else ladder —
-// or the bare body when the state has only its irrefutable arm.
+// or the bare body when the state has only its irrefutable arm. A state with no irrefutable
+// (unguarded-wildcard) arm — legal only for a closed-enum input proven exhaustive by the
+// coverage check (docs/125 §9) — gets a defensive `else: break`: dead code under a proven
+// total dispatch, but a guarantee the machine can never spin on an unhandled input even if
+// a hole ever slipped past the checker.
 func buildMachineArmChain(pos lexer.Pos, arms []loweredMachineArm) []ast.Stmt {
 	if len(arms) == 1 && arms[0].cond == nil {
 		return arms[0].body
 	}
 	ifStmt := &ast.IfStmt{Position: arms[0].pos, Cond: arms[0].cond, Then: arms[0].body}
+	hasElse := false
 	for _, a := range arms[1:] {
 		if a.cond == nil {
 			ifStmt.Else = a.body
+			hasElse = true
 			break
 		}
 		ifStmt.Elifs = append(ifStmt.Elifs, ast.ElifClause{Position: a.pos, Cond: a.cond, Body: a.body})
+	}
+	if !hasElse {
+		ifStmt.Else = []ast.Stmt{&ast.BreakStmt{Position: pos}}
 	}
 	return []ast.Stmt{ifStmt}
 }

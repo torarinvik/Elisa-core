@@ -129,17 +129,20 @@ func TestMachineDesugarShape(t *testing.T) {
 	if len(loop.Captures) != 1 || loop.Captures[0] != "lexer" {
 		t.Fatalf("loop captures = %v, want [lexer]", loop.Captures)
 	}
-	// Body = fresh input read + single match on the mode.
-	if len(loop.Body) != 2 {
-		t.Fatalf("loop body has %d stmts, want 2", len(loop.Body))
+	// Body = fresh input read + coverage obligation + single match on the mode.
+	if len(loop.Body) != 3 {
+		t.Fatalf("loop body has %d stmts, want 3", len(loop.Body))
 	}
 	inputDecl := loop.Body[0].(*ast.VarDeclStmt)
 	if !strings.HasPrefix(inputDecl.Name, "__machine_input_") || inputDecl.Mutable {
 		t.Fatalf("input decl = %+v", inputDecl)
 	}
-	matchStmt, ok := loop.Body[1].(*ast.MatchStmt)
+	if _, ok := loop.Body[1].(*ast.MachineCoverageStmt); !ok {
+		t.Fatalf("expected coverage obligation, got %T", loop.Body[1])
+	}
+	matchStmt, ok := loop.Body[2].(*ast.MatchStmt)
 	if !ok {
-		t.Fatalf("expected match, got %T", loop.Body[1])
+		t.Fatalf("expected match, got %T", loop.Body[2])
 	}
 	if len(matchStmt.Arms) != 3 {
 		t.Fatalf("match has %d arms, want 3", len(matchStmt.Arms))
@@ -275,7 +278,7 @@ func TestMachineRangeArmLowering(t *testing.T) {
 	}
 	wrapper := fn.Body[0].(*ast.IfStmt)
 	loop := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
-	matchStmt := loop.Body[1].(*ast.MatchStmt)
+	matchStmt := loop.Body[2].(*ast.MatchStmt)
 	// Num state: range arm + wildcard `break` → if/else. The range arm is the `if` cond.
 	numIf := matchStmt.Arms[0].Body[0].(*ast.IfStmt)
 	and, ok := numIf.Cond.(*ast.BinaryExpr)
@@ -547,7 +550,7 @@ func TestMachineInputBindPattern(t *testing.T) {
 	}
 	wrapper := fn.Body[0].(*ast.IfStmt)
 	loop := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
-	matchStmt := loop.Body[1].(*ast.MatchStmt)
+	matchStmt := loop.Body[2].(*ast.MatchStmt)
 	bind, ok := matchStmt.Arms[0].Body[0].(*ast.VarDeclStmt)
 	if !ok || bind.Name != "character" {
 		t.Fatalf("expected hoisted input-bind decl, got %#v", matchStmt.Arms[0].Body[0])

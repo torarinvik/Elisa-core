@@ -988,6 +988,8 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		} else {
 			a.errorf(n.Pos(), "static error triggered")
 		}
+	case *ast.MachineCoverageStmt:
+		a.checkMachineCoverage(n)
 	case *ast.ContractStmt:
 		// In-body `invariant` is analyzed + checked in place; a `requires`/`ensure` reaching here
 		// (not lifted) was not at the function start, which is the only place they're honoured.
