@@ -203,6 +203,7 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	a.checkSentinelIndex(fn)
 	a.checkFlowComplexity(fn)
 	a.checkAllocationChurn(fn)
+	a.checkUnfoldableClassifier(fn)
 	a.checkPoolChurn(fn)
 	a.checkTaskGroupChurn(fn)
 	a.checkLockChurn(fn)

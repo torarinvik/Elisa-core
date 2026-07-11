@@ -6,6 +6,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/parser"
+	"strings"
 	"testing"
 )
 
@@ -138,6 +139,46 @@ def classify(c: i64) -> Cls:
 	file := parseFoldTestFile(t, src)
 	if folded := foldCharClassifierTables(file); len(folded) != 0 {
 		t.Fatalf("non-char classifier must not fold, got %v", folded)
+	}
+}
+
+// The -Wperf foldability lint: a classifier-shaped function (char param, const-enum return)
+// that dispatches by a branch chain instead of folding draws a warning by default and a hard
+// error under -Wperf. Here a guard blocks the fold.
+func TestUnfoldableClassifierPerfLint(t *testing.T) {
+	src := `
+const enum Cls of u8:
+    A
+    B
+
+def classify(c: char) -> Cls:
+    return match c:
+        '0'..='9' if true:
+            Cls.A
+        _:
+            Cls.B
+`
+	warn := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unfoldable.elisa", src, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(warn), "not foldable to a lookup table") {
+		t.Fatalf("expected foldability warning, got:\n%s", allDiagnostics(warn))
+	}
+	if len(warn.Errors()) != 0 {
+		t.Fatalf("default foldability friction should be a warning, got errors:\n%v", warn.Errors())
+	}
+	strict := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "unfoldable_strict.elisa", src, AnalyzeOptions{EnforcePerfLints: true})
+	if len(strict.Errors()) == 0 {
+		t.Fatal("foldability friction should be an error under -Wperf")
+	}
+}
+
+// A FOLDABLE classifier draws NO lint — it was rewritten to a table lookup before analysis.
+func TestFoldableClassifierNoPerfLint(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "foldable_clean.elisa", foldClassifierSrc, AnalyzeOptions{EnforcePerfLints: true})
+	if strings.Contains(allDiagnostics(result), "foldable") {
+		t.Fatalf("a folded classifier must draw no foldability lint, got:\n%s", allDiagnostics(result))
+	}
+	if len(result.Errors()) != 0 {
+		t.Fatalf("folded classifier should be clean under -Wperf, got:\n%v", result.Errors())
 	}
 }
 
