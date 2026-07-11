@@ -188,18 +188,20 @@ transition is `next` at arm tail position.
 error: machine state is not a value; transitions occur only via `next`
 ```
 
-> **CONFIRMED ENFORCEMENT GAP (2026-07-11, highest-priority fix).** R1 as
-> implemented covers only the *mode* variable. `machine from` arm BODIES accept
-> arbitrary statements today: a nested `if a: if b: outer <- …` before the
-> terminator passes semantic analysis silently (probe-verified; the parser's
-> `machine_from` path performs zero arm-statement validation, while `machine
-> over` enforces both the no-nested-branching rule and the foreign-state
-> mutation ban "may only mutate the driven resource", docs/123 §5). This
-> undermines `machine from` as the non-loop sibling of the strict machine. Fix:
-> ONE shared arm law for both forms — straight-line computation, then guarded
-> transition rows, then one total fallback; no nested branch, no loop, no
-> foreign mutation. `validateMachineArmStmt` already exists; it needs a call
-> site in the `machine from` path plus the foreign-state scan.
+> **R1 arm law — LANDED (stage0, 2026-07-11).** The shared arm law now holds for
+> BOTH machine forms: an arm body is straight-line computation only, then guarded
+> `next`/`done` terminators. `machine from` arm bodies are validated by
+> `validateMachineFromArmStmt` (parser/machine_from.go), the sibling of `machine
+> over`'s `validateMachineArmStmt` — a nested `if`/`match`/`while`/`for`, or a
+> control-flow escape (`return`/`break`/`continue`, since resolution is `next`/
+> `done` not function-return) is now a parse error. Mutation stays legal in the
+> body (the desugared loop's captures license it), so the two forms differ only in
+> how they resolve. Regression tests: `TestMachineFromRefusalBranchInArm`,
+> `TestMachineFromRefusalReturnInArm`, `TestMachineFromStraightLineArmAccepted`.
+> Historical note: before this fix the `machine from` path performed zero
+> arm-statement validation, so a nested `if a: if b: outer <- …` before the
+> terminator passed semantic analysis silently — undermining `machine from` as the
+> non-loop sibling of the strict machine.
 
 **R2 — every arm must resolve.** Falling off an arm's end is neither "stay" nor
 "exit"; it is a compile error. "I forgot to decide" is unrepresentable.

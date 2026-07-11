@@ -194,6 +194,61 @@ func TestMachineRefusalBranchInArm(t *testing.T) {
 	}
 }
 
+// A `machine from` arm body must be straight-line — a nested branch before the
+// `next`/`done` terminator is the confirmed docs/125 §5 soundness hole (R1 for the
+// expression form). This mirrors TestMachineRefusalBranchInArm for `machine over`.
+func TestMachineFromRefusalBranchInArm(t *testing.T) {
+	src := "enum Scan:\n    A\n    B\n\n" +
+		"def probe(flag: bool) -> i64:\n" +
+		"    outer: mutable i64 = 0\n" +
+		"    result: i64 = machine from Scan.A:\n" +
+		"        Scan.A:\n" +
+		"            if flag:\n" +
+		"                outer <- outer + 1\n" +
+		"            next Scan.B\n" +
+		"        Scan.B:\n" +
+		"            done outer\n" +
+		"    return result\n"
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "cannot branch") {
+		t.Fatalf("expected machine-from branch refusal, got %v", errs)
+	}
+}
+
+// A `machine from` arm resolves via `done`, so a bare `return` is a control-flow escape.
+func TestMachineFromRefusalReturnInArm(t *testing.T) {
+	src := "enum Scan:\n    A\n\n" +
+		"def probe() -> i64:\n" +
+		"    result: i64 = machine from Scan.A:\n" +
+		"        Scan.A:\n" +
+		"            return 7\n" +
+		"    return result\n"
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "cannot `return`") {
+		t.Fatalf("expected machine-from return refusal, got %v", errs)
+	}
+}
+
+// Straight-line mutation plus a guarded `next` terminator is the blessed shape and must
+// still parse cleanly.
+func TestMachineFromStraightLineArmAccepted(t *testing.T) {
+	src := "enum Scan:\n    A\n    B\n\n" +
+		"def probe(flag: bool) -> i64:\n" +
+		"    outer: mutable i64 = 0\n" +
+		"    result: i64 = machine from Scan.A:\n" +
+		"        Scan.A:\n" +
+		"            outer <- outer + 1\n" +
+		"            next Scan.B if flag\n" +
+		"            done outer\n" +
+		"        Scan.B:\n" +
+		"            done outer\n" +
+		"    return result\n"
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("expected blessed machine-from arm to parse, got %v", errs)
+	}
+}
+
 func TestMachineRefusalNoDecision(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Text

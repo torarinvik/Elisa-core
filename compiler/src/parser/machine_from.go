@@ -159,7 +159,9 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 			// resolved on every path that reaches here.
 			p.errorf("machine arm statement follows a `next`/`done` transition — nothing after a resolution can run (docs/125 §5)")
 		}
-		body = append(body, p.parseStmt())
+		stmt := p.parseStmt()
+		p.validateMachineFromArmStmt(stmt)
+		body = append(body, stmt)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
@@ -209,4 +211,34 @@ valueScan:
 		end++
 	}
 	return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+}
+
+// validateMachineFromArmStmt enforces the shared arm law (docs/125 §5 R1) on a `machine
+// from` arm-body statement: straight-line computation only. All discrimination lives in
+// the arm header and the `next … if guard` terminators — a body may compute and mutate
+// (the desugared loop's captures license the mutation) but may NOT hide a branch, a loop,
+// or a control-flow escape. This mirrors `machine over`'s validateMachineArmStmt so both
+// forms obey one law; the only difference is that resolution here is `next`/`done`, so
+// `return`/`break`/`continue` are escapes rather than legal arm exits.
+func (p *Parser) validateMachineFromArmStmt(stmt ast.Stmt) {
+	switch s := stmt.(type) {
+	case *ast.IfStmt, *ast.MatchStmt, *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt:
+		p.errorf("machine arms cannot branch or loop (docs/125 §5) — move the condition into a `next State if guard` terminator or split into separate arms")
+	case *ast.ReturnStmt:
+		p.errorf("machine arms cannot `return` — an arm resolves with `done VALUE`, not by escaping the enclosing function (docs/125 §5)")
+	case *ast.BreakStmt, *ast.ContinueStmt:
+		p.errorf("machine arms cannot `break`/`continue` — every path resolves via `next State` or `done VALUE` (docs/125 §5)")
+	case *ast.CanStmt:
+		// A postfix `can Effect` clause is a transparent effect-licensing wrapper, not a
+		// branch. Validate the licensed statements.
+		for _, inner := range s.Body {
+			p.validateMachineFromArmStmt(inner)
+		}
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.ExprStmt:
+		_ = s // allowed straight-line forms
+	case nil:
+		// parse error already reported
+	default:
+		p.errorf("machine arms allow only straight-line statements before a `next`/`done` terminator (docs/125 §5)")
+	}
 }
