@@ -127,6 +127,25 @@ mandate (`while cond |outer_a, outer_b|:` as a complete local frame condition)
 is the natural strict-tier form for loops, and the highest-ergonomic-risk item
 on the list — it graduates only if the census supports it.
 
+> **CENSUS DONE, ENFORCEMENT DEFERRED (2026-07-11).** The census tool ships as
+> `findJoinRuleSites` / `TestJoinRuleCensus` (analyzer_flow_join_rule.go): it
+> counts branch statements whose fall-through arms phi-reconstruct ≥N outer
+> variables, excluding synthesized `__`-names and counting a variable only when
+> ≥2 sibling arms write it (a lone guarded write is not a value-picking join).
+> Measured over the stage1 compiler + stdlib (145+18 files): **the anti-pattern is
+> effectively absent.** Every ≥2-variable hit is a blessed form the syntactic pass
+> can't yet tell apart — a post-desugar machine if-ladder (`{depth, lexer}`),
+> self-referential accumulation (`n <- n + 1` across arms), same-value writes
+> (`flag <- true` in two arms), or a captured threaded accumulator (`table`,
+> already in a `|table, …|` manifest). The only hand-written residue is the
+> two-variable default-then-overwrite extract (`x, y` pulled from a `match` with a
+> `_` default), which §1d classes as **style, not divergence** — flagging it would
+> train reflexive `ComplexFlow` grants, the failure §1d exists to prevent. So the
+> warn-tier detector (step 11) and the loop-header mandate (step 12) do **not**
+> graduate now: the corpus already crosses joins explicitly. Re-run the census as
+> the codebase grows; wire the lint only if genuine multi-variable divergent-phi
+> sites appear.
+
 Two hard constraints carry over unchanged from the rest of the language:
 
 - **Zero overhead.** Every blessed form must lower to exactly the code the
