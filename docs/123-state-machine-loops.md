@@ -307,13 +307,21 @@ These are the construct's identity — each is a hard compile error inside `mach
        total <- total + count      # ✗ machine arms may only mutate the driven
        break count                 #   lmut resource and state payloads
    ```
-4. **Non-exhaustive state × input.** Every declared state must handle every input value
-   (a final `State, _:` arm per state discharges it). A state with no arms is an error.
+4. **Non-exhaustive state × input.** Every declared state must handle every input value,
+   with a TWO-TIER rule keyed on the input's type (docs/125 §9 C1, LANDED 2026-07-11):
+   - **open input (char/int/range):** a final unguarded `State, _:` per state is
+     mandatory (the parser proves this without types and errors early);
+   - **closed const-enum input (classified dispatch):** every state must spell **all**
+     the enum's variants as explicit tags — a missing variant is a hard error naming it —
+     and an unguarded `_` is **rejected** ("spell the tags"; a wildcard erases the
+     add-a-variant safety net). Enforced by a compile-time `MachineCoverageStmt` the
+     desugar emits for the analyzer, which knows the input type.
+   A state with no arms is an error.
 5. **Unreachable arms.** An arm shadowed by earlier patterns/guards is an error, not dead
-   code. **KNOWN GAP (verified 2026-07-11): only the irrefutable-arm-before-others case
-   is caught today — two literally identical arms (`Scanning, 'm':` twice) pass
-   silently. General pairwise reachability is Phase 2 work, alongside tag-coverage
-   (docs/125 §9.1).**
+   code. Both the irrefutable-arm-before-others case AND two identical unconditional
+   literal/tag arms (`Scanning, 'm':` twice) are now caught (docs/125 §9, `063f385e`);
+   a guard or a distinguishing payload condition exempts the arm (0-FP). General pairwise
+   overlap of ranges is still not compared.
 6. **Undeclared transition targets.** `->` may only name a declared `state`.
 7. **Refinement violations at edges.** Every `-> State(args)` must discharge the target
    payload refinements (via the arm's pattern facts, e.g. `Expr(depth > 1)` proving
@@ -356,11 +364,11 @@ object). `machine` is opt-in; there is no pressure to force code into it.
    Guarded arms are non-covering for exhaustiveness.
 2. **Payload refinement patterns** — `Expr(depth > 1)` + payload literals `Expr(1)`.
    ✅ DONE (via the scalarized desugar, §4).
-3. **State × input exhaustiveness** — per-state coverage of the input domain. PARTIAL:
-   the per-state irrefutable-final-arm rule ships; true domain totality is Phase 2.
-   For closed-enum inputs the cheap complete form is tag-coverage (docs/125 §9.1) —
-   strictly easier than the general char-range problem and it removes the wildcard
-   mandate that erases the add-a-variant safety net.
+3. **State × input exhaustiveness** — per-state coverage of the input domain. ✅ DONE for
+   both tiers (see §5.4): open inputs keep the mandatory `_`; closed const-enum inputs
+   require all tags spelled and reject `_` (tag-coverage, docs/125 §9 C1, `6a5f9e14`).
+   The remaining open problem is only general char-RANGE totality (proving a set of
+   `'a'..='z'`-style ranges covers all bytes without a `_`), which stays Phase 2.
 
 **Verified arm-pattern matrix (2026-07-11):** literals ✓, alternation `'a' | 'b'` ✓,
 input bind + guard (`c if c.is_digit()`) ✓, enum tags ✓ (an enum-returning scrutinee
