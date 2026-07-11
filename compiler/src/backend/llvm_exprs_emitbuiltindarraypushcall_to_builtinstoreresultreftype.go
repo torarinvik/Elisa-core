@@ -438,7 +438,11 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 	}
 	owner, ok := s.darrayGrowthOwner(expr, fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope")
+		fnName := "<unknown>"
+		if s.decl != nil {
+			fnName = s.decl.Name
+		}
+		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope (in function %q, expr at %v)", fnName, expr.Pos())
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.reserve.owner.arena")
