@@ -218,16 +218,19 @@ artifact. Acyclic ⇒ terminating for free. Any cycle requires a machine-level
 
 > **DISCHARGE WIRED (stage0, 2026-07-11).** The measure no longer stops at a
 > presence check. The desugar prepends the machine-level `decreases M` as a
-> leading loop-body clause on the lowered `while`, so the *existing*
-> `checkLoopTermination` (analyzer_flow.go) owns it on the same footing as a
-> hand-written loop: `M` is type-checked as an integer (a non-integer measure is
-> now a hard error), a straight-line body is proved by strict-decrease +
-> bounded-below, and a body the analyzer cannot model (the common case — the loop
-> body is a `match` over the mode, and arms call into the driven resource) records
-> `ProofRuntime` and leans on the runtime progress backstop, escalating under
-> `-strict` and suppressed by `can Unsafe.AssumeProgress`. `machine from`
-> termination is thus a first-class participant in the proof economy, not a
-> black box.
+> leading loop-body clause on the lowered `while` (flagged
+> `RuntimeProgressBackstop`), so the *existing* `checkLoopTermination`
+> (analyzer_flow.go) owns it: `M` is type-checked as an integer (a non-integer
+> measure is now a hard error — this catches real bugs), and a straight-line body
+> is proved by strict-decrease + bounded-below. But a machine-from body is a
+> `match` over the mode whose arms call into the driven resource, so it is never
+> straight-line; the measure is therefore a runtime-backstopped **claim**, not a
+> proof obligation (docs/125 §5) — an unprovable measure records `ProofRuntime`
+> **silently** (no advisory lint, no `-strict` escalation) and relies on the
+> runtime progress check, with `can Unsafe.AssumeProgress` the explicit opt-out.
+> This is deliberate: unlike a hand-written `while decreases` (where the author
+> expects a proof), R3 already *requires* the measure's presence, so the machine
+> only needs the measure to be well-typed and the loop to be runtime-guarded.
 
 ```elisa
 machine from Scan.Ws decreases lexer.remaining():
@@ -777,9 +780,30 @@ machines, but the classifier makes it non-blocking. The duplicate-arm gap is a
   win. C3's table folding should also consider mode-dispatch ordering by
   execution frequency, or profile-free heuristics (self-transitioning states
   first).
-- **C1 — tag-coverage** for closed-enum scrutinees + duplicate-arm rejection
-  (stage0, then stage1). Flip the pilot's `_` arms to explicit tags.
-- **C2 — qualification gating** (the carrot rule) + leading-dot arm shorthand.
-- **C3 — table folding** + `-Wperf` foldability lint; benchmark vs the
-  hand-written branch chain — the "declarative and faster" claim is
-  demonstrated here, not asserted.
+- **C1 — tag-coverage** for closed-enum scrutinees; duplicate-arm rejection
+  ✅ DONE (stage0 `063f385e`): two unconditional same-literal/tag arms in one
+  state are rejected as unreachable (0-FP: guard / payload-cond / cross-state /
+  ranges exempt). Range patterns also now parse in machine arms (`3eb5d3c5`),
+  unifying the match/when/machine grammar. REMAINING: tag-coverage totality to
+  flip the pilot's `_` arms to explicit tags (needs relaxing the mandatory-`_`
+  rule + deferring exhaustiveness to semantic; safety net = `else: break`).
+- **C2 — qualification gating** (the carrot rule); leading-dot arm shorthand
+  ✅ ALREADY WORKS (`Go, .Digit:` resolves via the scrutinee enum type; a bogus
+  `.Member` errors). Qualification gating (empty-effect + termination +
+  closed-enum → tag-mode) remains.
+- **C3 — table folding** ✅ DONE (stage0 `analyzer_classifier_fold.go`). A pure
+  total `char -> const enum` classifier whose body is a single `when`/`match`
+  (literal / range / alternation arms + wildcard) is recognized before analysis,
+  evaluated at compile time for all 256 bytes (char is byte-sized), and rewritten
+  to a static-table lookup: a file-scope `const __classtable_<fn>: Enum[256]`
+  (lowers to `internal constant` rodata) plus `return __classtable_<fn>[c]`. No
+  backend change — reuses const-array codegen; behavior-preserving by
+  construction (the table is the classifier's own truth table). Works for
+  top-level and `extend`/`module`-nested classifiers (the pilot's real shape).
+  **Benchmark (500M classify calls, best-of-3): folded table 4011 Mchar/s vs the
+  same classifier's branch chain 1402 Mchar/s — 2.86× faster**, identical
+  checksum. The "declarative *and* faster" claim is demonstrated, not asserted.
+  (Note: `when c:` lowers to a 13-`icmp` comparison ladder, not an LLVM
+  `switch` — LLVM does not auto-table it, so the fold is a real win.)
+  REMAINING: the `-Wperf` foldability lint (flag a char→enum function that
+  *looks* like a classifier but isn't foldable — effectful / non-total / guarded).

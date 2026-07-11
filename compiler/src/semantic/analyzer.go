@@ -774,6 +774,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	if activeFile == nil {
 		activeFile = file
 	}
+	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
+	// before census/analysis, so the synthesized const table and rewritten body flow through
+	// the normal analysis + codegen paths. A no-op unless a foldable classifier is present.
+	foldCharClassifierTables(activeFile)
 	census := analyzeASTCensus(activeFile)
 	exprCapacity := census.exprs
 	exprFactsCapacity := census.exprs / 8
