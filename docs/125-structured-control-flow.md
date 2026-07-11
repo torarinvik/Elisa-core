@@ -805,5 +805,7 @@ machines, but the classifier makes it non-blocking. The duplicate-arm gap is a
   checksum. The "declarative *and* faster" claim is demonstrated, not asserted.
   (Note: `when c:` lowers to a 13-`icmp` comparison ladder, not an LLVM
   `switch` — LLVM does not auto-table it, so the fold is a real win.)
-  REMAINING: the `-Wperf` foldability lint (flag a char→enum function that
-  *looks* like a classifier but isn't foldable — effectful / non-total / guarded).
+  The `-Wperf` foldability lint (`checkUnfoldableClassifier`) is also LANDED: a
+  classifier-shaped function (char param, const-enum return) that dispatches by a
+  branch chain instead of folding draws a warning (hard error under `-Wperf`),
+  naming the blocker (a guarded arm, etc.); a folded classifier draws nothing.
