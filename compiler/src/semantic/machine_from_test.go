@@ -78,7 +78,9 @@ def f(x: i64) -> i64:
 	}
 }
 
-// A cycle WITH a `decreases` measure is accepted (discharge is deferred to the prover).
+// A cycle WITH a `decreases` measure is accepted; the measure is now discharged by the
+// existing loop-termination prover (checkLoopTermination) — here it falls back to the
+// runtime progress backstop (advisory), so acceptance holds.
 func TestMachineFromCycleWithDecreasesOk(t *testing.T) {
 	all := machineFromDiag(t, "r3_ok.elisa", `
 def f(x: i64) -> i64:
@@ -93,6 +95,24 @@ def f(x: i64) -> i64:
 `)
 	if strings.Contains(all, "transition cycle") {
 		t.Fatalf("cycle with decreases must be accepted, got:\n%s", all)
+	}
+}
+
+// The `decreases` measure now flows into the loop-termination prover, so a non-integer
+// measure is a hard error — proving the measure is genuinely type-checked, not merely
+// present-checked (the pre-wiring behavior silently ignored the measure's type).
+func TestMachineFromDecreasesMeasureMustBeInteger(t *testing.T) {
+	all := machineFromDiag(t, "dec_type.elisa", `
+def f(flag: bool) -> i64:
+    return machine from S.A decreases flag:
+        S.A:
+            next S.B if flag
+            done 0
+        S.B:
+            next S.A
+`)
+	if !strings.Contains(all, "measure must be an integer") {
+		t.Fatalf("expected non-integer decreases measure to be rejected, got:\n%s", all)
 	}
 }
 

@@ -330,10 +330,23 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 		})
 	}
 
+	// A machine-level `decreases M` (docs/125 §5 R3) lowers to a leading loop-body
+	// `decreases` clause so the EXISTING loop-termination prover (checkLoopTermination,
+	// analyzer_flow.go) discharges it on the same footing as a hand-written `while`: type
+	// the measure as an integer, prove strict-decrease + bounded-below where the body is
+	// straight-line, else record ProofRuntime and lean on the runtime progress backstop /
+	// `can Unsafe.AssumeProgress`. The R3 pre-check already demanded the measure's PRESENCE
+	// for a cyclic transition graph; this is what makes the measure actually mean something.
+	loopBody := make([]ast.Stmt, 0, 2)
+	if expr.Decreases != nil {
+		loopBody = append(loopBody, &ast.ContractStmt{Position: expr.Decreases.Pos(), Kind: ast.ContractDecreases, Cond: expr.Decreases})
+	}
+	loopBody = append(loopBody, &ast.MatchStmt{Position: pos, Value: ident(modeVar), Arms: matchArms})
+
 	loop := &ast.WhileStmt{
 		Position: pos,
 		Cond:     &ast.UnaryExpr{Position: pos, Op: lexer.TOKEN_NOT, Operand: ident(doneVar)},
-		Body:     []ast.Stmt{&ast.MatchStmt{Position: pos, Value: ident(modeVar), Arms: matchArms}},
+		Body:     loopBody,
 		Captures: captures,
 	}
 

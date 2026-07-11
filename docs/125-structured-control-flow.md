@@ -216,6 +216,19 @@ artifact. Acyclic ⇒ terminating for free. Any cycle requires a machine-level
 `decreases`, discharged by the 4-increment prover / callee `ensure` summaries
 (docs/118), or the escape hatch `can Unsafe.AssumeProgress`.
 
+> **DISCHARGE WIRED (stage0, 2026-07-11).** The measure no longer stops at a
+> presence check. The desugar prepends the machine-level `decreases M` as a
+> leading loop-body clause on the lowered `while`, so the *existing*
+> `checkLoopTermination` (analyzer_flow.go) owns it on the same footing as a
+> hand-written loop: `M` is type-checked as an integer (a non-integer measure is
+> now a hard error), a straight-line body is proved by strict-decrease +
+> bounded-below, and a body the analyzer cannot model (the common case — the loop
+> body is a `match` over the mode, and arms call into the driven resource) records
+> `ProofRuntime` and leans on the runtime progress backstop, escalating under
+> `-strict` and suppressed by `can Unsafe.AssumeProgress`. `machine from`
+> termination is thus a first-class participant in the proof economy, not a
+> black box.
+
 ```elisa
 machine from Scan.Ws decreases lexer.remaining():
     Scan.Ws:
