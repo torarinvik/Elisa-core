@@ -750,11 +750,18 @@ machines, but the classifier makes it non-blocking. The duplicate-arm gap is a
 
 ### 9.5 Increments
 
-- **C0 — pilot (no compiler change).** `read_number` as a classifier machine
-  with `_` arms; `@inline(always)` classifier (inlining is load-bearing in the
-  stage1 lexer, ~10%). Acceptance: token-parity byte-identical, `lexer_bench`
-  non-regression, the `can ComplexFlow:` grant in `read_number` REMOVED,
-  strict census stays 0.
+- **C0 — pilot (no compiler change).** ✅ DONE (Elisa-compiler d76556e).
+  `read_number` is a 6-state classified machine (Lead/Hex/Whole/Fraction/
+  ExpLead/ExpDigits over a total `NumberClass` classifier); the radix fork is
+  a guarded Lead arm and the `can ComplexFlow:` grant is gone; the kind
+  payload rides the states and survives EOF fall-out. All acceptance criteria
+  green: token parity byte-identical (13 fixtures), strict census 0,
+  lexer_bench at-or-above baseline (289.8 vs 284.6 MB/s best-of-3).
+  **Perf finding: state-DECLARATION order shapes the lowered dispatch ladder**
+  — hot digit-run states declared first turned a 4% regression into a small
+  win. C3's table folding should also consider mode-dispatch ordering by
+  execution frequency, or profile-free heuristics (self-transitioning states
+  first).
 - **C1 — tag-coverage** for closed-enum scrutinees + duplicate-arm rejection
   (stage0, then stage1). Flip the pilot's `_` arms to explicit tags.
 - **C2 — qualification gating** (the carrot rule) + leading-dot arm shorthand.
