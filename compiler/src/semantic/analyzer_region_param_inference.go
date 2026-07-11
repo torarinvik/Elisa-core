@@ -510,6 +510,43 @@ func regionlessRefStruct(typ ast.TypeExpr) (func(region string), bool) {
 	}
 }
 
+// refParamIsPackedEnum reports whether a parameter type is a by-reference (`&`) region-backed PACKED
+// enum (a handle-tree node type like `Ast::Expr`) with no explicit region already on the ref. Peels the
+// mutable/owned/ref qualifiers, resolves the referent, and checks it is a packed EnumType (or a packed
+// enum root). Used to restrict the scalar-out-param region-thread to the handle-enum UAF class — an
+// ordinary struct out-param (no region-backed storage) is left to the existing field-grown/forwarded
+// triggers. Conservative: an unresolved/non-enum type returns false (no thread, prior behavior).
+func (a *Analyzer) refParamIsPackedEnum(typ ast.TypeExpr) bool {
+	var ref *ast.RefType
+	for {
+		switch t := typ.(type) {
+		case *ast.MutableType:
+			typ = t.Elem
+		case *ast.OwnedType:
+			typ = t.Elem
+		case *ast.RefType:
+			if t.Region != "" {
+				return false
+			}
+			ref = t
+			typ = t.Elem
+		default:
+			if ref == nil {
+				return false
+			}
+			// Resolve under diagnostic suppression: this runs at the pre-body classification pass where a
+			// generic type-param name (`T`/`K` from an enclosing `extend[T]`) is not yet in scope, so a
+			// bare resolveType would emit a spurious "unknown type" error. We only need the boolean.
+			savedSuppress := a.suppressDiagnostics
+			a.suppressDiagnostics = true
+			resolved := a.resolveType(typ)
+			a.suppressDiagnostics = savedSuppress
+			et, ok := resolved.(*EnumType)
+			return ok && et != nil && (et.Packed || et.Root().Packed)
+		}
+	}
+}
+
 // paramFieldContainerIsGrown reports whether the body contains a growth-method call whose receiver is
 // a FIELD of the named struct parameter — `param.field.push(...)`. Mirrors paramContainerIsGrown but
 // peels one field access (the container lives inside the struct). A false negative only forgoes the
@@ -646,6 +683,120 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 	if fn == nil {
 		return false
 	}
+	argIsRegionValued := a.regionValueTester(fn, funcByName)
+
+	// Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
+	found := false
+	var scan func(v reflect.Value)
+	scan = func(v reflect.Value) {
+		if found || !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
+					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
+						for _, arg := range call.Args {
+							if argIsRegionValued(arg) {
+								found = true
+								return
+							}
+						}
+					}
+				}
+			}
+			scan(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			scan(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				scan(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				scan(v.Index(i))
+			}
+		}
+	}
+	scan(reflect.ValueOf(fn.Body))
+	return found
+}
+
+// functionWritesHandleToScalarOutParam reports whether the function assigns to a by-reference PACKED
+// handle-enum out-param (`def h(out: mutable Ast::Expr&): out <- (Ast::Expr.Foo(...))`). Any value
+// assigned to such a ref IS a region-backed handle (the param type is the region-value gate), so if the
+// assigned node was BUILT in this function it lives in the per-call arena and frees on return — a UAF
+// once the caller stores the handle in a longer-lived node (the docs/125 quantifier `where`-clause bug).
+// Detecting this shape classifies the function region-polymorphic (classifyRegionPolymorphicFunctions),
+// so it threads `__region_auto` — its node builders then allocate into the CALLER's tree store, exactly
+// as a function that RETURNS the node already does. Over-triggering is sound: if the assigned handle was
+// built in the caller (already caller-region), the threaded region is simply unused for it. MUST run
+// inside the candidate's resolution context so the qualified enum type resolves.
+func (a *Analyzer) functionWritesHandleToScalarOutParam(fn *ast.FuncDecl) bool {
+	if fn == nil {
+		return false
+	}
+	assignsTo := func(name string) bool {
+		found := false
+		var scan func(v reflect.Value)
+		scan = func(v reflect.Value) {
+			if found || !v.IsValid() || !v.CanInterface() {
+				return
+			}
+			switch v.Kind() {
+			case reflect.Pointer:
+				if v.IsNil() {
+					return
+				}
+				if asn, ok := v.Interface().(*ast.AssignStmt); ok && asn != nil {
+					if id, ok := asn.Target.(*ast.Ident); ok && id != nil && id.Name == name {
+						found = true
+						return
+					}
+				}
+				scan(v.Elem())
+			case reflect.Interface:
+				if v.IsNil() {
+					return
+				}
+				scan(v.Elem())
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					scan(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					scan(v.Index(i))
+				}
+			}
+		}
+		scan(reflect.ValueOf(fn.Body))
+		return found
+	}
+	for i := range fn.Params {
+		p := &fn.Params[i]
+		if a.refParamIsPackedEnum(p.Type) && assignsTo(p.Name) {
+			return true
+		}
+	}
+	return false
+}
+
+// regionValueTester builds the shared "does this expression produce a region-carrying value?" predicate
+// used by both containerParamGrownWithRegionValue (inserted args) and scalarRefAssignedRegionValue
+// (assigned out-param RHS). It first maps each local name to its producing expression (var-decl,
+// assignment, or `if EXPR is x:` refinement binding) so an ident argument resolves to its producer, then
+// returns a tester that classifies from RESOLVED TYPES only (callee return types, packed-enum
+// constructors, owned-less list literals/comprehensions) — never region-poly classification, which runs
+// after this pass. Conservative both ways: an unresolved value simply returns false.
+func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl) func(ast.Expr) bool {
 	// 1. Map each local name to the expression it was bound from, so an inserted ident resolves to its
 	//    producer: a var-decl value, an assignment, or an `if EXPR is x:` refinement scrutinee.
 	boundExpr := map[string]ast.Expr{}
@@ -780,49 +931,7 @@ func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name str
 		}
 		return rec(arg, 0)
 	}
-
-	// 3. Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
-	found := false
-	var scan func(v reflect.Value)
-	scan = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
-				return
-			}
-			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
-				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && containerGrowthMethods[field.Field] {
-					if id, ok := field.Object.(*ast.Ident); ok && id != nil && id.Name == name {
-						for _, arg := range call.Args {
-							if argIsRegionValued(arg) {
-								found = true
-								return
-							}
-						}
-					}
-				}
-			}
-			scan(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			scan(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				scan(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				scan(v.Index(i))
-			}
-		}
-	}
-	scan(reflect.ValueOf(fn.Body))
-	return found
+	return argIsRegionValued
 }
 
 // typeIsRegionValued reports whether a value of this resolved type owns/references region-backed

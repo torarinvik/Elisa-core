@@ -83,7 +83,17 @@ func (a *Analyzer) classifyRegionPolymorphicFunctions(decls []scopedDecl) {
 			sc := fnScope[fn]
 			isPoly := false
 			a.withResolutionContext(sc.Namespace, sc.Usings, func() {
-				isPoly = (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) || functionBuildsAndReturnsLocalContainer(fn)
+				// docs/125: a function that WRITES a region-backed packed handle-enum through a scalar
+				// `mutable T&` out-param (`out <- (Ast::Expr.Foo(...))`) is region-polymorphic, exactly as
+				// one that RETURNS such a node. Threading `__region_auto` makes its node builders allocate
+				// into the CALLER's tree store; without it the node lands in a per-call arena freed on
+				// return — a UAF once the caller stores the handle (the reverted quantifier-`where` bug).
+				// Composes with an existing `__rg_parser` struct-region param (they thread DIFFERENT
+				// regions — the tree store vs. the Parser's field arena), so no RegionParams gate needed.
+				// Over-triggering is sound: a handle built in the caller ignores the threaded region.
+				isPoly = (a.functionReturnsRegionAllocatedValue(fn) && !funcHasArenaParam(fn)) ||
+					functionBuildsAndReturnsLocalContainer(fn) ||
+					(!funcHasArenaParam(fn) && a.functionWritesHandleToScalarOutParam(fn))
 			})
 			if isPoly {
 				fnType.RegionPolymorphic = true
