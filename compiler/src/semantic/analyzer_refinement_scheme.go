@@ -368,25 +368,8 @@ func (a *Analyzer) structInvariantEntailsFieldRefinement(value ast.Expr, pred as
 	if !ok || fe == nil {
 		return false
 	}
-	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
-	if !ok || st == nil || len(st.Invariants) == 0 {
-		return false
-	}
-	// Build a range from all invariant clauses that constrain this specific field.
-	fieldRange := numRange{}
-	any := false
-	for _, inv := range st.Invariants {
-		if inv == nil {
-			continue
-		}
-		r, ok := a.rangeFromStructInvariantForField(inv, fe.Field)
-		if !ok {
-			continue
-		}
-		fieldRange = fieldRange.intersect(r)
-		any = true
-	}
-	if !any {
+	fieldRange, ok := a.structInvariantFieldRange(fe)
+	if !ok {
 		return false
 	}
 	// Check that the extracted range entails the predicate.
@@ -404,6 +387,41 @@ func (a *Analyzer) structInvariantEntailsFieldRefinement(value ast.Expr, pred as
 		}
 	}
 	return true
+}
+
+// structInvariantFieldRange returns the numeric interval that the enclosing struct type's invariants
+// pin on the specific field read `fe` (e.g. `invariant self.panel_idx >= 0` yields [0, +inf) for
+// `c.panel_idx`). It intersects every invariant clause that constrains this field; ok=false when the
+// object is not a struct with invariants, or no invariant clause constrains this field.
+//
+// Sound: a struct invariant is established at construction and re-checked after each field store (debug
+// runtime), so it may be assumed at any read of the field — the same basis the refinement path
+// (structInvariantEntailsFieldRefinement) and the method-entry seed already rely on.
+func (a *Analyzer) structInvariantFieldRange(fe *ast.FieldExpr) (numRange, bool) {
+	if fe == nil {
+		return numRange{}, false
+	}
+	st, ok := stripRefForBounds(a.exprTypes[fe.Object]).(*StructType)
+	if !ok || st == nil || len(st.Invariants) == 0 {
+		return numRange{}, false
+	}
+	fieldRange := numRange{}
+	any := false
+	for _, inv := range st.Invariants {
+		if inv == nil {
+			continue
+		}
+		r, ok := a.rangeFromStructInvariantForField(inv, fe.Field)
+		if !ok {
+			continue
+		}
+		fieldRange = fieldRange.intersect(r)
+		any = true
+	}
+	if !any {
+		return numRange{}, false
+	}
+	return fieldRange, true
 }
 
 // rangeFromStructInvariantForField extracts a numeric interval from an invariant expression for a

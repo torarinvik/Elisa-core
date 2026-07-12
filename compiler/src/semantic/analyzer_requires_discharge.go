@@ -225,17 +225,48 @@ func (a *Analyzer) proveRequiresComparison(n *ast.BinaryExpr, subst map[string]a
 	default:
 		return requiresUnknown
 	}
-	left, ok := a.substitutedAffine(n.Left, subst)
-	if !ok {
-		return requiresUnknown
+	left, lok := a.substitutedAffine(n.Left, subst)
+	right, rok := a.substitutedAffine(n.Right, subst)
+	if lok && rok {
+		diff := subtractAffine(left, right)
+		r := a.boundAffine(diff, a.currentScope)
+		if v := classifyDiffRange(r, n.Op); v != requiresUnknown {
+			return v
+		}
+		// Transitive-relational fallback: when the affine-bound tier cannot resolve the goal via
+		// constant ranges, try to prove/refute a simple `L OP R` comparison (where both L and R
+		// reduce to a single immutable-integer variable) by checking reachability in the relational-
+		// edge graph (collectRelationalEdges). E.g. `a <= b, b <= c` can prove `a <= c` and refute
+		// `a > c`. Only ident-vs-ident goals with a single term on each side are admitted (sound:
+		// a more complex affine expression would require the general arithmetic path above).
+		if v := a.transitiveRelationalProof(left, right, n.Op); v != requiresUnknown {
+			return v
+		}
 	}
-	right, ok := a.substitutedAffine(n.Right, subst)
-	if !ok {
-		return requiresUnknown
+	// Field-invariant range tier: an operand that is a struct-field read (directly, or a callee param
+	// that substitutes to a caller field read) carries no affine form, so the tiers above decline. But
+	// the field's enclosing struct invariant pins its range — e.g. `invariant self.panel_idx >= 0`
+	// bounds `c.panel_idx` to [0, +inf) at every read. Bound each side as an interval (its affine range
+	// OR its invariant range) and decide `L OP R` by interval subtraction. This is what lets
+	// `cc_blit_panel(c, ..., c.panel_idx)` discharge `requires slot >= 0` even across an intervening
+	// mutation or mutable-ref call that dropped the flow fact. Sound: struct invariants hold at every
+	// field read (established at construction, re-checked after each field store) — the same basis as
+	// structInvariantEntailsFieldRefinement and the method-entry invariant seed.
+	if lr, ok := a.rangeOfRequiresOperand(n.Left, subst); ok {
+		if rr, ok := a.rangeOfRequiresOperand(n.Right, subst); ok {
+			if v := classifyDiffRange(subNumRange(lr, rr), n.Op); v != requiresUnknown {
+				return v
+			}
+		}
 	}
-	diff := subtractAffine(left, right)
-	r := a.boundAffine(diff, a.currentScope)
-	switch n.Op {
+	return requiresUnknown
+}
+
+// classifyDiffRange decides a comparison `L OP R` from the interval of the difference `L - R`. A bound
+// is used only when known; an open bound on the needed side leaves the verdict requiresUnknown
+// (fail-closed). Shared by the affine tier and the field-invariant range tier.
+func classifyDiffRange(r numRange, op lexer.TokenKind) requiresVerdict {
+	switch op {
 	case lexer.TOKEN_GT: // L - R > 0
 		if r.loKnown && r.lo > 0 {
 			return requiresProven
@@ -279,16 +310,68 @@ func (a *Analyzer) proveRequiresComparison(n *ast.BinaryExpr, subst map[string]a
 			return requiresRefuted
 		}
 	}
-	// Transitive-relational fallback: when the affine-bound tier cannot resolve the goal via
-	// constant ranges, try to prove/refute a simple `L OP R` comparison (where both L and R
-	// reduce to a single immutable-integer variable) by checking reachability in the relational-
-	// edge graph (collectRelationalEdges). E.g. `a <= b, b <= c` can prove `a <= c` and refute
-	// `a > c`. Only ident-vs-ident goals with a single term on each side are admitted (sound:
-	// a more complex affine expression would require the general arithmetic path above).
-	if v := a.transitiveRelationalProof(left, right, n.Op); v != requiresUnknown {
-		return v
-	}
 	return requiresUnknown
+}
+
+// subNumRange returns the interval of `l - r`: [l.lo - r.hi, l.hi - r.lo]. A bound is known only when
+// both contributing bounds are known and the subtraction does not overflow int64 (an overflowing bound
+// becomes open, which only declines a proof — never admits an unsound one).
+func subNumRange(l, r numRange) numRange {
+	out := numRange{}
+	if l.loKnown && r.hiKnown {
+		if v, ok := subInt64Checked(l.lo, r.hi); ok {
+			out.loKnown, out.lo = true, v
+		}
+	}
+	if l.hiKnown && r.loKnown {
+		if v, ok := subInt64Checked(l.hi, r.lo); ok {
+			out.hiKnown, out.hi = true, v
+		}
+	}
+	return out
+}
+
+func subInt64Checked(a, b int64) (int64, bool) {
+	if b == -int64(^uint64(0)>>1)-1 { // b == minInt64: -b overflows, so decline (open bound)
+		return 0, false
+	}
+	return addInt64Checked(a, -b)
+}
+
+// rangeOfRequiresOperand bounds a precondition operand as an integer interval: first via the affine
+// tier (constants, immutable-int params/args, linear combos), then — when that yields no usable bound —
+// via the struct invariant of a field-read operand (resolved directly or through a substituted param).
+func (a *Analyzer) rangeOfRequiresOperand(expr ast.Expr, subst map[string]ast.Expr) (numRange, bool) {
+	if aff, ok := a.substitutedAffine(expr, subst); ok {
+		r := a.boundAffine(aff, a.currentScope)
+		if r.loKnown || r.hiKnown {
+			return r, true
+		}
+	}
+	if fe, ok := a.resolveRequiresFieldOperand(expr, subst); ok {
+		if r, ok := a.structInvariantFieldRange(fe); ok {
+			return r, true
+		}
+	}
+	return numRange{}, false
+}
+
+// resolveRequiresFieldOperand resolves a precondition operand to the caller-side field read it denotes:
+// either the operand is itself a field read, or it is a callee parameter whose substituted argument is
+// a field read (`requires slot >= 0` called as `f(c.panel_idx)`). Returns the field expression whose
+// `Object` type carries the struct invariant.
+func (a *Analyzer) resolveRequiresFieldOperand(expr ast.Expr, subst map[string]ast.Expr) (*ast.FieldExpr, bool) {
+	switch n := unwrapParen(expr).(type) {
+	case *ast.FieldExpr:
+		return n, true
+	case *ast.Ident:
+		if arg, ok := subst[n.Name]; ok {
+			if fe, ok := unwrapParen(arg).(*ast.FieldExpr); ok {
+				return fe, true
+			}
+		}
+	}
+	return nil, false
 }
 
 // transitiveRelationalProof attempts to prove or refute a comparison `leftAffine OP rightAffine`
