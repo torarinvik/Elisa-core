@@ -142,6 +142,10 @@ type MachineFromExpr struct {
 	// threads by bare name (docs/119 §6). Both lower into the machine's ExprBlock.
 	HeaderDecls    []Stmt
 	HeaderCaptures []string
+	// FromStartSugar marks a machine produced by the `start State:` local-state form (docs/125
+	// §5) rather than a written `machine from Enum.State:`. Diagnostics use it to suggest the
+	// `start` spelling instead of leaking the synthesized `__StartStates_…` enum name.
+	FromStartSugar bool
 	Arms           []MachineFromArm
 	// Lowered is the analyzer-built ExprBlock desugar; the backend emits it in place of
 	// this node (the mode enum decl is hoisted to pendingDecls at parse time).

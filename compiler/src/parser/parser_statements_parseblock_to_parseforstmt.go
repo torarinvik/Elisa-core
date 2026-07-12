@@ -231,6 +231,12 @@ func (p *Parser) parseStmt() ast.Stmt {
 			if p.looksLikeForStmt() {
 				return p.parseForStmt()
 			}
+		case "state":
+			// docs/125 §5 local-state sugar: `state Foo` / `state Bar(baz: T)` accumulate on
+			// the parser until a `start Foo:` consumes them. Produces no statement (nil).
+			if p.looksLikeStateDeclStmt() {
+				return p.parseStateDeclStmt()
+			}
 		case "let":
 			if p.looksLikeLetDestructureStmt() {
 				return p.parseLetDestructureStmt()

@@ -196,3 +196,72 @@ def header_pipe_accumulators() -> void:
 	exit, stdout, stderr := runStressProgram(t, "machine_from_header_pipe", body)
 	assertAllPassed(t, exit, stdout, stderr, "header_pipe_accumulators")
 }
+
+// docs/125 §5 `state`/`start` local-state sugar — a function declares its states inline
+// (`state Scan` / `state Grow(first: i32, last: i32)`) and runs them with `start Scan …:`,
+// which synthesizes an enum and lowers to `machine from <synth>.Scan`. Covers a cyclic
+// machine with the header pipe + a payload-binding machine, both over inline states.
+func TestMachineFromStateStartSugarRuntime(t *testing.T) {
+	body := `
+global CHANGED: array[u8, 8] = zeroed
+
+def count_blocks(dh: i32) -> i32:
+    state Scan
+    state Grow(first: i32, last: i32)
+    state Emit(first: i32, last: i32)
+    return start Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
+        Scan:
+            at_end: bool = r >= dh
+            row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
+            r <- r + 1
+            done blocks if at_end
+            next Grow(r - 1, r - 1) if row_changed
+            next Scan
+        Grow(first, last):
+            in_range: bool = r < dh
+            cur_changed: bool = in_range and CHANGED[r.usize()] != 0
+            step: i32 = 1 if cur_changed else 0
+            r <- r + step
+            next Grow(first, r - 1) if cur_changed
+            next Emit(first, last)
+        Emit(first, last):
+            blocks <- blocks + 1
+            next Scan
+
+def classify(x: i64) -> i64:
+    state Start
+    state Mid(flag: bool)
+    state End(val: i64)
+    return start Start:
+        Start:
+            next Mid(true) if x > 0
+            next Mid(false)
+        Mid(flag):
+            next End(10) if flag
+            next End(20)
+        End(val):
+            done val
+
+def set(i: i32) -> void:
+    CHANGED[i.usize()] <- 1
+
+@test
+def state_start_sugar() -> void:
+    can Abort.Panic:
+        if count_blocks(8) != 0:
+            panic("empty")
+        set(0)
+        set(1)
+        set(3)
+        set(6)
+        set(7)
+        if count_blocks(8) != 3:
+            panic("three blocks")
+        if classify(5) != 10:
+            panic("positive routes Mid(true) -> End(10)")
+        if classify(-1) != 20:
+            panic("nonpositive routes Mid(false) -> End(20)")
+`
+	exit, stdout, stderr := runStressProgram(t, "machine_from_state_start", body)
+	assertAllPassed(t, exit, stdout, stderr, "state_start_sugar")
+}

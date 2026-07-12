@@ -41,6 +41,12 @@ type Parser struct {
 	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer
 	// after each parseDecl so the synthesized decls land flat at file scope.
 	pendingDecls []ast.Decl
+	// pendingStateDecls collects function-local `state Foo` / `state Bar(baz: T)` declarations
+	// (docs/125 §5 local-state sugar) until a `start Foo:` consumes them: the `start` synthesizes
+	// an enum from the accumulated states, hoists it to pendingDecls, and lowers to
+	// `machine from <synth>.Foo`. Cleared when a `start` consumes it and reset per-function so
+	// states never leak across a `start` or a function boundary.
+	pendingStateDecls []machineState
 	// stmtGuardArmed enables the generalized postfix statement guard (docs/125 §6b): while armed,
 	// a postfix `if COND` with NO `else` whose condition ends at a statement terminator is not a
 	// malformed ternary but a do-or-skip guard on the enclosing statement. Armed only around the

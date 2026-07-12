@@ -332,8 +332,38 @@ the loop-header parser (a `-> yield` is rejected — a machine yields through `d
 lowering prepends the pipe decls to the machine's ExprBlock as loop-private locals, so
 they are licensed by their own declaration rather than an outer capture. Zero new codegen.
 
-Anonymous inline state enums: declined (§8 — payloads settled the trade in
-favor of named enums). The construct is complete.
+✅ **LOCAL-STATE SUGAR `state`/`start` LANDED (stage0)**: a function may declare its states
+inline instead of adding a top-level enum that exists only to name them:
+
+```elisa
+def emit_changed_blocks(dw: i32, dh: i32) -> i32:
+    state Scan
+    state Grow(first: i32, last: i32)
+    state Emit(first: i32, last: i32)
+    return start Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
+        Scan:
+            next Grow(r - 1, r - 1) if row_changed
+            next Scan
+        Grow(first, last): …
+        Emit(first, last): next Scan
+```
+
+`state Foo` / `state Bar(baz: T)` are function-body statements that accumulate on the parser;
+`start Foo …:` <arms> synthesizes an enum from them (hoisted to file scope with a program-unique
+name, like `machine over`'s mode enum), then delegates to the identical `machine from` tail parser
+with the synthesized enum as the state type. So it inherits EVERYTHING from `machine from` —
+payload states (`state Bar(baz: usize)` → the arm binds `baz`), the header accumulator pipe,
+`decreases`, and every R2/R3/R4/R5 refusal — with zero new analysis or codegen. `state`/`start`
+stay contextual keywords (recognized only when directly followed by an identifier, so variables
+named `state`/`start` are unaffected); states are function-scoped (cleared when a `start` consumes
+them and reset per function). This is the anonymous-inline-state need met WITHOUT the earlier
+objection: payload field types are written at the `state` line, so nothing is reinvented — the
+`state` block IS the declaration site. Diagnostics suggest the `start` spelling, never the
+synthesized enum name. Golden TestMachineFromStateStartSugarRuntime.
+
+Anonymous inline state enums (a fully nameless `machine from` with no `state`/enum at all):
+declined (§8 — payloads settled the trade in favor of named states); `state`/`start` gives the
+locality benefit while keeping every state a written, named declaration. The construct is complete.
 
 ## 4. `when` — order-independence as a declaration
 

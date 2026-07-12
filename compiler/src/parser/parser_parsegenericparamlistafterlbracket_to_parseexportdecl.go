@@ -329,6 +329,10 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		fulfills = p.parseFulfillsClausesAfterKeyword()
 	}
 
+	// docs/125 §5: `state` declarations are function-local; clear any left uncollected by a
+	// prior function (malformed states-without-`start`) so they cannot leak into this body.
+	p.pendingStateDecls = nil
+
 	var body []ast.Stmt
 	if p.match(lexer.TOKEN_ASSIGN) {
 		// Expression-bodied function: `def f(...) -> T = EXPR` is exactly

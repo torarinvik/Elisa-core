@@ -101,9 +101,18 @@ func (a *Analyzer) machineFromDoneJoin(expr *ast.MachineFromExpr) Type {
 // checkMachineFromGraph enforces the state-graph refusals: every arm names a real variant
 // with no duplicate, every arm resolves (R2: ends in a terminator, the last unguarded),
 // every `next` target is a real variant, and every state is reachable from the start (R4).
+// machineStateSpace names the machine's state space for a diagnostic, avoiding the
+// synthesized `__StartStates_…` enum name when the machine came from the `start` sugar.
+func machineStateSpace(expr *ast.MachineFromExpr) string {
+	if expr.FromStartSugar {
+		return "the machine's declared `state`s"
+	}
+	return expr.StartEnum
+}
+
 func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[string]bool) bool {
 	if !valid[expr.StartState] {
-		a.errorf(expr.Position, "`machine from` start state %q is not a variant of %s", expr.StartState, expr.StartEnum)
+		a.errorf(expr.Position, "`machine from` start state %q is not a variant of %s", expr.StartState, machineStateSpace(expr))
 		return false
 	}
 
@@ -112,7 +121,7 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 	for i := range expr.Arms {
 		arm := &expr.Arms[i]
 		if !valid[arm.State] {
-			a.errorf(arm.Position, "machine arm state %q is not a variant of %s", arm.State, expr.StartEnum)
+			a.errorf(arm.Position, "machine arm state %q is not a variant of %s", arm.State, machineStateSpace(expr))
 			ok = false
 			continue
 		}
@@ -133,7 +142,7 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 		}
 		for _, term := range arm.Terminators {
 			if !term.IsDone && !valid[term.Target] {
-				a.errorf(term.Position, "machine transition `next %s` names a non-variant of %s", term.Target, expr.StartEnum)
+				a.errorf(term.Position, "machine transition `next %s` names a non-variant of %s", term.Target, machineStateSpace(expr))
 				ok = false
 			}
 		}
@@ -147,7 +156,7 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 			declared := map[string]bool{}
 			for _, target := range arm.DeclaredOut {
 				if !valid[target] {
-					a.errorf(arm.Position, "machine arm %q declares out-edge %q which is not a variant of %s", arm.State, target, expr.StartEnum)
+					a.errorf(arm.Position, "machine arm %q declares out-edge %q which is not a variant of %s", arm.State, target, machineStateSpace(expr))
 					ok = false
 					continue
 				}
@@ -197,7 +206,12 @@ func (a *Analyzer) checkMachineFromGraph(expr *ast.MachineFromExpr, valid map[st
 	// free. Discharging the measure is deferred to the docs/118 prover; here we only demand
 	// its presence when the `next` graph has a cycle.
 	if cycle := machineFromCycle(expr); cycle != "" && expr.Decreases == nil {
-		a.errorf(expr.Position, "machine transition cycle through state %q has no `decreases` measure — add `machine from %s.%s decreases <measure>:` or the loop may never terminate (docs/125 §5)", cycle, expr.StartEnum, expr.StartState)
+		fix := fmt.Sprintf("machine from %s.%s decreases <measure>:", expr.StartEnum, expr.StartState)
+		if expr.FromStartSugar {
+			// Don't leak the synthesized `__StartStates_…` enum name; suggest the `start` spelling.
+			fix = fmt.Sprintf("start %s decreases <measure>:", expr.StartState)
+		}
+		a.errorf(expr.Position, "machine transition cycle through state %q has no `decreases` measure — add `%s` or the loop may never terminate (docs/125 §5)", cycle, fix)
 		ok = false
 	}
 	return ok

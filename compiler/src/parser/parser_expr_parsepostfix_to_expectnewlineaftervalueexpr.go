@@ -495,6 +495,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 		if p.cur().Text == "for" && p.looksLikeForStmt() {
 			return p.parseLoopValueExpr("for")
 		}
+		// docs/125 §5 local-state sugar: `start State …:` runs a `machine from` over the
+		// function's inline `state` declarations. Value-expression atom like `machine from`.
+		if p.cur().Text == "start" && p.looksLikeStartExpr() {
+			return p.parseStartExpr()
+		}
 		if p.looksLikeQueryExpr() {
 			return p.parseQueryExpr()
 		}

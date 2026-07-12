@@ -40,6 +40,15 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	p.expectIdentText("from")
 
 	startEnum, startState := p.parseMachineFromStateRef()
+	return p.parseMachineFromTail(pos, startEnum, startState)
+}
+
+// parseMachineFromTail parses everything after the start-state reference of a `machine from`
+// expression — the optional entry-state payload, the header accumulator pipe, `decreases`,
+// and the arm block — into a MachineFromExpr. Shared by `machine from Enum.State` and the
+// `start State` local-state sugar (docs/125 §5), which differ only in how (startEnum,
+// startState) are obtained.
+func (p *Parser) parseMachineFromTail(pos lexer.Pos, startEnum, startState string) ast.Expr {
 	// Entry-state payload: `machine from Num.Exponent(seed)` constructs the start
 	// variant with args (docs/125 §5). Payload-free start states omit the parens.
 	startArgs := p.parseMachineFromCallArgs()
