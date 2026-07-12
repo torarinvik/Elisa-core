@@ -134,7 +134,15 @@ type MachineFromExpr struct {
 	// `machine from Num.Exponent(false)`. Empty when the start variant is payload-free.
 	StartArgs []Expr
 	Decreases Expr // machine-level termination measure (docs/118); nil when absent
-	Arms      []MachineFromArm
+	// HeaderDecls are the machine-private accumulators from the header pipe
+	// (`machine from START |r: i32 = 0, blocks: i32 = 0| decreases M:`): mutable
+	// locals in scope for the `decreases` measure and every arm body, threaded
+	// across transitions (the machine analogue of a loop-header accumulator). Empty
+	// when the header carries no pipe. HeaderCaptures names outer mutables the pipe
+	// threads by bare name (docs/119 §6). Both lower into the machine's ExprBlock.
+	HeaderDecls    []Stmt
+	HeaderCaptures []string
+	Arms           []MachineFromArm
 	// Lowered is the analyzer-built ExprBlock desugar; the backend emits it in place of
 	// this node (the mode enum decl is hoisted to pendingDecls at parse time).
 	Lowered Expr

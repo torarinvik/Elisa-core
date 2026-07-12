@@ -294,7 +294,23 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 	}
 
 	// Collect mutated roots across arm bodies so the loop captures license the mutation.
-	captures := machineFromCaptureRoots(expr)
+	// Header-pipe accumulators (`|r = 0|`) are machine-private locals declared in this same
+	// ExprBlock, so they are licensed by their own declaration, not by an outer capture —
+	// exclude them from the capture list and keep only genuine outer mutables (bare-name
+	// threads from the pipe, plus roots mutated but not declared here).
+	headerLocal := map[string]bool{}
+	for _, decl := range expr.HeaderDecls {
+		if v, ok := decl.(*ast.VarDeclStmt); ok {
+			headerLocal[v.Name] = true
+		}
+	}
+	captures := make([]string, 0)
+	for _, root := range machineFromCaptureRoots(expr) {
+		if !headerLocal[root] {
+			captures = append(captures, root)
+		}
+	}
+	captures = append(captures, expr.HeaderCaptures...)
 
 	matchArms := make([]ast.MatchArm, 0, len(expr.Arms)+1)
 	covered := map[string]bool{}
@@ -351,12 +367,16 @@ func (a *Analyzer) buildMachineFromLowering(expr *ast.MachineFromExpr, variantCo
 		RuntimeProgressBackstop: expr.Decreases != nil,
 	}
 
-	stmts := []ast.Stmt{
+	// Header-pipe accumulators are declared first so they are in scope for the whole
+	// machine (the `decreases` measure inside the loop body and every arm).
+	stmts := make([]ast.Stmt, 0, len(expr.HeaderDecls)+4)
+	stmts = append(stmts, expr.HeaderDecls...)
+	stmts = append(stmts,
 		&ast.VarDeclStmt{Position: pos, Name: resultVar, Mutable: true, Type: astTypeExprForBuiltinMethodRewrite(pos, resultType), Value: &ast.ZeroedLit{Position: pos}},
 		&ast.VarDeclStmt{Position: pos, Name: doneVar, Mutable: true, Type: &ast.NamedType{Position: pos, Name: "bool"}, Value: &ast.BoolLit{Position: pos, Value: false}},
 		&ast.VarDeclStmt{Position: pos, Name: modeVar, Mutable: true, Value: enumMember(expr.StartState, expr.StartArgs)},
 		loop,
-	}
+	)
 	return &ast.ExprBlock{Position: pos, Stmts: stmts, Value: ident(resultVar), Captures: captures}
 }
 

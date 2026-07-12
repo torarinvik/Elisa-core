@@ -232,6 +232,22 @@ the `DECLS`. A loop without `->` has type `void` (statement loop).
 `break`/`continue` work unchanged inside loop expressions; `break` yields the current
 accumulator state (this is what makes early-exit folds natural — no sentinel needed).
 
+**Spelling — same-line and block-RHS are equivalent.** A loop expression may be written
+inline in value position or as an indented block RHS; both lower identically:
+
+```elisa
+result: i64 = for x in xs |acc = 0| -> acc:   # same-line: the loop keyword IS a value atom
+    acc <- acc + x
+
+result: i64 =                                  # block-RHS: the loop starts on the next
+    for x in xs |acc = 0| -> acc:              #   indented line (also valid for `while`)
+        acc <- acc + x
+```
+
+`for`/`while` are recognized as value-expression atoms (like `machine from`/`match`), so the
+inline form works at any `=`/`<-`/`return`-of-local site. A loop in value position without a
+`-> YIELD` is a hard error (a statement loop has type `void` and is not a value).
+
 ### 3.2 Before / after
 
 ```elisa

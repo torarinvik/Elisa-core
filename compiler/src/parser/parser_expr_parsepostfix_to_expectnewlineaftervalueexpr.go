@@ -469,6 +469,11 @@ func (p *Parser) parsePrimary() ast.Expr {
 		return &ast.TryExpr{Position: pos, Value: value}
 	case lexer.TOKEN_CATCH:
 		return p.parseCatchExpr()
+	case lexer.TOKEN_WHILE:
+		// Same-line value-form loop (`x = while cond |i = 0| -> i: …`). The block-RHS
+		// form (`x: T =` NEWLINE INDENT `while …`) is handled earlier by the `=` site;
+		// reaching here means `while` sits directly in value position.
+		return p.parseLoopValueExpr("while")
 	case lexer.TOKEN_MATCH:
 		return p.parseMatchExpr()
 	case lexer.TOKEN_RAISE:
@@ -482,6 +487,13 @@ func (p *Parser) parsePrimary() ast.Expr {
 		}
 		if p.cur().Text == "machine" && p.looksLikeMachineFromExpr() {
 			return p.parseMachineFromExpr()
+		}
+		// Same-line value-form loop (`x = for i in xs |acc = 0| -> acc: …`). `for` is a
+		// contextual ident, so it reaches here in value position; the block-RHS form is
+		// handled earlier by the `=` site. looksLikeForStmt keeps a variable named `for`
+		// from being mistaken for a loop.
+		if p.cur().Text == "for" && p.looksLikeForStmt() {
+			return p.parseLoopValueExpr("for")
 		}
 		if p.looksLikeQueryExpr() {
 			return p.parseQueryExpr()

@@ -83,6 +83,31 @@ func (p *Parser) loopHeaderDeclsAhead() bool {
 	return p.loopHeaderDeclsAt(p.pos)
 }
 
+// parseLoopValueExpr parses an inline value-form loop in expression position — the
+// same-line spelling of a docs/119 §3 loop expression (`x = for i in xs |acc = 0| -> acc:`
+// / `x = while cond |i = 0| -> i:`). The canonical block-RHS spelling (`x: T =` NEWLINE
+// INDENT `for …`) is handled at the `=` site before control reaches here; this admits the
+// one-line form by treating the loop keyword as a value-expression atom, delegating to the
+// ordinary statement parser and unwrapping its `-> yield` desugar (an ExprStmt wrapping the
+// ExprBlock that wrapLoopHeader builds). A loop with no `-> yield` is not a value, so it is
+// a hard error here rather than a silently-void expression.
+func (p *Parser) parseLoopValueExpr(kind string) ast.Expr {
+	pos := p.cur().Pos
+	var stmt ast.Stmt
+	if kind == "while" {
+		stmt = p.parseWhile()
+	} else {
+		stmt = p.parseForStmt()
+	}
+	if es, ok := stmt.(*ast.ExprStmt); ok {
+		if _, isBlock := es.Expr.(*ast.ExprBlock); isBlock {
+			return es.Expr
+		}
+	}
+	p.errorAt(pos, "a `%s` loop used as a value needs a `-> yield` accumulator header (e.g. `%s … |acc = 0| -> acc:`) (docs/119 §3)", kind, kind)
+	return &ast.NullLit{Position: pos}
+}
+
 // parseLoopHeader parses `|name = expr, ...| [-> yield]`. Each decl becomes a
 // mutable local initialized once, before the first iteration. An initializer
 // containing a top-level bitwise `|` needs parens.

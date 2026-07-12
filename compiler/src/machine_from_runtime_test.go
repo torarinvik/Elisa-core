@@ -140,3 +140,59 @@ def declared_out_runs() -> void:
 	exit, stdout, stderr := runStressProgram(t, "machine_from_declared_out", body)
 	assertAllPassed(t, exit, stdout, stderr, "declared_out_runs")
 }
+
+// docs/125 §5 header accumulator pipe — `machine from START |r = 0, blocks = 0| decreases M:`
+// declares machine-private mutables threaded across transitions, in scope for the `decreases`
+// measure (which references `r`) and every arm body. The pipe replaces hand-declared outer
+// mutables; this is the row-block coalescer shape from the screen recorder. Covers a
+// multi-accumulator pipe on a cyclic machine whose measure names an accumulator.
+func TestMachineFromHeaderPipeRuntime(t *testing.T) {
+	body := `
+global CHANGED: array[u8, 8] = zeroed
+
+enum Coalesce:
+    Scan
+    Grow(i32, i32)
+    Emit(i32, i32)
+
+def count_blocks(dh: i32) -> i32:
+    return machine from Coalesce.Scan |r: i32 = 0, blocks: i32 = 0| decreases 3 * (dh - r) + 2:
+        Coalesce.Scan:
+            at_end: bool = r >= dh
+            row_changed: bool = (not at_end) and CHANGED[r.usize()] != 0
+            r <- r + 1
+            done blocks if at_end
+            next Coalesce.Grow(r - 1, r - 1) if row_changed
+            next Coalesce.Scan
+        Coalesce.Grow(first, last):
+            in_range: bool = r < dh
+            cur_changed: bool = in_range and CHANGED[r.usize()] != 0
+            step: i32 = 1 if cur_changed else 0
+            r <- r + step
+            next Coalesce.Grow(first, r - 1) if cur_changed
+            next Coalesce.Emit(first, last)
+        Coalesce.Emit(first, last):
+            blocks <- blocks + 1
+            next Coalesce.Scan
+
+def set(i: i32) -> void:
+    CHANGED[i.usize()] <- 1
+
+@test
+def header_pipe_accumulators() -> void:
+    can Abort.Panic:
+        # empty bitmap -> 0 blocks
+        if count_blocks(8) != 0:
+            panic("empty")
+        # 1 1 0 1 0 0 1 1 -> 3 blocks
+        set(0)
+        set(1)
+        set(3)
+        set(6)
+        set(7)
+        if count_blocks(8) != 3:
+            panic("three blocks")
+`
+	exit, stdout, stderr := runStressProgram(t, "machine_from_header_pipe", body)
+	assertAllPassed(t, exit, stdout, stderr, "header_pipe_accumulators")
+}

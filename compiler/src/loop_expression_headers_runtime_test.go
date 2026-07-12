@@ -79,3 +79,34 @@ func TestLoopExpressionHeaders(t *testing.T) {
 	exit, stdout, stderr := runStressProgram(t, "loop_expression_headers", loopHeaderBody)
 	assertAllPassed(t, exit, stdout, stderr, "loop_expression_headers")
 }
+
+// docs/119 §3 — the SAME-LINE spelling of a loop-value expression: `x = for … -> acc:`
+// and `x = while … -> acc:` on one line, instead of the block-RHS form (`x: T =` NEWLINE
+// INDENT `for …`). Both spellings lower identically; this verifies the inline form parses
+// as a value-expression atom and computes the same result.
+const inlineLoopValueBody = `
+def sum_for(n: i64) -> i64:
+    result: i64 = for x in 0..<n |sum: i64 = 0| -> sum:
+        sum <- sum + x
+    return result
+
+def sum_while(n: i64) -> i64:
+    total: i64 = while i < n |i: i64 = 0, acc: i64 = 0| -> acc:
+        acc <- acc + i
+        i <- i + 1
+    return total
+
+@test
+def inline_loop_values() -> void:
+    can Abort.Panic:
+        if sum_for(5) != 10:
+            panic("sum_for")
+        if sum_while(5) != 10:
+            panic("sum_while")
+`
+
+func TestInlineLoopValueExpr(t *testing.T) {
+	t.Parallel()
+	exit, stdout, stderr := runStressProgram(t, "inline_loop_value", inlineLoopValueBody)
+	assertAllPassed(t, exit, stdout, stderr, "inline_loop_values")
+}

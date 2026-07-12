@@ -320,6 +320,18 @@ default, annotated where the contract should be visible (mirrors regions). Compi
 zero runtime cost; R3/R4 still query the actual `next` graph. stage1 consumes the clause
 structurally.
 
+✅ **HEADER ACCUMULATOR PIPE LANDED (stage0)**: `machine from START |r: i32 = 0,
+blocks: i32 = 0| decreases M:` declares machine-private mutables threaded across every
+transition — the machine analogue of a loop-header accumulator pipe (docs/119 §3). They
+are in scope for the `decreases` measure (which routinely references one, e.g.
+`decreases 3 * (dh - r) + 2`) and every arm body; the pipe precedes `decreases` so the
+measure can name an accumulator. This replaces the hand-declared outer mutables that a
+cyclic machine previously needed (`r: mutable i32 = 0` before the `return machine`),
+closing the last case where machine state leaked into an ambient outer variable. Reuses
+the loop-header parser (a `-> yield` is rejected — a machine yields through `done`); the
+lowering prepends the pipe decls to the machine's ExprBlock as loop-private locals, so
+they are licensed by their own declaration rather than an outer capture. Zero new codegen.
+
 Anonymous inline state enums: declined (§8 — payloads settled the trade in
 favor of named enums). The construct is complete.
 

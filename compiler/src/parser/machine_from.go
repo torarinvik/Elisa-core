@@ -43,6 +43,27 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	// Entry-state payload: `machine from Num.Exponent(seed)` constructs the start
 	// variant with args (docs/125 §5). Payload-free start states omit the parens.
 	startArgs := p.parseMachineFromCallArgs()
+
+	// Optional header accumulator pipe `|r: i32 = 0, blocks: i32 = 0|` (docs/125 §5):
+	// machine-private mutables threaded across transitions, in scope for `decreases` and
+	// every arm. It precedes `decreases` so the measure can reference an accumulator by
+	// name (`decreases 3 * (dh - r) + 2`). Reuses the loop-header parser; a `-> yield` is
+	// rejected because a machine yields through `done`, not a header yield.
+	var headerDecls []ast.Stmt
+	var headerCaptures []string
+	// A `|` here is unambiguously a header pipe: the only tokens legal after the start
+	// state are `|`, `decreases`, or `:`, so there is no bitwise-or to disambiguate from
+	// (unlike a loop iterable). Detect it directly rather than via loopHeaderDeclsAhead,
+	// whose closing-pipe-must-be-followed-by-`:`/`->` rule fails when `decreases` follows.
+	if p.peek() == lexer.TOKEN_PIPE {
+		hdr := p.parseLoopHeader()
+		if hdr.yield != nil {
+			p.errorf("`machine from` yields through `done VALUE`, not a header `-> yield` — drop the `-> …` from the accumulator pipe (docs/125 §5)")
+		}
+		headerDecls = hdr.decls
+		headerCaptures = hdr.captures
+	}
+
 	var decreases ast.Expr
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "decreases" {
 		p.advance()
@@ -62,7 +83,7 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.MachineFromExpr{Position: pos, StartEnum: startEnum, StartState: startState, StartArgs: startArgs, Decreases: decreases, Arms: arms}
+	return &ast.MachineFromExpr{Position: pos, StartEnum: startEnum, StartState: startState, StartArgs: startArgs, Decreases: decreases, HeaderDecls: headerDecls, HeaderCaptures: headerCaptures, Arms: arms}
 }
 
 // parseMachineFromCallArgs parses an optional `(EXPR, EXPR, …)` payload-construction
