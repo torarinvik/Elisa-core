@@ -17,7 +17,7 @@ type proofDiagnostic struct {
 	// RelevantFacts is a short (≤5) list of known scope facts that mention at least one variable
 	// appearing in the goal. Best-effort, may be empty.
 	RelevantFacts []string
-	// Suggestion is a concrete actionable hint (e.g. "add `assert n >= 0` before the call").
+	// Suggestion is a concrete actionable hint (e.g. "add `assert(n >= 0)` before the call").
 	Suggestion string
 	// Counterexample is the optional SMT counterexample string (may be "").
 	Counterexample string
@@ -329,7 +329,7 @@ func buildEnsureSuggestion(clause ast.Expr, subst map[string]ast.Expr, counterex
 	if counterexample != "" {
 		return fmt.Sprintf("strengthen the function body so %q holds on all return paths, or add `requires` bounds to rule out the failing case", goal)
 	}
-	return fmt.Sprintf("add `assert %s` before the return to surface the fact to the prover, or strengthen the `requires` preconditions so the postcondition is reachable", goal)
+	return fmt.Sprintf("add `%s` before the return to surface the fact to the prover, or strengthen the `requires` preconditions so the postcondition is reachable", assertCallForm(goal))
 }
 
 // ---------------------------------------------------------------------------
@@ -588,6 +588,36 @@ func classifySMTFactProvenance(sf smtFact) FactProvenance {
 
 // ---------------------------------------------------------------------------
 
+// assertCallForm renders the runtime-assert CALL that seeds the prover: `assert(<goal>)`. It must be
+// the parenthesized call form — a bare `assert COND` parses as a static (compile-time) assertion and
+// does NOT inject a fact. A single fully-enclosing paren layer on the goal (added by the expression
+// unparser) is stripped so the result reads `assert(x >= 0)`, not `assert((x >= 0))`.
+func assertCallForm(goal string) string {
+	return "assert(" + stripOuterParens(goal) + ")"
+}
+
+// stripOuterParens removes one paren pair iff it fully encloses the whole string; otherwise returns
+// the input unchanged (e.g. `(a) + (b)` is left alone).
+func stripOuterParens(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) < 2 || s[0] != '(' || s[len(s)-1] != ')' {
+		return s
+	}
+	depth := 0
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case '(':
+			depth++
+		case ')':
+			depth--
+			if depth == 0 && i != len(s)-1 {
+				return s // the opening paren closes before the end: not fully enclosing
+			}
+		}
+	}
+	return strings.TrimSpace(s[1 : len(s)-1])
+}
+
 // buildSuggestion returns a concrete, actionable suggestion for fixing the unprovable obligation.
 func buildSuggestion(req ast.Expr, subst map[string]ast.Expr, counterexample string) string {
 	// Build the caller-side goal text for the suggestion.
@@ -595,8 +625,8 @@ func buildSuggestion(req ast.Expr, subst map[string]ast.Expr, counterexample str
 
 	// If there's a counterexample, suggest narrowing the caller inputs.
 	if counterexample != "" {
-		return fmt.Sprintf("add `assert %s` before the call to rule out the failing case, or strengthen the precondition of the caller", goal)
+		return fmt.Sprintf("add `%s` before the call to rule out the failing case, or strengthen the precondition of the caller", assertCallForm(goal))
 	}
 	// Generic: suggest asserting the goal or adding a requires to the caller.
-	return fmt.Sprintf("add `assert %s` before the call to make the fact visible to the prover, or add `requires %s` to the calling function", goal, goal)
+	return fmt.Sprintf("add `%s` before the call to make the fact visible to the prover, or add `requires %s` to the calling function", assertCallForm(goal), goal)
 }

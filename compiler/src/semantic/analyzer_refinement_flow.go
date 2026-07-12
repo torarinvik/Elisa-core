@@ -482,7 +482,40 @@ func fieldPathKey(a *Analyzer, scope *Scope, expr ast.Expr) (string, bool) {
 
 // constIntValue extracts a compile-time integer constant from an expression.
 func (a *Analyzer) constIntValue(expr ast.Expr) (int64, bool) {
-	cv, ok := a.evalConstExpr(expr)
+	if cv, ok := a.evalConstExpr(expr); ok && cv.Kind == ConstInt {
+		return cv.Int, true
+	}
+	// Verification-only fallback: an IMMUTABLE global (`global NAME: T = <literal>`, no `mutable`)
+	// with a compile-time-constant initializer folds to its value as a PROOF constant. A non-mutable
+	// global is guaranteed never-written — the type checker rejects any store to it ("cannot assign
+	// to immutable global") — so its literal initializer is a sound compile-time constant. This is
+	// scoped to constIntValue (the prover's constant leaf); it does NOT promote the global to a
+	// general `const` (array sizes and other const-only positions are unaffected).
+	if ident, isIdent := unwrapParen(expr).(*ast.Ident); isIdent {
+		if v, ok := a.immutableGlobalIntValue(ident.Name); ok {
+			return v, true
+		}
+	}
+	return 0, false
+}
+
+// immutableGlobalIntValue resolves a name that binds a non-mutable global with a constant-foldable
+// literal initializer to its integer value. Returns false for a `mutable` global, a non-global, a
+// global with no/non-constant initializer, or an unknown name. Sound because immutability is
+// enforced by the type system (writes to a non-mutable global are a compile error).
+func (a *Analyzer) immutableGlobalIntValue(name string) (int64, bool) {
+	if a == nil {
+		return 0, false
+	}
+	sym, _, ok := a.lookupVisibleGlobal(name)
+	if !ok || sym == nil || sym.Kind != SymbolGlobal || sym.Mutable {
+		return 0, false
+	}
+	gd, ok := sym.Node.(*ast.GlobalDecl)
+	if !ok || gd == nil || gd.Mutable || gd.Value == nil {
+		return 0, false
+	}
+	cv, ok := a.evalConstExpr(gd.Value)
 	if !ok || cv.Kind != ConstInt {
 		return 0, false
 	}

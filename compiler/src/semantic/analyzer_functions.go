@@ -3,6 +3,8 @@ package semantic
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -732,12 +734,70 @@ func (a *Analyzer) analyzeSpecClauseExpr(expr ast.Expr, clause string) Type {
 	start := len(savedRefs)
 	t := a.analyzeExpr(expr)
 	if introduced := a.currentFunctionUsedPermissionRefs[start:]; len(introduced) > 0 {
-		a.errorf(expr.Pos(), "%s clause must be pure but uses the `%s` effect; a contract may not perform effects (no IO, allocation, mutation, time, or randomness) — an effectful or non-deterministic clause is unsound because the verifier treats a spec-position call as a single deterministic value", clause, lawEffectName(introduced[0]))
+		msg := fmt.Sprintf("%s clause must be pure but uses the `%s` effect; a contract may not perform effects (no IO, allocation, mutation, time, or randomness) — an effectful or non-deterministic clause is unsound because the verifier treats a spec-position call as a single deterministic value", clause, lawEffectName(introduced[0]))
+		// A common cause is reading a module-level `global` inside the clause. If the offending read is
+		// of an IMMUTABLE global, `const` is the working fix: a `const` read is pure (records no effect),
+		// so the clause is admissible and the value still folds in the prover.
+		if hint := a.contractGlobalReadConstHint(expr, introduced); hint != "" {
+			msg += "; " + hint
+		}
+		a.errorf(expr.Pos(), "%s", msg)
 	}
 	// Spec-position effects are verification-only and must not leak into the enclosing function's
 	// inferred effect set; restore the snapshot regardless of outcome.
 	a.currentFunctionUsedPermissionRefs = savedRefs
 	return t
+}
+
+// contractGlobalReadConstHint returns an actionable "make it a `const`" suggestion when a rejected
+// contract clause's effect is a `global` read AND the clause references at least one IMMUTABLE global.
+// Reading a `const` is pure (no effect), so converting the immutable global fixes the purity error
+// while keeping the value foldable in the prover. Returns "" when the effect is not a global read or
+// no immutable global is named (e.g. the effect is a mutable-global read, IO, or a call).
+func (a *Analyzer) contractGlobalReadConstHint(expr ast.Expr, introduced []ast.PermissionRef) string {
+	readsGlobal := false
+	for _, ref := range introduced {
+		if ref.Name == "Global" {
+			readsGlobal = true
+			break
+		}
+	}
+	if !readsGlobal {
+		return ""
+	}
+	var names []string
+	seen := map[string]bool{}
+	for name := range collectExprIdents(expr, nil) {
+		if seen[name] {
+			continue
+		}
+		sym, _, ok := a.lookupVisibleGlobal(name)
+		if !ok || sym == nil || sym.Kind != SymbolGlobal || sym.Mutable {
+			continue
+		}
+		if _, ok := sym.Node.(*ast.GlobalDecl); !ok {
+			continue
+		}
+		seen[name] = true
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	sort.Strings(names)
+	if len(names) == 1 {
+		return fmt.Sprintf("declare %q as `const` (not `global`) so it can be read in a contract — a `const` read is pure", names[0])
+	}
+	return fmt.Sprintf("declare %s as `const` (not `global`) so they can be read in a contract — a `const` read is pure", strings.Join(quoteEach(names), ", "))
+}
+
+// quoteEach returns each string wrapped in double quotes, for readable name lists in diagnostics.
+func quoteEach(names []string) []string {
+	out := make([]string, len(names))
+	for i, n := range names {
+		out[i] = fmt.Sprintf("%q", n)
+	}
+	return out
 }
 
 // exprReferencesGhostField reports whether an analyzed contract expression reads a `ghost` struct
