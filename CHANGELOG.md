@@ -61,6 +61,10 @@ All notable changes to this repository should be documented in this file.
   - canonical + legacy packed-ABI dense-key indexing
   - `table.values` optimization facts
 
+### Fixed
+
+- A plain `assert(COND)` statement (no `by:` proof block) now lowers correctly instead of crashing with `unknown identifier "assert" during LLVM lowering`. The analyzer already treated it as a first-class assertion — discharging COND through the proof ladder and recording it as a downstream flow fact — but the LLVM backend fell through to ordinary call emission and failed to resolve the reserved `assert` identifier as a callee. The backend now special-cases the asserted-call form exactly like `assert … by:`: a debug-gated runtime check (panics on a false condition at `-O0`) that is erased at higher opt levels. This also makes the verifier's own "add `assert(...)` before the call" suggestion actionable. Regression: `src/plain_assert_lowering_runtime_test.go`.
+
 ### Changed
 
 - `@test` annotations now permit declared `Abort` permissions while continuing to reject other declared permission families.
