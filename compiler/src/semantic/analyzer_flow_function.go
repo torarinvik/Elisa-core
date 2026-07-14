@@ -150,13 +150,61 @@ func isLegitimateGuardBlock(n *ast.IfStmt) bool {
 }
 
 // stmtIsLoop reports whether the statement is a loop construct (while/for/iterator-for/
-// parallel-for) — the shapes the guarded-loop exemption covers.
+// parallel-for) — the shapes the guarded-loop exemption covers. A captured/header loop
+// (docs/119 §6 — `while cond |x|:`, `for … |acc=0|:`) does NOT reach here as a bare loop:
+// wrapLoopHeader lowers it to a synthesized `if true:` scope wrapper around its capture-init
+// decls + the loop. That wrapper is transparent scoping, not a decision, so we look through it
+// (else `if COND: while … |x|:` — the ubiquitous "skip the loop when empty" guard — would be
+// flagged though its uncaptured twin is exempt).
 func stmtIsLoop(stmt ast.Stmt) bool {
 	switch stmt.(type) {
 	case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt:
 		return true
 	}
+	if body, ok := loopHeaderScopeBody(stmt); ok {
+		return stmtsAreHeaderLoop(body)
+	}
 	return false
+}
+
+// loopHeaderScopeBody returns the body of a synthesized loop-header scope wrapper and true, or
+// (nil, false). wrapLoopHeader (parser/loop_header.go) emits `if true: <decls…, loop>` for a
+// captured/header loop: a NON-source `if` whose condition is the literal `true`, no elif/else.
+// A hand-written `if true:` is FromSource and never matches, so this keys only on the synthesized
+// shape (zero false positives).
+func loopHeaderScopeBody(stmt ast.Stmt) ([]ast.Stmt, bool) {
+	s, ok := stmt.(*ast.IfStmt)
+	if !ok || s.FromSource || len(s.Elifs) > 0 || len(s.Else) > 0 {
+		return nil, false
+	}
+	if b, ok := s.Cond.(*ast.BoolLit); ok && b.Value {
+		return s.Then, true
+	}
+	return nil, false
+}
+
+// stmtsAreHeaderLoop reports whether a loop-header scope-wrapper body is exactly a run of
+// capture-initializer VarDecls followed by a single loop — the desugaring of one captured loop,
+// nothing more (so an unrelated `if true:` block carrying other statements is not mistaken for a
+// guarded loop).
+func stmtsAreHeaderLoop(stmts []ast.Stmt) bool {
+	sawLoop := false
+	for _, s := range stmts {
+		switch s.(type) {
+		case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt:
+			if sawLoop {
+				return false
+			}
+			sawLoop = true
+		case *ast.VarDeclStmt:
+			if sawLoop {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return sawLoop
 }
 
 // bodyHasNestedDecision reports whether a branch body directly contains a SOURCE block `if`
