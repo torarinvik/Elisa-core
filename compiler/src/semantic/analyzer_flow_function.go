@@ -90,10 +90,58 @@ func (a *Analyzer) checkStrictBlockIf(n *ast.IfStmt) {
 	if condContainsIsTest(n.Cond) {
 		return
 	}
+	if isLegitimateGuardBlock(n) {
+		return
+	}
 	a.errorf(n.Position, "strict flow [-Wflow-strict]: block `if` statement — every decision must be "+
 		"a value, an exit, an arm, or a transition (docs/125 §6b). Use a postfix guard (`STMT if COND`), "+
 		"a value selection (`x = A if c else B`, `when`), a `match` arm, or a `machine` state; or state "+
 		"the exception with `can ComplexFlow:`")
+}
+
+// isLegitimateGuardBlock reports whether a source block `if` is a legitimate conditional
+// COMPUTATION (a guard), not a hidden decision tree — docs/125 §6b exemption (ratified
+// 2026-07-14). The distinguishing, zero-FP feature: the branch BINDS a local (a `=`), which
+// no postfix guard, value-selection, or ternary can express (you cannot conditionally bind).
+// Such a block — `if COND: x = <compute>; <use x>` — is the ONLY way to conditionally
+// destructure/compute-and-act, so flagging it would force a `can ComplexFlow:` grant (which
+// docs/125 wants to FALL, not rise). Kept STRICT so genuine hidden machines still fire:
+//   - an if/elif chain is a decision TABLE (→ `when`/`match`), never exempt;
+//   - a body that itself branches (a nested `if`/`match`) is a decision TREE, never exempt;
+//   - a binding-FREE block (single or multi postfix-reducible effects) stays flagged — the
+//     programmer can split it to postfix guards (they know the condition's purity).
+func isLegitimateGuardBlock(n *ast.IfStmt) bool {
+	if len(n.Elifs) > 0 {
+		return false
+	}
+	if bodyHasNestedDecision(n.Then) || bodyHasNestedDecision(n.Else) {
+		return false
+	}
+	return bodyBindsLocal(n.Then) || bodyBindsLocal(n.Else)
+}
+
+// bodyHasNestedDecision reports whether a branch body directly contains an `if`/`match` — a
+// nested decision that makes the block a tree (hidden state machine), not a straight guard.
+// Loops are not decisions and do not disqualify (they recurse through the normal walk).
+func bodyHasNestedDecision(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		switch stmt.(type) {
+		case *ast.IfStmt, *ast.MatchStmt:
+			return true
+		}
+	}
+	return false
+}
+
+// bodyBindsLocal reports whether a branch body binds a local with `=` (a VarDeclStmt) — the
+// feature that makes the block irreducible to any guard/value form.
+func bodyBindsLocal(stmts []ast.Stmt) bool {
+	for _, stmt := range stmts {
+		if _, ok := stmt.(*ast.VarDeclStmt); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // condContainsIsTest reports whether a condition tree contains an `is` refinement test —

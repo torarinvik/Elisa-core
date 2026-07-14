@@ -122,6 +122,64 @@ func TestStrictBlockIfComplexFlowGrant(t *testing.T) {
 	}
 }
 
+// docs/125 §6b legitimate-guard exemption (ratified 2026-07-14): a block `if` whose branch
+// BINDS a local and is straight-line (no elif, no nested if/match) is a conditional
+// computation, not a hidden decision tree — exempt. But a binding-free block, an if/elif
+// table, and a block whose body itself branches all STAY flagged.
+func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
+	exempt := `def f(x: i64) -> i64:
+    if x > 0:
+        y: i64 = x * 2
+        return y
+    return 0
+`
+	strict := flowStrict(t, "blockif_bindingguard.elisa", exempt)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a straight-line binding guard block must be exempt, got:\n%v", strict.Errors())
+	}
+
+	// A binding-FREE block stays flagged (it is postfix-reducible).
+	bindingFree := `def g(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        total <- total + 1
+        total <- total + 2
+    return total
+`
+	s2 := flowStrict(t, "blockif_bindingfree.elisa", bindingFree)
+	if !strings.Contains(strings.Join(s2.Errors(), "\n"), "block `if`") {
+		t.Fatalf("a binding-free block must still be flagged, got:\n%v", s2.Errors())
+	}
+
+	// An if/elif chain is a decision table — stays flagged even when the then-branch binds.
+	table := `def h(x: i64) -> i64:
+    r: mutable i64 = 0
+    if x > 0:
+        y: i64 = x
+        r <- y
+    elif x < 0:
+        r <- 0 - 1
+    return r
+`
+	s3 := flowStrict(t, "blockif_table.elisa", table)
+	if !strings.Contains(strings.Join(s3.Errors(), "\n"), "block `if`") {
+		t.Fatalf("an if/elif table must still be flagged, got:\n%v", s3.Errors())
+	}
+
+	// A body that itself branches is a decision TREE — stays flagged even though it binds.
+	tree := `def k(x: i64) -> i64:
+    if x > 0:
+        y: i64 = x
+        if y > 5:
+            return y
+    return 0
+`
+	s4 := flowStrict(t, "blockif_tree.elisa", tree)
+	if !strings.Contains(strings.Join(s4.Errors(), "\n"), "block `if`") {
+		t.Fatalf("a nested-decision (tree) block must still be flagged, got:\n%v", s4.Errors())
+	}
+}
+
 // ---- shape re-tests (§6) -----------------------------------------------------------------
 
 const shapeRetestPreamble = `enum Expr2:
