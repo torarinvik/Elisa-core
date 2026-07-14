@@ -178,6 +178,19 @@ func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
 	if !strings.Contains(strings.Join(s4.Errors(), "\n"), "block `if`") {
 		t.Fatalf("a nested-decision (tree) block must still be flagged, got:\n%v", s4.Errors())
 	}
+
+	// A `rebind`-destructure guard binds new locals (a declaring TupleBind) — same irreducible
+	// principle as `=`, so it is exempt.
+	rebindGuard := `def m(x: i64) -> i64:
+    if x > 0:
+        rebind a, b = (x, x + 1)
+        return a + b
+    return 0
+`
+	s5 := flowStrict(t, "blockif_rebindguard.elisa", rebindGuard)
+	if all := strings.Join(s5.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a rebind-destructure binding guard must be exempt, got:\n%v", s5.Errors())
+	}
 }
 
 // ---- shape re-tests (§6) -----------------------------------------------------------------

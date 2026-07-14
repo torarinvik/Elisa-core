@@ -133,12 +133,22 @@ func bodyHasNestedDecision(stmts []ast.Stmt) bool {
 	return false
 }
 
-// bodyBindsLocal reports whether a branch body binds a local with `=` (a VarDeclStmt) — the
-// feature that makes the block irreducible to any guard/value form.
+// bodyBindsLocal reports whether a branch body introduces a NEW local binding — the feature
+// that makes the block irreducible to any guard/value form (you cannot conditionally *bind*).
+// Two spellings qualify, both genuine new bindings:
+//   - `x = <compute>`            → *ast.VarDeclStmt
+//   - `rebind a, b = <destr>`    → *ast.TupleBindStmt with Declare (a declaring destructure)
+// A reassignment (`x <- y`, a non-declaring TupleBindStmt/AssignStmt) does NOT qualify: it is
+// postfix-guardable (`x <- y if COND`), so a block of only reassignments stays flagged.
 func bodyBindsLocal(stmts []ast.Stmt) bool {
 	for _, stmt := range stmts {
-		if _, ok := stmt.(*ast.VarDeclStmt); ok {
+		switch s := stmt.(type) {
+		case *ast.VarDeclStmt:
 			return true
+		case *ast.TupleBindStmt:
+			if s.Declare {
+				return true
+			}
 		}
 	}
 	return false
