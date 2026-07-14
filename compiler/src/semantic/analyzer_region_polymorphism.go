@@ -464,16 +464,52 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 		return a.exprResultIsRegionAllocated(value)
 	}
 	var collect func(stmts []ast.Stmt)
+	// A binding's RHS can itself carry statements (a match-expression's arm bodies, a
+	// block expression's leading statements — docs/119 §2/§4): the locals declared there
+	// (e.g. the rebind-desugared `done_term` inside a `term = match …:` arm) feed the
+	// value's tail, so collect must see them or the tail Ident never registers.
+	var collectValueStmts func(value ast.Expr)
+	collectValueStmts = func(value ast.Expr) {
+		switch e := unwrapParenForRegionPoly(value).(type) {
+		case *ast.MatchExpr:
+			for _, arm := range e.Arms {
+				collect(arm.Body)
+			}
+		case *ast.ExprBlock:
+			collect(e.Stmts)
+			collectValueStmts(e.Value)
+		case *ast.TernaryExpr:
+			collectValueStmts(e.Value)
+			collectValueStmts(e.Alt)
+		}
+	}
 	collect = func(stmts []ast.Stmt) {
 		for _, stmt := range stmts {
 			switch s := stmt.(type) {
 			case *ast.VarDeclStmt:
-				if s.Value != nil && regiony(s.Value) {
-					regionLocals[s.Name] = true
+				if s.Value != nil {
+					collectValueStmts(s.Value)
+					if regiony(s.Value) {
+						regionLocals[s.Name] = true
+					}
 				}
 			case *ast.AssignStmt:
+				if s.Value != nil {
+					collectValueStmts(s.Value)
+				}
 				if target, ok := s.Target.(*ast.Ident); ok && target != nil && s.Value != nil && regiony(s.Value) {
 					regionLocals[target.Name] = true
+				}
+			case *ast.TupleBindStmt:
+				// A multi-target rebind/tuple bind whose RHS is region-allocated feeds
+				// every bound name (the temps a `rebind a, b = call()` destructures into).
+				if s.Value != nil {
+					collectValueStmts(s.Value)
+					if regiony(s.Value) {
+						for _, nm := range s.Names {
+							regionLocals[nm.Name] = true
+						}
+					}
 				}
 			case *ast.IfStmt:
 				collect(s.Then)
