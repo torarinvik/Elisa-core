@@ -256,16 +256,43 @@ func (p *Parser) parseMultiPlaceAssignStmt(pos lexer.Pos, first ast.Expr) ast.St
 	if blockValue, ok := p.parseValueBlockRHS(pos); ok {
 		value = blockValue
 	} else {
+		// docs/125 §6b: like single-place `x <- v if cond`, the multi-place RHS admits a
+		// postfix statement guard — `a, b <- call() if cond` is do-or-skip.
+		p.stmtGuardArmed = true
 		value = p.parseValueExprAllowTuple()
+		p.stmtGuardArmed = false
 	}
 	p.expectNewlineAfterValueExpr(value)
 
+	// The desugars below ride per-place assignments on pendingStmts (they land flat AFTER
+	// the returned statement). A postfix guard must scope the WHOLE form — temp bind and
+	// every place-write — so capture the newly appended pending statements into the
+	// guard's then-block instead of letting them land unconditionally.
+	pendingBase := len(p.pendingStmts)
+
 	// docs/120 §6: thread slots. A slot whose expression is the target binding itself, or a
 	// mutating call on it, is a THREAD — its effects execute in place and the slot erases.
-	if stmt, handled := p.desugarThreadSlots(pos, places, value); handled {
+	stmt, handled := p.desugarThreadSlots(pos, places, value)
+	if !handled {
+		stmt = p.buildPureMultiPlaceAssign(pos, places, value)
+	}
+	return p.guardPendingStmts(stmt, pendingBase)
+}
+
+// guardPendingStmts finishes a statement whose desugar may ride per-place writes on
+// pendingStmts: with no armed guard it returns the statement unchanged (pending writes
+// land flat after it, as always); with a captured postfix guard (docs/125 §6b) it moves
+// the newly appended pending statements INTO the guard's then-block so the whole form —
+// bind and every place-write — is do-or-skip together.
+func (p *Parser) guardPendingStmts(stmt ast.Stmt, pendingBase int) ast.Stmt {
+	if p.stmtGuardCond == nil {
 		return stmt
 	}
-	return p.buildPureMultiPlaceAssign(pos, places, value)
+	then := append([]ast.Stmt{stmt}, p.pendingStmts[pendingBase:]...)
+	p.pendingStmts = p.pendingStmts[:pendingBase]
+	cond := p.stmtGuardCond
+	p.stmtGuardCond = nil
+	return &ast.IfStmt{Position: stmt.Pos(), Cond: cond, Then: then}
 }
 
 // buildPureMultiPlaceAssign is the docs/120 §1 desugar for value-only slots: the whole

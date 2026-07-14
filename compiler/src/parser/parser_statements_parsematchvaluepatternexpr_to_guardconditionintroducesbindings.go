@@ -365,11 +365,24 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 		value = blockValue
 		p.expectNewlineAfterValueExpr(value)
 	} else {
+		// docs/125 §6b: like single-place `x <- v if cond`, the `<-` (reassign) form
+		// admits a postfix statement guard — `a, b <- call() if cond` is do-or-skip.
+		// The `=` (declare) form does not: a conditionally-declared binding would be
+		// unusable afterwards.
+		if !declare {
+			p.stmtGuardArmed = true
+		}
 		value = p.parseValueExprAllowTuple()
+		p.stmtGuardArmed = false
 		// Not the plain expectNewline: a multi-line match-expression RHS ends with its
 		// arm block's DEDENT (the trailing newline was consumed inside the final arm).
 		p.expectNewlineAfterValueExpr(value)
 	}
+	// A postfix guard must scope the WHOLE desugar — thread effects, per-place
+	// pendingStmts writes, and the bind itself — so route every return below through
+	// guardTupleBind, which captures newly appended pending statements into the
+	// guard's then-block.
+	pendingBase := len(p.pendingStmts)
 	// docs/120 §6: in the `<-` (reassign) form, a slot naming its own target — the bare
 	// binding or a mutating call on it — is a THREAD slot and erases; only value slots
 	// remain bound. The `=` (declare) form introduces fresh names and never threads.
@@ -379,7 +392,7 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 			places[i] = &ast.Ident{Position: nm.Position, Name: nm.Name}
 		}
 		if stmt, handled := p.desugarThreadSlots(pos, places, value); handled {
-			return stmt
+			return p.guardPendingStmts(stmt, pendingBase)
 		}
 		// docs/120 implicit threading — mixed claim form: `lexer, suffix <-
 		// lexer.read_type_suffix()`. When the RHS is a single direct call, a target
@@ -402,19 +415,19 @@ func (p *Parser) tryParseTupleBindStmt(pos lexer.Pos) ast.Stmt {
 			switch len(names) {
 			case 0:
 				// Every target was a claimed thread: the call stands alone.
-				return &ast.ExprStmt{Position: pos, Expr: value}
+				return p.guardPendingStmts(&ast.ExprStmt{Position: pos, Expr: value}, pendingBase)
 			case 1:
 				// One value target: the return is a scalar. `_` discards it explicitly
 				// (`parser, _ <- parser.advance()` — the thread is claimed, the Token
 				// dropped visibly); otherwise a plain reassignment.
 				if names[0].Name == "_" {
-					return &ast.DiscardStmt{Position: pos, Value: value}
+					return p.guardPendingStmts(&ast.DiscardStmt{Position: pos, Value: value}, pendingBase)
 				}
-				return &ast.AssignStmt{Position: names[0].Position, Target: &ast.Ident{Position: names[0].Position, Name: names[0].Name}, Value: value}
+				return p.guardPendingStmts(&ast.AssignStmt{Position: names[0].Position, Target: &ast.Ident{Position: names[0].Position, Name: names[0].Name}, Value: value}, pendingBase)
 			}
 		}
 	}
-	return &ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}
+	return p.guardPendingStmts(&ast.TupleBindStmt{Position: pos, Names: names, Declare: declare, Value: value}, pendingBase)
 }
 func (p *Parser) parseLetDestructureStmt() ast.Stmt {
 	pos := p.cur().Pos
