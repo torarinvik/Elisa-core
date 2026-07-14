@@ -120,12 +120,14 @@ func isLegitimateGuardBlock(n *ast.IfStmt) bool {
 	if bodyBindsLocal(n.Then) || bodyBindsLocal(n.Else) {
 		return true
 	}
-	// Guarded loop (docs/125 §6b broadening, ratified 2026-07-14 wave audits): `if COND:`
-	// whose body is exactly one loop. A loop is a computation, not a decision — there is
-	// no arm/transition form for "maybe iterate", and hoisting the guard into the loop
-	// condition changes evaluation (re-tests per iteration). The one-statement shape keeps
-	// this exact: a loop plus trailing effects falls to the multi-statement rule below.
-	if len(n.Else) == 0 && len(n.Then) == 1 && stmtIsLoop(n.Then[0]) {
+	// Guarded loop or guarded MATCH (docs/125 §6b broadening, ratified 2026-07-14 wave
+	// audits): `if COND:` whose body is exactly one loop or one match. A loop is a
+	// computation, not a decision — there is no arm/transition form for "maybe iterate",
+	// and hoisting the guard into the loop condition changes evaluation. A match IS the
+	// sanctioned decision form and cannot take a postfix guard, so `if c: match …` is the
+	// only spelling of a guarded, already-modelled decision. The one-statement shape keeps
+	// this exact: extra trailing effects fall to the multi-statement rule below.
+	if len(n.Else) == 0 && len(n.Then) == 1 && (stmtIsLoop(n.Then[0]) || stmtIsMatch(n.Then[0])) {
 		return true
 	}
 	// Straight-line multi-effect guard: `if COND: eff1; eff2; …` (binding-free, no nested
@@ -157,9 +159,11 @@ func stmtIsLoop(stmt ast.Stmt) bool {
 	return false
 }
 
-// bodyHasNestedDecision reports whether a branch body directly contains an `if`/`match` — a
-// nested decision that makes the block a tree (hidden state machine), not a straight guard.
-// Loops are not decisions and do not disqualify (they recurse through the normal walk).
+// bodyHasNestedDecision reports whether a branch body directly contains a SOURCE block `if`
+// — a hidden nested decision that makes the block a tree (hidden state machine), not a
+// straight guard. A `match` does NOT disqualify: it is the sanctioned arm-based decision
+// form, so a guard wrapping one is a guard over an already-modelled decision. Loops are not
+// decisions and do not disqualify (they recurse through the normal walk).
 func bodyHasNestedDecision(stmts []ast.Stmt) bool {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
@@ -170,11 +174,16 @@ func bodyHasNestedDecision(stmts []ast.Stmt) bool {
 			if s.FromSource {
 				return true
 			}
-		case *ast.MatchStmt:
-			return true
 		}
 	}
 	return false
+}
+
+// stmtIsMatch reports whether the statement is a match — the sanctioned arm-based decision
+// form. A body containing one is already modelled, so it never makes the parent a "tree".
+func stmtIsMatch(stmt ast.Stmt) bool {
+	_, ok := stmt.(*ast.MatchStmt)
+	return ok
 }
 
 // bodyBindsLocal reports whether a branch body introduces a NEW local binding — the feature

@@ -211,6 +211,23 @@ func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
 		t.Fatalf("an uneven straight-line if/else alternation must be exempt, got:\n%v", s2e.Errors())
 	}
 
+	// A guard wrapping exactly one MATCH is exempt — match is the sanctioned decision form
+	// and cannot take a postfix guard, so `if c: match …` is the only spelling.
+	guardedMatch := `def g5(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        match x:
+            1:
+                total <- 10
+            _:
+                total <- 20
+    return total
+`
+	s2f := flowStrict(t, "blockif_guardedmatch.elisa", guardedMatch)
+	if all := strings.Join(s2f.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a guarded match must be exempt, got:\n%v", s2f.Errors())
+	}
+
 	// An if/elif chain is a decision table — stays flagged even when the then-branch binds.
 	table := `def h(x: i64) -> i64:
     r: mutable i64 = 0
