@@ -138,7 +138,9 @@ func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
 		t.Fatalf("a straight-line binding guard block must be exempt, got:\n%v", strict.Errors())
 	}
 
-	// A binding-FREE block stays flagged (it is postfix-reducible).
+	// A binding-free MULTI-statement straight-line block is exempt (2026-07-14 broadening):
+	// splitting it to per-statement postfix guards would re-evaluate the condition per
+	// statement, so the block is the honest spelling.
 	bindingFree := `def g(x: i64) -> i64:
     total: mutable i64 = 0
     if x > 0:
@@ -147,8 +149,66 @@ func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
     return total
 `
 	s2 := flowStrict(t, "blockif_bindingfree.elisa", bindingFree)
-	if !strings.Contains(strings.Join(s2.Errors(), "\n"), "block `if`") {
-		t.Fatalf("a binding-free block must still be flagged, got:\n%v", s2.Errors())
+	if all := strings.Join(s2.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a binding-free multi-statement straight-line block must be exempt, got:\n%v", s2.Errors())
+	}
+
+	// A SINGLE-statement binding-free body stays flagged — it is exactly one postfix guard
+	// with no condition duplication, so the fold pressure remains.
+	singleStmt := `def g1(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        total <- total + 1
+    return total
+`
+	s2b := flowStrict(t, "blockif_singlestmt.elisa", singleStmt)
+	if !strings.Contains(strings.Join(s2b.Errors(), "\n"), "block `if`") {
+		t.Fatalf("a single-statement binding-free block must still be flagged, got:\n%v", s2b.Errors())
+	}
+
+	// A guarded loop (`if COND:` wrapping exactly one loop) is exempt — a loop is a
+	// computation, not a decision, and hoisting the guard changes evaluation.
+	loopGuard := `def g2(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        for i in 0..<x:
+            total <- total + i
+    return total
+`
+	s2c := flowStrict(t, "blockif_loopguard.elisa", loopGuard)
+	if all := strings.Join(s2c.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a guarded loop must be exempt, got:\n%v", s2c.Errors())
+	}
+
+	// A plain if/else with both branches single-statement stays flagged — that is
+	// ternary/value-if territory.
+	evenAlt := `def g3(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        total <- 1
+    else:
+        total <- 2
+    return total
+`
+	s2d := flowStrict(t, "blockif_evenalt.elisa", evenAlt)
+	if !strings.Contains(strings.Join(s2d.Errors(), "\n"), "block `if`") {
+		t.Fatalf("a single/single if/else must still be flagged, got:\n%v", s2d.Errors())
+	}
+
+	// A plain if/else where one branch carries 2+ straight-line statements is exempt —
+	// two-way effect alternation with no shared scrutinee has no when/match/ternary form.
+	unevenAlt := `def g4(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        total <- total + 1
+        total <- total + 2
+    else:
+        total <- 9
+    return total
+`
+	s2e := flowStrict(t, "blockif_unevenalt.elisa", unevenAlt)
+	if all := strings.Join(s2e.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("an uneven straight-line if/else alternation must be exempt, got:\n%v", s2e.Errors())
 	}
 
 	// An if/elif chain is a decision table — stays flagged even when the then-branch binds.

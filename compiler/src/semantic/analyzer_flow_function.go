@@ -117,7 +117,44 @@ func isLegitimateGuardBlock(n *ast.IfStmt) bool {
 	if bodyHasNestedDecision(n.Then) || bodyHasNestedDecision(n.Else) {
 		return false
 	}
-	return bodyBindsLocal(n.Then) || bodyBindsLocal(n.Else)
+	if bodyBindsLocal(n.Then) || bodyBindsLocal(n.Else) {
+		return true
+	}
+	// Guarded loop (docs/125 §6b broadening, ratified 2026-07-14 wave audits): `if COND:`
+	// whose body is exactly one loop. A loop is a computation, not a decision — there is
+	// no arm/transition form for "maybe iterate", and hoisting the guard into the loop
+	// condition changes evaluation (re-tests per iteration). The one-statement shape keeps
+	// this exact: a loop plus trailing effects falls to the multi-statement rule below.
+	if len(n.Else) == 0 && len(n.Then) == 1 && stmtIsLoop(n.Then[0]) {
+		return true
+	}
+	// Straight-line multi-effect guard: `if COND: eff1; eff2; …` (binding-free, no nested
+	// decisions). Splitting to per-statement postfix guards would re-evaluate COND once per
+	// statement — wrong if COND is impure and noisy even when pure — so the block is the
+	// honest spelling. A SINGLE-statement body stays flagged: it is exactly one postfix
+	// guard with no duplication, so the pressure to fold it remains.
+	if len(n.Else) == 0 && len(n.Then) >= 2 {
+		return true
+	}
+	// Two-way effect alternation: a plain if/else (no elif — a chain is a table) whose
+	// branches are straight-line and at least one side carries 2+ statements. With no
+	// shared scrutinee there is no when/match arm to give it, and a ternary cannot carry
+	// statements. The both-sides-single case stays flagged — that is ternary/value-if
+	// territory (`x = A if c else B`).
+	if len(n.Else) > 0 && (len(n.Then) >= 2 || len(n.Else) >= 2) {
+		return true
+	}
+	return false
+}
+
+// stmtIsLoop reports whether the statement is a loop construct (while/for/iterator-for/
+// parallel-for) — the shapes the guarded-loop exemption covers.
+func stmtIsLoop(stmt ast.Stmt) bool {
+	switch stmt.(type) {
+	case *ast.WhileStmt, *ast.ForStmt, *ast.IterForStmt, *ast.ParallelForStmt:
+		return true
+	}
+	return false
 }
 
 // bodyHasNestedDecision reports whether a branch body directly contains an `if`/`match` — a
@@ -125,8 +162,15 @@ func isLegitimateGuardBlock(n *ast.IfStmt) bool {
 // Loops are not decisions and do not disqualify (they recurse through the normal walk).
 func bodyHasNestedDecision(stmts []ast.Stmt) bool {
 	for _, stmt := range stmts {
-		switch stmt.(type) {
-		case *ast.IfStmt, *ast.MatchStmt:
+		switch s := stmt.(type) {
+		case *ast.IfStmt:
+			// Only a SOURCE block `if` makes the parent a tree. Parser-synthesized ifs —
+			// postfix guards (`x <- v if c`), `break if c`, guarded returns — are sanctioned
+			// forms; their desugared IfStmt children must not disqualify the parent.
+			if s.FromSource {
+				return true
+			}
+		case *ast.MatchStmt:
 			return true
 		}
 	}
