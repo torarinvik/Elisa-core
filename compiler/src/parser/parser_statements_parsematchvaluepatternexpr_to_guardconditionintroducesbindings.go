@@ -463,14 +463,25 @@ func (p *Parser) parseSignalStmt() *ast.SignalStmt {
 	p.expectNewline()
 	return &ast.SignalStmt{Position: pos, Permissions: []ast.PermissionRef{ref}}
 }
-func (p *Parser) parsePanic() *ast.PanicStmt {
+// parsePanic parses `panic(msg)`, optionally with a trailing postfix guard
+// `panic(msg) if COND` (docs/125 §6b: a guarded divergence — do-or-skip, no else — the
+// analogue of `break if`/`continue if`/`VALUE return if`). The guard desugars to a
+// NON-source `if COND: panic(msg)`, so the strict block-`if` ban never fires on it and a
+// conditional panic reads as one line instead of a two-line block.
+func (p *Parser) parsePanic() ast.Stmt {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_PANIC)
 	p.expect(lexer.TOKEN_LPAREN)
 	msg := p.parseExpr()
 	p.expect(lexer.TOKEN_RPAREN)
+	panicStmt := &ast.PanicStmt{Position: pos, Message: msg}
+	if p.match(lexer.TOKEN_IF) {
+		cond := p.parseExpr()
+		p.expectNewlineAfterValueExpr(cond)
+		return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{panicStmt}}
+	}
 	p.expectNewline()
-	return &ast.PanicStmt{Position: pos, Message: msg}
+	return panicStmt
 }
 
 type ifClause struct {

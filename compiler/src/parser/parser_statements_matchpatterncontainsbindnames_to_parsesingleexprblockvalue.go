@@ -724,9 +724,13 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			asKind = "!"
 		}
 		p.expect(lexer.TOKEN_LARROW)
+		// docs/125 §6b: the reinterpret-assign RHS admits a postfix statement guard too —
+		// `x as & <- v if cond` is do-or-skip (a ternary still spells its `else`).
+		p.stmtGuardArmed = true
 		value := p.parseValueExprAllowTuple()
+		p.stmtGuardArmed = false
 		p.expectNewlineAfterValueExpr(value)
-		return &ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value}
+		return p.takeStmtGuard(&ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value})
 	}
 
 	// docs/119 §2: inside an expression block a bare `a, b` line is a tuple

@@ -178,7 +178,28 @@ func (p *Parser) parseExpr() ast.Expr {
 	}
 	if p.matchIdentText("can") {
 		permissions := p.parsePermissionRefs(false)
-		return &ast.CanExpr{Position: expr.Pos(), Expr: expr, Permissions: permissions}
+		canExpr := &ast.CanExpr{Position: expr.Pos(), Expr: expr, Permissions: permissions}
+		// docs/125 §6b: a can-annotated call statement still admits a postfix guard —
+		// `f(...) can E if COND` is do-or-skip. The base `if` branch above returned before
+		// `can` could attach, so re-check the guard here while the window is still armed.
+		if p.allowTernary && p.peek() == lexer.TOKEN_IF && !p.prevTokenIsDedent() {
+			p.advance()
+			cond := p.parseOr()
+			if p.stmtGuardArmed && p.peek() != lexer.TOKEN_ELSE && p.stmtEndAhead() {
+				p.stmtGuardArmed = false
+				p.stmtGuardCond = cond
+				return canExpr
+			}
+			// A completed ternary over a can-value (`(f() can E) if c else d`) is unusual
+			// but well-formed; build it so nothing is silently dropped.
+			savedGuardArmed := p.stmtGuardArmed
+			p.stmtGuardArmed = false
+			p.expect(lexer.TOKEN_ELSE)
+			alt := p.parseExpr()
+			p.stmtGuardArmed = savedGuardArmed
+			return &ast.TernaryExpr{Position: canExpr.Pos(), Value: canExpr, Cond: cond, Alt: alt}
+		}
+		return canExpr
 	}
 
 	return expr
