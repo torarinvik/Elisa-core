@@ -406,6 +406,7 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	}
 	if semantic.SameType(t, arenaType) {
 		s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: ptr}
+		s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
 		if isRegionParam {
 			s.regionPolyOwner = s.treeAllocOwner
 		}
@@ -413,6 +414,7 @@ func (s *functionState) bindImplicitTreeOwnerParam(name string, t semantic.Type,
 	}
 	if refType, ok := t.(*semantic.RefType); ok && refType != nil && semantic.SameType(refType.Elem, arenaType) && value != nil {
 		s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: value, arenaRefPtr: ptr}
+		s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
 		if isRegionParam {
 			s.regionPolyOwner = s.treeAllocOwner
 		}
@@ -428,14 +430,29 @@ func packedStoreKey(enumType *semantic.EnumType) string {
 	return enumType.Root().Name
 }
 func (s *functionState) lookupPackedStore(enumType *semantic.EnumType) (packedStoreBinding, bool) {
-	if s.packedStores == nil || enumType == nil {
+	if enumType == nil {
 		return packedStoreBinding{}, false
 	}
-	binding, ok := s.packedStores[packedStoreKey(enumType)]
-	if !ok || binding.typ == nil {
-		return packedStoreBinding{}, false
+	if s.packedStores != nil {
+		if binding, ok := s.packedStores[packedStoreKey(enumType)]; ok && binding.typ != nil {
+			return binding, true
+		}
 	}
-	return binding, true
+	// Implicit region-backed stores live in the function-wide cache (not scope-restored);
+	// an entry is valid exactly while its owning region is the active tree-alloc owner.
+	if s.regionPackedStores != nil {
+		regionKey := s.treeAllocOwner.arenaRef
+		if regionKey == nil {
+			regionKey = s.treeAllocOwner.arenaRefPtr
+		}
+		if regionKey != nil {
+			key := regionPackedStoreKey{region: regionKey, enum: packedStoreKey(enumType)}
+			if binding, ok := s.regionPackedStores[key]; ok && binding.typ != nil {
+				return binding, true
+			}
+		}
+	}
+	return packedStoreBinding{}, false
 }
 func (s *functionState) bindPackedStoreValue(t semantic.Type, value C.LLVMValueRef) {
 	storeType, ok := t.(*semantic.PackedEnumStoreType)

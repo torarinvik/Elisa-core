@@ -265,20 +265,21 @@ func (s *functionState) emitAutoRegionPackedAllocExpr(expr *ast.AllocExpr) (C.LL
 // getOrCreateRegionPackedStore returns the implicit packed store for enumType active in the current
 // region, creating it (backed by the active inferred region's arena) on first use and registering it
 // as the active store so subsequent new[auto] allocations and storeless `match` resolve to it.
+//
+// Creation is emitted at the owning region's store ANCHOR (right after its arena initialization),
+// not at the current builder position: a first use inside a loop body would otherwise re-execute
+// ctx_aos_store_new every iteration — a fresh, empty store per iteration — so a handle escaping one
+// iteration decodes against a different store (the machine-from degenerate-darray SIGBUS). The
+// hoisted store dominates the region's whole extent, and the binding is cached function-wide
+// (regionPackedStores, not the scope-restored packedStores) keyed by the region identity.
 func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType) (packedStoreBinding, error) {
-	arenaPtr := s.treeAllocOwner.arenaRef
 	// regionKey is the stable identity for the arena so that the "is this the same arena?" check below
 	// uses a compile-time-constant SSA value (an alloca pointer) rather than a loaded pointer value that
 	// is a fresh SSA each time. For direct Arena values (arenaRef), the alloca IS the stable key. For
 	// Arena& references (arenaRefPtr), use the alloca that holds the reference pointer.
-	regionKey := arenaPtr
-	if arenaPtr == nil && s.treeAllocOwner.arenaRefPtr != nil {
+	regionKey := s.treeAllocOwner.arenaRef
+	if regionKey == nil {
 		regionKey = s.treeAllocOwner.arenaRefPtr
-		loaded, err := s.treeOwnerArenaRefValue(s.treeAllocOwner, "packed.store.owner.arena")
-		if err != nil {
-			return packedStoreBinding{}, err
-		}
-		arenaPtr = loaded
 	}
 	if binding, ok := s.lookupPackedStore(enumType); ok {
 		// Reuse an explicit/threaded store (regionArena nil) unconditionally, or an implicit store
@@ -288,26 +289,76 @@ func (s *functionState) getOrCreateRegionPackedStore(enumType *semantic.EnumType
 			return binding, nil
 		}
 	}
-	if arenaPtr == nil {
+	if regionKey == nil {
 		return packedStoreBinding{}, fmt.Errorf("new[auto] packed allocation has no active inferred region arena (in %s)", s.fnType.Name)
+	}
+	savedBlock := C.LLVMGetInsertBlock(s.builder)
+	hoisted := s.treeAllocOwner.storeAnchorBlock != nil
+	if hoisted {
+		s.positionAfterStoreAnchor(s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr)
+	}
+	restore := func() {
+		if hoisted && savedBlock != nil {
+			C.LLVMPositionBuilderAtEnd(s.builder, savedBlock)
+		}
+	}
+	arenaPtr := s.treeAllocOwner.arenaRef
+	if arenaPtr == nil {
+		loaded, err := s.treeOwnerArenaRefValue(s.treeAllocOwner, "packed.store.owner.arena")
+		if err != nil {
+			restore()
+			return packedStoreBinding{}, err
+		}
+		arenaPtr = loaded
 	}
 	// docs/77: a sealed hierarchy shares ONE store per root, whose record is the union over all
 	// refinements' leaves. Build (and key) the store on the root.
 	root := enumType.Root()
 	if root.StoreType == nil {
+		restore()
 		return packedStoreBinding{}, fmt.Errorf("packed enum %s is missing store layout metadata", root.Name)
 	}
 	storeType := semantic.PackedEnumStoreWithState(root.StoreType, s.g.result.NamedTypes["Local"])
 	storeValue, err := s.emitPackedStoreValueFromArenaPtr(arenaPtr, storeType)
+	restore()
 	if err != nil {
 		return packedStoreBinding{}, err
 	}
-	if s.packedStores == nil {
-		s.packedStores = map[string]packedStoreBinding{}
+	if s.regionPackedStores == nil {
+		s.regionPackedStores = map[regionPackedStoreKey]packedStoreBinding{}
 	}
 	binding := packedStoreBinding{value: storeValue, typ: storeType, regionArena: regionKey}
-	s.packedStores[packedStoreKey(enumType)] = binding
+	s.regionPackedStores[regionPackedStoreKey{region: regionKey, enum: packedStoreKey(enumType)}] = binding
 	return binding, nil
+}
+
+// positionAfterStoreAnchor positions the builder immediately after the captured anchor
+// instruction (or at the block start when the anchor block was empty at capture time).
+func (s *functionState) positionAfterStoreAnchor(block C.LLVMBasicBlockRef, instr C.LLVMValueRef) {
+	if instr != nil {
+		if next := C.LLVMGetNextInstruction(instr); next != nil {
+			C.LLVMPositionBuilderBefore(s.builder, next)
+			return
+		}
+		C.LLVMPositionBuilderAtEnd(s.builder, C.LLVMGetInstructionParent(instr))
+		return
+	}
+	if first := C.LLVMGetFirstInstruction(block); first != nil {
+		C.LLVMPositionBuilderBefore(s.builder, first)
+		return
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, block)
+}
+
+// captureStoreAnchor snapshots the builder's current position as a (block, last-instruction)
+// pair for treeAllocOwnerBinding.storeAnchor*. Called right after an owner's arena is
+// initialized, so implicit packed stores hoisted there see a fully-initialized arena.
+func (s *functionState) captureStoreAnchor() (C.LLVMBasicBlockRef, C.LLVMValueRef) {
+	block := C.LLVMGetInsertBlock(s.builder)
+	if block == nil {
+		return nil, nil
+	}
+	return block, C.LLVMGetLastInstruction(block)
 }
 
 func (s *functionState) emitScopedPackedAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, semantic.Type, error) {

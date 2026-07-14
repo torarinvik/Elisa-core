@@ -596,6 +596,9 @@ func (s *functionState) emitInStore(stmt *ast.InStoreStmt) error {
 		return err
 	} else if ok {
 		s.treeAllocOwner = owner
+		if owner.storeAnchorBlock == nil {
+			s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
+		}
 		defer func() {
 			s.treeAllocOwner = savedTreeOwner
 		}()

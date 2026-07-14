@@ -97,8 +97,16 @@ type functionState struct {
 	// statement -> the stack arena to free right after it (the object died and is not aliased).
 	// Populated at region entry, fired once and removed when the statement is emitted.
 	earlyFreeByOffset map[int]C.LLVMValueRef
-	packedStores      map[string]packedStoreBinding
-	treeAllocOwner    treeAllocOwnerBinding
+	packedStores map[string]packedStoreBinding
+	// regionPackedStores caches the IMPLICIT region-backed packed store per (region, enum root)
+	// (getOrCreateRegionPackedStore). Unlike packedStores it is NOT scope-cloned/restored:
+	// the creation instructions are hoisted to the owning region's anchor (they dominate the
+	// region's whole extent), and the region half of the key makes an entry valid exactly
+	// while that region is the active owner — so a scope exit between two uses must not drop
+	// the binding (that re-created an empty store and broke previously-issued handles), and a
+	// nested region's store never evicts the outer region's.
+	regionPackedStores map[regionPackedStoreKey]packedStoreBinding
+	treeAllocOwner     treeAllocOwnerBinding
 	// regionPolyOwner is the region threaded into a region-polymorphic function via the hidden
 	// `__region_auto` Arena& param (docs/75). The function's synthesized `__auto_*` region adopts it
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
@@ -334,6 +342,20 @@ type packedStoreBinding struct {
 type treeAllocOwnerBinding struct {
 	arenaRef    C.LLVMValueRef
 	arenaRefPtr C.LLVMValueRef
+	// storeAnchorBlock/storeAnchorInstr mark the position right after this owner's arena
+	// became initialized. Implicit region-backed packed stores (getOrCreateRegionPackedStore)
+	// are emitted THERE, not at first use: a first use inside a loop body would otherwise
+	// re-execute ctx_aos_store_new every iteration (a fresh empty store per iteration), so a
+	// handle escaping one iteration decodes against a different store — the machine-from
+	// degenerate-darray SIGBUS. One hoisted store per (region, enum) dominates every use.
+	storeAnchorBlock C.LLVMBasicBlockRef
+	storeAnchorInstr C.LLVMValueRef
+}
+// regionPackedStoreKey identifies an implicit region-backed packed store: the owning region's
+// stable arena identity (an alloca/param pointer) plus the enum root's name.
+type regionPackedStoreKey struct {
+	region C.LLVMValueRef
+	enum   string
 }
 type packedStoreExtractCacheKey struct {
 	block C.LLVMBasicBlockRef

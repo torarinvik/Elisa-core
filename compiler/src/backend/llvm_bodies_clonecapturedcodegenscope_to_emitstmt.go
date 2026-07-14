@@ -260,9 +260,17 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 	// first block on demand, and arena_free over a never-allocated arena is a no-op. So a
 	// region that never allocates costs nothing beyond the stack slot.
 	if n.Lazy {
+		s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
 		return nil
 	}
-	return s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator)
+	if err := s.emitRegionInit(alloca, arenaType, n.Capacity, n.Allocator); err != nil {
+		return err
+	}
+	// Anchor implicit packed-store creation right after the arena is fully initialized:
+	// getOrCreateRegionPackedStore hoists ctx_aos_store_new here so one store per (region,
+	// enum) dominates every use, instead of re-creating a store at a first use inside a loop.
+	s.treeAllocOwner.storeAnchorBlock, s.treeAllocOwner.storeAnchorInstr = s.captureStoreAnchor()
+	return nil
 }
 
 // regionPolyAutoAdopts reports whether this synthesized `__auto_*` region, inside a
