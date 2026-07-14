@@ -256,6 +256,24 @@ func TestStrictBlockIfExemptsBindingGuard(t *testing.T) {
 		t.Fatalf("a nested-decision (tree) block must still be flagged, got:\n%v", s4.Errors())
 	}
 
+	// A guard wrapping an already-exempt nested form (here a guarded loop) plus effects is NOT
+	// a hidden tree: the nested loop is a computation, not a decision, so the parent is judged
+	// by its own straight-line shape. Contrast the `tree` case above — a nested REAL decision
+	// (plain if / if-elif) still makes a tree.
+	nestedExempt := `def kg(x: i64) -> i64:
+    total: mutable i64 = 0
+    if x > 0:
+        if x > 5:
+            for i in 0..<x:
+                total <- total + i
+        total <- total + 1
+    return total
+`
+	s4b := flowStrict(t, "blockif_nestedexempt.elisa", nestedExempt)
+	if all := strings.Join(s4b.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("a guard wrapping an exempt nested form + effects must be exempt, got:\n%v", s4b.Errors())
+	}
+
 	// A `rebind`-destructure guard binds new locals (a declaring TupleBind) — same irreducible
 	// principle as `=`, so it is exempt.
 	rebindGuard := `def m(x: i64) -> i64:

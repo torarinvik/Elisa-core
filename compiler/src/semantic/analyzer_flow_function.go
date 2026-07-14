@@ -216,12 +216,25 @@ func bodyHasNestedDecision(stmts []ast.Stmt) bool {
 	for _, stmt := range stmts {
 		switch s := stmt.(type) {
 		case *ast.IfStmt:
-			// Only a SOURCE block `if` makes the parent a tree. Parser-synthesized ifs —
-			// postfix guards (`x <- v if c`), `break if c`, guarded returns — are sanctioned
-			// forms; their desugared IfStmt children must not disqualify the parent.
-			if s.FromSource {
-				return true
+			// Only a SOURCE block `if` can make the parent a tree. Parser-synthesized ifs —
+			// postfix guards (`x <- v if c`), `break if c`, guarded returns, loop-header scope
+			// wrappers — are sanctioned forms; their desugared IfStmt children must not
+			// disqualify the parent.
+			if !s.FromSource {
+				continue
 			}
+			// ...and only a REAL nested decision makes a tree. A checked destructure (is-test
+			// condition) or an already-exempt guard (guarded loop/match, binding guard,
+			// straight-line block, uneven alternation) is a sanctioned NON-decision by §6b's
+			// own reasoning ("a loop is a computation, not a decision"; an is-test is a
+			// "checked destructure") — so a guard wrapping only such forms plus effects is not
+			// a HIDDEN machine; it is judged by its own shape below. A plain nested `if` or an
+			// if/elif table IS a real decision and still makes a tree; a real decision buried
+			// deeper is surfaced at its own site by the ordinary walk, never lost.
+			if condContainsIsTest(s.Cond) || isLegitimateGuardBlock(s) {
+				continue
+			}
+			return true
 		}
 	}
 	return false
