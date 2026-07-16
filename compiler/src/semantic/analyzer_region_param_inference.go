@@ -925,6 +925,23 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
 					}
 				}
+				// A brace construction `Ty{field: value, …}` carries region storage when any
+				// field initializer does (a struct wrapping a packed-enum handle or container —
+				// e.g. `items.push(ParamDecl{type_expression: node})`): the wrapper struct is
+				// copied into the caller's container but the wrapped handle's record (and its
+				// side-table payloads) live in a region, which must therefore be the param's.
+				if n != nil && n.Brace {
+					for _, fieldValue := range n.Args {
+						if rec(fieldValue, depth+1) {
+							return true
+						}
+					}
+					for _, spread := range n.Spreads {
+						if rec(spread, depth+1) {
+							return true
+						}
+					}
+				}
 				return false
 			}
 			return false
