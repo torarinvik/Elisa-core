@@ -394,36 +394,6 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
-func (p *Parser) parseTokenSetDecl() *ast.TokenSetDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("tokenset")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	var elemType ast.TypeExpr
-	if p.match(lexer.TOKEN_COLON) {
-		elemType = p.parseTypeExpr()
-	}
-	p.expect(lexer.TOKEN_ASSIGN)
-	value := p.parseExpr()
-	p.expectNewlineAfterValueExpr(value)
-	list, ok := value.(*ast.ListLitExpr)
-	if !ok {
-		p.errorAt(value.Pos(), "tokenset initializer must be a list literal")
-		list = &ast.ListLitExpr{Position: value.Pos()}
-	}
-	return &ast.TokenSetDecl{Position: pos, Name: name, ElemType: elemType, Value: list}
-}
-func (p *Parser) parseCharsetDecl() *ast.CharsetDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("charset")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_ASSIGN)
-	terms := []ast.LexerCharClassTerm{p.parseLexerCharClassTerm()}
-	for p.match(lexer.TOKEN_PIPE) {
-		terms = append(terms, p.parseLexerCharClassTerm())
-	}
-	p.expectNewline()
-	return &ast.CharsetDecl{Position: pos, Name: name, Terms: terms}
-}
 // looksLikeLayoutDecl distinguishes a guest-memory overlay `layout Name [size N]:` declaration
 // (docs/107) from the struct/enum layout-mode prefix that shares the `layout` keyword
 // (`layout soa struct …`, `layout(...) enum …`, docs/01). The overlay form reaches a `:` directly
@@ -522,62 +492,6 @@ func (p *Parser) parseLayoutInt() int64 {
 	return v
 }
 
-func (p *Parser) parseKeywordMapDecl() *ast.KeywordMapDecl {
-	pos := p.cur().Pos
-	p.expectIdentText("keywordmap")
-	name := p.expect(lexer.TOKEN_IDENT).Text
-	p.expect(lexer.TOKEN_COLON)
-	inputType := p.parseTypeExpr()
-	p.expect(lexer.TOKEN_ARROW)
-	returnType := p.parseTypeExpr()
-	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	p.expect(lexer.TOKEN_INDENT)
-	entries := make([]ast.KeywordMapEntry, 0, p.estimateIndentedItemCount())
-	seen := map[string]lexer.Pos{}
-	var fallback ast.Expr
-	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
-		p.skipNewlines()
-		if p.peek() == lexer.TOKEN_DEDENT {
-			break
-		}
-		entry, isFallback := p.parseKeywordMapEntry()
-		if isFallback {
-			if fallback != nil {
-				p.errorAt(entry.Position, "keywordmap can only have one `_` fallback arm")
-			}
-			fallback = entry.Value
-			continue
-		}
-		if prev, exists := seen[entry.Text]; exists {
-			p.errorAt(entry.Position, "duplicate keywordmap entry %q (first seen at %s:%d:%d)", entry.Text, prev.File, prev.Line, prev.Col)
-		} else {
-			seen[entry.Text] = entry.Position
-		}
-		entries = append(entries, entry)
-	}
-	p.expect(lexer.TOKEN_DEDENT)
-	if fallback == nil {
-		p.errorAt(pos, "keywordmap requires a default fallback")
-		fallback = &ast.ZeroedLit{Position: pos}
-	}
-	return &ast.KeywordMapDecl{Position: pos, Name: name, InputType: inputType, ReturnType: returnType, Fallback: fallback, Entries: entries}
-}
-
-func (p *Parser) parseKeywordMapEntry() (ast.KeywordMapEntry, bool) {
-	pos := p.cur().Pos
-	isFallback := p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "_"
-	text := ""
-	if isFallback {
-		p.advance()
-	} else {
-		text = p.expect(lexer.TOKEN_STRING_LIT).Text
-	}
-	p.expect(lexer.TOKEN_FATARROW)
-	value := p.parseExpr()
-	p.expectNewline()
-	return ast.KeywordMapEntry{Position: pos, Text: text, Value: value}, isFallback
-}
 func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_CONST)

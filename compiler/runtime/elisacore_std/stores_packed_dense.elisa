@@ -7,8 +7,7 @@ def packed_store_append_tag(a: mutable Arena&, state: mutable PackedStoreState&,
             tags.push(tag)
 def packed_store_append_prefix_words(a: mutable Arena&, state: mutable PackedStoreState&, row: void&):
     can Memory.Allocate, Abort.Panic:
-        if state.prefix_words == 0:
-            return
+        return if state.prefix_words == 0
         needed_rows: usize = state.handles.count
         assert state.prefix_column_capacity >= needed_rows
         assert state.prefix_columns.items != null
@@ -50,8 +49,7 @@ def packed_store_append_prefix_words(a: mutable Arena&, state: mutable PackedSto
             column[row_index] <- row_words[i]
 def packed_store_append_side_words(a: mutable Arena&, state: mutable PackedStoreState&, words: void&):
     can Memory.Allocate, Abort.Panic:
-        if state.side_words == 0:
-            return
+        return if state.side_words == 0
         needed_rows: usize = state.handles.count
         assert state.side_column_capacity >= needed_rows
         assert state.side_columns.items != null
@@ -95,10 +93,7 @@ def ctx_packed_store_state_new_with_prefix_words(a: mutable Arena&, row_bytes: u
     can Memory.Allocate, Abort.Panic:
         state_bits: heap void& = ctx_packed_store_state_new(a, row_bytes)
         state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
-        if prefix_words < state.row_words:
-            state.prefix_words <- prefix_words
-        else:
-            state.prefix_words <- state.row_words
+        state.prefix_words <- prefix_words if prefix_words < state.row_words else state.row_words
         return state_bits
 def ctx_packed_store_state_new_with_side_words(a: mutable Arena&, row_bytes: usize, side_words: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
@@ -118,8 +113,7 @@ def ctx_packed_store_alloc_fixed_tagged_result(a: mutable Arena&, state_bits: mu
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
 
         needed_rows: mutable usize = state.tags.count + 1
-        if needed_rows < state.handles.count:
-            needed_rows <- state.handles.count
+        needed_rows <- state.handles.count if needed_rows < state.handles.count
 
         packed_store_ensure_metadata_capacity(a, state, needed_rows)
         in a:
@@ -145,8 +139,7 @@ def ctx_packed_store_record_side_words_at(a: mutable Arena&, words: void&, state
     can Memory.Allocate, Abort.Panic:
         assert state_bits != null
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
-        if state.side_words == 0:
-            return
+        return if state.side_words == 0
         row_index: usize = index.usize()
         assert row_index < state.side_column_capacity
         assert state.side_columns.items != null
@@ -191,8 +184,7 @@ def ctx_packed_store_record_tag(a: mutable Arena&, tag: u32, state_bits: mutable
         assert state_bits != null
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         needed_rows: mutable usize = state.tags.count + 1
-        if needed_rows < state.handles.count:
-            needed_rows <- state.handles.count
+        needed_rows <- state.handles.count if needed_rows < state.handles.count
         packed_store_ensure_metadata_capacity(a, state, needed_rows)
         in a:
             state.tags.push(tag)
@@ -308,8 +300,7 @@ def ctx_packed_store_read_index_tag(state_bits: mutable void&, index: u32) -> u3
 def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: mutable void&, word_offset: usize) -> uintptr:
     can Abort.Panic:
         assert handle != 0.uintptr()
-        if handle & 1.uintptr() != 0.uintptr():
-            panic("packed store read_word cannot read inline word handles")
+        panic("packed store read_word cannot read inline word handles") if handle & 1.uintptr() != 0.uintptr()
 
         region_index: usize = (handle >> 32.uintptr()).usize()
         offset_words_plus_one: usize = ((handle & 0xffffffff.u64().uintptr()) >> 1.uintptr()).usize()

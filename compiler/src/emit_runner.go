@@ -11,7 +11,6 @@ import (
 
 	"elisacore/src/backend"
 	"elisacore/src/frontendir"
-	"elisacore/src/grammar"
 	"elisacore/src/interpreter"
 	"elisacore/src/semantic"
 	"elisacore/src/unparse"
@@ -97,7 +96,7 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
-		lowered := unparse.FormatFile(grammar.LowerFileStandalone(file))
+		lowered := unparse.FormatFile(file)
 		outputPath := outputPathForEmit(program.filename, options.output, loweredExtension)
 		if err := writeOutputFile(outputPath, []byte(lowered)); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)

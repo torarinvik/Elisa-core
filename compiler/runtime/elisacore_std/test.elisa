@@ -9,24 +9,20 @@ def fail(message: cstr):
 
 def assert_true(condition: bool):
     can Abort.Panic:
-        if not condition:
-            panic("assert_true failed")
+        fail("assert_true failed") if not condition
 
 
 def assert_false(condition: bool):
     can Abort.Panic:
-        if condition:
-            panic("assert_false failed")
+        fail("assert_false failed") if condition
 
 def assert_eq[T](actual: T, expected: T):
     can Abort.Panic:
-        if actual != expected:
-            panic("assert_eq failed")
+        fail("assert_eq failed") if actual != expected
 
 def assert_ne[T](actual: T, expected: T):
     can Abort.Panic:
-        if actual == expected:
-            panic("assert_ne failed")
+        fail("assert_ne failed") if actual == expected
 
 
 def id_invalid[T]() -> id[T]:

@@ -146,8 +146,7 @@ static if ELISA_TARGET_OS_POSIX:
 
 	def mutex_destroy(mu: mutable Mutex&) -> void:
 		can Memory.Release:
-			if mu.handle == null:
-				return
+			return if mu.handle == null
 			raw: mutable heap void& = mu.handle.cast[mutable heap void&]
 			_ = pthread_mutex_destroy(raw.cast[mutable PthreadMutexT&])
 			free(raw.cast[heap void&])
@@ -169,8 +168,7 @@ static if ELISA_TARGET_OS_POSIX:
 
 	def condvar_destroy(cv: mutable CondVar&) -> void:
 		can Memory.Release:
-			if cv.handle == null:
-				return
+			return if cv.handle == null
 			raw: mutable heap void& = cv.handle.cast[mutable heap void&]
 			_ = pthread_cond_destroy(raw.cast[mutable PthreadCondT&])
 			free(raw.cast[heap void&])
@@ -221,8 +219,7 @@ static if ELISA_TARGET_OS_POSIX:
 			trusted Unsafe.AssumeProgress:
 				while remaining > 0:
 					chunk: mutable u32 = max_chunk32
-					if remaining < max_chunk64:
-						chunk <- remaining.u32()
+					chunk <- remaining.u32() if remaining < max_chunk64
 					_ = usleep(chunk)
 					remaining <- remaining - chunk.u64()
 
@@ -360,8 +357,7 @@ static if ELISA_TARGET_OS_WINDOWS:
 def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
 	can Memory.Allocate, Abort.Panic:
 		raw: heap void&? = malloc(size)
-		if raw == null:
-			panic("concurrency allocation failed")
+		panic("concurrency allocation failed") if raw == null
 		ptr: heap void& = raw.cast[heap void&]
 		return ptr
 
@@ -383,11 +379,9 @@ def mutex_dispose(mu: mutable Mutex&):
 
 def mutex_lock(mu: mutable Mutex&) -> MutexGuard[Held]:
 	can Sync.Lock, Abort.Panic:
-		if mu.handle == null:
-			panic("mutex_lock on uninitialized mutex")
+		panic("mutex_lock on uninitialized mutex") if mu.handle == null
 		status: int = ctx_platform_mutex_lock(mu.handle.cast[void&])
-		if status != 0:
-			panic("mutex lock failed")
+		panic("mutex lock failed") if status != 0
 		guard: MutexGuard[Held] = zeroed
 		guard.handle <- mu.handle
 		return move guard
@@ -396,11 +390,9 @@ def mutex_unlock(g: MutexGuard[Held]):
 	can Sync.Unlock, Abort.Panic:
 		handle: void&? = g.handle
 		_ = move g
-		if handle == null:
-			panic("mutex_unlock on empty guard")
+		panic("mutex_unlock on empty guard") if handle == null
 		status: int = ctx_platform_mutex_unlock(handle.cast[void&])
-		if status != 0:
-			panic("mutex unlock failed")
+		panic("mutex unlock failed") if status != 0
 
 def condvar() -> CondVar:
 	can Memory.Allocate, Memory.Release:
@@ -416,30 +408,23 @@ def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
 	can Sync.Wait, Abort.Panic:
 		cond_handle: void&? = cv.handle
 		mutex_handle: void&? = g.handle
-		if cond_handle == null:
-			panic("cond_wait on uninitialized condvar")
-		if mutex_handle == null:
-			panic("cond_wait with empty mutex guard")
+		panic("cond_wait on uninitialized condvar") if cond_handle == null
+		panic("cond_wait with empty mutex guard") if mutex_handle == null
 		status: int = ctx_platform_cond_wait(cond_handle.cast[void&], mutex_handle.cast[void&])
-		if status != 0:
-			panic("cond wait failed")
+		panic("cond wait failed") if status != 0
 		return move g
 
 def notify_one(cv: mutable CondVar&):
 	can Sync.Notify, Abort.Panic:
-		if cv.handle == null:
-			panic("notify_one on uninitialized condvar")
+		panic("notify_one on uninitialized condvar") if cv.handle == null
 		status: int = ctx_platform_cond_signal(cv.handle.cast[void&])
-		if status != 0:
-			panic("cond signal failed")
+		panic("cond signal failed") if status != 0
 
 def notify_all(cv: mutable CondVar&):
 	can Sync.Notify, Abort.Panic:
-		if cv.handle == null:
-			panic("notify_all on uninitialized condvar")
+		panic("notify_all on uninitialized condvar") if cv.handle == null
 		status: int = ctx_platform_cond_broadcast(cv.handle.cast[void&])
-		if status != 0:
-			panic("cond broadcast failed")
+		panic("cond broadcast failed") if status != 0
 
 # ------------------------------------------------------------
 # Predicate wait wrappers
@@ -476,15 +461,13 @@ def sleep_usec(usec: u64):
 def ctx_concurrency_join_handle(handle: uintptr):
 	can Thread.Join, Abort.Panic:
 		status: int = ctx_thread_join(handle)
-		if status != 0:
-			panic("thread join failed")
+		panic("thread join failed") if status != 0
 
 def spawn_raw(entry: void&, arg: void&?) -> Thread[void&?, Joinable]:
 	can Thread.Spawn, Abort.Panic:
 		out: Thread[void&?, Joinable] = zeroed
 		status: int = ctx_thread_create(&out.handle, entry, arg)
-		if status != 0:
-			panic("thread create failed")
+		panic("thread create failed") if status != 0
 		out.state <- arg
 		return move out
 
@@ -544,8 +527,7 @@ def native_callback_context_free(ctx: mutable heap void&?):
 def spawn_native_callback_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> Thread[u32, Joinable]:
 	can Thread.Spawn, Memory.Allocate, Memory.Release, Abort.Panic:
 		ctx: mutable heap void&? = native_callback_context_new_u32_voidp(name, arg, fallback)
-		if ctx == null:
-			panic("native callback context allocation failed")
+		panic("native callback context allocation failed") if ctx == null
 		out: Thread[u32, Joinable] = zeroed
 		status: int = native_callback_context_start_u32_voidp(ctx, &out.handle)
 		if status != 0:
@@ -568,8 +550,7 @@ def detach_raw(thread: Thread[void&?, Joinable]):
 		handle: uintptr = thread.handle
 		_ = move thread
 		status: int = ctx_thread_detach(handle)
-		if status != 0:
-			panic("thread detach failed")
+		panic("thread detach failed") if status != 0
 
 # ------------------------------------------------------------
 # Persistent worker pool. pool_new spawns `threads` workers ONCE; each parks on
@@ -583,8 +564,7 @@ def detach_raw(thread: Thread[void&?, Joinable]):
 # Narrow a stored (always-non-null after init) sync handle from void&? to void&.
 def ctx_sync_handle(p: void&?) -> void&:
 	can Abort.Panic:
-		if p == null:
-			panic("null sync handle")
+		panic("null sync handle") if p == null
 		return p
 
 # Pool-internal lock/notify helpers. These DROP the Sync.* effect via `trusted`: the
@@ -619,8 +599,7 @@ def ctx_pool_broadcast(c: void&):
 # `shutdown` is set and the queue is drained.
 def ctx_pool_worker_main(arg: void&?) -> void&?:
 	can Abort.Panic:
-		if arg == null:
-			return null
+		null return if arg == null
 		state: mutable heap ConcurrencyPoolState& = arg.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -635,8 +614,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 				if head != null:
 					# pop the head (narrowed non-null in this branch)
 					state.qhead <- head.next
-					if state.qhead == null:
-						state.qtail <- null
+					state.qtail <- null if state.qhead == null
 					ctx_pool_unlock(mu)
 					# run the type-erased work entry outside the lock
 					entry_bits: void& = head.entry
@@ -662,10 +640,7 @@ def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uin
 		nraw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
 		node: heap ConcurrencyRawTaskNode& = nraw.cast[heap ConcurrencyRawTaskNode&]
 		node.handle <- whandle
-		if state.workers == null:
-			node.next <- null
-		else:
-			node.next <- state.workers.cast[heap ConcurrencyRawTaskNode&]
+		node.next <- null if state.workers == null else state.workers.cast[heap ConcurrencyRawTaskNode&]
 		state.workers <- node.cast[void&]
 
 # Allocate + initialize a pool state and spawn its persistent workers. Shared by
@@ -675,8 +650,7 @@ def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyPoolState))
 		state: mutable heap ConcurrencyPoolState& = raw.cast[mutable heap ConcurrencyPoolState&]
 		nworkers: mutable usize = threads
-		if nworkers < 1.usize():
-			nworkers <- 1.usize()
+		nworkers <- 1.usize() if nworkers < 1.usize()
 		state.worker_count <- nworkers
 		state.qhead <- null
 		state.qtail <- null
@@ -701,8 +675,7 @@ def ctx_pool_state_new(threads: usize) -> mutable heap ConcurrencyPoolState&:
 			while i < nworkers:
 				whandle: mutable uintptr = 0
 				status: int = ctx_thread_create(&whandle, ctx_pool_worker_main.cast[void&], state.cast[void&?])
-				if status != 0:
-					panic("pool worker create failed")
+				panic("pool worker create failed") if status != 0
 				ctx_pool_push_worker(state, whandle)
 				i <- i + 1.usize()
 		return state
@@ -718,8 +691,7 @@ def pool_new(threads: usize) -> ThreadPool:
 # state. After this the pool handle is null and must not be reused.
 def pool_shutdown(pool: mutable ThreadPool&):
 	can Pool.Shutdown, Thread.Join, Memory.Release, Abort.Panic:
-		if pool.handle == null:
-			return
+		return if pool.handle == null
 		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
 		wc: void& = ctx_sync_handle(state.work_cond)
@@ -770,10 +742,8 @@ def default_pool() -> ThreadPool:
 # whose `handle` is the completion record (as a uintptr) the awaiter waits on.
 def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Task[void&?, Pending]:
 	can Pool.Submit, Memory.Allocate, Abort.Panic:
-		if pool.handle == null:
-			panic("pool_submit on uninitialized pool")
-		if arg == null:
-			panic("pool_submit with null arg")
+		panic("pool_submit on uninitialized pool") if pool.handle == null
+		panic("pool_submit with null arg") if arg == null
 		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
 		raw: heap void& = ctx_concurrency_alloc(size_of(PoolTaskRecord))
 		rec: heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
@@ -806,8 +776,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 # worker, then free it.
 def ctx_pool_wait_record(handle: uintptr):
 	can Memory.Release, Abort.Panic:
-		if handle == 0:
-			return
+		return if handle == 0
 		rec: mutable heap PoolTaskRecord& = handle.cast[mutable heap PoolTaskRecord&]
 		state: mutable heap ConcurrencyPoolState& = rec.pool.cast[mutable heap ConcurrencyPoolState&]
 		mu: void& = ctx_sync_handle(state.mutex)
@@ -838,10 +807,7 @@ def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
 		node: heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
 		node.handle <- handle
-		if group.handle == null:
-			node.next <- null
-		else:
-			node.next <- group.handle.cast[heap ConcurrencyRawTaskNode&]
+		node.next <- null if group.handle == null else group.handle.cast[heap ConcurrencyRawTaskNode&]
 		group.handle <- node.cast[void&]
 
 def task_group_wait_all_raw(group: mutable TaskGroup&):
@@ -860,14 +826,12 @@ def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
 		while true:
 			current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
 			next: i64 = current - 1
-			if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange:
-				return next
+			next return if compare_exchange(slot, current, next, MemoryOrder.AcqRel, MemoryOrder.Acquire) can Atomics.CompareExchange
 	return 0
 
 def ctx_concurrency_work1_release(state_bits: mutable void&?):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
-		if state_bits == null:
-			return
+		return if state_bits == null
 		live_bits: void& = state_bits.cast[void&]
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		remaining: i64 = ctx_concurrency_ref_release(&state.refs)
@@ -901,8 +865,7 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 
 def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 	can Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		if state_bits == null:
-			panic("concurrency work returned no state")
+		panic("concurrency work returned no state") if state_bits == null
 		live_bits: void& = state_bits
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
 		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
@@ -941,14 +904,10 @@ def task_group_new() -> TaskGroup:
 
 def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 	can Memory.Allocate, Abort.Panic:
-		if state_bits == null:
-			return
+		return if state_bits == null
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyTaskGroupNode))
 		node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
-		if group.cleanup == null:
-			node.next <- null
-		else:
-			node.next <- group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
+		node.next <- null if group.cleanup == null else group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
 		# state_bits is a caller-provided pointer recorded in a heap cleanup node;
 		# its lifetime is the caller's contract, unverifiable by the type system.
 		trusted Unsafe.StaleRef:
@@ -957,8 +916,7 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 
 def ctx_task_group_release_all(group: mutable TaskGroup&):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
-		if group.cleanup == null:
-			return
+		return if group.cleanup == null
 		current: mutable heap ConcurrencyTaskGroupNode&? = group.cleanup.cast[heap ConcurrencyTaskGroupNode&?]
 		group.cleanup <- null
 		trusted Unsafe.AssumeProgress:
@@ -1196,13 +1154,11 @@ static if ELISA_TARGET_OS_MACOS:
 		val: mutable int = 0
 		sz: mutable usize = 4
 		key_p: u8& = "hw.perflevel0.physicalcpu"
-		if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0:
-			return val.i64()
+		val.i64() return if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
 		sz <- 4
 		val <- 0
 		key_l: u8& = "hw.logicalcpu"
-		if sysctlbyname(key_l, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0:
-			return val.i64()
+		val.i64() return if sysctlbyname(key_l, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
 		return 1
 
 static elif ELISA_TARGET_OS_LINUX:

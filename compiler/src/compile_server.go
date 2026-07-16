@@ -11,7 +11,6 @@ import (
 
 	"elisacore/src/backend"
 	"elisacore/src/frontendir"
-	"elisacore/src/grammar"
 	"elisacore/src/interpreter"
 	"elisacore/src/semantic"
 	"elisacore/src/unparse"
@@ -101,7 +100,7 @@ func executeCompileServerRequest(req compileServerRequest) (compileServerRespons
 		if !ok {
 			return compileServerResponse{OK: false, Error: "frontend parse failed", Stderr: strings.TrimSpace(stderr.String())}, http.StatusBadRequest
 		}
-		response.Output = unparse.FormatFile(grammar.LowerFile(file))
+		response.Output = unparse.FormatFile(file)
 	case emitSemantic:
 		_, result, ok := analyzeLoadedProgram(program, &stderr)
 		if !ok {

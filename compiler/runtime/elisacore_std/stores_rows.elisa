@@ -46,8 +46,7 @@ def ctx_packed_store_reserve(a: mutable Arena&, needed_rows: usize, state_bits: 
         assert state_bits != null
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
 
-        if needed_rows <= state.handles.capacity:
-            return
+        return if needed_rows <= state.handles.capacity
 
         packed_store_ensure_metadata_capacity(a, state, needed_rows)
 def ctx_packed_store_row_ptr_at(state_bits: mutable void&, index: usize) -> mutable void&:

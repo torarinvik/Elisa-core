@@ -367,9 +367,12 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("module") {
 		return p.parseNamespaceDecl()
 	}
-	// `extend Foo:` extends a module; `extend grammar Name` (handled later) extends
-	// a grammar. Disambiguate on the token after `extend`.
-	if p.peekIdentText("extend") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text != "grammar" {
+	if p.peekIdentText("extend") && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "grammar" {
+		p.errorf("grammar and lexer DSL declarations have been removed")
+		p.skipRejectedDecl()
+		return nil
+	}
+	if p.peekIdentText("extend") {
 		return p.parseExtendDecl()
 	}
 	if p.peekIdentText("using") {
@@ -396,17 +399,8 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("contract") && p.looksLikeContractDecl() {
 		return p.parseContractDecl()
 	}
-	if p.peekIdentText("tokenset") {
-		return p.parseTokenSetDecl()
-	}
-	if p.peekIdentText("charset") {
-		return p.parseCharsetDecl()
-	}
 	if p.peekIdentText("layout") && p.looksLikeLayoutDecl() {
 		return p.parseLayoutDecl()
-	}
-	if p.peekIdentText("keywordmap") {
-		return p.parseKeywordMapDecl()
 	}
 	if p.peek() == lexer.TOKEN_ENUM && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+1].Text == "map" {
 		return p.parseEnumMapDecl()
@@ -416,17 +410,10 @@ func (p *Parser) parseDecl() ast.Decl {
 		p.skipRejectedDecl()
 		return nil
 	}
-	if p.peekIdentText("grammar") {
-		return p.parseGrammarDecl()
-	}
-	if p.peekIdentText("grammarenv") {
-		return p.parseGrammarEnvDecl()
-	}
-	if p.peekIdentText("lexer") {
-		return p.parseLexerDecl()
-	}
-	if p.peekIdentText("extend") {
-		return p.parseGrammarDecl()
+	if p.peekIdentText("grammar") || p.peekIdentText("grammarenv") || p.peekIdentText("lexer") || p.peekIdentText("tokenset") || p.peekIdentText("charset") || p.peekIdentText("keywordmap") {
+		p.errorf("grammar and lexer DSL declarations have been removed")
+		p.skipRejectedDecl()
+		return nil
 	}
 	if p.peekIdentText("tree") {
 		p.errorf("the `tree` construct has been removed (docs/81); model the AST as a sealed `enum … is` hierarchy")

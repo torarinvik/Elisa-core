@@ -84,8 +84,7 @@ def arena_deque_buffer_index[T](d: Deque[T]&, logical_index: usize) -> usize:
         return (d.head + logical_index) if logical_index < head_len else logical_index - head_len
 
 def arena_deque_copy_linearized[T](d: Deque[T]&, dst: mutable T&):
-    if d.count == 0:
-        return
+    return if d.count == 0
 
     assert d.items != null
 
@@ -116,8 +115,7 @@ def arena_deque_reserve[T](a: mutable Arena&, d: mutable Deque[T]&, needed: usiz
         d return if needed <= d.capacity
 
         new_capacity: mutable usize = d.capacity
-        if new_capacity == 0:
-            new_capacity <- ARENA_DEQUE_INIT_CAP
+        new_capacity <- ARENA_DEQUE_INIT_CAP if new_capacity == 0
 
         trusted Unsafe.AssumeProgress:
             while needed > new_capacity:
@@ -142,8 +140,7 @@ def arena_deque_push_front_assume_capacity[T](d: mutable Deque[T]&, item: T):
         assert d.items != null
         assert d.count < d.capacity
 
-        if d.head == 0:
-            d.head <- d.capacity
+        d.head <- d.capacity if d.head == 0
 
         d.head <- d.head - 1
         d.items[d.head] <- item
@@ -223,6 +220,5 @@ def arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
         physical_index: usize = arena_deque_buffer_index(d, d.count - 1)
         out[0] <- d.items[physical_index]
         d.count <- d.count - 1
-        if d.count == 0:
-            d.head <- 0
+        d.head <- 0 if d.count == 0
         return true

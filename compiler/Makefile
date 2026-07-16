@@ -16,7 +16,7 @@
 # stale-contract drift accumulate while nothing ran them. (./test/backend is NOT yet listed:
 # it has its own pre-existing rot; add it once de-rotted.)
 FAST_PKGS := ./src/semantic/ ./src/smt/ ./src/backend/ ./src/parser/ ./src/lexer/ \
-             ./src/interpreter/ ./src/grammar/ ./src/easm/ ./src/frontendir/ ./src/unparse/ \
+             ./src/interpreter/ ./src/easm/ ./src/frontendir/ ./src/unparse/ \
              ./test/semantic/ ./test/lexer/
 
 # test: fast inner-loop suite. The default. Does NOT run the slow ./src native-runtime tests.

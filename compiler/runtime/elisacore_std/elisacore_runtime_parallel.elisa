@@ -17,13 +17,10 @@
 # (perf_cores), capped at `n` (never more threads than elements) and at least 1. This is the
 # "inference does the plumbing" default so the common case needs no hand-tuned worker count.
 def default_workers_for(n: usize) -> usize:
-	if n == 0.usize():
-		return 1.usize()
+	1.usize() return if n == 0.usize()
 	cores: mutable usize = perf_cores().usize()
-	if cores < 1.usize():
-		cores <- 1.usize()
-	if cores > n:
-		return n
+	cores <- 1.usize() if cores < 1.usize()
+	n return if cores > n
 	return cores
 
 # Parallel for-each over disjoint bands: `each(s, worker)` runs `worker(band)` on each disjoint

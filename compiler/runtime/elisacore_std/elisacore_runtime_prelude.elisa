@@ -93,27 +93,23 @@ def progress_cancel(budget: mutable ProgressBudget&):
 
 def progress_check_cancel(budget: mutable ProgressBudget&):
 	can Progress.CheckCancel, Abort.Panic:
-		if budget.cancelled:
-			panic("progress budget cancelled")
+		panic("progress budget cancelled") if budget.cancelled
 
 def progress_tick(budget: mutable ProgressBudget&):
 	can Progress.Tick, Progress.CheckCancel, Abort.Panic:
 		progress_check_cancel(budget)
-		if budget.remaining_steps <= 0:
-			panic("progress budget exhausted")
+		panic("progress budget exhausted") if budget.remaining_steps <= 0
 		budget.remaining_steps <- budget.remaining_steps - 1
 
 def progress_enter_recursion(budget: mutable ProgressBudget&):
 	can Progress.EnterRecursion, Progress.CheckCancel, Abort.Panic:
 		progress_check_cancel(budget)
-		if budget.max_depth > 0 and budget.current_depth >= budget.max_depth:
-			panic("progress recursion depth exhausted")
+		panic("progress recursion depth exhausted") if budget.max_depth > 0 and budget.current_depth >= budget.max_depth
 		budget.current_depth <- budget.current_depth + 1
 
 def progress_leave_recursion(budget: mutable ProgressBudget&):
 	can Progress.LeaveRecursion:
-		if budget.current_depth > 0:
-			budget.current_depth <- budget.current_depth - 1
+		budget.current_depth <- budget.current_depth - 1 if budget.current_depth > 0
 
 # ------------------------------------------------------------
 # Permanent / scratch arena allocation
@@ -143,8 +139,7 @@ def string_len_bucket(ptr: u8&) -> usize:
 
 def register_perm_string_len(ptr: u8&?, len: usize):
 	can Memory.Allocate, Abort.Panic:
-		if ptr == null or len == 0:
-			return
+		return if ptr == null or len == 0
 
 		bucket: usize = string_len_bucket(ptr)
 
@@ -167,8 +162,7 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 		string_len_cache[bucket] <- new_entry
 
 def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
-	if ptr == null:
-		return 0
+	0 return if ptr == null
 
 	bucket: usize = string_len_bucket(ptr)
 
@@ -197,8 +191,7 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 def runtime_strlen(value: u8&?) -> usize:
 	src: u8& = value if value != null else ""
 
-	if src[0] == 0:
-		return 0
+	0 return if src[0] == 0
 	# Conservative correctness path:
 	# do not consult pointer-keyed cache here; non-permanent and reused
 	# arena addresses can make cache lookups unsafe across lifetimes.
@@ -222,8 +215,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
 		out: heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
-		if len > 0:
-			memcpy(out.cast[mutable void&], src.cast[void&], len)
+		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
 		register_perm_string_len(out.cast[u8&], len)
 		return out
@@ -244,8 +236,7 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 		out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
 		snprintf(out.cast[u8&?], len.usize() + 1, "%lld", value)
 
-		if arena == &perm_arena:
-			register_perm_string_len(out.cast[u8&], len.usize())
+		register_perm_string_len(out.cast[u8&], len.usize()) if arena == &perm_arena
 
 		return out
 

@@ -26,8 +26,7 @@ def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable Pack
         # columns track their own capacity. Once geometric growth has run a few times the
         # common case is "everything already fits" — return before the per-column accessor
         # and reserve/ensure calls, which (uninlined) otherwise dominate construction cost.
-        if needed_rows <= handles.capacity and (state.prefix_words == 0 or needed_rows <= state.prefix_column_capacity) and (state.side_words == 0 or needed_rows <= state.side_column_capacity):
-            return
+        return if needed_rows <= handles.capacity and (state.prefix_words == 0 or needed_rows <= state.prefix_column_capacity) and (state.side_words == 0 or needed_rows <= state.side_column_capacity)
 
         indices: mutable darray[u32]& = packed_store_index_table(state)
         tags: mutable darray[u32]& = packed_store_tag_table(state)
@@ -53,16 +52,14 @@ def packed_store_append_variant_slot(a: mutable Arena&, state: mutable PackedSto
             variant_slots.push(slot)
 def packed_store_ensure_prefix_columns(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
-        if state.prefix_words == 0:
-            return
+        return if state.prefix_words == 0
 
         columns: mutable darray[uintptr]& = packed_store_prefix_column_table(state)
         in a:
             for column_index in columns.count..<state.prefix_words:
                 columns.push(0.uintptr())
 
-        if state.prefix_column_capacity >= needed_rows:
-            return
+        return if state.prefix_column_capacity >= needed_rows
 
         new_capacity: mutable usize = ARENA_DA_INIT_CAP if state.prefix_column_capacity == 0 else state.prefix_column_capacity * 2
         trusted Unsafe.AssumeProgress:
@@ -87,16 +84,14 @@ def packed_store_ensure_prefix_columns(a: mutable Arena&, state: mutable PackedS
         state.prefix_column_capacity <- new_capacity
 def packed_store_ensure_side_columns(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
-        if state.side_words == 0:
-            return
+        return if state.side_words == 0
 
         columns: mutable darray[uintptr]& = packed_store_side_column_table(state)
         in a:
             for column_index in columns.count..<state.side_words:
                 columns.push(0.uintptr())
 
-        if state.side_column_capacity >= needed_rows:
-            return
+        return if state.side_column_capacity >= needed_rows
 
         new_capacity: mutable usize = ARENA_DA_INIT_CAP if state.side_column_capacity == 0 else state.side_column_capacity * 2
         trusted Unsafe.AssumeProgress:
@@ -142,10 +137,8 @@ def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable h
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
 
-        if preferred_region_capacity < hinted_capacity:
-            preferred_region_capacity <- hinted_capacity
-        if preferred_region_capacity < row_words:
-            preferred_region_capacity <- row_words
+        preferred_region_capacity <- hinted_capacity if preferred_region_capacity < hinted_capacity
+        preferred_region_capacity <- row_words if preferred_region_capacity < row_words
 
         state.head_region <- null
         state.alloc_region <- null
@@ -172,8 +165,7 @@ def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag
     can Memory.Allocate, Abort.Panic:
         if state.alloc_region == null:
             capacity: mutable usize = state.preferred_region_capacity
-            if capacity < size:
-                capacity <- size
+            capacity <- size if capacity < size
 
             if a.end == null:
                 assert a.begin == null
@@ -217,10 +209,8 @@ def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag
 
         capacity: mutable usize = state.preferred_region_capacity
         grown_capacity: usize = state.alloc_region.capacity * 2
-        if capacity < grown_capacity:
-            capacity <- grown_capacity
-        if capacity < size:
-            capacity <- size
+        capacity <- grown_capacity if capacity < grown_capacity
+        capacity <- size if capacity < size
 
         assert a.end != null
         a.end.next as & <- new_region_with_owner(capacity, owner_tag)
@@ -239,8 +229,7 @@ def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintp
 
         if state.alloc_region == null:
             capacity: mutable usize = state.preferred_region_capacity
-            if capacity < size:
-                capacity <- size
+            capacity <- size if capacity < size
 
             if a.end == null:
                 assert a.begin == null
@@ -266,10 +255,8 @@ def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintp
 
         capacity: mutable usize = state.preferred_region_capacity
         grown_capacity: usize = state.alloc_region.capacity * 2
-        if capacity < grown_capacity:
-            capacity <- grown_capacity
-        if capacity < size:
-            capacity <- size
+        capacity <- grown_capacity if capacity < grown_capacity
+        capacity <- size if capacity < size
 
         assert a.end != null
         a.end.next as & <- new_region_with_owner(capacity, owner_tag)
@@ -290,8 +277,7 @@ def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable v
         size: usize = state.row_words
         assert size > 0
 
-        if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity:
-            ctx_packed_store_alloc_fixed_result_slow(a, owner_tag, state)
+        ctx_packed_store_alloc_fixed_result_slow(a, owner_tag, state) if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity
 
         assert state.alloc_region != null
 
@@ -328,13 +314,10 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
             state.row_words <- size
 
             hinted_capacity: usize = state.row_words * PACKED_STORE_MIN_ROWS_PER_REGION
-            if state.preferred_region_capacity < hinted_capacity:
-                state.preferred_region_capacity <- hinted_capacity
-            if state.preferred_region_capacity < state.row_words:
-                state.preferred_region_capacity <- state.row_words
+            state.preferred_region_capacity <- hinted_capacity if state.preferred_region_capacity < hinted_capacity
+            state.preferred_region_capacity <- state.row_words if state.preferred_region_capacity < state.row_words
 
-        if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity:
-            ctx_packed_store_alloc_result_slow(a, size, owner_tag, state)
+        ctx_packed_store_alloc_result_slow(a, size, owner_tag, state) if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity
 
         assert state.alloc_region != null
 

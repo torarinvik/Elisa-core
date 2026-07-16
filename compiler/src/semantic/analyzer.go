@@ -1,11 +1,10 @@
 package semantic
 
 import (
-	"os"
 	"elisacore/src/ast"
 	"elisacore/src/easm"
-	"elisacore/src/grammar"
 	"elisacore/src/lexer"
+	"os"
 )
 
 type ConstValueKind int
@@ -134,7 +133,7 @@ type Analyzer struct {
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
-	regionPolyFn            *ast.FuncDecl
+	regionPolyFn *ast.FuncDecl
 	// regionPolyCandidateFnTypes maps a candidate function's SIMPLE name to its
 	// FuncType(s), built once per classification pre-pass. It resolves a constructor
 	// call (`Parser(args)`) to its `def Parser(...)->Parser` FuncType even when a
@@ -142,22 +141,22 @@ type Analyzer struct {
 	// returns the struct, hiding the region-poly constructor. Region-poly-ness is read
 	// live from the FuncType during the fixpoint. Nil outside the pre-pass.
 	regionPolyCandidateFnTypes map[string][]*FuncType
-	extensionMethodsByName  map[string][]*ExtensionMethod
-	ufcsFunctionsByName     map[string][]*Symbol
-	permissions             map[string]*PermissionSet
-	capabilityAliases       map[string][]ast.PermissionRef
-	globalScope             *Scope
-	functionTypes           map[string]*FuncType
-	externLinkNames         map[string]externLinkNameSignature
-	constValues             map[string]ConstValue
-	exprTypes               map[ast.Expr]Type
-	permGrowthOps           map[ast.Expr]bool
-	rewriteDefaults         map[*ast.Ident]bool
-	optionalBindSourceTypes map[*ast.OptionalBindExpr]Type
-	interfaceMethodRefs     map[*ast.FieldExpr]*InterfaceMethodRef
-	safeCalls               map[*ast.CallExpr]*SafeCallInfo
-	exprFacts               map[ast.Expr]OptimizationFacts
-	indexBoundsProven       map[*ast.IndexExpr]bool
+	extensionMethodsByName     map[string][]*ExtensionMethod
+	ufcsFunctionsByName        map[string][]*Symbol
+	permissions                map[string]*PermissionSet
+	capabilityAliases          map[string][]ast.PermissionRef
+	globalScope                *Scope
+	functionTypes              map[string]*FuncType
+	externLinkNames            map[string]externLinkNameSignature
+	constValues                map[string]ConstValue
+	exprTypes                  map[ast.Expr]Type
+	permGrowthOps              map[ast.Expr]bool
+	rewriteDefaults            map[*ast.Ident]bool
+	optionalBindSourceTypes    map[*ast.OptionalBindExpr]Type
+	interfaceMethodRefs        map[*ast.FieldExpr]*InterfaceMethodRef
+	safeCalls                  map[*ast.CallExpr]*SafeCallInfo
+	exprFacts                  map[ast.Expr]OptimizationFacts
+	indexBoundsProven          map[*ast.IndexExpr]bool
 	// getWrappedIndexExprs records index expressions whose `else` recovery is
 	// owned by an enclosing `get` (e.g. `get arr[i] else 0`). Such sites already
 	// use the explicit `get` head, so they must NOT receive the bare-`else`
@@ -459,7 +458,7 @@ type Analyzer struct {
 	loopCaptureAllowed []map[string]bool
 	// enforceLinearMutation gates the docs/120 §10 uniform rule (a bare lmut-mutating call
 	// is an error). Off until the frontend is fully converted to the reassignment form.
-	enforceLinearMutation bool
+	enforceLinearMutation  bool
 	requireExternContracts bool
 	// requiresReport gates the -requires-report aggregation (docs c3): per requires-bearing function,
 	// how many direct call sites statically discharge the precondition vs fall back to a runtime check.
@@ -769,11 +768,8 @@ func Analyze(file *ast.File) *Result {
 }
 
 func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
-	loweredFile := grammar.LowerFile(file)
+	loweredFile := file
 	activeFile := loweredFile
-	if activeFile == nil {
-		activeFile = file
-	}
 	// Fold recognized total char classifiers to static lookup tables (docs/125 §9.6 / C3)
 	// before census/analysis, so the synthesized const table and rewritten body flow through
 	// the normal analysis + codegen paths. A no-op unless a foldable classifier is present.
@@ -912,9 +908,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	expandedDecls := a.expandActiveAndGeneratedDecls(activeFile.Decls, generatedDecls)
 	if len(generatedDecls) != 0 {
 		activeFile = &ast.File{Filename: activeFile.Filename, Decls: expandedDecls, DeclVisibility: activeFile.DeclVisibility}
-		if loweredFile != nil {
-			loweredFile = activeFile
-		}
+		loweredFile = activeFile
 		activeDecls = a.flattenScopedDecls(activeFile.Decls, "", nil)
 		generatedScopedDecls := make([]scopedDecl, 0, len(generatedDecls))
 		for _, scoped := range activeDecls {

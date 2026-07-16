@@ -85,8 +85,7 @@ def ctx_aos_store_record_side_words_at(a: mutable Arena&, words: void&, state_bi
     can Abort.Panic:
         assert state_bits != null
         state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
-        if state.side_words == 0:
-            return
+        return if state.side_words == 0
         index_usize: usize = index.usize()
         assert index_usize < state.count
         chunk_index: usize = index_usize / state.chunk_records

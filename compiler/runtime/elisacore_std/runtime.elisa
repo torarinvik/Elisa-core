@@ -27,8 +27,7 @@ def char_to_string_scratch(value: i64) -> heap u8&:
 def uint_to_string_scratch(value: u64) -> heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%llu", value)
-        if len < 0:
-            panic("uint_to_string_scratch: snprintf failed")
+        panic("uint_to_string_scratch: snprintf failed") if len < 0
         out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
         snprintf(out.cast[u8&?], len.usize() + 1, "%llu", value)
         return out
@@ -36,8 +35,7 @@ def uint_to_string_scratch(value: u64) -> heap u8&:
 def float_to_string_scratch(value: f64) -> heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%g", value)
-        if len < 0:
-            panic("float_to_string_scratch: snprintf failed")
+        panic("float_to_string_scratch: snprintf failed") if len < 0
         out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
         snprintf(out.cast[u8&?], len.usize() + 1, "%g", value)
         return out
@@ -259,8 +257,7 @@ impl Str for f32:
 
 def printr(value: cstr) -> void can[Console.Write]:
     length: usize = runtime_strlen(value)
-    if length == 0:
-        return
+    return if length == 0
     _ = runtime_write(FileDescriptor.Output, value.cast[void&], length) can Console.Write
 
 def print(value: cstr) -> void can[Console.Write]:
@@ -274,8 +271,7 @@ def print[T: Str](value: T) -> void can[Console.Write, Memory.Allocate, Console.
     print(T.__cast__(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
 
 def printr(value: dstr) -> void can[Console.Write]:
-    if value.count == 0 or value.items == null:
-        return
+    return if value.count == 0 or value.items == null
     items: u8& = value.items
     _ = runtime_write(FileDescriptor.Output, items.cast[void&], value.count) can Console.Write
 

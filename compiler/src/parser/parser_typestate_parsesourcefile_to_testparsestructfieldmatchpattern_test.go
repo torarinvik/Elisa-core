@@ -17,7 +17,9 @@ func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
 	}
 	p := New(tokens)
 	file := p.ParseFile("test.elisa")
-	return file, p.Errors()
+	errs := p.Errors()
+	recordParserParityCase(t, src, len(errs), len(p.Notices()))
+	return file, errs
 }
 func TestParseCharLiteralInConstDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, "const VALUE: char = '\\n'\n")
@@ -207,18 +209,20 @@ def merge[T, @r](dst: mutable darray[T]& @r, src: darray[T]) -> void:
 }
 
 func TestLegacyRegionParamSpellingIsRejected(t *testing.T) {
-	l := lexer.New("test.elisa", []byte(`def repl[region r](s: mutable darray[u8]& @r) -> void:
+	src := `def repl[region r](s: mutable darray[u8]& @r) -> void:
 	s <- [1]
 
 struct Box[T, region owner]:
 	value: T
-`))
+`
+	l := lexer.New("test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected lexer errors: %v", errs)
 	}
 	p := New(tokens)
 	_ = p.ParseFile("test.elisa")
+	recordParserParityCase(t, src, len(p.Errors()), len(p.Notices()))
 	errs := strings.Join(p.Errors(), "\n")
 	for _, want := range []string{"`region r` has been removed", "use `@r`", "`region owner` has been removed", "use `@owner`"} {
 		if !strings.Contains(errs, want) {
@@ -228,10 +232,12 @@ struct Box[T, region owner]:
 }
 
 func TestCanonicalRegionParamSpellingEmitsNoDeprecation(t *testing.T) {
-	l := lexer.New("test.elisa", []byte("def repl[@r](s: mutable darray[u8]& @r) -> void:\n\ts <- [1]\n"))
+	src := "def repl[@r](s: mutable darray[u8]& @r) -> void:\n\ts <- [1]\n"
+	l := lexer.New("test.elisa", []byte(src))
 	tokens := l.Tokenize()
 	p := New(tokens)
 	p.ParseFile("test.elisa")
+	recordParserParityCase(t, src, len(p.Errors()), len(p.Notices()))
 	if notices := p.Notices(); len(notices) != 0 {
 		t.Fatalf("canonical `[@r]` spelling should emit no deprecation notice, got: %v", notices)
 	}

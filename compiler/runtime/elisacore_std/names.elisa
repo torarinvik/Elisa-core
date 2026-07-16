@@ -67,8 +67,7 @@ def name_text_hash(text: sview, policy: NameCasePolicy) -> u64:
     index: mutable i64 = 0
     while index < text.len:
         ch: mutable char = text.data[index.usize()].char()
-        if policy == NameCasePolicy.AsciiCaseInsensitive:
-            ch <- name_ascii_lower(ch)
+        ch <- name_ascii_lower(ch) if policy == NameCasePolicy.AsciiCaseInsensitive
         hash <- name_table_hash_step(hash, ch)
         index <- index + 1
     return hash
@@ -99,8 +98,7 @@ def name_table_entry(table: NameTable&, name_id: NameId) -> NameEntry:
 
 
 def name_table_text(table: NameTable&, name_id: NameId) -> sview:
-    if not name_table_valid_id(table, name_id):
-        return ("".cast[cstr])[0:0]
+    ("".cast[cstr])[0:0] return if not name_table_valid_id(table, name_id)
     return table.entries[(!name_id).usize() - 1].text
 
 

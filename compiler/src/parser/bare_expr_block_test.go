@@ -22,7 +22,10 @@ func parseSourceWithNotices(t *testing.T, src string) (*ast.File, []string, []st
 	}
 	p := New(tokens)
 	file := p.ParseFile("test.elisa")
-	return file, p.Errors(), p.Notices()
+	errs := p.Errors()
+	notices := p.Notices()
+	recordParserParityCase(t, src, len(errs), len(notices))
+	return file, errs, notices
 }
 
 func TestBareExprBlockOnVarDeclRHS(t *testing.T) {

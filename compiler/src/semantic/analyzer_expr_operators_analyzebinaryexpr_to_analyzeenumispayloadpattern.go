@@ -50,6 +50,17 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		if result, ok := a.analyzeComparisonOverload(expr, left); ok {
 			return result
 		}
+		// Optionals only compare against null (present-flag check). `opt == 5`
+		// would hide an implicit presence branch; require an explicit unwrap so
+		// the null case is visible at the comparison site.
+		if !IsNullType(left) && !IsNullType(right) {
+			_, leftIsOptional := left.(*OptionalType)
+			_, rightIsOptional := right.(*OptionalType)
+			if leftIsOptional || rightIsOptional {
+				a.errorf(expr.Pos(), "cannot compare %s and %s: unwrap the optional first (compare against null, or bind the value with `if EXPR is NAME:`)", left, right)
+				return a.namedTypes["bool"]
+			}
+		}
 		compareLeft := left
 		compareRight := right
 		if !typesComparableForEquality(compareLeft, compareRight) && !IsNullType(left) && !IsNullType(right) {

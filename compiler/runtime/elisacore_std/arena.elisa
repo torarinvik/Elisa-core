@@ -152,8 +152,7 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 
 def assert(condition: bool):
     can Abort.Panic:
-        if not condition:
-            panic("assert failed")
+        panic("assert failed") if not condition
 
 def max(a: usize, b: usize) -> usize:
     ensure result >= a
@@ -169,10 +168,8 @@ def clamp(x: usize, lo: usize, hi: usize) -> usize:
     requires lo <= hi
     ensure result >= lo
     ensure result <= hi
-    if x < lo:
-        return lo
-    if x > hi:
-        return hi
+    lo return if x < lo
+    hi return if x > hi
     return x
 
 def inv_handle(ptr: heap void&?) -> bool:
@@ -420,8 +417,7 @@ def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
             if needed_bytes > r.committed:
                 target: mutable usize = win_commit_round_up(needed_bytes)
                 full: usize = size_of(Region) + size_of(uintptr) * r.capacity
-                if target > full:
-                    target <- full
+                target <- full if target > full
                 base: mutable heap void&? = arena_mutable_heap_void_from_region(r)
                 commit_raw: mutable heap void&? = null
                 trusted Unsafe.RawExtern:
@@ -442,14 +438,12 @@ def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
 # ARENA_BACKEND (mmap/VirtualAlloc), so it is identical to new_region for those.
 def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
-        if strategy == ARENA_STRATEGY_MALLOC:
-            return new_region_malloc(capacity)
+        new_region_malloc(capacity) return if strategy == ARENA_STRATEGY_MALLOC
         # reserve_commit/fixed take a contiguous block that grows in place. On Windows that block
         # is reserved-then-committed-on-demand (new_region_reserve); on POSIX it is a demand-paged
         # mmap (new_region_reserve falls through to new_region there). CHAINED/SCRATCH keep the
         # plain block source.
-        if strategy == ARENA_STRATEGY_RESERVE_COMMIT or strategy == ARENA_STRATEGY_FIXED:
-            return new_region_reserve(capacity)
+        new_region_reserve(capacity) return if strategy == ARENA_STRATEGY_RESERVE_COMMIT or strategy == ARENA_STRATEGY_FIXED
         return new_region(capacity)
 
 def free_region(r: heap Region&):
@@ -510,14 +504,12 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             # declaration, so they already have a block here.
             if a.end == null:
                 cap: mutable usize = ARENA_DEFAULT_RESERVE_COMMIT_SLOTS
-                if cap < size:
-                    cap <- size
+                cap <- size if cap < size
                 a.end as & <- new_region_backend(cap, a.strategy)
                 a.begin <- a.end
                 a.end_index <- 0
             assert a.end != null
-            if a.end.count + size > a.end.capacity:
-                panic("region overflow: reservation exhausted (reserve_commit/fixed)")
+            panic("region overflow: reservation exhausted (reserve_commit/fixed)") if a.end.count + size > a.end.capacity
             data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
             offset_bytes: usize = a.end.count * size_of(uintptr)
             result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
@@ -530,8 +522,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             assert a.begin == null
 
             capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
-            if capacity < size:
-                capacity <- size
+            capacity <- size if capacity < size
 
             a.end as & <- new_region_backend(capacity, a.strategy)
             a.begin <- a.end
@@ -549,8 +540,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             assert a.end.next == null
 
             capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
-            if capacity < size:
-                capacity <- size
+            capacity <- size if capacity < size
 
             a.end.next as & <- new_region_backend(capacity, a.strategy)
             a.end <- a.end.next
@@ -587,8 +577,7 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
             data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
             old_offset_slots: usize = arena_tail_offset_slots(data_base, oldptr)
             if old_offset_slots + old_slots == a.end.count:
-                if old_offset_slots + new_slots > a.end.capacity:
-                    panic("region overflow: reservation exhausted (reserve_commit/fixed grow)")
+                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if old_offset_slots + new_slots > a.end.capacity
                 a.end.count <- old_offset_slots + new_slots
                 # Windows: page-in the bytes the grown tail now spans (no-op elsewhere).
                 arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
@@ -745,8 +734,7 @@ def arena_free(a: mutable Arena&):
 
 def arena_trim(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
-        if a.end == null:
-            return
+        return if a.end == null
 
         r: mutable heap Region&? = a.end.next
         trusted Unsafe.AssumeProgress:
@@ -766,8 +754,7 @@ def arena_trim(a: mutable Arena&):
 # The semantic layer has already proven the child is consumed and that the two
 # backings are compatible (so the parent's free can reclaim the adopted blocks).
 def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
-    if child.begin == null:
-        return
+    return if child.begin == null
 
     c: mutable heap Region&? = child.begin
     trusted Unsafe.AssumeProgress:
@@ -784,8 +771,7 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
         trusted Unsafe.AssumeProgress:
             while last != null and last.next != null:
                 last <- last.next
-        if last != null:
-            last.next as & <- child.begin
+        last.next as & <- child.begin if last != null
 
     child.begin as ! <- null
     child.end as ! <- null

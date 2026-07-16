@@ -50,8 +50,7 @@ def len[T](s: Slice[T]) -> usize:
 def slice_band[T](s: Slice[T], start: usize, end: usize) -> Slice[T]:
 	lo: usize = start if start < s.count else s.count
 	hi: usize = end if end < s.count else s.count
-	if hi <= lo:
-		return Slice[T] { base: s.base, count: 0.usize() }
+	Slice[T] { base: s.base, count: 0.usize() } return if hi <= lo
 	p: mutable T& = s.base.cast[mutable T&]
 	return Slice[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
 
@@ -60,8 +59,7 @@ def slice_band[T](s: Slice[T], start: usize, end: usize) -> Slice[T]:
 def split[T](s: Slice[T], nbands: usize, idx: usize) -> Slice[T]:
 	band: usize = (s.count + nbands - 1.usize()) / nbands
 	lo: usize = idx * band
-	if lo >= s.count:
-		return Slice[T] { base: s.base, count: 0.usize() }
+	Slice[T] { base: s.base, count: 0.usize() } return if lo >= s.count
 	hi: usize = (lo + band if lo + band < s.count else s.count)
 	p: mutable T& = s.base.cast[mutable T&]
 	return Slice[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
@@ -69,16 +67,14 @@ def split[T](s: Slice[T], nbands: usize, idx: usize) -> Slice[T]:
 # Bounds-checked read (panics on out-of-range): the safe default. `s.get(i)`.
 def get[T](s: Slice[T], i: usize) -> T:
 	can Abort.Panic:
-		if i >= s.count:
-			panic("Slice index out of bounds")
+		panic("Slice index out of bounds") if i >= s.count
 		p: T& = s.base.cast[T&]
 		return p[i]
 
 # Bounds-checked write (panics on out-of-range): the safe default. `s.set(i, v)`.
 def set[T](s: Slice[T], i: usize, v: T) -> void:
 	can Abort.Panic:
-		if i >= s.count:
-			panic("Slice index out of bounds")
+		panic("Slice index out of bounds") if i >= s.count
 		p: mutable T& = s.base.cast[mutable T&]
 		p[i] <- v
 
@@ -134,8 +130,7 @@ def len[T](v: ReadView[T]) -> usize:
 # Bounds-checked read (panics on out-of-range): the safe default. `v.get(i)`.
 def get[T](v: ReadView[T], i: usize) -> T:
 	can Abort.Panic:
-		if i >= v.count:
-			panic("ReadView index out of bounds")
+		panic("ReadView index out of bounds") if i >= v.count
 		p: T& = v.base.cast[T&]
 		return p[i]
 

@@ -23,8 +23,6 @@ For compile-time protocols and receiver-style dispatch, see `../docs/19-static-i
 
 For the canonical bundle cleanup direction, see `../docs/20-tree-capabilities-and-interface-cleanup.md`.
 
-For the parser implementation house style, see `../docs/21-canonical-grammar-style.md`.
-
 For the concrete pain points that surfaced while implementing the SML frontend and the Elisa core ergonomics improvements they suggest, see `../docs/23-sml-frontend-pain-points-and-elisacore-ergonomics.md`.
 
 For scope/checkpoint rollback blocks, see `../docs/08-region-checkpoints.md`.
@@ -38,7 +36,6 @@ That reference covers the currently implemented syntax for:
 - named bundles via `bundle Name implicit:` and `bundle Name explicit:`
 - local explicit bundles for block-scoped call-shaping packs
 - brace destructuring, field punning, record updates, and filtered iterable loops
-- grammar DSL parser features: `token:` blocks, `token family` reusable token unions, `seq:` blocks, comma-free `seq(...)`, `prefix(...)`, postfix `*`/`+` repetition, `flatrepeat`, `separated ... by ... until(...)`, recovery, lookahead/cut, precedence/suffix/postfix helpers, and channel-driven struct result synthesis
 - `do:` blocks, `defer`, index fallback, store/dict sugar, char literals, and explicit `parallel for`
 - lambda literals and explicit cast/conversion surfaces
 - protocols, associated types, extension methods, UFCS rewriting, safe call chaining, and the preferred generic specialization surface
@@ -75,32 +72,6 @@ exists yet.
 ```text
 return lambda (value: i64) -> i64:
   return value + 1
-```
-
-```text
-grammar ExprGrammar over Token using ParserState:
-  cursor state
-  alloc alloc
-  token:
-    IDENT
-    INTEGER
-    PLUS "+"
-    MINUS "-"
-    LPAREN "("
-    RPAREN ")"
-  expression() -> Expr:
-    result = precedence(additive):
-      atom = choice(
-        prefix(.PLUS, .MINUS) atom() -> make_unary(alloc, op, operand),
-        integer_atom()
-      )
-      additive(left = atom()):
-        op = .PLUS | .MINUS right = atom() -> make_binary(alloc, left, op, right)
-    return result
-  integer_atom() -> Expr:
-    seq:
-      .INTEGER(token)
-      expr(make_int(alloc, token))
 ```
 
 ```text

@@ -70,8 +70,7 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
 def ctx_fstr_alloc(total: usize) -> dstr:
     can Memory.Allocate, Abort.Panic:
         out: mutable dstr = zeroed
-        if total == 0:
-            return out
+        out return if total == 0
         buf: mutable u8& = alloc_perm(total.i64()).cast[mutable u8&]
         out.items as & <- buf
         out.count <- 0
@@ -80,10 +79,8 @@ def ctx_fstr_alloc(total: usize) -> dstr:
 
 def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
     can Memory.Allocate, Abort.Panic:
-        if ptr == null or len == 0:
-            return
-        if out.items == null:
-            return
+        return if ptr == null or len == 0
+        return if out.items == null
         assert out.count + len <= out.capacity
         arena_memcpy(collections_mutable_void_from_items_at[u8](out.items, out.count), ptr.cast[void&], len)
         out.count <- out.count + len
@@ -110,16 +107,13 @@ def string_slice_eq(value: u8&?, start: i64, end: i64, other: u8&?) -> int:
 
     if start > 0:
         lo <- start.usize()
-        if lo > len:
-            lo <- len
+        lo <- len if lo > len
 
     if end >= 0:
         hi <- end.usize()
-        if hi > len:
-            hi <- len
+        hi <- len if hi > len
 
-    if hi < lo:
-        hi <- lo
+    hi <- lo if hi < lo
 
     slice_len: usize = hi - lo
     rhs_len: usize = runtime_strlen(rhs)
@@ -145,29 +139,23 @@ def string_slices_eq(lhs: u8&?, lhs_start: i64, lhs_end: i64, rhs: u8&?, rhs_sta
 
     if lhs_start > 0:
         left_lo <- lhs_start.usize()
-        if left_lo > left_len:
-            left_lo <- left_len
+        left_lo <- left_len if left_lo > left_len
 
     if lhs_end >= 0:
         left_hi <- lhs_end.usize()
-        if left_hi > left_len:
-            left_hi <- left_len
+        left_hi <- left_len if left_hi > left_len
 
-    if left_hi < left_lo:
-        left_hi <- left_lo
+    left_hi <- left_lo if left_hi < left_lo
 
     if rhs_start > 0:
         right_lo <- rhs_start.usize()
-        if right_lo > right_len:
-            right_lo <- right_len
+        right_lo <- right_len if right_lo > right_len
 
     if rhs_end >= 0:
         right_hi <- rhs_end.usize()
-        if right_hi > right_len:
-            right_hi <- right_len
+        right_hi <- right_len if right_hi > right_len
 
-    if right_hi < right_lo:
-        right_hi <- right_lo
+    right_hi <- right_lo if right_hi < right_lo
 
     left_slice_len: usize = left_hi - left_lo
     right_slice_len: usize = right_hi - right_lo
@@ -190,16 +178,13 @@ def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
 
         if start > 0:
             lo <- start.usize()
-            if lo > len:
-                lo <- len
+            lo <- len if lo > len
 
         if end >= 0:
             hi <- end.usize()
-            if hi > len:
-                hi <- len
+            hi <- len if hi > len
 
-        if hi < lo:
-            hi <- lo
+        hi <- lo if hi < lo
 
         src return if lo == 0 and hi == len
 
@@ -224,16 +209,13 @@ def sview(value: u8&?, start: i64, end: i64) -> sview:
 
     if start > 0:
         lo <- start.usize()
-        if lo > len:
-            lo <- len
+        lo <- len if lo > len
 
     if end >= 0:
         hi <- end.usize()
-        if hi > len:
-            hi <- len
+        hi <- len if hi > len
 
-    if hi < lo:
-        hi <- lo
+    hi <- lo if hi < lo
 
     return StringView{data: src + lo, len: (hi - lo).i64()}
 
@@ -255,12 +237,9 @@ def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     lo: mutable i64 = start if start > 0 else 0
     hi: mutable i64 = end if end >= 0 else view.len
 
-    if lo > view.len:
-        lo <- view.len
-    if hi > view.len:
-        hi <- view.len
-    if hi < lo:
-        hi <- lo
+    lo <- view.len if lo > view.len
+    hi <- view.len if hi > view.len
+    hi <- lo if hi < lo
 
     return StringView{data: view.data + lo.usize(), len: hi - lo}
 
@@ -360,8 +339,7 @@ def sview_trim_trailing(view: sview, byte: u8) -> sview:
 def sview_basename(view: sview, sep: u8) -> sview:
     i: mutable i64 = view.len
     while i > 0:
-        if string_view_index(view, i - 1) == sep.i64():
-            return string_view_suffix(view, i)
+        string_view_suffix(view, i) return if string_view_index(view, i - 1) == sep.i64()
         i <- i - 1
     return view
 
@@ -369,8 +347,7 @@ def sview_basename(view: sview, sep: u8) -> sview:
 def sview_dirname(view: sview, sep: u8) -> sview:
     i: mutable i64 = view.len
     while i > 0:
-        if string_view_index(view, i - 1) == sep.i64():
-            return string_view_prefix(view, i - 1)
+        string_view_prefix(view, i - 1) return if string_view_index(view, i - 1) == sep.i64()
         i <- i - 1
     return string_view_prefix(view, 0)
 
@@ -385,8 +362,7 @@ def sview_dirname(view: sview, sep: u8) -> sview:
 # tracks this for interior darray borrows).
 def bytes_view(buf: darray[u8]) -> sview:
     n: usize = buf.count
-    if n == 0:
-        return sview("", 0, 0)
+    sview("", 0, 0) return if n == 0
     trusted Unsafe.UncheckedIndex:
         return StringView{data: &buf[0], len: n.i64()}
 
@@ -406,8 +382,7 @@ def sview_find_last_byte(view: sview, byte: u8) -> i64:
     trusted Unsafe.AssumeProgress:
         while i > 0:
             i <- i - 1
-            if sview_at(view, i.usize()) == byte:
-                return i
+            i return if sview_at(view, i.usize()) == byte
     return -1
 
 # `Fs`: pure (allocation-free, OS-free) std::filesystem::path string decomposition.
@@ -450,8 +425,7 @@ module Fs:
                     return out
                 for cb in base:
                     _ = out.push(cb)
-                if sview_len(base) > 0 and not sview_ends_with(base, sep):
-                    _ = out.push(47)
+                out.push(47) if sview_len(base) > 0 and not sview_ends_with(base, sep)
                 for cl in leaf:
                     _ = out.push(cl)
             return out

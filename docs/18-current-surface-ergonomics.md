@@ -1,5 +1,10 @@
 # Current surface ergonomics
 
+> The former `grammar`, `grammarenv`, `lexer`, `tokenset`, `charset`, and
+> `keywordmap` declaration DSLs have been removed. Historical sections describing
+> those forms are retained temporarily for migration archaeology and are not part
+> of the supported language surface.
+
 This note documents implemented source-language features that landed after many of the older design notes in this folder.
 
 Unlike several of the earlier files here, this is not a forward-looking proposal. It is a practical reference for syntax the current compiler accepts today.

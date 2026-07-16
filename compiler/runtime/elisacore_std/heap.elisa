@@ -119,8 +119,7 @@ def fixed_buffer_resize(a: mutable FixedBufferAllocator&, ptr: void&, old_size: 
         return true
 
 def fixed_buffer_release(a: mutable FixedBufferAllocator&, ptr: void&, size_bytes: usize):
-    if fixed_buffer_is_last_allocation(a, ptr, size_bytes):
-        a.end_index <- a.end_index - size_bytes
+    a.end_index <- a.end_index - size_bytes if fixed_buffer_is_last_allocation(a, ptr, size_bytes)
 
 def memory_pool_init[T]() -> MemoryPool[T]:
     return zeroed
@@ -133,8 +132,7 @@ def memory_pool_init_capacity[T](count: usize) -> MemoryPool[T]:
 def memory_pool_add_capacity[T](pool: mutable MemoryPool[T]&, count: usize):
     can Memory.Allocate, Abort.Panic:
         item_size: mutable usize = size_of(T)
-        if item_size < size_of(MemoryPoolFreeNode):
-            item_size <- size_of(MemoryPoolFreeNode)
+        item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
 
         for i in 0..<count:
             raw: heap void& = arena_alloc(&pool.arena, item_size)
@@ -154,8 +152,7 @@ def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
                 return item
 
         item_size: mutable usize = size_of(T)
-        if item_size < size_of(MemoryPoolFreeNode):
-            item_size <- size_of(MemoryPoolFreeNode)
+        item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
 
         raw: heap void& = arena_alloc(&pool.arena, item_size)
         trusted Unsafe.PointerCast:
@@ -208,8 +205,7 @@ def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
                 return item
 
         item_size: mutable usize = size_of(T)
-        if item_size < size_of(MemoryPoolFreeNode):
-            item_size <- size_of(MemoryPoolFreeNode)
+        item_size <- size_of(MemoryPoolFreeNode) if item_size < size_of(MemoryPoolFreeNode)
 
         assert pool.owner != null
         owner: mutable Arena& = pool.owner

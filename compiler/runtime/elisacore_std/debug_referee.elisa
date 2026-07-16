@@ -122,8 +122,7 @@ global mutable elisa_trace_total: u64 = 0   # actual steps recorded (counts dedu
 
 # Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
-    if not elisa_trace_fault_checked:
-        elisa_trace_maybe_install_fault_handler()
+    elisa_trace_maybe_install_fault_handler() if not elisa_trace_fault_checked
     elisa_trace_total <- elisa_trace_total + 1
     # Collapse a consecutive run of the same plain step (e.g. a hot loop body) into a
     # single entry with a repeat count, so a tight loop does not flush the whole ring.
@@ -171,8 +170,7 @@ def elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void:
         si_addr <- slot
     fbuf: mutable u8[96] = zeroed
     fw: int = snprintf(fbuf[0], 96, "*** elisa fault: signal %lld at address 0x%llx ***\n", sig.i64(), si_addr.u64()) can Console.Format
-    if fw > 0:
-        _ = write(2, (&fbuf[0]).cast[void&], fw.usize()) can Console
+    write(2, (&fbuf[0]).cast[void&], fw.usize()) can Console if fw > 0
     elisa_trace_dump() can Console
     _ = signal(sig, null)
     _ = kill(getpid(), sig)
@@ -195,21 +193,17 @@ def elisa_trace_install_fault_handler() -> void:
 # program's own signal handling (e.g. the emulator installs its SIGSEGV handler later,
 # which then overrides this one -- the emulator should call elisa_trace_dump() itself).
 def elisa_trace_maybe_install_fault_handler() -> void:
-    if elisa_trace_fault_checked:
-        return
+    return if elisa_trace_fault_checked
     elisa_trace_fault_checked <- true
-    if getenv("ELISA_TRACE_ON_FAULT".cast[u8&]) != null:
-        elisa_trace_install_fault_handler()
+    elisa_trace_install_fault_handler() if getenv("ELISA_TRACE_ON_FAULT".cast[u8&]) != null
 
 def elisa_trace_dump() -> void:
     entries: u64 = elisa_trace_pos
     n: mutable u64 = entries
-    if n > ELISA_TRACE_CAP.u64():
-        n <- ELISA_TRACE_CAP.u64()
+    n <- ELISA_TRACE_CAP.u64() if n > ELISA_TRACE_CAP.u64()
     hdr: mutable u8[160] = zeroed
     hw: int = snprintf(hdr[0], 160, "--- elisa trace: most recent %llu entries (%llu step(s)) ---\n", n, elisa_trace_total) can Console.Format
-    if hw > 0:
-        _ = write(2, (&hdr[0]).cast[void&], hw.usize()) can Console
+    write(2, (&hdr[0]).cast[void&], hw.usize()) can Console if hw > 0
     i: mutable u64 = 0
     while i < n:
         idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
@@ -218,18 +212,21 @@ def elisa_trace_dump() -> void:
         rep: u32 = elisa_trace_ring[idx].repeat
         buf: mutable u8[256] = zeroed
         w: mutable int = 0
-        if elisa_trace_ring[idx].has_value != 0:
-            vn: cstr = elisa_trace_ring[idx].var_name
-            vv: u64 = elisa_trace_ring[idx].value
-            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
-        elif rep != 0:
-            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1) can Console.Format
-        else:
-            w <- snprintf(buf[0], 256, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
+        # Trace-line format selected by priority (value > repeat > plain): a classification
+        # value drives one `match` transition rather than a hidden if/elif ladder.
+        line_kind: i64 = 0 if elisa_trace_ring[idx].has_value != 0 else (1 if rep != 0 else 2)
+        match line_kind:
+            0:
+                vn: cstr = elisa_trace_ring[idx].var_name
+                vv: u64 = elisa_trace_ring[idx].value
+                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
+            1:
+                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u (x%u)\n", i, nm, ln, rep + 1) can Console.Format
+            _:
+                w <- snprintf(buf[0], 256, "  [-%llu] %s:%u\n", i, nm, ln) can Console.Format
         if w > 0:
             wn: mutable usize = w.usize()
-            if wn > 256:
-                wn <- 256
+            wn <- 256 if wn > 256
             _ = write(2, (&buf[0]).cast[void&], wn) can Console
         i <- i + 1
 
@@ -257,21 +254,15 @@ def debug_referee_trace_count() -> usize:
     return debug_referee_event_count
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
-    if index >= DEBUG_REFEREE_TRACE_CAP:
-        return DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""}
+    DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""} return if index >= DEBUG_REFEREE_TRACE_CAP
     return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
-    if value == DEBUG_REFEREE_POISON_GENERIC:
-        return true
-    if value == DEBUG_REFEREE_POISON_GOT:
-        return true
-    if value == DEBUG_REFEREE_POISON_TLS:
-        return true
-    if value == DEBUG_REFEREE_POISON_TCB:
-        return true
-    if value == DEBUG_REFEREE_POISON_DTV:
-        return true
+    true return if value == DEBUG_REFEREE_POISON_GENERIC
+    true return if value == DEBUG_REFEREE_POISON_GOT
+    true return if value == DEBUG_REFEREE_POISON_TLS
+    true return if value == DEBUG_REFEREE_POISON_TCB
+    true return if value == DEBUG_REFEREE_POISON_DTV
     return false
 
 def debug_referee_is_near_null(value: uintptr) -> bool:
@@ -280,17 +271,13 @@ def debug_referee_is_near_null(value: uintptr) -> bool:
 def debug_referee_is_noncanonical_x86_64(value: uintptr) -> bool:
     high: uintptr = value >> 48
     sign: uintptr = (value >> 47) & 1
-    if sign == 0:
-        return high != 0
+    high != 0 return if sign == 0
     return high != 0xffff
 
 def debug_referee_pointer_reason(value: uintptr) -> int:
-    if debug_referee_is_poison(value):
-        return DEBUG_REFEREE_REASON_POISON
-    if debug_referee_is_near_null(value):
-        return DEBUG_REFEREE_REASON_NEAR_NULL
-    if debug_referee_is_noncanonical_x86_64(value):
-        return DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64
+    DEBUG_REFEREE_REASON_POISON return if debug_referee_is_poison(value)
+    DEBUG_REFEREE_REASON_NEAR_NULL return if debug_referee_is_near_null(value)
+    DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64 return if debug_referee_is_noncanonical_x86_64(value)
     return DEBUG_REFEREE_REASON_OK
 
 def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) can[Debug.Referee]:
@@ -305,13 +292,11 @@ def debug_referee_record(kind: int, reason: int, value: uintptr, label: cstr) ca
 
 def debug_referee_trace_value(label: cstr, value: uintptr) can[Debug.Referee]:
     can Debug.Referee:
-        if debug_referee_trace_enabled:
-            debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label)
+        debug_referee_record(DEBUG_REFEREE_KIND_TRACE_VALUE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
 
 def debug_referee_checkpoint(label: cstr) can[Debug.Referee]:
     can Debug.Referee:
-        if debug_referee_trace_enabled:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0, label)
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECKPOINT, DEBUG_REFEREE_REASON_OK, 0, label) if debug_referee_trace_enabled
 
 def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
     can Debug.Referee:
@@ -319,8 +304,7 @@ def debug_referee_check_pointer(label: cstr, value: uintptr) -> bool can[Debug.R
         if reason != DEBUG_REFEREE_REASON_OK:
             debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, reason, value, label)
             return false
-        if debug_referee_trace_enabled:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label)
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_POINTER, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
         return true
 
 def debug_referee_check_callable(label: cstr, value: uintptr) -> bool can[Debug.Referee]:
@@ -329,24 +313,19 @@ def debug_referee_check_callable(label: cstr, value: uintptr) -> bool can[Debug.
         if reason != DEBUG_REFEREE_REASON_OK:
             debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, reason, value, label)
             return false
-        if debug_referee_trace_enabled:
-            debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label)
+        debug_referee_record(DEBUG_REFEREE_KIND_CHECK_CALLABLE, DEBUG_REFEREE_REASON_OK, value, label) if debug_referee_trace_enabled
         return true
 
 def debug_referee_assert_pointer(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
     can Debug.Referee, Abort.Panic:
-        if not debug_referee_enabled:
-            return
-        if debug_referee_check_pointer(label, value):
-            return
+        return if not debug_referee_enabled
+        return if debug_referee_check_pointer(label, value)
         panic("debug referee stopped unsafe pointer")
 
 def debug_referee_assert_callable(label: cstr, value: uintptr) can[Debug.Referee, Abort.Panic]:
     can Debug.Referee, Abort.Panic:
-        if not debug_referee_enabled:
-            return
-        if debug_referee_check_callable(label, value):
-            return
+        return if not debug_referee_enabled
+        return if debug_referee_check_callable(label, value)
         panic("debug referee stopped unsafe callable")
 
 def debug_trace_set_enabled(enabled: bool) can[Debug.Trace]:
@@ -369,28 +348,23 @@ def debug_trace_did_overflow() -> bool:
     return debug_trace_overflowed
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
-    if index >= DEBUG_TRACE_TAPE_CAP:
-        return DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""}
+    DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""} return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:
-    if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0
+    0 return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index].kind
 
 def debug_trace_event_a_at(index: usize) -> uintptr:
-    if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0
+    0 return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index].a
 
 def debug_trace_event_b_at(index: usize) -> uintptr:
-    if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0
+    0 return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index].b
 
 def debug_trace_event_c_at(index: usize) -> uintptr:
-    if index >= DEBUG_TRACE_TAPE_CAP:
-        return 0
+    0 return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index].c
 
 def debug_trace_last_kind() -> int:
@@ -401,8 +375,7 @@ def debug_trace_mix_word(word: uintptr) can[Debug.Trace]:
 
 def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]:
     can Debug.Trace:
-        if not debug_trace_enabled:
-            return
+        return if not debug_trace_enabled
 
         debug_trace_sequence <- debug_trace_sequence + 1
         event: DebugTraceEvent = DebugTraceEvent{sequence: debug_trace_sequence, kind: kind, a: a, b: b, c: c, label: label}
@@ -414,10 +387,8 @@ def debug_trace_record(kind: int, label: cstr, a: uintptr, b: uintptr, c: uintpt
         debug_trace_mix_word(b)
         debug_trace_mix_word(c)
 
-        if debug_trace_event_count < DEBUG_TRACE_TAPE_CAP:
-            debug_trace_events[debug_trace_event_count] <- event
-        else:
-            debug_trace_overflowed <- true
+        debug_trace_events[debug_trace_event_count] <- event if debug_trace_event_count < DEBUG_TRACE_TAPE_CAP
+        debug_trace_overflowed <- true if not (debug_trace_event_count < DEBUG_TRACE_TAPE_CAP)
         debug_trace_event_count <- debug_trace_event_count + 1
 
 def debug_trace_checkpoint(label: cstr) can[Debug.Trace]:
@@ -434,5 +405,4 @@ def debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[De
 
 def debug_trace_assert_fingerprint(expected: u64) can[Debug.Trace, Abort.Panic]:
     can Abort.Panic:
-        if debug_trace_hash != expected:
-            panic("debug trace fingerprint mismatch")
+        panic("debug trace fingerprint mismatch") if debug_trace_hash != expected
