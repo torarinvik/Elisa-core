@@ -533,8 +533,14 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		if colonPos+1 < len(p.tokens) {
 			afterColon = p.tokens[colonPos+1].Kind
 		}
+		// TOKEN_LPAREN opens a tuple type (`t: (a: i64, b: i64) = …`), which
+		// parseTypeExpr already handles and which the parameter and return
+		// positions already accept — only this statement-level lookahead was
+		// blind to it, so a tuple-annotated local fell through to expression
+		// parsing and died on the colon.
 		if afterColon == lexer.TOKEN_IDENT || afterColon == lexer.TOKEN_MUTABLE || afterColon == lexer.TOKEN_TAIL ||
-			afterColon == lexer.TOKEN_HEAP || afterColon == lexer.TOKEN_STACK || afterColon == lexer.TOKEN_STATIC {
+			afterColon == lexer.TOKEN_HEAP || afterColon == lexer.TOKEN_STACK || afterColon == lexer.TOKEN_STATIC ||
+			afterColon == lexer.TOKEN_LPAREN {
 			name := p.cur().Text
 			p.advance()
 			p.advance()
