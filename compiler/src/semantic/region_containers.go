@@ -649,6 +649,11 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		// payload into the target's arena, so nothing dangles).
 		valueRegion = a.enumCtorPayloadFreshRegion(argExpr)
 		if valueRegion == "" {
+			// The ctor may have been bound to a local first (`node = Item.Row(mk()); out.push(node)`)
+			// — the taint side-table carries the payload's region across that binding.
+			valueRegion = a.structInteriorTaintRegion(argExpr)
+		}
+		if valueRegion == "" {
 			return
 		}
 		// Sanctioned adopted cases (mirrors the backend's regionPolyAutoAdopts): the function's
@@ -673,16 +678,37 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 // would have stamped on a bare container here), which this returns. "" when the expression is not
 // such a ctor, its payload is region-free, or no allocation region is active.
 func (a *Analyzer) enumCtorPayloadFreshRegion(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
 	inner := unwrapParen(expr)
 	if alloc, isAlloc := inner.(*ast.AllocExpr); isAlloc && alloc != nil {
 		inner = unwrapParen(alloc.Value)
 	}
 	call, ok := inner.(*ast.CallExpr)
+	if !ok || call == nil {
+		return ""
+	}
+	// Resolve `Enum.Variant(...)` WITHOUT packedAllocConstructorInfo: that helper reports
+	// "enum has no variant" as a side effect, which would fabricate diagnostics here (this is a
+	// query, and a non-variant member call like `Expr.Store(..)` is legitimate elsewhere).
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil {
+		return ""
+	}
+	baseName, ok := qualifiedTypePathFromExpr(fieldExpr.Object)
 	if !ok {
 		return ""
 	}
-	et, _, isCtor := a.packedAllocConstructorInfo(call)
-	if !isCtor || et == nil {
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return ""
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		return ""
+	}
+	if _, isVariant := enumType.Variant(fieldExpr.Field); !isVariant {
 		return ""
 	}
 	for _, payloadArg := range call.Args {
@@ -830,6 +856,16 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	}
 	// Whole-aggregate assignment to a plain local: propagate the source's taint.
 	if _, isIdent := stripParenExpr(target).(*ast.Ident); !isIdent {
+		return
+	}
+	// An enum CONSTRUCTOR bound to a local (`node: Item = Item.Row(make_vals(10))`, or the
+	// packed `node: Node = new Stmt.Block(body: kids)`) taints the local with the payload's
+	// fresh region. Without this the ident launders the payload past every store check — the
+	// enum type carries no region stamp and the ctor expression is gone by the time `node` is
+	// pushed. Checked BEFORE the container gates below: a PACKED handle deliberately fails
+	// typeCarriesRegionStorage, yet its variant payload dangles just the same.
+	if region := a.enumCtorPayloadFreshRegion(value); region != "" {
+		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
 		return
 	}
 	if !typeCarriesRegionStorage(valueType) || containerRegion(valueType) != "" {

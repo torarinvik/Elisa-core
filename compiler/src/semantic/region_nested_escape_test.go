@@ -664,3 +664,52 @@ def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void ca
 		t.Fatalf("enum-ctor element extended into a multi-container grower must be rejected; got: %s", all)
 	}
 }
+
+// The IDENT-laundered vector — the shape [[void-grower-region-adoption]] recorded as a "live
+// time bomb" that earlier probing "could NOT be made to crash". It does crash (segfault at 2000
+// iterations): binding the ctor to a local first (`node = Item.Row(mk()); out.push(node)`) hid
+// the payload from every store check, since the enum type carries no region stamp and the ctor
+// expression is gone by the push. The interior-taint side-table now carries the payload's
+// region across the binding.
+func TestNestedRegionIdentBoundEnumCtorTwoContainerGrowerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "ident_enum_payload_grower_escape.elisa", `enum Item:
+    Row(vals: darray[i64])
+    Nothing()
+
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    return xs
+
+def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+    node: Item = Item.Row(make_vals(10))
+    out.push(node)
+    tally.push(7)
+    return
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"__rg_out\"") {
+		t.Fatalf("ident-bound enum ctor pushed into a multi-container grower must be rejected; got: %s", all)
+	}
+}
+
+// enumCtorPayloadFreshRegion must classify WITHOUT side effects: packedAllocConstructorInfo
+// reports "enum has no variant" as it resolves, so calling it from the taint recorder
+// fabricated that diagnostic for a legitimate non-variant member call on an enum-named type.
+// (Caught as a real regression in TestAnalyzeFunctionAnalysisRecordsProduceAndRebaseTransforms.)
+func TestEnumNamedTypeNonVariantMemberCallIsNotADiagnostic(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "enum_nonvariant_member_query.elisa", `enum Expr:
+    Literal(value: i64)
+    Nothing()
+
+def helper() -> i64:
+    e: Expr = Expr.Literal(7)
+    match e:
+        Expr.Literal(value: v):
+            return v
+        Expr.Nothing():
+            return 0
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "has no variant") {
+		t.Fatalf("region taint classification must not fabricate variant diagnostics; got: %s", all)
+	}
+}

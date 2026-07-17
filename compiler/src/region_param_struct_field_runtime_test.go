@@ -894,3 +894,40 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("single-container extend of an enum-ctor element must adopt; expected RAN 42000, got %s %q", status, out)
 	}
 }
+
+// The single-container ident-bound form must still ADOPT and run — the taint the recorder now
+// records is exempted by the ambient-adoption carve-out, exactly like the inline-ctor form.
+func TestVoidGrowerIdentBoundEnumCtorAdoptedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `enum Item:
+    Row(vals: darray[i64])
+    Nothing()
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    xs.push(n + 1)
+    return xs
+def grow(out: mutable darray[Item]&) -> void can[Memory.Allocate, Abort.Panic]:
+    node: Item = Item.Row(make_vals(10))
+    out.push(node)
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nested: mutable darray[Item] = []
+    i: mutable i64 = 0
+    while i < 2000:
+        grow(nested) can Memory.Allocate, Abort.Panic
+        i <- i + 1
+    total: mutable i64 = 0
+    for it in nested:
+        match it:
+            Item.Row(vals: vs):
+                for x in vs:
+                    total <- total + x
+            Item.Nothing():
+                total <- total + 0
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "42000" {
+		t.Fatalf("single-container ident-bound ctor must adopt; expected RAN 42000, got %s %q", status, out)
+	}
+}
