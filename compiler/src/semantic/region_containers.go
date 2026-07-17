@@ -647,12 +647,19 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		// container here) — use that as the value's region. The one sanctioned exception: a
 		// void grower whose ambient region was bound to this very target (adoption routes the
 		// payload into the target's arena, so nothing dangles).
-		call, ok := unwrapParen(argExpr).(*ast.CallExpr)
+		inner := unwrapParen(argExpr)
+		if alloc, isAlloc := inner.(*ast.AllocExpr); isAlloc && alloc != nil {
+			// `new Stmt.Block(body: kids, ...)` — a PACKED ctor allocates through an AllocExpr;
+			// the region-carrying payload check below applies identically (the handle's record is
+			// store-threaded, but a container payload dangles with the function's auto region).
+			inner = unwrapParen(alloc.Value)
+		}
+		call, ok := inner.(*ast.CallExpr)
 		if !ok {
 			return
 		}
 		et, _, isCtor := a.packedAllocConstructorInfo(call)
-		if !isCtor || et == nil || et.Packed || et.Root().Packed {
+		if !isCtor || et == nil {
 			return
 		}
 		payloadCarries := false
@@ -665,7 +672,13 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		if !payloadCarries {
 			return
 		}
+		// Sanctioned adopted cases (mirrors the backend's regionPolyAutoAdopts): the function's
+		// synthesized auto region ADOPTS a caller-provided arena, so the wrapped payload actually
+		// lands in caller-owned storage and nothing dangles.
 		if a.currentFuncDecl != nil && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
+			return
+		}
+		if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
 			return
 		}
 		valueRegion = a.activeContainerRegionName()

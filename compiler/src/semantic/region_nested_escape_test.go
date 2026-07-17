@@ -591,3 +591,30 @@ def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void:
 		t.Fatalf("enum-ctor-wrapped inner-region payload pushed into a multi-container grower must be rejected; got: %s", all)
 	}
 }
+
+// The PACKED-enum variant of the same hole: `out.push(new Stmt.Block(body: kids, ...))` in a
+// TWO-container void grower. The handle's record is store-threaded, but the darray payload
+// lands in the function's synthesized auto region (no ambient adoption with 2 container
+// params) and dangles — runtime-confirmed segfault at 2000 iterations before this check saw
+// through the AllocExpr wrapper. Single-container growers stay accepted (ambient adoption) as
+// do explicitly region-polymorphic functions (their auto region adopts the caller's arena).
+func TestNestedRegionPackedCtorPayloadTwoContainerGrowerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "packed_payload_grower_escape.elisa", `enum Node: pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+
+def make_leaf(v: i64) -> Node can[Memory.Allocate, Abort.Panic]:
+    return new Stmt.Leaf(value: v)
+
+def grow_two(out: mutable darray[Node]&, tally: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+    kids: mutable darray[Node] = []
+    kids.push(make_leaf(10))
+    out.push(new Stmt.Block(body: kids, tag: 99))
+    tally.push(7)
+    return
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"__rg_out\"") {
+		t.Fatalf("packed-ctor container payload pushed into a multi-container grower must be rejected; got: %s", all)
+	}
+}
