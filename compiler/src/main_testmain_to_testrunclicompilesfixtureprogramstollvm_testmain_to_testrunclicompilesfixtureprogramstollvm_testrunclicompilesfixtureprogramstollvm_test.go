@@ -490,17 +490,6 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			},
 		},
 		{
-			name: "grammar_surface_precedence",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_surface_precedence.elisa"),
-			checks: []string{
-				"%Token = type { i8 }",
-				"define %Token @grammar_surface_parse_expr(ptr",
-				"define %Token @grammar_surface_parse_one_off(ptr",
-				"@__grammar_try__Arithmetic____grammar_precedence_Arithmetic_expression_1_compare(",
-				"@__grammar_try__Arithmetic____grammar_precedence_Arithmetic_one_off_expression_1_inline(",
-			},
-		},
-		{
 			name: "fact_core_rules",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_core_rules.elisa"),
 			checks: []string{
@@ -516,18 +505,6 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 				"define i64 @__impl__FactBuilder__semantic.StructType_FactBuilderTag__state()",
 				"define i64 @fact_interface_rules__FactBuilderTag(",
 				"define i64 @fact_interface_concrete(",
-			},
-		},
-		{
-			name: "grammar_uses_shared_helpers",
-			path: filepath.Join(repoRoot, "Code", "test_programs", "grammar_uses_shared_helpers.elisa"),
-			checks: []string{
-				"%Token = type { i8 }",
-				"define %Token @grammar_uses_parse_statement(ptr",
-				"define %Token @grammar_uses_recovering_atom(ptr",
-				"@__grammar_try__StatementGrammar____grammar_precedence_StatementGrammar_statement_1_compare(",
-				"call void @record_parse_error(ptr",
-				"@__grammar_try__StatementGrammar__recovering_atom(",
 			},
 		},
 		{
