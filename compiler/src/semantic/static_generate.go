@@ -129,6 +129,20 @@ func (a *Analyzer) evalStaticGenerateEmit(stmt *ast.StaticGenerateEmitDecl) ([]a
 		}
 		return nil, false
 	}
+	// The rendered source is lexed as its OWN text, so token positions are offsets within the
+	// GENERATED fragment — while the filename here is the user's REAL file. Left unrebased, a
+	// diagnostic on a generated declaration names the real file with a line number from the
+	// fragment, i.e. it points at an arbitrary innocent line: a bad `emit` body on line 8
+	// reported at line 2, on an unrelated enum variant, once per generated instance.
+	//
+	// Rebasing onto the `emit` site makes every generated node point at the code the user
+	// actually wrote and can edit, which is the only position that means anything here — the
+	// generated text has no independent existence on disk. The lex/parse errors above already
+	// report against exactly this position; this extends the same anchoring to the nodes they
+	// produce. (Same shape as the f-string sub-lexer; see parser_fstring.go.)
+	for i := range tokens {
+		tokens[i].Pos = stmt.Pos()
+	}
 	p := parser.New(tokens)
 	file := p.ParseFile(stmt.Pos().File)
 	if errs := p.Errors(); len(errs) != 0 {
