@@ -111,3 +111,60 @@ func containsString(values []string, target string) bool {
 	}
 	return false
 }
+
+// TestEmitCArchiveWritesNoArtifactWhenUnsafeAuditFails pins that a REJECTED program leaves
+// nothing behind.
+//
+// The unsafe-permission audit gates `-emit c-archive`, but it used to run AFTER `ar` had
+// already produced the archive, so a program the compiler refused still left a complete,
+// linkable .a (plus its .h) on disk. The exit code said "failed" while the artifact said
+// "success" -- and the artifact wins for anything that checks the filesystem instead of the
+// status: an incremental build, a Makefile, a test harness. Observed before the fix: this
+// exact fixture audit-failed, yet its archive linked and ran, returning 42.
+//
+// Asserting file ABSENCE is the point; asserting the exit code alone is what let this hide.
+func TestEmitCArchiveWritesNoArtifactWhenUnsafeAuditFails(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("ar"); err != nil {
+		t.Skip("ar not available")
+	}
+
+	dir := t.TempDir()
+	sourcePath := filepath.Join(dir, "unguarded.elisa")
+	archivePath := filepath.Join(dir, "libunguarded.a")
+
+	// Nothing bounds a bare `darray[i64]&`, so the audit rejects the unguarded index.
+	writeFixtureFile(t, sourcePath, `
+def peek(xs: darray[i64]&) -> i64:
+    return xs[0]
+
+def main() -> i64:
+    a: mutable darray[i64] = []
+    a.push(42)
+    return peek(a)
+`)
+
+	var stdout, stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "c-archive", "-o", archivePath, sourcePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected the unsafe audit to reject the program, got exit 0\nstderr:\n%s", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "unsafe permission audit failed") {
+		t.Fatalf("expected an unsafe-audit diagnostic, got stderr:\n%s", stderr.String())
+	}
+
+	// The archive and every sidecar the emitter would otherwise write must be absent.
+	base := strings.TrimSuffix(archivePath, ".a")
+	for _, path := range []string{
+		archivePath,
+		base + ".h",
+		base + ".unsafe.txt",
+		base + ".elisa-abi.json",
+	} {
+		if _, err := os.Stat(path); err == nil {
+			t.Fatalf("a rejected program left an artifact behind: %s", path)
+		} else if !os.IsNotExist(err) {
+			t.Fatalf("stat %s: %v", path, err)
+		}
+	}
+}

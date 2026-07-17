@@ -72,6 +72,26 @@ func buildCArchive(result *semantic.Result, sourcePath string, outputPath string
 	if err := ensureOutputParentExists(archivePath); err != nil {
 		return err
 	}
+	// The unsafe-permission audit GATES the emission, so it runs before anything is written.
+	// It used to run after `ar` had already produced the archive: a REJECTED program still
+	// left a complete, linkable .a (and .h) on disk, so the exit code said "failed" while the
+	// artifact said "success". Anything that checks for the file rather than the exit status --
+	// an incremental build, a test harness -- would link and RUN a program the compiler had
+	// refused (verified: an unguarded `xs[0]` audit-failed, yet its archive linked and returned
+	// 42). Fail first, write nothing.
+	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{
+		EnforceUnsafePermissions: true,
+		TargetTriple:             targetTriple,
+		TargetDebug:              optLevel == backend.OptimizationLevel0,
+	})
+	if errs := unsafeResult.Errors(); len(errs) != 0 {
+		for _, e := range errs {
+			if stderr != nil {
+				fmt.Fprintf(stderr, "%s\n", e)
+			}
+		}
+		return fmt.Errorf("unsafe permission audit failed")
+	}
 	tempDir, err := os.MkdirTemp("", "elisacore-c-archive-*")
 	if err != nil {
 		return err
@@ -124,20 +144,9 @@ func buildCArchive(result *semantic.Result, sourcePath string, outputPath string
 		return err
 	}
 
+	// The audit itself ran up front (it gates emission); only its REPORT is an artifact, so
+	// that is all that happens here.
 	unsafePath := base + ".unsafe.txt"
-	unsafeResult := semantic.AnalyzeWithOptions(result.File, semantic.AnalyzeOptions{
-		EnforceUnsafePermissions: true,
-		TargetTriple:             targetTriple,
-		TargetDebug:              optLevel == backend.OptimizationLevel0,
-	})
-	if errs := unsafeResult.Errors(); len(errs) != 0 {
-		for _, e := range errs {
-			if stderr != nil {
-				fmt.Fprintf(stderr, "%s\n", e)
-			}
-		}
-		return fmt.Errorf("unsafe permission audit failed")
-	}
 	unsafeReport := generateUnsafeReport(unsafeResult)
 	if err := writeOutputFile(unsafePath, []byte(unsafeReport)); err != nil {
 		return err
