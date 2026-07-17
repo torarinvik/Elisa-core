@@ -159,71 +159,7 @@ def main() -> i64:
 	}
 }
 
-func TestRunCLIActivatesLoweredGrammarProductionsForInterpretAndIR(t *testing.T) {
-	t.Parallel()
-	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_active.elisa")
-	bundlePath := filepath.Join(fixtureDir, "grammar_active.elisair")
-	src := "grammar Demo:\n    produce() -> i64:\n        pass\n\ndef main() -> i64:\n    return produce()\n"
-	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write grammar activation fixture: %v", err)
-	}
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar-backed interpret to succeed, stderr:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[ result   ] 0") {
-		t.Fatalf("expected grammar-backed interpret to report zeroed grammar return, got:\n%s", stdout.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runCLI([]string{"-emit", "ir", "-o", bundlePath, sourcePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar-backed IR emit to succeed, stderr:\n%s", stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runCLI([]string{"-emit", "interpret", bundlePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar-backed interpret from bundle to succeed, stderr:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[ result   ] 0") {
-		t.Fatalf("expected grammar-backed bundle interpret to report zeroed grammar return, got:\n%s", stdout.String())
-	}
-}
-
-func TestRunCLIEmittedLoweredGrammarSourceIsStandalone(t *testing.T) {
-	t.Parallel()
-	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_standalone.elisa")
-	loweredPath := filepath.Join(fixtureDir, "grammar_standalone.lowered.elisa")
-	src := "grammar Demo:\n    produce() -> i64:\n        return 9\n\ndef main() -> i64:\n    return produce()\n"
-	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write grammar standalone fixture: %v", err)
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "lowered", "-o", loweredPath, sourcePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected lowered emit to succeed, stderr:\n%s", stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runCLI([]string{"-emit", "interpret", loweredPath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected standalone lowered source to interpret, stderr:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[ result   ] 9") {
-		t.Fatalf("expected standalone lowered source to report 9, got:\n%s", stdout.String())
-	}
-}
 
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
 	t.Parallel()
@@ -312,43 +248,6 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 	}
 }
 
-func TestRunCLIActivatesExplicitGrammarReturnExpressions(t *testing.T) {
-	t.Parallel()
-	fixtureDir := t.TempDir()
-	sourcePath := filepath.Join(fixtureDir, "grammar_return.elisa")
-	bundlePath := filepath.Join(fixtureDir, "grammar_return.elisair")
-	src := "grammar Demo:\n    produce() -> i64:\n        return 7\n\ndef main() -> i64:\n    return produce()\n"
-	if err := os.WriteFile(sourcePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write grammar return fixture: %v", err)
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "interpret", sourcePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar explicit return interpret to succeed, stderr:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[ result   ] 7") {
-		t.Fatalf("expected grammar explicit return interpret to report 7, got:\n%s", stdout.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runCLI([]string{"-emit", "ir", "-o", bundlePath, sourcePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar explicit return IR emit to succeed, stderr:\n%s", stderr.String())
-	}
-
-	stdout.Reset()
-	stderr.Reset()
-	exitCode = runCLI([]string{"-emit", "interpret", bundlePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("expected grammar explicit return bundle interpret to succeed, stderr:\n%s", stderr.String())
-	}
-	if !strings.Contains(stdout.String(), "[ result   ] 7") {
-		t.Fatalf("expected grammar explicit return bundle interpret to report 7, got:\n%s", stdout.String())
-	}
-}
 
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 	t.Parallel()

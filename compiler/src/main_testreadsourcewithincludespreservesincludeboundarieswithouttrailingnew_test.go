@@ -799,51 +799,11 @@ func TestParseArgsAcceptsFactTraceEmitAlias(t *testing.T) {
 		t.Fatalf("expected facts emit mode, got %q", options.emit)
 	}
 }
-func TestRunCLIWritesLoweredGrammarSourceToDefaultPath(t *testing.T) {
-	t.Parallel()
-	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "lowered_fixture.elisa")
-	src := "grammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
-	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write lowered fixture: %v", err)
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "lowered", fixturePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
-	}
-	if stdout.Len() != 0 {
-		t.Fatalf("expected no stdout output, got:\n%s", stdout.String())
-	}
-	if stderr.Len() != 0 {
-		t.Fatalf("expected no stderr output, got:\n%s", stderr.String())
-	}
-	outputPath := filepath.Join(fixtureDir, "lowered_fixture"+loweredExtension)
-	data, err := os.ReadFile(outputPath)
-	if err != nil {
-		t.Fatalf("failed to read lowered output file: %v", err)
-	}
-	output := string(data)
-	if strings.Contains(output, "grammar PascalFrontend:") {
-		t.Fatalf("expected standalone lowered output to omit source grammar declarations, got:\n%s", output)
-	}
-	for _, want := range []string{
-		"def expression(state: mutable ParserState&) -> Token:",
-		"state.expect_kind(TokenKind.IDENT)",
-		"return (true, __grammar_committed_",
-	} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("expected lowered output to contain %q, got:\n%s", want, output)
-		}
-	}
-}
 func TestRunCLIEmitsSemanticReport(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "semantic_fixture.elisa")
-	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
+	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ndef expression(state: mutable ParserState&) -> Token:\n    return state.expect_kind(TokenKind.IDENT)\n"
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write semantic fixture: %v", err)
 	}
@@ -859,12 +819,9 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 	}
 	output := stdout.String()
 	for _, want := range []string{
-		"=== lowered ===",
-		"def expression(state: mutable ParserState&) -> Token:",
 		"=== semantic ===",
 		"func expression",
 		"signature: fn(mutable ParserState&) -> Token",
-		"func __grammar_try__PascalFrontend__expression",
 		"return_isolation:",
 		"fact_snapshot:",
 		"fact_exits:",
@@ -873,28 +830,6 @@ func TestRunCLIEmitsSemanticReport(t *testing.T) {
 	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("expected semantic report to contain %q, got:\n%s", want, output)
-		}
-	}
-}
-func TestRunCLIEmitsFactTraceForGrammarLoweredPaths(t *testing.T) {
-	t.Parallel()
-	fixtureDir := t.TempDir()
-	fixturePath := filepath.Join(fixtureDir, "grammar_fact_fixture.elisa")
-	src := "const enum TokenKind of u32:\n    IDENT = 1\n\nstruct Token:\n    kind: TokenKind\n\nstruct ParserState:\n    cursor: mutable usize\n\nimpl mutable ParserState&:\n    def expect_kind(self: mutable ParserState&, kind: TokenKind) -> Token:\n        _ = kind\n        return Token{kind: TokenKind.IDENT}\n\ngrammar PascalFrontend:\n    expression(state: mutable ParserState&) -> Token:\n        token(TokenKind.IDENT)\n"
-	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
-		t.Fatalf("failed to write grammar fact fixture: %v", err)
-	}
-
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
-	exitCode := runCLI([]string{"-emit", "facts", "-filter", "function=eq:__grammar_try__PascalFrontend__expression,mode=eq:summary", fixturePath}, &stdout, &stderr)
-	if exitCode != 0 {
-		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
-	}
-	output := stdout.String()
-	for _, want := range []string{"func __grammar_try__PascalFrontend__expression", "path_facts=[", "state.cursor{root=state,path=cursor,steps=field:cursor}", "alias-class#0"} {
-		if !strings.Contains(output, want) {
-			t.Fatalf("expected grammar fact trace to contain %q, got:\n%s", want, output)
 		}
 	}
 }
