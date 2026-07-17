@@ -647,29 +647,8 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		// container here) — use that as the value's region. The one sanctioned exception: a
 		// void grower whose ambient region was bound to this very target (adoption routes the
 		// payload into the target's arena, so nothing dangles).
-		inner := unwrapParen(argExpr)
-		if alloc, isAlloc := inner.(*ast.AllocExpr); isAlloc && alloc != nil {
-			// `new Stmt.Block(body: kids, ...)` — a PACKED ctor allocates through an AllocExpr;
-			// the region-carrying payload check below applies identically (the handle's record is
-			// store-threaded, but a container payload dangles with the function's auto region).
-			inner = unwrapParen(alloc.Value)
-		}
-		call, ok := inner.(*ast.CallExpr)
-		if !ok {
-			return
-		}
-		et, _, isCtor := a.packedAllocConstructorInfo(call)
-		if !isCtor || et == nil {
-			return
-		}
-		payloadCarries := false
-		for _, payloadArg := range call.Args {
-			if typeCarriesRegionStorage(a.exprTypes[payloadArg]) {
-				payloadCarries = true
-				break
-			}
-		}
-		if !payloadCarries {
+		valueRegion = a.enumCtorPayloadFreshRegion(argExpr)
+		if valueRegion == "" {
 			return
 		}
 		// Sanctioned adopted cases (mirrors the backend's regionPolyAutoAdopts): the function's
@@ -681,14 +660,37 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
 			return
 		}
-		valueRegion = a.activeContainerRegionName()
-		if valueRegion == "" {
-			return
-		}
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
+}
+
+// enumCtorPayloadFreshRegion classifies an enum-constructor expression — bare (`Item.Row(x)`) or
+// through `new` (`new Stmt.Block(body: kids)`) — whose payload arguments carry region storage.
+// The enum TYPE carries no region stamp, so region checks were blind to the wrapped payload; the
+// payload actually lives in the INNERMOST active allocation region (what stampContainerRegion
+// would have stamped on a bare container here), which this returns. "" when the expression is not
+// such a ctor, its payload is region-free, or no allocation region is active.
+func (a *Analyzer) enumCtorPayloadFreshRegion(expr ast.Expr) string {
+	inner := unwrapParen(expr)
+	if alloc, isAlloc := inner.(*ast.AllocExpr); isAlloc && alloc != nil {
+		inner = unwrapParen(alloc.Value)
+	}
+	call, ok := inner.(*ast.CallExpr)
+	if !ok {
+		return ""
+	}
+	et, _, isCtor := a.packedAllocConstructorInfo(call)
+	if !isCtor || et == nil {
+		return ""
+	}
+	for _, payloadArg := range call.Args {
+		if typeCarriesRegionStorage(a.exprTypes[payloadArg]) {
+			return a.activeContainerRegionName()
+		}
+	}
+	return ""
 }
 
 // checkNestedRegionBulkStoreEscape is the bulk form of the element-store check
@@ -1086,7 +1088,13 @@ func (a *Analyzer) valueInteriorRegion(expr ast.Expr) string {
 		}
 		return r
 	default:
-		return a.valueStoreRegion(stripped, a.exprTypes[stripped])
+		if r := a.valueStoreRegion(stripped, a.exprTypes[stripped]); r != "" {
+			return r
+		}
+		// An enum-ctor element (`[Item.Row(make_vals(10))]` fed to extend/assign) carries its
+		// payload's fresh region even though the enum type is unstamped — same blindness the
+		// element-store check had (enumCtorPayloadFreshRegion).
+		return a.enumCtorPayloadFreshRegion(stripped)
 	}
 }
 
@@ -1132,6 +1140,9 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 	// check; keeps `out.push(Holder{items: make_vals(10)})` consistent with the enum-ctor form.
 	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
 		return
+	}
+	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic && targetRegion != "" {
+		return // region-poly fn: the synthesized auto region adopts the caller's arena (regionPolyAutoAdopts).
 	}
 	if targetRegion == "" {
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)

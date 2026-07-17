@@ -640,3 +640,27 @@ def grow_two(out: mutable darray[Holder]&, tally: mutable darray[i64]&) -> void 
 		t.Fatalf("struct-literal payload in a multi-container grower must stay rejected; got: %s", all)
 	}
 }
+
+// Bulk vector of the enum-ctor payload hole: `out.extend([Item.Row(make_vals(10))])` in a
+// TWO-container grower — the list-literal interior scan (valueInteriorRegion) was enum-blind,
+// so this compiled and use-after-freed silently (segfault at 2000 iterations). Now the ctor
+// element classifies via enumCtorPayloadFreshRegion and the store is rejected.
+func TestNestedRegionExtendEnumCtorElementTwoContainerGrowerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "extend_enum_payload_grower_escape.elisa", `enum Item:
+    Row(vals: darray[i64])
+    Nothing()
+
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    return xs
+
+def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.extend([Item.Row(make_vals(10))])
+    tally.push(7)
+    return
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"__rg_out\"") {
+		t.Fatalf("enum-ctor element extended into a multi-container grower must be rejected; got: %s", all)
+	}
+}
