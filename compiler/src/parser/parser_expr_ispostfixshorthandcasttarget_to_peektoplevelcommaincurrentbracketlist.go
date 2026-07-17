@@ -311,6 +311,7 @@ func (p *Parser) parseTupleExprFromFirst(pos lexer.Pos, first ast.Expr) ast.Expr
 func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) ast.Expr {
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	secondName := p.parseComprehensionSecondBinder()
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	var rangeEnd ast.Expr
@@ -352,7 +353,17 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 		owner = p.withInMembershipDisabled(p.parseExpr)
 		p.errorf("comprehension allocation owner `[...] in <owner>` is no longer supported; annotate the binding type instead (e.g. `xs: darray[T] @<owner> = [...]`)")
 	}
-	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner, Parallel: parallel}
+	return &ast.ListComprehensionExpr{Position: pos, Value: value, Name: name, SecondName: secondName, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter, Owner: owner, Parallel: parallel}
+}
+
+// parseComprehensionSecondBinder consumes an optional `, IDENT` after a comprehension
+// head's first binder — the two-binder tuple-destructuring head `for k, v in src`
+// (dict entries, darray-of-tuples), mirroring the statement-level `for k, v in d:`.
+func (p *Parser) parseComprehensionSecondBinder() string {
+	if !p.match(lexer.TOKEN_COMMA) {
+		return ""
+	}
+	return p.expect(lexer.TOKEN_IDENT).Text
 }
 
 // parseDictComprehensionFromFirst parses a dict comprehension
@@ -364,6 +375,7 @@ func (p *Parser) parseListComprehensionFromFirst(pos lexer.Pos, value ast.Expr) 
 func (p *Parser) parseDictComprehensionFromFirst(pos lexer.Pos, key ast.Expr, value ast.Expr) ast.Expr {
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	secondName := p.parseComprehensionSecondBinder()
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	var rangeEnd ast.Expr
@@ -381,7 +393,7 @@ func (p *Parser) parseDictComprehensionFromFirst(pos lexer.Pos, key ast.Expr, va
 		filter = p.parseExpr()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ast.ListComprehensionExpr{Position: pos, Key: key, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
+	return &ast.ListComprehensionExpr{Position: pos, Key: key, Value: value, Name: name, SecondName: secondName, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
 }
 
 // parseSetComprehensionFromFirst parses a set comprehension
@@ -392,6 +404,7 @@ func (p *Parser) parseDictComprehensionFromFirst(pos lexer.Pos, key ast.Expr, va
 func (p *Parser) parseSetComprehensionFromFirst(pos lexer.Pos, value ast.Expr) ast.Expr {
 	p.expectIdentText("for")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	secondName := p.parseComprehensionSecondBinder()
 	p.expect(lexer.TOKEN_IN)
 	source := p.withWhereExprDisabled(func() ast.Expr { return p.withTernaryDisabled(p.parseExpr) })
 	var rangeEnd ast.Expr
@@ -409,7 +422,7 @@ func (p *Parser) parseSetComprehensionFromFirst(pos lexer.Pos, value ast.Expr) a
 		filter = p.parseExpr()
 	}
 	p.expect(lexer.TOKEN_RBRACE)
-	return &ast.ListComprehensionExpr{Position: pos, Set: true, Value: value, Name: name, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
+	return &ast.ListComprehensionExpr{Position: pos, Set: true, Value: value, Name: name, SecondName: secondName, Source: source, RangeEnd: rangeEnd, RangeStep: rangeStep, RangeOp: rangeOp, Filter: filter}
 }
 
 // parseFoldComprehensionFromFirst parses a fold/reduce comprehension with no head

@@ -170,6 +170,7 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 			TemperatureMode:        tt.TemperatureMode,
 			HasTemperatureMode:     tt.HasTemperatureMode,
 			CallConv:               tt.CallConv,
+			IsNativeExtern:         tt.IsNativeExtern,
 			IntrinsicName:          tt.IntrinsicName,
 			Params:                 params,
 			Return:                 substituteType(tt.Return, subst, impls),

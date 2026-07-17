@@ -176,6 +176,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				fnType := a.funcTypeFromExternDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Params, n.ReturnType, n.Variadic)
 				a.applyExternFuncAnnotations(n, fnType)
 				a.checkExternContractDiscipline(n)
+				a.checkExternOptionalABI(n, fnType)
 				a.markRawExternFuncType(n, fnType)
 				if !fnType.ReturnProvenanceKnown {
 					fnType.ReturnProvenanceKnown = true

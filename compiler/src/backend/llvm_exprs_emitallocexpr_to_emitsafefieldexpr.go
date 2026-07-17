@@ -631,6 +631,10 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	if err != nil {
 		return nil, nil, err
 	}
+	// Optional arguments to an extern cross as the bare nullable pointer the C callee
+	// declares; see externOptionalABI. Done before convertByvalArgs so the optional is
+	// already a pointer by the time aggregate classification runs.
+	args = s.convertExternOptionalArgs(funcType, args)
 	// Convert any memory-class aggregate arguments into byval pointers
 	// (memcpy-filled stack temporaries) so they match the lowered pointer
 	// parameter type. byvalTypes maps explicit-arg index -> aggregate type.
@@ -726,6 +730,15 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 		}
 	}
 	applyByvalCallAttrs(call)
+	// An extern returning `T?` returned the bare payload pointer; rebuild the optional
+	// Elisa expects from a null test. See externOptionalABI.
+	if _, ok := externNicheOptionalPayload(funcType, funcType.Return); ok {
+		optionalValue, err := s.emitExternOptionalFromNiche(call, funcType.Return)
+		if err != nil {
+			return nil, nil, err
+		}
+		return optionalValue, funcType.Return, nil
+	}
 	return call, funcType.Return, nil
 }
 func (s *functionState) emitSafeFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {

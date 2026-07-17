@@ -671,6 +671,9 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 		if expr.RangeOp != lexer.TOKEN_RANGE && expr.RangeOp != lexer.TOKEN_RANGE_LT && expr.RangeOp != lexer.TOKEN_RANGE_GT {
 			a.errorf(expr.Pos(), "list comprehension uses unsupported range operator %s", lexer.TokenName(expr.RangeOp))
 		}
+		if expr.SecondName != "" {
+			a.errorf(expr.Pos(), "a range comprehension yields a single integer per step; a two-binder head `for %s, %s in ...` requires a tuple-yielding source (e.g. a dict)", expr.Name, expr.SecondName)
+		}
 		loopSym := &Symbol{Name: expr.Name, Kind: SymbolLocal, Type: itemType, Node: expr, Mutable: false}
 		a.defineLocalInScope(loopScope, loopSym, expr.Pos())
 	} else {
@@ -686,7 +689,15 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 			a.errorf(expr.Pos(), "list comprehension value iteration does not support affine element type %s; use an explicit `for` loop (read-only iteration borrows affine elements automatically)", info.ItemType)
 		}
 		itemType = info.ItemType
-		pattern := &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
+		// A two-binder head `for k, v in src` destructures a tuple-yielding source
+		// (dict entries, darray-of-tuples) exactly like the statement-level tuple loop.
+		var pattern ast.MoveBindPattern = &ast.MoveBindNamePattern{Position: expr.Pos(), Name: expr.Name}
+		if expr.SecondName != "" {
+			pattern = &ast.MoveBindTuplePattern{Position: expr.Pos(), Args: []ast.MoveBindArg{
+				{Position: expr.Pos(), Name: expr.Name},
+				{Position: expr.Pos(), Name: expr.SecondName},
+			}}
+		}
 		a.bindIterLoopPattern(loopScope, pattern, ast.IterBindValue, info.ItemType, info.ItemFacts, info.HasItemFacts)
 	}
 	// Comma-head bindings: per-element `name [:T] = e` lets, declared in the loop scope
@@ -839,6 +850,9 @@ func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExp
 	}
 	if expr.Filter != nil {
 		return fail(expr.Pos(), "does not support an `if` filter")
+	}
+	if expr.SecondName != "" {
+		return fail(expr.Pos(), "does not support a two-binder head")
 	}
 	if len(expr.Bindings) > 0 {
 		return fail(expr.Pos(), "does not support head bindings")

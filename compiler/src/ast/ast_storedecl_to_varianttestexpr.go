@@ -133,13 +133,13 @@ type EnsuresClause struct {
 	RefinementArgs []Expr
 }
 type FuncDecl struct {
-	Position         lexer.Pos
-	Annotations      []Annotation
-	Static           bool
-	Override         bool
-	Name             string
-	TypeParams       []string
-	RegionParams     []string
+	Position     lexer.Pos
+	Annotations  []Annotation
+	Static       bool
+	Override     bool
+	Name         string
+	TypeParams   []string
+	RegionParams []string
 	// AmbientGrownContainerRegion names a `__rg_<param>` region (one of RegionParams) inferred for a
 	// container parameter this function grows by INSERTING region-allocated values (the void-grower
 	// shape `out.push(make_node())`). The backend binds this function's ambient allocation region to
@@ -148,9 +148,9 @@ type FuncDecl struct {
 	// otherwise.
 	AmbientGrownContainerRegion string
 	PermissionParams            []string
-	GenericParams    []GenericParam
-	Permissions      []PermissionRef
-	Ensures          []EnsuresClause
+	GenericParams               []GenericParam
+	Permissions                 []PermissionRef
+	Ensures                     []EnsuresClause
 	// Requires holds value-contract preconditions (`requires <bool-expr>` clauses), checked at
 	// function entry in debug builds only (elided in release), like the bounds-check watchdog.
 	// Distinct from Ensures, which is the typestate/resource-state contract.
@@ -570,6 +570,7 @@ type OptionalTypeExpr struct {
 	Position lexer.Pos
 	Value    TypeExpr
 }
+
 // LmutThreadSlot is one erased `name: lmut T` slot of a declared-threading return tuple
 // (docs/120 §2): the slot's original tuple index and the lmut parameter it threads.
 type LmutThreadSlot struct {
@@ -791,15 +792,19 @@ type MembershipRangeExpr struct {
 	Op       lexer.TokenKind
 }
 type ListComprehensionExpr struct {
-	Position  lexer.Pos
-	Value     Expr
-	Name      string
-	Source    Expr
-	RangeEnd  Expr
-	RangeStep Expr
-	RangeOp   lexer.TokenKind
-	Filter    Expr
-	Owner     Expr
+	Position lexer.Pos
+	Value    Expr
+	Name     string
+	// SecondName, when non-empty, marks a two-binder head `for k, v in src` (tuple
+	// destructuring, e.g. dict entries). Name binds the first tuple field, SecondName
+	// the second. Empty for the ordinary single-binder head.
+	SecondName string
+	Source     Expr
+	RangeEnd   Expr
+	RangeStep  Expr
+	RangeOp    lexer.TokenKind
+	Filter     Expr
+	Owner      Expr
 	// Key, when non-nil, marks a dict comprehension `{ Key: Value for ... }`; the
 	// result is dict[KeyType, ValueType] instead of darray[ValueType].
 	Key Expr

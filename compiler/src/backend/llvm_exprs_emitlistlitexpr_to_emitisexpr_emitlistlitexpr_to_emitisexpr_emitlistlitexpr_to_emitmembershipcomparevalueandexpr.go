@@ -401,7 +401,7 @@ func (s *functionState) emitListComprehensionExpr(expr *ast.ListComprehensionExp
 //	  for __i in 0..<src.count: name = src[__i]; <bindings>; result[__i] <- value;
 //	  result }
 func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensionExpr, resultName string, resultInit ast.Expr, resultIdent *ast.Ident) (*ast.ExprBlock, bool) {
-	if expr.Filter != nil {
+	if expr.Filter != nil || expr.SecondName != "" {
 		return nil, false
 	}
 	if expr.RangeEnd != nil {
@@ -517,9 +517,10 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 		break
 	}
 	comp, ok := inner.(*ast.ListComprehensionExpr)
-	// Filter-free, non-range list comprehension — the exact shape the fresh-init fast path
-	// (indexedStoreComprehensionBlock) vectorizes. Filtered / range sources fall back.
-	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd != nil {
+	// Filter-free, single-binder, non-range list comprehension — the exact shape the fresh-init
+	// fast path (indexedStoreComprehensionBlock) vectorizes. Filtered / range / two-binder
+	// sources fall back.
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd != nil || comp.SecondName != "" {
 		return nil, false
 	}
 	srcIdent, ok := comp.Source.(*ast.Ident)
@@ -626,19 +627,108 @@ func (s *functionState) fusedExtendComprehensionBlock(dstExpr, arg ast.Expr, dst
 	}, true
 }
 
-// A dict-source presize+indexed-store fusion (the dict analogue of fusedExtendComprehensionBlock)
-// was attempted here and reverted: verifying it exposed a PRE-EXISTING, unrelated bug where plain
-// `for k, v in someDict:` iteration runs more times than `dict.count` (confirmed against the
-// known-good TestRunCLIDictIterationYieldsKeyValuePairs by adding a bare iteration counter — it
-// undercounts against the loop's own already-passing per-entry checks, meaning the loop body runs
-// with more iterations than real entries). A presized `dst.resize(base + src.count)` fast path
-// would silently WRITE PAST that buffer under the same bug (an out-of-bounds store, worse than the
-// materialized fallback's safe amortized-growth push) — see task_dcf0ced9 for the dict-iteration
-// fix. Once that lands, this reduces to a straightforward copy of fusedExtendComprehensionBlock with
-// `srcIdent[idxIdent]` swapped for a running-counter store and `comp.Source` gated to *DictType.
-// Until then, dict-source extend (filter-free or filtered) falls through to
-// fusedPushExtendComprehensionBlock below, which only ever pushes (safe regardless of iteration
-// count, matching the materialized path's safety envelope) rather than presizing.
+// fusedDictExtendComprehensionBlock is the DICT-source counterpart of
+// fusedExtendComprehensionBlock: `dst.extend([ value for k, v in src ])` (or the single-binder
+// entry-tuple head) over a plain dict identifier, filter-free. A dict's count is exact and the
+// comprehension is filter-free, so the output length is `src.count` — presize `dst` once and fill
+// the appended tail slots through a RUNNING COUNTER (a dict has no integer element indexing, so
+// the store index is `__base + __i` with `__i` incremented per iteration, not the loop index of an
+// indexed source). Depends on `for ... in someDict` running exactly `src.count` iterations — the
+// dict-iteration overcount bug that previously blocked this path (task_dcf0ced9) is fixed and
+// pinned by TestRunCLIDictIterationVisitsExactlyCountEntries; a presized buffer plus an overcount
+// would be an out-of-bounds store. A dict source can never alias a darray dst, so no self-extend
+// snapshotting concern applies. Returns ok=false (later fused paths / materialized fallback)
+// unless: dst a plain ident, and a FILTER-FREE list comprehension over a plain dict-source ident.
+//
+//	{ __n: usize = src.count; __base: usize = dst.count; dst.resize(__base + __n);
+//	  __i: mutable usize = 0;
+//	  for <binders> in src: <bindings>; dst[__base + __i] <- value; __i <- __i + 1;
+//	  0 }
+func (s *functionState) fusedDictExtendComprehensionBlock(dstExpr, arg ast.Expr, dstDarray *semantic.DArrayType) (*ast.ExprBlock, bool) {
+	if dstDarray == nil {
+		return nil, false
+	}
+	dstIdent, ok := dstExpr.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	inner := arg
+	for {
+		if p, ok := inner.(*ast.ParenExpr); ok && p != nil {
+			inner = p.Inner
+			continue
+		}
+		break
+	}
+	comp, ok := inner.(*ast.ListComprehensionExpr)
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter != nil || comp.RangeEnd != nil || comp.Parallel {
+		return nil, false
+	}
+	srcIdent, ok := comp.Source.(*ast.Ident)
+	if !ok {
+		return nil, false
+	}
+	srcType := s.exprType(srcIdent)
+	if ref, ok := srcType.(*semantic.RefType); ok && ref != nil {
+		srcType = ref.Elem
+	}
+	if _, isDict := srcType.(*semantic.DictType); !isDict {
+		return nil, false
+	}
+	var usizeType semantic.Type
+	if s.g != nil && s.g.result != nil && s.g.result.NamedTypes != nil {
+		usizeType = s.g.result.NamedTypes["usize"]
+	}
+	if usizeType == nil {
+		return nil, false
+	}
+	pos := comp.Position
+	reg := func(e ast.Expr, t semantic.Type) ast.Expr {
+		if t != nil && s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
+			s.g.result.ExprTypes[e] = t
+		}
+		return e
+	}
+	nName := s.g.nextSyntheticName("extend.dict.n.")
+	baseName := s.g.nextSyntheticName("extend.dict.base.")
+	idxName := s.g.nextSyntheticName("extend.dict.i.")
+	nIdent := reg(&ast.Ident{Position: pos, Name: nName}, usizeType)
+	baseIdent := reg(&ast.Ident{Position: pos, Name: baseName}, usizeType)
+	idxIdent := reg(&ast.Ident{Position: pos, Name: idxName}, usizeType)
+
+	nDecl := &ast.VarDeclStmt{Position: pos, Name: nName, Value: reg(&ast.FieldExpr{Position: pos, Object: srcIdent, Field: "count"}, usizeType)}
+	baseDecl := &ast.VarDeclStmt{Position: pos, Name: baseName, Value: reg(&ast.FieldExpr{Position: pos, Object: dstIdent, Field: "count"}, usizeType)}
+	resizeCall := &ast.CallExpr{
+		Position: pos,
+		Func:     &ast.FieldExpr{Position: pos, Object: dstIdent, Field: "resize"},
+		Args:     []ast.Expr{reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: nIdent}, usizeType)},
+	}
+	idxDecl := &ast.VarDeclStmt{Position: pos, Name: idxName, Mutable: true, Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType)}
+
+	storeTarget := reg(&ast.IndexExpr{Position: pos, Object: dstIdent, Index: reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: baseIdent, Right: idxIdent}, usizeType)}, dstDarray.Elem)
+	store := &ast.AssignStmt{Position: pos, Target: storeTarget, Value: comp.Value}
+	bump := &ast.AssignStmt{
+		Position: pos,
+		Target:   reg(&ast.Ident{Position: pos, Name: idxName}, usizeType),
+		Value:    reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_PLUS, Left: idxIdent, Right: reg(&ast.IntLit{Position: pos, Value: "1"}, usizeType)}, usizeType),
+	}
+	body := append([]ast.Stmt{}, comp.Bindings...)
+	body = append(body, ast.Stmt(store), ast.Stmt(bump))
+
+	loop := &ast.IterForStmt{Position: pos, Pattern: comprehensionBindPattern(comp), Mode: ast.IterBindValue, Source: comp.Source, Body: body}
+
+	return &ast.ExprBlock{
+		Position: pos,
+		Stmts: []ast.Stmt{
+			nDecl,
+			baseDecl,
+			&ast.ExprStmt{Position: pos, Expr: resizeCall},
+			idxDecl,
+			loop,
+		},
+		Value: reg(&ast.IntLit{Position: pos, Value: "0"}, usizeType),
+	}, true
+}
 
 // fusedFilteredExtendComprehensionBlock is the FILTERED counterpart of
 // fusedExtendComprehensionBlock: `dst.extend([ v for x in src if cond ])`. The output length isn't
@@ -678,9 +768,9 @@ func (s *functionState) fusedFilteredExtendComprehensionBlock(dstExpr, arg ast.E
 		break
 	}
 	comp, ok := inner.(*ast.ListComprehensionExpr)
-	// This path is specifically the FILTERED list comprehension (Filter != nil). Filter-free goes
-	// to fusedExtendComprehensionBlock; range/dict/set fall back to the materialized extend.
-	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter == nil || comp.RangeEnd != nil {
+	// This path is specifically the FILTERED, single-binder list comprehension (Filter != nil).
+	// Filter-free goes to fusedExtendComprehensionBlock; range/dict/set/two-binder fall back.
+	if !ok || comp == nil || comp.Key != nil || comp.Set || comp.Filter == nil || comp.RangeEnd != nil || comp.SecondName != "" {
 		return nil, false
 	}
 	srcIdent, ok := comp.Source.(*ast.Ident)
@@ -1106,7 +1196,20 @@ func comprehensionLoopStmt(expr *ast.ListComprehensionExpr, sink ast.Expr) ast.S
 	if expr.RangeEnd != nil {
 		return &ast.ForStmt{Position: expr.Position, Name: expr.Name, Start: expr.Source, End: expr.RangeEnd, Step: expr.RangeStep, Op: expr.RangeOp, Body: loopBody}
 	}
-	return &ast.IterForStmt{Position: expr.Position, Pattern: &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name}, Mode: ast.IterBindValue, Source: expr.Source, Body: loopBody}
+	return &ast.IterForStmt{Position: expr.Position, Pattern: comprehensionBindPattern(expr), Mode: ast.IterBindValue, Source: expr.Source, Body: loopBody}
+}
+
+// comprehensionBindPattern builds the iterator binding pattern for a comprehension head:
+// a plain name for the single-binder head, a two-element tuple destructure for the
+// two-binder `for k, v in src` head (dict entries, darray-of-tuples).
+func comprehensionBindPattern(expr *ast.ListComprehensionExpr) ast.MoveBindPattern {
+	if expr.SecondName != "" {
+		return &ast.MoveBindTuplePattern{Position: expr.Position, Args: []ast.MoveBindArg{
+			{Position: expr.Position, Name: expr.Name},
+			{Position: expr.Position, Name: expr.SecondName},
+		}}
+	}
+	return &ast.MoveBindNamePattern{Position: expr.Position, Name: expr.Name}
 }
 
 // comprehensionDesugarBlock wraps the result declaration + fused loop into the ExprBlock

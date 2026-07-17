@@ -609,7 +609,7 @@ func (s *functionState) enumIsTarget(expr ast.Expr) (*semantic.EnumType, *semant
 	}
 	enumName := named.Name[:idx]
 	variantName := named.Name[idx+1:]
-	base, ok := s.g.result.NamedTypes[enumName]
+	base, _, ok := s.lookupVisibleNamedType(enumName)
 	if !ok {
 		return nil, nil, false
 	}

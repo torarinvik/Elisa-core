@@ -221,6 +221,9 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 		fused, fusedOK = s.fusedRangeExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
 	}
 	if !fusedOK {
+		fused, fusedOK = s.fusedDictExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
+	}
+	if !fusedOK {
 		fused, fusedOK = s.fusedPushExtendComprehensionBlock(fieldExpr.Object, expr.Args[0], darrayType)
 	}
 	if fusedOK {

@@ -618,6 +618,7 @@ type FuncType struct {
 	TemperatureMode             FuncTemperatureMode
 	HasTemperatureMode          bool
 	CallConv                    string
+	IsNativeExtern              bool // a non-generic `extern`: the callee may be native C, so the signature is an ABI boundary (see extern_optional_abi.go)
 	IntrinsicName               string
 	GuardEffects                []FuncGuardEffect
 	BoundaryPointerParamIndices []int

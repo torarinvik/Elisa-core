@@ -151,6 +151,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 		TemperatureMode:             base.TemperatureMode,
 		HasTemperatureMode:          base.HasTemperatureMode,
 		CallConv:                    base.CallConv,
+		IsNativeExtern:              base.IsNativeExtern,
 		IntrinsicName:               base.IntrinsicName,
 		BoundaryPointerParamIndices: append([]int(nil), base.BoundaryPointerParamIndices...),
 		SpecSignature:               semantic.CloneSpecSignature(base.SpecSignature),

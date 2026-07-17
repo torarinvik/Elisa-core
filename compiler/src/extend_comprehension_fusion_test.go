@@ -233,12 +233,108 @@ func TestExtendRangeComprehensionFusionEmitsNoTemp(t *testing.T) {
 	}
 }
 
-// Dict-source extend fusion (a bespoke presize+indexed-store path, mirroring the darray-source fast
-// path) was attempted and reverted after discovering a PRE-EXISTING, unrelated bug: `for k, v in
-// someDict:` iterates more times than `dict.count` (see task_dcf0ced9). A presized fast path would
-// silently write past its buffer under that bug, so dict sources currently fall through to the
-// always-safe generic push fallback (see fusedPushExtendComprehensionBlock in the backend) instead —
-// no dedicated test here until the iteration-count bug is fixed upstream.
+// `dst.extend([ value for k, v in src ])` fuses over a DICT source: a dict's count is exact and the
+// head is filter-free, so the fused path presizes dst once and fills the appended tail through a
+// running counter (dicts have no integer element indexing). This became possible once the dict
+// iteration overcount bug was fixed (task_dcf0ced9; pinned by
+// TestRunCLIDictIterationVisitsExactlyCountEntries) — an overcount plus a presized buffer would be
+// an out-of-bounds store. Pins the value semantics: appended count/contents (order-insensitive sum),
+// append onto a non-empty dst, both single- and two-binder heads, and that a FILTERED dict source
+// still routes through the safe push fallback.
+func TestExtendDictComprehensionFusionRuntime(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def check(cond: bool, msg: cstr) -> void can[Abort.Panic]:
+    if not cond:
+        panic(msg)
+
+def scenarios() -> i64 can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        d: mutable dict[i64, i64] = {}
+        d.put(1, 10)
+        d.put(2, 20)
+        d.put(3, 30)
+
+        # two-binder head onto a non-empty dst
+        dst: mutable darray[i64] = [7]
+        dst.extend([k * 100 + v for k, v in d])
+        sum: mutable i64 = 0
+        for x in dst:
+            sum <- sum + x
+        check(dst.count == 4 and dst[0] == 7 and sum == 667, "dict-two-binder")
+
+        # single-binder head binds the entry tuple
+        tups: mutable darray[i64] = []
+        tups.extend([e.key + e.value for e in d])
+        tsum: mutable i64 = 0
+        for x in tups:
+            tsum <- tsum + x
+        check(tups.count == 3 and tsum == 66, "dict-single-binder")
+
+        # a larger dict crossing a region-capacity boundary (>256 entries)
+        big: mutable dict[i64, i64] = {}
+        for i in 0..<400:
+            big.put(i, i * 2)
+        wide: mutable darray[i64] = [1]
+        wide.extend([v for _, v in big])
+        wsum: mutable i64 = 0
+        for x in wide:
+            wsum <- wsum + x
+        check(wide.count == 401 and wsum == 1 + 399 * 400, "dict-boundary")
+
+        # filtered dict source: falls to the push fallback, still correct
+        filt: mutable darray[i64] = []
+        filt.extend([v for k, v in d if k > 1])
+        fsum: mutable i64 = 0
+        for x in filt:
+            fsum <- fsum + x
+        check(filt.count == 2 and fsum == 50, "dict-filtered")
+
+        return 37
+
+def main() -> int can[Memory.Allocate, Abort.Panic]:
+    return scenarios().int()
+`)
+	if strings.Contains(out, "dict-two-binder") || strings.Contains(out, "dict-single-binder") ||
+		strings.Contains(out, "dict-boundary") || strings.Contains(out, "dict-filtered") {
+		t.Fatalf("fused dict extend produced a wrong result: status=%s out=%q", status, out)
+	}
+	if status != "RUNERR" || !strings.Contains(out, "exit status 37") {
+		t.Fatalf("expected clean exit code 37, got status=%s out=%q", status, out)
+	}
+}
+
+// The dict fused path presizes + counter-stores — no materialized comprehension temp / memcpy.
+func TestExtendDictComprehensionFusionEmitsNoTemp(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := filepath.Join(dir, "extend_dict_fusion.elisa")
+	prog := "def build(d: dict[i64, i64]) -> usize:\n" +
+		"    can Memory.Allocate, Abort.Panic:\n" +
+		"        dst: mutable darray[i64] = [9]\n" +
+		"        dst.extend([k + v for k, v in d])\n" +
+		"        return dst.count\n"
+	if err := os.WriteFile(src, []byte(prog), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "llvm", src}, &stdout, &stderr); code != 0 {
+		t.Fatalf("expected fused dict-extend fixture to compile, stderr:\n%s", stderr.String())
+	}
+	ir := stdout.String()
+	for _, banned := range []string{"list.comp.result", "darray.extend.memcpy"} {
+		if strings.Contains(ir, banned) {
+			t.Fatalf("fused dict extend still emitted %q (materialized path not skipped):\n%s", banned, ir)
+		}
+	}
+	if !strings.Contains(ir, "resize") && !strings.Contains(ir, "ensure") {
+		t.Fatalf("expected a presize (resize/ensure-capacity) in the fused dict extend, got:\n%s", ir)
+	}
+	// The presized dict path's synthetic locals ("extend.dict.*") distinguish it from the older
+	// push fallback (which also avoids the temp, but never presizes).
+	if !strings.Contains(ir, "extend.dict.") {
+		t.Fatalf("expected the presized dict-extend lowering (extend.dict.* locals), got:\n%s", ir)
+	}
+}
 
 // A FILTERED range (`dst.extend([ v for i in start..<end if cond ])`) is not caught by the
 // filter-free range fast path; it falls to the generic push-direct fusion — no temp/memcpy, just

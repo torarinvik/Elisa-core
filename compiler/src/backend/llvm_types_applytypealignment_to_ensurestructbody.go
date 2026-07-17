@@ -69,11 +69,18 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		return nil, err
 	}
 	_, isErrorUnionReturn := nonVoidErrorUnion(fn.Return)
+	// `-> T?` at a C boundary is the bare nullable payload pointer, not Elisa's
+	// {tag, payload} struct; the call site rebuilds the optional from a null test.
+	// See externOptionalABI.
+	_, nicheOptionalReturn := externNicheOptionalPayload(fn, fn.Return)
+	if nicheOptionalReturn {
+		returnType = C.LLVMPointerTypeInContext(g.context, 0)
+	}
 	// Large aggregate returns are returned via an sret out-pointer (return void),
 	// mirroring the error-union out-param mechanism. (Error-union returns already
 	// carry their value via an out-pointer, so they are mutually exclusive.)
 	cabi := funcTypeIsCABI(fn)
-	sretReturn := !isErrorUnionReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
+	sretReturn := !isErrorUnionReturn && !nicheOptionalReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
 	if sretReturn {
 		returnType = C.LLVMVoidTypeInContext(g.context)
 	}
@@ -89,6 +96,11 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 	}
 	for _, param := range fn.Params {
+		if _, ok := externNicheOptionalPayload(fn, param); ok {
+			// `T?` at a C boundary is the bare nullable pointer; see externOptionalABI.
+			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			continue
+		}
 		if g.aggregateIsMemoryClassABI(param, cabi) {
 			// Memory-class params are passed by pointer (byval / indirect).
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))

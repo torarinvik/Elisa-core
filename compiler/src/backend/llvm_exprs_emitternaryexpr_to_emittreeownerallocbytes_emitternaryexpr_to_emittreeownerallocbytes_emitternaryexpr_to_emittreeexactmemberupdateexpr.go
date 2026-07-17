@@ -127,6 +127,14 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
 	s.scope = parentScope
+	// Both arms void (`f(x) if cond else g(x)`): the arms were emitted for their effects
+	// and there is no value to merge. A phi of void is not a legal instruction, so build
+	// none — the merge block itself is the whole result. Void cannot be bound or operated
+	// on, so this expression only ever appears in statement position, where the discarded
+	// value is never read.
+	if isVoidType(resultType) {
+		return nil, resultType, nil
+	}
 	phiType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
