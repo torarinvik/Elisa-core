@@ -174,3 +174,62 @@ def fstring_braces_empty_nested() -> void:
 		t.Fatalf("expected both f-string tests to pass, got:\n%s", stdout.String())
 	}
 }
+
+// TestFStringInterpolationDiagnosticPointsAtTheLiteral pins the POSITION of an f-string
+// interpolation diagnostic, which is a different property from its message.
+//
+// Embedded expressions are sub-lexed with a fresh Lexer over just the interpolation text, so
+// their tokens carry offsets within THAT fragment. The parser rebased its own diagnostics onto
+// the literal, but the returned expression kept fragment-relative positions -- so a diagnostic
+// raised LATER, by the analyzer, printed a position from the mini-source. `f"count {n}"` on
+// line 3 reported its type error at line 1, col 1; a second interpolation reported line 1, col
+// 2 -- the interpolation INDEX masquerading as a source location, pointing at an unrelated line
+// of the user's file.
+//
+// TestFStringSemanticTypesAndRejection above asserts only the message text, which is why this
+// went unnoticed. Every f-string diagnostic must land on the literal's own line (the Stage A
+// contract in parser_fstring.go).
+func TestFStringInterpolationDiagnosticPointsAtTheLiteral(t *testing.T) {
+	// Two rejected interpolations on DIFFERENT lines: each diagnostic must name its own line,
+	// which a fragment-relative position (always line 1) cannot do.
+	file := parseFStringSource(t, `
+def g(n: i64, m: i64) -> dstr:
+    can Memory.Allocate, Abort.Panic:
+        a: dstr = f"n is {n}"
+        return f"m is {m}"
+`)
+	result := semantic.Analyze(file)
+	errs := result.Errors()
+	if len(errs) == 0 {
+		t.Fatalf("expected the i64 interpolations to be rejected")
+	}
+
+	var got []string
+	for _, e := range errs {
+		if strings.Contains(e, "string-like") {
+			got = append(got, e)
+		}
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 string-like diagnostics, got %d: %v", len(got), errs)
+	}
+	// The f-strings sit on lines 4 and 5 of the fixture (it opens with a newline).
+	for _, want := range []string{"fstr_test.elisa:4:", "fstr_test.elisa:5:"} {
+		found := false
+		for _, e := range got {
+			if strings.Contains(e, want) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected a diagnostic at %s, got:\n%s", want, strings.Join(got, "\n"))
+		}
+	}
+	// Belt and braces: nothing may be attributed to line 1, the fragment-relative artifact.
+	for _, e := range got {
+		if strings.Contains(e, "fstr_test.elisa:1:") {
+			t.Fatalf("diagnostic points at line 1 (fragment-relative position leaked): %s", e)
+		}
+	}
+}

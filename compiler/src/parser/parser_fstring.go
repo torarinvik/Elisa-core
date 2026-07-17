@@ -142,6 +142,18 @@ func (p *Parser) parseFStringExpr(src string, pos lexer.Pos) (ast.Expr, bool) {
 	for _, e := range subLexer.Errors() {
 		p.errorAt(pos, "in f-string interpolation: %s", e)
 	}
+	// The sub-lexer treats the interpolation text as its OWN source, so its token positions are
+	// offsets within that fragment (`{n}` in `f"count {n}"` lexes at line 1, col 1). Rebasing the
+	// tokens onto the literal's position gives every node built from them the f-string's position
+	// — the Stage A contract stated above, which the errors raised here already follow.
+	//
+	// Without this only the PARSER's own diagnostics were rebased; the returned expression kept
+	// fragment-relative positions, so any LATER diagnostic against it printed a position from the
+	// mini-source: `f"count {n}"` on line 3 reported its interpolation type error at `1:1-2`, and a
+	// second interpolation at `1:2-3` — the index masquerading as a location.
+	for i := range tokens {
+		tokens[i].Pos = pos
+	}
 	sub := New(tokens)
 	expr := sub.parseExpr()
 	for _, e := range sub.Errors() {
