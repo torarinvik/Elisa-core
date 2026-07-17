@@ -204,3 +204,93 @@ def dict_iteration_yields_key_value_pairs() -> void:
 		t.Fatalf("expected dict_iteration_yields_key_value_pairs to pass, got:\n%s", stdout.String())
 	}
 }
+
+// TestRunCLIDictIterationVisitsExactlyCountEntries pins the ITERATION COUNT of a dict walk,
+// which is a different property from the key/value correctness asserted above.
+//
+// This is the regression guard for the dict-iteration overcount bug (task_dcf0ced9): `for k,
+// v in d:` used to run MORE times than `d.count`. It survived because every existing dict
+// test checked a value sum or per-entry flags -- both of which happily tolerate extra
+// iterations over empty/tombstone slots, since a spurious visit contributes nothing to a sum
+// and re-sets an already-set flag. Only a bare counter observes it.
+//
+// The grown case is the sharp one: 17 entries forces the open-addressing backing to a
+// capacity well above the count, so an iterator that walked the whole slot array instead of
+// skipping empties would overcount badly. The literal cases cover both binding forms
+// (two-name destructure and single-name entry) and both a scalar and a cstr key type.
+func TestRunCLIDictIterationVisitsExactlyCountEntries(t *testing.T) {
+	t.Parallel()
+	repoRoot := repoRootFromMainTest(t)
+	std := filepath.Join(repoRoot, "compiler", "runtime", "elisacore_std")
+	fixtureDir := t.TempDir()
+	rel := func(name string) string {
+		p, err := filepath.Rel(fixtureDir, filepath.Join(std, name))
+		if err != nil {
+			t.Fatalf("rel include %s: %v", name, err)
+		}
+		return filepath.ToSlash(p)
+	}
+	preamble := fmt.Sprintf("# include %q\n# include %q\n",
+		rel("test.elisa"), rel("elisacore_runtime.elisa"))
+	src := preamble + `
+@test
+def dict_iteration_visits_exactly_count_entries() -> void:
+    can Memory.Allocate, Abort.Panic:
+        d: dict[i64, i64] = {1: 10, 2: 20, 3: 30}
+        n: mutable i64 = 0
+        for k, v in d:
+            n <- n + 1
+        if n != d.count.i64():
+            panic("two-name dict iteration count != d.count")
+
+@test
+def dict_single_name_iteration_visits_exactly_count_entries() -> void:
+    can Memory.Allocate, Abort.Panic:
+        d: dict[i64, i64] = {1: 10, 2: 20, 3: 30}
+        n: mutable i64 = 0
+        for e in d:
+            n <- n + 1
+        if n != d.count.i64():
+            panic("single-name dict iteration count != d.count")
+
+@test
+def cstr_dict_iteration_visits_exactly_count_entries() -> void:
+    can Memory.Allocate, Abort.Panic:
+        d: dict[cstr, u8] = {"one": 1, "two": 2, "skip": 4}
+        n: mutable i64 = 0
+        for k, v in d:
+            n <- n + 1
+        if n != d.count.i64():
+            panic("cstr dict iteration count != d.count")
+
+@test
+def grown_dict_iteration_visits_exactly_count_entries() -> void:
+    can Memory.Allocate, Abort.Panic:
+        d: mutable dict[i64, i64] = {}
+        for i in 0..<17:
+            d.entry(i).insert(i * 2)
+        n: mutable i64 = 0
+        for k, v in d:
+            n <- n + 1
+        if n != d.count.i64():
+            panic("grown dict iteration count != d.count")
+`
+	fixturePath := filepath.Join(fixtureDir, "dict_iteration_visits_exactly_count_entries.elisa")
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected dict iteration-count tests to pass, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, name := range []string{
+		"dict_iteration_visits_exactly_count_entries",
+		"dict_single_name_iteration_visits_exactly_count_entries",
+		"cstr_dict_iteration_visits_exactly_count_entries",
+		"grown_dict_iteration_visits_exactly_count_entries",
+	} {
+		if !strings.Contains(stdout.String(), "[       OK ] "+name) {
+			t.Fatalf("expected %s to pass, got:\n%s", name, stdout.String())
+		}
+	}
+}
