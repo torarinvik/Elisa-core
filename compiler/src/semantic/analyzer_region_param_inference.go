@@ -155,6 +155,17 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		// Recorded on the AST FuncDecl (like RegionParams) — symbol/FuncType resolution is not reliably
 		// available at this pre-pass, and the backend reads the FuncDecl directly.
 		fn.AmbientGrownContainerRegion = "__rg_" + ambientGrownParam
+		// Callers' stack assignment must know which arg position feeds the ambient region: a
+		// container forwarded here gets adopted payload allocations interleaved into its arena,
+		// so its stack cannot be tail-only reserve_commit (see assignRegionStacks).
+		if a.ambientGrownCalleeParamIndex != nil {
+			for i := range fn.Params {
+				if fn.Params[i].Name == ambientGrownParam {
+					a.ambientGrownCalleeParamIndex[fn.Name] = i
+					break
+				}
+			}
+		}
 	}
 	return changed
 }
@@ -908,8 +919,21 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 				return false
 			case *ast.CallExpr:
 				// A bare constructor of a region-backed packed enum allocates region storage.
-				if et, _, ok := a.packedAllocConstructorInfo(n); ok && et != nil && et.Packed {
-					return true
+				if et, _, ok := a.packedAllocConstructorInfo(n); ok && et != nil {
+					if et.Packed {
+						return true
+					}
+					// An INLINE value-enum constructor (`Item.Row(make_vals(10))`) is region-valued
+					// when any payload argument is — the variant embeds the payload directly, so the
+					// wrapped container's backing must live in the grown param's region. Without this
+					// the void-grower ambient adoption never fired for enum-wrapped inserts and the
+					// payload backing was freed on return (silent UAF).
+					for _, arg := range n.Args {
+						if rec(arg, depth+1) {
+							return true
+						}
+					}
+					return false
 				}
 				// Otherwise resolve the callee's RETURN TYPE (region-carrying ⇒ region-valued).
 				if cn, _, isCall := ast.PrepassCallShape(n); isCall {

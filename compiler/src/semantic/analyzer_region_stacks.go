@@ -93,6 +93,65 @@ func isFreshAutoStructAllocation(vd *ast.VarDeclStmt) bool {
 	return ok && alloc != nil && alloc.AutoRegion
 }
 
+// collectAmbientForwardedContainers returns the subset of `candidates` (fresh region container
+// names) that are passed — bare, `&name`, or reborrow-cast — at the ambient-grown param position
+// of a call to a void grower (a callee the region-param pre-pass gave an
+// AmbientGrownContainerRegion, recorded in a.ambientGrownCalleeParamIndex). Such a container's
+// arena receives the callee's adopted payload allocations interleaved with its own growth, so
+// its stack must keep the chained (relocating) backing.
+func (a *Analyzer) collectAmbientForwardedContainers(body []ast.Stmt, candidates map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if a == nil || len(a.ambientGrownCalleeParamIndex) == 0 || len(candidates) == 0 {
+		return out
+	}
+	checkCall := func(expr ast.Expr) {
+		calleeName, args, isCall := ast.PrepassCallShape(expr)
+		if !isCall {
+			return
+		}
+		idx, ok := a.ambientGrownCalleeParamIndex[calleeName]
+		if !ok || idx >= len(args) {
+			return
+		}
+		for n := range candidates {
+			if forwardsParamIdent(args[idx], n) {
+				out[n] = true
+			}
+		}
+	}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if expr, ok := v.Interface().(ast.Expr); ok {
+				checkCall(expr)
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(body))
+	return out
+}
+
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
 	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
@@ -133,6 +192,14 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 	// (bounded) such darray gets its own reserve_commit stack so the base never moves and the
 	// reference stays valid across growth.
 	interiorRef := collectInteriorRefNames(region.Body, seen)
+
+	// Containers forwarded to an ambient-grown-container callee (a void grower, docs/76): the
+	// callee routes its ADOPTED payload allocations into the container's arena, interleaving
+	// foreign allocations between the container's growth steps. A tail-only reserve_commit stack
+	// would then panic at the first non-tail realloc ("cannot grow in place"), so such a
+	// container keeps the chained (relocating) backing. The proven-bound interior-ref path below
+	// is unaffected: its capacity is preallocated up front, so it never reallocs at all.
+	ambientForwarded := a.collectAmbientForwardedContainers(region.Body, seen)
 
 	next := 1
 	mergeStack := -1
@@ -186,7 +253,7 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		// docs/73 §5: gated on mmap-overcommit targets (POSIX). On Windows (VirtualAlloc) and the
 		// libc-malloc backend a 256 MiB reservation would commit eagerly, so those keep chained —
 		// the checker reads this same strategy, so trust and runtime stay consistent everywhere.
-		if a.targetMmapOvercommit() {
+		if a.targetMmapOvercommit() && !ambientForwarded[n] {
 			asn.StackStrategy[next] = "reserve_commit"
 		}
 		next++

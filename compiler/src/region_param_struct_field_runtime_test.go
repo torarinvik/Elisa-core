@@ -738,3 +738,88 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("a bare `return localStruct.containerField` must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
 	}
 }
+
+// Void grower called MANY times: the caller's container outgrows its initial capacity, so its
+// arena must tolerate the callee's adopted payload allocations interleaved between growth
+// steps. Before the ambient-forwarded chained-backing demotion (assignRegionStacks), the
+// container sat on a tail-only reserve_commit stack and the first non-tail realloc panicked
+// ("reserve_commit/fixed array cannot grow in place") — the shipped single-call test never grew
+// past the initial capacity, so this stayed latent.
+func TestVoidGrowerRepeatedGrowthChainedBackingNoPanic(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `enum Node: pass
+enum Stmt is Node:
+    Leaf(value: i64)
+    Block(body: darray[Node], tag: i64)
+def make_leaf(v: i64) -> Node can[Memory.Allocate, Abort.Panic]:
+    return new Stmt.Leaf(value: v)
+def grow(out: mutable darray[Node]&) -> void can[Memory.Allocate, Abort.Panic]:
+    kids: mutable darray[Node] = []
+    kids.push(make_leaf(10))
+    kids.push(make_leaf(20))
+    out.push(new Stmt.Block(body: kids, tag: 99))
+    return
+def sumtree(n: Node) -> i64 can[Memory.Allocate, Abort.Panic]:
+    match n:
+        Stmt.Leaf(value: v):
+            return v
+        Stmt.Block(body: b, tag: t):
+            total: mutable i64 = t
+            for k in b:
+                total <- total + sumtree(k) can Memory.Allocate, Abort.Panic
+            return total
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nodes: mutable darray[Node] = []
+    i: mutable i64 = 0
+    while i < 2000:
+        grow(nodes) can Memory.Allocate, Abort.Panic
+        i <- i + 1
+    acc: mutable i64 = 0
+    for n in nodes:
+        acc <- acc + sumtree(n) can Memory.Allocate, Abort.Panic
+    print(acc.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "258000" {
+		t.Fatalf("repeated void-grower growth must relocate (chained backing), not panic; expected RAN 258000, got %s %q", status, out)
+	}
+}
+
+// An INLINE value enum (no packed store) whose variant payload wraps a region-poly call result,
+// pushed by a single-container void grower: previously the wrapper hid the payload from
+// containerParamGrownWithRegionValue, so ambient adoption never engaged and the payload backing
+// freed on the grower's return — a SILENT use-after-free (segfault at 2000 iterations). Now
+// typeCarriesRegionStorage sees the enum payload and the ctor args are traced, so the payload
+// adopts into the caller's container region.
+func TestVoidGrowerInlineEnumPayloadAdoptedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `enum Item:
+    Row(vals: darray[i64])
+    Nothing()
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    xs.push(n + 1)
+    return xs
+def grow(out: mutable darray[Item]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(Item.Row(make_vals(10)))
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nested: mutable darray[Item] = []
+    i: mutable i64 = 0
+    while i < 2000:
+        grow(nested) can Memory.Allocate, Abort.Panic
+        i <- i + 1
+    total: mutable i64 = 0
+    for it in nested:
+        match it:
+            Item.Row(vals: vs):
+                for x in vs:
+                    total <- total + x
+            Item.Nothing():
+                total <- total + 0
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "42000" {
+		t.Fatalf("inline-enum payload void grower must adopt the payload into the caller's region; expected RAN 42000, got %s %q", status, out)
+	}
+}

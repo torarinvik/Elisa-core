@@ -256,6 +256,26 @@ func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
 			}
 		}
 		return false
+	case *EnumType:
+		if tt == nil {
+			return false
+		}
+		// A PACKED enum is a handle into a region store — deliberately NOT treated as carrying
+		// region storage here (typeIsRegionValued covers handles with its own, narrower intent).
+		// An INLINE value enum, though, embeds its variant payloads directly, so a variant payload
+		// holding a container (`Item.Row(vals: darray[i64])`) makes the enum VALUE carry the
+		// container's region-backed header exactly like a struct field would.
+		if tt.Packed || tt.Root().Packed {
+			return false
+		}
+		for _, v := range tt.Variants {
+			for _, p := range v.Payload {
+				if typeCarriesRegionStorageRec(p, seen) {
+					return true
+				}
+			}
+		}
+		return false
 	}
 	return false
 }
@@ -610,16 +630,48 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	if a == nil || argExpr == nil {
 		return
 	}
-	valueRegion := containerOrEntryRegion(valueType)
-	if valueRegion == "" {
-		return
-	}
 	targetRegion := containerOrEntryRegion(elemType)
 	if targetRegion == "" {
 		targetRegion = containerRegion(containerType)
 	}
 	if targetRegion == "" {
 		return
+	}
+	valueRegion := containerOrEntryRegion(valueType)
+	if valueRegion == "" {
+		// An INLINE value-enum constructor (`out.push(Item.Row(make_vals(10)))`) wraps its
+		// payload directly, but the enum TYPE carries no region stamp, so the store looked
+		// region-free and slipped past this check (silent use-after-free). When a payload
+		// argument carries region storage, the wrapped value lives in the INNERMOST active
+		// allocation region (the same region stampContainerRegion would have stamped on a bare
+		// container here) — use that as the value's region. The one sanctioned exception: a
+		// void grower whose ambient region was bound to this very target (adoption routes the
+		// payload into the target's arena, so nothing dangles).
+		call, ok := unwrapParen(argExpr).(*ast.CallExpr)
+		if !ok {
+			return
+		}
+		et, _, isCtor := a.packedAllocConstructorInfo(call)
+		if !isCtor || et == nil || et.Packed || et.Root().Packed {
+			return
+		}
+		payloadCarries := false
+		for _, payloadArg := range call.Args {
+			if typeCarriesRegionStorage(a.exprTypes[payloadArg]) {
+				payloadCarries = true
+				break
+			}
+		}
+		if !payloadCarries {
+			return
+		}
+		if a.currentFuncDecl != nil && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
+			return
+		}
+		valueRegion = a.activeContainerRegionName()
+		if valueRegion == "" {
+			return
+		}
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)

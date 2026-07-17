@@ -566,3 +566,28 @@ func TestNestedRegionExtendScalarAccepted(t *testing.T) {
 		t.Fatalf("scalar-element extend must be accepted; got: %s", all)
 	}
 }
+
+// A MULTI-container void grower (2 regionless container params) cannot ambient-adopt (the
+// containerParamCount==1 soundness gate), so an inline value-enum ctor wrapping a region-poly
+// payload (`out.push(Item.Row(make_vals(10)))`) previously compiled and use-after-freed
+// silently — the enum TYPE carries no region stamp, so the element-store escape check was
+// blind to the wrapped payload. Now the ctor's payload args are classified via the innermost
+// active allocation region and the store is rejected.
+func TestNestedRegionEnumCtorPayloadTwoContainerGrowerRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "enum_payload_grower_escape.elisa", `enum Item:
+    Row(vals: darray[i64])
+    Nothing()
+
+def make_vals(n: i64) -> darray[i64]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    return xs
+
+def grow_two(out: mutable darray[Item]&, tally: mutable darray[i64]&) -> void:
+    out.push(Item.Row(make_vals(10)))
+    tally.push(7)
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"__rg_out\"") {
+		t.Fatalf("enum-ctor-wrapped inner-region payload pushed into a multi-container grower must be rejected; got: %s", all)
+	}
+}

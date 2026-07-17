@@ -201,6 +201,13 @@ type Analyzer struct {
 	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
 	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
 	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
+	// ambientGrownCalleeParamIndex maps a void-grower function name to the index (among its
+	// explicit params) of the container param whose region becomes the callee's ambient
+	// allocation region (AmbientGrownContainerRegion). Recorded by the region-param pre-pass;
+	// consumed by assignRegionStacks to demote a forwarded container's default reserve_commit
+	// stack to chained — the callee interleaves adopted payload allocations into the container's
+	// arena, so tail-only growth would panic at the first non-tail realloc.
+	ambientGrownCalleeParamIndex map[string]int
 	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
 	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
 	// surfaced on Result).
@@ -833,6 +840,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		progressSummaries:                 make(map[*ast.FuncDecl]*FunctionProgressSummary, funcDeclCapacity),
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		ambiguousDArrayBuilders:           make(map[*ast.VarDeclStmt]bool),
+		ambientGrownCalleeParamIndex:      make(map[string]int),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
