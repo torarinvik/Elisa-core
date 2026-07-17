@@ -823,3 +823,38 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("inline-enum payload void grower must adopt the payload into the caller's region; expected RAN 42000, got %s %q", status, out)
 	}
 }
+
+// A STRUCT-literal wrapper around a region-poly call result, pushed by a single-container void
+// grower: `out.push(Holder{items: make_vals(10), tag: 5})`. The enum-ctor equivalent already
+// adopted; the struct form was REJECTED ("via a fresh container") because
+// checkInteriorRegionAgainstTarget lacked the sanctioned-adoption exemption. With it, the
+// payload adopts into the caller's container region and runs.
+func TestVoidGrowerStructLiteralPayloadAdoptedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `struct Holder:
+    items: darray[i64]
+    tag: i64
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    xs.push(n + 1)
+    return xs
+def grow(out: mutable darray[Holder]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(Holder{items: make_vals(10), tag: 5})
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    nested: mutable darray[Holder] = []
+    i: mutable i64 = 0
+    while i < 2000:
+        grow(nested) can Memory.Allocate, Abort.Panic
+        i <- i + 1
+    total: mutable i64 = 0
+    for h in nested:
+        for x in h.items:
+            total <- total + x
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "42000" {
+		t.Fatalf("struct-literal payload single-container grower must adopt; expected RAN 42000, got %s %q", status, out)
+	}
+}

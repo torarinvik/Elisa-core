@@ -1123,7 +1123,15 @@ func (a *Analyzer) checkFreshContainerStoreEscape(targetExpr ast.Expr, targetTyp
 func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetRegion string, valueExpr ast.Expr, via string) {
 	valueRegion := a.valueInteriorRegion(valueExpr)
 	if valueRegion == "" {
-		return // scalar / region-less interior can't dangle.
+		return // scalar / regionless interior can't dangle.
+	}
+	// Sanctioned void-grower adoption: when this function's ambient allocation region is bound to
+	// the target container's region (single-container grower, AmbientGrownContainerRegion), the
+	// value's synthesized `__auto_*` interior actually lives in the caller's arena — the backend's
+	// regionPolyAutoAdopts routes it there — so nothing dangles. Mirrors the enum-ctor element
+	// check; keeps `out.push(Holder{items: make_vals(10)})` consistent with the enum-ctor form.
+	if a.currentFuncDecl != nil && targetRegion != "" && a.currentFuncDecl.AmbientGrownContainerRegion == targetRegion {
+		return
 	}
 	if targetRegion == "" {
 		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)

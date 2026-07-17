@@ -618,3 +618,25 @@ def grow_two(out: mutable darray[Node]&, tally: mutable darray[i64]&) -> void ca
 		t.Fatalf("packed-ctor container payload pushed into a multi-container grower must be rejected; got: %s", all)
 	}
 }
+
+// The struct-literal TWO-container variant must stay rejected — the adoption exemption above is
+// keyed to the ambient-bound target, which a multi-container grower never has.
+func TestNestedRegionStructLiteralPayloadTwoContainerGrowerStillRejected(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "struct_payload_grower_escape.elisa", `struct Holder:
+    items: darray[i64]
+    tag: i64
+
+def make_vals(n: i64) -> darray[i64] can[Memory.Allocate, Abort.Panic]:
+    xs: mutable darray[i64] = []
+    xs.push(n)
+    return xs
+
+def grow_two(out: mutable darray[Holder]&, tally: mutable darray[i64]&) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(Holder{items: make_vals(10), tag: 5})
+    tally.push(7)
+    return
+`)
+	if all := strings.Join(res.Errors(), "\n"); !strings.Contains(all, "longer-lived region \"__rg_out\"") {
+		t.Fatalf("struct-literal payload in a multi-container grower must stay rejected; got: %s", all)
+	}
+}
