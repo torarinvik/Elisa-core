@@ -86,15 +86,29 @@ def build() -> i64:
 	}
 }
 
-// A struct local initialized from a region-POLYMORPHIC builder CALL (not an inline literal) must
-// also carry its ambient region for downstream threading: `bag = make_bag()` returns a fresh
-// container-bearing struct allocated in the caller's ambient region, exactly like a struct literal.
-func TestRegionStructLocalFromBuilderCallThreadsRegionParam(t *testing.T) {
+// A struct local initialized from a region-POLYMORPHIC builder CALL, whose container field is then
+// grown through a forwarded `mutable&` and RETURNED, must never be silently miscompiled.
+//
+// This test used to assert the opposite -- that no "cannot infer region parameter" error appears --
+// but that expectation was unsound AND untested: its fixture said `Bag([])`, a positional
+// construction the language no longer accepts ("use the brace form"), so the fixture errored out
+// long before reaching the region logic and the assertion passed vacuously. Written in the current
+// spelling, the program it describes COMPILED CLEAN AND SEGFAULTED: `bag`'s region cannot be
+// inferred through the builder call, so the returned `bag.items` header outlived its backing.
+//
+// Rejecting is the designed response, and the sibling test below says so in as many words:
+// conservatively re-reject rather than thread a WRONG region, "which would be a use-after-free".
+// So this now pins the sound outcome -- refused at compile time, not miscompiled.
+//
+// Threading a builder-call local's region (making this program COMPILE and run) is a real
+// remaining feature; the inline-literal form (`bag: mutable Bag = Bag{items: []}`) already works
+// and is pinned by TestRegionLocalStructFieldReturnedNoUAF in the runtime tests.
+func TestRegionStructLocalFromBuilderCallIsRefusedNotMiscompiled(t *testing.T) {
 	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_struct_local_builder.elisa", `struct Bag:
     items: mutable darray[i64]
 
 def make_bag() -> Bag:
-    return Bag([])
+    return Bag{items: []}
 
 def bag_push(b: mutable Bag&, v: i64) -> void:
     b.items.push(v)
@@ -104,8 +118,14 @@ def build() -> darray[i64]:
     bag_push(bag, 1)
     return bag.items
 `)
-	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "cannot infer region parameter") {
-		t.Fatalf("struct local from a region-poly builder call should thread its region; got: %s", all)
+	all := strings.Join(res.Errors(), "\n")
+	// The fixture must be VALID in the current spelling -- the stale `Bag([])` is what let the
+	// old assertion pass without ever exercising the region logic.
+	if strings.Contains(all, "positional construction") || strings.Contains(all, "empty list literal requires") {
+		t.Fatalf("fixture is not valid in the current spelling, so it does not exercise region inference: %s", all)
+	}
+	if !strings.Contains(all, "cannot infer region parameter") {
+		t.Fatalf("a builder-call local whose grown field is returned must be REFUSED (its region is not inferable); accepting it silently miscompiles to a use-after-free. errors: %s", all)
 	}
 }
 

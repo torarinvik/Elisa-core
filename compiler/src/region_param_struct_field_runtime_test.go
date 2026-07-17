@@ -704,3 +704,37 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 		t.Fatalf("module-scoped region-poly grower call must dispatch directly and thread region args; expected RAN 3, got %s %q", status, out)
 	}
 }
+
+// TestRegionLocalStructFieldReturnedNoUAF pins a BARE `return b.items` -- a local struct's grown
+// container field, returned directly.
+//
+// This SILENTLY MISCOMPILED: it compiled clean and segfaulted, because the function was not
+// classified region-polymorphic, so `b.items`' backing lived in its auto region and was freed on
+// return while the header copied out. Both neighbouring shapes already worked -- `return b` (the
+// whole struct) and `return xs` (a local darray) -- which is what made the gap easy to miss; the
+// classifier handled a container field only as a STRUCT-LITERAL field (`return Out{items: b.errs}`),
+// not as a bare field return.
+//
+// The loop and read-back are load-bearing: a freed backing usually still reads plausibly once, so a
+// single read can pass by luck. Summing 2000 iterations turns a dangling backing into a wrong total
+// or a crash rather than a green test.
+func TestRegionLocalStructFieldReturnedNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, "struct Bag:\n    items: mutable darray[u32]\n"+`def build(n: u32) -> darray[u32] can[Memory.Allocate, Abort.Panic]:
+    b: mutable Bag = Bag{items: []}
+    b.items.push(n)
+    b.items.push(n + 1)
+    return b.items
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    total: mutable u64 = 0
+    i: mutable i64 = 0
+    while i < 2000:
+        xs: darray[u32] = build(65) can Memory.Allocate, Abort.Panic
+        total <- total + xs[0].u64() + xs[1].u64()
+        i <- i + 1
+    print(total.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "262000" {
+		t.Fatalf("a bare `return localStruct.containerField` must thread the caller region (no UAF); expected RAN 262000, got %s %q", status, out)
+	}
+}

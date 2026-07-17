@@ -374,6 +374,26 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 		switch e := value.(type) {
 		case *ast.Ident:
 			return regionLocals[e.Name]
+		case *ast.FieldExpr:
+			// A BARE `return b.items`, where `b` is a region-fed local: the field's BUFFER lives
+			// in `b`'s region, so this function must thread the caller's region exactly as the
+			// struct-literal-field case below does. Without it the header copies out while the
+			// backing is freed on return — `.count` reads fine, element reads segfault.
+			//
+			// This was previously excluded (the comment below said so), which left a SILENT UAF
+			// in safe code: `def leak() -> darray[i64]: b: mutable Bag = Bag{items: []}; …;
+			// return b.items` compiled clean and segfaulted at runtime, while both neighbouring
+			// shapes — `return b` (whole struct) and `return xs` (a local darray) — were already
+			// classified and worked.
+			//
+			// `retCarriesRegionStorage` is the same guard the struct-literal case relies on, and
+			// it is what keeps a scalar field copy (`return b.value: i64`) unclassified: that
+			// return type carries no region storage.
+			if retCarriesRegionStorage {
+				if root := rootIdentExpr(e); root != nil && regionLocals[root.Name] {
+					return true
+				}
+			}
 		case *ast.StructLitExpr:
 			for _, arg := range e.Args {
 				if arg == nil {
