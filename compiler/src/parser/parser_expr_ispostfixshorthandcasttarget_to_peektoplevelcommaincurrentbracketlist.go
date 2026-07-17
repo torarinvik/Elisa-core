@@ -1310,7 +1310,8 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		}
 	}
 
-	if p.peek() == lexer.TOKEN_LBRACKET {
+	// Each further `[N]` nests another array level (`i64[2][3][4]`), not just one.
+	for p.peek() == lexer.TOKEN_LBRACKET {
 		p.advance()
 		size := p.parseExpr()
 		p.expect(lexer.TOKEN_RBRACKET)
