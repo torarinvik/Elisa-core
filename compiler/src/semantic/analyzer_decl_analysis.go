@@ -116,7 +116,7 @@ func (a *Analyzer) analyzeFunctionAnnotations(fn *ast.FuncDecl) {
 	seen := make(map[string]lexer.Pos, len(fn.Annotations))
 	for _, annotation := range fn.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
-			a.errorf(annotation.Position, "duplicate @%s annotation on function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
+			a.errorf(annotation.Position, "duplicate @%s annotation on function %q (first seen at line %d:%d)", annotation.Name, fn.Name, prev.Line, prev.Col)
 			continue
 		}
 		seen[annotation.Name] = annotation.Position

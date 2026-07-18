@@ -215,7 +215,7 @@ func (a *Analyzer) analyzePackedCommonFieldAnnotations(enumDecl *ast.EnumDecl, f
 	seen := make(map[string]lexer.Pos, len(fieldDecl.Annotations))
 	for _, annotation := range fieldDecl.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
-			a.errorf(annotation.Position, "duplicate @%s annotation on packed enum %q common field %q (first seen at %s:%d:%d)", annotation.Name, enumDecl.Name, fieldDecl.Name, prev.File, prev.Line, prev.Col)
+			a.errorf(annotation.Position, "duplicate @%s annotation on packed enum %q common field %q (first seen at line %d:%d)", annotation.Name, enumDecl.Name, fieldDecl.Name, prev.Line, prev.Col)
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
@@ -249,7 +249,7 @@ func (a *Analyzer) analyzeEnumAnnotations(enumDecl *ast.EnumDecl, enumType *Enum
 	hasProfileOverride := false
 	for _, annotation := range enumDecl.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
-			a.errorf(annotation.Position, "duplicate @%s annotation on enum %q (first seen at %s:%d:%d)", annotation.Name, enumDecl.Name, prev.File, prev.Line, prev.Col)
+			a.errorf(annotation.Position, "duplicate @%s annotation on enum %q (first seen at line %d:%d)", annotation.Name, enumDecl.Name, prev.Line, prev.Col)
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
@@ -502,7 +502,7 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 	var nonblockingPos lexer.Pos
 	for _, annotation := range fn.Annotations {
 		if prev, exists := seen[annotation.Name]; exists {
-			a.errorf(annotation.Position, "duplicate @%s annotation on extern function %q (first seen at %s:%d:%d)", annotation.Name, fn.Name, prev.File, prev.Line, prev.Col)
+			a.errorf(annotation.Position, "duplicate @%s annotation on extern function %q (first seen at line %d:%d)", annotation.Name, fn.Name, prev.Line, prev.Col)
 			continue
 		}
 		seen[annotation.Name] = annotation.Position
