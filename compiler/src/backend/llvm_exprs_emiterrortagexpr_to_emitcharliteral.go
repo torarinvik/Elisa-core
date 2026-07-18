@@ -1027,6 +1027,14 @@ func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic
 	if expected != nil && isStringViewCarrierType(expected) {
 		resultType = expected
 	}
+	// isStringViewCarrierType also accepts `sview&` (a ref wrapping a view), e.g.
+	// when the expected type comes from assigning a literal through a
+	// `mutable sview&` out-parameter. The literal itself always materializes the
+	// two-field view VALUE; unwrap the ref so we lower {ptr,i64} rather than ptr
+	// (which produced an invalid `insertvalue ptr undef, ...`).
+	if ref, ok := resultType.(*semantic.RefType); ok && isStringViewCarrierType(resultType) {
+		resultType = ref.Elem
+	}
 	if isStringViewCarrierType(resultType) {
 		viewLLVMType, err := s.g.lowerType(resultType)
 		if err != nil {

@@ -42,6 +42,23 @@ func (g *llvmGenerator) verify() error {
 	if os.Getenv("ELISACORE_DUMP_MODULE_ON_VERIFY_FAILURE") == "1" {
 		fmt.Fprintln(os.Stderr, g.printModule())
 	}
+	// The verifier message names IR values but no source location. Re-verify each
+	// function to at least name the failing function(s) so the error can be traced
+	// back to a source definition.
+	var failing []string
+	for fn := C.LLVMGetFirstFunction(g.module); fn != nil; fn = C.LLVMGetNextFunction(fn) {
+		if C.LLVMCountBasicBlocks(fn) == 0 {
+			continue
+		}
+		if C.LLVMVerifyFunction(fn, C.LLVMReturnStatusAction) != 0 {
+			var nameLen C.size_t
+			name := C.GoString(C.LLVMGetValueName2(fn, &nameLen))
+			failing = append(failing, name)
+		}
+	}
+	if len(failing) > 0 {
+		errText = fmt.Sprintf("%s\nin function(s): %s", errText, strings.Join(failing, ", "))
+	}
 	return fmt.Errorf("%s", errText)
 }
 func (g *llvmGenerator) printModule() string {
