@@ -788,10 +788,11 @@ def ctx_hash_cstr(s: cstr) -> u64:
 def ctx_hash_sview(view: sview) -> u64:
     h: mutable u64 = 0xcbf29ce484222325
     i: mutable i64 = 0
-    while i < view.len:
-        h <- h ^ view.data[i.usize()].u64()
-        h <- h * 0x100000001b3
-        i <- i + 1
+    trusted Unsafe.UncheckedIndex:
+        while i < view.len:
+            h <- h ^ view.data[i.usize()].u64()
+            h <- h * 0x100000001b3
+            i <- i + 1
     return h
 
 def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
@@ -799,12 +800,13 @@ def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
     i: mutable usize = 0
     len: usize = view.len.usize()
     remaining: mutable usize = len
-    while remaining > 0:
-        decreases remaining
-        false return if text[i] != view.data[i]
-        i <- i + 1
-        remaining <- remaining - 1
-    return text[len] == 0
+    trusted Unsafe.UncheckedIndex:
+        while remaining > 0:
+            decreases remaining
+            false return if text[i] != view.data[i]
+            i <- i + 1
+            remaining <- remaining - 1
+        return text[len] == 0
 
 def ctx_hash_u64(value: u64) -> u64:
     h: mutable u64 = value
@@ -907,17 +909,22 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
         new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])))
         arena_dict_zero_buckets(new_items, target_capacity)
 
-        # Switch to the fresh table, then re-probe every live entry into it. Rehashing drops
-        # tombstones, so `used` is reset to the live count as entries are placed.
-        m.items as & <- new_items
-        m.capacity <- target_capacity
-        m.count <- 0.usize()
-        m.used <- 0.usize()
+        # Rehash through a distinct dictionary value so reads from the old
+        # backing and writes to the new backing are visibly disjoint.
+        rehash: mutable dict[K, T] = zeroed
+        rehash.arena as & <- owner
+        rehash.items as & <- new_items
+        rehash.capacity <- target_capacity
 
         if old_items_opt != null and old_capacity > 0:
             old_items: mutable DictBucket[K, T]& = old_items_opt
             for i in 0..<old_capacity:
-                arena_dict_place_fresh(m, old_items[i].key, old_items[i].value) if old_items[i].state == 1
+                arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == 1
+
+        m.items as & <- rehash.items
+        m.capacity <- rehash.capacity
+        m.count <- rehash.count
+        m.used <- rehash.used
         return
 
 def arena_dict_get[K, T](m: dict[K, T]&, key: K) -> T&?:
@@ -1183,15 +1190,23 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
         new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(owner, target_capacity * size_of(SetBucket[T])))
         arena_set_zero_buckets(new_items, target_capacity)
 
-        s.items as & <- new_items
-        s.capacity <- target_capacity
-        s.count <- 0.usize()
-        s.used <- 0.usize()
+        # Rehash through a separate set value. This keeps the old backing read
+        # through `s` and the fresh backing mutated through `rehash`, so no
+        # mutable-alias capability escapes from this safe collection helper.
+        rehash: mutable set[T] = zeroed
+        rehash.arena as & <- owner
+        rehash.items as & <- new_items
+        rehash.capacity <- target_capacity
 
         if old_items_opt != null and old_capacity > 0:
             old_items: mutable SetBucket[T]& = old_items_opt
             for i in 0..<old_capacity:
-                arena_set_place_fresh(s, old_items[i].key) if old_items[i].state == 1
+                arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == 1
+
+        s.items as & <- rehash.items
+        s.capacity <- rehash.capacity
+        s.count <- rehash.count
+        s.used <- rehash.used
         return
 
 def arena_set_add[T](a: mutable Arena&, s: mutable set[T]&, key: T) -> bool error[RuntimeError]:
