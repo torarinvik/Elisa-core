@@ -163,7 +163,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 			}
 		}
 		if len(variant.Payload) == 1 {
-			argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, 0, orderedArgs[0], tailPlan, tailDataPtr)
+			argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, 0, orderedArgs[0], tailPlan, tailDataPtr, storeValue, enumType)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -180,7 +180,7 @@ func (s *functionState) emitPackedEnumConstructorAlloc(callExpr *ast.CallExpr, s
 			allZero := true
 			for i, payload := range variant.Payload {
 				_ = payload
-				argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, i, orderedArgs[i], tailPlan, tailDataPtr)
+				argValue, err := s.emitPackedEnumConstructorPayloadValue(variant, i, orderedArgs[i], tailPlan, tailDataPtr, storeValue, enumType)
 				if err != nil {
 					return nil, nil, err
 				}
@@ -334,7 +334,7 @@ func (s *functionState) emitPackedEnumTailDataPtr(allocPtr C.LLVMValueRef, rowSi
 	indices := []C.LLVMValueRef{rowSizeValue}
 	return C.LLVMBuildGEP2(s.builder, i8Type, allocPtr, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("packed.tail.data")), nil
 }
-func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.EnumVariant, index int, arg ast.Expr, tailPlan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef, storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
 	if tailPlan != nil && index == tailPlan.index {
 		return s.emitPackedEnumTailPayloadValue(tailPlan, tailDataPtr)
 	}
@@ -342,10 +342,67 @@ func (s *functionState) emitPackedEnumConstructorPayloadValue(variant *semantic.
 	if err != nil {
 		return nil, err
 	}
-	if enumType, ok := s.g.optionalEnumNicheField(variant.Payload[index]); ok {
-		return s.packOptionalEnumNicheValue(argValue, enumType, "packed.enum.payload")
+	if nicheEnumType, ok := s.g.optionalEnumNicheField(variant.Payload[index]); ok {
+		return s.packOptionalEnumNicheValue(argValue, nicheEnumType, "packed.enum.payload")
 	}
-	return argValue, nil
+	return s.emitPackedEnumPayloadDArrayAdopt(argValue, variant.Payload[index], storeValue, enumType)
+}
+
+// emitPackedEnumPayloadDArrayAdopt copies a darray payload's backing into the packed store's
+// arena before the darray struct is written into the record. A side-table darray (`Call.arguments`,
+// `Func.body`, ...) is usually BUILT in the constructing function's own region — region inference
+// sees the ctor return only a u32 handle, so nothing marks the backing as escaping, and once the
+// builder's region is freed the record holds a dangling data pointer (the comprehension-filter
+// parse crash: the payload's `arguments` pointed one page past its freed chunk). The ctor consumes
+// the darray affinely (consumeAffineValueExpr), so a copy cannot break aliasing; capacity clamps to
+// count — a later grow re-allocates in the ambient region instead of writing the store arena.
+// Elements are copied SHALLOWLY: handle/scalar/sview elements (every AST side-table today) are
+// self-contained; an element type that itself owns region storage still needs its own adoption.
+func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef, payloadType semantic.Type, storeValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	darrayType, ok := payloadType.(*semantic.DArrayType)
+	if !ok || darrayType == nil {
+		return argValue, nil
+	}
+	if enumType == nil || enumType.StoreType == nil || storeValue == nil {
+		return argValue, nil
+	}
+	elemSize, err := s.sizeOfType(darrayType.Elem)
+	if err != nil {
+		return nil, err
+	}
+	countValue := C.LLVMBuildExtractValue(s.builder, argValue, 1, cStringFree("packed.payload.adopt.count"))
+	oldData := C.LLVMBuildExtractValue(s.builder, argValue, 0, cStringFree("packed.payload.adopt.src"))
+	byteCount, err := s.emitCheckedElemByteCount(countValue, elemSize, "packed.payload.adopt")
+	if err != nil {
+		return nil, err
+	}
+	ops := &packedStoreOps{s: s, storeValue: storeValue, storeType: enumType.StoreType}
+	arenaValue, err := ops.arenaValue("packed.payload.adopt.arena")
+	if err != nil {
+		return nil, err
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	arenaRefType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	voidRefType := &semantic.RefType{Elem: s.g.result.NamedTypes["void"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	usizeType := s.g.result.NamedTypes["usize"]
+	allocType := s.g.cachedRuntimeHelperType("arena_alloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "arena_alloc", Params: []semantic.Type{arenaRefType, usizeType}, Return: voidRefType}
+	})
+	allocCallee, err := s.g.ensureFunctionDeclared("arena_alloc", allocType)
+	if err != nil {
+		return nil, err
+	}
+	allocLLVMType, err := s.g.lowerFunctionType(allocType)
+	if err != nil {
+		return nil, err
+	}
+	newData := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, byteCount}, "packed.payload.adopt.alloc")
+	if err := s.emitPackedEnumTailMemcpy(newData, oldData, byteCount); err != nil {
+		return nil, err
+	}
+	adopted := C.LLVMBuildInsertValue(s.builder, argValue, newData, 0, cStringFree("packed.payload.adopt.data"))
+	adopted = C.LLVMBuildInsertValue(s.builder, adopted, countValue, 2, cStringFree("packed.payload.adopt.cap"))
+	return adopted, nil
 }
 func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if plan == nil || plan.viewType == nil {
