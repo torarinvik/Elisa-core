@@ -435,6 +435,12 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 	}
 	if len(variant.Payload) == 1 {
 		value := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+		// The AoS record payload is tiled at handle width (u32) and sits at a 4-byte
+		// offset after the tag, so `payloadPtr` is only 4-aligned even when the loaded
+		// struct (e.g. a DynArray side-table with an 8-byte data pointer) has a natural
+		// 8-byte alignment. Declaring the load's true (under-)alignment prevents -O2 from
+		// assuming 8-alignment and miscompiling the load (comprehension-filter Call SEGV).
+		C.LLVMSetAlignment(value, 4)
 		value, err := unpackNiche(value, variant.Payload[0])
 		if err != nil {
 			return nil, err
@@ -442,6 +448,7 @@ func (s *functionState) loadEnumVariantPayload(decodedEnumPtr C.LLVMValueRef, en
 		return []C.LLVMValueRef{value}, nil
 	}
 	aggregate := C.LLVMBuildLoad2(s.builder, payloadType, payloadPtr, cStringFree("match.payload"))
+	C.LLVMSetAlignment(aggregate, 4)
 	values := make([]C.LLVMValueRef, 0, len(variant.Payload))
 	for i, fieldType := range variant.Payload {
 		value := C.LLVMBuildExtractValue(s.builder, aggregate, C.unsigned(i), cStringFree("match.payload.field"))
