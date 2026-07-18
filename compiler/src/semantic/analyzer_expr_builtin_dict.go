@@ -313,6 +313,34 @@ func (a *Analyzer) analyzeBuiltinDictIndexExpr(expr *ast.IndexExpr, objType Type
 			helperName = "arena_dict_get_cstr_view_mut"
 		}
 	}
+	// The rewrite target is an INTERNAL runtime helper; when analysis runs
+	// without the runtime prelude (bare single-file fixtures, differential
+	// harnesses), synthesizing the call would leak "undefined identifier
+	// arena_dict_get_mut" plus a cascade of follow-on errors that no user
+	// code contains. Resolve the helper first and fall back to the entry
+	// type silently when it is absent — the user-facing key/value checks
+	// run independently of the rewrite.
+	helperVisible := false
+	if a.currentScope != nil {
+		_, helperVisible = a.currentScope.Lookup(helperName)
+	}
+	if !helperVisible {
+		a.analyzeExpr(expr.Index)
+		// Fall back to the ENTRY VALUE type (not the runtime ref-optional):
+		// without the prelude the ref plumbing does not exist, and the value
+		// type keeps reads and index-assignments quiet in bare analysis.
+		var result Type = dictType.Value
+		if expr.Fallback != nil {
+			fallbackType := a.analyzeValueExpr(expr.Fallback, dictType.Value)
+			if !IsNeverType(fallbackType) && !AssignableTo(dictType.Value, fallbackType) {
+				a.errorf(expr.Fallback.Pos(), "dict index fallback expects %s, got %s", dictType.Value, fallbackType)
+				a.reportShapeMismatchNotes(expr.Fallback.Pos(), dictType.Value, fallbackType)
+			}
+			result = dictType.Value
+		}
+		a.exprTypes[expr] = result
+		return result, true
+	}
 	call := &ast.CallExpr{
 		Position: expr.Position,
 		Func:     &ast.Ident{Position: expr.Position, Name: helperName},
