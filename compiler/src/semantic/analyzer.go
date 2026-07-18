@@ -1003,7 +1003,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	if dumpRegionStacks {
 		a.dumpRegionLifetimeSummary()
 	}
-	return &Result{
+	analysisResult := &Result{
 		SMTProfile:              a.smtStats,
 		EnforcePerfLints:        a.enforcePerfLints,
 		File:                    file,
@@ -1056,4 +1056,6 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		ExportedGlobals:         a.exportedGlobals,
 		Diagnostics:             a.diagnostics,
 	}
+	recordInternalParityCase(file, options, analysisResult)
+	return analysisResult
 }

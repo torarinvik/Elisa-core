@@ -29,6 +29,7 @@ type groupedBlockContext struct {
 }
 
 func New(filename string, src []byte) *Lexer {
+	recordParitySource(filename, src)
 	return &Lexer{
 		src:         src,
 		filename:    filename,
