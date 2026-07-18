@@ -27,11 +27,17 @@ func analyzeFrameSurvivalWithSMT(t *testing.T, filename, src string) *Result {
 	return AnalyzeWithOptions(file, AnalyzeOptions{EnableSMT: true})
 }
 
-func countCalleeRequiresProof(result *Result, calleeName string, outcome ProofOutcome) int {
+func countCalleeRequiresProof(result *Result, calleeName string, outcomes ...ProofOutcome) int {
 	n := 0
 	for _, f := range result.ProofReport {
-		if f.Outcome == outcome && strings.Contains(f.Subject, "precondition of "+calleeName) {
-			n++
+		if !strings.Contains(f.Subject, "precondition of "+calleeName) {
+			continue
+		}
+		for _, outcome := range outcomes {
+			if f.Outcome == outcome {
+				n++
+				break
+			}
 		}
 	}
 	return n
@@ -62,7 +68,9 @@ def caller(s: mutable S&) -> i64:
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("expected a clean analysis, got: %v", errs)
 	}
-	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT); got != 1 {
+	// Since 10055e6a a surviving identical assert fact discharges the requires at the linear tier
+	// before SMT is consulted; either static outcome demonstrates frame-aware survival.
+	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT, ProofProvenLinear); got != 1 {
 		t.Fatalf("expected `s.size > 0` to survive the disjoint-frame call and discharge need_pos, got %d: %+v", got, result.ProofReport)
 	}
 }
@@ -89,7 +97,7 @@ def caller(s: mutable S&) -> i64:
     return need_pos(s.size)
 `
 	result := analyzeFrameSurvivalWithSMT(t, "frame_survive_overlap.elisa", src)
-	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT); got != 0 {
+	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT, ProofProvenLinear); got != 0 {
 		t.Fatalf("a fact about a CHANGED field must not survive the call: %+v", result.ProofReport)
 	}
 }
@@ -115,7 +123,7 @@ def caller(s: mutable S&) -> i64:
     return need_pos(s.size)
 `
 	result := analyzeFrameSurvivalWithSMT(t, "frame_survive_unframed.elisa", src)
-	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT); got != 0 {
+	if got := countCalleeRequiresProof(result, "need_pos", ProofProvenSMT, ProofProvenLinear); got != 0 {
 		t.Fatalf("an unframed callee must drop the fact conservatively: %+v", result.ProofReport)
 	}
 }
