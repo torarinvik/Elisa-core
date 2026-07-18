@@ -30,6 +30,44 @@ func (s *functionState) resolveEnumArmVariant(enumType *semantic.EnumType, patte
 }
 
 func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {
+	resultSize, err := s.g.abiSizeOfType(resultType)
+	if err != nil {
+		return nil, nil, err
+	}
+	spillLargeResult := resultSize >= largeCompilerTempHeapThresholdBytes && !semantic.IsNeverType(resultType)
+	var resultSlot C.LLVMValueRef
+	if spillLargeResult {
+		resultSlot, err = s.createTempStorage("match.expr.result", resultType)
+		if err != nil {
+			return nil, nil, err
+		}
+	}
+	recordIncoming := func(value C.LLVMValueRef, block C.LLVMBasicBlockRef, values *[]C.LLVMValueRef, blocks *[]C.LLVMBasicBlockRef) error {
+		if spillLargeResult {
+			if storeErr := s.storeValue(resultSlot, value, resultType, "match.expr.result.store"); storeErr != nil {
+				return storeErr
+			}
+		}
+		*values = append(*values, value)
+		*blocks = append(*blocks, block)
+		return nil
+	}
+	finishResult := func(values []C.LLVMValueRef, blocks []C.LLVMBasicBlockRef) (C.LLVMValueRef, semantic.Type, error) {
+		if spillLargeResult {
+			value, loadErr := s.loadValue(resultSlot, resultType, "match.expr.result.load")
+			return value, resultType, loadErr
+		}
+		if len(values) == 1 || semantic.IsNeverType(resultType) {
+			return values[0], resultType, nil
+		}
+		llvmType, lowerErr := s.g.lowerType(resultType)
+		if lowerErr != nil {
+			return nil, nil, lowerErr
+		}
+		phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
+		C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
+		return phi, resultType, nil
+	}
 	storeBinding, err := s.resolvePackedMatchStoreBinding(enumType, expr.Value, expr.Store)
 	if err != nil {
 		return nil, nil, err
@@ -51,6 +89,9 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 	}
 	matchTagValue, err := s.extractEnumTagValue(enumValue, decodedMatchValue, enumType, storeBinding)
 	if err != nil {
+		return nil, nil, err
+	}
+	if _, err := s.prepareNonPackedEnumMatchTemp(enumValue, enumType); err != nil {
 		return nil, nil, err
 	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
@@ -121,8 +162,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			}
 			if reachable && !s.currentBlockTerminated() {
 				armEnd := C.LLVMGetInsertBlock(s.builder)
-				incomingValues = append(incomingValues, armValue)
-				incomingBlocks = append(incomingBlocks, armEnd)
+				if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
+					s.popScope()
+					return nil, nil, err
+				}
 				C.LLVMBuildBr(s.builder, mergeBB)
 			}
 			s.popScope()
@@ -148,8 +191,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			}
 			if reachable && !s.currentBlockTerminated() {
 				armEnd := C.LLVMGetInsertBlock(s.builder)
-				incomingValues = append(incomingValues, armValue)
-				incomingBlocks = append(incomingBlocks, armEnd)
+				if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
+					s.popScope()
+					return nil, nil, err
+				}
 				C.LLVMBuildBr(s.builder, mergeBB)
 			}
 			s.popScope()
@@ -175,16 +220,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 			C.LLVMBuildUnreachable(s.builder)
 			return nil, resultType, nil
 		}
-		if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
-			return incomingValues[0], resultType, nil
-		}
-		llvmType, err := s.g.lowerType(resultType)
-		if err != nil {
-			return nil, nil, err
-		}
-		phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
-		C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-		return phi, resultType, nil
+		return finishResult(incomingValues, incomingBlocks)
 	}
 	for i, arm := range expr.Arms {
 		bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.arm"))
@@ -222,8 +258,10 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		}
 		if reachable && !s.currentBlockTerminated() {
 			armEnd := C.LLVMGetInsertBlock(s.builder)
-			incomingValues = append(incomingValues, armValue)
-			incomingBlocks = append(incomingBlocks, armEnd)
+			if err := recordIncoming(armValue, armEnd, &incomingValues, &incomingBlocks); err != nil {
+				s.popScope()
+				return nil, nil, err
+			}
 			C.LLVMBuildBr(s.builder, mergeBB)
 		}
 		s.popScope()
@@ -253,16 +291,7 @@ func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semant
 		C.LLVMBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}
-	if len(incomingValues) == 1 || semantic.IsNeverType(resultType) {
-		return incomingValues[0], resultType, nil
-	}
-	llvmType, err := s.g.lowerType(resultType)
-	if err != nil {
-		return nil, nil, err
-	}
-	phi := C.LLVMBuildPhi(s.builder, llvmType, cStringFree("match.expr.phi"))
-	C.LLVMAddIncoming(phi, llvmValueSlicePtr(incomingValues), llvmBlockSlicePtr(incomingBlocks), C.unsigned(len(incomingValues)))
-	return phi, resultType, nil
+	return finishResult(incomingValues, incomingBlocks)
 }
 func (s *functionState) emitConstEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, constEnumType *semantic.ConstEnumType) (C.LLVMValueRef, semantic.Type, error) {
 	if constEnumType == nil {

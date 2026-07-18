@@ -452,11 +452,15 @@ func (g *llvmGenerator) ensureErrorUnionType(unionType *semantic.ErrorUnionType)
 	if err != nil {
 		return nil, err
 	}
-	valueType, err := g.lowerType(unionType.Value)
-	if err != nil {
+	// A value-carrying error union is an internal descriptor, not an inline copy of
+	// its payload.  The payload lives in function-owned storage and the descriptor
+	// carries its address.  This keeps `T error[E]` cheap and bounded even when T is
+	// a very large enum/struct, while the function ABI continues to return the error
+	// code plus a caller-provided payload out-pointer.
+	if _, err := g.lowerType(unionType.Value); err != nil {
 		return nil, err
 	}
-	fields := []C.LLVMTypeRef{errType, valueType}
+	fields := []C.LLVMTypeRef{errType, C.LLVMPointerTypeInContext(g.context, 0)}
 	C.LLVMStructSetBody(ty, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0)
 	g.structBodies[name] = true
 	return ty, nil

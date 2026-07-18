@@ -149,6 +149,10 @@ func (a *Analyzer) checkCalleeParamWhereRefinements(call *ast.CallExpr, declName
 }
 
 func (a *Analyzer) dischargeWherePredicate(pred ast.Expr, subst map[string]ast.Expr, pos lexer.Pos, subject string) {
+	if a.directCallReturnWhereEntails(pred, subst) {
+		a.recordProof(pos, subject, "where", ProofProvenContract)
+		return
+	}
 	switch a.proveRequiresClause(pred, subst) {
 	case requiresProven:
 		a.recordProof(pos, subject, "where", ProofProvenLinear)
@@ -165,6 +169,41 @@ func (a *Analyzer) dischargeWherePredicate(pred ast.Expr, subst map[string]ast.E
 		diag := a.buildRequiresFailureDiagnostic(pred, subst, counterexample)
 		a.proofLint(pos, "%s", diag.Format(subject))
 	}
+}
+
+// directCallReturnWhereEntails implements the modular forwarding rule for anonymous where returns:
+// if the value being checked is a direct call and the callee has already proved the identical return
+// predicate, the caller may forward that value without re-proving the callee body.  Both predicates
+// are instantiated with the same call expression before structural comparison.
+func (a *Analyzer) directCallReturnWhereEntails(pred ast.Expr, subst map[string]ast.Expr) bool {
+	if a == nil || pred == nil || len(subst) != 1 {
+		return false
+	}
+	var value ast.Expr
+	for _, candidate := range subst {
+		value = candidate
+	}
+	call, ok := unwrapParen(value).(*ast.CallExpr)
+	if !ok || call == nil {
+		return false
+	}
+	decl, ok := a.resolveDirectCallFuncDecl(call)
+	if !ok || decl == nil {
+		return false
+	}
+	ret, ok := whereRefinementTypeExpr(decl.ReturnType)
+	if !ok || ret == nil || ret.Predicate == nil {
+		return false
+	}
+	calleeSubst := map[string]ast.Expr{"result": call}
+	for i, param := range decl.Params {
+		if i < len(call.Args) && call.Args[i] != nil {
+			calleeSubst[param.Name] = call.Args[i]
+		}
+	}
+	want := optimizationExprString(stripOptimizationParens(substituteIdents(pred, subst)))
+	have := optimizationExprString(stripOptimizationParens(substituteIdents(ret.Predicate, calleeSubst)))
+	return want != "" && want == have
 }
 
 func (a *Analyzer) analyzeWhereBoolPredicate(pred ast.Expr) {

@@ -192,6 +192,21 @@ const (
 // args. Handles conjunctions structurally (`A and B`) and comparison leaves via bounded linear
 // arithmetic; everything else declines (requiresUnknown), keeping the pass sound.
 func (a *Analyzer) proveRequiresClause(expr ast.Expr, subst map[string]ast.Expr) requiresVerdict {
+	// A proven assertion is itself a complete proof of the same instantiated goal.  This fast path is
+	// particularly important for field-place assertions: affineOf intentionally does not model an
+	// arbitrary `object.field` as an immutable scalar, while the assertion fact is nevertheless sound
+	// and is invalidated whenever that place (or one of its roots) may be mutated.
+	instantiated := substituteIdents(expr, subst)
+	goalKey := optimizationExprString(stripOptimizationParens(instantiated))
+	if goalKey != "" {
+		for sc := a.currentScope; sc != nil; sc = sc.Parent {
+			for _, fact := range sc.smtAssertFacts {
+				if optimizationExprString(stripOptimizationParens(fact.Expr)) == goalKey {
+					return requiresProven
+				}
+			}
+		}
+	}
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
 		return a.proveRequiresClause(n.Inner, subst)

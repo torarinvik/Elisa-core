@@ -145,14 +145,17 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		callArgs = append(callArgs, resultSlot)
 		callArgs = append(callArgs, args...)
 		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(callArgs), C.unsigned(len(callArgs)), callNameC)
-		payload := C.LLVMBuildLoad2(builder, resultLLVMType, resultSlot, cStringFree("export.ret.payload"))
 		unionLLVMType, err := g.lowerType(targetType.Return)
 		if err != nil {
 			return err
 		}
 		targetResult = C.LLVMGetUndef(unionLLVMType)
 		targetResult = C.LLVMBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
-		targetResult = C.LLVMBuildInsertValue(builder, targetResult, payload, 1, cStringFree("export.ret.val"))
+		// The internal non-void error-union descriptor is {error, payload*}.
+		// Keep the wrapper's result slot alive through ABI packing and place its
+		// address in the descriptor; inserting the payload value itself recreates
+		// the obsolete inline representation and produces invalid LLVM IR.
+		targetResult = C.LLVMBuildInsertValue(builder, targetResult, resultSlot, 1, cStringFree("export.ret.val.ptr"))
 	} else {
 		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), callNameC)
 		targetResult = call

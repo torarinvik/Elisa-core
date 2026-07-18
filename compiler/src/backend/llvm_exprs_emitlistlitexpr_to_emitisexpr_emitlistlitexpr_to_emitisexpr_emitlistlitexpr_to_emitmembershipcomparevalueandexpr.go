@@ -1514,7 +1514,7 @@ func (s *functionState) emitStackTempZeroed(t semantic.Type, name string) (C.LLV
 	return s.emitStackTempValue(zero, t, name)
 }
 func (s *functionState) emitStackTempValue(value C.LLVMValueRef, t semantic.Type, name string) (C.LLVMValueRef, error) {
-	alloca, err := s.createEntryAlloca(name, t)
+	alloca, err := s.createTempStorage(name, t)
 	if err != nil {
 		return nil, err
 	}

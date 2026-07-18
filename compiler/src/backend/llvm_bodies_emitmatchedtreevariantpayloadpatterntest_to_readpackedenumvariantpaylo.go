@@ -249,11 +249,36 @@ func (s *functionState) extractEnumVariantPayloadValues(enumValue C.LLVMValueRef
 	if enumType != nil && enumType.Packed {
 		return s.loadEnumVariantPayload(decodedEnumValue, enumValue, enumType, variant, store, origin)
 	}
-	enumPtr, err := s.emitStackTempValue(enumValue, enumType, "match.payload.tmp")
+	enumPtr := s.nonPackedEnumMatchTemps[enumValue]
+	if enumPtr == nil {
+		var err error
+		enumPtr, err = s.prepareNonPackedEnumMatchTemp(enumValue, enumType)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return s.loadEnumVariantPayload(nil, enumPtr, enumType, variant, store, packedReadOriginKey{})
+}
+
+// prepareNonPackedEnumMatchTemp materializes a non-packed enum scrutinee once.
+// Callers invoke it before emitting dispatch so its copy dominates every arm;
+// nested/fallback extraction still remains safe when no pre-seeding occurred.
+func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue C.LLVMValueRef, enumType *semantic.EnumType) (C.LLVMValueRef, error) {
+	if enumValue == nil || enumType == nil || enumType.Packed || enumIsTagOnly(enumType) {
+		return nil, nil
+	}
+	if ptr := s.nonPackedEnumMatchTemps[enumValue]; ptr != nil {
+		return ptr, nil
+	}
+	ptr, err := s.emitStackTempValue(enumValue, enumType, "match.payload.tmp")
 	if err != nil {
 		return nil, err
 	}
-	return s.loadEnumVariantPayload(nil, enumPtr, enumType, variant, store, packedReadOriginKey{})
+	if s.nonPackedEnumMatchTemps == nil {
+		s.nonPackedEnumMatchTemps = make(map[C.LLVMValueRef]C.LLVMValueRef)
+	}
+	s.nonPackedEnumMatchTemps[enumValue] = ptr
+	return ptr, nil
 }
 func (s *functionState) matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil {

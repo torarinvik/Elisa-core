@@ -233,7 +233,7 @@ func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []C.L
 		if err != nil {
 			return nil, nil, err
 		}
-		tmp, err := s.createEntryAlloca("byval.arg", funcType.Params[i])
+		tmp, err := s.createTempStorage("byval.arg", funcType.Params[i])
 		if err != nil {
 			return nil, nil, err
 		}
@@ -251,7 +251,8 @@ func (s *functionState) convertByvalArgs(funcType *semantic.FuncType, args []C.L
 
 func semanticTypeIsAggregate(t semantic.Type) bool {
 	switch t.(type) {
-	case *semantic.StructType, *semantic.ArrayType:
+	case *semantic.StructType, *semantic.ArrayType, *semantic.EnumType,
+		*semantic.TupleType, *semantic.OptionalType:
 		return true
 	default:
 		return false

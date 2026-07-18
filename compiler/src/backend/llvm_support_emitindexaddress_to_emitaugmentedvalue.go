@@ -50,6 +50,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"unsafe"
 )
 
 // indexBoundsProven reports whether the semantic analyzer proved expr's index in-bounds,
@@ -865,11 +866,34 @@ func (s *functionState) buildErrorUnionFailure(unionType *semantic.ErrorUnionTyp
 	if isVoidType(unionType.Value) {
 		return s.wrapVoidErrorUnionCode(unionType.Errors, errorCode)
 	}
-	payload, err := s.zeroValue(unionType.Value)
+	payloadPtr, err := s.errorUnionZeroPayloadGlobal(unionType.Value)
 	if err != nil {
 		return nil, err
 	}
-	return s.buildErrorUnionValue(unionType, errorCode, payload)
+	return s.buildErrorUnionValueFromPointer(unionType, errorCode, payloadPtr)
+}
+
+// Failed error unions never expose their success payload.  Point them at one immutable
+// module-level zero object instead of allocating a full payload-sized stack temporary at
+// every propagation site.  The split return ABI may still copy this zero to the caller's
+// already-zeroed out slot, which is harmless and keeps the representation total.
+func (s *functionState) errorUnionZeroPayloadGlobal(payloadType semantic.Type) (C.LLVMValueRef, error) {
+	llvmType, err := s.g.lowerType(payloadType)
+	if err != nil {
+		return nil, err
+	}
+	name := "__elisa_errzero_" + llvmTypeSymbolName(payloadType)
+	nameC := C.CString(name)
+	defer C.free(unsafe.Pointer(nameC))
+	global := C.LLVMGetNamedGlobal(s.g.module, nameC)
+	if global != nil {
+		return global, nil
+	}
+	global = C.LLVMAddGlobal(s.g.module, llvmType, nameC)
+	C.LLVMSetInitializer(global, C.LLVMConstNull(llvmType))
+	C.LLVMSetGlobalConstant(global, 1)
+	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
+	return global, nil
 }
 
 func (s *functionState) buildErrorSetValue(errorSet *semantic.ErrorSetType, tag string, args []C.LLVMValueRef) (C.LLVMValueRef, error) {
@@ -951,6 +975,20 @@ func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType,
 		// payloads. Wrap a bare code into that struct so the value matches the type.
 		return s.wrapVoidErrorUnionCode(unionType.Errors, errorCode)
 	}
+	payloadSlot, err := s.createTempStorage("errunion.payload", unionType.Value)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.storeValue(payloadSlot, payload, unionType.Value, "errunion.payload"); err != nil {
+		return nil, err
+	}
+	return s.buildErrorUnionValueFromPointer(unionType, errorCode, payloadSlot)
+}
+
+func (s *functionState) buildErrorUnionValueFromPointer(unionType *semantic.ErrorUnionType, errorCode C.LLVMValueRef, payloadPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
+	if unionType == nil || isVoidType(unionType.Value) || payloadPtr == nil {
+		return nil, fmt.Errorf("missing value-carrying error union pointer")
+	}
 	llvmType, err := s.g.lowerType(unionType)
 	if err != nil {
 		return nil, err
@@ -969,7 +1007,7 @@ func (s *functionState) buildErrorUnionValue(unionType *semantic.ErrorUnionType,
 	}
 	value := C.LLVMGetUndef(llvmType)
 	value = C.LLVMBuildInsertValue(s.builder, value, errorCode, 0, cStringFree("errunion.err"))
-	value = C.LLVMBuildInsertValue(s.builder, value, payload, 1, cStringFree("errunion.value"))
+	value = C.LLVMBuildInsertValue(s.builder, value, payloadPtr, 1, cStringFree("errunion.value.ptr"))
 	return value, nil
 }
 func (s *functionState) extractErrorUnionCode(value C.LLVMValueRef, unionType *semantic.ErrorUnionType) (C.LLVMValueRef, error) {
@@ -987,7 +1025,8 @@ func (s *functionState) extractErrorUnionPayload(value C.LLVMValueRef, unionType
 	if unionType == nil || isVoidType(unionType.Value) {
 		return nil, fmt.Errorf("error union has no payload")
 	}
-	return C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload")), nil
+	payloadPtr := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("errunion.payload.ptr"))
+	return s.loadValue(payloadPtr, unionType.Value, "errunion.payload")
 }
 func (s *functionState) extractOptionalPresent(value C.LLVMValueRef, optionalType *semantic.OptionalType) (C.LLVMValueRef, error) {
 	if optionalType == nil {

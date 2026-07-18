@@ -97,7 +97,7 @@ type functionState struct {
 	// statement -> the stack arena to free right after it (the object died and is not aliased).
 	// Populated at region entry, fired once and removed when the statement is emitted.
 	earlyFreeByOffset map[int]C.LLVMValueRef
-	packedStores map[string]packedStoreBinding
+	packedStores      map[string]packedStoreBinding
 	// regionPackedStores caches the IMPLICIT region-backed packed store per (region, enum root)
 	// (getOrCreateRegionPackedStore). Unlike packedStores it is NOT scope-cloned/restored:
 	// the creation instructions are hoisted to the owning region's anchor (they dominate the
@@ -111,7 +111,7 @@ type functionState struct {
 	// `__region_auto` Arena& param (docs/75). The function's synthesized `__auto_*` region adopts it
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
 	// region and the returned handle outlives the call. Zero value (nil arenaRef) for ordinary fns.
-	regionPolyOwner              treeAllocOwnerBinding
+	regionPolyOwner treeAllocOwnerBinding
 	// ambientGrownContainerRegion (the void-grower fix) is the `__rg_<param>` region of a caller-owned
 	// container this function grows with region-allocated inserts; when set, the function's synthesized
 	// `__auto_*` region adopts that container's arena so inserted region-poly values land in the
@@ -133,6 +133,9 @@ type functionState struct {
 	packedDenseSideWordReads     map[packedDenseSideWordReadCacheKey]C.LLVMValueRef
 	packedDirectFieldReads       map[packedDirectFieldReadCacheKey]C.LLVMValueRef
 	packedVariantPayloadReads    map[packedVariantPayloadReadCacheKey][]C.LLVMValueRef
+	// nonPackedEnumMatchTemps maps a match scrutinee SSA value to the single
+	// addressable copy emitted before its dispatch. The copy dominates every arm.
+	nonPackedEnumMatchTemps map[C.LLVMValueRef]C.LLVMValueRef
 	// straightLineBlockParent maps a basic block created purely as a straight-line continuation of
 	// another (e.g. the `wd.ok` arm of an index bounds-check, whose `wd.fail` arm always traps) to its
 	// predecessor. Such a block is only reachable from that predecessor, so a value live in the
@@ -162,6 +165,10 @@ type functionState struct {
 	// of identifier names it reads, so a later assignment to one of those names re-asserts the
 	// invariant (docs/90 brick 90-14). Truncated at block exit; debug-gated like all contracts.
 	activeInvariants []activeInvariant
+	// Large compiler-generated temporaries are heap-backed to keep debug/O0 stack
+	// frames bounded. They are allocated in the entry block and freed on every
+	// normal function exit after the return payload has been copied out.
+	heapTemps []C.LLVMValueRef
 }
 
 type oldCapture struct {
@@ -351,6 +358,7 @@ type treeAllocOwnerBinding struct {
 	storeAnchorBlock C.LLVMBasicBlockRef
 	storeAnchorInstr C.LLVMValueRef
 }
+
 // regionPackedStoreKey identifies an implicit region-backed packed store: the owning region's
 // stable arena identity (an alloca/param pointer) plus the enum root's name.
 type regionPackedStoreKey struct {
@@ -652,6 +660,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			return err
 		}
 		if isVoidType(fnType.Return) {
+			if err := state.emitHeapTempCleanup(); err != nil {
+				return err
+			}
 			C.LLVMBuildRetVoid(builder)
 		} else if retUnion, ok := fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
 			zeroCode, err := state.errorCodeConstant(0)
@@ -660,6 +671,9 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			}
 			successValue, err := state.wrapVoidErrorUnionCode(retUnion.Errors, zeroCode)
 			if err != nil {
+				return err
+			}
+			if err := state.emitHeapTempCleanup(); err != nil {
 				return err
 			}
 			C.LLVMBuildRet(builder, successValue)
@@ -692,6 +706,9 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 			return err
 		}
 		if isVoidType(retUnion.Value) {
+			if err := s.emitHeapTempCleanup(); err != nil {
+				return err
+			}
 			C.LLVMBuildRet(s.builder, coerced)
 			return nil
 		}
@@ -706,7 +723,16 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		if err != nil {
 			return err
 		}
-		C.LLVMBuildStore(s.builder, payload, s.resultSlot)
+		// A non-void error union uses a split ABI (scalar error return plus payload
+		// out-pointer).  Large payloads must use the same memcpy-aware store path as
+		// ordinary sret returns; a raw LLVM aggregate store makes llc -O0 expand a
+		// multi-hundred-KB value into megabytes of elementwise machine code.
+		if err := s.storeValue(s.resultSlot, payload, retUnion.Value, "errunion.ret"); err != nil {
+			return err
+		}
+		if err := s.emitHeapTempCleanup(); err != nil {
+			return err
+		}
 		C.LLVMBuildRet(s.builder, errorCode)
 		return nil
 	}
@@ -715,6 +741,9 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		// already emitted for its side effects by the caller. A void function must
 		// terminate with RetVoid — building a value `ret` here yields an invalid
 		// `ret void <badref>` that the module verifier rejects.
+		if err := s.emitHeapTempCleanup(); err != nil {
+			return err
+		}
 		C.LLVMBuildRetVoid(s.builder)
 		return nil
 	}
@@ -731,8 +760,14 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		if err := s.storeValue(s.resultSlot, coerced, s.fnType.Return, "sret.ret"); err != nil {
 			return err
 		}
+		if err := s.emitHeapTempCleanup(); err != nil {
+			return err
+		}
 		C.LLVMBuildRetVoid(s.builder)
 		return nil
+	}
+	if err := s.emitHeapTempCleanup(); err != nil {
+		return err
 	}
 	C.LLVMBuildRet(s.builder, coerced)
 	return nil

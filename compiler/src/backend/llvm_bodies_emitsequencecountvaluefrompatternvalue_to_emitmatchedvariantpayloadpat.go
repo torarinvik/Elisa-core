@@ -184,6 +184,7 @@ func (s *functionState) emitListMatchPatternTest(pattern *ast.MatchListPattern, 
 	}
 	return nil
 }
+
 // emitPatternAsBinding materializes the docs/122 §5.4 as-binding (`Pattern as whole`):
 // the entire matched value stored under the given name. Emitted unconditionally at the
 // pattern-test site — sound because the binding is only referable from the arm body,
@@ -206,7 +207,9 @@ func (s *functionState) emitPatternAsBinding(name string, actualValue C.LLVMValu
 	if err != nil {
 		return err
 	}
-	C.LLVMBuildStore(s.builder, actualValue, alloca)
+	if err := s.storeValue(alloca, actualValue, actualType, name); err != nil {
+		return err
+	}
 	s.defineBinding(name, valueBinding{ptr: alloca, typ: actualType})
 	return nil
 }
@@ -283,7 +286,9 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 					if err != nil {
 						return nil, packedPayloadValueCache{}, err
 					}
-					C.LLVMBuildStore(s.builder, actualValue, alloca)
+					if err := s.storeValue(alloca, actualValue, category, p.Binder); err != nil {
+						return nil, packedPayloadValueCache{}, err
+					}
 					s.defineBinding(p.Binder, valueBinding{ptr: alloca, typ: category})
 					if enumType.Packed {
 						s.bindPackedEnumStoreOrigin(p.Binder, enumType, store)
@@ -314,13 +319,17 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		}
 		if p.Name != "" && p.Name != "_" {
 			if existing, ok := s.lookupBinding(p.Name); ok && existing.ptr != nil && semantic.SameType(existing.typ, actualType) {
-				C.LLVMBuildStore(s.builder, actualValue, existing.ptr)
+				if err := s.storeValue(existing.ptr, actualValue, actualType, p.Name); err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
 			} else {
 				alloca, err := s.createEntryAlloca(p.Name, actualType)
 				if err != nil {
 					return nil, packedPayloadValueCache{}, err
 				}
-				C.LLVMBuildStore(s.builder, actualValue, alloca)
+				if err := s.storeValue(alloca, actualValue, actualType, p.Name); err != nil {
+					return nil, packedPayloadValueCache{}, err
+				}
 				s.defineBinding(p.Name, valueBinding{ptr: alloca, typ: actualType})
 			}
 		}
@@ -587,6 +596,7 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 func (s *functionState) emitStructMatchFieldValue(actualValue C.LLVMValueRef, actualType semantic.Type, field structLiteralField, name string) (C.LLVMValueRef, error) {
 	return C.LLVMBuildExtractValue(s.builder, actualValue, C.unsigned(field.Index), cStringFree(name)), nil
 }
+
 // emitRangeMatchPatternTest emits the docs/122 §5.2 range arm (`LO..<HI` / `LO..=HI`):
 // scrutinee >= LO chained through an intermediate block into scrutinee </<= HI, with
 // signedness taken from the common comparison type — the two-comparison analogue of

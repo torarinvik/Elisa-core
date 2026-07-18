@@ -69,6 +69,9 @@ func (s *functionState) emitEnumMatch(stmt *ast.MatchStmt, enumType *semantic.En
 	if err != nil {
 		return err
 	}
+	if _, err := s.prepareNonPackedEnumMatchTemp(enumValue, enumType); err != nil {
+		return err
+	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
 	allTerminated := true

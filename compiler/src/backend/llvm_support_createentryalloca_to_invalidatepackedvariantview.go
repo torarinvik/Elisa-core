@@ -15,7 +15,7 @@ import (
 	"unsafe"
 )
 
-func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMValueRef, error) {
+func (s *functionState) createEntryAllocaRaw(name string, t semantic.Type) (C.LLVMValueRef, error) {
 	llvmType, err := s.g.lowerType(t)
 	if err != nil {
 		return nil, err
@@ -34,6 +34,85 @@ func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMV
 	alloca := C.LLVMBuildAlloca(builder, llvmType, nameC)
 	s.g.applyTypeAlignment(alloca, t)
 	return alloca, nil
+}
+
+const largeCompilerTempHeapThresholdBytes = 64 * 1024
+
+// createEntryAlloca is the common local-storage policy, despite its historical
+// name. Large source locals are just as capable of exhausting the native stack as
+// compiler-generated workspaces (especially closed ADTs whose largest variant
+// contains fixed arrays), so every caller goes through the same size gate.
+func (s *functionState) createEntryAlloca(name string, t semantic.Type) (C.LLVMValueRef, error) {
+	return s.createTempStorage(name, t)
+}
+
+// createTempStorage keeps ordinary storage on the stack but moves very large
+// locals and compiler-generated workspaces to entry-dominating heap storage.
+func (s *functionState) createTempStorage(name string, t semantic.Type) (C.LLVMValueRef, error) {
+	sizeBytes, err := s.g.abiSizeOfType(t)
+	if err != nil {
+		return nil, err
+	}
+	if sizeBytes < largeCompilerTempHeapThresholdBytes {
+		return s.createEntryAllocaRaw(name, t)
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	llvmSizeType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, err
+	}
+	mallocType := s.g.cachedRuntimeHelperType("malloc", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "malloc", Params: []semantic.Type{usizeType}, Return: s.lambdaVoidRefType()}
+	})
+	callee, err := s.g.ensureFunctionDeclared("malloc", mallocType)
+	if err != nil {
+		return nil, err
+	}
+	llvmMallocType, err := s.g.lowerFunctionType(mallocType)
+	if err != nil {
+		return nil, err
+	}
+	builder := C.LLVMCreateBuilderInContext(s.g.context)
+	defer C.LLVMDisposeBuilder(builder)
+	entry := C.LLVMGetEntryBasicBlock(s.fnValue)
+	first := C.LLVMGetFirstInstruction(entry)
+	if first != nil {
+		C.LLVMPositionBuilderBefore(builder, first)
+	} else {
+		C.LLVMPositionBuilderAtEnd(builder, entry)
+	}
+	sizeValue := C.LLVMConstInt(llvmSizeType, C.ulonglong(sizeBytes), 0)
+	nameC := cString(name + ".heap")
+	defer C.free(unsafe.Pointer(nameC))
+	ptr := C.LLVMBuildCall2(builder, llvmMallocType, callee, llvmValueSlicePtr([]C.LLVMValueRef{sizeValue}), 1, nameC)
+	s.heapTemps = append(s.heapTemps, ptr)
+	return ptr, nil
+}
+
+func (s *functionState) emitHeapTempCleanup() error {
+	if len(s.heapTemps) == 0 {
+		return nil
+	}
+	voidType := s.g.result.NamedTypes["void"]
+	freeType := s.g.cachedRuntimeHelperType("free", func() *semantic.FuncType {
+		return &semantic.FuncType{Name: "free", Params: []semantic.Type{s.lambdaVoidRefType()}, Return: voidType}
+	})
+	callee, err := s.g.ensureFunctionDeclared("free", freeType)
+	if err != nil {
+		return err
+	}
+	llvmFreeType, err := s.g.lowerFunctionType(freeType)
+	if err != nil {
+		return err
+	}
+	// Void calls cannot have an LLVM result name, but LLVMBuildCall2 still
+	// requires a non-nil C string for the name argument.
+	emptyName := cString("")
+	defer C.free(unsafe.Pointer(emptyName))
+	for i := len(s.heapTemps) - 1; i >= 0; i-- {
+		C.LLVMBuildCall2(s.builder, llvmFreeType, callee, llvmValueSlicePtr([]C.LLVMValueRef{s.heapTemps[i]}), 1, emptyName)
+	}
+	return nil
 }
 
 // createEntryAllocaZeroed allocas in the entry block AND stores a zero value there, so the slot is

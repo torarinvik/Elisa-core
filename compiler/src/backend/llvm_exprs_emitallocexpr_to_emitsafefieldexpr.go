@@ -677,11 +677,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 			}
 		}
 		applyByvalCallAttrs(call)
-		payload, err := s.loadValue(resultSlot, retUnion.Value, "call.payload")
-		if err != nil {
-			return nil, nil, err
-		}
-		unionValue, err := s.buildErrorUnionValue(retUnion, call, payload)
+		unionValue, err := s.buildErrorUnionValueFromPointer(retUnion, call, resultSlot)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -691,7 +687,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	if layout.sret {
 		// Large aggregate return: allocate a result slot, prepend it as the
 		// hidden sret out-pointer, call (returns void), then load the result.
-		resultSlot, err := s.createEntryAlloca("call.sret", funcType.Return)
+		resultSlot, err := s.createTempStorage("call.sret", funcType.Return)
 		if err != nil {
 			return nil, nil, err
 		}

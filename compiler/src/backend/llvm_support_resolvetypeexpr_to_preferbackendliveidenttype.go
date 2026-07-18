@@ -14,6 +14,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	case *ast.RefinementTypeExpr:
 		// docs/85: refinement types are representation-erased — codegen sees the base type.
 		return s.resolveTypeExpr(n.Base)
+	case *ast.WhereRefinementTypeExpr:
+		// docs/95/109: anonymous and named `refine` aliases carry proof
+		// metadata only. Semantic analysis has already discharged the
+		// predicate; native layout and ABI are exactly the base type.
+		return s.resolveTypeExpr(n.Base)
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":
