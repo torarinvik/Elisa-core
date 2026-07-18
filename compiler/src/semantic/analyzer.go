@@ -505,6 +505,10 @@ type Analyzer struct {
 	suppressOptimizationFacts        bool
 	suppressLazyFuncSummaryInference bool
 	returnProvenanceInProgress       map[*ast.FuncDecl]bool
+	// funcDeclUsings records each function declaration's file/module `using` imports so
+	// speculative re-analyses (return-provenance / borrowed-owner-ref inference) resolve
+	// unqualified names exactly as the body's real analysis does.
+	funcDeclUsings                   map[*ast.FuncDecl][]string
 	returnProvenanceLocalInProgress  map[*Symbol]bool
 	returnBorrowedOwnerRefInProgress map[*ast.FuncDecl]bool
 	// inReturnBorrowCapture is true only while computing a return statement's
@@ -885,6 +889,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		castHooksByName:                   map[string]map[castHookSignature]*Symbol{},
 		initHooksByName:                   map[string]map[initHookSignature]*Symbol{},
 		returnProvenanceInProgress:        map[*ast.FuncDecl]bool{},
+		funcDeclUsings:                    map[*ast.FuncDecl][]string{},
 		returnProvenanceLocalInProgress:   map[*Symbol]bool{},
 		returnBorrowedOwnerRefInProgress:  map[*ast.FuncDecl]bool{},
 		returnBorrowedOwnerLocalProgress:  map[*Symbol]bool{},

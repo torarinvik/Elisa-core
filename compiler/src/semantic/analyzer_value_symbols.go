@@ -93,6 +93,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: n, Mutable: false, Private: scoped.Private, Deprecated: funcDeprecationMessage(n)}
 				a.functionTypes[symbolName] = fnType
 				a.funcDeclSymbols[n] = sym
+				a.funcDeclUsings[n] = append([]string(nil), a.currentUsings...)
 				if !a.defineExternImplementationGlobal(qualifiedName, sym, n.Pos()) {
 					a.defineReceiverOverloadGlobal(qualifiedName, sym, n.Pos())
 				}
@@ -122,6 +123,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType
 								a.funcDeclSymbols[fnDecl] = sym
+								a.funcDeclUsings[fnDecl] = append([]string(nil), a.currentUsings...)
 								a.defineGlobal(sym, fnDecl.Pos())
 								a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
 							case *ast.ExternFuncDecl:
@@ -156,6 +158,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType
 								a.funcDeclSymbols[fnDecl] = sym
+								a.funcDeclUsings[fnDecl] = append([]string(nil), a.currentUsings...)
 								a.defineGlobal(sym, fnDecl.Pos())
 							case *ast.ExternFuncDecl:
 								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)

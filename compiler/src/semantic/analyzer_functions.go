@@ -359,7 +359,11 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		} else {
 			a.currentNamespace = ""
 		}
-		a.currentUsings = nil
+		// Restore the declaration's own `using` imports: without them unqualified
+		// names (e.g. a match pattern's enum name made visible by a file-level
+		// `using`) silently fail to resolve in this suppressed-diagnostics pass,
+		// poisoning cached expression types with <invalid>.
+		a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
 	}
 
 	a.withGenericParams(fn.GenericParams, nil, func() {
@@ -531,7 +535,11 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 		} else {
 			a.currentNamespace = ""
 		}
-		a.currentUsings = nil
+		// Restore the declaration's own `using` imports: without them unqualified
+		// names (e.g. a match pattern's enum name made visible by a file-level
+		// `using`) silently fail to resolve in this suppressed-diagnostics pass,
+		// poisoning cached expression types with <invalid>.
+		a.currentUsings = append([]string(nil), a.funcDeclUsings[fn]...)
 	}
 
 	a.withGenericParams(fn.GenericParams, nil, func() {

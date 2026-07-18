@@ -420,5 +420,5 @@ func (s *functionState) emitMatchExpr(expr *ast.MatchExpr) (C.LLVMValueRef, sema
 	if resolveMatchableStructTypeBackend(s.exprType(expr.Value)) {
 		return s.emitStructMatchExpr(expr, resultType)
 	}
-	return nil, nil, fmt.Errorf("match requires an enum, const enum, error set, optional, tree-category, string, tuple, or struct value")
+	return nil, nil, fmt.Errorf("%s: match requires an enum, const enum, error set, optional, tree-category, string, tuple, or struct value", expr.Pos())
 }

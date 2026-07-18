@@ -8,7 +8,13 @@ import (
 func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 	defer func() {
 		if expr != nil {
-			a.exprTypes[expr] = result
+			// A suppressed-diagnostics speculative pass (return-provenance /
+			// borrow inference) may fail to resolve names its real analysis
+			// resolved; never let it overwrite a previously computed valid
+			// type with <invalid> - codegen reads this cache.
+			if !(a.suppressDiagnostics && IsInvalidType(result) && !IsInvalidType(a.exprTypes[expr]) && a.exprTypes[expr] != nil) {
+				a.exprTypes[expr] = result
+			}
 			a.recordExprOptimizationFacts(expr, result)
 		}
 	}()

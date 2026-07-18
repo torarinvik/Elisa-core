@@ -603,6 +603,11 @@ func preferBackendLiveIdentType(cached semantic.Type, live semantic.Type) semant
 	if cached == nil {
 		return live
 	}
+	// A stale <invalid> cache entry (e.g. from a failed speculative analysis
+	// pass) must never shadow a live binding that carries a real type.
+	if semantic.IsInvalidType(cached) && !semantic.IsInvalidType(live) {
+		return live
+	}
 	if semantic.SameType(cached, live) {
 		return cached
 	}

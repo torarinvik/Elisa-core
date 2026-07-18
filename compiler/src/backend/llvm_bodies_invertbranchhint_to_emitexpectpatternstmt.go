@@ -548,7 +548,7 @@ func (s *functionState) emitMatch(stmt *ast.MatchStmt) error {
 	if resolveMatchableStructTypeBackend(s.exprType(stmt.Value)) {
 		return s.emitStructMatch(stmt)
 	}
-	return fmt.Errorf("match requires an enum, const enum, error set, optional, tree-category, string, tuple, sequence, or struct value")
+	return fmt.Errorf("%s: match requires an enum, const enum, error set, optional, tree-category, string, tuple, sequence, or struct value", stmt.Pos())
 }
 func (s *functionState) emitExpectPatternStmt(stmt *ast.ExpectPatternStmt) error {
 	if stmt == nil {
