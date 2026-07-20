@@ -51,12 +51,28 @@ func recordInternalParityCase(file *ast.File, options AnalyzeOptions, result *Re
 	fp.OverlayLayouts = nil
 	fingerprint := fmt.Sprintf("%+v;overlay=%t", fp, hasOverlay)
 
-	line := fmt.Sprintf("%s\t%d\t%d\t%s\t%s\t%s\n",
+	// Overlay layouts are injected via AnalyzeOptions (no in-source spelling in these
+	// tests), so serialize them as a 7th column: one line per layout,
+	// "name|size|stride|field:offset:width:reqsize,...". stage1's replay turns each
+	// into a `# overlay ...` header the ported overlay checks consume.
+	var overlaySpecs []string
+	for _, layout := range options.OverlayLayouts {
+		if layout == nil {
+			continue
+		}
+		fields := make([]string, 0, len(layout.Fields))
+		for _, f := range layout.Fields {
+			fields = append(fields, fmt.Sprintf("%s:%d:%d:%d", f.Name, f.Offset, f.Width, f.RequiresSizeAtLeast))
+		}
+		overlaySpecs = append(overlaySpecs, fmt.Sprintf("%s|%d|%d|%s", layout.Name, layout.Size, layout.Stride, strings.Join(fields, ",")))
+	}
+	line := fmt.Sprintf("%s\t%d\t%d\t%s\t%s\t%s\t%s\n",
 		base64.StdEncoding.EncodeToString([]byte(file.Filename)),
 		errors, warnings,
 		base64.StdEncoding.EncodeToString([]byte(fingerprint)),
 		base64.StdEncoding.EncodeToString([]byte(src)),
-		base64.StdEncoding.EncodeToString([]byte(strings.Join(messages, "\n"))))
+		base64.StdEncoding.EncodeToString([]byte(strings.Join(messages, "\n"))),
+		base64.StdEncoding.EncodeToString([]byte(strings.Join(overlaySpecs, "\n"))))
 
 	internalParityMu.Lock()
 	defer internalParityMu.Unlock()
