@@ -49,7 +49,13 @@ func recordInternalParityCase(file *ast.File, options AnalyzeOptions, result *Re
 	fp := options
 	hasOverlay := len(fp.OverlayLayouts) > 0
 	fp.OverlayLayouts = nil
-	fingerprint := fmt.Sprintf("%+v;overlay=%t", fp, hasOverlay)
+	// regionStackCap is an analyzer package global (not an AnalyzeOptions field), but a family of
+	// region-lifetime tests OVERRIDE it (to 4) to exercise the merge-stack rejection path. Its value
+	// materially changes region diagnostics, so record it in the fingerprint — otherwise two cases
+	// with the same source but different caps collapse to contradictory rows the stage1 replay
+	// cannot disambiguate (it is not spelled in the source). stage1 maps a non-default cap to a
+	// `# regioncap N` replay header.
+	fingerprint := fmt.Sprintf("%+v;overlay=%t;regionStackCap=%d", fp, hasOverlay, regionStackCap)
 
 	// Overlay layouts are injected via AnalyzeOptions (no in-source spelling in these
 	// tests), so serialize them as a 7th column: one line per layout,
