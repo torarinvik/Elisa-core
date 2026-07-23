@@ -121,7 +121,13 @@ func (a *Analyzer) evalStaticGenerateEmit(stmt *ast.StaticGenerateEmitDecl) ([]a
 	if !ok {
 		return nil, false
 	}
-	l := lexer.New(stmt.Pos().File, []byte(source))
+	// Lex the generated fragment under a SYNTHETIC filename, not the user's real file. All
+	// token positions are rebased onto the emit site below, so the lexer filename is otherwise
+	// unused — but lexer.New registers the source in the internal-parity registry keyed by
+	// filename, and passing the real file here would clobber the user's original source with
+	// this fragment (breaking the stage1 differential replay, which must see the true input,
+	// not a per-variant expansion snippet). Mirrors the `<static-generate-expr>` template lex.
+	l := lexer.New("<static-generate-emit>", []byte(source))
 	tokens := l.Tokenize()
 	if errs := l.Errors(); len(errs) != 0 {
 		for _, err := range errs {
