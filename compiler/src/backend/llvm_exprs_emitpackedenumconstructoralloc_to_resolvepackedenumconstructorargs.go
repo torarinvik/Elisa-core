@@ -400,10 +400,110 @@ func (s *functionState) emitPackedEnumPayloadDArrayAdopt(argValue C.LLVMValueRef
 	if err := s.emitPackedEnumTailMemcpy(newData, oldData, byteCount); err != nil {
 		return nil, err
 	}
+	// DEEP adoption: the shallow memcpy above copies the element structs verbatim, so any OWNED
+	// container field inside an element (e.g. `MatchArm.body: darray[Stmt]`) still points at the
+	// builder's region, which frees on return — a use-after-free (the self-host next_token crash).
+	// Recursively copy each such field's backing into the store arena too. sview/view/handle fields
+	// are borrows into persistent buffers and need no adoption.
+	if err := s.emitDeepAdoptElementContainers(newData, countValue, darrayType.Elem, arenaValue, allocLLVMType, allocCallee); err != nil {
+		return nil, err
+	}
 	adopted := C.LLVMBuildInsertValue(s.builder, argValue, newData, 0, cStringFree("packed.payload.adopt.data"))
 	adopted = C.LLVMBuildInsertValue(s.builder, adopted, countValue, 2, cStringFree("packed.payload.adopt.cap"))
 	return adopted, nil
 }
+// emitDeepAdoptElementContainers, for a darray payload whose element is a STRUCT with owned
+// container (darray) fields, copies each such field's backing into the store arena too — the
+// recursive counterpart of the shallow memcpy in emitPackedEnumPayloadDArrayAdopt. Without it a
+// nested field like `MatchArm.body: darray[Stmt]` keeps pointing at the builder's freed region
+// (the self-host next_token use-after-free). sview/view/handle fields are borrows and are skipped.
+// `base` points at the freshly-copied element array (count elements) in the store arena.
+func (s *functionState) emitDeepAdoptElementContainers(base, count C.LLVMValueRef, elemType semantic.Type, arenaValue C.LLVMValueRef, allocLLVMType C.LLVMTypeRef, allocCallee C.LLVMValueRef) error {
+	st, ok := elemType.(*semantic.StructType)
+	if !ok || st == nil || st.Decl == nil {
+		return nil
+	}
+	type ownedField struct {
+		index    int
+		darrayLL C.LLVMTypeRef
+		elemSize uint64
+		nested   semantic.Type
+	}
+	var owned []ownedField
+	for i, fd := range st.Decl.Fields {
+		f, present := st.Fields[fd.Name]
+		if !present {
+			continue
+		}
+		dt, isD := f.Type.(*semantic.DArrayType)
+		if !isD || dt == nil {
+			continue
+		}
+		fElemSize, err := s.sizeOfType(dt.Elem)
+		if err != nil {
+			return err
+		}
+		fLL, err := s.g.lowerType(f.Type)
+		if err != nil {
+			return err
+		}
+		owned = append(owned, ownedField{index: i, darrayLL: fLL, elemSize: fElemSize, nested: dt.Elem})
+	}
+	if len(owned) == 0 {
+		return nil
+	}
+	elemLLVMType, err := s.g.lowerType(st)
+	if err != nil {
+		return err
+	}
+	usizeType := s.g.result.NamedTypes["usize"]
+	usizeLL, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	ptrLL := C.LLVMPointerTypeInContext(s.g.context, 0)
+	iPtr := C.LLVMBuildAlloca(s.builder, usizeLL, cStringFree("adopt.deep.i"))
+	C.LLVMBuildStore(s.builder, C.LLVMConstInt(usizeLL, 0, 0), iPtr)
+	headerBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.header"))
+	bodyBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.body"))
+	exitBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("adopt.deep.exit"))
+	C.LLVMBuildBr(s.builder, headerBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, headerBB)
+	iVal := C.LLVMBuildLoad2(s.builder, usizeLL, iPtr, cStringFree("adopt.deep.i.load"))
+	cond := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntULT), iVal, count, cStringFree("adopt.deep.cond"))
+	C.LLVMBuildCondBr(s.builder, cond, bodyBB, exitBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, bodyBB)
+	elemIndices := []C.LLVMValueRef{iVal}
+	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, base, llvmValueSlicePtr(elemIndices), C.unsigned(len(elemIndices)), cStringFree("adopt.deep.elem"))
+	for _, of := range owned {
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, elemLLVMType, elemPtr, C.unsigned(of.index), cStringFree("adopt.deep.field"))
+		dataPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 0, cStringFree("adopt.deep.fdata.ptr"))
+		countPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 1, cStringFree("adopt.deep.fcount.ptr"))
+		capPtr := C.LLVMBuildStructGEP2(s.builder, of.darrayLL, fieldPtr, 2, cStringFree("adopt.deep.fcap.ptr"))
+		fdata := C.LLVMBuildLoad2(s.builder, ptrLL, dataPtr, cStringFree("adopt.deep.fdata"))
+		fcount := C.LLVMBuildLoad2(s.builder, usizeLL, countPtr, cStringFree("adopt.deep.fcount"))
+		fbytes, err := s.emitCheckedElemByteCount(fcount, of.elemSize, "adopt.deep.field")
+		if err != nil {
+			return err
+		}
+		fnew := s.buildCall(allocLLVMType, allocCallee, []C.LLVMValueRef{arenaValue, fbytes}, "adopt.deep.falloc")
+		if err := s.emitPackedEnumTailMemcpy(fnew, fdata, fbytes); err != nil {
+			return err
+		}
+		C.LLVMBuildStore(s.builder, fnew, dataPtr)
+		C.LLVMBuildStore(s.builder, fcount, capPtr)
+		// Recurse: a field whose elements are themselves structs with owned containers.
+		if err := s.emitDeepAdoptElementContainers(fnew, fcount, of.nested, arenaValue, allocLLVMType, allocCallee); err != nil {
+			return err
+		}
+	}
+	iNext := C.LLVMBuildAdd(s.builder, iVal, C.LLVMConstInt(usizeLL, 1, 0), cStringFree("adopt.deep.i.next"))
+	C.LLVMBuildStore(s.builder, iNext, iPtr)
+	C.LLVMBuildBr(s.builder, headerBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, exitBB)
+	return nil
+}
+
 func (s *functionState) emitPackedEnumTailPayloadValue(plan *packedEnumTailPayloadPlan, tailDataPtr C.LLVMValueRef) (C.LLVMValueRef, error) {
 	if plan == nil || plan.viewType == nil {
 		return nil, fmt.Errorf("missing packed enum tail payload plan")
