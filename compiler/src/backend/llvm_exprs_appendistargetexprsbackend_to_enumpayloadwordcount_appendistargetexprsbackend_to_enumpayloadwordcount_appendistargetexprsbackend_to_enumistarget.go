@@ -373,7 +373,17 @@ func (s *functionState) enumIsTargetPattern(expr ast.Expr) (*semantic.EnumType, 
 		if testExpr == nil || testExpr.Pattern == nil {
 			return nil, nil, nil, false
 		}
-		base, ok := s.g.result.NamedTypes[testExpr.Pattern.EnumName]
+		// Resolve through MODULE VISIBILITY, not the raw NamedTypes map: a pattern
+		// records the enum name as WRITTEN (`Expr`), while a module-scoped enum is keyed
+		// by its qualified name (`Ast.Expr`). The raw lookup therefore missed for every
+		// `module M:` enum, this function returned false, and emitIsExpr fell through to
+		// the comparable path — which tried to emit the PATTERN as a value and failed with
+		// "unsupported expression *ast.VariantTestExpr". Only bit in a VALUE position
+		// (`flag: bool = e is M.E.V(a, b)`, `return e is ...`); a condition never reaches
+		// here because directConditionPattern intercepts it first, which is why the
+		// compiler's own pervasive `if x is T.V(...)` never showed the bug.
+		// enumIsTarget, the sibling below, already resolved names this way.
+		base, _, ok := s.lookupVisibleNamedType(testExpr.Pattern.EnumName)
 		if !ok {
 			return nil, nil, nil, false
 		}
