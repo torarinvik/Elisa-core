@@ -365,6 +365,19 @@ func (s *functionState) emitMatchPatternTest(pattern ast.MatchPattern, actualVal
 		if err != nil {
 			return nil, packedPayloadValueCache{}, err
 		}
+		// Materialize the scrutinee copy HERE, before any option block exists, so the
+		// store that initializes it dominates every option. nonPackedEnumMatchTemps
+		// caches the temp POINTER but not its initializing store, so without this the
+		// FIRST option's lazy spill lands inside that option's own block and every
+		// later option reads an uninitialized slot -- binding garbage instead of the
+		// payload. The top-level match pre-seeds for exactly this reason; a nested
+		// or-pattern (`Expr.Leaf(Token.Ident(v) | Token.Keyword(v))`) is the case that
+		// had no pre-seeding of its own.
+		if orEnumType, ok := actualType.(*semantic.EnumType); ok && !orEnumType.Packed {
+			if _, err := s.prepareNonPackedEnumMatchTemp(actualValue, orEnumType); err != nil {
+				return nil, packedPayloadValueCache{}, err
+			}
+		}
 		for name, typ := range bindings {
 			if _, ok := s.lookupBinding(name); ok {
 				continue
