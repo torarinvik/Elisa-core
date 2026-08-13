@@ -93,6 +93,25 @@ func TypeIdentityKey(t Type) string {
 	return fmt.Sprintf("%T:%s", t, t.String())
 }
 
+// TypeSymbolFragment names a type for an EMITTED SYMBOL. Unlike TypeIdentityKey it does
+// NOT include Go's %T: that is this compiler's own implementation type
+// (`*semantic.StructType`), and embedding it put `semantic.StructType_BuilderTag` inside
+// public, C-visible symbols like `__impl__Builder__semantic.StructType_BuilderTag__make`.
+//
+// Two problems with that. It leaks an internal Go type name into the ABI, so renaming a
+// Go struct here silently changes every emitted symbol; and it is unreproducible by any
+// other implementation of this language — a second compiler would have to know THIS
+// compiler's Go type names to agree on a symbol.
+//
+// Identity uses (impl-set keys, type equality) keep TypeIdentityKey and its %T
+// disambiguation; only the naming sites use this.
+func TypeSymbolFragment(t Type) string {
+	if t == nil {
+		return "<nil>"
+	}
+	return t.String()
+}
+
 func StaticImplLookupKey(interfaceName string, receiver Type) string {
 	return interfaceName + "|" + TypeIdentityKey(receiver)
 }
@@ -252,7 +271,7 @@ func sanitizeStaticInterfaceSymbolFragment(value string) string {
 }
 
 func StaticImplMethodSymbolName(interfaceName string, receiver Type, methodName string) string {
-	return "__impl__" + sanitizeStaticInterfaceSymbolFragment(interfaceName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeIdentityKey(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
+	return "__impl__" + sanitizeStaticInterfaceSymbolFragment(interfaceName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeSymbolFragment(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
 }
 
 func (a *Analyzer) lookupVisibleStaticInterface(name string) (*StaticInterface, string, bool) {

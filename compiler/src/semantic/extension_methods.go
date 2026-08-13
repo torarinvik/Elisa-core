@@ -15,7 +15,7 @@ type ExtensionMethod struct {
 }
 
 func ExtensionMethodSymbolName(visibleName string, receiver Type, methodName string) string {
-	return "__ext__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeIdentityKey(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
+	return "__ext__" + sanitizeStaticInterfaceSymbolFragment(visibleName) + "__" + sanitizeStaticInterfaceSymbolFragment(TypeSymbolFragment(receiver)) + "__" + sanitizeStaticInterfaceSymbolFragment(methodName)
 }
 
 func ReceiverOverloadSymbolName(visibleName string, receiver Type, methodName string) string {
