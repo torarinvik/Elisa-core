@@ -1,9 +1,10 @@
 package semantic
 
 import (
+	"fmt"
+
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
-	"fmt"
 	"sort"
 	"strings"
 )
@@ -22,7 +23,21 @@ func (a *Analyzer) analyzeFunctionBodyStmts(body []ast.Stmt) {
 	a.overlaySizeGuards = a.overlaySizeGuards[:savedSizeGuards]
 }
 
+// analyzeFunc analyzes a function body with its type parameters left OPAQUE (the
+// template pass). See analyzeFuncWithTypeArgs for the monomorphized re-analysis.
 func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
+	a.analyzeFuncWithTypeArgs(fn, nil)
+}
+
+// analyzeFuncWithTypeArgs is analyzeFunc with the generic parameters bound to CONCRETE
+// arguments. Passing nil reproduces the template pass exactly.
+//
+// Type-directed typing rules cannot be decided on a template: `T& + n` is pointer
+// arithmetic while `i64& + n` is value arithmetic (scalarRefValueContextOperandType), so a
+// body analyzed once with T opaque records types that are wrong for the instantiation.
+// Re-analyzing per instantiation is what makes the instantiated type govern — the most
+// specific type wins, as monomorphization requires.
+func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	sym, ok := a.symbolForFuncDecl(fn)
 	if !ok || sym == nil {
 		a.errorf(fn.Pos(), "internal error: missing function symbol for %q", fn.Name)
@@ -134,7 +149,20 @@ func (a *Analyzer) analyzeFunc(fn *ast.FuncDecl) {
 	}
 	explicitDecls := a.expandedFuncDeclParams(fn)
 	allParamDecls := append([]ast.ParamDecl(nil), explicitDecls...)
-	a.withGenericParams(fn.GenericParams, nil, func() {
+	// MONOMORPHIZATION: bind the signature to the concrete arguments before the parameter
+	// symbols are defined from it. Binding only the type-parameter SCOPE is not enough —
+	// parameter symbols take their types from fnType, so without this substitution the body
+	// still sees `T&` and every type-directed rule decides as if T were unknown.
+	if len(typeArgs) != 0 && fnType != nil {
+		if bindings := funcTypeParamBindings(fn, typeArgs); len(bindings) != 0 {
+			if specialized, ok := a.substituteType(fnType, bindings, nil, nil, nil).(*FuncType); ok && specialized != nil {
+				fnType = specialized
+				a.currentFuncType = fnType
+				a.currentReturn = fnType.Return
+			}
+		}
+	}
+	a.withGenericParams(fn.GenericParams, typeArgs, func() {
 		a.withRegionParams(fn.RegionParams, func() {
 			a.withPermissionParams(fn.PermissionParams, func() {
 				a.withShapeParams(fnType.ShapeParams, func() {

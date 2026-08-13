@@ -420,3 +420,32 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		}
 	}
 }
+
+// orderedGenericTypeArgs returns the concrete type arguments in DECLARATION order, which
+// is the order semantic.withGenericParams binds them in. The bindings map is keyed by
+// parameter name and therefore unordered; ordering here keeps the analyzer's binding of
+// `T` matched to the argument the backend specialized on.
+//
+// Falls back to the declaration's own generic params when the specialized signature no
+// longer carries them (specializeFuncType clears them once bound).
+func orderedGenericTypeArgs(fnType *semantic.FuncType, decl *ast.FuncDecl, bindings map[string]semantic.Type) []semantic.Type {
+	if len(bindings) == 0 {
+		return nil
+	}
+	params := funcGenericParams(fnType)
+	if len(params) == 0 && decl != nil {
+		params = decl.GenericParams
+	}
+	args := make([]semantic.Type, 0, len(params))
+	for _, param := range params {
+		bound, ok := bindings[param.Name]
+		if !ok {
+			return nil
+		}
+		args = append(args, bound)
+	}
+	if len(args) == 0 {
+		return nil
+	}
+	return args
+}

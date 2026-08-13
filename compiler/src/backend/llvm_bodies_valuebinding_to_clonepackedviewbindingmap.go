@@ -53,6 +53,10 @@ type functionState struct {
 	diScope              C.LLVMMetadataRef
 	traceNameGlobal      C.LLVMValueRef
 	typeMap              map[string]semantic.Type
+	// specializedExprTypes overlays the expression types recorded by the TEMPLATE
+	// analysis with the ones a re-analysis produced for THIS instantiation. Empty for
+	// a non-generic body. See semantic.Result.SpecializedExprTypes.
+	specializedExprTypes map[ast.Expr]semantic.Type
 	specializedFuncTypes map[*semantic.FuncType]*semantic.FuncType
 	resultSlot           C.LLVMValueRef
 	sretReturn           bool
@@ -521,6 +525,14 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		fnType:  fnType,
 		builder: builder,
 		typeMap: typeBindings,
+	}
+	// MONOMORPHIZATION: re-analyze this body with the type parameters bound to their
+	// concrete arguments, so type-directed typing rules are decided on the INSTANTIATED
+	// type rather than on the opaque template. Without this a specialized `T& + n` keeps
+	// the pointer-arithmetic typing chosen when T was unknown, and means something
+	// different from the identical code spelled `i64&`.
+	if len(typeBindings) != 0 && g.result != nil {
+		state.specializedExprTypes = g.result.SpecializedExprTypes(decl, orderedGenericTypeArgs(fnType, decl, typeBindings))
 	}
 	// A signature-level `can[Scalar]` grants the whole body; `can Scalar:` blocks nest on top
 	// (see the CanStmt case in emitStmt).

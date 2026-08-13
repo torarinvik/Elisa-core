@@ -197,10 +197,25 @@ type Analyzer struct {
 	resolvedCastHooks            map[ast.Expr]*Symbol
 	unsafeLifetimeWidenCasts     map[*ast.CastExpr]bool
 	unsafeBufferReinterpretCasts map[*ast.CastExpr]bool
-	sentinelFuncNameCache        map[string]bool
-	loweredInitCalls             map[*ast.StructLitExpr]*ast.CallExpr
-	postfixShorthandCalls        map[*ast.CastExpr]*ast.CallExpr
-	regionStacks                 map[*ast.RegionStmt]RegionStackAssignment
+	// nulTerminatedBuffers names darray locals a `push(0)` has NUL-terminated, so a
+	// `(&buf[0]).cast[cstr]` on them is a bounded C-string, not an unbounded scan.
+	nulTerminatedBuffers map[string]bool
+	// pendingIterFillLints defers "cannot infer a safe reserve bound" until the end of the
+	// function, where the statement list is walkable and an explicit user-written
+	// `target.reserve(...)` immediately before the loop can be honoured.
+	pendingIterFillLints map[*ast.IterForStmt]string
+	// iterFillLintDecided remembers loops the post-pass already ruled on. A function body can
+	// be analyzed more than once, which would otherwise re-record a loop AFTER its walk
+	// consumed it and resurrect a lint the programmer's reserve had already silenced.
+	iterFillLintDecided map[*ast.IterForStmt]bool
+	// iterFillSuppressedAt keys the same decision by SOURCE POSITION. A file can be analyzed
+	// through more than one AST, and the safety-net flush would otherwise re-emit for the
+	// second copy a lint the first copy's walk had already silenced.
+	iterFillSuppressedAt  map[string]bool
+	sentinelFuncNameCache map[string]bool
+	loweredInitCalls      map[*ast.StructLitExpr]*ast.CallExpr
+	postfixShorthandCalls map[*ast.CastExpr]*ast.CallExpr
+	regionStacks          map[*ast.RegionStmt]RegionStackAssignment
 	// ambientGrownCalleeParamIndex maps a void-grower function name to the index (among its
 	// explicit params) of the container param whose region becomes the callee's ambient
 	// allocation region (AmbientGrownContainerRegion). Recorded by the region-param pre-pass;
@@ -849,6 +864,10 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),
 		unsafeBufferReinterpretCasts:      make(map[*ast.CastExpr]bool),
+		nulTerminatedBuffers:              make(map[string]bool),
+		pendingIterFillLints:              make(map[*ast.IterForStmt]string),
+		iterFillLintDecided:               make(map[*ast.IterForStmt]bool),
+		iterFillSuppressedAt:              make(map[string]bool),
 		loweredInitCalls:                  make(map[*ast.StructLitExpr]*ast.CallExpr, resolvedInitCallCapacity),
 		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
 		regionStacks:                      make(map[*ast.RegionStmt]RegionStackAssignment),
@@ -1009,6 +1028,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.dumpRegionLifetimeSummary()
 	}
 	analysisResult := &Result{
+		analyzer:                a,
 		SMTProfile:              a.smtStats,
 		EnforcePerfLints:        a.enforcePerfLints,
 		File:                    file,

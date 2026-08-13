@@ -16,6 +16,13 @@ import (
 )
 
 func (s *functionState) exprType(expr ast.Expr) semantic.Type {
+	// A monomorphized body's own types win over the template's: the re-analysis decided
+	// type-directed rules on the CONCRETE argument (see semantic.SpecializedExprTypes).
+	if len(s.specializedExprTypes) != 0 {
+		if specialized, ok := s.specializedExprTypes[expr]; ok && specialized != nil {
+			return specialized
+		}
+	}
 	t := s.g.exprType(expr)
 	switch n := expr.(type) {
 	case *ast.Ident:

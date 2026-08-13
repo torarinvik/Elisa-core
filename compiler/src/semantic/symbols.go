@@ -139,6 +139,9 @@ type Result struct {
 	ExportedGlobals   []*ExportedGlobal
 	EASMModules       []*easm.Module
 	Diagnostics       []Diagnostic
+	// analyzer is retained so a generic body can be RE-ANALYZED per instantiation
+	// (SpecializedExprTypes). Unexported: nothing outside this package may drive it.
+	analyzer *Analyzer
 }
 
 func (r *Result) ActiveFile() *ast.File {
