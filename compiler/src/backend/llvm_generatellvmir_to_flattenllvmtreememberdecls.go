@@ -78,6 +78,21 @@ func generateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLe
 		return "", nil, err
 	}
 	defer g.dispose()
+	// Give the module its datalayout and triple BEFORE printing. ensureTargetMachine is
+	// what sets both (LLVMSetDataLayout/LLVMSetTarget), and the textual-IR path never
+	// called it: optimizeModule returns early at -O0, and writeObjectFile is a different
+	// entry point. The header therefore appeared only when some incidental path happened to
+	// need the DataLayout — a program using pointer arithmetic got one, `def main() -> i64:
+	// return 7` did not — so `-emit llvm` output was NONDETERMINISTIC in a way no exit code
+	// could show.
+	//
+	// It is also wrong, not merely inconsistent: IR without a datalayout is interpreted with
+	// LLVM's defaults, so a module emitted under `-target-triple` carried neither the
+	// requested triple nor its layout, and any downstream opt/llc would size pointers and
+	// align types for the wrong target.
+	if err := g.ensureTargetMachine(); err != nil {
+		return "", nil, err
+	}
 	if err := g.optimizeModule(optLevel); err != nil {
 		return "", nil, err
 	}

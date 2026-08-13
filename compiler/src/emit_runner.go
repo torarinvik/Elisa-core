@@ -402,7 +402,11 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		}
 		return 0
 	case emitLLVM:
-		output, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, effectiveOptimizationLevel(options), options.packedProfile, "", false, false)
+		// `-emit llvm` DROPPED the requested target triple (it passed ""), so cross-target
+		// IR was emitted with the HOST triple and layout while `-emit obj` for the same
+		// flags correctly produced a foreign object. Every other emit path here already
+		// threads options.targetTriple.
+		output, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, false, false)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
