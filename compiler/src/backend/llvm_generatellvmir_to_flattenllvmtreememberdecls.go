@@ -4,9 +4,9 @@ package backend
 
 /*
 #cgo darwin,arm64 CFLAGS: -I/opt/homebrew/opt/llvm/include
-#cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/opt/llvm/lib -lLLVM-C -lLLVM
+#cgo darwin,arm64 LDFLAGS: -L/opt/homebrew/opt/llvm/lib -lLLVM
 #cgo darwin,amd64 CFLAGS: -I/usr/local/opt/llvm/include
-#cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM-C -lLLVM
+#cgo darwin,amd64 LDFLAGS: -L/usr/local/opt/llvm/lib -lLLVM
 #cgo linux CFLAGS: -I/usr/include -I/usr/lib/llvm-21/include -I/usr/lib/llvm-20/include -I/usr/lib/llvm-19/include -I/usr/lib/llvm-18/include -I/usr/lib/llvm-17/include -I/usr/lib/llvm-16/include -I/usr/lib/llvm-15/include
 #cgo linux LDFLAGS: -L/usr/lib/llvm-21/lib -L/usr/lib/llvm-20/lib -L/usr/lib/llvm-19/lib -L/usr/lib/llvm-18/lib -L/usr/lib/llvm-17/lib -L/usr/lib/llvm-16/lib -L/usr/lib/llvm-15/lib -lLLVM-C -lLLVM
 #cgo windows CFLAGS: -IC:/msys64/mingw64/include
@@ -67,6 +67,12 @@ func GenerateLLVMIRWithOptAndPackedLoweringProfileForTargetDebugTrace(result *se
 // loop vectorized. Build/emit drivers surface these to the user; the thinner overloads that don't
 // thread warnings out delegate here and discard them.
 func GenerateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, []string, error) {
+	output, warnings, err := generateLLVMIRWithWarnings(result, optLevel, profile, targetTriple, debugInfo, traceInfo)
+	recordBackendParityCase(result, optLevel, err)
+	return output, warnings, err
+}
+
+func generateLLVMIRWithWarnings(result *semantic.Result, optLevel OptimizationLevel, profile PackedLoweringProfile, targetTriple string, debugInfo bool, traceInfo bool) (string, []string, error) {
 	g, err := compileLLVMModuleWithTargetDebugTrace(result, optLevel, profile, targetTriple, debugInfo, traceInfo)
 	if err != nil {
 		return "", nil, err
