@@ -97,10 +97,19 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 			return 1
 		}
 		lowered := unparse.FormatFile(file)
-		outputPath := outputPathForEmit(program.filename, options.output, loweredExtension)
-		if err := writeOutputFile(outputPath, []byte(lowered)); err != nil {
-			fmt.Fprintf(stderr, "error: %s\n", err)
-			return 1
+		// Without -o this writes to STDOUT, like every other TEXT emit mode. It used to
+		// derive `<input>.lowered.elisa` via outputPathForEmit and write THERE — so
+		// `elisac -emit lowered foo.elisa` printed nothing, exited 0, and silently
+		// created a file next to the input. Running it over a fixture directory littered
+		// 53 files into the source tree. The derived-path convention belongs to the
+		// BINARY modes (.o/.bc/.a/IR), which cannot go to stdout; lowered is text.
+		if options.output != "" {
+			if err := writeOutputFile(options.output, []byte(lowered)); err != nil {
+				fmt.Fprintf(stderr, "error: %s\n", err)
+				return 1
+			}
+		} else {
+			fmt.Fprint(stdout, lowered)
 		}
 		return 0
 	case emitFmt:
