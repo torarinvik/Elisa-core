@@ -1,5 +1,42 @@
 package semantic
 
+// funcAssignableIgnoringNarrowerPermissions reports whether `src` is a function type that
+// differs from `dst` ONLY by requiring FEWER effects.
+//
+// A callback that needs a SUBSET of the permitted effects is safe wherever the wider type is
+// expected: it simply never uses the rest. The reverse must stay rejected, since that would
+// let an unaccounted effect happen. SameType requires the sets to be EQUAL, which made
+// `fn(i64) -> i64 can[Abort]` un-passable to a parameter declared
+// `fn(i64) -> i64 can[Abort, Memory]` — rejecting a sound program.
+//
+// Implemented by re-checking with src's permissions replaced by dst's, so EVERY other
+// property still goes through SameType and this cannot loosen anything else.
+func funcAssignableIgnoringNarrowerPermissions(dst, src Type) bool {
+	dstFn, ok := dst.(*FuncType)
+	if !ok || dstFn == nil {
+		return false
+	}
+	srcFn, ok := src.(*FuncType)
+	if !ok || srcFn == nil {
+		return false
+	}
+	if len(srcFn.Permissions) >= len(dstFn.Permissions) {
+		return false
+	}
+	permitted := make(map[string]bool, len(dstFn.Permissions))
+	for _, permission := range dstFn.Permissions {
+		permitted[permission] = true
+	}
+	for _, permission := range srcFn.Permissions {
+		if !permitted[permission] {
+			return false
+		}
+	}
+	widened := *srcFn
+	widened.Permissions = dstFn.Permissions
+	return SameType(dst, &widened)
+}
+
 func AssignableTo(dst, src Type) bool {
 	if dst == nil || src == nil {
 		return false
@@ -155,6 +192,12 @@ func AssignableTo(dst, src Type) bool {
 		if srcEnum, ok := StripAggregateStateType(src).(*EnumType); ok && srcEnum != dstEnum && enumDescendsFrom(srcEnum, dstEnum) {
 			return true
 		}
+	}
+	// A function value that needs FEWER effects than the position permits. Checked LAST, so
+	// every other rule decides first and this only ever accepts what SameType would have
+	// accepted but for the permission set.
+	if funcAssignableIgnoringNarrowerPermissions(dst, src) {
+		return true
 	}
 	return false
 }
