@@ -211,7 +211,9 @@ func (i *Interpreter) invokeCallValue(frame *frame, expr *ast.CallExpr, calleeVa
 			return runtimeFn.fn(positional)
 		}
 		bound := map[string]Value{}
-		if err := bindCallArgs(bound, runtimeFn.params, positional, named); err != nil {
+		if err := bindCallArgs(bound, runtimeFn.params, positional, named, func(e ast.Expr) (Value, error) {
+			return i.evalExpr(frame, e)
+		}); err != nil {
 			return VoidValue(), fmt.Errorf("%s: %w", expr.Pos(), err)
 		}
 		ordered := make([]Value, 0, len(runtimeFn.params))
@@ -359,7 +361,9 @@ func (i *Interpreter) callLambda(lambda *lambdaValue, expr *ast.CallExpr, caller
 	for name, value := range lambda.captures {
 		callFrame.locals[name] = value.Clone()
 	}
-	if err := bindCallArgs(callFrame.locals, lambda.expr.Params, positional, named); err != nil {
+	if err := bindCallArgs(callFrame.locals, lambda.expr.Params, positional, named, func(e ast.Expr) (Value, error) {
+		return i.evalExpr(callFrame, e)
+	}); err != nil {
 		return VoidValue(), fmt.Errorf("%s: %w", lambda.expr.Pos(), err)
 	}
 	if lambda.expr.BodyExpr != nil {

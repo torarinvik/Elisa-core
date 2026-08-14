@@ -510,7 +510,9 @@ func (i *Interpreter) loweredFuncParams(name string, fn *ast.FuncDecl) []ast.Par
 }
 func (i *Interpreter) callFunction(name string, fn *ast.FuncDecl, positional []Value, named map[string]Value) (Value, error) {
 	frame := &frame{locals: map[string]Value{}, namespace: interpreterNamespaceFromName(name), function: name}
-	if err := bindCallArgs(frame.locals, i.loweredFuncParams(name, fn), positional, named); err != nil {
+	if err := bindCallArgs(frame.locals, i.loweredFuncParams(name, fn), positional, named, func(e ast.Expr) (Value, error) {
+		return i.evalExpr(frame, e)
+	}); err != nil {
 		return VoidValue(), fmt.Errorf("%s: %w", fn.Pos(), err)
 	}
 	signal, err := i.execBlock(frame, fn.Body)
@@ -528,7 +530,7 @@ func (i *Interpreter) callFunction(name string, fn *ast.FuncDecl, positional []V
 func childFrame(parent *frame) *frame {
 	return &frame{locals: map[string]Value{}, parent: parent, namespace: parent.namespace, function: parent.function}
 }
-func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Value, named map[string]Value) error {
+func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Value, named map[string]Value, evalDefault func(ast.Expr) (Value, error)) error {
 	if len(named) == 0 {
 		if len(positional) != len(params) {
 			return fmt.Errorf("expected %d arguments, got %d", len(params), len(positional))
@@ -568,6 +570,19 @@ func bindCallArgs(dst map[string]Value, params []ast.ParamDecl, positional []Val
 	}
 	for _, param := range params {
 		if _, ok := dst[param.Name]; !ok {
+			// A parameter carrying a DEFAULT is not missing — it is omitted. Only the
+			// positional path filled defaults (its caller appends them), so a NAMED call that
+			// skipped a defaulted parameter errored here, and `-emit interpret` answered 111
+			// for test/repro/generic_default_argument.elisa where the fixture itself records
+			// 127. `named[i64](0, c: 9)` never bound `b`, whose default is 2.
+			if param.DefaultValue != nil && evalDefault != nil {
+				value, err := evalDefault(param.DefaultValue)
+				if err != nil {
+					return err
+				}
+				dst[param.Name] = value.Clone()
+				continue
+			}
 			return fmt.Errorf("missing argument %q", param.Name)
 		}
 	}
