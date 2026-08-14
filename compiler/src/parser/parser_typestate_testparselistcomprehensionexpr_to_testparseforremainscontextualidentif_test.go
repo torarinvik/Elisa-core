@@ -191,7 +191,12 @@ func TestParsePostfixShorthandCastRoundTripsInsideBranchHead(t *testing.T) {
 	formatted := unparse.FormatFile(file)
 	for _, want := range []string{
 		"if ((ch >= 'A') and (ch <= 'Z')):",
-		"return ((ch.i64() + 32)).char()",
+		// The INPUT spelling, unchanged — which is what this test's name asks for. It
+		// previously asserted the doubled `((ch.i64() + 32)).char()`, codifying the
+		// paren-doubling bug: a ParenExpr printed its own parens on top of the ones the
+		// inner BinaryExpr already prints, so `-emit fmt` was not idempotent and grew a
+		// pair on every pass.
+		"return (ch.i64() + 32).char()",
 	} {
 		if !strings.Contains(formatted, want) {
 			t.Fatalf("expected formatted output to contain %q, got:\n%s", want, formatted)

@@ -96,6 +96,13 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
+		// LOWER before formatting. semantic.Analyze mutates the AST in place — it desugars
+		// UFCS method calls into free calls, rewrites overloaded names to their mangled
+		// `__ovl__` form, and inserts address-of nodes. That mutation IS the lowering this
+		// mode exists to show, and skipping the pass made `-emit lowered` print the raw
+		// parse tree: identical to what a correct `-emit fmt` prints, so the mode showed
+		// nothing about lowering at all.
+		emitSemanticWarningsIfNoErrors(file, stderr)
 		lowered := unparse.FormatFile(file)
 		// Without -o this writes to STDOUT, like every other TEXT emit mode. It used to
 		// derive `<input>.lowered.elisa` via outputPathForEmit and write THERE — so
@@ -117,8 +124,15 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		if !ok {
 			return 1
 		}
-		emitSemanticWarningsIfNoErrors(file, stderr)
+		// FORMAT FIRST, then analyse. semantic.Analyze mutates the AST in place, so running
+		// it before FormatFile made the FORMATTER emit desugared code: `b.add(7)` came back
+		// as `add(b, 7)`, and an overloaded call came back as
+		// `__ovl__printr__dstr__printr(value)` — which is not user-writable syntax at all.
+		// `elisac -emit fmt` is meant to round-trip a source file, so writing its output
+		// back over the input silently rewrote the program. The warnings pass still runs,
+		// just after the text has been captured, so stderr is unchanged.
 		formatted := unparse.FormatFile(file)
+		emitSemanticWarningsIfNoErrors(file, stderr)
 		if options.output != "" {
 			if err := writeOutputFile(options.output, []byte(formatted)); err != nil {
 				fmt.Fprintf(stderr, "error: %s\n", err)

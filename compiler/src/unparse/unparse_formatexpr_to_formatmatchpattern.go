@@ -329,7 +329,18 @@ func formatExpr(expr ast.Expr) string {
 	case *ast.TypeExprExpr:
 		return formatTypeExpr(n.Type)
 	case *ast.ParenExpr:
-		return "(" + formatExpr(n.Inner) + ")"
+		// Do not double a group the inner expression already prints for itself. A
+		// BinaryExpr always emits its own surrounding parens (see the case above), so a
+		// source-written `(a + b)` parses to ParenExpr{BinaryExpr} and used to format as
+		// `((a + b))`. That made -emit fmt NON-IDEMPOTENT: re-formatting its own output
+		// added another pair every pass, `((total * 10) + i)` -> `((((total * 10)) + i))`
+		// and so on without bound.
+		inner := formatExpr(n.Inner)
+		if selfParenthesizingExpr(n.Inner) &&
+			strings.HasPrefix(inner, "(") && strings.HasSuffix(inner, ")") {
+			return inner
+		}
+		return "(" + inner + ")"
 	case *ast.RaiseExpr:
 		return "raise " + formatExpr(n.Error)
 	case *ast.TryExpr:
@@ -900,5 +911,24 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 		return line
 	default:
 		return "<pattern>"
+	}
+}
+
+// selfParenthesizingExpr reports whether formatExpr already wraps this node in its own
+// parentheses. A ParenExpr around one of these must NOT add a second pair: the source
+// `(a + b)` parses to ParenExpr{BinaryExpr} and would otherwise print `((a + b))`, so
+// each -emit fmt pass grew the output without bound and the formatter was not idempotent.
+//
+// Keep this in sync with the cases in formatExpr that return a "(" ... ")" string.
+func selfParenthesizingExpr(expr ast.Expr) bool {
+	switch node := expr.(type) {
+	case *ast.BinaryExpr:
+		return node != nil
+	case *ast.UnaryExpr:
+		return node != nil
+	case *ast.TernaryExpr:
+		return node != nil
+	default:
+		return false
 	}
 }
