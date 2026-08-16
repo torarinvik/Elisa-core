@@ -2,6 +2,8 @@ package semantic
 
 import (
 	"fmt"
+	"path/filepath"
+	"strings"
 
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
@@ -31,6 +33,30 @@ import (
 // Elisa implementation for a non-generic extern is compiled alongside the declaration,
 // the implementation's symbol replaces the extern's (defineExternImplementationGlobal),
 // so its non-extern FuncType is what reaches lowering and nothing here applies.
+
+// unitIsModuleInterface reports whether the unit under analysis is a MODULE INTERFACE
+// (`.elisai`) rather than surface source.
+//
+// The distinction matters because `extern` is overloaded (see the note above): in a
+// `.elisa` it usually declares a native C function, but every declaration in a `.elisai`
+// is an Elisa function from another Elisa unit, using Elisa's own ABI. The old heuristic
+// — "a generic extern is necessarily an interface declaration" — covers only the generic
+// half, so a NON-GENERIC interface declaration was treated as a C boundary and put
+// through the C-ABI checks.
+//
+// That made `-emit iface` produce a file the compiler then REFUSED to read: an Elisa
+// function returning `i64?` is fine, its interface declaration says `extern f() -> i64?`,
+// and re-reading that hit "return type of extern cannot be the optional type i64?".
+// Measured over test/repro, 5 of 44 generated interfaces could not be re-consumed.
+//
+// The file extension settles it exactly, with no heuristic and no effect on `.elisa`
+// sources.
+func (a *Analyzer) unitIsModuleInterface() bool {
+	if a == nil || a.file == nil {
+		return false
+	}
+	return strings.EqualFold(filepath.Ext(a.file.Filename), ".elisai")
+}
 
 // NullNichePointerPayload reports whether t lowers to a single pointer for which null is
 // not a valid value, and can therefore encode `t?` as a plain nullable C pointer.

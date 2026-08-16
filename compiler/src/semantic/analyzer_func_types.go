@@ -117,7 +117,7 @@ func (a *Analyzer) funcTypeFromDeclWithFrame(name string, typeParams []string, g
 		ExplicitParamHasDefault:   append([]bool(nil), hasDefaults...),
 		Return:                    retType,
 		Variadic:                  variadic,
-		IsNativeExtern:            isExtern && len(typeParams) == 0 && len(resolvedGenericParams) == 0,
+		IsNativeExtern:            isExtern && len(typeParams) == 0 && len(resolvedGenericParams) == 0 && !a.unitIsModuleInterface(),
 		OwnedParams:               ownedParamFlags(allParams),
 	}
 	// Strict protocol balance (body-bearing functions only — never externs, whose native body cannot be

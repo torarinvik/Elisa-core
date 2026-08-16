@@ -140,7 +140,21 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		if n.Region != "" {
 			region = " @" + n.Region
 		}
-		return prefix + formatTypeExpr(n.Elem) + suffix + region
+		// HOIST a region carried by the referent out past the `&`.
+		//
+		// The surface form is `darray[T]& @r`; resolveType's push-down then moves `@r`
+		// through the ref ONTO the container, and region-param INFERENCE stamps it there
+		// directly. Printing the post-push-down tree literally gives `darray[T] @r&`,
+		// which the parser rejects ("expected ), got &") — so `-emit iface` produced an
+		// interface file the compiler itself could not read back.
+		elem := n.Elem
+		if region == "" {
+			if hoisted, rest, ok := hoistReferentRegion(elem); ok {
+				region = " @" + hoisted
+				elem = rest
+			}
+		}
+		return prefix + formatTypeExpr(elem) + suffix + region
 	case *ast.RefStateLiteralTypeExpr:
 		return ast.RefStateMarker(n.State)
 	case *ast.RefStorageLiteralTypeExpr:
@@ -255,5 +269,43 @@ func formatRefStorage(storage ast.RefStorage) string {
 		return "static"
 	default:
 		return ""
+	}
+}
+
+// hoistReferentRegion splits a region annotation off a referent container type, returning
+// the region name and the type without it. Only the two container shapes that can carry
+// one are handled; everything else round-trips unchanged.
+//
+// The returned node is a SHALLOW COPY — the caller is a formatter and must not mutate the
+// AST it is printing.
+func hoistReferentRegion(t ast.TypeExpr) (string, ast.TypeExpr, bool) {
+	switch n := t.(type) {
+	case *ast.BuiltinTypeExpr:
+		if n == nil || n.Region == "" {
+			return "", t, false
+		}
+		stripped := *n
+		stripped.Region = ""
+		return n.Region, &stripped, true
+	case *ast.GenericType:
+		if n == nil || n.Region == "" {
+			return "", t, false
+		}
+		stripped := *n
+		stripped.Region = ""
+		return n.Region, &stripped, true
+	case *ast.MutableType:
+		if n == nil || n.Elem == nil {
+			return "", t, false
+		}
+		region, rest, ok := hoistReferentRegion(n.Elem)
+		if !ok {
+			return "", t, false
+		}
+		stripped := *n
+		stripped.Elem = rest
+		return region, &stripped, true
+	default:
+		return "", t, false
 	}
 }
