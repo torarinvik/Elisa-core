@@ -20,7 +20,12 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			path: filepath.Join(repoRoot, "Code", "test_programs", "pointer_alloc.elisa"),
 			checks: []string{
 				"%ErrUnion__MemoryError__heap_Node = type { i32, ptr }",
-				"%ErrUnion__MemoryError__int = type { i32, i64 }",
+				// Both payloads are carried BY ADDRESS, including the scalar one. A
+				// value-carrying error union is an internal descriptor rather than an
+				// inline copy (ensureErrorUnionType), so `T error[E]` stays cheap and
+				// bounded when T is a large struct or enum. This line asserted
+				// `{ i32, i64 }` from before that change.
+				"%ErrUnion__MemoryError__int = type { i32, ptr }",
 				"%Node = type { i64, ptr }",
 				"declare ptr @alloc_node()",
 				"declare ptr @sfree_node(ptr)",
@@ -46,7 +51,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "variadic_stdio",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "variadic_stdio.elisa"),
 			checks: []string{
-				"%ErrUnion__FormatError__int = type { i32, i64 }",
+				"%ErrUnion__FormatError__int = type { i32, ptr }",
 				"declare i64 @snprintf(ptr, i64, ptr, ...)",
 				"define i32 @checked_format_len(",
 				"define i64 @format_len(ptr",
@@ -87,7 +92,7 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "stack_pointers",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "stack_pointers.elisa"),
 			checks: []string{
-				"%ErrUnion__StackError__int = type { i32, i64 }",
+				"%ErrUnion__StackError__int = type { i32, ptr }",
 				"%ScratchSlot = type { i64 }",
 				"define i32 @checked_stack_slot(ptr",
 				"define i64 @stack_slot_or_zero()",
@@ -502,7 +507,11 @@ func TestRunCLICompilesFixtureProgramsToLLVM(t *testing.T) {
 			name: "fact_interface_rules",
 			path: filepath.Join(repoRoot, "Code", "test_programs", "fact_interface_rules.elisa"),
 			checks: []string{
-				"define i64 @__impl__FactBuilder__semantic.StructType_FactBuilderTag__state()",
+				// Was `__impl__FactBuilder__semantic.StructType_FactBuilderTag__state`:
+				// the mangler used to render the receiver through its GO type, leaking
+				// `semantic.StructType` into an emitted symbol name. That leak is fixed,
+				// so this pins the clean mangling — and would fail again if it returned.
+				"define i64 @__impl__FactBuilder__FactBuilderTag__state()",
 				"define i64 @fact_interface_rules__FactBuilderTag(",
 				"define i64 @fact_interface_concrete(",
 			},
