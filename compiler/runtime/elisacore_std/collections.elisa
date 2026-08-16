@@ -110,15 +110,22 @@ def collections_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
     trusted Unsafe.PointerCast:
         return items.cast[mutable void&]
 
+# `T& + n` is VALUE arithmetic for a scalar referent, by design: a scalar ref
+# derefs for +/- so `for ref x in nums: x + 1` means the number, not the address
+# (scalarRefValueContextOperandType). Only `u8&` is exempt as the byte-pointer
+# case. So stepping a generic `T&` has to go through a byte pointer and scale by
+# size_of(T) explicitly — writing `items + index` compiled to "load the element,
+# add the index, treat the SUM as an address", which for a deque of i64 holding
+# {1, 2} produced the pointer 0x1.
 @internal
 def collections_void_from_items_at[T](items: T&, index: usize) -> void&:
     trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
-        return (items + index).cast[void&]
+        return (items.cast[u8&] + index * size_of(T)).cast[void&]
 
 @internal
 def collections_mutable_void_from_items_at[T](items: mutable T&, index: usize) -> mutable void&:
     trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
-        return (items + index).cast[mutable void&]
+        return (items.cast[mutable u8&] + index * size_of(T)).cast[mutable void&]
 
 @internal
 def collections_void_from_data_at(data: void&, offset: usize) -> void&:
