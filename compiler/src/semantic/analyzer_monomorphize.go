@@ -61,9 +61,26 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	return overlay
 }
 
-// funcTypeParamBindings pairs a declaration's generic TYPE parameters with concrete
-// arguments, in declaration order. Non-type generic parameters (const/error-set) are
-// skipped: they are bound by their own scopes, not by type substitution.
+// funcTypeParamBindings pairs a declaration's generic parameters with concrete arguments,
+// in declaration order.
+//
+// VALUE (const) parameters are bound here too. The old rule skipped them — "bound by their
+// own scopes, not by type substitution" — but substitution is exactly what consumes them:
+// substituteTypeWithDepth's ArrayType branch resolves `n.ConstParam` by looking it up in
+// THIS map and expecting a *ConstValueType. Skipping them left the re-analysed body
+// holding `Box[i64, N]` with N unresolved, so the backend lowered an opaque instance and
+// emitted `GEP into unsized type!` — invalid IR for a program the analyzer accepted:
+//
+//     struct Box[T, N: usize]:
+//         items: mutable T[N]
+//     def box_len[T, N: usize](b: mutable Box[T, N]&) -> usize: ...
+//
+// That is what made elisacore_std's own InlineVec[T, N] uncompilable.
+//
+// The cursor now advances for EVERY generic parameter, not just the ones that get bound.
+// typeArgs is built over the whole parameter list (orderedGenericTypeArgs), so skipping a
+// parameter without advancing misaligned every argument after it: `[N: usize, T]` bound T
+// to the CONST argument. `[T, N]` only worked because the skipped parameter was last.
 func funcTypeParamBindings(fn *ast.FuncDecl, typeArgs []Type) map[string]Type {
 	if fn == nil || len(typeArgs) == 0 {
 		return nil
@@ -71,16 +88,17 @@ func funcTypeParamBindings(fn *ast.FuncDecl, typeArgs []Type) map[string]Type {
 	bindings := map[string]Type{}
 	next := 0
 	for _, param := range fn.GenericParams {
-		if param.Kind != ast.GenericParamType {
-			continue
-		}
 		if next >= len(typeArgs) {
 			break
 		}
-		if typeArgs[next] != nil {
-			bindings[param.Name] = typeArgs[next]
-		}
+		arg := typeArgs[next]
 		next++
+		switch param.Kind {
+		case ast.GenericParamType, ast.GenericParamValue:
+			if arg != nil {
+				bindings[param.Name] = arg
+			}
+		}
 	}
 	if len(bindings) == 0 {
 		for i, name := range fn.TypeParams {
