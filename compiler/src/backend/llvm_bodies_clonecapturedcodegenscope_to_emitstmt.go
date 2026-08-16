@@ -638,10 +638,19 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		if err != nil {
 			return err
 		}
-		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
-		if s.g.di != nil {
-			s.g.di.declareVariable(s, n.Name, alloca, declType, n.Pos().Line, 0)
-		}
+		// The binding comes into scope AFTER its initializer is emitted, not before.
+		//
+		// A declaration that SHADOWS an outer local reads the outer one in its own
+		// initializer — `i = i + 1` inside a loop body means "declare a new i, one more
+		// than the enclosing i". Defining the binding first made `i` inside the
+		// initializer resolve to the slot being declared, which nothing has stored to
+		// yet: the emitted IR loads the fresh alloca, so the new local is
+		// uninitialized-memory + 1 and the OUTER i never changes.
+		//
+		// Measured on `def main() -> i64: i: mutable i64 = 0; while i < 3: i = i + 1;
+		// return i`: the INTERPRETER answers 3 and the native binary loops forever. Two
+		// answers from one compiler, and the interpreter's is the correct one — a
+		// declaration's initializer belongs to the enclosing scope.
 		var initValue C.LLVMValueRef
 		if n.Value != nil {
 			// If this local is a stack-tagged darray, tell a seeded container initializer to
@@ -670,6 +679,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {
 				return err
 			}
+		}
+		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
+		if s.g.di != nil {
+			s.g.di.declareVariable(s, n.Name, alloca, declType, n.Pos().Line, 0)
 		}
 		s.bindImplicitTreeOwnerParam(n.Name, declType, alloca, initValue)
 		if s.g.trace != nil {
