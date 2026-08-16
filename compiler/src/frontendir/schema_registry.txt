@@ -1,0 +1,1756 @@
+# Frontend IR (.elisair) schema ID registry — COMMITTED, APPEND-ONLY.
+#
+# Regenerate with `go run ./src/frontendir/gen`, which only ever ADDS entries.
+# Never renumber and never reuse an ID: a retired name keeps its line so its ID
+# stays retired. TestSchemaMatchesRegistry enforces both.
+#
+#   T <id> <TypeName>
+#   F <TypeName> <id> <FieldName>
+
+T 1 AddrOfExpr
+F AddrOfExpr 1 Operand
+F AddrOfExpr 2 Position
+
+T 2 AdoptStmt
+F AdoptStmt 1 Child
+F AdoptStmt 2 Parent
+F AdoptStmt 3 Position
+
+T 3 AggregateStateTypeExpr
+F AggregateStateTypeExpr 1 Base
+F AggregateStateTypeExpr 2 Position
+F AggregateStateTypeExpr 3 State
+F AggregateStateTypeExpr 4 States
+
+T 4 AliasDecl
+F AliasDecl 1 Name
+F AliasDecl 2 Position
+F AliasDecl 3 Refs
+
+T 5 AlignofExpr
+F AlignofExpr 1 Position
+F AlignofExpr 2 Type
+
+T 6 AllocExpr
+F AllocExpr 1 AutoRegion
+F AllocExpr 2 ExplicitAutoRegion
+F AllocExpr 3 Owner
+F AllocExpr 4 Position
+F AllocExpr 5 Value
+
+T 7 Annotation
+F Annotation 1 Args
+F Annotation 2 Name
+F Annotation 3 Position
+
+T 8 ArrayType
+F ArrayType 1 Elem
+F ArrayType 2 Position
+F ArrayType 3 Size
+
+T 9 AsRefAssignStmt
+F AsRefAssignStmt 1 AsKind
+F AsRefAssignStmt 2 Position
+F AsRefAssignStmt 3 Target
+F AsRefAssignStmt 4 Value
+
+T 10 AssertByStmt
+F AssertByStmt 1 Cond
+F AssertByStmt 2 Position
+F AssertByStmt 3 Proof
+F AssertByStmt 4 Scoped
+F AssertByStmt 5 ScopedTheory
+
+T 11 AssertHoleStmt
+F AssertHoleStmt 1 Position
+
+T 12 AssignStmt
+F AssignStmt 1 ArgManifest
+F AssignStmt 2 AsOverlayCall
+F AssignStmt 3 FastMath
+F AssignStmt 4 Optional
+F AssignStmt 5 Position
+F AssignStmt 6 Target
+F AssignStmt 7 Value
+
+T 13 AssociatedTypeDecl
+F AssociatedTypeDecl 1 DefaultType
+F AssociatedTypeDecl 2 Name
+F AssociatedTypeDecl 3 Position
+
+T 14 AugAssignStmt
+F AugAssignStmt 1 Op
+F AugAssignStmt 2 Position
+F AugAssignStmt 3 Target
+F AugAssignStmt 4 Value
+
+T 15 BinaryExpr
+F BinaryExpr 1 Left
+F BinaryExpr 2 LoweredCall
+F BinaryExpr 3 Op
+F BinaryExpr 4 Position
+F BinaryExpr 5 Right
+
+T 16 BitGroupDecl
+F BitGroupDecl 1 Kind
+F BitGroupDecl 2 Members
+F BitGroupDecl 3 Position
+
+T 17 BitGroupMemberDecl
+F BitGroupMemberDecl 1 Name
+F BitGroupMemberDecl 2 Position
+F BitGroupMemberDecl 3 Type
+
+T 18 BoolLit
+F BoolLit 1 Position
+F BoolLit 2 Value
+
+T 19 BreakStmt
+F BreakStmt 1 Position
+
+T 20 BuiltinTypeExpr
+F BuiltinTypeExpr 1 Name
+F BuiltinTypeExpr 2 Position
+F BuiltinTypeExpr 3 Region
+F BuiltinTypeExpr 4 TypeArgs
+F BuiltinTypeExpr 5 ValueArgs
+
+T 21 CallArgItem
+F CallArgItem 1 ArgIndex
+F CallArgItem 2 Position
+
+T 22 CallExpr
+F CallExpr 1 ArgForwardPos
+F CallExpr 2 ArgItemOrder
+F CallExpr 3 ArgNames
+F CallExpr 4 ArgShorthand
+F CallExpr 5 Args
+F CallExpr 6 Func
+F CallExpr 7 HasArgForward
+F CallExpr 8 LmutRebindClaims
+F CallExpr 9 LmutThreadEffect
+F CallExpr 10 Position
+F CallExpr 11 ResolvedArgs
+F CallExpr 12 ResolvedArgsValid
+F CallExpr 13 ResolvedCommonArgs
+F CallExpr 14 ResolvedImplicitArgs
+F CallExpr 15 ResolvedImplicitArgsValid
+F CallExpr 16 Safe
+F CallExpr 17 SafeConcurrencySugar
+F CallExpr 18 SafeReceiver
+
+T 23 CanExpr
+F CanExpr 1 Expr
+F CanExpr 2 Permissions
+F CanExpr 3 Position
+F CanExpr 4 SuppressPermissionInference
+
+T 24 CanStmt
+F CanStmt 1 As
+F CanStmt 2 Body
+F CanStmt 3 Permissions
+F CanStmt 4 Position
+F CanStmt 5 SuppressPermissionInference
+
+T 25 CastExpr
+F CastExpr 1 Operand
+F CastExpr 2 Origin
+F CastExpr 3 Position
+F CastExpr 4 RefShorthand
+F CastExpr 5 Target
+
+T 26 CatchArm
+F CatchArm 1 Body
+F CatchArm 2 ErrorBinding
+F CatchArm 3 Name
+F CatchArm 4 Payload
+F CatchArm 5 Position
+
+T 27 CatchExpr
+F CatchExpr 1 Arms
+F CatchExpr 2 Position
+F CatchExpr 3 Success
+F CatchExpr 4 Value
+
+T 28 CharLit
+F CharLit 1 Position
+F CharLit 2 Value
+
+T 29 CharsetDecl
+F CharsetDecl 1 Name
+F CharsetDecl 2 Position
+F CharsetDecl 3 Terms
+
+T 30 CheckpointStmt
+F CheckpointStmt 1 Body
+F CheckpointStmt 2 Name
+F CheckpointStmt 3 Position
+F CheckpointStmt 4 Target
+
+T 31 ConstDecl
+F ConstDecl 1 Name
+F ConstDecl 2 Position
+F ConstDecl 3 Type
+F ConstDecl 4 Value
+
+T 32 ConstEnumDecl
+F ConstEnumDecl 1 Members
+F ConstEnumDecl 2 Name
+F ConstEnumDecl 3 Position
+F ConstEnumDecl 4 Storage
+
+T 33 ConstEnumMemberDecl
+F ConstEnumMemberDecl 1 Name
+F ConstEnumMemberDecl 2 Position
+F ConstEnumMemberDecl 3 Value
+
+T 34 ContinueStmt
+F ContinueStmt 1 Position
+
+T 35 ContractInclude
+F ContractInclude 1 Args
+F ContractInclude 2 Law
+F ContractInclude 3 Position
+
+T 36 ContractStmt
+F ContractStmt 1 Cond
+F ContractStmt 2 Kind
+F ContractStmt 3 Position
+F ContractStmt 4 Proof
+F ContractStmt 5 ScopedProof
+F ContractStmt 6 UsesArgs
+F ContractStmt 7 UsesName
+F ContractStmt 8 UsesTypeArgs
+F ContractStmt 9 WildReason
+
+T 37 DeferStmt
+F DeferStmt 1 Body
+F DeferStmt 2 Mode
+F DeferStmt 3 Position
+
+T 38 DerivedStateDecl
+F DerivedStateDecl 1 Condition
+F DerivedStateDecl 2 Position
+F DerivedStateDecl 3 StateName
+
+T 39 DestroyStmt
+F DestroyStmt 1 Name
+F DestroyStmt 2 Position
+
+T 40 DiscardStmt
+F DiscardStmt 1 Position
+F DiscardStmt 2 Value
+
+T 41 ElifClause
+F ElifClause 1 Body
+F ElifClause 2 Cond
+F ElifClause 3 Hint
+F ElifClause 4 Position
+
+T 42 EmitExpr
+F EmitExpr 1 All
+F EmitExpr 2 Nothing
+F EmitExpr 3 Position
+F EmitExpr 4 Value
+
+T 43 EnsuresClause
+F EnsuresClause 1 Condition
+F EnsuresClause 2 Kind
+F EnsuresClause 3 Position
+F EnsuresClause 4 RefState
+F EnsuresClause 5 RefinementArgs
+F EnsuresClause 6 RefinementLaw
+F EnsuresClause 7 StateCases
+F EnsuresClause 8 Target
+
+T 44 EnsuresCondition
+F EnsuresCondition 1 Kind
+F EnsuresCondition 2 Position
+F EnsuresCondition 3 ReturnBool
+
+T 45 EnsuresPath
+F EnsuresPath 1 Fields
+F EnsuresPath 2 Position
+F EnsuresPath 3 Root
+
+T 46 EnumColumnExpr
+F EnumColumnExpr 1 Enum
+F EnumColumnExpr 2 Field
+F EnumColumnExpr 3 Position
+
+T 47 EnumDecl
+F EnumDecl 1 Annotations
+F EnumDecl 2 Common
+F EnumDecl 3 IndexWidth
+F EnumDecl 4 Layout
+F EnumDecl 5 LayoutSet
+F EnumDecl 6 LayoutSparse
+F EnumDecl 7 Name
+F EnumDecl 8 Packed
+F EnumDecl 9 Parent
+F EnumDecl 10 Position
+F EnumDecl 11 Variants
+
+T 48 EnumPayloadDecl
+F EnumPayloadDecl 1 Name
+F EnumPayloadDecl 2 Position
+F EnumPayloadDecl 3 Relation
+F EnumPayloadDecl 4 Type
+
+T 49 EnumVariantDecl
+F EnumVariantDecl 1 Name
+F EnumVariantDecl 2 Payload
+F EnumVariantDecl 3 Position
+
+T 50 ErrorDecl
+F ErrorDecl 1 Name
+F ErrorDecl 2 Position
+F ErrorDecl 3 Tags
+
+T 51 ErrorSetExpr
+F ErrorSetExpr 1 HasEllipsis
+F ErrorSetExpr 2 Position
+F ErrorSetExpr 3 Tags
+
+T 52 ErrorTagExpr
+F ErrorTagExpr 1 Family
+F ErrorTagExpr 2 Position
+F ErrorTagExpr 3 SetName
+F ErrorTagExpr 4 Tag
+
+T 53 ErrorUnionTypeExpr
+F ErrorUnionTypeExpr 1 Errors
+F ErrorUnionTypeExpr 2 Position
+F ErrorUnionTypeExpr 3 Value
+
+T 54 ErrorVariantDecl
+F ErrorVariantDecl 1 Name
+F ErrorVariantDecl 2 Payload
+F ErrorVariantDecl 3 Position
+
+T 55 ExpectPatternStmt
+F ExpectPatternStmt 1 Patterns
+F ExpectPatternStmt 2 Position
+F ExpectPatternStmt 3 Value
+
+T 56 ExportFuncDecl
+F ExportFuncDecl 1 Name
+F ExportFuncDecl 2 Params
+F ExportFuncDecl 3 Position
+F ExportFuncDecl 4 ReturnType
+F ExportFuncDecl 5 TargetName
+F ExportFuncDecl 6 TargetTypeArgs
+
+T 57 ExportGlobalDecl
+F ExportGlobalDecl 1 Alias
+F ExportGlobalDecl 2 Position
+F ExportGlobalDecl 3 TargetName
+
+T 58 ExportTypeDecl
+F ExportTypeDecl 1 Alias
+F ExportTypeDecl 2 ExportedType
+F ExportTypeDecl 3 Position
+
+T 59 ExprBlock
+F ExprBlock 1 Captures
+F ExprBlock 2 Position
+F ExprBlock 3 Stmts
+F ExprBlock 4 Value
+
+T 60 ExprStmt
+F ExprStmt 1 Expr
+F ExprStmt 2 Position
+
+T 61 ExternFuncDecl
+F ExternFuncDecl 1 Annotations
+F ExternFuncDecl 2 Changes
+F ExternFuncDecl 3 EnsureValues
+F ExternFuncDecl 4 Ensures
+F ExternFuncDecl 5 GenericParams
+F ExternFuncDecl 6 Name
+F ExternFuncDecl 7 Override
+F ExternFuncDecl 8 Params
+F ExternFuncDecl 9 PermissionParams
+F ExternFuncDecl 10 Permissions
+F ExternFuncDecl 11 Position
+F ExternFuncDecl 12 Preserves
+F ExternFuncDecl 13 RegionParams
+F ExternFuncDecl 14 Requires
+F ExternFuncDecl 15 ReturnType
+F ExternFuncDecl 16 TypeParams
+F ExternFuncDecl 17 Uses
+F ExternFuncDecl 18 Variadic
+
+T 62 ExternTypeDecl
+F ExternTypeDecl 1 Annotations
+F ExternTypeDecl 2 Name
+F ExternTypeDecl 3 Position
+
+T 63 ExternVarDecl
+F ExternVarDecl 1 Annotations
+F ExternVarDecl 2 Name
+F ExternVarDecl 3 Position
+F ExternVarDecl 4 Type
+
+T 64 FieldDecl
+F FieldDecl 1 Annotations
+F FieldDecl 2 BitGroup
+F FieldDecl 3 DefaultValue
+F FieldDecl 4 Ghost
+F FieldDecl 5 IsTail
+F FieldDecl 6 Mutable
+F FieldDecl 7 Name
+F FieldDecl 8 Position
+F FieldDecl 9 Type
+
+T 65 FieldExpr
+F FieldExpr 1 Field
+F FieldExpr 2 Object
+F FieldExpr 3 Position
+F FieldExpr 4 Safe
+
+T 66 File
+F File 1 DeclVisibility
+F File 2 Decls
+F File 3 Filename
+
+T 67 FloatLit
+F FloatLit 1 Position
+F FloatLit 2 Suffix
+F FloatLit 3 Value
+
+T 68 FoldExpr
+F FoldExpr 1 Arms
+F FoldExpr 2 Keyword
+F FoldExpr 3 Position
+F FoldExpr 4 ResultType
+F FoldExpr 5 RewriteDefault
+F FoldExpr 6 Root
+F FoldExpr 7 Value
+
+T 69 ForStmt
+F ForStmt 1 AutovecExpected
+F ForStmt 2 AutovecReason
+F ForStmt 3 Body
+F ForStmt 4 End
+F ForStmt 5 Name
+F ForStmt 6 Op
+F ForStmt 7 Position
+F ForStmt 8 PreReserve
+F ForStmt 9 PreReserves
+F ForStmt 10 Reverse
+F ForStmt 11 Start
+F ForStmt 12 Step
+
+T 70 FulfillsClause
+F FulfillsClause 1 Law
+F FulfillsClause 2 Param
+F FulfillsClause 3 Position
+
+T 71 FuncDecl
+F FuncDecl 1 AmbientGrownContainerRegion
+F FuncDecl 2 Annotations
+F FuncDecl 3 Body
+F FuncDecl 4 Changes
+F FuncDecl 5 ContractIncludes
+F FuncDecl 6 Decreases
+F FuncDecl 7 DecreasesWild
+F FuncDecl 8 EnsureProofs
+F FuncDecl 9 EnsureValues
+F FuncDecl 10 Ensures
+F FuncDecl 11 Forbids
+F FuncDecl 12 Fulfills
+F FuncDecl 13 GenericParams
+F FuncDecl 14 Includes
+F FuncDecl 15 IsContract
+F FuncDecl 16 IsGhost
+F FuncDecl 17 IsLaw
+F FuncDecl 18 IsLemma
+F FuncDecl 19 LmutThreadSlots
+F FuncDecl 20 Name
+F FuncDecl 21 Override
+F FuncDecl 22 ParamContracts
+F FuncDecl 23 Params
+F FuncDecl 24 PermissionParams
+F FuncDecl 25 Permissions
+F FuncDecl 26 Position
+F FuncDecl 27 Preserves
+F FuncDecl 28 RegionParams
+F FuncDecl 29 Requires
+F FuncDecl 30 RequiresProofs
+F FuncDecl 31 ReturnType
+F FuncDecl 32 Static
+F FuncDecl 33 TypeParams
+F FuncDecl 34 Uses
+
+T 72 FuncTypeExpr
+F FuncTypeExpr 1 Params
+F FuncTypeExpr 2 Permissions
+F FuncTypeExpr 3 Position
+F FuncTypeExpr 4 Return
+F FuncTypeExpr 5 Variadic
+
+T 73 GenericParam
+F GenericParam 1 InterfaceBound
+F GenericParam 2 Kind
+F GenericParam 3 Name
+F GenericParam 4 Position
+F GenericParam 5 StateCases
+F GenericParam 6 StateOwner
+
+T 74 GenericType
+F GenericType 1 Args
+F GenericType 2 Name
+F GenericType 3 Position
+F GenericType 4 Region
+
+T 75 GenericValueArgTypeExpr
+F GenericValueArgTypeExpr 1 Position
+F GenericValueArgTypeExpr 2 Value
+
+T 76 GetExpr
+F GetExpr 1 Fallback
+F GetExpr 2 Position
+F GetExpr 3 Recovery
+F GetExpr 4 Value
+
+T 77 GlobalDecl
+F GlobalDecl 1 Mutable
+F GlobalDecl 2 Name
+F GlobalDecl 3 Position
+F GlobalDecl 4 Type
+F GlobalDecl 5 Value
+
+T 78 GrammarAliasDecl
+F GrammarAliasDecl 1 Name
+F GrammarAliasDecl 2 Params
+F GrammarAliasDecl 3 Position
+F GrammarAliasDecl 4 Term
+
+T 79 GrammarApplyArg
+F GrammarApplyArg 1 Name
+F GrammarApplyArg 2 Position
+F GrammarApplyArg 3 Term
+
+T 80 GrammarApplyTerm
+F GrammarApplyTerm 1 Args
+F GrammarApplyTerm 2 Direct
+F GrammarApplyTerm 3 Name
+F GrammarApplyTerm 4 Piped
+F GrammarApplyTerm 5 Position
+
+T 81 GrammarAssignTerm
+F GrammarAssignTerm 1 Name
+F GrammarAssignTerm 2 Position
+F GrammarAssignTerm 3 Term
+
+T 82 GrammarAttemptTerm
+F GrammarAttemptTerm 1 Expr
+F GrammarAttemptTerm 2 Position
+
+T 83 GrammarBindTerm
+F GrammarBindTerm 1 Name
+F GrammarBindTerm 2 Position
+F GrammarBindTerm 3 Term
+
+T 84 GrammarCallTerm
+F GrammarCallTerm 1 Args
+F GrammarCallTerm 2 Explicit
+F GrammarCallTerm 3 Name
+F GrammarCallTerm 4 Position
+
+T 85 GrammarChannelDecl
+F GrammarChannelDecl 1 Default
+F GrammarChannelDecl 2 Name
+F GrammarChannelDecl 3 Position
+F GrammarChannelDecl 4 Type
+
+T 86 GrammarChoiceTerm
+F GrammarChoiceTerm 1 Options
+F GrammarChoiceTerm 2 Position
+
+T 87 GrammarConcatTerm
+F GrammarConcatTerm 1 Position
+F GrammarConcatTerm 2 Terms
+
+T 88 GrammarCutTerm
+F GrammarCutTerm 1 Position
+
+T 89 GrammarDecl
+F GrammarDecl 1 AdvanceFunc
+F GrammarDecl 2 AllocExpr
+F GrammarDecl 3 Channels
+F GrammarDecl 4 CurrentFunc
+F GrammarDecl 5 CursorExpr
+F GrammarDecl 6 EOFExpr
+F GrammarDecl 7 EnvType
+F GrammarDecl 8 ErrorType
+F GrammarDecl 9 ExpectFunc
+F GrammarDecl 10 ExpectKindFunc
+F GrammarDecl 11 Extend
+F GrammarDecl 12 GenericParams
+F GrammarDecl 13 GrammarAliases
+F GrammarDecl 14 GrammarFns
+F GrammarDecl 15 InfixTables
+F GrammarDecl 16 Name
+F GrammarDecl 17 OverType
+F GrammarDecl 18 PermissionParams
+F GrammarDecl 19 Position
+F GrammarDecl 20 Productions
+F GrammarDecl 21 RecordErrorFunc
+F GrammarDecl 22 RecoveryPolicies
+F GrammarDecl 23 RegionParams
+F GrammarDecl 24 TokenAliases
+F GrammarDecl 25 TokenEnumName
+F GrammarDecl 26 TokenEnumStorage
+F GrammarDecl 27 TokenKindField
+F GrammarDecl 28 TokenKindType
+F GrammarDecl 29 TokenLookupCompareFunc
+F GrammarDecl 30 TokenLookupFunc
+F GrammarDecl 31 TokenSets
+F GrammarDecl 32 TypeParams
+F GrammarDecl 33 Uses
+F GrammarDecl 34 UsingType
+
+T 90 GrammarDelimitedTerm
+F GrammarDelimitedTerm 1 Body
+F GrammarDelimitedTerm 2 Close
+F GrammarDelimitedTerm 3 Message
+F GrammarDelimitedTerm 4 Open
+F GrammarDelimitedTerm 5 Position
+
+T 91 GrammarDynamicClimbTerm
+F GrammarDynamicClimbTerm 1 MinPrecName
+F GrammarDynamicClimbTerm 2 Position
+F GrammarDynamicClimbTerm 3 Spec
+F GrammarDynamicClimbTerm 4 TableName
+
+T 92 GrammarDynamicInfixSpec
+F GrammarDynamicInfixSpec 1 Atom
+F GrammarDynamicInfixSpec 2 Combine
+F GrammarDynamicInfixSpec 3 CombineParams
+F GrammarDynamicInfixSpec 4 FixityRef
+F GrammarDynamicInfixSpec 5 ReturnType
+
+T 93 GrammarEmptyTerm
+F GrammarEmptyTerm 1 Position
+F GrammarEmptyTerm 2 Type
+
+T 94 GrammarEnvDecl
+F GrammarEnvDecl 1 AdvanceFunc
+F GrammarEnvDecl 2 AllocExpr
+F GrammarEnvDecl 3 CurrentFunc
+F GrammarEnvDecl 4 CursorExpr
+F GrammarEnvDecl 5 EOFExpr
+F GrammarEnvDecl 6 ErrorType
+F GrammarEnvDecl 7 ExpectFunc
+F GrammarEnvDecl 8 ExpectKindFunc
+F GrammarEnvDecl 9 Name
+F GrammarEnvDecl 10 OverType
+F GrammarEnvDecl 11 Position
+F GrammarEnvDecl 12 RecordErrorFunc
+F GrammarEnvDecl 13 TokenGrammarName
+F GrammarEnvDecl 14 TokenKindField
+F GrammarEnvDecl 15 TokenKindType
+F GrammarEnvDecl 16 UsingType
+
+T 95 GrammarExprTerm
+F GrammarExprTerm 1 Expr
+F GrammarExprTerm 2 Position
+F GrammarExprTerm 3 Type
+
+T 96 GrammarFirstTerm
+F GrammarFirstTerm 1 Name
+F GrammarFirstTerm 2 Position
+
+T 97 GrammarFlatRepeatTerm
+F GrammarFlatRepeatTerm 1 Elem
+F GrammarFlatRepeatTerm 2 Position
+F GrammarFlatRepeatTerm 3 Until
+
+T 98 GrammarFnDecl
+F GrammarFnDecl 1 GenericParams
+F GrammarFnDecl 2 Name
+F GrammarFnDecl 3 Params
+F GrammarFnDecl 4 Position
+F GrammarFnDecl 5 Return
+F GrammarFnDecl 6 Shorthand
+F GrammarFnDecl 7 Terms
+F GrammarFnDecl 8 TypeCtor
+F GrammarFnDecl 9 TypeParams
+
+T 99 GrammarFnParam
+F GrammarFnParam 1 Default
+F GrammarFnParam 2 DefaultExpr
+F GrammarFnParam 3 Name
+F GrammarFnParam 4 Position
+F GrammarFnParam 5 Type
+
+T 100 GrammarFnType
+F GrammarFnType 1 Kind
+F GrammarFnType 2 Position
+F GrammarFnType 3 Result
+
+T 101 GrammarGuardTerm
+F GrammarGuardTerm 1 Cond
+F GrammarGuardTerm 2 Position
+
+T 102 GrammarInfixTableDecl
+F GrammarInfixTableDecl 1 Dynamic
+F GrammarInfixTableDecl 2 Levels
+F GrammarInfixTableDecl 3 Name
+F GrammarInfixTableDecl 4 Position
+F GrammarInfixTableDecl 5 Result
+
+T 103 GrammarInfixTableTerm
+F GrammarInfixTableTerm 1 Position
+F GrammarInfixTableTerm 2 TableName
+
+T 104 GrammarListTerm
+F GrammarListTerm 1 Elem
+F GrammarListTerm 2 Position
+F GrammarListTerm 3 Separator
+F GrammarListTerm 4 Until
+
+T 105 GrammarLookaheadTerm
+F GrammarLookaheadTerm 1 Position
+F GrammarLookaheadTerm 2 Term
+
+T 106 GrammarMatchArm
+F GrammarMatchArm 1 Patterns
+F GrammarMatchArm 2 Position
+F GrammarMatchArm 3 Term
+
+T 107 GrammarMatchTerm
+F GrammarMatchTerm 1 Arms
+F GrammarMatchTerm 2 Position
+F GrammarMatchTerm 3 Value
+
+T 108 GrammarOptionalTerm
+F GrammarOptionalTerm 1 Position
+F GrammarOptionalTerm 2 Term
+
+T 109 GrammarPassTerm
+F GrammarPassTerm 1 Position
+
+T 110 GrammarPostfixArm
+F GrammarPostfixArm 1 Bindings
+F GrammarPostfixArm 2 Block
+F GrammarPostfixArm 3 Op
+F GrammarPostfixArm 4 OpName
+F GrammarPostfixArm 5 Position
+F GrammarPostfixArm 6 Value
+
+T 111 GrammarPostfixTerm
+F GrammarPostfixTerm 1 Arms
+F GrammarPostfixTerm 2 LeftName
+F GrammarPostfixTerm 3 Position
+F GrammarPostfixTerm 4 Seed
+
+T 112 GrammarPrecedenceArm
+F GrammarPrecedenceArm 1 Bindings
+F GrammarPrecedenceArm 2 Block
+F GrammarPrecedenceArm 3 Op
+F GrammarPrecedenceArm 4 OpName
+F GrammarPrecedenceArm 5 Position
+F GrammarPrecedenceArm 6 Value
+
+T 113 GrammarPrecedenceLevel
+F GrammarPrecedenceLevel 1 Arms
+F GrammarPrecedenceLevel 2 Assoc
+F GrammarPrecedenceLevel 3 LeftName
+F GrammarPrecedenceLevel 4 Name
+F GrammarPrecedenceLevel 5 Position
+F GrammarPrecedenceLevel 6 Seed
+
+T 114 GrammarPrecedenceTerm
+F GrammarPrecedenceTerm 1 Arms
+F GrammarPrecedenceTerm 2 Assoc
+F GrammarPrecedenceTerm 3 LeftName
+F GrammarPrecedenceTerm 4 Levels
+F GrammarPrecedenceTerm 5 Position
+F GrammarPrecedenceTerm 6 Result
+F GrammarPrecedenceTerm 7 Seed
+
+T 115 GrammarProductionDecl
+F GrammarProductionDecl 1 Append
+F GrammarProductionDecl 2 Channels
+F GrammarProductionDecl 3 ExternalHost
+F GrammarProductionDecl 4 HasParamList
+F GrammarProductionDecl 5 Name
+F GrammarProductionDecl 6 Params
+F GrammarProductionDecl 7 Position
+F GrammarProductionDecl 8 Public
+F GrammarProductionDecl 9 RecoverMsg
+F GrammarProductionDecl 10 RecoverPolicy
+F GrammarProductionDecl 11 RecoverUntil
+F GrammarProductionDecl 12 RecoverValue
+F GrammarProductionDecl 13 ReturnType
+F GrammarProductionDecl 14 Terms
+
+T 116 GrammarRecoverTerm
+F GrammarRecoverTerm 1 Position
+F GrammarRecoverTerm 2 RecoverMsg
+F GrammarRecoverTerm 3 RecoverPolicy
+F GrammarRecoverTerm 4 RecoverUntil
+F GrammarRecoverTerm 5 RecoverValue
+F GrammarRecoverTerm 6 Term
+
+T 117 GrammarRecoveryDecl
+F GrammarRecoveryDecl 1 Fallback
+F GrammarRecoveryDecl 2 Message
+F GrammarRecoveryDecl 3 Name
+F GrammarRecoveryDecl 4 Position
+F GrammarRecoveryDecl 5 Until
+
+T 118 GrammarRepeatTerm
+F GrammarRepeatTerm 1 Elem
+F GrammarRepeatTerm 2 MinOne
+F GrammarRepeatTerm 3 Position
+F GrammarRepeatTerm 4 Until
+
+T 119 GrammarRequiredTerm
+F GrammarRequiredTerm 1 Message
+F GrammarRequiredTerm 2 Position
+F GrammarRequiredTerm 3 Term
+
+T 120 GrammarReturnTerm
+F GrammarReturnTerm 1 Position
+F GrammarReturnTerm 2 Term
+
+T 121 GrammarSeparatedTerm
+F GrammarSeparatedTerm 1 Elem
+F GrammarSeparatedTerm 2 Position
+F GrammarSeparatedTerm 3 Separator
+F GrammarSeparatedTerm 4 Until
+
+T 122 GrammarSeqTerm
+F GrammarSeqTerm 1 Position
+F GrammarSeqTerm 2 Terms
+
+T 123 GrammarSingletonTerm
+F GrammarSingletonTerm 1 Position
+F GrammarSingletonTerm 2 Type
+F GrammarSingletonTerm 3 Value
+
+T 124 GrammarSuffixTerm
+F GrammarSuffixTerm 1 Arms
+F GrammarSuffixTerm 2 LeftName
+F GrammarSuffixTerm 3 Position
+F GrammarSuffixTerm 4 Seed
+
+T 125 GrammarTokenAliasDecl
+F GrammarTokenAliasDecl 1 HasLiteral
+F GrammarTokenAliasDecl 2 Kind
+F GrammarTokenAliasDecl 3 Literal
+F GrammarTokenAliasDecl 4 Position
+
+T 126 GrammarTokenKindTerm
+F GrammarTokenKindTerm 1 Kind
+F GrammarTokenKindTerm 2 Position
+
+T 127 GrammarTokenSetDecl
+F GrammarTokenSetDecl 1 Excluded
+F GrammarTokenSetDecl 2 Name
+F GrammarTokenSetDecl 3 Position
+F GrammarTokenSetDecl 4 Terms
+F GrammarTokenSetDecl 5 TokenFamily
+
+T 128 GrammarTokenSetRefTerm
+F GrammarTokenSetRefTerm 1 Name
+F GrammarTokenSetRefTerm 2 Position
+
+T 129 GrammarTokenTerm
+F GrammarTokenTerm 1 Position
+F GrammarTokenTerm 2 Value
+
+T 130 GrammarWhenTerm
+F GrammarWhenTerm 1 Cond
+F GrammarWhenTerm 2 Else
+F GrammarWhenTerm 3 Position
+F GrammarWhenTerm 4 Then
+F GrammarWhenTerm 5 TokenKindGate
+
+T 131 GroupedCheckpointStmt
+F GroupedCheckpointStmt 1 Body
+F GroupedCheckpointStmt 2 Position
+F GroupedCheckpointStmt 3 Targets
+
+T 132 Ident
+F Ident 1 Name
+F Ident 2 Position
+
+T 133 IfStmt
+F IfStmt 1 Cond
+F IfStmt 2 Elifs
+F IfStmt 3 Else
+F IfStmt 4 FromSource
+F IfStmt 5 Hint
+F IfStmt 6 Position
+F IfStmt 7 Then
+
+T 134 ImplAssociatedTypeDecl
+F ImplAssociatedTypeDecl 1 Name
+F ImplAssociatedTypeDecl 2 Position
+F ImplAssociatedTypeDecl 3 Type
+
+T 135 ImplDecl
+F ImplDecl 1 Annotations
+F ImplDecl 2 ForType
+F ImplDecl 3 GenericParams
+F ImplDecl 4 InterfaceName
+F ImplDecl 5 Members
+F ImplDecl 6 Position
+
+T 136 ImportDecl
+F ImportDecl 1 Module
+F ImportDecl 2 Names
+F ImportDecl 3 Position
+
+T 137 InStoreStmt
+F InStoreStmt 1 Body
+F InStoreStmt 2 Position
+F InStoreStmt 3 Store
+
+T 138 IndexExpr
+F IndexExpr 1 AsBuiltinDictGet
+F IndexExpr 2 AsOverlayCall
+F IndexExpr 3 AsSpecialize
+F IndexExpr 4 Fallback
+F IndexExpr 5 Index
+F IndexExpr 6 Index2
+F IndexExpr 7 LegacyElseFallback
+F IndexExpr 8 Object
+F IndexExpr 9 Position
+
+T 139 IntLit
+F IntLit 1 IsHex
+F IntLit 2 Position
+F IntLit 3 Suffix
+F IntLit 4 Value
+
+T 140 InterfaceDecl
+F InterfaceDecl 1 Bases
+F InterfaceDecl 2 Members
+F InterfaceDecl 3 Name
+F InterfaceDecl 4 Position
+
+T 141 IsAliasExpr
+F IsAliasExpr 1 Alias
+F IsAliasExpr 2 Position
+F IsAliasExpr 3 Target
+
+T 142 IsPatternExpr
+F IsPatternExpr 1 Brackets
+F IsPatternExpr 2 Position
+F IsPatternExpr 3 Targets
+
+T 143 IterForStmt
+F IterForStmt 1 Body
+F IterForStmt 2 Filter
+F IterForStmt 3 Mode
+F IterForStmt 4 MovedSource
+F IterForStmt 5 Pattern
+F IterForStmt 6 PatternFilter
+F IterForStmt 7 PatternFilterSubject
+F IterForStmt 8 Position
+F IterForStmt 9 PreReserve
+F IterForStmt 10 PreReserves
+F IterForStmt 11 Reverse
+F IterForStmt 12 Source
+F IterForStmt 13 WhereFilter
+
+T 144 KeywordMapDecl
+F KeywordMapDecl 1 Entries
+F KeywordMapDecl 2 Fallback
+F KeywordMapDecl 3 InputType
+F KeywordMapDecl 4 Name
+F KeywordMapDecl 5 Position
+F KeywordMapDecl 6 ReturnType
+
+T 145 KeywordMapEntry
+F KeywordMapEntry 1 Position
+F KeywordMapEntry 2 Text
+F KeywordMapEntry 3 Value
+
+T 146 LambdaExpr
+F LambdaExpr 1 Body
+F LambdaExpr 2 BodyExpr
+F LambdaExpr 3 Keyword
+F LambdaExpr 4 ParallelBody
+F LambdaExpr 5 Params
+F LambdaExpr 6 Position
+F LambdaExpr 7 ReturnType
+F LambdaExpr 8 UsesShorthandParams
+
+T 147 LayoutDecl
+F LayoutDecl 1 Fields
+F LayoutDecl 2 Name
+F LayoutDecl 3 Position
+F LayoutDecl 4 Size
+
+T 148 LayoutFieldDecl
+F LayoutFieldDecl 1 Name
+F LayoutFieldDecl 2 Offset
+F LayoutFieldDecl 3 Position
+F LayoutFieldDecl 4 RequiresSizeAtLeast
+F LayoutFieldDecl 5 Type
+
+T 149 LeakStmt
+F LeakStmt 1 Name
+F LeakStmt 2 Position
+
+T 150 LetDestructureStmt
+F LetDestructureStmt 1 Pattern
+F LetDestructureStmt 2 Position
+F LetDestructureStmt 3 Value
+
+T 151 LexerCharClassDecl
+F LexerCharClassDecl 1 Name
+F LexerCharClassDecl 2 Position
+F LexerCharClassDecl 3 Terms
+
+T 152 LexerCharClassTerm
+F LexerCharClassTerm 1 End
+F LexerCharClassTerm 2 Name
+F LexerCharClassTerm 3 Position
+F LexerCharClassTerm 4 Range
+F LexerCharClassTerm 5 Ref
+F LexerCharClassTerm 6 Start
+
+T 153 LexerDecl
+F LexerDecl 1 CharClasses
+F LexerDecl 2 GrammarName
+F LexerDecl 3 KeywordCompareFunc
+F LexerDecl 4 Keywords
+F LexerDecl 5 Literals
+F LexerDecl 6 ModeEnumName
+F LexerDecl 7 Modes
+F LexerDecl 8 Name
+F LexerDecl 9 Position
+F LexerDecl 10 TokenKindType
+
+T 154 LexerKeywordDecl
+F LexerKeywordDecl 1 Entries
+F LexerKeywordDecl 2 Fallback
+F LexerKeywordDecl 3 Position
+
+T 155 LexerKeywordEntry
+F LexerKeywordEntry 1 Kind
+F LexerKeywordEntry 2 Position
+F LexerKeywordEntry 3 Text
+
+T 156 LexerLiteralDecl
+F LexerLiteralDecl 1 Entries
+F LexerLiteralDecl 2 Fallback
+F LexerLiteralDecl 3 Longest
+F LexerLiteralDecl 4 Position
+
+T 157 LexerLiteralEntry
+F LexerLiteralEntry 1 Kind
+F LexerLiteralEntry 2 Position
+F LexerLiteralEntry 3 Text
+
+T 158 LexerModeDecl
+F LexerModeDecl 1 Name
+F LexerModeDecl 2 Position
+
+T 159 ListComprehensionExpr
+F ListComprehensionExpr 1 Bindings
+F ListComprehensionExpr 2 Filter
+F ListComprehensionExpr 3 Key
+F ListComprehensionExpr 4 LoweredParallel
+F ListComprehensionExpr 5 Name
+F ListComprehensionExpr 6 Owner
+F ListComprehensionExpr 7 Parallel
+F ListComprehensionExpr 8 Position
+F ListComprehensionExpr 9 RangeEnd
+F ListComprehensionExpr 10 RangeOp
+F ListComprehensionExpr 11 RangeStep
+F ListComprehensionExpr 12 SecondName
+F ListComprehensionExpr 13 Set
+F ListComprehensionExpr 14 Source
+F ListComprehensionExpr 15 Value
+
+T 160 ListLitExpr
+F ListLitExpr 1 Brace
+F ListLitExpr 2 Elems
+F ListLitExpr 3 Keys
+F ListLitExpr 4 Owner
+F ListLitExpr 5 Position
+F ListLitExpr 6 Spreads
+
+T 161 LmutRebindClaim
+F LmutRebindClaim 1 Name
+F LmutRebindClaim 2 Position
+
+T 162 LmutThreadSlot
+F LmutThreadSlot 1 ParamIndex
+F LmutThreadSlot 2 ParamName
+F LmutThreadSlot 3 TupleIndex
+
+T 163 LockStmt
+F LockStmt 1 Body
+F LockStmt 2 GuardName
+F LockStmt 3 Mutex
+F LockStmt 4 Position
+
+T 164 MachineCoverageState
+F MachineCoverageState 1 HasWildcard
+F MachineCoverageState 2 Name
+F MachineCoverageState 3 Position
+F MachineCoverageState 4 Tags
+
+T 165 MachineCoverageStmt
+F MachineCoverageStmt 1 Input
+F MachineCoverageStmt 2 Position
+F MachineCoverageStmt 3 States
+
+T 166 MachineFromArm
+F MachineFromArm 1 Bindings
+F MachineFromArm 2 Body
+F MachineFromArm 3 DeclaredOut
+F MachineFromArm 4 HasDeclaredOut
+F MachineFromArm 5 Position
+F MachineFromArm 6 State
+F MachineFromArm 7 Terminators
+
+T 167 MachineFromExpr
+F MachineFromExpr 1 Arms
+F MachineFromExpr 2 Decreases
+F MachineFromExpr 3 FromStartSugar
+F MachineFromExpr 4 HeaderCaptures
+F MachineFromExpr 5 HeaderDecls
+F MachineFromExpr 6 Lowered
+F MachineFromExpr 7 Position
+F MachineFromExpr 8 StartArgs
+F MachineFromExpr 9 StartEnum
+F MachineFromExpr 10 StartState
+
+T 168 MachineFromTerminator
+F MachineFromTerminator 1 Args
+F MachineFromTerminator 2 Guard
+F MachineFromTerminator 3 IsDone
+F MachineFromTerminator 4 Position
+F MachineFromTerminator 5 Target
+F MachineFromTerminator 6 Value
+
+T 169 MarkStmt
+F MarkStmt 1 Name
+F MarkStmt 2 Position
+F MarkStmt 3 RegionName
+
+T 170 MatchArm
+F MatchArm 1 Body
+F MatchArm 2 Guard
+F MatchArm 3 Pattern
+F MatchArm 4 Position
+
+T 171 MatchBindPattern
+F MatchBindPattern 1 Binder
+F MatchBindPattern 2 Name
+F MatchBindPattern 3 Position
+
+T 172 MatchExpr
+F MatchExpr 1 Arms
+F MatchExpr 2 Position
+F MatchExpr 3 Store
+F MatchExpr 4 Value
+
+T 173 MatchListPattern
+F MatchListPattern 1 Elems
+F MatchListPattern 2 Position
+
+T 174 MatchLiteralPattern
+F MatchLiteralPattern 1 Pinned
+F MatchLiteralPattern 2 Position
+F MatchLiteralPattern 3 Value
+
+T 175 MatchOrPattern
+F MatchOrPattern 1 Options
+F MatchOrPattern 2 Position
+
+T 176 MatchPatternArg
+F MatchPatternArg 1 Name
+F MatchPatternArg 2 Pattern
+F MatchPatternArg 3 Position
+
+T 177 MatchRangePattern
+F MatchRangePattern 1 Hi
+F MatchRangePattern 2 Inclusive
+F MatchRangePattern 3 Lo
+F MatchRangePattern 4 Position
+
+T 178 MatchRestPattern
+F MatchRestPattern 1 Name
+F MatchRestPattern 2 Position
+
+T 179 MatchStmt
+F MatchStmt 1 Arms
+F MatchStmt 2 Position
+F MatchStmt 3 Store
+F MatchStmt 4 Value
+
+T 180 MatchStringLiteralPattern
+F MatchStringLiteralPattern 1 Position
+F MatchStringLiteralPattern 2 Value
+
+T 181 MatchStructPattern
+F MatchStructPattern 1 Args
+F MatchStructPattern 2 As
+F MatchStructPattern 3 Brace
+F MatchStructPattern 4 Position
+F MatchStructPattern 5 ResolvedArgs
+F MatchStructPattern 6 Rest
+F MatchStructPattern 7 TypeName
+
+T 182 MatchTuplePattern
+F MatchTuplePattern 1 Elems
+F MatchTuplePattern 2 Position
+
+T 183 MatchVariantPattern
+F MatchVariantPattern 1 Args
+F MatchVariantPattern 2 As
+F MatchVariantPattern 3 EnumName
+F MatchVariantPattern 4 Position
+F MatchVariantPattern 5 ResolvedArgs
+F MatchVariantPattern 6 Rest
+F MatchVariantPattern 7 Variant
+
+T 184 MatchWildcardPattern
+F MatchWildcardPattern 1 Position
+
+T 185 MembershipRangeExpr
+F MembershipRangeExpr 1 End
+F MembershipRangeExpr 2 Op
+F MembershipRangeExpr 3 Position
+F MembershipRangeExpr 4 Start
+
+T 186 MoveBindArg
+F MoveBindArg 1 Field
+F MoveBindArg 2 Name
+F MoveBindArg 3 Position
+
+T 187 MoveBindNamePattern
+F MoveBindNamePattern 1 Name
+F MoveBindNamePattern 2 Position
+
+T 188 MoveBindStmt
+F MoveBindStmt 1 Pattern
+F MoveBindStmt 2 Position
+F MoveBindStmt 3 Store
+F MoveBindStmt 4 Value
+
+T 189 MoveBindStructPattern
+F MoveBindStructPattern 1 Args
+F MoveBindStructPattern 2 Brace
+F MoveBindStructPattern 3 Position
+F MoveBindStructPattern 4 TypeName
+
+T 190 MoveBindTuplePattern
+F MoveBindTuplePattern 1 Args
+F MoveBindTuplePattern 2 Position
+
+T 191 MoveBindVariantPattern
+F MoveBindVariantPattern 1 Args
+F MoveBindVariantPattern 2 EnumName
+F MoveBindVariantPattern 3 Position
+F MoveBindVariantPattern 4 Variant
+
+T 192 MoveExpr
+F MoveExpr 1 Operand
+F MoveExpr 2 Position
+
+T 193 MutableType
+F MutableType 1 Elem
+F MutableType 2 Linear
+F MutableType 3 Position
+
+T 194 NamedType
+F NamedType 1 Name
+F NamedType 2 Position
+
+T 195 NamespaceDecl
+F NamespaceDecl 1 Const
+F NamespaceDecl 2 Decls
+F NamespaceDecl 3 Extend
+F NamespaceDecl 4 Module
+F NamespaceDecl 5 Name
+F NamespaceDecl 6 Position
+F NamespaceDecl 7 Private
+
+T 196 NullLit
+F NullLit 1 Position
+
+T 197 OffsetofExpr
+F OffsetofExpr 1 Field
+F OffsetofExpr 2 Position
+F OffsetofExpr 3 Type
+
+T 198 OptionalBindExpr
+F OptionalBindExpr 1 FromIs
+F OptionalBindExpr 2 Name
+F OptionalBindExpr 3 Position
+F OptionalBindExpr 4 Value
+
+T 199 OptionalTypeExpr
+F OptionalTypeExpr 1 Position
+F OptionalTypeExpr 2 Value
+
+T 200 OwnedType
+F OwnedType 1 Elem
+F OwnedType 2 Position
+
+T 201 PanicStmt
+F PanicStmt 1 Message
+F PanicStmt 2 Position
+
+T 202 ParallelForStmt
+F ParallelForStmt 1 Body
+F ParallelForStmt 2 IndexName
+F ParallelForStmt 3 Name
+F ParallelForStmt 4 Position
+F ParallelForStmt 5 Source
+
+T 203 ParamContract
+F ParamContract 1 Param
+F ParamContract 2 Position
+F ParamContract 3 Pred
+
+T 204 ParamDecl
+F ParamDecl 1 DefaultValue
+F ParamDecl 2 Mutable
+F ParamDecl 3 Name
+F ParamDecl 4 Position
+F ParamDecl 5 Type
+
+T 205 ParenExpr
+F ParenExpr 1 Inner
+F ParenExpr 2 Position
+
+T 206 PassStmt
+F PassStmt 1 Position
+
+T 207 PermissionDecl
+F PermissionDecl 1 Includes
+F PermissionDecl 2 Members
+F PermissionDecl 3 Name
+F PermissionDecl 4 Position
+
+T 208 PermissionRef
+F PermissionRef 1 Member
+F PermissionRef 2 Name
+F PermissionRef 3 Position
+
+T 209 PoolStmt
+F PoolStmt 1 Body
+F PoolStmt 2 Name
+F PoolStmt 3 Position
+F PoolStmt 4 Workers
+
+T 210 PromoteStmt
+F PromoteStmt 1 Position
+F PromoteStmt 2 Region
+F PromoteStmt 3 Value
+
+T 211 ProofBlockStmt
+F ProofBlockStmt 1 Goal
+F ProofBlockStmt 2 Position
+F ProofBlockStmt 3 Proof
+
+T 212 ProofUseStmt
+F ProofUseStmt 1 Citations
+F ProofUseStmt 2 Position
+
+T 213 QuantifierExpr
+F QuantifierExpr 1 Body
+F QuantifierExpr 2 Exists
+F QuantifierExpr 3 In
+F QuantifierExpr 4 Position
+F QuantifierExpr 5 Vars
+
+T 214 QueryExpr
+F QueryExpr 1 Filter
+F QueryExpr 2 Kind
+F QueryExpr 3 Name
+F QueryExpr 4 Owner
+F QueryExpr 5 Pattern
+F QueryExpr 6 PatternFilter
+F QueryExpr 7 PatternFilterSubject
+F QueryExpr 8 Position
+F QueryExpr 9 Projection
+F QueryExpr 10 Source
+
+T 215 RaiseExpr
+F RaiseExpr 1 Error
+F RaiseExpr 2 Position
+
+T 216 RecordUpdateExpr
+F RecordUpdateExpr 1 ArgNames
+F RecordUpdateExpr 2 Args
+F RecordUpdateExpr 3 Base
+F RecordUpdateExpr 4 Position
+F RecordUpdateExpr 5 ResolvedArgs
+F RecordUpdateExpr 6 ResolvedArgsValid
+
+T 217 RecoveryClause
+F RecoveryClause 1 Binding
+F RecoveryClause 2 Body
+F RecoveryClause 3 Kind
+F RecoveryClause 4 Position
+F RecoveryClause 5 Value
+
+T 218 RefStateLiteralTypeExpr
+F RefStateLiteralTypeExpr 1 Position
+F RefStateLiteralTypeExpr 2 State
+
+T 219 RefStorageLiteralTypeExpr
+F RefStorageLiteralTypeExpr 1 Position
+F RefStorageLiteralTypeExpr 2 Storage
+
+T 220 RefType
+F RefType 1 Elem
+F RefType 2 Explicit
+F RefType 3 Position
+F RefType 4 Region
+F RefType 5 State
+F RefType 6 Storage
+
+T 221 RefineDecl
+F RefineDecl 1 Base
+F RefineDecl 2 Name
+F RefineDecl 3 Params
+F RefineDecl 4 Position
+F RefineDecl 5 Predicate
+F RefineDecl 6 TypeParams
+
+T 222 RefinementPredExpr
+F RefinementPredExpr 1 Args
+F RefinementPredExpr 2 Name
+F RefinementPredExpr 3 Position
+
+T 223 RefinementTypeExpr
+F RefinementTypeExpr 1 Base
+F RefinementTypeExpr 2 Position
+F RefinementTypeExpr 3 Preds
+
+T 224 RegionStmt
+F RegionStmt 1 Allocator
+F RegionStmt 2 Body
+F RegionStmt 3 Capacity
+F RegionStmt 4 Lazy
+F RegionStmt 5 Name
+F RegionStmt 6 OwnerName
+F RegionStmt 7 Position
+F RegionStmt 8 UserAuto
+
+T 225 ResetStmt
+F ResetStmt 1 Name
+F ResetStmt 2 Position
+
+T 226 RestoreCheckpointStmt
+F RestoreCheckpointStmt 1 Name
+F RestoreCheckpointStmt 2 Position
+
+T 227 RestoreStmt
+F RestoreStmt 1 MarkName
+F RestoreStmt 2 Position
+F RestoreStmt 3 RegionName
+
+T 228 ReturnStmt
+F ReturnStmt 1 Position
+F ReturnStmt 2 Value
+
+T 229 ScopeStmt
+F ScopeStmt 1 Body
+F ScopeStmt 2 Guard
+F ScopeStmt 3 Position
+
+T 230 ShorthandMemberExpr
+F ShorthandMemberExpr 1 Parts
+F ShorthandMemberExpr 2 Position
+
+T 231 SignalStmt
+F SignalStmt 1 Permissions
+F SignalStmt 2 Position
+
+T 232 SizeofExpr
+F SizeofExpr 1 Position
+F SizeofExpr 2 Type
+
+T 233 SliceExpr
+F SliceExpr 1 End
+F SliceExpr 2 Object
+F SliceExpr 3 Position
+F SliceExpr 4 Start
+
+T 234 SpecializeExpr
+F SpecializeExpr 1 Operand
+F SpecializeExpr 2 Position
+F SpecializeExpr 3 TypeArgs
+
+T 235 StateSetTypeExpr
+F StateSetTypeExpr 1 Cases
+F StateSetTypeExpr 2 Position
+
+T 236 StaticAssertBlockDecl
+F StaticAssertBlockDecl 1 Assertions
+F StaticAssertBlockDecl 2 Position
+
+T 237 StaticAssertBlockStmt
+F StaticAssertBlockStmt 1 Assertions
+F StaticAssertBlockStmt 2 Position
+
+T 238 StaticAssertDecl
+F StaticAssertDecl 1 Cond
+F StaticAssertDecl 2 Message
+F StaticAssertDecl 3 Position
+
+T 239 StaticAssertItem
+F StaticAssertItem 1 Cond
+F StaticAssertItem 2 Message
+F StaticAssertItem 3 Position
+
+T 240 StaticAssertStmt
+F StaticAssertStmt 1 Cond
+F StaticAssertStmt 2 Message
+F StaticAssertStmt 3 Position
+
+T 241 StaticBlockStmt
+F StaticBlockStmt 1 Body
+F StaticBlockStmt 2 Position
+
+T 242 StaticElifClause
+F StaticElifClause 1 Body
+F StaticElifClause 2 Cond
+F StaticElifClause 3 Position
+
+T 243 StaticElifDecl
+F StaticElifDecl 1 Body
+F StaticElifDecl 2 Cond
+F StaticElifDecl 3 Position
+
+T 244 StaticErrorStmt
+F StaticErrorStmt 1 Message
+F StaticErrorStmt 2 Position
+
+T 245 StaticGenerateDecl
+F StaticGenerateDecl 1 Body
+F StaticGenerateDecl 2 Position
+
+T 246 StaticGenerateElifDecl
+F StaticGenerateElifDecl 1 Body
+F StaticGenerateElifDecl 2 Cond
+F StaticGenerateElifDecl 3 Position
+
+T 247 StaticGenerateEmitDecl
+F StaticGenerateEmitDecl 1 Position
+F StaticGenerateEmitDecl 2 Tokens
+
+T 248 StaticGenerateForDecl
+F StaticGenerateForDecl 1 Body
+F StaticGenerateForDecl 2 Filter
+F StaticGenerateForDecl 3 Name
+F StaticGenerateForDecl 4 Position
+F StaticGenerateForDecl 5 Source
+
+T 249 StaticGenerateIfDecl
+F StaticGenerateIfDecl 1 Cond
+F StaticGenerateIfDecl 2 Elifs
+F StaticGenerateIfDecl 3 Else
+F StaticGenerateIfDecl 4 Position
+F StaticGenerateIfDecl 5 Then
+
+T 250 StaticIfDecl
+F StaticIfDecl 1 Cond
+F StaticIfDecl 2 Elifs
+F StaticIfDecl 3 Else
+F StaticIfDecl 4 Position
+F StaticIfDecl 5 Then
+
+T 251 StaticIfStmt
+F StaticIfStmt 1 Cond
+F StaticIfStmt 2 Elifs
+F StaticIfStmt 3 Else
+F StaticIfStmt 4 Position
+F StaticIfStmt 5 Then
+
+T 252 StoreDecl
+F StoreDecl 1 Annotations
+F StoreDecl 2 Fields
+F StoreDecl 3 Name
+F StoreDecl 4 Position
+F StoreDecl 5 Soa
+
+T 253 StringLit
+F StringLit 1 Position
+F StringLit 2 Value
+
+T 254 StructDecl
+F StructDecl 1 Affine
+F StructDecl 2 Annotations
+F StructDecl 3 DerivedStates
+F StructDecl 4 Droppable
+F StructDecl 5 Fields
+F StructDecl 6 GenericParams
+F StructDecl 7 HasStateParam
+F StructDecl 8 Invariants
+F StructDecl 9 Layout
+F StructDecl 10 Name
+F StructDecl 11 NamedStateCases
+F StructDecl 12 Position
+F StructDecl 13 RegionOwner
+F StructDecl 14 RegionParams
+F StructDecl 15 ReprC
+F StructDecl 16 StateParamCount
+F StructDecl 17 TerminalStateCases
+F StructDecl 18 TypeParams
+
+T 255 StructLitExpr
+F StructLitExpr 1 ArgNames
+F StructLitExpr 2 Args
+F StructLitExpr 3 Brace
+F StructLitExpr 4 Name
+F StructLitExpr 5 Position
+F StructLitExpr 6 ResolvedArgs
+F StructLitExpr 7 ResolvedArgsValid
+F StructLitExpr 8 Spreads
+F StructLitExpr 9 TypeArgs
+
+T 256 StructTestExpr
+F StructTestExpr 1 Pattern
+F StructTestExpr 2 Position
+
+T 257 TailType
+F TailType 1 Elem
+F TailType 2 Position
+
+T 258 TernaryExpr
+F TernaryExpr 1 Alt
+F TernaryExpr 2 Cond
+F TernaryExpr 3 Position
+F TernaryExpr 4 Value
+
+T 259 TokenSetDecl
+F TokenSetDecl 1 ElemType
+F TokenSetDecl 2 Name
+F TokenSetDecl 3 Position
+F TokenSetDecl 4 Value
+
+T 260 TryExpr
+F TryExpr 1 Fallback
+F TryExpr 2 Position
+F TryExpr 3 Recovery
+F TryExpr 4 Value
+
+T 261 TupleBindName
+F TupleBindName 1 Name
+F TupleBindName 2 Position
+
+T 262 TupleBindStmt
+F TupleBindStmt 1 ArgManifest
+F TupleBindStmt 2 Declare
+F TupleBindStmt 3 Names
+F TupleBindStmt 4 Position
+F TupleBindStmt 5 Value
+
+T 263 TupleExpr
+F TupleExpr 1 Elems
+F TupleExpr 2 Position
+
+T 264 TupleTypeExpr
+F TupleTypeExpr 1 Fields
+F TupleTypeExpr 2 Position
+
+T 265 TupleTypeField
+F TupleTypeField 1 Name
+F TupleTypeField 2 Position
+F TupleTypeField 3 Type
+
+T 266 TypeAliasDecl
+F TypeAliasDecl 1 Name
+F TypeAliasDecl 2 Position
+F TypeAliasDecl 3 Target
+F TypeAliasDecl 4 TypeParams
+
+T 267 TypeExprExpr
+F TypeExprExpr 1 Position
+F TypeExprExpr 2 Type
+
+T 268 UnaryExpr
+F UnaryExpr 1 LoweredCall
+F UnaryExpr 2 Op
+F UnaryExpr 3 Operand
+F UnaryExpr 4 Position
+
+T 269 UnwrapElseExpr
+F UnwrapElseExpr 1 Fallback
+F UnwrapElseExpr 2 LegacyImplicitElse
+F UnwrapElseExpr 3 Position
+F UnwrapElseExpr 4 Recovery
+F UnwrapElseExpr 5 Value
+
+T 270 UsingDecl
+F UsingDecl 1 Alias
+F UsingDecl 2 Member
+F UsingDecl 3 Name
+F UsingDecl 4 Position
+
+T 271 VarDeclStmt
+F VarDeclStmt 1 Ghost
+F VarDeclStmt 2 Mutable
+F VarDeclStmt 3 Name
+F VarDeclStmt 4 Owner
+F VarDeclStmt 5 Position
+F VarDeclStmt 6 Type
+F VarDeclStmt 7 Value
+
+T 272 VariantTestExpr
+F VariantTestExpr 1 Pattern
+F VariantTestExpr 2 Position
+
+T 273 VisitArm
+F VisitArm 1 BindName
+F VisitArm 2 Body
+F VisitArm 3 ChildBindings
+F VisitArm 4 ChildResultsName
+F VisitArm 5 Guard
+F VisitArm 6 Position
+F VisitArm 7 TargetName
+F VisitArm 8 Wildcard
+
+T 274 VisitArmChildBinding
+F VisitArmChildBinding 1 BindName
+F VisitArmChildBinding 2 FieldName
+F VisitArmChildBinding 3 Position
+
+T 275 WhereRefinementTypeExpr
+F WhereRefinementTypeExpr 1 Base
+F WhereRefinementTypeExpr 2 Position
+F WhereRefinementTypeExpr 3 Predicate
+
+T 276 WhileStmt
+F WhileStmt 1 Body
+F WhileStmt 2 Captures
+F WhileStmt 3 Cond
+F WhileStmt 4 Hint
+F WhileStmt 5 Position
+F WhileStmt 6 RuntimeProgressBackstop
+
+T 277 ZeroedLit
+F ZeroedLit 1 Position
+
+T 278 lexer.Pos
+F lexer.Pos 1 Col
+F lexer.Pos 2 EndCol
+F lexer.Pos 3 EndLine
+F lexer.Pos 4 EndOffset
+F lexer.Pos 5 File
+F lexer.Pos 6 Line
+F lexer.Pos 7 Offset
+
+T 279 lexer.Token
+F lexer.Token 1 Kind
+F lexer.Token 2 Pos
+F lexer.Token 3 Suffix
+F lexer.Token 4 Text
