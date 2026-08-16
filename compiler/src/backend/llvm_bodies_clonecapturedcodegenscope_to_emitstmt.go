@@ -210,6 +210,29 @@ func backendScopedArenaOwnerDecl(pos lexer.Pos, regionName string, ownerName str
 		},
 	}
 }
+// noteScopedArenaOwnerAlias records that `as OWNER` names the same arena as the region
+// itself, and returns a restore for the enclosing binding of that name. Without it, `in
+// owner:` keys the tree-alloc owner on the alloca holding the REFERENCE while `in scratch:`
+// keys on the Arena alloca, so one arena had two identities and a packed store registered
+// under one was invisible under the other.
+func (s *functionState) noteScopedArenaOwnerAlias(stmt *ast.RegionStmt) func() {
+	if s == nil || stmt == nil || stmt.OwnerName == "" {
+		return func() {}
+	}
+	if s.scopedArenaOwnerAlias == nil {
+		s.scopedArenaOwnerAlias = make(map[string]string)
+	}
+	previous, had := s.scopedArenaOwnerAlias[stmt.OwnerName]
+	s.scopedArenaOwnerAlias[stmt.OwnerName] = stmt.Name
+	return func() {
+		if had {
+			s.scopedArenaOwnerAlias[stmt.OwnerName] = previous
+			return
+		}
+		delete(s.scopedArenaOwnerAlias, stmt.OwnerName)
+	}
+}
+
 func backendScopedArenaInStoreStmt(stmt *ast.RegionStmt) *ast.InStoreStmt {
 	body := make([]ast.Stmt, 0, len(stmt.Body)+1)
 	if stmt.OwnerName != "" {
@@ -304,9 +327,11 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	// per-iteration regions.
 	savedPackedStores := s.packedStores
 	s.packedStores = s.clonePackedStores()
+	restoreOwnerAlias := s.noteScopedArenaOwnerAlias(n)
 	defer func() {
 		s.treeAllocOwner = savedTreeOwner
 		s.packedStores = savedPackedStores
+		restoreOwnerAlias()
 	}()
 	if s.regionPolyAutoAdopts(n) {
 		// Adopt the threaded caller region: bind the region name to it, route new[auto] to it, emit

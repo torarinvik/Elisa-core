@@ -242,6 +242,17 @@ func (s *functionState) classifyTreeAllocOwnerExpr(expr ast.Expr) (treeAllocOwne
 	}
 	if refType, ok := ownerType.(*semantic.RefType); ok && refType != nil && semantic.SameType(refType.Elem, arenaType) {
 		if ident, ok := stripped.(*ast.Ident); ok {
+			// `with arena scratch(n) as owner:` lowers to `in scratch:` plus a synthesized
+			// `owner: Arena& = &scratch`, so `in owner:` names an arena that ALREADY has a
+			// tree-alloc identity — the Arena alloca. Keying this on the reference's alloca
+			// instead gave one arena two identities, and a packed store registered while
+			// `scratch` was the owner was then invisible under `owner`: the read built a
+			// second, empty store and decoded handles against it.
+			if region, aliased := s.scopedArenaOwnerAlias[ident.Name]; aliased {
+				if binding, ok := s.lookupBinding(region); ok && binding.ptr != nil {
+					return treeAllocOwnerBinding{arenaRef: binding.ptr}, true, nil
+				}
+			}
 			if binding, ok := s.lookupBinding(ident.Name); ok && binding.ptr != nil {
 				return treeAllocOwnerBinding{arenaRefPtr: binding.ptr}, true, nil
 			}

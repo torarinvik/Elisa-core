@@ -110,7 +110,15 @@ type functionState struct {
 	// the binding (that re-created an empty store and broke previously-issued handles), and a
 	// nested region's store never evicts the outer region's.
 	regionPackedStores map[regionPackedStoreKey]packedStoreBinding
-	treeAllocOwner     treeAllocOwnerBinding
+	// scopedArenaOwnerAlias maps the `as OWNER` name of a scoped region to the region's own
+	// name. `with arena scratch(n) as owner:` lowers to `in scratch:` plus a synthesized
+	// `owner: Arena& = &scratch`, so `in owner:` and `in scratch:` denote ONE arena — but the
+	// tree-alloc owner key for `owner` is the alloca holding the REFERENCE, while `scratch`
+	// keys on the Arena alloca itself. Two keys for one arena meant a store registered under
+	// one was invisible under the other. Resolving the alias back to the region name keeps a
+	// single key per arena.
+	scopedArenaOwnerAlias map[string]string
+	treeAllocOwner        treeAllocOwnerBinding
 	// regionPolyOwner is the region threaded into a region-polymorphic function via the hidden
 	// `__region_auto` Arena& param (docs/75). The function's synthesized `__auto_*` region adopts it
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
