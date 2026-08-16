@@ -595,7 +595,12 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")
-	fmt.Fprintln(w, "       elisacore project view|deps [target] [--project <dir|project.json>] [--json]")
+	// `--json` is a deps/abi-lint/easm-lint option; `project view` accepts it silently
+	// and ignores it. Grouping the subcommands on one line advertised a flag that does
+	// nothing and hid abi-lint and easm-lint entirely — `elisacore project` prints the
+	// accurate per-subcommand list, and this summary now agrees with it.
+	fmt.Fprintln(w, "       elisacore project view [target] [--project <dir|project.json>]")
+	fmt.Fprintln(w, "       elisacore project deps|abi-lint|easm-lint [target] [--project <dir|project.json>] [--json]")
 	fmt.Fprintf(w, "Packed enums lower canonically as handle-based %s in compiler mode; use @packed_profile(canonical|retained_reads|build_heavy) for supported enum-level tuning.\n", backend.PackedEnumABIVariantSparse)
 }
 func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {
