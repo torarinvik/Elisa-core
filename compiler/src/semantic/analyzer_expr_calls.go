@@ -596,6 +596,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			if !frameWritesNothingThroughParam {
 				a.invalidatePredFactsForTarget(loweredArgs[i])
 				a.invalidateWrittenConst(rootIdentNameOrEmpty(loweredArgs[i]))
+				// A mutable ref may SHORTEN the buffer (`pop`, a helper that truncates), which
+				// can remove a NUL terminator, so drop that fact too. Appends go through the
+				// builtin push/extend path and never reach here, so this does not lose the
+				// common `push(0)` then cast idiom.
+				a.forgetDarrayNulTerminated(loweredArgs[i])
 				// A mutating ref to `self` (or any struct) lets the callee write ANY field, so every
 				// written-field fact under that root is stale — drop them all (mirrors the writtenConst drop
 				// above). An immutable borrow took the preserve credit and never reached this branch.

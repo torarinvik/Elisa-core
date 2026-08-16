@@ -30,6 +30,15 @@ func (a *Analyzer) checkBufferReinterpretCast(cast *ast.CastExpr, dst Type) {
 		return
 	}
 	if isUnboundedStringRefType(dst) {
+		// `buf.push(0)` then `(&buf[0]).cast[cstr]` is the NUL-terminated C-string idiom, and
+		// it is exactly the proof this warning asks for: a scan from element 0 stops at the
+		// pushed NUL, which is inside the buffer, so it cannot run off the end. Passing a
+		// cstr is also unavoidable at a C boundary — no length-bounded alternative exists —
+		// so warning on a terminated buffer only trains the reader to ignore the check.
+		if a.castReadsNulTerminatedBufferFromStart(cast.Operand) {
+			a.recordUnsafeBufferReinterpret(cast)
+			return
+		}
 		a.recordUnsafeBufferReinterpret(cast)
 		a.warnf(cast.Pos(), "casting an interior pointer of a sized %s to an unbounded string (%s) erases its length; a static_strlen / C-string scan can read past the %s into adjacent memory (out-of-bounds, nondeterministic). Prefer a length-bounded view (sview), or copy bounded bytes into a fresh allocation", bufKind, dst, bufKind)
 		return
@@ -45,6 +54,69 @@ func (a *Analyzer) checkBufferReinterpretCast(cast *ast.CastExpr, dst Type) {
 		a.recordUnsafeBufferReinterpret(cast)
 		a.warnf(cast.Pos(), "casting an interior pointer of a byte %s to %s reinterprets %s as a wider value; reading it accesses more bytes than the index bounds and can read past the %s (out-of-bounds, nondeterministic). Bounds-check the offset against the buffer length, or copy the bytes into a properly typed value", bufKind, dst, bufKind, bufKind)
 	}
+}
+
+// noteDarrayNulTerminated records `buf.push(0)` on a bare identifier receiver: the buffer now
+// contains a NUL, so a C-string scan starting at element 0 terminates inside it.
+func (a *Analyzer) noteDarrayNulTerminated(recv ast.Expr, arg ast.Expr) {
+	if a == nil {
+		return
+	}
+	ident, ok := recv.(*ast.Ident)
+	if !ok || ident == nil {
+		return
+	}
+	lit, ok := arg.(*ast.IntLit)
+	if !ok || lit == nil || lit.Value != "0" {
+		return
+	}
+	if a.nulTerminatedBuffers == nil {
+		a.nulTerminatedBuffers = make(map[string]bool)
+	}
+	a.nulTerminatedBuffers[ident.Name] = true
+}
+
+// forgetDarrayNulTerminated drops the NUL-termination fact when a buffer is shortened or
+// emptied (`clear`, `truncate`, `pop`, `resize`) — the terminator may be gone.
+func (a *Analyzer) forgetDarrayNulTerminated(recv ast.Expr) {
+	if a == nil || a.nulTerminatedBuffers == nil {
+		return
+	}
+	if ident, ok := recv.(*ast.Ident); ok && ident != nil {
+		delete(a.nulTerminatedBuffers, ident.Name)
+	}
+}
+
+// castReadsNulTerminatedBufferFromStart reports whether the operand is `&buf[0]` (through the
+// usual paren/ref/cast wrappers) for a buffer already known to hold a NUL. Only index 0
+// qualifies: a scan from a later element could start past the terminator.
+func (a *Analyzer) castReadsNulTerminatedBufferFromStart(expr ast.Expr) bool {
+	if a == nil || len(a.nulTerminatedBuffers) == 0 {
+		return false
+	}
+	for expr != nil {
+		switch n := expr.(type) {
+		case *ast.ParenExpr:
+			expr = n.Inner
+		case *ast.AddrOfExpr:
+			expr = n.Operand
+		case *ast.CastExpr:
+			expr = n.Operand
+		case *ast.IndexExpr:
+			if n.Index2 != nil {
+				return false
+			}
+			lit, ok := n.Index.(*ast.IntLit)
+			if !ok || lit == nil || lit.Value != "0" {
+				return false
+			}
+			ident, ok := n.Object.(*ast.Ident)
+			return ok && ident != nil && a.nulTerminatedBuffers[ident.Name]
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) recordUnsafeBufferReinterpret(cast *ast.CastExpr) {

@@ -220,7 +220,17 @@ func (a *Analyzer) lintUninferredAutoReserveIterFill(stmt *ast.IterForStmt, srcN
 	if target == "" {
 		return
 	}
-	a.perfLint(stmt.Pos(), "cannot infer a safe reserve bound for %q in this loop; growth may reallocate repeatedly. Make the bound provable or add an explicit `%s.reserve(total)` before the loop", target, target)
+	// Deferred: the remedy this message advertises is "add an explicit `X.reserve(total)`
+	// before the loop", so it must not fire when the programmer already wrote one. That check
+	// needs the enclosing statement LIST, which is only walkable once the function body is
+	// complete, so the decision happens in flushPendingIterFillLint/flushRemainingIterFillLints.
+	if a.iterFillLintDecided[stmt] {
+		return
+	}
+	if a.pendingIterFillLints == nil {
+		a.pendingIterFillLints = make(map[*ast.IterForStmt]string)
+	}
+	a.pendingIterFillLints[stmt] = target
 }
 
 // isDArrayTypeMaybeRef reports whether t is a darray, looking through a single reference wrapper

@@ -256,6 +256,9 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
+	// `buf.push(0)` NUL-terminates the buffer — remembered so a later `(&buf[0]).cast[cstr]`
+	// is recognised as a bounded C-string rather than an unbounded scan.
+	a.noteDarrayNulTerminated(fieldExpr.Object, expr.Args[0])
 	// Growing a container that is a FIELD of a region-less struct local (`m.bits.push(..)`) allocates
 	// the field backing in the ambient region; taint the struct so a later by-value copy of it into a
 	// longer-lived container is caught (S4 Stage 2 — by-value region-struct element storage).
@@ -548,6 +551,7 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 	if !ok || fieldExpr == nil || fieldExpr.Field != "resize" || fieldExpr.Object == nil {
 		return nil, false
 	}
+	a.forgetDarrayNulTerminated(fieldExpr.Object)
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
 		return nil, false
 	}
@@ -611,6 +615,7 @@ func (a *Analyzer) analyzeBuiltinDarrayClearCall(expr *ast.CallExpr) (Type, bool
 	if !ok || fieldExpr == nil || fieldExpr.Field != "clear" || fieldExpr.Object == nil {
 		return nil, false
 	}
+	a.forgetDarrayNulTerminated(fieldExpr.Object)
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
 		return nil, false
 	}
@@ -656,6 +661,7 @@ func (a *Analyzer) analyzeBuiltinDarrayTruncateCall(expr *ast.CallExpr) (Type, b
 	if !ok || fieldExpr == nil || fieldExpr.Field != "truncate" || fieldExpr.Object == nil {
 		return nil, false
 	}
+	a.forgetDarrayNulTerminated(fieldExpr.Object)
 	if a.exprResolvesToTypePath(fieldExpr.Object) {
 		return nil, false
 	}
