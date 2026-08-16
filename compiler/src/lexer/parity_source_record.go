@@ -13,7 +13,8 @@ import (
 var (
 	paritySourceMu      sync.Mutex
 	paritySources       map[string]string
-	parityRecordEnabled = os.Getenv("ELISA_SEMANTIC_INTERNAL_PARITY_OUT") != ""
+	parityRecordEnabled = os.Getenv("ELISA_SEMANTIC_INTERNAL_PARITY_OUT") != "" ||
+				os.Getenv("ELISA_BACKEND_PARITY_OUT") != ""
 )
 
 func recordParitySource(filename string, src []byte) {
