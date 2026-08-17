@@ -12,7 +12,7 @@ func TestGenerateLLVMIRLowersCapturelessLambdaHelpers(t *testing.T) {
     return fn(value)
 
 def run() -> i64:
-    return apply(lambda value: value + 1, 41)
+    return apply(fn(value) => value + 1, 41)
 `
 
 	result := parseAndAnalyze(t, "backend_lambda_captureless.elisa", src)
@@ -33,7 +33,7 @@ func TestGenerateLLVMIRLowersCapturedLambdasThroughClosureDispatch(t *testing.T)
     return fn(value)
 
 def run(offset: i64) -> i64:
-    return apply(lambda value: value + offset, 41)
+    return apply(fn(value) => value + offset, 41)
 `
 
 	result := parseAndAnalyze(t, "backend_lambda_closure.elisa", src)

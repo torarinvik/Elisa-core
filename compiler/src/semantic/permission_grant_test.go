@@ -30,7 +30,7 @@ def build() -> i64:
 	return alloc_value()
 `)
 	all := allDiagnostics(result)
-	if !strings.Contains(all, `call to "alloc_value" requires can[Abort, Atomics] and has no explicit local effect grant; add  can[Abort.Panic, Atomics.Load] or a surrounding can ...: block`) {
+	if !strings.Contains(all, `call to "alloc_value" requires can[Abort, Atomics] and has no explicit local effect grant; add can[Abort.Panic, Atomics.Load] or a surrounding can ...: block`) {
 		t.Fatalf("expected missing top-level grant warning on call, got:\n%s", all)
 	}
 }

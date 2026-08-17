@@ -155,7 +155,7 @@ struct ScratchHolder:
 
 
 def make_holder() -> ScratchHolder:
-		return ScratchHolder(ScratchPair(8, 9))
+		return ScratchHolder{pair: ScratchPair{left: 8, right: 9}}
 `
 	result := parseAndAnalyze(t, "backend_nested_struct_literals.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
