@@ -48,6 +48,26 @@ func TestGetIndexElseReturn(t *testing.T) {
 `, AnalyzeOptions{EnforceUnsafePermissions: true})
 }
 
+// A nested fixed-array access must retain its inner array type through the
+// struct-field/index chain. The reference initializer is invalid because the
+// final access still yields u8[16], not u8&.
+func TestGetNestedFixedArrayReferenceMismatch(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "get_nested_fixed_array_ref.elisa", `struct Row:
+    raw: mutable u8[16][8]
+
+struct State:
+    rows: mutable Row[2]
+
+def bad(state: State&, index: usize, note: usize) -> i32:
+    raw: u8& = get state.rows[index].raw[note] else return 0
+    return raw.i32()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(all, `variable "raw" expects u8&`) || !strings.Contains(all, "got u8[16]") {
+		t.Fatalf("expected nested fixed-array reference mismatch; got: %s", all)
+	}
+}
+
 // `get arr[i]` with no else propagates absence; legal when the function returns
 // an optional, and a checked access (no Unsafe.UncheckedIndex grant needed).
 func TestGetIndexPropagation(t *testing.T) {
