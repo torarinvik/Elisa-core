@@ -267,10 +267,16 @@ func (p *Parser) parseReturn() ast.Stmt {
 	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
+		// A postfix guard may be consumed by the expression parser while parsing
+		// the return value, especially when the value is unary (`return -1 if
+		// stop`). Arm the statement-guard path so the parser normalizes that
+		// spelling to the same IfStmt used by `value return if stop`.
+		p.stmtGuardArmed = true
 		value = p.parseValueExprAllowTuple()
+		p.stmtGuardArmed = false
 	}
 	p.expectNewlineAfterValueExpr(value)
-	return &ast.ReturnStmt{Position: pos, Value: value}
+	return p.takeStmtGuard(&ast.ReturnStmt{Position: pos, Value: value})
 }
 
 // returnIfIsValueForm decides whether the `if` following `return` opens a value-if block
@@ -463,6 +469,7 @@ func (p *Parser) parseSignalStmt() *ast.SignalStmt {
 	p.expectNewline()
 	return &ast.SignalStmt{Position: pos, Permissions: []ast.PermissionRef{ref}}
 }
+
 // parsePanic parses `panic(msg)`, optionally with a trailing postfix guard
 // `panic(msg) if COND` (docs/125 §6b: a guarded divergence — do-or-skip, no else — the
 // analogue of `break if`/`continue if`/`VALUE return if`). The guard desugars to a

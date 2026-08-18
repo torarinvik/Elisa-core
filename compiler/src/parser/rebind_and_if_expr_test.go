@@ -74,3 +74,14 @@ func TestReturnIfBareGuardStillParses(t *testing.T) {
 		t.Fatalf("unexpected parser errors for bare return guard: %v", errs)
 	}
 }
+
+// A signed return value followed by a guard must remain a statement guard. The
+// stage1 expression parser can consume the postfix `if` while parsing `-1`,
+// so this is an explicit stage0 parity anchor for that spelling.
+func TestSignedReturnIfGuardStillParses(t *testing.T) {
+	src := "def f(value: i64, stop: bool) -> i64:\n    return -1 if stop\n    return value\n"
+	_, errs, _ := parseSourceWithNotices(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for signed return guard: %v", errs)
+	}
+}
