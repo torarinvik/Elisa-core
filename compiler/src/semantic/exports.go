@@ -429,6 +429,8 @@ func isCABICompatibleType(t Type) bool {
 		return true
 	case *ArrayType:
 		return tt.HasConstSize && isCABICompatibleType(tt.Elem)
+	case *FuncType:
+		return isCABICompatibleFuncType(tt)
 	case *BitIntType:
 		return false
 	case *BitGroupType:

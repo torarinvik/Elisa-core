@@ -431,6 +431,8 @@ func formatCDecl(t semantic.Type, name string, result *semantic.Result) (string,
 			return "", fmt.Errorf("array declaration %s is missing a compile-time size", tt.String())
 		}
 		return formatCDecl(tt.Elem, fmt.Sprintf("%s[%d]", name, tt.ConstSize), result)
+	case *semantic.FuncType:
+		return formatCFunctionPointerDecl(tt, name, result)
 	case *semantic.StructType, *semantic.GenericInstanceType:
 		publicName, ok := publicTypeNameForHeader(tt, result)
 		if !ok {
@@ -443,6 +445,32 @@ func formatCDecl(t semantic.Type, name string, result *semantic.Result) (string,
 	default:
 		return "", fmt.Errorf("unsupported C header type %s", t.String())
 	}
+}
+
+func formatCFunctionPointerDecl(fn *semantic.FuncType, name string, result *semantic.Result) (string, error) {
+	if fn == nil || strings.TrimSpace(name) == "" {
+		return "", fmt.Errorf("function pointer declaration requires a name")
+	}
+	returnType, err := formatCDecl(fn.Return, "", result)
+	if err != nil {
+		return "", fmt.Errorf("unsupported function pointer return type: %w", err)
+	}
+	params := make([]string, 0, len(fn.Params))
+	for i, param := range fn.Params {
+		decl, err := formatCDecl(param, fmt.Sprintf("arg%d", i), result)
+		if err != nil {
+			return "", fmt.Errorf("unsupported function pointer parameter %d: %w", i+1, err)
+		}
+		params = append(params, decl)
+	}
+	if fn.Variadic {
+		params = append(params, "...")
+	}
+	paramList := "void"
+	if len(params) > 0 {
+		paramList = strings.Join(params, ", ")
+	}
+	return fmt.Sprintf("%s (*%s)(%s)", returnType, name, paramList), nil
 }
 
 func cBuiltinTypeName(name string) (string, error) {
