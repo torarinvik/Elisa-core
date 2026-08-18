@@ -179,6 +179,12 @@ func registerAggregateDependencies(t semantic.Type, result *semantic.Result, agg
 		return nil
 	case *semantic.RefType:
 		return registerAggregateDependencies(tt.Elem, result, aggregates)
+	case *semantic.OptionalType:
+		payload, ok := semantic.NicheOptionalPayload(tt)
+		if !ok {
+			return fmt.Errorf("unsupported C header optional type %s", tt.String())
+		}
+		return registerAggregateDependencies(payload, result, aggregates)
 	case *semantic.ArrayType:
 		return registerAggregateDependencies(tt.Elem, result, aggregates)
 	case *semantic.StructType, *semantic.GenericInstanceType:
@@ -261,6 +267,12 @@ func collectDirectAggregateDefinitionDeps(t semantic.Type, result *semantic.Resu
 		default:
 			return collectDirectAggregateDefinitionDeps(tt.Elem, result, deps, true)
 		}
+	case *semantic.OptionalType:
+		payload, ok := semantic.NicheOptionalPayload(tt)
+		if !ok {
+			return fmt.Errorf("unsupported C header optional type %s", tt.String())
+		}
+		return collectDirectAggregateDefinitionDeps(payload, result, deps, allowIncompleteStruct)
 	case *semantic.ArrayType:
 		return collectDirectAggregateDefinitionDeps(tt.Elem, result, deps, false)
 	default:
@@ -408,6 +420,12 @@ func formatCDecl(t semantic.Type, name string, result *semantic.Result) (string,
 			nextName = "(*" + name + ")"
 		}
 		return formatCDecl(tt.Elem, nextName, result)
+	case *semantic.OptionalType:
+		payload, ok := semantic.NicheOptionalPayload(tt)
+		if !ok {
+			return "", fmt.Errorf("unsupported C header optional type %s", tt.String())
+		}
+		return formatCDecl(payload, name, result)
 	case *semantic.ArrayType:
 		if !tt.HasConstSize {
 			return "", fmt.Errorf("array declaration %s is missing a compile-time size", tt.String())
