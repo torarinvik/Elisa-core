@@ -346,3 +346,52 @@ def main() -> i64:
 		t.Fatalf("expected canonical protocols + Div + generic [T:Add] all correct (255), got %d", got)
 	}
 }
+
+// A struct VALUE with no `__eq__` must be REJECTED at the comparison.
+//
+// AssignableTo(P, P) made `typesComparableForEquality` say yes, so the checker passed it
+// through to a backend that has no lowering for it: emitBinaryExpr builds an `icmp` for
+// every non-float operand type, aggregates included. The module then failed LLVM's own
+// verifier with "Invalid operand types for ICmp instruction" naming an internal temp — a
+// crash report about compiler internals, for an ordinary mistake in user code.
+func TestStructValueEqualityWithoutEqImplIsRejected(t *testing.T) {
+	result := analyzeOverloadSource(t, `
+struct P:
+    a: i64
+
+def same(x: P, y: P) -> bool:
+    return x == y
+`)
+	errs := result.Errors()
+	found := false
+	for _, err := range errs {
+		if strings.Contains(err, "struct P has no == operator") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected a source-level diagnostic naming the missing == operator, got: %v", errs)
+	}
+}
+
+// The same comparison with an `__eq__` impl still resolves through the overload — the
+// rejection above must not shadow `analyzeComparisonOverload`, which runs before it.
+func TestStructValueEqualityWithEqImplStillResolves(t *testing.T) {
+	result := analyzeOverloadSource(t, `
+struct P:
+    a: i64
+
+protocol Eq:
+    def __eq__(self: Self, other: Self) -> bool
+
+impl Eq for P:
+    def __eq__(self: P, other: P) -> bool:
+        return self.a == other.a
+
+def same(x: P, y: P) -> bool:
+    return x == y
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("a struct with an __eq__ impl must still compare, got: %v", errs)
+	}
+}

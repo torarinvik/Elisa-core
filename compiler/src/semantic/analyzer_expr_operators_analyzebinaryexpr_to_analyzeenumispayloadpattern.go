@@ -73,6 +73,13 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		if !typesComparableForEquality(compareLeft, compareRight) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
+		} else if st := plainStructValueType(compareLeft); st != nil && plainStructValueType(compareRight) != nil {
+			// A struct VALUE with no `__eq__`. AssignableTo(P, P) makes this look comparable,
+			// but the backend has no lowering for it: emitBinaryExpr builds an `icmp` for
+			// every non-float operand type, so the module failed LLVM's verifier with
+			// "Invalid operand types for ICmp instruction" naming an internal temp. Say what
+			// is actually wrong, at the comparison.
+			a.errorf(expr.Pos(), "struct %s has no == operator; implement Eq (`def __eq__(self, other) -> bool`) to compare values of this type", st.Name)
 		}
 		// Footgun guard: comparing two raw `u8&` C-string pointers with == / !=
 		// compares addresses, not contents (unlike cstr/sview/dstr, which content-
@@ -936,4 +943,22 @@ func (a *Analyzer) analyzeEnumIsPayloadPattern(pattern ast.MatchPattern, expecte
 	default:
 		a.errorf(pattern.Pos(), "unsupported variant is payload pattern %T", pattern)
 	}
+}
+
+// plainStructValueType reports the struct type when t is a struct VALUE — not a reference to
+// one, and not a runtime string (sview/dstr/cstr are struct-shaped but content-compare
+// through their own path, which runs before this).
+func plainStructValueType(t Type) *StructType {
+	if runtimeStringKindOf(t) != runtimeStringNone {
+		return nil
+	}
+	switch v := t.(type) {
+	case *StructType:
+		return v
+	case *GenericInstanceType:
+		if st, ok := v.Base.(*StructType); ok {
+			return st
+		}
+	}
+	return nil
 }
