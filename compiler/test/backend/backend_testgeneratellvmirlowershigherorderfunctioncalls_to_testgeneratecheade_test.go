@@ -109,13 +109,13 @@ struct Builder[T]:
     make: fn(T) -> Box[T]
 
 def make_i64_box(value: i64) -> Box[i64]:
-    return Box[i64](value)
+    return Box[i64]{value: value}
 
 def wrap[T](builder: Builder[T], value: T) -> Box[T]:
     return builder.make(value)
 
 def run() -> i64:
-    builder: Builder[i64] = Builder[i64](make_i64_box)
+    builder: Builder[i64] = Builder[i64]{make: make_i64_box}
     boxed: Box[i64] = wrap(builder, 7)
     return boxed.value
 `
@@ -276,7 +276,7 @@ def bump(ch: char) -> i64:
 		"icmp eq i64",
 		"ret i64 65",
 		"define i64 @bump(i64",
-		"add i64",
+		"llvm.sadd.with.overflow.i64",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -400,7 +400,7 @@ global seed: i32 = ANSWER
 global offset: i32 = ANSWER + 8
 global choice: i32 = 7 if ANSWER > 0 else 9
 global negated: i32 = -(ANSWER / 21)
-global pair: Pair = Pair(ANSWER - 41, 1 + 1)
+global pair: Pair = Pair{left: ANSWER - 41, right: 1 + 1}
 global flags: i32[4] = zeroed
 `
 	result := parseAndAnalyze(t, "backend_globals.elisa", src)
@@ -432,10 +432,10 @@ func TestGenerateLLVMIRAllowsAggregateGlobalReferencesInInitializers(t *testing.
 struct Holder:
 	pair: Pair
 
-global base: Pair = Pair(1, 2)
-global table: Pair[2] = [base, Pair(3, 4)]
+global base: Pair = Pair{left: 1, right: 2}
+global table: Pair[2] = [base, Pair{left: 3, right: 4}]
 global picked: Pair = table[1]
-global wrapped: Holder = Holder(table[0])
+global wrapped: Holder = Holder{pair: table[0]}
 global first_left: i32 = table[0].left
 `
 	result := parseAndAnalyze(t, "backend_global_aggregate_refs.elisa", src)

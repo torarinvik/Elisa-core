@@ -254,7 +254,7 @@ def sum(pair: Pair) -> i64:
 		"extractvalue %Pair",
 		"store i64",
 		"load i64",
-		"add i64",
+		"llvm.sadd.with.overflow.i64",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

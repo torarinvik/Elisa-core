@@ -14,7 +14,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughWildcardRebasedHelperR
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -23,7 +23,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
@@ -50,7 +50,7 @@ func TestGenerateLLVMIRKeepsOverlapGuardrailsThroughWildcardRebasedHelperReturne
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -59,7 +59,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
@@ -89,7 +89,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -98,7 +98,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> bool:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -128,7 +128,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -137,7 +137,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_rebased_helper_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -167,7 +167,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -176,7 +176,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> bool:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
 	return arena_da_eq_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -203,7 +203,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughNestedFieldProjection(
 struct NestedViews:
 	inner: Views
 
-@borrows_return_field(inner.left, left, inner.right, right)
+@borrows_return(field, inner.left, left, inner.right, right)
 extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -212,7 +212,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_nested_struct(values: array[i32, 4]) -> bool:
-	boxed: NestedViews = NestedViews(Views(values[0:2], values[2:4]))
+	boxed: NestedViews = NestedViews{inner: Views{left: values[0:2], right: values[2:4]}}
 	return arena_da_eq_exact(boxed.inner.left, boxed.inner.right)
 
 def eq_nested_helper(values: array[i32, 4]) -> bool:
@@ -262,8 +262,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T, shape_out]:
 	_ = a
@@ -315,7 +315,7 @@ extern intern_small_string(src: u8&, len: usize) -> heap u8&
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	src: u8& = value if value != null else "".cast[u8&]
 	_ = start
-	return StringView(src, end)
+	return StringView{data: src, len: end}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)
@@ -503,7 +503,7 @@ def head_view(view: view[i32]) -> i32:
 		"extractvalue %DynArray__i32",
 		"darrayslice.view.len.out = sub i64",
 		"slicetmp.len.out = sub i64",
-		"getelementptr i32, ptr",
+		"getelementptr inbounds i32, ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {

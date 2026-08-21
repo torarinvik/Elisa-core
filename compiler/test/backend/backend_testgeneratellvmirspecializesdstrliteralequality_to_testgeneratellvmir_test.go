@@ -309,8 +309,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	if dst.len != src.len:
@@ -401,7 +401,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughFieldProjection(t *t
 	left: view[i32]
 	right: view[i32]
 
-@borrows_return_field(left, left, right, right)
+@borrows_return(field, left, left, right, right)
 extern wrap_views(left: view[i32], right: view[i32]) -> Views
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -409,7 +409,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_struct(values: array[i32, 4]) -> void:
-	boxed: Views = Views(values[0:2], values[2:4])
+	boxed: Views = Views{left: values[0:2], right: values[2:4]}
 	arena_da_copy_exact(boxed.left, boxed.right)
 
 def copy_helper(values: array[i32, 4]) -> void:
@@ -451,7 +451,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
+	items: array[Views, 1] = [Views{left: values[0:2], right: values[2:4]}]
 	arena_da_copy_exact(items[0].left, items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_copy_exact_indexed_field_projection.elisa", src)
@@ -488,7 +488,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_helper_view_slice(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0:2], values[2:4]), Views(values[4:6], values[6:8])]
+	items: array[Views, 2] = [Views{left: values[0:2], right: values[2:4]}, Views{left: values[4:6], right: values[6:8]}]
 	window: view[Views] = arena_da_view_slice(items[1:2], 0, 1)
 	arena_da_copy_exact(window[0].left, window[0].right)
 	`
@@ -515,7 +515,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughHelperReturnedIndexe
 struct ViewHolder:
 	items: array[Views, 1]
 
-@borrows_return_field(items[0].left, left, items[0].right, right)
+@borrows_return(field, items[0].left, left, items[0].right, right)
 extern wrap_indexed_views(left: view[i32], right: view[i32]) -> ViewHolder
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):

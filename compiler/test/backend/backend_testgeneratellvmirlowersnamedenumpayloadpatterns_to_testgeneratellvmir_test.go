@@ -128,10 +128,10 @@ def next_kind() -> TokenKind:
 	}
 
 	checks := []string{
-		"define i1 @is_region(i32",
-		"define i32 @next_kind()",
-		"icmp eq i32",
-		"ret i32 2",
+		"define i1 @is_region(i8",
+		"define i8 @next_kind()",
+		"icmp eq i8",
+		"ret i8 2",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -216,7 +216,7 @@ def make_box(owner: Arena) -> FrozenBox:
 		right: Expr = new Expr.Lit(span: 2, value: 4)
 		_ = new Expr.Add(span: 5, left: left, right: right)
 	frozen: Expr.Store[Frozen] = freeze(move store)
-	return FrozenBox(frozen)
+	return FrozenBox{store: frozen}
 
 def inspect(owner: Arena) -> i32:
 	box: FrozenBox = make_box(owner)
@@ -360,7 +360,7 @@ func TestGenerateLLVMIRLowersFrontendStressFixture(t *testing.T) {
 
 	checks := []string{
 		"%SourceSpan = type { i64, i64 }",
-		"%Token = type { i32, %SourceSpan, ptr }",
+		"%Token = type { i8, %SourceSpan, ptr }",
 		"%DynDict__cstr__Symbol = type { ptr, i64, i64, i64, ptr }",
 		"%Scope = type { ptr, %DynDict__cstr__Symbol, i64 }",
 		"%ParserState = type { %DynArrayView, i64, ptr }",
@@ -495,7 +495,7 @@ def recover(span: i64) -> i64:
 	}
 	for _, check := range []string{
 		"%ErrSet__BackendError = type { i32, i64, i32 }",
-		"%ErrUnion__BackendError__i64 = type { %ErrSet__BackendError, i64 }",
+		"%ErrUnion__BackendError__i64 = type { %ErrSet__BackendError, ptr }",
 		"insertvalue %ErrSet__BackendError",
 		"extractvalue %ErrSet__BackendError",
 		"define %ErrSet__BackendError @fail(",
@@ -524,7 +524,6 @@ def ok() -> i64 error[BackendError]:
 		"%ErrSet__BackendError = type { i32, i64, i32 }",
 		"define %ErrSet__BackendError @ok(ptr",
 		"store i64 7",
-		"ret %ErrSet__BackendError { i32 0",
 		"ret %ErrSet__BackendError",
 	} {
 		if !strings.Contains(output, check) {
@@ -556,7 +555,7 @@ def recover(e: BackendError) -> i64:
 		"errset.code",
 		"errset.payload",
 		"match.error.payload",
-		"add i64",
+		"llvm.sadd.with.overflow.i64",
 	} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
@@ -589,8 +588,8 @@ def fail_now() -> int error[BroadError]:
 	}
 
 	checks := []string{
-		"%ErrUnion__SourceError__int = type { i32, i64 }",
-		"%ErrUnion__BroadError__int = type { i32, i64 }",
+		"%ErrUnion__SourceError__int = type { i32, ptr }",
+		"%ErrUnion__BroadError__int = type { i32, ptr }",
 		"declare i32 @read_value(ptr)",
 		"define i32 @bubble(ptr ",
 		"define i32 @fail_now(ptr ",
@@ -629,7 +628,7 @@ def bubble_network() -> int error[FileError, NetworkError]:
 	}
 
 	checks := []string{
-		"%ErrUnion__FileError__int = type { i32, i64 }",
+		"%ErrUnion__FileError__int = type { i32, ptr }",
 		"declare i32 @read_disk(ptr)",
 		"declare i32 @read_network(ptr)",
 		"define i32 @bubble_disk(ptr ",

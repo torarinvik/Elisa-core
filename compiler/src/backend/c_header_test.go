@@ -22,3 +22,22 @@ export type CallbackTable as PublicCallbackTable
 		t.Fatalf("expected C function-pointer field, got:\n%s", header)
 	}
 }
+
+func TestGenerateCHeaderFunctionPointerCStrParameter(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "header_function_pointer_cstr.elisa", `struct CallbackTable layout(c):
+	callback: fn(cstr) -> void
+	returns_cstr: fn() -> cstr
+
+export type CallbackTable as PublicCallbackTable
+`)
+	header, err := GenerateCHeader(result)
+	if err != nil {
+		t.Fatalf("GenerateCHeader returned error: %v", err)
+	}
+	if !strings.Contains(header, "void (*callback)(const char *arg0);") {
+		t.Fatalf("expected C function-pointer cstr parameter, got:\n%s", header)
+	}
+	if !strings.Contains(header, "const char * (*returns_cstr)(void);") {
+		t.Fatalf("expected C function-pointer cstr return, got:\n%s", header)
+	}
+}

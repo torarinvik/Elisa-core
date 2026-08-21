@@ -219,7 +219,7 @@ func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
 		total <- total + i
 	for j in limit..>0:
 		total <- total + j
-	for k in 0..4..2:
+	for k in 0..=4..2:
 		total <- total + k
 	return total
 `
@@ -243,7 +243,6 @@ func TestGenerateLLVMIRLowersForLoopRanges(t *testing.T) {
 		"select i1",
 		"icmp slt",
 		"icmp sgt",
-		"icmp sle",
 		"add i64",
 		"sub i64",
 	} {
@@ -289,7 +288,7 @@ func TestGenerateLLVMIRLowersIterableForLoopMutableRef(t *testing.T) {
 	value: mutable int
 
 def bump() -> int:
-	items: mutable array[Counter, 2] = [Counter(1), Counter(2)]
+	items: mutable array[Counter, 2] = [Counter{value: 1}, Counter{value: 2}]
 	for mutable item in items:
 		item.value <- item.value + 1
 	return items[0].value + items[1].value

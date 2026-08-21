@@ -17,7 +17,7 @@ struct ViewHolder:
 struct NestedHolder:
 	holder: ViewHolder
 
-@borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
+@borrows_return(field, holder.items[0].left, left, holder.items[0].right, right)
 extern wrap_nested_indexed_views(left: view[i32], right: view[i32]) -> NestedHolder
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -51,7 +51,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughRebasedHelperReturne
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern wrap_sub(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -59,7 +59,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
@@ -86,7 +86,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughWildcardRebasedHelpe
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -94,7 +94,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[1:3], 0, 2)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
@@ -124,7 +124,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -132,7 +132,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
-	items: array[Views, 4] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4]), Views(values[4:5], values[5:6]), Views(values[6:7], values[7:8])]
+	items: array[Views, 4] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}, Views{left: values[4:5], right: values[5:6]}, Views{left: values[6:7], right: values[7:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[1:3], 0, 2)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -159,7 +159,7 @@ func TestGenerateLLVMIRKeepsCopyOverlapGuardrailsThroughWildcardRebasedHelperRet
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items[*].left, src[*].left, items[*].right, src[*].right)
+@borrows_return(field, rebased, items[*].left, src[*].left, items[*].right, src[*].right)
 extern wrap_sub_wild(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -167,7 +167,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: ViewWindow = wrap_sub_wild(items[0:1], 0, 1)
 	arena_da_copy_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`
@@ -202,7 +202,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
+@borrows_return(field, rebased, meta.items[*].left, src[*].left, meta.items[*].right, src[*].right)
 extern wrap_submeta_wild(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -210,7 +210,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
-	items: array[Views, 2] = [Views(values[0:3], values[1:4]), Views(values[4:7], values[5:8])]
+	items: array[Views, 2] = [Views{left: values[0:3], right: values[1:4]}, Views{left: values[4:7], right: values[5:8]}]
 	wrapped: Wrapper = wrap_submeta_wild(items[0:1], 0, 1)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -245,7 +245,7 @@ struct Meta:
 struct Wrapper:
 	meta: Meta
 
-@borrows_return_field_rebased(meta.items, src)
+@borrows_return(field, rebased, meta.items, src)
 extern wrap_submeta(src: view[Views], start: usize, end: usize) -> Wrapper
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -253,7 +253,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: Wrapper = wrap_submeta(items[1:2], 0, 1)
 	arena_da_copy_exact(wrapped.meta.items[0].left, wrapped.meta.items[0].right)
 	`
@@ -280,7 +280,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewCopyExactThroughNestedFieldProjectio
 struct NestedViews:
 	inner: Views
 
-@borrows_return_field(inner.left, left, inner.right, right)
+@borrows_return(field, inner.left, left, inner.right, right)
 extern wrap_nested_views(left: view[i32], right: view[i32]) -> NestedViews
 
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
@@ -288,7 +288,7 @@ def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	_ = src
 
 def copy_nested_struct(values: array[i32, 4]) -> void:
-	boxed: NestedViews = NestedViews(Views(values[0:2], values[2:4]))
+	boxed: NestedViews = NestedViews{inner: Views{left: values[0:2], right: values[2:4]}}
 	arena_da_copy_exact(boxed.inner.left, boxed.inner.right)
 
 def copy_nested_helper(values: array[i32, 4]) -> void:
@@ -333,8 +333,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -409,8 +409,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst

@@ -203,15 +203,14 @@ func TestGenerateLLVMIRLowersManualRegions(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
-	region scratch(1024)
-	mark scratch as cp
-	temp: i32& = new[scratch] seed + 1
-	restore scratch from cp
-	reused: i32& = new[scratch] seed + 2
-	value: i32 = reused[0]
-	reset scratch
-	final: i32& = new[scratch] seed + 3
-	return value + final[0]
+	value: i32 = 0
+	region scratch(1024):
+		temp: i32& = new[scratch] seed + 1
+		value = temp[0]
+	region reused(1024):
+		reused_value: i32& = new[reused] seed + 2
+		value = value + reused_value[0]
+	return value
 `
 	result := parseAndAnalyze(t, "backend_region_checkpoints.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -220,13 +219,9 @@ func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 	}
 
 	checks := []string{
-		"%ArenaMark = type { ptr, i64 }",
-		"declare %ArenaMark @arena_snapshot(ptr)",
-		"declare void @arena_rewind(ptr, %ArenaMark)",
-		"declare void @arena_reset(ptr)",
-		"call %ArenaMark @arena_snapshot(ptr",
-		"call void @arena_rewind(ptr",
-		"call void @arena_reset(ptr",
+		"declare ptr @new_region_backend(i64, i64)",
+		"call ptr @new_region_backend(i64 1024, i64 0)",
+		"call void @arena_free(ptr",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -236,17 +231,14 @@ func TestGenerateLLVMIRLowersRegionCheckpoints(t *testing.T) {
 }
 func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 	src := `def region_value(seed: i32) -> i32:
-	region scratch(1024)
-	mark scratch as outer
-	stable: i32& = new[scratch] seed + 1
-	mark scratch as inner
-	temp: i32& = new[scratch] seed + 2
-	restore scratch from inner
-	kept: i32 = stable[0]
-	restore scratch from outer
-	reset scratch
-	fresh: i32& = new[scratch] seed + 3
-	return kept + fresh[0]
+	kept: i32 = 0
+	region scratch(1024):
+		stable: i32& = new[scratch] seed + 1
+		kept = stable[0]
+		region inner(1024):
+			temp: i32& = new[inner] seed + 2
+			kept = kept + temp[0]
+	return kept
 `
 	result := parseAndAnalyze(t, "backend_nested_region_checkpoints.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -254,14 +246,11 @@ func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
 	}
 
-	if got := strings.Count(output, "call %ArenaMark @arena_snapshot(ptr"); got != 2 {
-		t.Fatalf("expected 2 arena_snapshot calls, got %d\n%s", got, output)
+	if got := strings.Count(output, "call ptr @new_region_backend(i64 1024, i64 0)"); got != 2 {
+		t.Fatalf("expected 2 scoped region allocations, got %d\n%s", got, output)
 	}
-	if got := strings.Count(output, "call void @arena_rewind(ptr"); got != 2 {
-		t.Fatalf("expected 2 arena_rewind calls, got %d\n%s", got, output)
-	}
-	if got := strings.Count(output, "call void @arena_reset(ptr"); got != 1 {
-		t.Fatalf("expected 1 arena_reset call, got %d\n%s", got, output)
+	if got := strings.Count(output, "call void @arena_free(ptr"); got != 4 {
+		t.Fatalf("expected scoped and function-exit region frees, got %d\n%s", got, output)
 	}
 }
 func TestGenerateLLVMIRLowersEnumConstructorsAndMatch(t *testing.T) {

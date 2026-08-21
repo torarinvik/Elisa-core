@@ -22,8 +22,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -98,8 +98,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -163,8 +163,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -203,8 +203,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_fill[T](dst: view[T], value: T):
 	_ = dst
@@ -291,8 +291,8 @@ def arena_da_view[T](values: darray[T, shape_in]&, start: usize, end: usize) -> 
 	_ = start
 	_ = end
 	if values.items != null:
-		return DynArrayView(values.items.cast[void&], values.count)
-	return DynArrayView(null, 0)
+		return DynArrayView{data: values.items.cast[void&], len: values.count}
+	return DynArrayView{data: null, len: 0}
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	_ = left
@@ -370,7 +370,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughFieldProjection(t *tes
 	left: view[i32]
 	right: view[i32]
 
-@borrows_return_field(left, left, right, right)
+@borrows_return(field, left, left, right, right)
 extern wrap_views(left: view[i32], right: view[i32]) -> Views
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -379,7 +379,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_struct(values: array[i32, 4]) -> bool:
-	boxed: Views = Views(values[0:2], values[2:4])
+	boxed: Views = Views{left: values[0:2], right: values[2:4]}
 	return arena_da_eq_exact(boxed.left, boxed.right)
 
 def eq_helper(values: array[i32, 4]) -> bool:
@@ -422,7 +422,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 1] = [Views(values[0:2], values[2:4])]
+	items: array[Views, 1] = [Views{left: values[0:2], right: values[2:4]}]
 	return arena_da_eq_exact(items[0].left, items[0].right)
 	`
 	result := parseAndAnalyze(t, "backend_dview_eq_exact_indexed_field_projection.elisa", src)
@@ -448,7 +448,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughHelperReturnedIndexedF
 struct ViewHolder:
 	items: array[Views, 1]
 
-@borrows_return_field(items[0].left, left, items[0].right, right)
+@borrows_return(field, items[0].left, left, items[0].right, right)
 extern wrap_indexed_views(left: view[i32], right: view[i32]) -> ViewHolder
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -486,7 +486,7 @@ struct ViewHolder:
 struct NestedHolder:
 	holder: ViewHolder
 
-@borrows_return_field(holder.items[0].left, left, holder.items[0].right, right)
+@borrows_return(field, holder.items[0].left, left, holder.items[0].right, right)
 extern wrap_nested_indexed_views(left: view[i32], right: view[i32]) -> NestedHolder
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -521,7 +521,7 @@ func TestGenerateLLVMIRSpecializesArenaDViewEqExactThroughRebasedHelperReturnedI
 struct ViewWindow:
 	items: view[Views]
 
-@borrows_return_field_rebased(items, src)
+@borrows_return(field, rebased, items, src)
 extern wrap_sub(src: view[Views], start: usize, end: usize) -> ViewWindow
 
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
@@ -530,7 +530,7 @@ def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
 
 def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
-	items: array[Views, 2] = [Views(values[0:1], values[1:2]), Views(values[2:3], values[3:4])]
+	items: array[Views, 2] = [Views{left: values[0:1], right: values[1:2]}, Views{left: values[2:3], right: values[3:4]}]
 	wrapped: ViewWindow = wrap_sub(items[1:2], 0, 1)
 	return arena_da_eq_exact(wrapped.items[0].left, wrapped.items[0].right)
 	`

@@ -28,3 +28,12 @@ export fn api() -> i64 = missing_target
 		t.Fatalf("expected undefined export target diagnostic, got:\n%s", all)
 	}
 }
+
+func TestAnalyzeAcceptsExportTargetWithRenamedParameterNames(t *testing.T) {
+	analyzeFunctionAnalysisTestSource(t, "renamed_export_parameters.elisa", `
+def implementation(left: i64, right: i64) -> i64:
+    return left + right
+
+export fn public_api(first: i64, second: i64) -> i64 = implementation
+`)
+}

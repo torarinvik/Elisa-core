@@ -220,7 +220,7 @@ struct FloatPair:
 	right: f32
 
 global g_ratio: f32 = 1.25
-global g_pair: FloatPair = FloatPair(2.5, 3.5)
+global g_pair: FloatPair = FloatPair{left: 2.5, right: 3.5}
 global g_values: f32[2] = [4.5, 5.5]
 
 def choose(flag: bool) -> f32:
@@ -321,7 +321,7 @@ const F64_TOTAL: f64 = 3.25 + 4.25
 
 global g_f32: f32 = 5.25 + 6.25
 global g_f64: f64 = 7.25 + 8.25
-global g_pair: FloatPair = FloatPair(9.25 + 10.25, 11.25 + 12.25)
+global g_pair: FloatPair = FloatPair{left: 9.25 + 10.25, right: 11.25 + 12.25}
 global g_values: f32[2] = [13.25 + 14.25, 15.25 + 16.25]
 
 def total() -> f64:

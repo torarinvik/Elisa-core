@@ -100,7 +100,7 @@ def by_reverse_family_order() -> int error[NetworkError, FileError]:
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
 	}
 
-	if !strings.Contains(output, "%ErrUnion__error_FileError__NetworkError__int = type { i32, i64 }") {
+	if !strings.Contains(output, "%ErrUnion__error_FileError__NetworkError__int = type { i32, ptr }") {
 		t.Fatalf("expected canonical error union struct name, got:\n%s", output)
 	}
 }
@@ -128,8 +128,8 @@ def maybe(flag: bool) -> int? error[ProbeError]:
 		"%Optional__int = type { i1, i64 }",
 		"define i32 @raw(ptr ",
 		"define i32 @maybe(ptr ",
-		"store i64 1, ptr %0",
-		"store %Optional__int zeroinitializer, ptr %0",
+		"store i64 1, ptr %errunion.payload",
+		"store %Optional__int %errunion.payload3, ptr %0",
 	}
 	for _, check := range checks {
 		if !strings.Contains(output, check) {
@@ -239,7 +239,7 @@ func TestGenerateLLVMIRLowersOptionalNullChecksAndSmartCastUse(t *testing.T) {
 
 def maybe_box(flag: bool) -> Box?:
 	if flag:
-		return Box(7)
+		return Box{value: 7}
 	return null
 
 
@@ -414,7 +414,7 @@ func TestGenerateLLVMIRSpecializesSameExtentRuntimeStringEquality(t *testing.T) 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
-	return StringView("".cast[u8&], end - start)
+	return StringView{data: "".cast[u8&], len: end - start}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)

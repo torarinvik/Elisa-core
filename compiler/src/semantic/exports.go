@@ -337,19 +337,19 @@ func sameExportSignature(left *FuncType, right *FuncType) bool {
 	if left == nil || right == nil {
 		return left == right
 	}
-	if left.Variadic != right.Variadic || funcTypeExplicitParamCount(left) != funcTypeExplicitParamCount(right) || len(left.ExplicitParamNames) != len(right.ExplicitParamNames) {
-		return false
-	}
-	for i := range left.ExplicitParamNames {
-		if left.ExplicitParamNames[i] != right.ExplicitParamNames[i] {
-			return false
-		}
-	}
+	leftExplicitCount := funcTypeExplicitParamCount(left)
 	rightExplicitCount := funcTypeExplicitParamCount(right)
-	if len(left.Params) < len(left.ExplicitParamNames) || len(right.Params) < rightExplicitCount {
+	if left.Variadic != right.Variadic || leftExplicitCount != rightExplicitCount {
 		return false
 	}
-	for i := range left.ExplicitParamNames {
+	if len(left.Params) < leftExplicitCount || len(right.Params) < rightExplicitCount {
+		return false
+	}
+	// Parameter names are not part of a function type. Export declarations commonly
+	// use public-facing names (for example `key`) while the implementation uses a
+	// more descriptive name (for example `current_key`); requiring alpha-equivalent
+	// names here rejects otherwise identical C-ABI signatures.
+	for i := 0; i < leftExplicitCount; i++ {
 		if !SameType(left.Params[i], right.Params[i]) {
 			return false
 		}
@@ -426,6 +426,11 @@ func isCABICompatibleType(t Type) bool {
 	case *AddressSpaceType:
 		return isCABICompatibleType(tt.Storage)
 	case *RefType:
+		return true
+	case *DStrType:
+		// cstr is represented as a raw immutable byte pointer at the C/LLVM
+		// boundary, so it is valid in exported structs and function-pointer
+		// signatures just like a reference.
 		return true
 	case *ArrayType:
 		return tt.HasConstSize && isCABICompatibleType(tt.Elem)
