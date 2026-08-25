@@ -1,0 +1,125 @@
+# ============================================================
+# Elisa core Runtime - file I/O (libc stdio bindings + helpers)
+# ============================================================
+#
+# Small, conservative file I/O surface over C stdio. Streams are opaque
+# `heap void&` handles (FILE*), following the malloc/free precedent in
+# arena.elisa. Every extern that touches the file system carries
+# `can[Blocking.IO]`; fopen additionally allocates and fclose releases.
+#
+# The helpers below never expose a raw stream: they open, do the whole
+# operation, and close, reporting failures through the FileIoError set.
+
+# ------------------------------------------------------------
+# libc stdio externs
+# ------------------------------------------------------------
+
+extern fopen(path: u8&, mode: u8&) -> mutable heap void&? can[Blocking.IO, Memory.Allocate]
+extern fclose(stream: heap void&) -> int can[Blocking.IO, Memory.Release]
+extern fread(buffer: mutable void&, size: usize, count: usize, stream: void&) -> usize can[Blocking.IO]
+extern fwrite(buffer: void&, size: usize, count: usize, stream: void&) -> usize can[Blocking.IO]
+extern fseek(stream: void&, offset: i64, whence: int) -> int can[Blocking.IO]
+extern ftell(stream: void&) -> i64 can[Blocking.IO]
+extern ferror(stream: void&) -> int
+extern unlink(path: u8&) -> int can[Blocking.IO]
+
+const FILEIO_SEEK_SET: int = 0
+const FILEIO_SEEK_END: int = 2
+
+# ------------------------------------------------------------
+# Error set
+# ------------------------------------------------------------
+
+# Variants deliberately carry no payload: the stage1 backend currently declines
+# `raise E.Variant(<cstr payload>)` (see repro/nw_fileio_raise_cstr_payload_stage1.elisa),
+# and this module must compile under both compilers. Callers already hold the path.
+error FileIoError:
+    OpenFailed
+    ReadFailed
+    WriteFailed
+    SeekFailed
+
+# ------------------------------------------------------------
+# Helpers
+# ------------------------------------------------------------
+
+# Size in bytes of the file at `path`, via fseek/ftell.
+def file_size(path: cstr) -> i64 error[FileIoError]:
+    can Blocking.IO, Memory.Allocate, Memory.Release:
+        handle: mutable heap void&? = fopen(path.cast[u8&], "rb")
+        if handle == null:
+            raise FileIoError.OpenFailed
+        stream: mutable heap void& = handle
+        if fseek(stream, 0, FILEIO_SEEK_END) != 0:
+            _ = fclose(stream)
+            raise FileIoError.SeekFailed
+        size: i64 = ftell(stream)
+        _ = fclose(stream)
+        if size < 0:
+            raise FileIoError.SeekFailed
+        return size
+
+# True when the file at `path` can be opened for reading.
+def file_exists(path: cstr) -> bool:
+    can Blocking.IO, Memory.Allocate, Memory.Release:
+        stream: mutable heap void&? = fopen(path.cast[u8&], "rb")
+        false return if stream == null
+        _ = fclose(stream)
+        return true
+
+# Read the whole file into a darray[u8] allocated in arena `a`.
+def read_entire_file(a: mutable Arena&, path: cstr) -> darray[u8] error[FileIoError]:
+    can Blocking.IO, Memory.Allocate, Memory.Release, Abort.Panic:
+        size: i64 = try file_size(path)
+        handle: mutable heap void&? = fopen(path.cast[u8&], "rb")
+        if handle == null:
+            raise FileIoError.OpenFailed
+        stream: mutable heap void& = handle
+        in a:
+            buffer: mutable darray[u8] = []
+            buffer.reserve(size.usize() + 1)
+            index: mutable i64 = 0
+            while index < size:
+                buffer.push(0)
+                index <- index + 1
+            if size > 0:
+                read_count: usize = fread((&buffer[0]).cast[mutable void&], 1, size.usize(), stream)
+                if read_count != size.usize():
+                    _ = fclose(stream)
+                    raise FileIoError.ReadFailed
+            _ = fclose(stream)
+            return buffer
+
+# Read the whole file and return it as a NUL-terminated C string copy
+# allocated in arena `a`. Embedded NUL bytes truncate the logical string.
+def read_entire_file_cstr(a: mutable Arena&, path: cstr) -> cstr error[FileIoError]:
+    can Blocking.IO, Memory.Allocate, Memory.Release, Abort.Panic:
+        buffer: mutable darray[u8] = try read_entire_file(a, path)
+        in a:
+            buffer.push(0)
+        return buffer.items.cast[cstr]
+
+# Write `bytes` to the file at `path`, replacing any existing contents.
+# Returns the number of bytes written. (A `void error[...]` return is avoided:
+# `try` on a void error union miscompiles under stage0 and `catch` on one
+# crashes the stage1 compiler — see repro/nw_fileio_try_void_else.elisa and
+# repro/nw_fileio_catch_void_error_union_stage1_crash.elisa.)
+def write_entire_file(path: cstr, bytes: sview) -> i64 error[FileIoError]:
+    can Blocking.IO, Memory.Allocate, Memory.Release:
+        handle: mutable heap void&? = fopen(path.cast[u8&], "wb")
+        if handle == null:
+            raise FileIoError.OpenFailed
+        stream: mutable heap void& = handle
+        if bytes.len > 0:
+            written: usize = fwrite(bytes.data.cast[void&], 1, bytes.len.usize(), stream)
+            if written != bytes.len.usize():
+                _ = fclose(stream)
+                raise FileIoError.WriteFailed
+        if fclose(stream) != 0:
+            raise FileIoError.WriteFailed
+        return bytes.len
+
+# Delete the file at `path`; true when the file was removed.
+def remove_file(path: cstr) -> bool:
+    can Blocking.IO:
+        return unlink(path.cast[u8&]) == 0
