@@ -18,11 +18,11 @@ include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 # * The identical shape inside an ERROR-UNION return (`-> JV error[E]`) does NOT
 #   decline -- elisacore_json shipped `json_at` that way for a while.
 # * A STRUCT (non-enum) copied the same way is fine on both stages.
-# * ELISA_DBG_DECLINE=1 is essential here: the plain error message lists ~25
-#   std runtime names (join, rt_concat2, __cast__, ...) that are declined
-#   HARMLESSLY in every build, and truncates the list before the one user
-#   function that actually matters. Grep the debug output for `DROPPED` on a
-#   name from your own file.
+# * The decline list also carries std runtime names (`join`, and historically
+#   the `store_*` / `rt_*` / `__cast__` family) that are declined HARMLESSLY.
+#   When the list is long it is truncated before the one user function that
+#   matters, so run with ELISA_DBG_DECLINE=1 and grep the output for `DROPPED`
+#   on a name from your own file.
 #
 # WORKAROUND used by elisacore_json.elisa: copy through `arena_memcpy` into a
 # `zeroed` local and `return move` it (`json_value_copy` / `json_member_copy`),

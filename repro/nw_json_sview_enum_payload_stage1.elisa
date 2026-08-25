@@ -6,8 +6,8 @@ include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 # below never reads `t`. Found while building elisacore_json (2026-08-25).
 #
 #   stage0: compiles + runs, exit 0
-#   stage1: error: backend emitted no functions for this unit; declined 39:
-#             store_get, store_count, ..., tag_of, ...
+#   stage1: error: backend emitted no functions for this unit; declined 4:
+#             tag_of, join, tag_of, main
 #           note: every function in the unit is dropped when the backend
 #                 declines one; the object was not written
 #
@@ -19,9 +19,9 @@ include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 # * Scalar payloads (bool / f64 / i64 / uintptr) are fine on both stages.
 # * An `sview` LOCAL, and calls to `sview(...)`, are fine on stage1; only the
 #   enum-variant-payload position declines.
-# * The declined `store_*` names are the std's generic Store/KeyedStore impls
-#   (same family as repro/nw_print_int_generic_stage1.elisa); `tag_of` is the
-#   function that actually matters here.
+# * `join` in the decline list is the std's Fs::join and is declined harmlessly
+#   in every build; `tag_of` is the function that actually matters. Run with
+#   ELISA_DBG_DECLINE=1 and grep for `DROPPED` on a name from your own file.
 #
 # WORKAROUND used by elisacore_json.elisa: carry strings as
 # `(data_bits: uintptr, len: i64)` in the variant and rebuild the `sview` in an
