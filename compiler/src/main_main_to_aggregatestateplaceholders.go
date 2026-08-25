@@ -265,7 +265,7 @@ func parseArgs(args []string) (cliOptions, error) {
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
-		case arg == "-O0" || arg == "-O2" || arg == "-O3":
+		case arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3":
 			level, err := parseOptimizationArg(strings.TrimPrefix(arg, "-O"))
 			if err != nil {
 				return cliOptions{}, err
@@ -591,7 +591,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 func printUsage(w io.Writer) {
 	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive, emitTokens}
-	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
+	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O1|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")
@@ -607,12 +607,14 @@ func parseOptimizationArg(value string) (backend.OptimizationLevel, error) {
 	switch strings.TrimSpace(strings.TrimPrefix(strings.ToUpper(value), "O")) {
 	case "0":
 		return backend.OptimizationLevel0, nil
+	case "1":
+		return backend.OptimizationLevel1, nil
 	case "2":
 		return backend.OptimizationLevel2, nil
 	case "3":
 		return backend.OptimizationLevel3, nil
 	default:
-		return 0, fmt.Errorf("unsupported optimization level %q (expected O0, O2, or O3)", value)
+		return 0, fmt.Errorf("unsupported optimization level %q (expected O0, O1, O2, or O3)", value)
 	}
 }
 func effectiveOptimizationLevel(options cliOptions) backend.OptimizationLevel {
