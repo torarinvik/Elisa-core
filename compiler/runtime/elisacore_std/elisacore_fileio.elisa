@@ -30,14 +30,13 @@ const FILEIO_SEEK_END: int = 2
 # Error set
 # ------------------------------------------------------------
 
-# Variants deliberately carry no payload: the stage1 backend currently declines
-# `raise E.Variant(<cstr payload>)` (see repro/nw_fileio_raise_cstr_payload_stage1.elisa),
-# and this module must compile under both compilers. Callers already hold the path.
+# Each variant carries the offending path, so a caller that fans several
+# files through one `try` still knows which one failed.
 error FileIoError:
-    OpenFailed
-    ReadFailed
-    WriteFailed
-    SeekFailed
+    OpenFailed(path: cstr)
+    ReadFailed(path: cstr)
+    WriteFailed(path: cstr)
+    SeekFailed(path: cstr)
 
 # ------------------------------------------------------------
 # Helpers
@@ -48,15 +47,15 @@ def file_size(path: cstr) -> i64 error[FileIoError]:
     can Blocking.IO, Memory.Allocate, Memory.Release:
         handle: mutable heap void&? = fopen(path.cast[u8&], "rb")
         if handle == null:
-            raise FileIoError.OpenFailed
+            raise FileIoError.OpenFailed(path)
         stream: mutable heap void& = handle
         if fseek(stream, 0, FILEIO_SEEK_END) != 0:
             _ = fclose(stream)
-            raise FileIoError.SeekFailed
+            raise FileIoError.SeekFailed(path)
         size: i64 = ftell(stream)
         _ = fclose(stream)
         if size < 0:
-            raise FileIoError.SeekFailed
+            raise FileIoError.SeekFailed(path)
         return size
 
 # True when the file at `path` can be opened for reading.
@@ -73,7 +72,7 @@ def read_entire_file(a: mutable Arena&, path: cstr) -> darray[u8] error[FileIoEr
         size: i64 = try file_size(path)
         handle: mutable heap void&? = fopen(path.cast[u8&], "rb")
         if handle == null:
-            raise FileIoError.OpenFailed
+            raise FileIoError.OpenFailed(path)
         stream: mutable heap void& = handle
         in a:
             buffer: mutable darray[u8] = []
@@ -86,7 +85,7 @@ def read_entire_file(a: mutable Arena&, path: cstr) -> darray[u8] error[FileIoEr
                 read_count: usize = fread((&buffer[0]).cast[mutable void&], 1, size.usize(), stream)
                 if read_count != size.usize():
                     _ = fclose(stream)
-                    raise FileIoError.ReadFailed
+                    raise FileIoError.ReadFailed(path)
             _ = fclose(stream)
             return buffer
 
@@ -108,15 +107,15 @@ def write_entire_file(path: cstr, bytes: sview) -> i64 error[FileIoError]:
     can Blocking.IO, Memory.Allocate, Memory.Release:
         handle: mutable heap void&? = fopen(path.cast[u8&], "wb")
         if handle == null:
-            raise FileIoError.OpenFailed
+            raise FileIoError.OpenFailed(path)
         stream: mutable heap void& = handle
         if bytes.len > 0:
             written: usize = fwrite(bytes.data.cast[void&], 1, bytes.len.usize(), stream)
             if written != bytes.len.usize():
                 _ = fclose(stream)
-                raise FileIoError.WriteFailed
+                raise FileIoError.WriteFailed(path)
         if fclose(stream) != 0:
-            raise FileIoError.WriteFailed
+            raise FileIoError.WriteFailed(path)
         return bytes.len
 
 # Delete the file at `path`; true when the file was removed.
