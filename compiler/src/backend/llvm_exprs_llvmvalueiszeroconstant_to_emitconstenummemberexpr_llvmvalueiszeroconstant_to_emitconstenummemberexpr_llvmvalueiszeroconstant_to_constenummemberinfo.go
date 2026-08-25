@@ -527,6 +527,11 @@ func (s *functionState) emitMovedValue(operand ast.Expr, expected semantic.Type)
 		if err := s.storeValue(binding.ptr, zero, binding.typ, binding.name+".move.zero"); err != nil {
 			return nil, nil, err
 		}
+		// docs/126 §2: moving a drop-typed value transfers its destructor obligation to
+		// the destination, so this scope must no longer run it.
+		if err := s.clearDropLiveFlag(binding); err != nil {
+			return nil, nil, err
+		}
 		return value, binding.typ, nil
 	}
 	return s.emitExpr(operand, expected)

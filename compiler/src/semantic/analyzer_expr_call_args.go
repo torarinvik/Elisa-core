@@ -468,6 +468,12 @@ func (a *Analyzer) rewriteExtensionMethodCall(expr *ast.CallExpr) extensionMetho
 	if receiverType == nil || IsInvalidType(receiverType) {
 		return extensionMethodCallRewriteNone
 	}
+	// docs/126 §2: `value.drop()` is the explicit early release of a drop-typed value.
+	// Lower it to the destructor call it stands for, moving the receiver in, so the
+	// ordinary affine machinery both rejects a later use and elides the scope-exit drop.
+	if a.rewriteExplicitDropCall(expr, fieldExpr, receiverType) {
+		return extensionMethodCallRewriteApplied
+	}
 	if _, ok := a.lookupFieldNoError(receiverType, fieldExpr.Field); ok {
 		return extensionMethodCallRewriteNone
 	}

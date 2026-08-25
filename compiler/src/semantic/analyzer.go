@@ -226,22 +226,36 @@ type Analyzer struct {
 	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
 	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
 	// surfaced on Result).
-	deathTimeCohorts         map[string][]DeathTimeCohort
-	deathEscapeStats         map[string]DeathTimeEscapeStats
-	paramRetained            map[*ast.FuncDecl][]bool
-	paramStoreTargets        map[*ast.FuncDecl][]map[int]bool
-	recordDeathCohortsOpt    bool
-	exprDenseNodeKeys        map[ast.Expr]DenseNodeKeyInfo
-	exprNodeTables           map[ast.Expr]NodeTableInfo
-	deferInfo                map[*ast.DeferStmt]*DeferInfo
-	foldInfo                 map[*ast.FoldExpr]*FoldInfo
-	lambdaInfo               map[*ast.LambdaExpr]*LambdaInfo
-	symbolFacts              map[*Symbol]OptimizationFacts
-	funcDeclSymbols          map[*ast.FuncDecl]*Symbol
-	declVisibility           map[ast.Decl]string
-	privateTypeNames         map[string]bool
-	castHooksByName          map[string]map[castHookSignature]*Symbol
-	initHooksByName          map[string]map[initHookSignature]*Symbol
+	deathTimeCohorts      map[string][]DeathTimeCohort
+	deathEscapeStats      map[string]DeathTimeEscapeStats
+	paramRetained         map[*ast.FuncDecl][]bool
+	paramStoreTargets     map[*ast.FuncDecl][]map[int]bool
+	recordDeathCohortsOpt bool
+	exprDenseNodeKeys     map[ast.Expr]DenseNodeKeyInfo
+	exprNodeTables        map[ast.Expr]NodeTableInfo
+	deferInfo             map[*ast.DeferStmt]*DeferInfo
+	foldInfo              map[*ast.FoldExpr]*FoldInfo
+	lambdaInfo            map[*ast.LambdaExpr]*LambdaInfo
+	symbolFacts           map[*Symbol]OptimizationFacts
+	funcDeclSymbols       map[*ast.FuncDecl]*Symbol
+	declVisibility        map[ast.Decl]string
+	privateTypeNames      map[string]bool
+	castHooksByName       map[string]map[castHookSignature]*Symbol
+	initHooksByName       map[string]map[initHookSignature]*Symbol
+	// dropHooks maps a qualified struct type name to its `__drop__` destructor
+	// (docs/126 D1). Populated by collectDropHooks BEFORE body analysis, because
+	// declaring a destructor INDUCES affinity on the type and every downstream
+	// move/copy/must-consume check must see that.
+	dropHooks map[string]*dropHook
+	// implicitDropSites records the compiler-inserted destructor calls the flow analysis
+	// proved necessary, keyed by the VarDeclStmt of the dying value — a drop always runs
+	// in the declaring statement's own effect-grant scope, so that key is also exactly
+	// the right one for the effect check and for the backend's cleanup registration.
+	implicitDropSites map[ast.Node][]DropSite
+	// currentDropLocals is the declaration-ordered list of drop-typed locals in the
+	// function being analyzed. Reset per function; walked backwards at each exit edge
+	// so drops run in reverse declaration order (docs/126 §2).
+	currentDropLocals        []dropLocalBinding
 	typeParamScopes          []map[string]Type
 	typeParamInterfaceScopes []map[string]*StaticInterface
 	interfaceAssocTypeScopes []map[string]Type
@@ -981,6 +995,11 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.inferRegionParamsForGrownContainerParams(activeDecls)
 	a.warnOnByValueGrownContainerParams(activeDecls)
 	a.collectValueSymbols(activeDecls)
+	// docs/126 D1: register `__drop__` destructors and INDUCE AFFINITY on their types.
+	// Must run after value symbols (each hook needs its resolved FuncType) and before
+	// any body analysis, so the induced move-only discipline governs every use.
+	a.collectDropHooks(activeDecls)
+	a.rejectDropTypedGlobals(activeDecls)
 	a.validateAliasRefinements()
 	a.collectStaticImpls(activeDecls)
 	a.classifyRegionPolymorphicFunctions(activeDecls)

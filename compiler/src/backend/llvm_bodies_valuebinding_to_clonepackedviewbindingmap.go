@@ -44,15 +44,15 @@ type codegenScope struct {
 	packedViewPtrs           map[string]packedVariantViewBinding
 }
 type functionState struct {
-	g                    *llvmGenerator
-	decl                 *ast.FuncDecl
-	fnValue              C.LLVMValueRef
-	fnType               *semantic.FuncType
-	builder              C.LLVMBuilderRef
-	scope                *codegenScope
-	diScope              C.LLVMMetadataRef
-	traceNameGlobal      C.LLVMValueRef
-	typeMap              map[string]semantic.Type
+	g               *llvmGenerator
+	decl            *ast.FuncDecl
+	fnValue         C.LLVMValueRef
+	fnType          *semantic.FuncType
+	builder         C.LLVMBuilderRef
+	scope           *codegenScope
+	diScope         C.LLVMMetadataRef
+	traceNameGlobal C.LLVMValueRef
+	typeMap         map[string]semantic.Type
 	// specializedExprTypes overlays the expression types recorded by the TEMPLATE
 	// analysis with the ones a re-analysis produced for THIS instantiation. Empty for
 	// a non-generic body. See semantic.Result.SpecializedExprTypes.
@@ -314,6 +314,9 @@ const (
 	// scopedCleanupRegionReset resets (not frees) a loop-entered lazy region at block exit, so its
 	// blocks are reused next iteration (no mmap/munmap churn); function-return arena_free releases.
 	scopedCleanupRegionReset
+	// scopedCleanupDrop runs a drop type's `__drop__` destructor at block exit (docs/126 D1),
+	// guarded on the value's live flag so a moved-away value is not dropped twice.
+	scopedCleanupDrop
 )
 
 type scopedCleanupBinding struct {
@@ -323,6 +326,11 @@ type scopedCleanupBinding struct {
 	typ       semantic.Type
 	owner     *codegenScope
 	deferBody *deferredBodyBinding
+	// flagPtr is the i1 "still owns its value" slot for a scopedCleanupDrop binding:
+	// set at the declaration, cleared by any move, tested before the destructor runs.
+	flagPtr C.LLVMValueRef
+	// dropHook is the mangled `__drop__` symbol to call for a scopedCleanupDrop binding.
+	dropHook string
 }
 type deferredBodyBinding struct {
 	stmt         *ast.DeferStmt
@@ -580,6 +588,33 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 		}
 		paramType := fnType.Params[typeIndex]
 		paramValue := C.LLVMGetParam(fnValue, C.unsigned(llvmIndex+paramOffset))
+		// docs/126 D1: a drop-typed parameter was MOVED in, so this frame owns it and
+		// must run its `__drop__` on the way out. Give it a private alloca even in the
+		// memory class, where the binding would otherwise alias the caller's copy —
+		// the drop zeroes the slot it drops, and that must never reach back into the
+		// caller's frame.
+		if semantic.DropHookSymbol(paramType) != "" && !state.isOwnDropReceiver(paramType) {
+			alloca, err := state.createEntryAlloca(name, paramType)
+			if err != nil {
+				return err
+			}
+			if g.aggregateIsMemoryClassABI(paramType, abiCABI) {
+				loaded, err := state.loadValue(paramValue, paramType, name)
+				if err != nil {
+					return err
+				}
+				if err := state.storeValue(alloca, loaded, paramType, name); err != nil {
+					return err
+				}
+			} else {
+				C.LLVMBuildStore(builder, paramValue, alloca)
+			}
+			state.defineBinding(name, valueBinding{ptr: alloca, typ: paramType, mutable: mutable})
+			if _, err := state.registerDropCleanup(name, alloca, paramType); err != nil {
+				return err
+			}
+			return nil
+		}
 		if g.aggregateIsMemoryClassABI(paramType, abiCABI) {
 			// memory-class: the parameter is already a pointer to the aggregate
 			// (a byval private copy, or on arm64 C-ABI a plain indirect pointer to
@@ -872,6 +907,10 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 	if binding.kind == scopedCleanupRegionReset {
 		// Keep the blocks for next iteration; the function-return arena_free releases them.
 		return s.emitArenaReset(binding.ptr, binding.typ)
+	}
+	if binding.kind == scopedCleanupDrop {
+		// docs/126 D1: run the user's `__drop__` unless the value was moved away.
+		return s.emitConditionalDrop(binding)
 	}
 	ops := semantic.CreateTypeBoundOps(binding.typ)
 	if len(ops) == 0 {

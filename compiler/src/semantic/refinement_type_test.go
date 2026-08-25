@@ -1653,7 +1653,7 @@ func TestGuardUpperBoundMergesUnsignedNonNegativityForReturn(t *testing.T) {
         return x
     return 0
 `,
-		"assert":   law + `def f(x: u32) -> Small:
+		"assert": law + `def f(x: u32) -> Small:
     can Abort.Panic:
         assert x <= 103
         return x
@@ -2535,4 +2535,3 @@ def use(x: i64) -> i64:
 		t.Fatalf("clamp(x,0,100) must NOT prove Bounded[1,100] (tighter than [0,100]): expected a runtime check")
 	}
 }
-

@@ -113,12 +113,12 @@ type Result struct {
 	// user" observability layer). The CLI prints it under --explain so the user can audit exactly
 	// what is statically guaranteed vs runtime-checked. Populated regardless of flags (it is small —
 	// one entry per refinement obligation).
-	ProofReport       []ProofFact
+	ProofReport []ProofFact
 	// ElisionSummary is the per-category proof-elision telemetry (docs/85 §elision-summary):
 	// counts of statically-elided vs runtime-fallback checks, broken down by the four obligation
 	// categories. Populated alongside ProofReport; printed under --explain as a one-liner summary
 	// so the dogfooding payoff is immediately scannable ("N bounds checks elided").
-	ElisionSummary    ProofElisionSummary
+	ElisionSummary ProofElisionSummary
 	// RequiresReport is the docs c3 -requires-report aggregation: one entry per (requires-bearing
 	// function, clause) with the provable/unprovable call-site split. Empty unless -requires-report
 	// is on. The CLI prints it.
@@ -134,11 +134,11 @@ type Result struct {
 	// by the test runner into a per-impl `@property` randomized harness so the law is fuzz-checked in
 	// debug/CI rather than silently assumed. A law PROVEN at the impl site produces no entry (zero cost).
 	LawFuzzObligations []*LawFuzzObligation
-	ExportedTypes     []*ExportedType
-	ExportedFuncs     []*ExportedFunc
-	ExportedGlobals   []*ExportedGlobal
-	EASMModules       []*easm.Module
-	Diagnostics       []Diagnostic
+	ExportedTypes      []*ExportedType
+	ExportedFuncs      []*ExportedFunc
+	ExportedGlobals    []*ExportedGlobal
+	EASMModules        []*easm.Module
+	Diagnostics        []Diagnostic
 	// analyzer is retained so a generic body can be RE-ANALYZED per instantiation
 	// (SpecializedExprTypes). Unexported: nothing outside this package may drive it.
 	analyzer *Analyzer

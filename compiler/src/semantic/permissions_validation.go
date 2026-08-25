@@ -29,6 +29,9 @@ func (a *Analyzer) validateFunctionPermissionUsage(fn *ast.FuncDecl) {
 		}
 	}
 	a.validateSegmentEntryAnnotations(fn)
+	// docs/126 §3: a moved-in drop-typed parameter is released by THIS frame, at the
+	// function's own grant level.
+	a.validateImplicitDropGrants(fn, granted)
 	a.validatePermissionStmts(fn.Body, granted)
 	a.validateSegmentFlow(fn)
 	if funcHasAnnotation(fn, "segment_agnostic") {
@@ -189,6 +192,11 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		if n.Value != nil {
 			a.validatePermissionExpr(n.Value, granted)
 		}
+		// docs/126 §3: an implicitly dropped value charges its destructor's effects to
+		// the scope that drops it. Checked at the DECLARATION because a drop always runs
+		// in the declaring statement's own grant scope, so `granted` here is exactly the
+		// set in force on every edge the drop can sit on.
+		a.validateImplicitDropGrants(n, granted)
 		if a.enforceUnsafePermissions && a.stmtRequiresUnsafeAlias(n) {
 			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
 		}

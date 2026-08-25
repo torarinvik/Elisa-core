@@ -28,10 +28,10 @@ import (
 var dumpDeathTime = os.Getenv("ELISA_DUMP_DEATHTIME") != ""
 
 type deathTimeAlloc struct {
-	name        string
-	declIndex   int
-	deathIndex  int    // statement index of last use; -1 == escapes (death deferred to caller)
-	kind        string
+	name         string
+	declIndex    int
+	deathIndex   int // statement index of last use; -1 == escapes (death deferred to caller)
+	kind         string
 	escapeReason string // "" (in-function), "return", or "arg" — why deathIndex is -1
 }
 

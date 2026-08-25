@@ -1012,7 +1012,7 @@ func (a *Analyzer) dischargeEnsureBooleans(n *ast.ReturnStmt) {
 			continue
 		}
 		diag := a.buildEnsureFailureDiagnostic(clause, subst, counterexample)
-			a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
+		a.errorf(n.Pos(), "%s", diag.FormatEnsure(a.currentFuncDecl.Name))
 	}
 }
 

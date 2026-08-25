@@ -126,7 +126,7 @@ const (
 type ProofObligationCategory string
 
 const (
-	ProofCatReturnRefinement  ProofObligationCategory = "return-refinement"  // return value satisfies refinement type
+	ProofCatReturnRefinement  ProofObligationCategory = "return-refinement"   // return value satisfies refinement type
 	ProofCatCallArgRefinement ProofObligationCategory = "call-arg-refinement" // argument satisfies callee param refinement
 	ProofCatArrayBounds       ProofObligationCategory = "array-bounds"        // index expression proved in-bounds
 	ProofCatContractEnsures   ProofObligationCategory = "contract-ensures"    // postcondition (ensure) clause

@@ -335,6 +335,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		if unionType, ok := valueType.(*ErrorUnionType); ok {
 			a.consumeHandledErrorUnionExpr(n.Value, unionType, "try")
 			if recovery == nil {
+				// docs/126 §2: a `try` with no fallback PROPAGATES — the error path
+				// leaves the function right here, with no syntax at the drop point.
+				// Every live drop-typed local dies on that invisible edge.
+				a.noteTryPropagationDrops(n.Pos())
 				currentUnion, ok := a.currentReturn.(*ErrorUnionType)
 				if !ok {
 					// Bare expr-lambda inference (docs/64 Phase 5b): accumulate the propagated set and

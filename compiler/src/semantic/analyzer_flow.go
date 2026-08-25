@@ -225,6 +225,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.bindActivePackedStoreType(bindingType)
 		}
 		a.consumeAffineValueExpr(n.Value, bindingType, "move into local "+strconvQuote(n.Name))
+		// docs/126 D1: a drop-typed local owns a resource from here until it is moved or
+		// its scope ends. Registering it AFTER the initializer's own consumption keeps
+		// `f: File = g` (a move out of g) from re-registering g's obligation on f's slot.
+		a.noteDropLocalDeclaration(n, sym, bindingType)
 	case *ast.LetDestructureStmt:
 		a.analyzeLetDestructureStmt(n)
 	case *ast.TupleBindStmt:
@@ -639,6 +643,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// including value-less returns in a void function, before the value-specific handling below.
 		a.dischargeEnsuresRefinements(n)
 		if n.Value == nil {
+			// docs/126 §2: a bare `return` is an exit edge too. (The value-returning
+			// path notes its edge further down, after the returned value has had its
+			// own chance to consume — `return move f` must suppress f's drop.)
+			a.noteImplicitDropEdge(DropEdgeReturn, n.Pos())
 			if currentUnion, ok := a.currentReturn.(*ErrorUnionType); ok {
 				if !SameType(currentUnion.Value, a.namedTypes["void"]) {
 					a.errorf(n.Pos(), "return value required for %s", a.currentReturn)
@@ -739,6 +747,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		a.validateCurrentFuncPoststatesForReturnValue(n.Value)
 		a.consumeAffineValueExpr(n.Value, expectedReturn, "return")
+		// docs/126 §2: an early `return` is an exit edge like any other — every drop
+		// local still holding a value dies here. Recorded AFTER the return value's own
+		// consumption so `return move f` correctly suppresses f's drop.
+		a.noteImplicitDropEdge(DropEdgeReturn, n.Pos())
 	case *ast.BreakStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "break is only valid inside a loop")
@@ -769,7 +781,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		specializedValueTypeBranches := make([]map[*Symbol]Type, 0, len(n.Elifs)+2)
 		entryRangeFacts := a.visibleRangeFacts()
 		rangeBranches := make([]map[string]numRange, 0, len(n.Elifs)+2)
-				thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
+		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
 		if !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)

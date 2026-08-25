@@ -430,7 +430,13 @@ type StructType struct {
 	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`
 	// (use-exactly-once, must-consume). Only meaningful when Affine is true;
 	// defaults false so a propagation gap is over-strict (linear), never unsound.
-	Droppable       bool
+	Droppable bool
+	// DropHook is the mangled symbol of this type's `__drop__` destructor (docs/126 D1),
+	// empty when the type has none. Set by collectDropHooks, which also forces
+	// Affine+Droppable — declaring a destructor INDUCES affinity. The backend reads it
+	// off the type to emit the scope-exit call, so it travels with generic instances via
+	// their base struct.
+	DropHook        string
 	ReprC           bool
 	Layout          ast.StructLayoutMode
 	PackedLayout    bool

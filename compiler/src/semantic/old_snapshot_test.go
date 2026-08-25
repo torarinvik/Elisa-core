@@ -13,11 +13,11 @@ import (
 // on an unbounded increment that can overflow.
 func TestOldSnapshotProveAndDecline(t *testing.T) {
 	cases := []struct {
-		name    string
-		ensure  string
-		reqs    string
-		body    string
-		prove   bool
+		name   string
+		ensure string
+		reqs   string
+		body   string
+		prove  bool
 	}{
 		{"unchanged", "p >= old(p)", "", "p += 0", true},
 		{"decrement", "p >= old(p)", "", "p -= 1", false},
