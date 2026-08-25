@@ -1,51 +1,36 @@
 # stage0 wasm32: a fresh `darray` is not fresh on the SECOND call
 #
-# Build for wasm32 and call each export several times:
+# ---------------------------------------------------------------------------
+# RESOLVED (2026-08-25, nw-port stage0 ff42deed) -- and the original diagnosis
+# in this file was WRONG about the cause.
+# ---------------------------------------------------------------------------
 #
-#   elisac -emit obj -O2 -target-triple wasm32-unknown-wasi -o m.o this.elisa
-#   wasm-ld --no-entry --export-dynamic --allow-undefined -o m.wasm m.o
+# What this file measured: nw_literal_direct() returned 914 every call while
+# nw_literal_checksum() returned 914 once and then 935 forever. That framing --
+# "stale on the second call" -- described the symptom, not the defect, and the
+# suspects it listed (a static holding initial capacity, thread-local storage,
+# data-segment init) were all wrong.
 #
-#   nw_literal_direct()   -> 914  914  914  914     correct, stable
-#   nw_literal_checksum() -> 914  935  935  935     WRONG from call 2 onward
+# THE ACTUAL CAUSE was pointer width. The backend seeded `wordBits` from
+# unsafe.Sizeof(uintptr(0)), the COMPILER's pointer size, so a wasm32 build had
+# 4-byte pointers alongside an 8-byte `usize`. The darray header
+# {items, count, capacity} therefore measured 24 bytes where the emitted code
+# indexed it as 12, and reads through the two paths landed at different offsets.
+# The "second call" pattern was just which stale bytes happened to be lying
+# around. Fixed by deriving the width from LLVM's data layout for the resolved
+# triple; both exports now return 914 on every call.
 #
-# 914 is the true byte sum of "Dual N-Back". Reading the literal directly is
-# correct every time, so the literal and its sview are fine. Pushing those same
-# bytes into a darray and summing the darray gives the right answer ONCE and a
-# different, stable wrong answer on every later call -- so a darray built fresh
-# in a function body is returning stale or aliased storage on the second entry.
+# The same root cause produced the unsatisfiable import ABI recorded in
+# nw_wasm32_usize_width.md, which is fixed by the same change.
 #
-# NATIVE IS CORRECT. The identical program compiled for the host returns 914
-# every time, as does a heavier version that builds a whole display list in a
-# function-local region (nw-core/src/display.elisa) -- three calls, identical
-# checksums.
+# STILL BROKEN, separately: two darrays growing INTERLEAVED lose elements past
+# the first relocation, because only one array can be the arena's tail
+# allocation. See repro/nw_wasm32_interleaved_darray_growth.elisa. That is what
+# still garbles pooled strings in a display-list frame; a single growing array
+# is now correct.
 #
-# Not the host allocator: the behaviour is unchanged whether the JS shim's
-# free/munmap rewind the bump pointer or are no-ops, and whether the darray is
-# built in an explicit `region ... :` or in the ambient region.
-#
-# Impact: this is the one thing blocking the browser target. Everything else
-# works -- stage0 emits valid wasm32 objects with no compiler change, and
-# nw-core/test/wasm_diff.mjs runs 421 cases through the wasm build identically
-# to the Python reference. But any core function that builds a container per
-# call (which is every display-list frame) is wrong after its first invocation.
-#
-# Suspects, in the order worth checking:
-#   * a static/global holding the darray's initial inline capacity that is
-#     initialised once instead of per call (the std notes a 256-element initial
-#     capacity);
-#   * thread-local storage used for the ambient region or scratch arena --
-#     wasm32 without pthreads has no TLS, so a per-call reset may silently not
-#     happen;
-#   * data-segment initialisation that runs only at __wasm_call_ctors time.
-#
-# See also repro/nw_wasm32_usize_width.md: the same target lowers pointer/size
-# externs inconsistently, which is likely a second symptom of the target's
-# properties not being consulted.
+# Kept as a regression guard: both exports must return 914 on every call.
 
-include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
-
-# Copy a string LITERAL byte by byte into a darray and sum it. Calling this
-# twice must give the same checksum.
 def literal_checksum() -> i64:
     can Memory.Allocate, Abort.Panic:
         text: sview = "Dual N-Back"
