@@ -1,0 +1,104 @@
+# ============================================================
+# Elisa core Runtime - math primitives (libm bindings + helpers)
+# ============================================================
+#
+# Bindings over the C math library plus the small pure helpers every
+# numeric program wants. All libm functions here are pure (no observable
+# effects), so the externs carry no `can` clause.
+#
+# Linking: on macOS libm lives inside libSystem, so no extra flag is
+# needed. On Linux/FreeBSD link with `-l m`.
+
+# ------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------
+
+const MATH_PI: f64 = 3.14159265358979323846
+const MATH_TAU: f64 = 6.28318530717958647692
+const MATH_E: f64 = 2.71828182845904523536
+const MATH_SQRT2: f64 = 1.41421356237309504880
+const MATH_LN2: f64 = 0.69314718055994530942
+const MATH_LN10: f64 = 2.30258509299404568402
+
+# ------------------------------------------------------------
+# libm externs - f64
+# ------------------------------------------------------------
+
+extern sqrt(x: f64) -> f64
+extern cbrt(x: f64) -> f64
+extern sin(x: f64) -> f64
+extern cos(x: f64) -> f64
+extern tan(x: f64) -> f64
+extern asin(x: f64) -> f64
+extern acos(x: f64) -> f64
+extern atan(x: f64) -> f64
+extern atan2(y: f64, x: f64) -> f64
+extern sinh(x: f64) -> f64
+extern cosh(x: f64) -> f64
+extern tanh(x: f64) -> f64
+extern exp(x: f64) -> f64
+extern exp2(x: f64) -> f64
+extern log(x: f64) -> f64
+extern log2(x: f64) -> f64
+extern log10(x: f64) -> f64
+extern pow(base: f64, exponent: f64) -> f64
+extern fmod(x: f64, y: f64) -> f64
+extern floor(x: f64) -> f64
+extern ceil(x: f64) -> f64
+extern round(x: f64) -> f64
+extern trunc(x: f64) -> f64
+extern fabs(x: f64) -> f64
+extern hypot(x: f64, y: f64) -> f64
+extern copysign(magnitude: f64, sign: f64) -> f64
+extern fmin(x: f64, y: f64) -> f64
+extern fmax(x: f64, y: f64) -> f64
+
+# ------------------------------------------------------------
+# libm externs - f32
+# ------------------------------------------------------------
+
+extern sqrtf(x: f32) -> f32
+extern sinf(x: f32) -> f32
+extern cosf(x: f32) -> f32
+extern tanf(x: f32) -> f32
+extern atan2f(y: f32, x: f32) -> f32
+extern expf(x: f32) -> f32
+extern logf(x: f32) -> f32
+extern powf(base: f32, exponent: f32) -> f32
+extern fmodf(x: f32, y: f32) -> f32
+extern floorf(x: f32) -> f32
+extern ceilf(x: f32) -> f32
+extern fabsf(x: f32) -> f32
+
+# ------------------------------------------------------------
+# Pure helpers
+# ------------------------------------------------------------
+
+def abs_i64(value: i64) -> i64:
+    return value if value >= 0 else -value
+
+def min_i64(lhs: i64, rhs: i64) -> i64:
+    return lhs if lhs < rhs else rhs
+
+def max_i64(lhs: i64, rhs: i64) -> i64:
+    return lhs if lhs > rhs else rhs
+
+def clamp_i64(value: i64, low: i64, high: i64) -> i64:
+    return low if value < low else (high if value > high else value)
+
+def clamp_f64(value: f64, low: f64, high: f64) -> f64:
+    return low if value < low else (high if value > high else value)
+
+# Linear interpolation: t = 0 yields start, t = 1 yields finish.
+def lerp(start: f64, finish: f64, t: f64) -> f64:
+    return start + (finish - start) * t
+
+def degrees_to_radians(degrees: f64) -> f64:
+    return degrees * (MATH_PI / 180.0)
+
+def radians_to_degrees(radians: f64) -> f64:
+    return radians * (180.0 / MATH_PI)
+
+# Approximate float equality with an absolute tolerance.
+def approx_eq(lhs: f64, rhs: f64, tolerance: f64) -> bool:
+    return fabs(lhs - rhs) <= tolerance
