@@ -135,6 +135,9 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
 		return resultType
 	}
+	if resultType, ok := a.analyzeBuiltinDarrayPopCall(expr); ok {
+		return resultType
+	}
 	if resultType, ok := a.analyzeBuiltinDarrayExtendCall(expr); ok {
 		return resultType
 	}

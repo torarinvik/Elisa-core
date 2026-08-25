@@ -31,6 +31,23 @@ func TestGenerateLLVMIRLowersDArrayBuilderSugar(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRLowersDArrayPopAggregate(t *testing.T) {
+	src := `def take(items: mutable darray[sview]&) -> sview:
+    return items.pop()
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_darray_pop_aggregate.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if !strings.Contains(output, "darray.pop.newcount") || !strings.Contains(output, "getelementptr %StringView") || !strings.Contains(output, "load %StringView") {
+		t.Fatalf("expected aggregate darray pop to decrement and load a StringView element, got:\n%s", output)
+	}
+	if strings.Contains(output, "call %StringView @darray_pop__sview") {
+		t.Fatalf("expected aggregate darray pop to use the builtin lowering, got generic helper call:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRSpecializesGenericExternMethodBuilderPush(t *testing.T) {
 	src := `struct MethodBox[T]:
     count: usize

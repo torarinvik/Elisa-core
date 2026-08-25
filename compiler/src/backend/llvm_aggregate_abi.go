@@ -280,9 +280,10 @@ func (g *llvmGenerator) addFuncEnumAttr(fn C.LLVMValueRef, llvmParamPos int, nam
 // pointeeEligibleForNoalias reports whether a `mutable T&` parameter whose pointee
 // is `elem` belongs to the subset for which `noalias` is sound to stamp.
 //
-// Limited to scalar (numeric) and darray pointees — the subset the aliasing model
-// proves free of laundered aliases (see memory: noalias-blocked-by-region-escape,
-// alias-laundering-hole). Struct/enum/view/void pointees are EXCLUDED: struct refs
+// Limited to scalar (numeric) pointees. Darray references are deliberately excluded:
+// checker/runtime code commonly forwards the same mutable darray through nested calls,
+// so an ABI-level noalias promise would be unsound even though the source borrow checker
+// permits those internal forwarding patterns. Struct/enum/view/void pointees are EXCLUDED:
 // still have open laundering residuals (field-rebind, nested carriers) and `void&`
 // is the type-erased aliasing escape hatch the trusted runtime relies on.
 func pointeeEligibleForNoalias(elem semantic.Type) bool {
@@ -292,19 +293,15 @@ func pointeeEligibleForNoalias(elem semantic.Type) bool {
 	if semantic.IsNumericType(elem) {
 		return true
 	}
-	if _, ok := elem.(*semantic.DArrayType); ok {
-		return true
-	}
 	return false
 }
 
 // applyMutableRefNoaliasAttrs stamps LLVM `noalias` on the eligible subset of
 // `mutable T&` parameters when opted in (ELISACORE_NOALIAS_MUTABLE_REFS).
 //
-// Soundness rests on the aliasing checker rejecting two live mutable references to
-// the same storage (call-arg alias check + escape analysis + closed laundering
-// vectors), so a `mutable T&` is the unique mutator of its pointee for the call —
-// exactly the restrict semantics `noalias` encodes. This is OFF by default: a
+// Soundness rests on the aliasing checker rejecting two live mutable scalar references to
+// the same storage. Darray refs are excluded because internal forwarding can preserve the
+// same darray across nested calls. This is OFF by default: a
 // noalias miscompile is silent, so it stays an explicit opt-in pending empirical
 // validation before it can become a default.
 func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn C.LLVMValueRef, fnType *semantic.FuncType, base int) {

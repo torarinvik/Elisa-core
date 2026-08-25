@@ -80,6 +80,12 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 			// "Invalid operand types for ICmp instruction" naming an internal temp. Say what
 			// is actually wrong, at the comparison.
 			a.errorf(expr.Pos(), "struct %s has no == operator; implement Eq (`def __eq__(self, other) -> bool`) to compare values of this type", st.Name)
+		} else if IsAggregateValueEqualityUnsupported(compareLeft) && IsAggregateValueEqualityUnsupported(compareRight) {
+			// Generic assignability can make aggregate values appear comparable. They do
+			// not have scalar LLVM equality lowering, though: falling through to the
+			// integer comparison emitter would construct an invalid icmp over an
+			// aggregate (most visibly for darray). Reject it at the source boundary.
+			a.errorf(expr.Pos(), "aggregate values do not support ==; compare their contents explicitly")
 		}
 		// Footgun guard: comparing two raw `u8&` C-string pointers with == / !=
 		// compares addresses, not contents (unlike cstr/sview/dstr, which content-
@@ -267,6 +273,7 @@ func (a *Analyzer) analyzeSpanAlgebraExpr(expr *ast.BinaryExpr, left Type, right
 	expr.LoweredCall = call
 	return result, true
 }
+
 // analyzeOperatorOverload dispatches a binary operator to a user protocol impl when the left operand's
 // type provides the operator's dunder method (`+` -> `__add__`, …). It desugars `a OP b` to the static
 // interface-method call `T.__add__(a, b)` and records it as `expr.LoweredCall`, so the backend emits the
@@ -636,6 +643,26 @@ func typesComparableForEquality(left Type, right Type) bool {
 		return true
 	}
 	return AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))
+}
+
+// IsAggregateValueEqualityUnsupported reports aggregates that have no value-equality
+// lowering in the backend. Runtime string carriers and payload enums are intentionally
+// absent because they each have an explicit equality path.
+func IsAggregateValueEqualityUnsupported(t Type) bool {
+	if runtimeStringKindOf(t) != runtimeStringNone {
+		return false
+	}
+	switch value := StripAggregateStateType(t).(type) {
+	case *ArrayType, *DArrayType, *TupleType, *ViewType, *DictType, *SetType, *DictEntryType, *StoreRowsViewType, *StoreRowViewType:
+		return true
+	case *StructType:
+		return value != nil
+	case *GenericInstanceType:
+		_, ok := value.Base.(*StructType)
+		return ok
+	default:
+		return false
+	}
 }
 func refsComparableIgnoringMutability(left Type, right Type) bool {
 	leftRef, ok := left.(*RefType)

@@ -340,6 +340,55 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 	return resultType, true
 }
 
+// analyzeBuiltinDarrayPopCall handles the value-producing `da.pop()` operation.
+// It must be recognized before UFCS/generic resolution: otherwise the compiler's own
+// aggregate containers instantiate `darray_pop[T]`, whose generic body cannot be lowered
+// during the stage0 bootstrap for every aggregate element type.
+func (a *Analyzer) analyzeBuiltinDarrayPopCall(expr *ast.CallExpr) (Type, bool) {
+	if a == nil || expr == nil {
+		return nil, false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "pop" || fieldExpr.Object == nil {
+		return nil, false
+	}
+	if a.exprResolvesToTypePath(fieldExpr.Object) {
+		return nil, false
+	}
+	receiverType := a.analyzeExpr(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, false
+	}
+	if len(expr.Args) != 0 {
+		for _, arg := range expr.Args {
+			a.analyzeExpr(arg)
+		}
+		a.errorf(expr.Pos(), "darray pop expects 0 arguments, got %d", len(expr.Args))
+		a.exprTypes[expr] = invalidType
+		return invalidType, true
+	}
+	if expr.NamedArgCount() != 0 {
+		a.errorf(expr.Pos(), "darray pop does not support named arguments")
+	}
+	if !builtinDArrayPushReceiverWritable(a, fieldExpr.Object, receiverType, receiverRefType) {
+		a.errorf(fieldExpr.Object.Pos(), "darray pop requires a mutable darray receiver")
+	}
+	resultType := receiverRefType
+	if resultType == nil {
+		resultType = &RefType{Elem: darrayType, Mutable: true, State: RefStateNonNull, Storage: RefStorageAny, ExplicitStorage: true}
+	}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   "darray.pop",
+		Params: []Type{resultType},
+		Return: darrayType.Elem,
+	}
+	a.exprTypes[expr] = darrayType.Elem
+	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray pop"))
+	a.invalidateIndexBoundsForContainer(fieldExpr.Object)
+	return darrayType.Elem, true
+}
+
 // isPlainListComprehensionArg reports whether e (after unwrapping parens) is a list comprehension
 // (not a dict/set comprehension, which infer their key/value/element types independently and don't
 // want a DArrayType expected-type hint forced onto them).

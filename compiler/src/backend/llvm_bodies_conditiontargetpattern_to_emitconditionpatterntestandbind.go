@@ -153,9 +153,19 @@ func (s *functionState) optionalBindSourceType(expr *ast.OptionalBindExpr) seman
 	if expr == nil {
 		return nil
 	}
+	// Generic bodies are emitted once per concrete instantiation. The analyzer's
+	// OptionalBindSourceTypes table is populated by the template pass, so it can
+	// still contain `T?` while this body is being lowered as `i64?`. Prefer the
+	// monomorphized expression overlay; otherwise extractOptionalPayload lowers
+	// the opaque type parameter as a pointer and feeds the wrong ABI to callbacks.
+	if len(s.specializedExprTypes) != 0 {
+		if valueType, ok := s.specializedExprTypes[expr]; ok && valueType != nil {
+			return valueType
+		}
+	}
 	if s.g != nil && s.g.result != nil && s.g.result.OptionalBindSourceTypes != nil {
 		if valueType, ok := s.g.result.OptionalBindSourceTypes[expr]; ok && valueType != nil {
-			return valueType
+			return substituteType(valueType, s.typeMap, s.g.result.StaticImpls)
 		}
 	}
 	return s.exprType(expr.Value)

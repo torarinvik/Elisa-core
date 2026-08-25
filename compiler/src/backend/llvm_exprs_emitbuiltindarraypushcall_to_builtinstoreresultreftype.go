@@ -168,6 +168,69 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	return darrayPtr, resultType, true, nil
 }
 
+// emitBuiltinDArrayPopCall lowers `d.pop()` directly for every darray element type.
+// Pop is value-producing, so leaving it to the generic `darray_pop[T]` body makes the
+// compiler instantiate an aggregate-indexing helper while it is compiling itself.  That
+// path used to emit the count decrement followed by an unconditional trap for aggregate
+// elements (sview, AST nodes, and compiler tables), which made the stage1 compiler trap in
+// its own semantic pass.  Keep the operation beside push/resize so the aggregate load uses
+// the same typed GEP path as ordinary darray indexing.
+func (s *functionState) emitBuiltinDArrayPopCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil {
+		return nil, nil, false, nil
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Field != "pop" || fieldExpr.Object == nil {
+		return nil, nil, false, nil
+	}
+	receiverType := s.exprType(fieldExpr.Object)
+	darrayType, receiverRefType, ok := builtinDArrayPushReceiverType(receiverType)
+	if !ok || darrayType == nil {
+		return nil, nil, false, nil
+	}
+	if len(expr.Args) != 0 {
+		return nil, nil, true, fmt.Errorf("darray pop expects no arguments, got %d", len(expr.Args))
+	}
+	darrayPtr, _, err := s.emitBuiltinDArrayReceiverPtr(fieldExpr.Object, receiverRefType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	countPtr, usizeType, err := s.emitBuiltinDArrayCountPtr(darrayPtr, darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	count := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.pop.count"))
+	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
+	nonEmpty := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), count, zero, cStringFree("darray.pop.nonempty"))
+	okBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.ok"))
+	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("darray.pop.empty"))
+	C.LLVMBuildCondBr(s.builder, nonEmpty, okBB, failBB)
+	C.LLVMPositionBuilderAtEnd(s.builder, failBB)
+	if err := s.emitTrapUnreachable("darray.pop.empty"); err != nil {
+		return nil, nil, true, err
+	}
+	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
+	newCount := C.LLVMBuildSub(s.builder, count, C.LLVMConstInt(usizeLLVMType, 1, 0), cStringFree("darray.pop.newcount"))
+	C.LLVMBuildStore(s.builder, newCount, countPtr)
+	itemsPtr, err := s.emitBuiltinDArrayItemsPtr(darrayPtr, darrayType)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	voidPtrType := C.LLVMPointerTypeInContext(s.g.context, 0)
+	itemsValue := C.LLVMBuildLoad2(s.builder, voidPtrType, itemsPtr, cStringFree("darray.pop.items"))
+	elemLLVMType, err := s.g.lowerType(darrayType.Elem)
+	if err != nil {
+		return nil, nil, true, err
+	}
+	elemPtr := C.LLVMBuildGEP2(s.builder, elemLLVMType, itemsValue, llvmValueSlicePtr([]C.LLVMValueRef{newCount}), 1, cStringFree("darray.pop.element"))
+	value := C.LLVMBuildLoad2(s.builder, elemLLVMType, elemPtr, cStringFree("darray.pop.value"))
+	return value, darrayType.Elem, true, nil
+}
+
 func (s *functionState) darrayPushUsesBulkAppend(darrayType *semantic.DArrayType, arg ast.Expr) bool {
 	if s == nil || darrayType == nil || arg == nil {
 		return false
