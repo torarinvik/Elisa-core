@@ -28,7 +28,14 @@ func (s *functionState) emitCheckedElemByteCount(countValue C.LLVMValueRef, elem
 		return C.LLVMBuildMul(s.builder, countValue, elemSizeValue, cStringFree(name+".bytes")), nil
 	}
 	// maxCount = SIZE_MAX / elemSize. count > maxCount  <=>  count*elemSize overflows.
-	const sizeMax = ^uint64(0)
+	//
+	// SIZE_MAX is the TARGET's, not the host's: on a 32-bit target (wasm32) a
+	// 64-bit constant silently truncates when materialised into an i32, which
+	// turns the guard into a comparison against a meaningless bound.
+	sizeMax := ^uint64(0)
+	if bits := s.g.wordBits; bits > 0 && bits < 64 {
+		sizeMax = (uint64(1) << uint(bits)) - 1
+	}
 	maxCount := sizeMax / elemSize
 	maxCountValue := C.LLVMConstInt(usizeLLVMType, C.ulonglong(maxCount), 0)
 	overflow := C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntUGT), countValue, maxCountValue, cStringFree(name+".size.overflow"))

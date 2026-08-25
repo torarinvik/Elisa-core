@@ -1,0 +1,48 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# wasm32: two darrays growing INTERLEAVED in one arena lose elements past the
+# first relocation. Native is correct.
+#
+#   native : ABCDEFGHIJKLMNOPQRST
+#   wasm32 : ABCDEFGHIJKLMNOP....     (first 16 right, tail lost)
+#
+# Only ONE array can be the arena's tail allocation, so the other must RELOCATE
+# when it grows (arena.elisa:586, the chained path, which copies oldsz bytes to
+# a fresh block). A single darray growing alone is fine on wasm32 -- push 20
+# bytes into one array and every byte reads back correctly -- so the defect is
+# in the relocation path specifically, not in growth generally.
+#
+# NOT the same bug as the usize width issue, which is FIXED: `usize` now follows
+# the target's pointer width (stage0 syncWordBitsWithTarget), darray is 12 bytes
+# on wasm32 instead of 24, and the isolated single-array corruption it caused is
+# gone. This one survives that fix.
+#
+# Impact: this is what still garbles pooled STRINGS in a display-list frame,
+# because a frame interleaves pushes into the command array and the string pool.
+# Geometry is unaffected -- the command records are correct and the board renders
+# correctly -- so it presents as wrong text rather than a crash.
+#
+# Worth checking first: whether the relocation reads the OLD capacity after the
+# other array's growth has already moved the bump pointer, so oldsz covers fewer
+# bytes than the array actually holds.
+
+def interleaved_byte(which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        alpha: mutable darray[u8] = []
+        beta: mutable darray[u8] = []
+        index: mutable i64 = 0
+        while index < 20 |index, alpha, beta|:
+            alpha.push((65 + index).u8())     # 'A'...
+            beta.push((97 + index).u8())      # 'a'...
+            index <- index + 1
+        return (get alpha[which.usize()] else 0.u8()).i64()
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Abort.Panic:
+        ok: mutable bool = true
+        index: mutable i64 = 0
+        while index < 20 |index, ok|:
+            ok <- false if interleaved_byte(index) != 65 + index
+            index <- index + 1
+        print("ABCDEFGHIJKLMNOPQRST OK" if ok else "TAIL LOST")
+        return 0
