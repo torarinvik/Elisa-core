@@ -1,0 +1,7 @@
+def take[N: usize](keys: u32[N]&, n: usize) -> u32:
+    return keys[0.usize()] + n.u32()
+
+def main() -> i64:
+    key: mutable u32[2] = [0, 0]
+    key[0.usize()] <- 7.u32()
+    return take(&key, 1).i64() - 8
