@@ -1,0 +1,78 @@
+# stage0 wasm32: a fresh `darray` is not fresh on the SECOND call
+#
+# Build for wasm32 and call each export several times:
+#
+#   elisac -emit obj -O2 -target-triple wasm32-unknown-wasi -o m.o this.elisa
+#   wasm-ld --no-entry --export-dynamic --allow-undefined -o m.wasm m.o
+#
+#   nw_literal_direct()   -> 914  914  914  914     correct, stable
+#   nw_literal_checksum() -> 914  935  935  935     WRONG from call 2 onward
+#
+# 914 is the true byte sum of "Dual N-Back". Reading the literal directly is
+# correct every time, so the literal and its sview are fine. Pushing those same
+# bytes into a darray and summing the darray gives the right answer ONCE and a
+# different, stable wrong answer on every later call -- so a darray built fresh
+# in a function body is returning stale or aliased storage on the second entry.
+#
+# NATIVE IS CORRECT. The identical program compiled for the host returns 914
+# every time, as does a heavier version that builds a whole display list in a
+# function-local region (nw-core/src/display.elisa) -- three calls, identical
+# checksums.
+#
+# Not the host allocator: the behaviour is unchanged whether the JS shim's
+# free/munmap rewind the bump pointer or are no-ops, and whether the darray is
+# built in an explicit `region ... :` or in the ambient region.
+#
+# Impact: this is the one thing blocking the browser target. Everything else
+# works -- stage0 emits valid wasm32 objects with no compiler change, and
+# nw-core/test/wasm_diff.mjs runs 421 cases through the wasm build identically
+# to the Python reference. But any core function that builds a container per
+# call (which is every display-list frame) is wrong after its first invocation.
+#
+# Suspects, in the order worth checking:
+#   * a static/global holding the darray's initial inline capacity that is
+#     initialised once instead of per call (the std notes a 256-element initial
+#     capacity);
+#   * thread-local storage used for the ambient region or scratch arena --
+#     wasm32 without pthreads has no TLS, so a per-call reset may silently not
+#     happen;
+#   * data-segment initialisation that runs only at __wasm_call_ctors time.
+#
+# See also repro/nw_wasm32_usize_width.md: the same target lowers pointer/size
+# externs inconsistently, which is likely a second symptom of the target's
+# properties not being consulted.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Copy a string LITERAL byte by byte into a darray and sum it. Calling this
+# twice must give the same checksum.
+def literal_checksum() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        text: sview = "Dual N-Back"
+        bytes: mutable darray[u8] = []
+        total: mutable i64 = 0
+        index: mutable i64 = 0
+        length: i64 = sview_len(text).i64()
+        while index < length |index, bytes, text|:
+            bytes.push(sview_at(text, index.usize()))
+            index <- index + 1
+        scan: mutable i64 = 0
+        while scan < bytes.count.i64() |scan, total, bytes|:
+            total <- total + (get bytes[scan.usize()] else 0.u8()).i64()
+            scan <- scan + 1
+        return total
+
+# The same, but reading the literal directly with no darray in between.
+def literal_direct() -> i64:
+    can Abort.Panic:
+        text: sview = "Dual N-Back"
+        total: mutable i64 = 0
+        index: mutable i64 = 0
+        length: i64 = sview_len(text).i64()
+        while index < length |index, total, text|:
+            total <- total + sview_at(text, index.usize()).i64()
+            index <- index + 1
+        return total
+
+export fn nw_literal_checksum() -> i64 = literal_checksum
+export fn nw_literal_direct() -> i64 = literal_direct

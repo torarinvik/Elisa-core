@@ -1,0 +1,52 @@
+# stage1 gap: a call returning `u8&` in a `cstr` context was DEREFERENCED.
+#
+# `mycast` below is the shape of every `impl Str for X` member in the std
+# (compiler/runtime/elisacore_std/runtime.elisa:210+):
+#
+#     impl Str for i64:
+#         def __cast__(self: i64) -> cstr:
+#             return int_to_string_scratch(self)      # -> heap u8&
+#
+# stage0 compiles it; stage1 declined the function, and with it the whole unit:
+#
+#   error: backend emitted no functions for this unit; declined 25:
+#     join, rt_concat2, …, __cast__, __cast__, …
+#
+# ---------------------------------------------------------------------------
+# ROOT CAUSE (confirmed, fixed 2026-08-25)
+# ---------------------------------------------------------------------------
+# codegen_expr_calls.elisa:491 auto-DEREFERENCES a call whose declared return is
+# `T&` when the surrounding context is not itself a `T&` — right for `v: i64 =
+# get_ref()`, wrong for a `cstr` context, because `cstr` is a POINTER and `u8&`
+# IS one. The load produced an `i8`, and the return statement's type-identity
+# check (codegen_stmt_return_vardecl.elisa:285, `ret ptr` expected) then declined
+# the function. The same conversion through a LOCAL always worked:
+#
+#     x: cstr = my_alloc(n)     # fine on both stages, before and after
+#     return my_alloc(n)        # declined on stage1 only
+#
+# so the two paths disagreed about one program. The fix passes the pointer
+# through when the expected type is `cstr` and the pointee is a BYTE; `cstr&`
+# (a pointer to a pointer) still derefs.
+#
+# ---------------------------------------------------------------------------
+# WHY IT MATTERED
+# ---------------------------------------------------------------------------
+# 14 of the std's `__cast__` members are shaped exactly like this (every integer,
+# float and char one; bool/cstr/sview/dstr escaped because their bodies end in a
+# `u8&`-returning call or an explicit `.cast[u8&]`). They decline SILENTLY in any
+# program that does not reach them — `print("text")` compiles with 24 declines
+# recorded in `!elisa.declined` — but `print(42)` goes through the generic
+# `print[T: Str]`, which calls `T.__cast__(value)`, and a REFERENCED declined
+# function makes the backend drop the module (codegen_module.elisa:257-260).
+#
+# Companion: nw_generic_protocol_impl_stage1.elisa, the OTHER half of what made
+# `print(42)` fail (the std's three `impl[T] …` generic protocol impls).
+
+extern my_alloc(n: usize) -> heap u8&
+
+def mycast(v: i64) -> cstr:
+    return my_alloc(v.usize())
+
+def main() -> i64:
+    return 1 if mycast(4) == "x" else 0

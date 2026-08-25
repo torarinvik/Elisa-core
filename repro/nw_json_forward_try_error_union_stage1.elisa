@@ -1,0 +1,46 @@
+# Repro (stage1 only): `try f(...)` where `f` returns an error union and is
+# defined LATER in the file (mutual recursion) is rejected by stage1's frontend.
+# It resolves the callee's return type as the ERROR SET instead of the value
+# type. Found while building elisacore_json (2026-08-25).
+#
+#   stage0: compiles + runs, exit 0
+#   stage1: <file>:8: cannot propagate __try_without_else from a function
+#           returning E
+#
+# ---------------------------------------------------------------------------
+# NARROWED
+# ---------------------------------------------------------------------------
+# * The BACKWARD call is fine: `try up(x - 1)` inside `down` (line 14, `up`
+#   already defined) draws no diagnostic. Only the forward one does.
+# * Direct self-recursion through an error union is fine on stage1
+#   (`def f(...) -> T error[E]` calling `try f(...)` on itself).
+# * In a bigger unit the bad resolution appears to stick: elisacore_json's
+#   `json_parse_value` was reported at every `try` site, including ones textually
+#   after its definition, once the forward site had been seen.
+# * This is what makes a two-function recursive-descent parser
+#   (parse_value <-> parse_array/parse_object) impossible to spell directly.
+#
+# WORKAROUND used by elisacore_json.elisa: the array and object loops are inlined
+# into `json_parse_value`, so the parser is a single SELF-recursive function and
+# no forward reference through an error union exists.
+
+error E:
+    Bad(pos: i64)
+
+# `down` is used before it is defined (mutual recursion).
+def up(x: i64) -> i64 error[E]:
+    if x <= 0:
+        return 0
+    v: i64 = try down(x - 1)
+    return v + 1
+
+def down(x: i64) -> i64 error[E]:
+    if x <= 0:
+        raise E.Bad(x)
+    w: i64 = try up(x - 1)
+    return w + 1
+
+def main() -> i64:
+    v: i64 = try up(4) else -1
+    1 return if v != 4
+    return 0

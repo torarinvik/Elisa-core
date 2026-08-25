@@ -1,0 +1,42 @@
+# Repro (stage1 only): a `try` expression used directly in CALL-ARGUMENT
+# position makes the stage1 backend decline the enclosing function, which drops
+# the whole unit. Found while building elisacore_json (2026-08-25).
+#
+#   stage0: compiles + runs, exit 0
+#   stage1: error: backend emitted no functions for this unit; declined 1: outer
+#           note: every function in the unit is dropped when the backend
+#                 declines one; the object was not written
+#
+# ---------------------------------------------------------------------------
+# NARROWED
+# ---------------------------------------------------------------------------
+# * `v: i64 = try inner(x)` then `twice(v)` compiles and runs on BOTH stages --
+#   only the nested-in-an-argument form declines.
+# * `return try inner(x)` (try in return position) is fine on both stages.
+# * `try inner(x) else <fallback>` in argument position was not separately
+#   probed; the plain `try` form above is enough to reproduce.
+# * Same shape bites container builders: `items.push(try parse_value(...))`
+#   inside a parser is the natural way to write a recursive descent, and it
+#   declines for exactly this reason.
+#
+# WORKAROUND used by elisacore_json.elisa: every `try` result is bound to a
+# local first, and the local is passed as the argument.
+
+error E:
+    Bad(pos: i64)
+
+def inner(x: i64) -> i64 error[E]:
+    if x < 0:
+        raise E.Bad(x)
+    return x + 1
+
+def twice(v: i64) -> i64:
+    return v * 2
+
+def outer(x: i64) -> i64 error[E]:
+    return twice(try inner(x))
+
+def main() -> i64:
+    v: i64 = try outer(3) else -1
+    1 return if v != 8
+    return 0
