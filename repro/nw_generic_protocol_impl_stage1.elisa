@@ -1,0 +1,72 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1 gap: printing an integer through the std declines the whole unit.
+# stage0 compiles and runs this file; stage1 reports
+#
+#   error: backend emitted no functions for this unit; declined 40:
+#     store_get, store_count, store_get, store_count, store_find, ...
+#   note: every function in the unit is dropped when the backend declines one
+#
+# (Companion repro: nw_print_int_generic_stage1.elisa, same shape.)
+#
+# ---------------------------------------------------------------------------
+# VERIFIED
+# ---------------------------------------------------------------------------
+# * `print("text")` alone: fine on both stages.
+# * Including collections.elisa without formatting an integer: fine on both.
+# * `print(42)` / `int_to_string_scratch(n)`: stage0 fine, stage1 declines.
+# * The declined names are the std's `Store` / `KeyedStore` impl members
+#   (store_get / store_count / store_find), reached because int_to_string_into
+#   interns small strings.
+# * Ordinary darray work (push, index, iterate) is unaffected on stage1 -- those
+#   are builtin container ops, not protocol dispatch. The nw-core board port
+#   uses darray heavily and compiles clean.
+# * stage1's own source contains ZERO generic impls (`grep -rn '^impl\[' src/`
+#   is empty), which is why the self-host fixpoint never exercised this path.
+#   The only generic impls in the ecosystem are the three in the std:
+#     impl[T] Store for darray[T]        (collections.elisa:1474)
+#     impl[T] Store for Deque[T]         (collections.elisa:1485)
+#     impl[K, T] KeyedStore for dict[K, T] (collections.elisa:1505)
+#
+# ---------------------------------------------------------------------------
+# LEADING HYPOTHESIS (not yet proven end to end)
+# ---------------------------------------------------------------------------
+# Parser::impl_declaration (src/parser/parser_decl_impl.elisa:17) matches only
+# the three-bare-identifier header form:
+#
+#     if parser.peek() == Ident and parser.peek_at(1) == Ident and parser.peek_at(2) == Ident:
+#
+# i.e. `impl Holder for Box:`. For `impl[T] Store for darray[T]:` the tokens
+# after `impl` are `[ T ] Store for darray [ T ]`, so peek() is LBracket, the
+# branch never fires, and none of the `__impl_scope` / `__impl_concrete`
+# annotations are recorded. The `[T]` parameters are then skipped along with the
+# rest of the header by skip_declaration_header_clauses and are captured nowhere.
+#
+# Expected downstream consequences (each worth confirming while fixing):
+#   * codegen_struct_reg.elisa:record_impl_member_lines sees no `__impl_scope`
+#     for the block, so members keep bare names instead of stage0's
+#     `__impl__I__C__m` spelling.
+#   * codegen_declare.elisa:declare_function_impl resolves the member's parameter
+#     types (`darray[T]&`) with no binding for `T`, gets TypeKind.Unmodeled, and
+#     returns null -- declining the function. Since a unit is dropped whole when
+#     any function declines, one unreachable generic impl takes everything else
+#     with it.
+#
+# ---------------------------------------------------------------------------
+# NOTE FOR WHOEVER FIXES THIS
+# ---------------------------------------------------------------------------
+# A synthetic `impl[T] P for C[T]` repro is awkward to write, because the free
+# call `hold_count(&b)` and the method call `b.hold_count()` are BOTH rejected by
+# stage0 too -- protocol methods are reached through a bound generic
+# (`def f[S: Store](s: S&)`, docs/69) and getting that shape right is its own
+# exercise. Use this file (valid, minimal, stage0-clean) as the behavioural
+# repro, and the std's three impls as the real-world instances.
+#
+# Separately worth filing: for an INVALID direct call such as `store_count(&xs)`,
+# stage0 emits a clear "undefined identifier" error while stage1 silently
+# declines the unit. Divergent diagnostics on rejected programs is its own bug.
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Console.Format, Abort.Panic:
+        print(42)
+        return 0
