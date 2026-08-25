@@ -1,0 +1,12 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Console.Format, Abort.Panic:
+        print(42)
+        return 0
+
+# stage1 bug: with the full runtime included, the generic print[T: Str] path
+# (print(42)) makes the stage1 backend decline 40 store_* generic
+# instantiations ("backend emitted no functions for this unit"); stage0
+# compiles and runs this correctly. Same family as the [N: usize] generic
+# decline in nw_rng_generic_array_len_param.elisa.
