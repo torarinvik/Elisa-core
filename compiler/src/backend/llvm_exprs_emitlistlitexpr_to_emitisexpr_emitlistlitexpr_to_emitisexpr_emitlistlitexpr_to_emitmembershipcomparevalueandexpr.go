@@ -1904,10 +1904,21 @@ func (s *functionState) fnFastMath() bool {
 	return false
 }
 
+// fpStrict reports whether the program opted out of relaxed FP entirely (ELISACORE_STRICT_FP /
+// the `-fstrict-fp` CLI flag). It beats every other tier, @fast_math included: a program asking for
+// reproducible IEEE results is asking for them everywhere, and a single contracted multiply-add in
+// a hot helper is exactly the kind of thing that would otherwise slip through.
+func (s *functionState) fpStrict() bool {
+	return s != nil && s.g != nil && s.g.strictFP
+}
+
 // fpContract applies contraction (FMA) by default, full fast-math when the function is @fast_math /
 // the program is -ffast-math, or reassociation+contraction inside a comprehension fold's accumulator
 // update (reduceReassocScope) so its reduction reassociates into a vectorizable tree (docs/79).
 func (s *functionState) fpContract(v C.LLVMValueRef) C.LLVMValueRef {
+	if s.fpStrict() {
+		return v
+	}
 	if s.fnFastMath() {
 		C.elisacoreSetFPFast(v)
 		return v
@@ -1922,6 +1933,9 @@ func (s *functionState) fpContract(v C.LLVMValueRef) C.LLVMValueRef {
 // fpContractReciprocal applies contraction+reciprocal by default (for fdiv), full fast-math under
 // @fast_math / -ffast-math, or reassociation+contraction inside a fold accumulator update.
 func (s *functionState) fpContractReciprocal(v C.LLVMValueRef) C.LLVMValueRef {
+	if s.fpStrict() {
+		return v
+	}
 	if s.fnFastMath() {
 		C.elisacoreSetFPFast(v)
 		return v

@@ -135,6 +135,13 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	// explicit opt-in. Comprehension folds already reassociate into a vectorizable tree by default
 	// (reassoc+contract only); -ffast-math and `@fast_math` are the broader, value-changing opt-ins.
 	g.globalFastMath = os.Getenv("ELISACORE_FAST_MATH") != ""
+	// ELISACORE_STRICT_FP is the opposite opt-in: emit FP arithmetic with NO fast-math flags at
+	// all, so `a + b * c` stays two roundings rather than becoming an fma. Contraction is on by
+	// default here (clang's -ffp-contract=on) and is value-changing wherever the add cancels --
+	// `-0.35 + 0.7 * r` differs from `fma(0.7, r, -0.35)` by an ulp or two. That is invisible in
+	// most code and fatal in the one place it matters: reproducing another implementation's FP
+	// results bit-for-bit. Off by default, since strict FP costs the fma.
+	g.strictFP = os.Getenv("ELISACORE_STRICT_FP") != ""
 	// ELISACORE_NOALIAS_MUTABLE_REFS (set by the `-fnoalias` CLI flag) stamps LLVM `noalias`
 	// on the eligible subset of `mutable T&` params (scalar/darray pointee). OFF by default:
 	// a noalias miscompile is silent, so it stays an explicit opt-in. NOTE (empirically
@@ -209,6 +216,7 @@ type llvmGenerator struct {
 	forceBoundsCheck          bool
 	forceContracts            bool
 	globalFastMath            bool
+	strictFP                  bool
 	noaliasMutableRefs        bool
 	perfWarnings              []string
 }
