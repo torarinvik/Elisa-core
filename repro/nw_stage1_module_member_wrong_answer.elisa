@@ -1,0 +1,59 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1 SILENTLY MISCOMPILES this: it prints "ALPHA WRONG" where stage0 prints
+# the correct answer. Beta is right, so it is not that modules are ignored
+# wholesale -- something about resolving `SIZE` unqualified inside Alpha, while
+# Beta also declares a `SIZE`, gets the wrong constant.
+#
+#   stage0:  alpha.total(3,4)+SIZE = 14   /  beta.total(2) = 200
+#   stage1:  ALPHA WRONG                  /  beta.total(2) = 200
+#
+# A wrong answer, not a decline -- the worst class. Both compilers accept the
+# program and disagree about what it means.
+#
+# NOT YET MINIMISED, and the failed attempts are worth recording so the next
+# person does not repeat them. Each of these WORKS correctly on stage1:
+#   * a module with only functions
+#   * a module with only a const, read unqualified from inside
+#   * a module with only a struct plus a constructor
+#   * two modules whose members differ only in case (`Grade` and `grade`)
+#   * a local variable shadowing the bare name of a qualified member
+#   * the same, inside a loop
+#
+# So the trigger needs more than one of these together. The port's six task
+# modules ALL failed on stage1 when converted to module blocks while passing on
+# stage0, with errors like "cannot call non-function value of type Grade" --
+# so the real reproduction is in a multi-module unit assembled through
+# `include`, which is what a minimisation should attack next.
+
+module Alpha:
+    const SIZE: i64 = 7
+
+    struct Point:
+        x: mutable i64
+        y: mutable i64
+
+    def make(x: i64, y: i64) -> Point:
+        p: mutable Point = zeroed
+        p.x <- x
+        p.y <- y
+        return p
+
+    def total(p: Point&) -> i64:
+        return p.x + p.y + SIZE
+
+module Beta:
+    # Same names as Alpha's: if modules really namespace, this must not clash.
+    const SIZE: i64 = 100
+
+    def total(n: i64) -> i64:
+        return n * SIZE
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        p: Alpha::Point = Alpha::make(3, 4)
+        a: i64 = Alpha::total(&p)
+        b: i64 = Beta::total(2)
+        print("alpha.total(3,4)+SIZE = 14" if a == 14 else "ALPHA WRONG")
+        print("beta.total(2) = 200" if b == 200 else "BETA WRONG")
+        return 0
