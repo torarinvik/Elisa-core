@@ -15,6 +15,21 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string, targetDebug bo
 	a.setTargetConstBool("ELISA_TARGET_OS_FREEBSD", osName == "freebsd")
 	a.setTargetConstBool("ELISA_TARGET_OS_POSIX", isPOSIXish(osName))
 	a.setTargetConstBool("ELISA_TARGET_OS_WASI", osName == "wasi")
+	// The same target under the name stage1 uses. Both compilers must know BOTH names, or a
+	// `static if ELISA_TARGET_OS_WASM:` folds under one and not the other -- which is what the
+	// emit_ast / emit_header / emit_unsafe parity gates caught on the wasm_minimal fixture:
+	// stage1 saw 16 declarations where stage0 saw 15, because the name was unknown here.
+	//
+	// An ALIAS, not a defined symbol, and that distinction is load-bearing. elisacore_std's
+	// arena.elisa declares `const ELISA_TARGET_OS_WASM: bool = false` itself, as bootstrap
+	// compatibility for stage0 binaries that predate this line. setTargetConstBool would
+	// define a global symbol and that declaration would then be a duplicate, breaking every
+	// build of the std. The alias supplies the fold value without the symbol, so the std's
+	// own const stays legal and the real target value still wins where they differ.
+	//
+	// Keyed on the ARCH rather than osName so it holds for a wasm triple whose OS component
+	// is absent or "unknown" as well as for "wasi".
+	a.setTargetConstAliasBool("ELISA_TARGET_OS_WASM", archName == "wasm32" || archName == "wasm64")
 	a.setTargetConstBool("ELISA_TARGET_ARCH_X86_64", archName == "x86_64")
 	a.setTargetConstBool("ELISA_TARGET_ARCH_ARM64", archName == "arm64" || archName == "aarch64")
 	a.setTargetConstBool("ELISA_TARGET_ARCH_WASM32", archName == "wasm32")
