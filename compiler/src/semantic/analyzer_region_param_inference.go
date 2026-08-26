@@ -263,6 +263,22 @@ func forwardsParamIdent(arg ast.Expr, name string) bool {
 				return false
 			}
 			arg = e.Operand
+		// A PATH rooted at the parameter forwards the parameter's region just as the bare
+		// identifier does: `&param.field` and `&param.field[i]` hand the callee a container that
+		// lives in the same region the parameter does, because a struct's container field is
+		// allocated in the struct's own region. Without these two cases, growing a `dstr` field
+		// of a `mutable T&` parameter through a helper is rejected with "cannot infer region
+		// parameter" even though threading the parameter's region is exactly right.
+		case *ast.FieldExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Object
+		case *ast.IndexExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Object
 		default:
 			return false
 		}

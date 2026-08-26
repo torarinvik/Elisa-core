@@ -99,6 +99,33 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// S4 field growth through a HELPER rather than in place. `helper(&m.bits, x)` hands a container
+// FIELD of a region-param struct ref to a function that grows it, which is the ordinary way to write
+// a string builder: one `append` routine, called from everywhere. Region-param inference used to peel
+// only `&x` and casts when deciding whether an argument forwards a parameter, so a path rooted at the
+// parameter (`&m.bits`, `&m.rows[i]`) did not count and the call was rejected with "cannot infer
+// region parameter" -- even though threading the parameter's own region is exactly right, a struct's
+// container field living in the struct's region.
+func TestS4FieldGrowthThroughHelperRunsEndToEnd(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, "struct Mod:\n    bits: mutable darray[u8]\n"+`def helper(out: mutable darray[u8]&, value: u8) -> void can[Memory.Allocate, Abort.Panic]:
+    out.push(value)
+    return
+def fill(m: mutable Mod&) -> void can[Memory.Allocate, Abort.Panic]:
+    helper(&m.bits, 65) can Memory.Allocate, Abort.Panic
+    helper(&m.bits, 66) can Memory.Allocate, Abort.Panic
+    return
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    region a(4096):
+        m: mutable Mod& @a = new[a] Mod{bits: []}
+        fill(m) can Memory.Allocate, Abort.Panic
+        print((m.bits[0].i64() + m.bits[1].i64()).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "131" {
+		t.Fatalf("expected RAN 131 (field forwarded to a growing helper), got %s %q", status, out)
+	}
+}
+
 // S4 Stage 2: storing a region-carrying struct BY VALUE in a container is sound when the struct's
 // interior field backing lives in the same (or a longer-lived) region as the container — a death
 // cohort: the modules and the table die together. Runs end-to-end with a PLAIN struct, no annotation.
