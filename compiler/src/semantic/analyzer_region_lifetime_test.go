@@ -420,3 +420,34 @@ func TestRegionManyCrossingGrowablesNoLongerRejected(t *testing.T) {
 		t.Fatalf("six crossing growables must each get their own stack now (no merge rejection), got:\n%s", all)
 	}
 }
+
+// Two RESERVED containers with crossing live ranges share stack 0 — the fixed/reserved stack —
+// and must be accepted. Crossing there is harmless: nothing on stack 0 is freed individually
+// (assignRegionStacks skips `stack <= 0` for early-free, so all of it dies at region exit) and the
+// stack is always `chained`/relocating, so outgrowing a reservation copies into a fresh chunk
+// rather than over a sibling.
+//
+// This case is why the fix matters twice over. `reserved` is not only user intent —
+// recordSynthesizedReserves marks any container the compiler pre-reserves for a counting loop — so
+// without the skip an optimization decides legality. And the rejection's own advertised remedy
+// ("reserve() one of them") moved the container ONTO stack 0, making the collision certain rather
+// than fixing it.
+func TestRegionLifetimeSharedStackCrossingAccepted(t *testing.T) {
+	// Pinned low to prove the acceptance is the stack-0 rule and not spare stack budget.
+	defer func(o int) { regionStackCap = o }(regionStackCap)
+	regionStackCap = 1
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rl_shared0.elisa", `def f() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        a: mutable darray[i64] = []
+        a.reserve(16)
+        b: mutable darray[i64] = []
+        b.reserve(16)
+        a.push(1)
+        b.push(1)
+        a.push(2)
+        b.push(2)
+`, AnalyzeOptions{})
+	if all := allDiagnostics(result); strings.Contains(all, "interleaved object lifetimes") {
+		t.Fatalf("crossing lifetimes on the shared fixed/reserved stack 0 must be accepted, got:\n%s", all)
+	}
+}
