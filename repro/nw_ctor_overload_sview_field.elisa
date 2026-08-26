@@ -1,26 +1,33 @@
-# A constructor overload is not recognised when the struct has an `sview` field.
-# Both compilers refuse it, with a message that asks for the very thing that is
-# defined three lines above:
+# FIXED. A constructor overload was not recognised when a STRING LITERAL was
+# passed to an `sview` parameter.
 #
 #   positional construction Row(...) is not allowed; use the brace form Row{...}
 #   for default field initialization, or define a constructor
 #   `def Row(...) -> Row`
 #
-# No module is involved -- this is top level. Measured across field types, only
-# the view type breaks:
+# ...asking for the constructor defined three lines above.
 #
-#   i64    OK        f64   OK        bool  OK
-#   cstr   OK        sview REFUSED
+# What my first note here got wrong. I wrote "it is the view type, not the
+# module and not the arity", framing it around the struct's sview FIELD. The
+# field has nothing to do with it. Measured:
 #
-# So it is not arity, not the number of fields, and not qualification: the
-# overload simply is not found when a parameter (or field) is an sview, and the
-# compiler falls back to reading `Row(...)` as positional construction.
+#   Row(3, "x")       literal   -> REFUSED
+#   name: sview = "x"
+#   Row(3, name)      local     -> OK
+#   struct with NO sview field, sview PARAM, literal arg -> REFUSED
 #
-# Worth fixing because sview is how this port carries every borrowed string --
-# menu row content, task names, syllogism words -- so it is exactly the structs
-# that would most like a constructor that cannot have one.
+# So it is the literal meeting an `sview` PARAMETER.
 #
-# Workaround: the brace form, `Row{k: k, s: s}`.
+# Cause: inferLiteralType gives a string literal `u8& static`, which is not
+# AssignableTo an `sview`, so the overload filter discarded the only candidate
+# and fell through to the all-fields positional path. The ORDINARY call path
+# accepts the same literal for the same parameter -- this was the overload
+# filter disagreeing with the language, not a real type error.
+#
+# Fixed by initHookArgFits, which is AssignableTo plus the literal-to-view
+# adaptation already used for match-arm folding.
+#
+# Kept as a runnable check: it must exit 3.
 
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
