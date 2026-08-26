@@ -1,14 +1,22 @@
-# Struct names share ONE flat table, so two modules cannot both declare a
-# `Work`. stage0 compiles this; stage1 reports
+# FIXED. Two modules may now each declare a `Work`.
+#
+# Struct names shared ONE flat table keyed by bare name, so the second `Work`
+# overwrote the first and stage1 reported
 #
 #   struct literal "Work" is missing field "tally"
 #
-# because Score's Work and Grade's Work collapsed onto one row.
+# for a program stage0 compiles and runs. Fixed in the compiler repo
+# (0d778490) across all three phases that key structs by name: the parser
+# records an owner column, the backend keys rows by (owner, name) and mangles
+# the LLVM type name per owner, and the semantic table gained a parallel module
+# column for its construct-site field checks.
 #
-# Constants were fixed the same way (see module_const_namespacing in the
-# compiler repo): the table needs an owner column and (owner, name) keys.
-# Structs are the bigger job -- 6 registration sites, ~37 lookups, and type
-# resolution reaches into the semantic phase.
+# The note below said struct rows are shared "so Grade's and Score's records
+# are deliberately named differently" in the CONST fixture. That is still true
+# of that fixture, and no longer necessary -- it is left as it is because it
+# tests constants, and a fixture that fails for two reasons tells you less.
+#
+# Kept as a runnable check: it must exit 23.
 
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
