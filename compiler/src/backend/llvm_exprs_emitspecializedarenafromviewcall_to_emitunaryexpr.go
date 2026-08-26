@@ -350,7 +350,12 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	return nil, resultType, true, nil
 }
 func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
-	viewValue, _, err := s.emitExpr(viewExpr, viewType)
+	// A view obtained through a reference (for example `dict.get(...) is existing`) is
+	// represented by a pointer when emitted in its native type.  ExtractValue requires the
+	// aggregate value, so materialize the ref-aware value before selecting its fields.  The
+	// general runtime string-compare path already does this via
+	// emitStringCompareOperandValue; the static-literal fast path must use the same coercion.
+	viewValue, err := s.emitStringCompareOperandValue(viewExpr, viewType)
 	if err != nil {
 		return nil, err
 	}

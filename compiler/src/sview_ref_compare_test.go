@@ -47,3 +47,31 @@ def main() -> int can[Memory.Allocate, Abort.Panic]:
 		t.Fatalf("sview-via-ref equality: expected exit 1 (match found), got status=%s out=%q", status, out)
 	}
 }
+
+// Regression for the static-literal specialization of the same path.  An sview reference
+// compared with a literal used to pass the pointer directly to LLVMBuildExtractValue,
+// crashing the compiler instead of returning a diagnostic.
+func TestSviewCompareThroughDictGetWithLiteralRuns(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def probe() -> usize can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        m: mutable dict[u64, sview] = {}
+        m.put(1, sview("hello", 0, -1))
+        hit: mutable usize = 0
+        if m.get(1) is existing:
+            if existing == "hello":
+                hit <- hit + 1
+        return hit
+
+def main() -> int can[Memory.Allocate, Abort.Panic]:
+    can Memory.Allocate, Abort.Panic:
+        return probe().int()
+`)
+	if status == "BUILD-FAIL" && (strings.Contains(out, "SIGSEGV") ||
+		strings.Contains(out, "LLVMBuildExtractValue")) {
+		t.Fatalf("sview-via-ref literal equality crashed codegen: %s", out)
+	}
+	if status != "RUNERR" || !strings.Contains(out, "exit status 1") {
+		t.Fatalf("sview-via-ref literal equality: expected exit 1 (match found), got status=%s out=%q", status, out)
+	}
+}
