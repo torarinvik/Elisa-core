@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -186,6 +187,42 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		}
 	}
 	return changed
+}
+
+// calleeReturnTypeIsRegionValued resolves a callee's declared return type for the
+// region-valued PROBE: in the callee's own namespace, and without reporting.
+//
+// Both halves matter, and both only became reachable when module members started
+// resolving in funcByName at all:
+//
+//   - A module member's return type is written BARE inside its module
+//     (`def spacer() -> Row` in `module M:`). Resolving it from the CALLER's namespace
+//     cannot see `M.Row`.
+//
+//   - resolveType REPORTS. So a probe that only asks "is this region-valued?" emitted a
+//     real "unknown type Row" error, pinned at the callee's own signature, and failed
+//     the compile — for this, which the pre-fix compiler accepted:
+//
+//     def fill(rows: mutable darray[M::Row]&):
+//     rows.push(M::spacer())
+//
+//     Note the shape: it needs a darray PARAMETER. Pushing onto a darray LOCAL, or
+//     binding the result to a local, never reaches this probe.
+//
+// A probe must not be able to fail a compile on its own, so the suppression is not
+// merely belt-and-braces: any future type this cannot resolve should make the probe
+// answer "no", not report.
+func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *ast.FuncDecl) bool {
+	savedNamespace := a.currentNamespace
+	savedSuppress := a.suppressDiagnostics
+	if idx := strings.LastIndex(qualifiedName, "."); idx >= 0 {
+		a.currentNamespace = qualifiedName[:idx]
+	}
+	a.suppressDiagnostics = true
+	resolved := a.resolveType(callee.ReturnType)
+	a.suppressDiagnostics = savedSuppress
+	a.currentNamespace = savedNamespace
+	return a.typeIsRegionValued(resolved)
 }
 
 // paramForwardedToRegionRequiringCallee reports whether the body passes the named parameter (as a bare
@@ -969,7 +1006,7 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 				// Otherwise resolve the callee's RETURN TYPE (region-carrying ⇒ region-valued).
 				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
 					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
-						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+						return a.calleeReturnTypeIsRegionValued(cn, callee)
 					}
 				}
 				return false
@@ -977,7 +1014,7 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 				// Pre-analysis `Name(args)` parses as a StructLitExpr; resolve it as a call.
 				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
 					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
-						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+						return a.calleeReturnTypeIsRegionValued(cn, callee)
 					}
 				}
 				// A brace construction `Ty{field: value, …}` carries region storage when any

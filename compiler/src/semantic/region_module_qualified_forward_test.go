@@ -105,3 +105,48 @@ def fill(bag: mutable Box::Sack&) -> void:
 		t.Fatalf("a same-named member in another module must not shadow the qualified target; got: %s", all)
 	}
 }
+
+// A module member's return type is written BARE inside its module, and the region-valued
+// PROBE resolves callee return types. Resolving `Row` from the caller's namespace cannot
+// see `M.Row` -- and resolveType REPORTS, so the probe emitted a real "unknown type Row"
+// against the callee's own signature and failed the compile.
+//
+// This is a regression the qualified-name registration INTRODUCED: before it, no module
+// member resolved in funcByName, so the probe never reached one. Measured against a stage0
+// built from the parent commit, which accepts this program.
+//
+// The shape needs a darray PARAMETER: pushing onto a darray LOCAL, or binding the call's
+// result to a local, never reaches the probe.
+func TestRegionProbeResolvesModuleCalleeReturnTypeInItsOwnNamespace(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_module_probe_return.elisa", `module M:
+    struct Row:
+        k: mutable i64
+
+    def spacer() -> Row:
+        return Row{k: 0}
+
+def fill(rows: mutable darray[M::Row]&) -> void:
+    rows.push(M::spacer())
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "unknown type") {
+		t.Fatalf("the region-valued probe must not report on a module callee's bare return type; got: %s", all)
+	}
+}
+
+// The same probe, reached through the PascalCase StructLitExpr spelling of a call -- a
+// separate branch in regionValueTester, and it had the identical defect.
+func TestRegionProbeResolvesModuleConstructorReturnTypeInItsOwnNamespace(t *testing.T) {
+	res := analyzeTreeTestSourceWithSemanticErrors(t, "region_module_probe_ctor.elisa", `module M:
+    struct Row:
+        k: mutable i64
+
+    def Row(k: i64) -> Row:
+        return Row{k: k}
+
+def fill(rows: mutable darray[M::Row]&) -> void:
+    rows.push(M::Row(3))
+`)
+	if all := strings.Join(res.Errors(), "\n"); strings.Contains(all, "unknown type") {
+		t.Fatalf("the probe must not report on a module constructor's bare return type; got: %s", all)
+	}
+}
