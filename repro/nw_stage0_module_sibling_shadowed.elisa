@@ -1,27 +1,34 @@
-# FIXED. An UNQUALIFIED call to a sibling inside a module bound to a STDLIB
-# GENERIC of the same name instead of the sibling. stage0 refused this:
+# FIXED, on BOTH compilers. It must exit 7 on each.
 #
-#   argument 1 to "add" expects mutable Flags[T]&, got mutable Box.Sack&
+# An unqualified call to a sibling inside a module bound to a STDLIB GENERIC of
+# the same name instead of the sibling.
 #
-# while stage1 compiled and ran it correctly -- the two compilers disagreeing
-# about a module member calling its own sibling by its own name.
+# What this header used to say, and why it was wrong:
 #
-# Cause: identifier resolution reaches the global scope through the ordinary
-# scope chain, so the stdlib's `add` was found there and returned before the
-# enclosing module was ever consulted. The namespace-aware lookup existed
-# (visibleNameCandidates puts `Box.add` first) but nothing on this path used it.
+#   "stage1 compiles and runs it correctly (exit 7)"
 #
-# Fixed by rewriteEnclosingNamespaceCallee, which RENAMES a bare callee to the
-# enclosing module's member. Renaming, not merely resolving the type: the first
-# attempt preferred the member in ident analysis alone, so the call type-checked
-# against Box's signature while codegen still emitted the stdlib symbol -- this
-# file compiled clean and returned 0. A wrong answer is worse than the error it
-# replaced, and only running it showed that. Guarded at runtime by
-# compiler/src/module_sibling_runtime_test.go for exactly that reason.
+# It did not. stage1 emitted `call void @add__i64(ptr, i64)` -- the stdlib's
+# `add[T](mutable Flags[T]&, T)`. That TYPE-CHECKS, so the program compiled
+# clean and returned 0: the stdlib call left `s.items` untouched. I verified
+# stage1 by COMPILING this file rather than running it, and then treated it as
+# the reference for fixing stage0. Both compilers were wrong; stage1 was the
+# quieter one, and a silent wrong answer is worse than stage0's hard error.
 #
-# Locals and parameters still shadow.
+# Caught later by running all four fixed repros end to end and comparing exit
+# codes across both stages.
 #
-# Kept as a runnable check: it must exit 7.
+# The two causes are the same shape one layer apart:
+#
+#   stage0  identifier resolution reached the global scope through the ordinary
+#           scope chain, so the stdlib `add` was found before the enclosing
+#           module was consulted. Fixed by RENAMING the callee (resolving only
+#           its type left codegen emitting the stdlib symbol -- exit 0 again).
+#   stage1  the generic dispatch ran BEFORE the enclosing-module scan. Fixed by
+#           preferring the enclosing module first, on an exact arity match.
+#
+# Guarded by compiler/src/module_sibling_runtime_test.go (stage0) and
+# test/parity/module_sibling_beats_generic_smoke.sh (both stages). Both check
+# the EXIT CODE. A compile-only guard passes against this bug.
 
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
