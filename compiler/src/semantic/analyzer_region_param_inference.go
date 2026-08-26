@@ -42,7 +42,7 @@ var containerGrowthMethods = map[string]bool{
 // (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
 // arena comes from.
 func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
-	cands := collectRegionPolyCandidateFuncs(decls)
+	cands, namespaceOf := collectRegionPolyCandidateFuncsScoped(decls)
 	// Resolve direct free-function call targets by name for the forwarding trigger. Overloads/last-wins
 	// is acceptable: a wrong match only forgoes (or, at worst, conservatively adds) an inferred region
 	// param — soundness is unaffected (the region threading is still verified at the real call site).
@@ -61,6 +61,24 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			continue
 		}
 		funcByName[fn.Name] = fn
+		// ALSO key a module member by the name a `::` call site actually writes. `Box::stow(bag, 12)`
+		// parses to Ident{Name: "Box.stow"}, but flattening leaves the FuncDecl's Name bare ("stow"),
+		// so keying by fn.Name alone made every module member invisible to the forwarding trigger:
+		// the caller never learned it had to thread a region, and the call was then rejected with
+		// "cannot infer region parameter" -- for a program the SAME module accepts when the sibling
+		// is called unqualified, and that stage1 compiles and runs correctly.
+		//
+		// That gap is what blocked module blocks for anything with a growable API: every renderer in
+		// nw-core takes `mutable DisplayList&` and forwards it onward, so `Display::rect(list, ...)`
+		// was unreachable from any function that received `list` as a parameter.
+		//
+		// Both keys are registered, not one: the bare name is what an unqualified sibling call and
+		// every top-level call site write, and dropping it would trade this bug for its mirror image.
+		// The two can never collide -- an identifier cannot contain a dot, so a qualified key is
+		// unreachable as a bare name.
+		if qualified := joinQualifiedName(namespaceOf[fn], fn.Name); qualified != fn.Name {
+			funcByName[qualified] = fn
+		}
 		// Functions that already manage regions explicitly are left alone: a hand-written `[@r]` owns
 		// the threading, and an `Arena&` param self-threads its allocator.
 		if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {

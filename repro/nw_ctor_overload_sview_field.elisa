@@ -1,0 +1,38 @@
+# A constructor overload is not recognised when the struct has an `sview` field.
+# Both compilers refuse it, with a message that asks for the very thing that is
+# defined three lines above:
+#
+#   positional construction Row(...) is not allowed; use the brace form Row{...}
+#   for default field initialization, or define a constructor
+#   `def Row(...) -> Row`
+#
+# No module is involved -- this is top level. Measured across field types, only
+# the view type breaks:
+#
+#   i64    OK        f64   OK        bool  OK
+#   cstr   OK        sview REFUSED
+#
+# So it is not arity, not the number of fields, and not qualification: the
+# overload simply is not found when a parameter (or field) is an sview, and the
+# compiler falls back to reading `Row(...)` as positional construction.
+#
+# Worth fixing because sview is how this port carries every borrowed string --
+# menu row content, task names, syllogism words -- so it is exactly the structs
+# that would most like a constructor that cannot have one.
+#
+# Workaround: the brace form, `Row{k: k, s: s}`.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct Row:
+    k: mutable i64
+    s: sview
+
+def Row(k: i64, s: sview) -> Row:
+    can Abort.Panic:
+        return Row{k: k, s: s}
+
+def main() -> i64:
+    can Abort.Panic:
+        b: Row = Row(3, "x")
+        return b.k

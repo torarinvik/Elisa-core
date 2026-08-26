@@ -1,0 +1,41 @@
+# An UNQUALIFIED call to a sibling inside a module binds to a STDLIB GENERIC of
+# the same name instead of the sibling. stage0 refuses this program:
+#
+#   argument 1 to "add" expects mutable Flags[T]&, got mutable Box.Sack&
+#
+# stage1 compiles and runs it correctly (exit 7), because the backend prefers
+# the ENCLOSING module's member on an exact arity match. stage0 has no such
+# preference, so the two compilers disagree about a program that should plainly
+# be legal: a module member calling its own sibling by its own name.
+#
+# The whole point of a namespace is that `add` inside Box means Box's `add`.
+# Without this, module members have to avoid every name the stdlib uses
+# generically -- push, add, get, count -- which is C-style prefixing again,
+# wearing a module block.
+#
+# Exits 7.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+module Box:
+    struct Sack:
+        items: mutable darray[i64]
+
+    def add(s: mutable Sack&, v: i64):
+        can Memory.Allocate, Abort.Panic:
+            s.items.push(v)
+
+    def fill(s: mutable Sack&):
+        can Memory.Allocate, Abort.Panic:
+            add(s, 7)
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region w(64 * 1024)
+        out: mutable i64 = 0
+        in w:
+            s: mutable Box::Sack = Box::Sack{items: []}
+            Box::fill(&s)
+            out <- get s.items[0] else 0
+        destroy w
+        return out

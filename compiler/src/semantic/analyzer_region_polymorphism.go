@@ -305,20 +305,35 @@ func (a *Analyzer) bodyCallsStoreNeedingOutsideRegion(stmts []ast.Stmt, storeNee
 // collectRegionPolyCandidateFuncs flattens the top-level and impl-member function declarations into
 // a single list for the classification fixpoint.
 func collectRegionPolyCandidateFuncs(decls []scopedDecl) []*ast.FuncDecl {
+	out, _ := collectRegionPolyCandidateFuncsScoped(decls)
+	return out
+}
+
+// collectRegionPolyCandidateFuncsScoped is collectRegionPolyCandidateFuncs plus the enclosing
+// module namespace of each function ("" for a top-level one).
+//
+// The namespace is NOT recoverable from the *ast.FuncDecl: flattening keeps a module member's
+// Name bare ("stow") and carries "Box" alongside it on the scopedDecl. Anything that wants to
+// match a function against the name written at a `::` call site needs both halves, because
+// `Box::stow(...)` parses to Ident{Name: "Box.stow"} -- one dotted string, already joined.
+func collectRegionPolyCandidateFuncsScoped(decls []scopedDecl) ([]*ast.FuncDecl, map[*ast.FuncDecl]string) {
 	var out []*ast.FuncDecl
+	namespaceOf := map[*ast.FuncDecl]string{}
 	for _, scoped := range decls {
 		switch n := scoped.Decl.(type) {
 		case *ast.FuncDecl:
 			out = append(out, n)
+			namespaceOf[n] = scoped.Namespace
 		case *ast.ImplDecl:
 			for _, member := range n.Members {
 				if fn, ok := member.(*ast.FuncDecl); ok {
 					out = append(out, fn)
+					namespaceOf[fn] = scoped.Namespace
 				}
 			}
 		}
 	}
-	return out
+	return out, namespaceOf
 }
 
 func (a *Analyzer) funcTypeForRegionPoly(fn *ast.FuncDecl) *FuncType {

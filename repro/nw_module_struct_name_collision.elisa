@@ -1,0 +1,35 @@
+# Struct names share ONE flat table, so two modules cannot both declare a
+# `Work`. stage0 compiles this; stage1 reports
+#
+#   struct literal "Work" is missing field "tally"
+#
+# because Score's Work and Grade's Work collapsed onto one row.
+#
+# Constants were fixed the same way (see module_const_namespacing in the
+# compiler repo): the table needs an owner column and (owner, name) keys.
+# Structs are the bigger job -- 6 registration sites, ~37 lookups, and type
+# resolution reaches into the semantic phase.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+module Grade:
+    struct Work:
+        total: mutable i64
+
+    def Work() -> Work:
+        can Abort.Panic:
+            return Work{total: 3}
+
+module Score:
+    struct Work:
+        tally: mutable i64
+
+    def Work() -> Work:
+        can Abort.Panic:
+            return Work{tally: 20}
+
+def main() -> i64:
+    can Abort.Panic:
+        g: Grade::Work = Grade::Work()
+        s: Score::Work = Score::Work()
+        return g.total + s.tally
