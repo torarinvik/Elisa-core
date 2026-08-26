@@ -137,8 +137,17 @@ func (a *Analyzer) structLocalArgRegion(arg ast.Expr) string {
 		}
 		break
 	}
-	ident, ok := arg.(*ast.Ident)
-	if !ok || a.currentScope == nil {
+	// A FIELD PATH into the local counts too, not just the bare local: `&buffers.history`
+	// names a sub-struct of `buffers`, and the whole of `buffers` -- nested struct fields
+	// included -- was constructed into the one ambient region that got recorded. Threading
+	// that region for `&buffers.history` therefore rests on exactly the assumption the bare
+	// `&buffers` case already rests on, one level deeper; it is not a new class of trust.
+	// Without this, growing a container inside a struct-local's field through a callee was
+	// simply unexpressible: the callee correctly inferred `__rg_hist`, and the call site then
+	// failed with "cannot infer region parameter". The use-site liveness gate in
+	// attachStructLocalArgRegion applies unchanged.
+	ident := rootIdentExpr(arg)
+	if ident == nil || a.currentScope == nil {
 		return ""
 	}
 	sym, ok := a.currentScope.Lookup(ident.Name)
