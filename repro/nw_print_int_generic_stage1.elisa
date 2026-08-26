@@ -5,8 +5,50 @@ def main() -> i64:
         print(42)
         return 0
 
-# stage1 bug: with the full runtime included, the generic print[T: Str] path
-# (print(42)) makes the stage1 backend decline 40 store_* generic
-# instantiations ("backend emitted no functions for this unit"); stage0
-# compiles and runs this correctly. Same family as the [N: usize] generic
-# decline in nw_rng_generic_array_len_param.elisa.
+# stage1 declines this unit; stage0 compiles and runs it. STILL OPEN.
+#
+#   error: backend emitted no functions for this unit;
+#          declined 5: join, print__i64, print, print__u32, print
+#
+# Progress since first filed: the count was 40 declined store_* instantiations,
+# now 5. The generic work done since then fixed most of it.
+#
+# The declining statement is the BODY of the generic print:
+#
+#   print: DECLINE Expr @line 7092
+#     -> runtime.elisa:271   print(T.__cast__(value) can ...) can Console.Write
+#
+# NEGATIVE RESULTS -- these were each reduced and BOTH STAGES AGREE, so none of
+# them is the cause. Do not re-investigate them:
+#
+#   1. Protocol dispatch through a TYPE PARAMETER (`T.method(value)` rather than
+#      `value.method()`). Both spellings, both stages: correct.
+#      See tparam.elisa in the session scratchpad; the shape is
+#          protocol Describe: def describe(self: Self) -> i64
+#          def via_type_param[T: Describe](value: T) -> i64: return T.describe(value)
+#
+#   2. A GENERIC calling a same-named NON-GENERIC OVERLOAD -- the exact shape of
+#      `print[T: Str]` calling `print(cstr)` -- with the protocol method
+#      returning cstr and carrying can[Memory.Allocate, Console.Format,
+#      Abort.Panic]. Both stages print 42. This was the strongest hypothesis
+#      (that stage1 resolves the inner call back to the generic rather than the
+#      overload) and it is WRONG.
+#
+#   3. The effect clauses on the protocol method and the call. Carried in the
+#      reduction at (2); no effect.
+#
+# What is still unexplained, and is where to look next:
+#
+#   * `print__u32` is instantiated at all. `print(42)` needs one integer
+#      instantiation, not a u32 one -- so something else in the concatenated
+#      runtime is dragging a second monomorphization in, and the decline may
+#      belong to THAT one rather than to the i64 one.
+#   * `join` declines independently in the same unit (Assign/For/If inside a
+#      runtime function, lines 6403-6406) and would drop the unit on its own.
+#      It does NOT decline for other programs against the same runtime, so it is
+#      instantiation-dependent too. Fixing print without fixing join leaves the
+#      unit dropped, so measure both.
+#
+# NOT a blocker for the port: the differential sweeps format integers by hand
+# (see the printr note at the top of test/board_sweep.elisa) precisely because of
+# this, and every suite passes on stage1 without it.

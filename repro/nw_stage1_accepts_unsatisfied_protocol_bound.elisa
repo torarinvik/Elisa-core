@@ -1,0 +1,39 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1 is MORE PERMISSIVE than stage0 here: it accepts a call whose argument
+# does not satisfy the generic's protocol bound, and emits a working program.
+# stage0 rejects it:
+#
+#   type "int" does not satisfy required interface fact "Describe"
+#       for call to "via_type_param"
+#
+# `21` is an `int` literal; the impls below cover i64 and u32 but not int, so the
+# bound is genuinely unsatisfied. Binding the literal to `seed: i64` first makes
+# both stages accept it, which is the correct behaviour and confirms the bound is
+# what stage0 is objecting to.
+#
+# Direction matters: stage1 accepting what stage0 rejects is a MISSING CHECK, not
+# a miscompile -- the emitted program runs and prints the right answers. Still a
+# parity gap, and one the self-host fixpoint cannot find, because stage1's own
+# source does not contain the mistake.
+#
+# Found while reducing the print(42) decline (nw_print_int_generic_stage1.elisa).
+
+protocol Describe:
+    def describe(self: Self) -> i64
+
+impl Describe for i64:
+    def describe(self: i64) -> i64:
+        return self * 2
+
+impl Describe for u32:
+    def describe(self: u32) -> i64:
+        return self.i64() * 3
+
+def via_type_param[T: Describe](value: T) -> i64:
+    return T.describe(value)
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        print("stage1 accepted an unsatisfied bound" if via_type_param(21) == 42 else "?")
+        return 0

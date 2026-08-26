@@ -1,0 +1,49 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1 resolved a REDECLARED extern to the FIRST declaration it saw, not the one
+# in scope, and rejected the call:
+#
+#   argument 1 to "getenv" expects u8, got cstr
+#
+# elisacore_runtime pulls in debug_referee's `extern getenv(name: u8&)`. This file
+# then declares `extern getenv(name: cstr)` and calls it with a cstr -- and stage1
+# checked the call against the OTHER declaration. FIXED: an extern whose
+# declarations disagree is now unmodeled for that check rather than pinned to
+# whichever the walk reached first.
+#
+# THIS WAS BLOCKING STAGE1'S SELF-HOST FIXPOINT. stage1's own
+# src/backend/llvm_c.elisa declares `extern getenv(name: cstr)` while its vendored
+# elisacore_std/debug_referee.elisa declares `extern getenv(name: u8&)`; the
+# self-host build concatenates both, and gen2 died with 14 copies of the error
+# above (build/gen3_check/gen2.log), so gen3 == gen4 could not run AT ALL.
+# After the fix the fixpoint is green: gen3.o == gen4.o byte-identical.
+#
+# That fixpoint is the real evidence the fix is right. Note it PRE-DATED the other
+# work in this session -- debug_referee.elisa and elisac.elisa were last modified
+# 2026-08-25 16:41, hours before any edit here.
+#
+# CAREFUL, stage0 is NOT a clean oracle for this shape. It COMPILES this file
+# (exit 0, both declaration orders), which is what the stage1 fix was measured
+# against -- but the object does not LINK:
+#
+#   Undefined symbols: "___ovl__getenv__cstr__getenv", referenced from _main
+#
+# stage0 treats the redeclaration as an OVERLOAD and mangles the call, instead of
+# binding to the C symbol `getenv`. So "stage0 accepts it" means accepts it at
+# COMPILE time only. That is a separate stage0 defect and is NOT fixed here; it
+# does not bite the self-host build, where the same duplicate pair links fine, so
+# the mangling evidently depends on the declarations' scopes. Worth reducing on
+# its own before anyone relies on redeclared externs deliberately.
+
+extern getenv(name: cstr) -> u8&?
+
+def probe() -> i64:
+    can Abort.Panic:
+        trusted Unsafe.RawExtern:
+            name: cstr = "PATH"
+            return 1 if getenv(name) is found else 0
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        print("dup extern OK" if probe() >= 0 else "no")
+        return 0

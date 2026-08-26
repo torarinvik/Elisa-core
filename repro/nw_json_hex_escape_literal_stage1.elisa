@@ -1,6 +1,19 @@
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
-# Repro (stage1 only): the `\xHH` and `\uXXXX` escapes in a string literal are
+# FIXED. stage1 now returns 4, matching stage0. `decode_string_escapes`
+# (src/backend/codegen_env.elisa) grew `\xHH` and `\uXXXX` handling plus two
+# helpers, hex_digit_value and push_utf8; a malformed escape keeps its source text
+# and clears all_known rather than guessing a value.
+#
+# Verified across every escape form, dumped as raw bytes and diffed against
+# stage0 -- \x lower/upper hex, \u producing 1/2/3 UTF-8 bytes, the classic
+# escapes (unchanged), and a non-escape `%`: all IDENTICAL.
+#
+# It was the ONLY mismatch in the 145-program differential corpus, and the corpus
+# was the thing that surfaced it -- this file had documented the bug since
+# 2026-08-25 but nothing was failing on it.
+#
+# ORIGINAL REPORT (stage1 only): the `\xHH` and `\uXXXX` escapes in a string literal are
 # not decoded by stage1's lexer. Both literals below are 2 bytes under stage0;
 # the program returns the total length it observes, so the exit code IS the
 # answer.

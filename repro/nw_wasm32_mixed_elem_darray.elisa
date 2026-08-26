@@ -1,0 +1,48 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# UNDIAGNOSED as of this writing. The display-list string POOL is garbled under
+# wasm32 while the command geometry is correct -- on EVERY frame, including the
+# first. The same code compiled natively is correct on every frame, so this is
+# wasm-specific and is NOT the pointer-width bug (fixed, ff42deed), NOT the
+# 256 MiB-reservation/heap-leak bug (fixed, see
+# nw_wasm32_target_triple_falls_back_to_host.md), and NOT an interleaved-growth
+# relocation bug (that diagnosis was wrong; there is no such bug).
+#
+# What the real display list does that the earlier equal-element-size probe did
+# NOT: it grows a 40-byte-element command array and a 1-byte-element pool array
+# INTERLEAVED in one arena. This file is that shape, reduced. Build it both ways
+# and compare:
+#
+#   elisac -emit obj -O2 -target-triple wasm32-unknown-wasi ...
+#   elisac -emit obj ...            # native, expected ABCDEFGHIJKLM
+#
+# Observed garbling in the real frame mixes correct fragments with float bytes
+# from the command records (" =Tri" survived inside otherwise-garbage output),
+# which is what makes an aliasing/overlap explanation the first one to test.
+
+struct Big:
+    a: f32
+    b: f32
+    c: f32
+    d: f32
+    e: f32
+    f: f32
+    g: u32
+    h: u32
+    i: u32
+    j: u32
+
+# A 40-byte-element array and a byte array growing INTERLEAVED, which is what a
+# display list does (commands + string pool).
+def mixed_byte(which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        cmds: mutable darray[Big] = []
+        pool: mutable darray[u8] = []
+        index: mutable i64 = 0
+        while index < 13 |index, cmds, pool|:
+            cmds.push(Big{a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0, f: 6.0, g: 7.u32(), h: 8.u32(), i: 9.u32(), j: 10.u32()})
+            pool.push((65 + index).u8())
+            index <- index + 1
+        return (get pool[which.usize()] else 0.u8()).i64()
+
+export fn nw_mixed(which: i64) -> i64 = mixed_byte

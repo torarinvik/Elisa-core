@@ -1,30 +1,27 @@
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
-# wasm32: two darrays growing INTERLEAVED in one arena lose elements past the
-# first relocation. Native is correct.
+# WITHDRAWN: the bug this file described DOES NOT EXIST. Kept because the way it
+# was wrong is worth not repeating.
 #
-#   native : ABCDEFGHIJKLMNOPQRST
-#   wasm32 : ABCDEFGHIJKLMNOP....     (first 16 right, tail lost)
+# The claim was that two darrays growing INTERLEAVED "lose elements past the
+# first relocation", based on native printing ABCDEFGHIJKLMNOPQRST and wasm
+# printing ABCDEFGHIJKLMNOP followed by garbage.
 #
-# Only ONE array can be the arena's tail allocation, so the other must RELOCATE
-# when it grows (arena.elisa:586, the chained path, which copies oldsz bytes to
-# a fresh block). A single darray growing alone is fine on wasm32 -- push 20
-# bytes into one array and every byte reads back correctly -- so the defect is
-# in the relocation path specifically, not in growth generally.
+# The measurement was the artifact. The harness reused ONE wasm instance across
+# 20 calls, so what it actually measured was the heap filling up: each call
+# leaked ~128 MiB (a reserve_commit region's default reservation, which is free
+# on a demand-paged target and emphatically not free in linear memory), and the
+# host shim ignored memory.grow's -1 and handed back addresses past the end of
+# memory. The 17th CALL failed -- not the 17th ELEMENT. With a fresh instance
+# per call the interleaved case was correct even before any fix.
 #
-# NOT the same bug as the usize width issue, which is FIXED: `usize` now follows
-# the target's pointer width (stage0 syncWordBitsWithTarget), darray is 12 bytes
-# on wasm32 instead of 24, and the isolated single-array corruption it caused is
-# gone. This one survives that fix.
+# See nw_wasm32_target_triple_falls_back_to_host.md for the real causes and the
+# fixes. After them, every call maps at the same two addresses and this file
+# passes on a shared instance too.
 #
-# Impact: this is what still garbles pooled STRINGS in a display-list frame,
-# because a frame interleaves pushes into the command array and the string pool.
-# Geometry is unaffected -- the command records are correct and the board renders
-# correctly -- so it presents as wrong text rather than a crash.
-#
-# Worth checking first: whether the relocation reads the OLD capacity after the
-# other array's growth has already moved the bump pointer, so oldsz covers fewer
-# bytes than the array actually holds.
+# The lesson, which the wordBits repro had already taught once: a symptom that
+# varies with CALL INDEX is about accumulated state, not about the operation
+# inside the call. Vary the instance before blaming the algorithm.
 
 def interleaved_byte(which: i64) -> i64:
     can Memory.Allocate, Abort.Panic:

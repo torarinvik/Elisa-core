@@ -1,0 +1,120 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# ROOT CAUSE of the long-standing `print(42)` decline, pinned.
+#
+# stage1 declines the i64 instantiation of a generic as soon as the protocol also
+# has a `char` impl -- even though `char` is never used at the call site. stage0
+# compiles this and prints 42.
+#
+#   error: backend emitted no functions for this unit; declined 3: join, emit__i64, emit
+#
+# WHY: codegen_env.elisa:616 and :624 both return ValueType{kind: Signed, bits: 64}
+#
+#     ValueType{kind: TypeKind.Signed, bits: 64} return if name == "i64" or name == "int" or name == "isize"
+#     ValueType{kind: TypeKind.Signed, bits: 64} return if name == "char"
+#
+# so `char` and `i64` are INDISTINGUISHABLE as ValueTypes. Two impls of the same
+# protocol then register under one key and the i64 instantiation cannot resolve to
+# a single body. Modelling char as a full-width signed scalar is deliberate (it
+# matches stage0's lowering, `define i64 @f(i64)`), so the fix is NOT to change
+# that -- it is to key protocol-impl selection by the SPELLED TYPE NAME rather
+# than by ValueType, which is the only thing that distinguishes them.
+#
+# This is why `print(42)` fails and `print(true)` succeeds: `Str` has impls for
+# BOTH char and i64 (runtime.elisa:202 and :210), while bool is unambiguous.
+#
+# BISECTED to exactly this. With `impl Show for i64` present, adding:
+#     +u32   -> still OK
+#     +sview -> still OK
+#     +char  -> DECLINES
+#
+# Other shapes that were reduced and are FINE on both stages, so they are not the
+# cause and should not be re-investigated: protocol dispatch through a type
+# parameter (`T.render(v)`), a generic calling a same-named non-generic overload,
+# effect clauses on the protocol method, and returning `heap u8&` from a function
+# declared `-> cstr`.
+
+protocol Show:
+    def render(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
+
+impl Show for i64:
+    def render(self: i64) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return int_to_string_scratch(self)
+
+# Remove this impl and the file compiles on stage1. It is never called.
+impl Show for char:
+    def render(self: char) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]:
+        return char_to_string_scratch(self.i64())
+
+def emit[T: Show](value: T) -> void can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    print(T.render(value) can Memory.Allocate, Console.Format, Abort.Panic) can Console.Write
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Console.Format, Abort.Panic:
+        n: i64 = 42
+        emit(n)
+        return 0
+
+# ------------------------------------------------------------------
+# MECHANISM, traced to the line. Not fixed -- the fix is a design change and
+# wants the full parity gate behind it, not a rushed patch.
+#
+#   1. src/backend/codegen_env.elisa:616,624
+#        i64/int/isize -> ValueType{Signed, 64}
+#        char          -> ValueType{Signed, 64}      <-- same value
+#
+#   2. src/backend/codegen_type_tables.elisa:345
+#        binding_types: mutable darray[ValueType]
+#      The CURRENT instantiation's `T` is stored as a ValueType, so by the time a
+#      generic body asks "which impl does T select?", the spelling is GONE.
+#
+#   3. src/backend/codegen_decl_facts.elisa (mangled_name_multi_into, ~line 685)
+#        if value_type.kind == TypeKind.Signed:
+#            text <- ... else "i64"
+#      so T=char and T=i64 both mangle to `emit__i64` -- one symbol for two
+#      instantiations.
+#
+#   4. Impl SYMBOLS are keyed by NAME and are fine:
+#      structs.impl_member_types is darray[sview] and produces
+#      `__impl__Show__char__render` vs `__impl__Show__i64__render`
+#      (codegen_struct_reg.elisa:1120). Only the SELECTION side loses the name.
+#
+# TWO WAYS TO FIX, in preference order:
+#
+#   A. Carry the spelled name alongside the binding: add
+#      `binding_type_names: darray[sview]` beside binding_names/binding_types and
+#      have impl selection prefer it. Localized, and mirrors what
+#      impl_member_types already stores. Remember every column pushed in lockstep
+#      -- see the register_target_consts bug in SESSION_COMPILER_FIXES.md #7.
+#
+#   B. Give `char` its own ValueType. Rejected: codegen_env.elisa:622-623 says the
+#      Signed/64 modelling is deliberate so char arithmetic and compares match
+#      stage0's lowering (`define i64 @f(i64)`), and changing it ripples through
+#      every arithmetic path for a symptom that lives in one lookup.
+#
+# CHECK STAGE0 FIRST. Its mangling comment says it mirrors stage0's `identity__i64`
+# scheme, which suggests stage0 ALSO mangles char as i64 -- yet stage0 compiles
+# this file. So stage0 already distinguishes the impls by some other means, and
+# whatever that is, is the design to copy rather than invent.
+#
+# ANSWER TO "CHECK STAGE0 FIRST": stage0 keeps `char` as its OWN semantic type --
+# `a.namedTypes["char"]`, distinct from i64 throughout the analyzer (see
+# analyzer_casts.go:31, analyzer_expr_indexing.go:171, and isCharType in
+# analyzer_classifier_fold.go:319). Only the LLVM LOWERING collapses it to i64.
+#
+# That is the distinction stage1 lost. codegen_env.elisa's comment -- "stage0
+# lowers char to i64 ... model it identically" -- is right about the LOWERING and
+# wrong to apply it to the TYPE. Representation and identity are different
+# questions, and impl selection asks the identity one.
+#
+# So the fix is to restore the distinction while keeping the lowering:
+#   * give char its own TypeKind (or a discriminating `bits` marker -- there is
+#     precedent: TypeKind.CStr already uses bits:1 as an opaque-handle marker);
+#   * have llvm_type_of map it to i64, so nothing about codegen changes;
+#   * audit `kind == TypeKind.Signed` sites, which is where the risk lives --
+#     char arithmetic and comparison must keep working.
+#
+# That is a bigger change than option (A) above and it is the FAITHFUL one, since
+# it makes stage1 model what stage0 models. (A) -- carrying the spelled name on
+# the binding -- is the smaller, more surgical version and would fix THIS symptom
+# without touching arithmetic. Prefer (A) if the audit looks wide.

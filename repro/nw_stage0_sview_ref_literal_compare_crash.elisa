@@ -1,0 +1,32 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage0 CRASHES (SIGSEGV, not a diagnostic) compiling a comparison between a
+# `mutable sview&` PARAMETER and a static string literal:
+#
+#   SIGSEGV: segmentation violation
+#   backend.(*functionState).emitStringViewStaticLiteralEqual
+#     llvm_exprs_emitspecializedarenafromviewcall_to_emitunaryexpr.go:357
+#
+# The literal path calls LLVMBuildExtractValue on the sview aggregate; through a
+# REFERENCE the value is a pointer, not the aggregate, so the extract gets a null
+# operand and LLVM dies inside cgo. A by-value `sview` parameter is fine, and so is
+# comparing two sview VALUES -- only ref-vs-static-literal crashes.
+#
+# Found while fixing stage1's redeclared-extern handling: the natural way to write
+# the accumulator was `if found == "":` over a `found: mutable sview&` out-param,
+# and stage0 fell over compiling stage1's own source. Worked around there by
+# copying the ref into a local first, which is also the shape this file shows is
+# safe.
+
+# Comparing a `mutable sview&` PARAMETER against a static string literal.
+def take(found: mutable sview&) -> i64:
+    can Abort.Panic:
+        if found == "":
+            return 1
+        return 0
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        s: mutable sview = ""
+        print("empty" if take(s) == 1 else "nonempty")
+        return 0
