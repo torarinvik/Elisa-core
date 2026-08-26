@@ -350,7 +350,12 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	return nil, resultType, true, nil
 }
 func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, viewType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
-	viewValue, _, err := s.emitExpr(viewExpr, viewType)
+	// Through a REFERENCE (`found: mutable sview&`), emitExpr yields the POINTER rather
+	// than the StringView aggregate, and the ExtractValue below then ran on a pointer and
+	// took LLVM down with a SIGSEGV inside cgo -- a compiler crash, not a diagnostic.
+	// emitStringCompareOperandValue already knows how to load a view through a ref; the
+	// non-ref path is unchanged.
+	viewValue, err := s.emitStringCompareOperandValue(viewExpr, viewType)
 	if err != nil {
 		return nil, err
 	}

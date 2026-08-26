@@ -40,10 +40,13 @@ const ARENA_STRATEGY_RESERVE_COMMIT: int = 2
 const ARENA_STRATEGY_FIXED: int = 3
 const ARENA_STRATEGY_SCRATCH: int = 4
 
-# Default reservation (in 8-byte slots) for a reserve_commit arena with no inferred bound (docs/73):
-# 256 MiB of contiguous virtual address space, reserved LAZILY on first allocation. Pages commit on
-# first touch, so this costs address space, not physical memory; overflowing it panics.
+# Default reservation (in uintptr slots) for a reserve_commit arena with no inferred bound
+# (docs/73). On a 64-bit demand-paged target this is 256 MiB of contiguous virtual ADDRESS SPACE:
+# pages commit on first touch, so it costs no physical memory and overflowing it panics.
+#
+# 33554432 slots on 64-bit; 2097152 (8 MiB) on 32-bit. See arena_default_reserve_slots below.
 const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
+const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 
 error RuntimeError:
     OutOfMemory
@@ -153,6 +156,23 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
 def assert(condition: bool):
     can Abort.Panic:
         panic("assert failed") if not condition
+
+# The default reserve_commit reservation, sized to the TARGET'S POINTER WIDTH.
+#
+# 256 MiB of address space is free on a 64-bit demand-paged target. It is not free anywhere
+# else. On WebAssembly there is no demand paging at all -- `memory.grow` commits real pages
+# immediately and linear memory is capped at 4 GiB -- so a 256 MiB "reservation" is a 256 MiB
+# ALLOCATION, per region. A display-list frame nests two regions and the browser shell grew
+# ~128 MiB per frame until memory.grow failed. On any 32-bit target it is also 1/16th of the
+# entire address space, which is unreasonable even with demand paging.
+#
+# Keyed on `size_of(uintptr)` rather than on a target predicate on purpose: pointer width is
+# the property that actually matters, it folds at compile time on every backend, and it adds
+# NO dependency on a compiler new enough to define a particular ELISA_TARGET_* name. An
+# earlier version of this used `static if ELISA_TARGET_ARCH_WASM` and broke every tool still
+# pinned to an older stage0, which is a bad trade for a constant.
+def arena_default_reserve_slots() -> usize:
+    return ARENA_DEFAULT_RESERVE_COMMIT_SLOTS if size_of(uintptr) >= 8 else ARENA_NARROW_RESERVE_COMMIT_SLOTS
 
 def max(a: usize, b: usize) -> usize:
     ensure result >= a
@@ -503,7 +523,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             # cost nothing. FIXED and bounded reserve_commit are reserved up front by the region
             # declaration, so they already have a block here.
             if a.end == null:
-                cap: mutable usize = ARENA_DEFAULT_RESERVE_COMMIT_SLOTS
+                cap: mutable usize = arena_default_reserve_slots()
                 cap <- size if cap < size
                 a.end as & <- new_region_backend(cap, a.strategy)
                 a.begin <- a.end

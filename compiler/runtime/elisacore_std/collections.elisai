@@ -29,6 +29,8 @@ const ARENA_STRATEGY_SCRATCH: int = 4
 
 const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
 
+const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
+
 error RuntimeError:
     OutOfMemory
 
@@ -84,6 +86,8 @@ static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
     extern bump_pointer: heap u8&
 
 extern assert(condition: bool)
+
+extern arena_default_reserve_slots() -> usize
 
 extern max(a: usize, b: usize) -> usize
 
