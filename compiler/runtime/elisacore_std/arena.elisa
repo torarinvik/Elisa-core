@@ -7,11 +7,18 @@ const ARENA_BACKEND_LINUX_MMAP = 1
 const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
 const ARENA_BACKEND_WASM_HEAPBASE = 3
 
+# Bootstrap compatibility: older stage0 binaries do not predefine the WASM target row.
+# Stage1 registers the same name with the actual target value before folding static branches;
+# stage0 sees this conservative false value and keeps compiling the host stdlib.
+const ELISA_TARGET_OS_WASM: bool = false
+
 # Backend chosen by target OS so the arena never depends on host libc malloc on the
 # platforms the emulator targets: POSIX (macOS/Linux/FreeBSD) -> mmap, Windows ->
 # VirtualAlloc. This matters because on the x86_64-under-Rosetta substrate, libc malloc
 # is unusable from inside guarded guest execution; an mmap-backed arena avoids it.
-static if ELISA_TARGET_OS_WINDOWS:
+static if ELISA_TARGET_OS_WASM:
+    const ARENA_BACKEND: int = ARENA_BACKEND_WASM_HEAPBASE
+static elif ELISA_TARGET_OS_WINDOWS:
     const ARENA_BACKEND: int = ARENA_BACKEND_WIN32_VIRTUALALLOC
 static elif ELISA_TARGET_OS_POSIX:
     const ARENA_BACKEND: int = ARENA_BACKEND_LINUX_MMAP
@@ -143,11 +150,10 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
         return ((n + (WIN_COMMIT_CHUNK - 1)) / WIN_COMMIT_CHUNK) * WIN_COMMIT_CHUNK
 
 static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-    extern __heap_base: heap u8&
-    extern wasm_memory_size(index: int) -> int
-    extern wasm_memory_grow(index: int, pages: usize) -> int
-
-    global mutable bump_pointer: heap u8& = __heap_base
+    # The generated host facade owns the allocator and seeds it from wasm-ld's
+    # `__heap_base` export after instantiation. Routing regions through malloc/free keeps
+    # Elisa's arena and JS-created strings/byte buffers on one collision-free heap.
+    const ARENA_WASM_USES_HOST_ALLOCATOR: bool = true
 
 # ------------------------------------------------------------
 # Small utilities
@@ -328,22 +334,11 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             r: heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-            r: heap Region& = arena_region_from_raw(arena_heap_void_from_u8(bump_pointer))
-            current_memory_size: mutable usize = 0
+            raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
-                current_memory_size <- ARENA_WASM_PAGE_SIZE * wasm_memory_size(0).usize()
-            desired_memory_size: usize = bump_pointer.usize() + size_bytes
-
-            if desired_memory_size > current_memory_size:
-                delta_bytes: usize = desired_memory_size - current_memory_size
-                delta_pages: usize = (delta_bytes + (ARENA_WASM_PAGE_SIZE - 1)) / ARENA_WASM_PAGE_SIZE
-
-                grow_result: mutable int = -1
-                trusted Unsafe.RawExtern:
-                    grow_result <- wasm_memory_grow(0, delta_pages)
-                assert grow_result >= 0
-
-            bump_pointer <- bump_pointer + size_bytes
+                raw <- malloc(size_bytes)
+            assert raw != null
+            r: heap Region& = arena_region_from_raw(raw)
 
         static else:
             static error("Unknown arena backend")
@@ -489,7 +484,8 @@ def free_region(r: heap Region&):
             assert ok
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
-            pass
+            trusted Unsafe.RawExtern:
+                free(arena_heap_void_from_region(r))
 
 # Free a libc-malloc-backed region block (counterpart to new_region_malloc).
 @internal
