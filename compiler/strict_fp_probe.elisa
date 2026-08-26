@@ -1,0 +1,12 @@
+# A multiply-add whose add CANCELS, which is where contraction is observable:
+# `low + (high - low) * r` is Python's `random.uniform`, and the fused form
+# differs from the two-rounding form by an ulp or two whenever `low` is
+# negative. Nothing here is foldable at compile time -- `r` comes in as an
+# argument -- so the shape survives to the IR.
+def blend(low: f64, high: f64, r: f64) -> f64:
+    can Abort.Panic:
+        return low + (high - low) * r
+
+def main() -> i64:
+    can Abort.Panic:
+        return blend(-0.35, 0.35, 0.125).i64()
