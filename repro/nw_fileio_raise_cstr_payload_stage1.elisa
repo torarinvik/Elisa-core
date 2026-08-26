@@ -1,0 +1,25 @@
+# Repro (stage1 only): the stage1 backend declines `raise E.Variant(<cstr payload>)`
+# ("might: DECLINE Expr" under ELISA_DBG_DECLINE=1), dropping the whole unit.
+# The same program with an i64 payload compiles and runs under stage1, and stage0
+# handles the cstr payload fine. Found while porting elisacore_fileio (2026-08-25).
+#
+#   stage0: compiles + runs, exit 0
+#   stage1: error: backend emitted no functions for this unit
+
+error PathErr:
+    Bad(path: cstr)
+    Plain
+
+def might(x: i64) -> i64 error[PathErr]:
+    if x < 0:
+        raise PathErr.Bad("p")
+    if x == 0:
+        raise PathErr.Plain
+    return x
+
+def main() -> i64:
+    a: i64 = try might(5) else -1
+    1 return if a != 5
+    b: i64 = try might(-2) else -7
+    2 return if b != -7
+    return 0

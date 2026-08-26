@@ -1,0 +1,64 @@
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+include "../../compiler/runtime/elisacore_std/elisacore_fileio.elisa"
+
+# Paths are passed as parameters rather than read from `const cstr` globals:
+# stage1's backend currently declines calls whose argument is a const cstr global.
+
+def roundtrip_smoke(a: mutable Arena&, test_path: cstr) -> void:
+    can Blocking.IO, Memory.Allocate, Memory.Release, Abort.Panic:
+        payload: cstr = "hello, elisa file io!\n"
+        _ = remove_file(test_path)
+        assert_false(file_exists(test_path))
+
+        written: i64 = try write_entire_file(test_path, payload[0:payload.len]) else -1
+        assert_eq(written, payload.len)
+        assert_true(file_exists(test_path))
+
+        size: i64 = try file_size(test_path) else -1
+        assert_eq(size, payload.len)
+
+        catch read_entire_file(a, test_path):
+            got:
+                check_bytes(got, payload)
+            error e:
+                fail("read_entire_file failed")
+
+        text: cstr = try read_entire_file_cstr(a, test_path) else ""
+        assert_true(text == payload)
+
+        assert_true(remove_file(test_path))
+        assert_false(file_exists(test_path))
+
+def check_bytes(bytes: darray[u8], payload: cstr) -> void:
+    can Abort.Panic:
+        assert_eq(bytes.count.i64(), payload.len)
+        index: mutable i64 = 0
+        while index < payload.len:
+            assert_eq(bytes[index.usize()].i64(), payload[index])
+            index <- index + 1
+
+def missing_file_errors(a: mutable Arena&, missing_path: cstr) -> void:
+    can Blocking.IO, Memory.Allocate, Memory.Release, Abort.Panic:
+        _ = remove_file(missing_path)
+        assert_false(file_exists(missing_path))
+        # Variant-pattern catch arms (`FileIoError.OpenFailed(p):`) are stage0-only
+        # today; keep the arms portable across both compilers.
+        catch file_size(missing_path):
+            ok:
+                fail("file_size on missing file unexpectedly succeeded")
+            error e:
+                assert_true(true)
+        catch read_entire_file(a, missing_path):
+            ok:
+                fail("read_entire_file on missing file unexpectedly succeeded")
+            error e:
+                assert_true(true)
+
+def main() -> i64:
+    can Blocking.IO, Memory.Allocate, Memory.Release, Abort.Panic, Unsafe.PointerCast:
+        region scratch(1048576)
+        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
+        roundtrip_smoke(arena, "/tmp/elisa_fileio_std_test.bin")
+        missing_file_errors(arena, "/tmp/elisa_fileio_std_missing.bin")
+        destroy scratch
+        return 0

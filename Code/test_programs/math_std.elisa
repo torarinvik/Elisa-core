@@ -1,0 +1,54 @@
+include "../../compiler/runtime/elisacore_std/test.elisa"
+include "../../compiler/runtime/elisacore_std/elisacore_math.elisa"
+
+def assert_close(actual: f64, expected: f64):
+    can Abort.Panic:
+        fail("assert_close failed") if not approx_eq(actual, expected, 0.000000001)
+
+def libm_smoke() -> void:
+    can Abort.Panic:
+        assert_close(sqrt(9.0), 3.0)
+        assert_close(cbrt(27.0), 3.0)
+        assert_close(sin(0.0), 0.0)
+        assert_close(cos(0.0), 1.0)
+        assert_close(sin(MATH_PI / 2.0), 1.0)
+        assert_close(atan2(1.0, 1.0), MATH_PI / 4.0)
+        assert_close(exp(0.0), 1.0)
+        assert_close(log(MATH_E), 1.0)
+        assert_close(log2(8.0), 3.0)
+        assert_close(log10(1000.0), 3.0)
+        assert_close(pow(2.0, 10.0), 1024.0)
+        assert_close(fmod(7.5, 2.0), 1.5)
+        assert_close(floor(2.7), 2.0)
+        assert_close(ceil(2.1), 3.0)
+        assert_close(round(2.5), 3.0)
+        assert_close(trunc(-2.7), -2.0)
+        assert_close(fabs(-4.25), 4.25)
+        assert_close(hypot(3.0, 4.0), 5.0)
+        assert_close(copysign(3.0, -1.0), -3.0)
+        assert_close(fmin(2.0, 3.0), 2.0)
+        assert_close(fmax(2.0, 3.0), 3.0)
+
+def f32_smoke() -> void:
+    can Abort.Panic:
+        assert_true(fabsf(sqrtf(4.0.f32()) - 2.0.f32()) < 0.0001.f32())
+        assert_true(fabsf(powf(2.0.f32(), 3.0.f32()) - 8.0.f32()) < 0.0001.f32())
+
+def helper_smoke() -> void:
+    can Abort.Panic:
+        assert_eq(abs_i64(-5), 5)
+        assert_eq(min_i64(2, 3), 2)
+        assert_eq(max_i64(2, 3), 3)
+        assert_eq(clamp_i64(10, 0, 5), 5)
+        assert_eq(clamp_i64(-1, 0, 5), 0)
+        assert_close(clamp_f64(0.5, 0.0, 1.0), 0.5)
+        assert_close(lerp(0.0, 10.0, 0.25), 2.5)
+        assert_close(degrees_to_radians(180.0), MATH_PI)
+        assert_close(radians_to_degrees(MATH_PI), 180.0)
+
+def main() -> i64:
+    can Abort.Panic:
+        libm_smoke()
+        f32_smoke()
+        helper_smoke()
+        return 0

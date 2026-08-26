@@ -210,6 +210,7 @@ func backendScopedArenaOwnerDecl(pos lexer.Pos, regionName string, ownerName str
 		},
 	}
 }
+
 // noteScopedArenaOwnerAlias records that `as OWNER` names the same arena as the region
 // itself, and returns a restore for the enclosing binding of that name. Without it, `in
 // owner:` keys the tree-alloc owner on the alloca holding the REFERENCE while `in scratch:`
@@ -706,6 +707,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			}
 		}
 		s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: declType, mutable: n.Mutable})
+		// docs/126 D1: a drop-typed local arms its destructor here, after the binding is
+		// in scope (the synthesized `__drop__(move n.Name)` resolves through it) and
+		// after the initializer ran (a shadowing decl must not arm the outer value).
+		if _, err := s.registerDropCleanup(n.Name, alloca, declType); err != nil {
+			return err
+		}
 		if s.g.di != nil {
 			s.g.di.declareVariable(s, n.Name, alloca, declType, n.Pos().Line, 0)
 		}

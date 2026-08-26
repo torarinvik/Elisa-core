@@ -12,8 +12,8 @@ import (
 // LLVM struct type (zero impact on runtime layout/size/offsets).
 func TestTypestateStateErasure(t *testing.T) {
 	tests := []struct {
-		name string
-		src  string
+		name       string
+		src        string
 		structName string
 		// concreteFieldsInDecl is the list of field names expected in Decl.Fields after
 		// analysis. The __typestate field should be present here (for construction) but
@@ -33,9 +33,9 @@ struct MySocket[state Closed | Open]:
 		Closed when self.__typestate == 0
 		Open when self.__typestate == 1
 `,
-			structName: "MySocket",
-			concreteFieldsInDecl:  []string{"fd", "__typestate"},
-			shouldHaveTypestate:     true,
+			structName:           "MySocket",
+			concreteFieldsInDecl: []string{"fd", "__typestate"},
+			shouldHaveTypestate:  true,
 		},
 		{
 			name: "Typestate struct with multiple fields",
@@ -49,9 +49,9 @@ struct Connection[state Idle | Active]:
 		Idle when self.__typestate == 0
 		Active when self.__typestate == 1
 `,
-			structName: "Connection",
-			concreteFieldsInDecl:  []string{"host", "port", "__typestate"},
-			shouldHaveTypestate:     true,
+			structName:           "Connection",
+			concreteFieldsInDecl: []string{"host", "port", "__typestate"},
+			shouldHaveTypestate:  true,
 		},
 		{
 			name: "Non-typestate struct (no state param) preserves all fields",
@@ -60,9 +60,9 @@ struct PlainStruct:
 	data: i32
 	value: u64
 `,
-			structName: "PlainStruct",
-			concreteFieldsInDecl:  []string{"data", "value"},
-			shouldHaveTypestate:     false,
+			structName:           "PlainStruct",
+			concreteFieldsInDecl: []string{"data", "value"},
+			shouldHaveTypestate:  false,
 		},
 		{
 			name: "Typestate struct with ghost field and typestate field",
@@ -78,8 +78,8 @@ struct Box[state Open | Closed]:
 `,
 			structName: "Box",
 			// Ghost fields are dropped from Decl.Fields; __typestate remains (phantom)
-			concreteFieldsInDecl:  []string{"content", "__typestate"},
-			shouldHaveTypestate:     true,
+			concreteFieldsInDecl: []string{"content", "__typestate"},
+			shouldHaveTypestate:  true,
 		},
 	}
 
@@ -281,8 +281,8 @@ struct MySocket[state Closed | Open]:
 // TestTypestateDetection verifies the detection logic for `state` generic parameters.
 func TestTypestateDetection(t *testing.T) {
 	tests := []struct {
-		name               string
-		src                string
+		name                string
+		src                 string
 		shouldHaveTypestate bool
 	}{
 		{

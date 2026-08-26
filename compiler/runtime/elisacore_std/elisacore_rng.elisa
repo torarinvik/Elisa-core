@@ -1,0 +1,180 @@
+# ============================================================
+# Elisa core Runtime - deterministic pseudo-random number generators
+# ============================================================
+#
+# Pure integer implementations (no FFI):
+#   - SplitMix64: tiny 64-bit generator, mostly used for seeding.
+#   - Xoshiro256**: fast general-purpose 64-bit generator.
+#   - MT19937: 32-bit Mersenne Twister, bit-exact with CPython's
+#     `random` module (Matsumoto-Nishimura 2002 reference code).
+#
+# All arithmetic relies on Elisa's silent two's-complement wrap-around
+# for unsigned integer types (verified: u32/u64 add/mul/sub wrap).
+
+# ------------------------------------------------------------
+# SplitMix64
+# ------------------------------------------------------------
+
+struct SplitMix64:
+    state: mutable u64
+
+def splitmix64_new(seed: u64) -> SplitMix64:
+    return SplitMix64{state: seed}
+
+def splitmix64_next(rng: mutable SplitMix64&) -> u64:
+    rng.state <- rng.state + 0x9E3779B97F4A7C15
+    z: mutable u64 = rng.state
+    z <- (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9
+    z <- (z ^ (z >> 27)) * 0x94D049BB133111EB
+    return z ^ (z >> 31)
+
+# ------------------------------------------------------------
+# Xoshiro256** (Blackman-Vigna)
+# ------------------------------------------------------------
+
+struct Xoshiro256:
+    s0: mutable u64
+    s1: mutable u64
+    s2: mutable u64
+    s3: mutable u64
+
+# Seed the four state words from SplitMix64, per the authors' guidance.
+def xoshiro256_new(seed: u64) -> Xoshiro256:
+    sm: mutable SplitMix64 = splitmix64_new(seed)
+    a: u64 = splitmix64_next(&sm)
+    b: u64 = splitmix64_next(&sm)
+    c: u64 = splitmix64_next(&sm)
+    d: u64 = splitmix64_next(&sm)
+    return Xoshiro256{s0: a, s1: b, s2: c, s3: d}
+
+def xoshiro256_next(rng: mutable Xoshiro256&) -> u64:
+    x: u64 = rng.s1 * 5
+    result: u64 = (((x << 7) | (x >> 57)) * 9)
+    t: u64 = rng.s1 << 17
+    rng.s2 <- rng.s2 ^ rng.s0
+    rng.s3 <- rng.s3 ^ rng.s1
+    rng.s1 <- rng.s1 ^ rng.s2
+    rng.s0 <- rng.s0 ^ rng.s3
+    rng.s2 <- rng.s2 ^ t
+    r3: u64 = rng.s3
+    rng.s3 <- (r3 << 45) | (r3 >> 19)
+    return result
+
+# Uniform f64 in [0, 1) using the top 53 bits.
+def xoshiro256_next_f64(rng: mutable Xoshiro256&) -> f64:
+    return (xoshiro256_next(rng) >> 11).f64() * (1.0 / 9007199254740992.0)
+
+# Unbiased uniform integer in [0, bound). Uses the classic rejection
+# method: reject values below 2^64 mod bound, then reduce. Chosen over
+# Lemire's method because it needs no 128-bit multiply.
+def xoshiro256_next_below(rng: mutable Xoshiro256&, bound: u64) -> u64:
+    0 return if bound == 0
+    threshold: u64 = (0.u64() - bound) % bound
+    while true:
+        x: u64 = xoshiro256_next(rng)
+        x % bound return if x >= threshold
+    return 0
+
+# ------------------------------------------------------------
+# MT19937 (Mersenne Twister, 32-bit)
+# ------------------------------------------------------------
+#
+# Reference implementation semantics (mt19937ar.c), which is exactly
+# what CPython's `_randommodule.c` embeds. `mt_seed_int` reproduces
+# CPython's `random.seed(int)` for non-negative seeds below 2^64.
+
+const MT_N: usize = 624
+const MT_M: usize = 397
+const MT_MATRIX_A: u32 = 0x9908B0DF
+const MT_UPPER_MASK: u32 = 0x80000000
+const MT_LOWER_MASK: u32 = 0x7FFFFFFF
+
+struct MT19937:
+    mt: mutable u32[624]
+    mti: mutable usize
+
+def mt19937_new() -> MT19937:
+    rng: mutable MT19937 = MT19937{mt: zeroed, mti: MT_N + 1}
+    mt_init_genrand(&rng, 5489)
+    return rng
+
+# init_genrand from the reference code.
+def mt_init_genrand(rng: mutable MT19937&, seed: u32):
+    rng.mt[0.usize()] <- seed
+    for i in 1..<MT_N:
+        prev: u32 = rng.mt[i - 1]
+        rng.mt[i] <- (1812433253.u32() * (prev ^ (prev >> 30))) + i.u32()
+    rng.mti <- MT_N
+
+# init_by_array from the reference code. Takes a two-word key array by
+# reference plus the number of leading words actually in use (1 or 2),
+# which covers every CPython int seed below 2^64. (A generic
+# `keys: u32[N]&` parameter would be the natural signature, but stage1
+# currently declines generic array-length parameters; see
+# repro/nw_rng_generic_array_len_param.elisa.)
+def mt_init_by_array(rng: mutable MT19937&, keys: u32[2]&, key_length: usize):
+    mt_init_genrand(rng, 19650218)
+    i: mutable usize = 1
+    j: mutable usize = 0
+    k: mutable usize = MT_N if MT_N > key_length else key_length
+    while k > 0:
+        prev: u32 = rng.mt[i - 1]
+        rng.mt[i] <- (rng.mt[i] ^ ((prev ^ (prev >> 30)) * 1664525.u32())) + keys[j] + j.u32()
+        i <- i + 1
+        j <- j + 1
+        if i >= MT_N:
+            rng.mt[0.usize()] <- rng.mt[MT_N - 1]
+            i <- 1
+        j <- 0 if j >= key_length else j
+        k <- k - 1
+    k <- MT_N - 1
+    while k > 0:
+        prev2: u32 = rng.mt[i - 1]
+        rng.mt[i] <- (rng.mt[i] ^ ((prev2 ^ (prev2 >> 30)) * 1566083941.u32())) - i.u32()
+        i <- i + 1
+        if i >= MT_N:
+            rng.mt[0.usize()] <- rng.mt[MT_N - 1]
+            i <- 1
+        k <- k - 1
+    rng.mt[0.usize()] <- 0x80000000
+
+# Seed exactly like CPython's `random.seed(n)` for 0 <= n < 2^64:
+# the int is split into 32-bit words, lowest word first, and fed to
+# init_by_array; zero becomes the single-word key [0].
+def mt_seed_int(rng: mutable MT19937&, seed: u64):
+    key: mutable u32[2] = [0, 0]
+    key[0.usize()] <- (seed & 0xFFFFFFFF).u32()
+    key[1.usize()] <- (seed >> 32).u32()
+    key_len: usize = 2 if (seed >> 32) != 0 else 1
+    mt_init_by_array(rng, &key, key_len)
+
+def mt_genrand_uint32(rng: mutable MT19937&) -> u32:
+    if rng.mti >= MT_N:
+        # Generate the next N words in one pass (the "twist").
+        if rng.mti == MT_N + 1:
+            mt_init_genrand(rng, 5489)
+        for kk in 0..<(MT_N - MT_M):
+            y0: u32 = (rng.mt[kk] & MT_UPPER_MASK) | (rng.mt[kk + 1] & MT_LOWER_MASK)
+            rng.mt[kk] <- rng.mt[kk + MT_M] ^ (y0 >> 1) ^ (MT_MATRIX_A if (y0 & 1) != 0 else 0.u32())
+        for kk2 in (MT_N - MT_M)..<(MT_N - 1):
+            y1: u32 = (rng.mt[kk2] & MT_UPPER_MASK) | (rng.mt[kk2 + 1] & MT_LOWER_MASK)
+            rng.mt[kk2] <- rng.mt[kk2 + MT_M - MT_N] ^ (y1 >> 1) ^ (MT_MATRIX_A if (y1 & 1) != 0 else 0.u32())
+        y2: u32 = (rng.mt[MT_N - 1] & MT_UPPER_MASK) | (rng.mt[0.usize()] & MT_LOWER_MASK)
+        rng.mt[MT_N - 1] <- rng.mt[MT_M - 1] ^ (y2 >> 1) ^ (MT_MATRIX_A if (y2 & 1) != 0 else 0.u32())
+        rng.mti <- 0
+
+    y: mutable u32 = rng.mt[rng.mti]
+    rng.mti <- rng.mti + 1
+
+    # Tempering.
+    y <- y ^ (y >> 11)
+    y <- y ^ ((y << 7) & 0x9D2C5680)
+    y <- y ^ ((y << 15) & 0xEFC60000)
+    y <- y ^ (y >> 18)
+    return y
+
+# random_random from CPython: 53-bit uniform in [0, 1).
+def mt_random_res53(rng: mutable MT19937&) -> f64:
+    a: u32 = mt_genrand_uint32(rng) >> 5
+    b: u32 = mt_genrand_uint32(rng) >> 6
+    return (a.f64() * 67108864.0 + b.f64()) * (1.0 / 9007199254740992.0)

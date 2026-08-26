@@ -421,7 +421,7 @@ func parseProjectCLIArgs(args []string) (projectCLIOptions, error) {
 				return projectCLIOptions{}, fmt.Errorf("missing value after -emit")
 			}
 			options.emitOverride = normalizeEmitMode(strings.TrimSpace(args[i]))
-		case arg == "-O0" || arg == "-O2" || arg == "-O3":
+		case arg == "-O0" || arg == "-O1" || arg == "-O2" || arg == "-O3":
 			level, err := parseOptimizationArg(strings.TrimPrefix(arg, "-O"))
 			if err != nil {
 				return projectCLIOptions{}, err
@@ -582,9 +582,9 @@ func printProjectUsage(w io.Writer) {
 	fmt.Fprintln(w, "Project commands:")
 	fmt.Fprintln(w, "  elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "  elisacore init-lib <name> [--path <dir>]")
-	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore build [target] [--project <dir|project.json>] [-emit <mode>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O1|-O2|-O3]")
 	fmt.Fprintln(w, "  elisacore run [target] [--project <dir|project.json>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>]")
-	fmt.Fprintln(w, "  elisacore test [target] [--project <dir|project.json>] [-filter <substring>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O2|-O3]")
+	fmt.Fprintln(w, "  elisacore test [target] [--project <dir|project.json>] [-filter <substring>] [-link <flag>|-L <dir>|-l <name>] [--trust <none|include|full>] [-O0|-O1|-O2|-O3]")
 	fmt.Fprintln(w, "  elisacore bench [target] [--project <dir|project.json>] [-filter <substring>] [--trust <none|include|full>]")
 	fmt.Fprintln(w, "  elisacore project view [target] [--project <dir|project.json>]")
 	fmt.Fprintln(w, "  elisacore project deps [target] [--project <dir|project.json>] [--json]")

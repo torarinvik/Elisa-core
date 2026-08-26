@@ -1,0 +1,98 @@
+include "../../compiler/runtime/elisacore_std/test.elisa"
+include "../../compiler/runtime/elisacore_std/arena.elisa"
+include "../../compiler/runtime/elisacore_std/elisacore_rng.elisa"
+
+# Expected values generated with CPython 3 `random` (see module docs)
+# and the reference splitmix64 / xoshiro256** algorithms.
+
+def splitmix_tests() -> void:
+    can Abort.Panic:
+        sm: mutable SplitMix64 = splitmix64_new(12345)
+        assert_eq(splitmix64_next(&sm), 2454886589211414944.u64())
+        assert_eq(splitmix64_next(&sm), 3778200017661327597.u64())
+        assert_eq(splitmix64_next(&sm), 2205171434679333405.u64())
+
+def xoshiro_tests() -> void:
+    can Abort.Panic:
+        rng: mutable Xoshiro256 = xoshiro256_new(12345)
+        assert_eq(xoshiro256_next(&rng), 13720838825685603483.u64())
+        assert_eq(xoshiro256_next(&rng), 2398916695208396998.u64())
+        assert_eq(xoshiro256_next(&rng), 17770384849984869256.u64())
+        assert_eq(xoshiro256_next(&rng), 891717726879801395.u64())
+        assert_eq(xoshiro256_next(&rng), 10241316046318454344.u64())
+        # f64 stream from a fresh generator: exact 53-bit conversion.
+        rng2: mutable Xoshiro256 = xoshiro256_new(12345)
+        assert_eq(xoshiro256_next_f64(&rng2), 0.7438081631565894)
+        assert_eq(xoshiro256_next_f64(&rng2), 0.13004553462783452)
+        assert_eq(xoshiro256_next_f64(&rng2), 0.9633344930128545)
+
+def xoshiro_below_tests() -> void:
+    can Abort.Panic:
+        rng: mutable Xoshiro256 = xoshiro256_new(777)
+        for i in 0..<200:
+            v: u64 = xoshiro256_next_below(&rng, 10)
+            assert_true(v < 10.u64())
+        # Determinism: same seed, same stream.
+        a: mutable Xoshiro256 = xoshiro256_new(999)
+        b: mutable Xoshiro256 = xoshiro256_new(999)
+        for j in 0..<50:
+            assert_eq(xoshiro256_next_below(&a, 1000000), xoshiro256_next_below(&b, 1000000))
+        assert_eq(xoshiro256_next_below(&a, 0), 0.u64())
+        assert_eq(xoshiro256_next_below(&a, 1), 0.u64())
+
+# CPython: random.seed(42); [random.getrandbits(32) ...] and [random.random() ...]
+def mt_seed42_tests() -> void:
+    can Abort.Panic:
+        rng: mutable MT19937 = mt19937_new()
+        mt_seed_int(&rng, 42)
+        assert_eq(mt_genrand_uint32(&rng), 2746317213.u32())
+        assert_eq(mt_genrand_uint32(&rng), 478163327.u32())
+        assert_eq(mt_genrand_uint32(&rng), 107420369.u32())
+        assert_eq(mt_genrand_uint32(&rng), 3184935163.u32())
+        assert_eq(mt_genrand_uint32(&rng), 1181241943.u32())
+        mt_seed_int(&rng, 42)
+        assert_eq(mt_random_res53(&rng), 0.6394267984578837)
+        assert_eq(mt_random_res53(&rng), 0.025010755222666936)
+        assert_eq(mt_random_res53(&rng), 0.27502931836911926)
+        assert_eq(mt_random_res53(&rng), 0.22321073814882275)
+        assert_eq(mt_random_res53(&rng), 0.7364712141640124)
+
+# CPython: random.seed(0)
+def mt_seed0_tests() -> void:
+    can Abort.Panic:
+        rng: mutable MT19937 = mt19937_new()
+        mt_seed_int(&rng, 0)
+        assert_eq(mt_genrand_uint32(&rng), 3626764237.u32())
+        assert_eq(mt_genrand_uint32(&rng), 1654615998.u32())
+        assert_eq(mt_genrand_uint32(&rng), 3255389356.u32())
+        mt_seed_int(&rng, 0)
+        assert_eq(mt_random_res53(&rng), 0.8444218515250481)
+        assert_eq(mt_random_res53(&rng), 0.7579544029403025)
+        assert_eq(mt_random_res53(&rng), 0.420571580830845)
+
+# CPython: random.seed(1234567890123456789)  (key has two 32-bit words)
+def mt_large_seed_tests() -> void:
+    can Abort.Panic:
+        rng: mutable MT19937 = mt19937_new()
+        mt_seed_int(&rng, 1234567890123456789)
+        assert_eq(mt_genrand_uint32(&rng), 3668327649.u32())
+        assert_eq(mt_genrand_uint32(&rng), 783902336.u32())
+        assert_eq(mt_genrand_uint32(&rng), 4215074995.u32())
+        assert_eq(mt_genrand_uint32(&rng), 2533971227.u32())
+        assert_eq(mt_genrand_uint32(&rng), 3276570512.u32())
+        mt_seed_int(&rng, 1234567890123456789)
+        assert_eq(mt_random_res53(&rng), 0.8540990887769795)
+        assert_eq(mt_random_res53(&rng), 0.9813986241071384)
+        assert_eq(mt_random_res53(&rng), 0.7628860245608512)
+        assert_eq(mt_random_res53(&rng), 0.06594882679433545)
+        assert_eq(mt_random_res53(&rng), 0.004832175111760928)
+
+def main() -> i64:
+    can Abort.Panic:
+        splitmix_tests()
+        xoshiro_tests()
+        xoshiro_below_tests()
+        mt_seed42_tests()
+        mt_seed0_tests()
+        mt_large_seed_tests()
+        return 0

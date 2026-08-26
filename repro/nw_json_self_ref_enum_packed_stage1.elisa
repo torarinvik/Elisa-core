@@ -1,0 +1,35 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Repro (stage0/stage1 DISAGREEMENT): an enum whose variant payload is an
+# OPTIONAL REFERENCE TO ITSELF (`Node&?`, not `Node` by value) is treated as a
+# plain inline enum by stage0 and as a region-backed PACKED enum by stage1.
+# Found while building elisacore_json (2026-08-25).
+#
+#   stage0: compiles + runs, exit 0
+#   stage1: <file>:NNNN: packed enum constructor "Node.Leaf" requires an active
+#           in Node.Store: scope or explicit new[Node.Store]
+#           (same for every constructor of the enum)
+#
+# docs/76 says recursion detection walks the BY-VALUE enum-reference graph, so a
+# `&?` edge should not promote -- repro/recursive_enum.elisa relies on exactly
+# that with `Expr&` payloads. stage1 promotes on the reference edge as well, so
+# the two compilers disagree about whether the enum needs a Store.
+#
+# WORKAROUND used by elisacore_json.elisa: children are referenced by an opaque
+# `uintptr` (plus a count), so the enum has no type-level self-edge at all and
+# both compilers agree it is a plain inline enum.
+
+enum Node:
+    Leaf(value: i64)
+    Pair(left: Node&?, right: Node&?)
+
+def leaf_value(n: Node) -> i64:
+    match n:
+        Node.Leaf(v):
+            return v
+        Node.Pair(l, r):
+            return -1
+
+def main() -> i64:
+    1 return if leaf_value(Node.Leaf(value: 7)) != 7
+    return 0

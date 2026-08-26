@@ -709,8 +709,8 @@ func (a *Analyzer) transitiveRangeFact(name string) (numRange, bool) {
 	// BFS for upper-bound derivation: follow edges that carry upper-bound constraints on name.
 	{
 		type bfsState struct {
-			node string
-			adj  int64 // cumulative offset: result_hi = peer_hi + adj
+			node  string
+			adj   int64 // cumulative offset: result_hi = peer_hi + adj
 			depth int
 		}
 		visited := map[string]bool{name: true}
@@ -965,11 +965,11 @@ func (a *Analyzer) recordConstAssignmentRangeFact(target ast.Expr, value ast.Exp
 // be valid for `target` after the cast, the bit pattern must encode the same numeric value in T.
 // This holds in two cases:
 //
-//   (a) Identity cast (src type == T): the bits are unchanged, so the range carries exactly.
-//   (b) Sign-flip cast (same bit width, different sign, e.g. i64↔u64): value-preserving only
-//       when the proven range is fully bounded ([lo, hi] both known) and BOTH endpoints fit T.
-//       An open bound over a sign-flip means values in the out-of-range half could exist and
-//       would reinterpret to negative/positive values, so we decline.
+//	(a) Identity cast (src type == T): the bits are unchanged, so the range carries exactly.
+//	(b) Sign-flip cast (same bit width, different sign, e.g. i64↔u64): value-preserving only
+//	    when the proven range is fully bounded ([lo, hi] both known) and BOTH endpoints fit T.
+//	    An open bound over a sign-flip means values in the out-of-range half could exist and
+//	    would reinterpret to negative/positive values, so we decline.
 //
 // Any other integer cast is rejected by the compiler as a value conversion (must use constructors),
 // so this function only needs to handle (a) and (b).
@@ -2409,9 +2409,9 @@ func (a *Analyzer) tryProveRefinementByLinear(value ast.Expr, decl *ast.FuncDecl
 //  4. Monotonic scaling: if `value` is `x * k` for an immutable integer `x` with known range
 //     [lo, hi] where lo >= 0, and constant k > 0, the scaled range [lo*k, hi*k] is derived
 //     (scaleRangePositive) and checked. Overflow-safe: overflowing bounds become open. Integers only.
-//  4a. Negating scale: if `value` is `x * k` with k < 0, the range flips to [hi*k, lo*k]
+//     4a. Negating scale: if `value` is `x * k` with k < 0, the range flips to [hi*k, lo*k]
 //     (scaleRangeNegative). Overflow-safe: overflowing bounds become open. Integers only.
-//  4b. Unary negation: if `value` is `-x`, treated as x * -1 via scaleRangeNegative, yielding
+//     4b. Unary negation: if `value` is `-x`, treated as x * -1 via scaleRangeNegative, yielding
 //     range [-hi, -lo]. Overflow-safe: overflowing bounds become open. Integers only.
 func (a *Analyzer) tryProveRefinementByFlow(value ast.Expr, decl *ast.FuncDecl, predArgs []ast.Expr) bool {
 	ident, ok := value.(*ast.Ident)

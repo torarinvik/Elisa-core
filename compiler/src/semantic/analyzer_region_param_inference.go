@@ -601,7 +601,20 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 					// bare param means the grown container is a (possibly nested) field of the struct
 					// param, so the param carries the region the field backing grows into. (The bare-param
 					// case `param.push` is a CONTAINER param, handled by paramContainerIsGrown.)
-					if _, isPath := growth.Object.(*ast.FieldExpr); isPath {
+					// IndexExpr as well as FieldExpr: `param.f[i].push(..)` is a path rooted at
+					// the param exactly as `param.f.push(..)` is, and the comment above already
+					// promised that shape. Matching only FieldExpr silently failed it — the
+					// growth fell through to "requires an active in <arena>: scope", which reads
+					// as "annotate this" rather than "the compiler missed a case it claims".
+					// rootIdentExpr already walks both, so only this guard was narrow. A bare
+					// `param.push(..)` still does NOT match (it is neither) and stays with
+					// paramContainerIsGrown, which is the container-param case.
+					isPath := false
+					switch growth.Object.(type) {
+					case *ast.FieldExpr, *ast.IndexExpr:
+						isPath = true
+					}
+					if isPath {
 						if root := rootIdentExpr(growth.Object); root != nil && root.Name == name {
 							found = true
 							return

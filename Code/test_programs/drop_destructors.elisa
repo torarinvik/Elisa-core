@@ -1,0 +1,145 @@
+include "../../compiler/runtime/elisacore_std/test.elisa"
+
+# docs/126 D1 — `__drop__` destructors, runtime behaviour.
+#
+# Every case observes the destructor through a counter the dying value points at, so a
+# missing drop, a double drop, and a wrong-order drop are all distinguishable from the
+# outside. `Tracked` declares `__drop__`, which INDUCES affinity on it: the type is
+# move-only from that declaration alone, with no `affine`/`linear` keyword.
+
+struct Tracked:
+    log: mutable i64&
+    mark: i64
+
+def __drop__(self: Tracked) -> void:
+    # Base-10 shift, so the log records BOTH how many drops ran and in what order.
+    self.log[0] <- self.log[0] * 10 + self.mark
+
+
+error DropTestError:
+    Failed
+
+
+# --- drop runs on normal fall-through -------------------------------------------------
+
+def scope_exit_drops(log: mutable i64&) -> void:
+    t: Tracked = Tracked{log: log, mark: 1}
+
+
+# --- drop runs on an early `return` ---------------------------------------------------
+
+def early_return_drops(log: mutable i64&, bail: bool) -> i64:
+    t: Tracked = Tracked{log: log, mark: 2}
+    if bail:
+        return 1
+    return 0
+
+
+# --- drop runs on `try` propagation ---------------------------------------------------
+#
+# The whole point of the RFC: the error path leaves the scope with NO syntax at the drop
+# point, so a value held across a `try` must still be released.
+
+def may_fail(fail: bool) -> i64 error[DropTestError]:
+    if fail:
+        raise DropTestError.Failed
+    return 5
+
+
+def try_propagation_drops(log: mutable i64&, fail: bool) -> i64 error[DropTestError]:
+    t: Tracked = Tracked{log: log, mark: 3}
+    n: i64 = try may_fail(fail)
+    return n
+
+
+# --- a moved value is NOT dropped here ------------------------------------------------
+
+def consume(v: Tracked) -> void:
+    # The obligation moved with the value: this scope drops it, the caller's does not.
+    _ = v.mark
+
+
+def moved_value_not_dropped_twice(log: mutable i64&) -> void:
+    t: Tracked = Tracked{log: log, mark: 4}
+    consume(move t)
+
+
+# --- returning a value moves it out ---------------------------------------------------
+
+def make_tracked(log: mutable i64&, mark: i64) -> Tracked:
+    t: Tracked = Tracked{log: log, mark: mark}
+    return move t
+
+
+def returned_value_dropped_by_caller(log: mutable i64&) -> void:
+    t: Tracked = make_tracked(log, 5)
+
+
+# --- explicit `.drop()` suppresses the implicit one -----------------------------------
+
+def explicit_drop_runs_once(log: mutable i64&) -> void:
+    t: Tracked = Tracked{log: log, mark: 6}
+    t.drop()
+
+
+# --- reverse declaration order --------------------------------------------------------
+
+def reverse_order_drops(log: mutable i64&) -> void:
+    first: Tracked = Tracked{log: log, mark: 1}
+    second: Tracked = Tracked{log: log, mark: 2}
+    third: Tracked = Tracked{log: log, mark: 3}
+
+
+# --- nested scopes drop at the inner scope's end --------------------------------------
+
+def inner_scope_drops_first(log: mutable i64&) -> void:
+    outer: Tracked = Tracked{log: log, mark: 1}
+    if true:
+        inner: Tracked = Tracked{log: log, mark: 2}
+    # `inner` is already gone here; `outer` follows at this function's exit.
+
+
+def drop_destructors_main_impl() -> int:
+    can Abort.Panic:
+        a: mutable i64 = 0
+        scope_exit_drops(&a)
+        assert_eq(a, 1)
+
+        b: mutable i64 = 0
+        assert_eq(early_return_drops(&b, true), 1)
+        assert_eq(b, 2)
+
+        c: mutable i64 = 0
+        assert_eq(early_return_drops(&c, false), 0)
+        assert_eq(c, 2)
+
+        d: mutable i64 = 0
+        assert_eq(try try_propagation_drops(&d, false) else 99, 5)
+        assert_eq(d, 3)
+
+        e: mutable i64 = 0
+        assert_eq(try try_propagation_drops(&e, true) else 99, 99)
+        assert_eq(e, 3)
+
+        f: mutable i64 = 0
+        moved_value_not_dropped_twice(&f)
+        assert_eq(f, 4)
+
+        g: mutable i64 = 0
+        returned_value_dropped_by_caller(&g)
+        assert_eq(g, 5)
+
+        h: mutable i64 = 0
+        explicit_drop_runs_once(&h)
+        assert_eq(h, 6)
+
+        i: mutable i64 = 0
+        reverse_order_drops(&i)
+        assert_eq(i, 321)
+
+        j: mutable i64 = 0
+        inner_scope_drops_first(&j)
+        assert_eq(j, 21)
+        return 0
+
+export fn main() -> int = drop_destructors_main_impl

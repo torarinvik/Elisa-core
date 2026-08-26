@@ -1,0 +1,70 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Repro (stage1 only): a function that RETURNS an enum by dereferencing an enum
+# reference (`return ref[0]`) is declined by the stage1 backend, which drops the
+# whole unit. Found while building elisacore_json (2026-08-25).
+#
+#   stage0: compiles + runs, exit 0
+#   stage1: error: backend emitted no functions for this unit; declined N: ...
+#           With ELISA_DBG_DECLINE=1 the culprit is named:
+#             jv_copy: DECLINE Return @line ...
+#             DROPPED jv_copy
+#
+# ---------------------------------------------------------------------------
+# NARROWED
+# ---------------------------------------------------------------------------
+# * The same `ref[0]` read bound to a LOCAL declines too; it is the enum-copy-
+#   out-of-a-reference that the backend refuses, not the return position alone.
+# * The identical shape inside an ERROR-UNION return (`-> JV error[E]`) does NOT
+#   decline -- elisacore_json shipped `json_at` that way for a while.
+# * A STRUCT (non-enum) copied the same way is fine on both stages.
+# * The decline list also carries std runtime names (`join`, and historically
+#   the `store_*` / `rt_*` / `__cast__` family) that are declined HARMLESSLY.
+#   When the list is long it is truncated before the one user function that
+#   matters, so run with ELISA_DBG_DECLINE=1 and grep the output for `DROPPED`
+#   on a name from your own file.
+#
+# WORKAROUND used by elisacore_json.elisa: copy through `arena_memcpy` into a
+# `zeroed` local and `return move` it (`json_value_copy` / `json_member_copy`),
+# which is the same idiom Code/test_programs/json_parser_ast_core.elisa uses.
+
+enum JV:
+    Null
+    Num(value: f64)
+
+def jv_ref(bits: uintptr, index: i64) -> JV&:
+    trusted Unsafe.PointerCast:
+        return (bits.cast[u8&] + index.usize() * size_of(JV)).cast[JV&]
+
+# The declining shape.
+def jv_copy(bits: uintptr, index: i64) -> JV:
+    return jv_ref(bits, index)[0]
+
+# The workaround shape (compiles on both stages).
+def jv_copy_ok(bits: uintptr, index: i64) -> JV:
+    trusted Unsafe.PointerCast:
+        out: mutable JV = zeroed
+        arena_memcpy((&out).cast[void&], jv_ref(bits, index).cast[void&], size_of(JV))
+        return move out
+
+def score(v: JV) -> f64:
+    match v:
+        JV.Null:
+            return -1.0
+        JV.Num(n):
+            return n
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+        region scratch(65536)
+        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
+        result: mutable i64 = 0
+        in arena:
+            items: mutable darray[JV] = []
+            items.push(JV.Num(value: 1.0))
+            items.push(JV.Num(value: 2.0))
+            bits: uintptr = (&items[0]).cast[u8&].cast[uintptr]
+            result <- 1 if score(jv_copy(bits, 1)) != 2.0
+            result <- 2 if score(jv_copy_ok(bits, 1)) != 2.0
+        destroy scratch
+        return result

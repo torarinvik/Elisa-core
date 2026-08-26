@@ -1,0 +1,45 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# WITHDRAWN: the bug this file described DOES NOT EXIST. Kept because the way it
+# was wrong is worth not repeating.
+#
+# The claim was that two darrays growing INTERLEAVED "lose elements past the
+# first relocation", based on native printing ABCDEFGHIJKLMNOPQRST and wasm
+# printing ABCDEFGHIJKLMNOP followed by garbage.
+#
+# The measurement was the artifact. The harness reused ONE wasm instance across
+# 20 calls, so what it actually measured was the heap filling up: each call
+# leaked ~128 MiB (a reserve_commit region's default reservation, which is free
+# on a demand-paged target and emphatically not free in linear memory), and the
+# host shim ignored memory.grow's -1 and handed back addresses past the end of
+# memory. The 17th CALL failed -- not the 17th ELEMENT. With a fresh instance
+# per call the interleaved case was correct even before any fix.
+#
+# See nw_wasm32_target_triple_falls_back_to_host.md for the real causes and the
+# fixes. After them, every call maps at the same two addresses and this file
+# passes on a shared instance too.
+#
+# The lesson, which the wordBits repro had already taught once: a symptom that
+# varies with CALL INDEX is about accumulated state, not about the operation
+# inside the call. Vary the instance before blaming the algorithm.
+
+def interleaved_byte(which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        alpha: mutable darray[u8] = []
+        beta: mutable darray[u8] = []
+        index: mutable i64 = 0
+        while index < 20 |index, alpha, beta|:
+            alpha.push((65 + index).u8())     # 'A'...
+            beta.push((97 + index).u8())      # 'a'...
+            index <- index + 1
+        return (get alpha[which.usize()] else 0.u8()).i64()
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Abort.Panic:
+        ok: mutable bool = true
+        index: mutable i64 = 0
+        while index < 20 |index, ok|:
+            ok <- false if interleaved_byte(index) != 65 + index
+            index <- index + 1
+        print("ABCDEFGHIJKLMNOPQRST OK" if ok else "TAIL LOST")
+        return 0

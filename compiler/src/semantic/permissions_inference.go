@@ -45,6 +45,9 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 		return nil
 	}
 	collector := permissionEffectCollector{analyzer: a}
+	// docs/126 §3: a moved-in drop-typed parameter is released by this frame, so its
+	// destructor's effects belong to this function's own row.
+	collector.addRefs(a.implicitDropPermissionRefs(fn))
 	collector.collectStmts(fn.Body)
 	return collector.refs()
 }
@@ -110,6 +113,11 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 		if c.analyzer.enforceUnsafePermissions && c.analyzer.stmtRequiresUnsafeAlias(n) {
 			c.addRefs(unsafeAliasRefs(n.Position))
 		}
+		// docs/126 §3: a value this scope can implicitly drop charges its destructor's
+		// effects here, exactly as a written call to it would. This runs inside the
+		// whole-program fixpoint, so a `__drop__` whose own effects are themselves
+		// inferred settles before its holders do.
+		c.addRefs(c.analyzer.implicitDropPermissionRefs(n))
 	case *ast.LetDestructureStmt:
 		c.collectExpr(n.Value)
 	case *ast.TupleBindStmt:

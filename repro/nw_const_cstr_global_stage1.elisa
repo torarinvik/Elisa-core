@@ -1,0 +1,32 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1: passing a `const cstr` GLOBAL to a function declines the whole unit.
+#
+#   stage0: prints "hello from a const global"
+#   stage1: error: backend emitted no functions for this unit; declined 2: join, main
+#
+# The same call with the string written INLINE at the call site compiles and
+# runs on both stages, so it is the const-global reference that is unmodelled,
+# not the parameter or the call.
+#
+# This is the last thing keeping nw-core's `config` suite off stage1: its sweep
+# reads a template path from a `const cstr` (see the STAGE0_ONLY list in
+# nw-core/scripts/check.sh). Everything else in that suite now builds -- the
+# generic-protocol-impl and cstr-return gaps that used to block it were fixed in
+# stage1 552bddca / 690da143.
+#
+# `join` appearing in the decline list is a red herring worth knowing about: the
+# report is capped at 12 names (codegen_debug.elisa:458) and lists whatever the
+# unit dragged in, so the informative name here is `main`. ELISA_DBG_DECLINE=1
+# plus a grep for DROPPED gives the full picture.
+
+const GREETING: cstr = "hello from a const global"
+
+def show(text: cstr):
+    can Console.Write:
+        print(text)
+
+def main() -> i64:
+    can Console.Write:
+        show(GREETING)
+        return 0

@@ -344,6 +344,27 @@ func (a *Analyzer) analyzeRegionLifetimes(region *ast.RegionStmt, asn RegionStac
 				if asn.StackOf[li.name] != asn.StackOf[lj.name] {
 					continue
 				}
+				// ...and stack 0 is not such a stack. It is the SHARED fixed/reserved stack, and
+				// two objects on it cannot conflict, however their live ranges cross:
+				//
+				//   * nothing on it is ever freed individually — assignRegionStacks skips
+				//     `stack <= 0` when computing StackEarlyFreeAfter, so every stack-0 object
+				//     is reclaimed in bulk at region exit. Identical death time, no LIFO order
+				//     to violate.
+				//   * it is always `chained` (StackStrategy is only ever set for stacks >= 1),
+				//     i.e. relocating: a reserved container that does outgrow its reservation
+				//     copies into a fresh chunk rather than growing over a sibling. That costs
+				//     a hole, not memory safety.
+				//
+				// This matters because `reserved` is not only user intent: recordSynthesizedReserves
+				// marks any container the compiler itself pre-reserves for a counting loop. Without
+				// this skip a pure optimization decides a program is illegal — and the advertised
+				// remedy ("reserve() one of them") makes it worse, since reserving is precisely what
+				// moves a container ONTO stack 0. The merge-stack rejection below is unaffected:
+				// that stack is > 0 and genuinely holds several growables each wanting its own tail.
+				if asn.StackOf[li.name] == 0 {
+					continue
+				}
 				flagged[j] = true
 				// Name the specific remedy. The one legal reorder lever is moving lj's BIRTH:
 				// declaring lj below li's last use makes the two ranges disjoint. That is provably

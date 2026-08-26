@@ -62,6 +62,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
+	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
@@ -104,6 +105,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentDropLocals = nil
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
@@ -188,6 +190,12 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 						if state, ok := a.abstractParamRegionRefState(ptype, i, map[string]bool{}); ok {
 							a.recordResolvedRegionRefBinding(sym, state)
 						}
+						// docs/126 §2: a drop-typed parameter was MOVED in by the caller,
+						// so this frame owns the obligation and releases it on the way out.
+						// (Only the real body pass registers these — the provenance and
+						// borrowed-owner inference passes re-walk the same body and must
+						// not double-enter the drop ledger.)
+						a.noteDropParam(fn, sym, symType)
 					}
 					if fnType != nil && fnType.RegionPolymorphic {
 						a.defineRegionPolymorphicParamSymbol(fn, fnType)
@@ -222,6 +230,10 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 					a.analyzeReturnWhereRefinement(fn, fnType)
 					a.analyzeFunctionBodyStmts(fn.Body)
 					a.verifyLemmaEnsures(fn)
+					// docs/126 D1: close the drop ledger while the affine state is still
+					// live — records the fall-through drops and folds each destructor's
+					// effects into this function's inferred effect set (below, line ~263).
+					a.finalizeImplicitDrops()
 					a.currentImplicitScopes = savedBodyImplicitScopes
 				})
 			})
@@ -288,6 +300,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
+	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
@@ -334,6 +347,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
+	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
@@ -365,6 +379,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentDropLocals = nil
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
@@ -470,6 +485,7 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
+	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes
@@ -510,6 +526,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	savedRegionMarks := a.currentRegionMarks
 	savedRegionRefs := a.currentRegionRefs
 	savedAffineValues := a.currentAffineValues
+	savedDropLocals := a.currentDropLocals
 	savedBorrowedOwnerRefs := a.currentBorrowedOwnerRefs
 	savedFunctionValues := a.currentFunctionValues
 	savedSpecializedValueTypes := a.currentSpecializedValueTypes
@@ -541,6 +558,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentStructInteriorRegionTaint = map[*Symbol]string{}
 	a.currentStructLocalAllocRegion = map[*Symbol]string{}
 	a.currentAffineValues = map[affineValueKey]affineValueState{}
+	a.currentDropLocals = nil
 	a.currentBorrowedOwnerRefs = map[*Symbol]borrowedOwnerRefState{}
 	a.currentFunctionValues = map[*Symbol]*FuncType{}
 	a.currentSpecializedValueTypes = map[*Symbol]Type{}
@@ -640,6 +658,7 @@ func (a *Analyzer) inferFuncReturnBorrowedOwnerRefs(fn *ast.FuncDecl, fnType *Fu
 	a.currentRegionMarks = savedRegionMarks
 	a.currentRegionRefs = savedRegionRefs
 	a.currentAffineValues = savedAffineValues
+	a.currentDropLocals = savedDropLocals
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues
 	a.currentSpecializedValueTypes = savedSpecializedValueTypes

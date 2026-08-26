@@ -146,6 +146,12 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
 	g.requestedTargetTriple = targetTriple
+	// BEFORE emitModule: every struct layout and index computation below reads
+	// g.wordBits, and it is seeded from the HOST's pointer size.
+	if err := g.syncWordBitsWithTarget(); err != nil {
+		g.dispose()
+		return nil, err
+	}
 	if g.result != nil {
 		g.result.PackedLowering = profile.metadata()
 	}

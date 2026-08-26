@@ -1,0 +1,116 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1 gap: printing an integer through the std declined the whole unit.
+# stage0 compiled and ran this file; stage1 reported
+#
+#   error: backend emitted no functions for this unit; declined 40:
+#     store_get, store_count, store_get, store_count, store_find, ...
+#   note: every function in the unit is dropped when the backend declines one
+#
+# (Companion repro: nw_print_int_generic_stage1.elisa, same shape.)
+#
+# ---------------------------------------------------------------------------
+# STATUS: the generic-impl half is FIXED (2026-08-25, nw-port stage1 552bddca)
+# ---------------------------------------------------------------------------
+# The 40 declines were TWO independent bugs sharing one symptom. Measured against
+# the pre-fix binary: 12 of the 40 were the generic protocol impls, the other 28
+# were a `cstr` return-conversion gap that had nothing to do with them.
+#
+# ---------------------------------------------------------------------------
+# BUG 1 -- generic protocol impls (FIXED)
+# ---------------------------------------------------------------------------
+# CONFIRMED as hypothesised. Parser::impl_declaration
+# (elisa-compiler-nw/src/parser/parser_decl_impl.elisa:17) matched only the
+# three-bare-identifier header form:
+#
+#     if parser.peek() == Ident and parser.peek_at(1) == Ident and parser.peek_at(2) == Ident:
+#
+# i.e. `impl Holder for Box:`. For `impl[T] Store for darray[T]:` the tokens after
+# `impl` are `[ T ] Store for darray [ T ]`, so peek() was LBracket, the branch
+# never fired, and the `[T]` was skipped with the rest of the header by
+# skip_declaration_header_clauses -- captured nowhere. Downstream,
+# codegen_declare.elisa:193 declare_function_impl resolved the member's
+# `darray[T]&` with no binding for T, got TypeKind.Unmodeled and returned null.
+#
+# THE FIX consumes the optional `[params]` after `impl` and records each parameter
+# against every member `def`'s line on the side table function-level generics
+# already use (generic_param_lines / generic_param_names). A member is then a
+# generic TEMPLATE exactly as if written `def store_get[T](s: darray[T]&, ...)`:
+# record_generic_func_metadata registers it, decl_line_is_generic keeps the eager
+# declare/emit passes off it, resolve_declarations binds T in its body, and the
+# existing UFCS template-selection path (codegen_call.elisa:764) instantiates it
+# per concrete receiver. No parallel mechanism. stage0 likewise emits no body for
+# an uninstantiated template -- `nm` on its object for this file shows no
+# `store_*` symbol at all.
+#
+# Consuming the `[params]` also lets the existing three-identifier branch fire, so
+# `__impl_scope` / `__impl_concrete` are recorded for generic impls now too.
+#
+# END TO END, not just "no longer declines": with
+#
+#     def total[S: Store](s: S&) -> usize:
+#         return s.store_count()
+#
+# a `darray[i64]` dispatches through `impl[T] Store for darray[T]` and answers its
+# count on stage1, agreeing with stage0. Covered by
+# elisa-compiler-nw/test/parity/generic_protocol_impl_smoke.sh.
+#
+# ---------------------------------------------------------------------------
+# BUG 2 -- `u8&` returned in a `cstr` context (separate; see the companion repro)
+# ---------------------------------------------------------------------------
+# The other 28 declines were the std's `impl Str for X: def __cast__(...) -> cstr`
+# members plus the `cstr[shape_*]` forwarders in runtime.elisa. Nothing to do with
+# generic impls: a call returning `heap u8&` in a `cstr` context was auto-
+# DEREFERENCED to an `i8` and the return path then refused it. Root cause and fix
+# in repro/nw_cstr_ref_return_stage1.elisa.
+#
+# ---------------------------------------------------------------------------
+# VERIFIED (unchanged from the original investigation)
+# ---------------------------------------------------------------------------
+# * `print("text")` alone: fine on both stages -- and it always was, with 24
+#   declines silently recorded in the module's `!elisa.declined` metadata. A
+#   decline is only fatal once something REFERENCES it
+#   (codegen_module.elisa:257-260), which is why the two bugs stayed invisible
+#   until `print(42)` reached them.
+# * Ordinary darray work (push, index, iterate) is unaffected -- those are builtin
+#   container ops, not protocol dispatch.
+# * stage1's own source contains ZERO generic impls (`grep -rn '^impl\[' src/` is
+#   empty), which is why its self-host fixpoint never exercised this path. The
+#   only generic impls in the ecosystem are the three in the std:
+#     impl[T] Store for darray[T]        (collections.elisa:1474)
+#     impl[T] Store for Deque[T]         (collections.elisa:1485)
+#     impl[K, T] KeyedStore for dict[K, T] (collections.elisa:1505)
+#
+# ---------------------------------------------------------------------------
+# STILL OPEN -- and this file still declines, for ONE remaining reason
+# ---------------------------------------------------------------------------
+# * `print(42)` reaches the std's generic `print[T: Str]`, whose body is
+#   `print(T.__cast__(value))` -- static protocol dispatch through a bound type
+#   parameter. stage1 resolves that by matching the argument types against the
+#   impl members, and requires the match to be UNIQUE. It is not: `char`, `int`,
+#   `i64` and `isize` are ONE ValueType to this backend (Signed/64, see
+#   codegen_env.elisa scalar_type_of_name), so `impl Str for char`,
+#   `impl Str for int` and `impl Str for i64` are indistinguishable and the call
+#   declines rather than guessing. An interim version DID guess and made
+#   `print(42)` print "*" -- chr(42), through the char impl -- which is why the
+#   rule is unique-or-decline.
+#
+#   Closing it needs type ARGUMENTS to carry name-level identity (or `char` to
+#   become a distinct ValueType), not more resolution cleverness. Until then
+#   `print(<integer>)`, `print(<float>)` and `print(<char>)` decline while
+#   `print(<string>)` works. Decline count for this file: 40 before this work,
+#   5 after (`join`, `print__i64`, `print`, `print__u32`, `print`).
+#
+# * DIVERGENT DIAGNOSTICS on rejected programs. For an INVALID direct call such as
+#   `store_count(&xs)` (a protocol method is reached through a bound generic, not
+#   by free call -- docs/69), stage0 emits `undefined identifier "store_count"`
+#   while stage1 silently declines the unit. Same for `__cast__(42)`, which stage0
+#   rejects and stage1 accepts. stage1's decline report is also capped at 12 names
+#   (codegen_debug.elisa:458) with no way to ask for the rest -- reading the full
+#   list means `-emit llvm` on a unit that still emits, then grepping
+#   `!elisa.declined`.
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Console.Format, Abort.Panic:
+        print(42)
+        return 0

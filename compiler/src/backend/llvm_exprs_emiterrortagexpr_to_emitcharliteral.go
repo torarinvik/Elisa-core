@@ -324,6 +324,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 
 		incomingValues := make([]C.LLVMValueRef, 0, 2)
 		incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+		mergeReachable := false
 
 		C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 		var okValue C.LLVMValueRef
@@ -336,6 +337,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		if !s.currentBlockTerminated() {
 			okEnd := C.LLVMGetInsertBlock(s.builder)
 			C.LLVMBuildBr(s.builder, mergeBB)
+			mergeReachable = true
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, okValue)
 				incomingBlocks = append(incomingBlocks, okEnd)
@@ -350,6 +352,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		if reachable && !s.currentBlockTerminated() {
 			fallbackEnd := C.LLVMGetInsertBlock(s.builder)
 			C.LLVMBuildBr(s.builder, mergeBB)
+			mergeReachable = true
 			if !isVoidType(resultType) {
 				incomingValues = append(incomingValues, fallbackValue)
 				incomingBlocks = append(incomingBlocks, fallbackEnd)
@@ -357,7 +360,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 		}
 
 		C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-		if len(incomingBlocks) == 0 {
+		if !mergeReachable {
 			C.LLVMBuildUnreachable(s.builder)
 			return nil, resultType, nil
 		}
@@ -396,6 +399,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 
 	incomingValues := make([]C.LLVMValueRef, 0, 2)
 	incomingBlocks := make([]C.LLVMBasicBlockRef, 0, 2)
+	mergeReachable := false
 
 	C.LLVMPositionBuilderAtEnd(s.builder, okBB)
 	var okValue C.LLVMValueRef
@@ -408,6 +412,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	if !s.currentBlockTerminated() {
 		okEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
+		mergeReachable = true
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, okValue)
 			incomingBlocks = append(incomingBlocks, okEnd)
@@ -422,6 +427,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	if reachable && !s.currentBlockTerminated() {
 		fallbackEnd := C.LLVMGetInsertBlock(s.builder)
 		C.LLVMBuildBr(s.builder, mergeBB)
+		mergeReachable = true
 		if !isVoidType(resultType) {
 			incomingValues = append(incomingValues, fallbackValue)
 			incomingBlocks = append(incomingBlocks, fallbackEnd)
@@ -429,7 +435,7 @@ func (s *functionState) emitTryExpr(expr *ast.TryExpr) (C.LLVMValueRef, semantic
 	}
 
 	C.LLVMPositionBuilderAtEnd(s.builder, mergeBB)
-	if len(incomingBlocks) == 0 {
+	if !mergeReachable {
 		C.LLVMBuildUnreachable(s.builder)
 		return nil, resultType, nil
 	}

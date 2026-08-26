@@ -1,0 +1,337 @@
+include "../worktrees/elisa-core-nw/compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# A reduction of nw-core's display list: a STRUCT holding two darrays that grow
+# interleaved, then serialized into a THIRD darray, then read back. That third
+# array is what the earlier probes were missing.
+
+struct Cmd:
+    kind: u8
+    color: u32
+    a: f32
+    b: f32
+    c: f32
+    d: f32
+    e: f32
+    f: f32
+    ref: u32
+    len: u32
+
+struct DList:
+    commands: mutable darray[Cmd]
+    pool: mutable darray[u8]
+
+def dlist_new() -> DList:
+    can Memory.Allocate, Abort.Panic:
+        return DList{commands: [], pool: []}
+
+def put_u32(out: mutable darray[u8]&, value: u32):
+    can Memory.Allocate, Abort.Panic:
+        out.push((value & 255.u32()).u8())
+        out.push(((value >> 8.u32()) & 255.u32()).u8())
+        out.push(((value >> 16.u32()) & 255.u32()).u8())
+        out.push(((value >> 24.u32()) & 255.u32()).u8())
+
+def put_f32(out: mutable darray[u8]&, value: f32):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            slot: f32[1] = zeroed
+            store: mutable f32[1] = slot
+            store[0] <- value
+            raw: u8& = (&store[0]).cast[u8&]
+            trusted Unsafe.UncheckedIndex:
+                out.push(raw[0])
+                out.push(raw[1])
+                out.push(raw[2])
+                out.push(raw[3])
+
+def add_text(list: mutable DList&, text: cstr, size: f32):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            start: u32 = list.pool.count.u32()
+            bytes: u8& = text.cast[u8&]
+            index: mutable usize = 0
+            trusted Unsafe.UncheckedIndex:
+                while bytes[index] != 0 |index, list, bytes|:
+                    list.pool.push(bytes[index])
+                    index <- index + 1
+            length: u32 = list.pool.count.u32() - start
+            list.commands.push(Cmd{kind: 11.u8(), color: 4294967295.u32(), a: 1.0, b: 2.0, c: size, d: 4.0, e: 5.0, f: 6.0, ref: start, len: length})
+
+def add_rect(list: mutable DList&, x: f32, y: f32):
+    can Memory.Allocate, Abort.Panic:
+        list.commands.push(Cmd{kind: 1.u8(), color: 255.u32(), a: x, b: y, c: 100.0, d: 50.0, e: 0.0, f: 0.0, ref: 0.u32(), len: 0.u32()})
+
+def encode(list: DList&) -> darray[u8]:
+    can Memory.Allocate, Abort.Panic:
+        out: mutable darray[u8] = []
+        put_u32(&out, 1313426254.u32())
+        put_u32(&out, 1.u32())
+        put_u32(&out, list.commands.count.u32())
+        put_u32(&out, list.pool.count.u32())
+        for cmd in list.commands |out|:
+            out.push(cmd.kind)
+            out.push(0.u8())
+            out.push(0.u8())
+            out.push(0.u8())
+            put_u32(&out, cmd.color)
+            put_f32(&out, cmd.a)
+            put_f32(&out, cmd.b)
+            put_f32(&out, cmd.c)
+            put_f32(&out, cmd.d)
+            put_f32(&out, cmd.e)
+            put_f32(&out, cmd.f)
+            put_u32(&out, cmd.ref)
+            put_u32(&out, cmd.len)
+        for byte in list.pool |out|:
+            out.push(byte)
+        return out
+
+# Byte `which` of the encoded POOL region. Expected: "Dual N-BackN =Trialframe-end"
+def frame_pool_byte(which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        add_text(&list, "Dual N-Back", 22.0)
+        add_text(&list, "N =", 16.0)
+        add_text(&list, "Trial", 16.0)
+        add_rect(&list, 30.0, 40.0)
+        add_text(&list, "frame-end", 12.0)
+        encoded: darray[u8] = encode(&list)
+        pool_at: i64 = 16 + list.commands.count.i64() * 40
+        return (get encoded[(pool_at + which).usize()] else 0.u8()).i64()
+
+export fn nw_pool_byte(which: i64) -> i64 = frame_pool_byte
+
+# field 0=encoded.count 1=commands.count 2=pool.count, else raw encoded[which]
+def frame_stat(field: i64, which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        add_text(&list, "Dual N-Back", 22.0)
+        add_text(&list, "N =", 16.0)
+        add_text(&list, "Trial", 16.0)
+        add_rect(&list, 30.0, 40.0)
+        add_text(&list, "frame-end", 12.0)
+        encoded: darray[u8] = encode(&list)
+        if field == 0:
+            return encoded.count.i64()
+        if field == 1:
+            return list.commands.count.i64()
+        if field == 2:
+            return list.pool.count.i64()
+        return (get encoded[which.usize()] else 0.u8()).i64()
+
+export fn nw_stat(field: i64, which: i64) -> i64 = frame_stat
+
+# Byte `which` of list.pool read DIRECTLY, bypassing encode() entirely.
+def pool_direct(which: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        add_text(&list, "Dual N-Back", 22.0)
+        add_text(&list, "N =", 16.0)
+        add_text(&list, "Trial", 16.0)
+        add_rect(&list, 30.0, 40.0)
+        add_text(&list, "frame-end", 12.0)
+        return (get list.pool[which.usize()] else 0.u8()).i64()
+
+export fn nw_pool_direct(which: i64) -> i64 = pool_direct
+
+# pool.count after each successive add. step 0 = after 2 rects, 1..4 after each
+# add_text, 5 after the trailing rect.
+def pool_after(step: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        list.pool.count.i64() return if step == 0
+        add_text(&list, "Dual N-Back", 22.0)
+        list.pool.count.i64() return if step == 1
+        add_text(&list, "N =", 16.0)
+        list.pool.count.i64() return if step == 2
+        add_text(&list, "Trial", 16.0)
+        list.pool.count.i64() return if step == 3
+        add_rect(&list, 30.0, 40.0)
+        list.pool.count.i64() return if step == 4
+        add_text(&list, "frame-end", 12.0)
+        return list.pool.count.i64()
+
+export fn nw_pool_after(step: i64) -> i64 = pool_after
+
+def add_text_nocmd(list: mutable DList&, text: cstr):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            bytes: u8& = text.cast[u8&]
+            index: mutable usize = 0
+            trusted Unsafe.UncheckedIndex:
+                while bytes[index] != 0 |index, list, bytes|:
+                    list.pool.push(bytes[index])
+                    index <- index + 1
+
+# Same string sequence but with NO commands pushed at all -- pool only.
+def pool_only(step: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_text_nocmd(&list, "Dual N-Back")
+        list.pool.count.i64() return if step == 1
+        add_text_nocmd(&list, "N =")
+        list.pool.count.i64() return if step == 2
+        add_text_nocmd(&list, "Trial")
+        list.pool.count.i64() return if step == 3
+        add_text_nocmd(&list, "frame-end")
+        return list.pool.count.i64()
+
+export fn nw_pool_only(step: i64) -> i64 = pool_only
+
+# Full header state after `pushes` command-pushes, with 11 pool bytes written
+# first. field: 0=pool.count 1=pool.cap 2=pool.items 3=cmd.count 4=cmd.cap 5=cmd.items
+def hdr(pushes: i64, field: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            list: mutable DList = dlist_new()
+            add_text_nocmd(&list, "Dual N-Back")
+            index: mutable i64 = 0
+            while index < pushes |index, list, pushes|:
+                add_rect(&list, 1.0, 2.0)
+                index <- index + 1
+            pi: mutable u8&? = list.pool.items
+            ci: mutable Cmd&? = list.commands.items
+            if field == 0:
+                return list.pool.count.i64()
+            if field == 1:
+                return list.pool.capacity.i64()
+            if field == 2:
+                return 0 if pi == null else pi.uintptr().i64()
+            if field == 3:
+                return list.commands.count.i64()
+            if field == 4:
+                return list.commands.capacity.i64()
+            return 0 if ci == null else ci.uintptr().i64()
+
+export fn nw_hdr(pushes: i64, field: i64) -> i64 = hdr
+
+# COMMANDS allocated FIRST (n rects), then 11 pool bytes. Reverse of nw_hdr.
+def hdr2(pushes: i64, field: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            list: mutable DList = dlist_new()
+            index: mutable i64 = 0
+            while index < pushes |index, list, pushes|:
+                add_rect(&list, 1.0, 2.0)
+                index <- index + 1
+            add_text_nocmd(&list, "Dual N-Back")
+            pi: mutable u8&? = list.pool.items
+            ci: mutable Cmd&? = list.commands.items
+            if field == 0:
+                return list.pool.count.i64()
+            if field == 1:
+                return list.pool.capacity.i64()
+            if field == 2:
+                return 0 if pi == null else pi.uintptr().i64()
+            if field == 3:
+                return list.commands.count.i64()
+            if field == 4:
+                return list.commands.capacity.i64()
+            return 0 if ci == null else ci.uintptr().i64()
+
+export fn nw_hdr2(pushes: i64, field: i64) -> i64 = hdr2
+
+def hdr_field(list: DList&, field: i64) -> i64:
+    can Abort.Panic:
+        trusted Unsafe.PointerCast:
+            pi: u8&? = list.pool.items
+            ci: Cmd&? = list.commands.items
+            if field == 0:
+                return list.pool.count.i64()
+            if field == 1:
+                return list.pool.capacity.i64()
+            if field == 2:
+                return 0 if pi == null else pi.uintptr().i64()
+            if field == 3:
+                return list.commands.count.i64()
+            if field == 4:
+                return list.commands.capacity.i64()
+            return 0 if ci == null else ci.uintptr().i64()
+
+# EXACTLY the failing sequence from pool_after, reporting full headers at each step.
+def seq(step: i64, field: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        hdr_field(&list, field) return if step == 0
+        add_text(&list, "Dual N-Back", 22.0)
+        hdr_field(&list, field) return if step == 1
+        add_text(&list, "N =", 16.0)
+        hdr_field(&list, field) return if step == 2
+        add_text(&list, "Trial", 16.0)
+        hdr_field(&list, field) return if step == 3
+        add_rect(&list, 30.0, 40.0)
+        hdr_field(&list, field) return if step == 4
+        add_text(&list, "frame-end", 12.0)
+        return hdr_field(&list, field)
+
+export fn nw_seq(step: i64, field: i64) -> i64 = seq
+
+# --- bisecting add_text -------------------------------------------------
+# A: start/length reads, but NO commands.push
+def add_A(list: mutable DList&, text: cstr):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            start: u32 = list.pool.count.u32()
+            bytes: u8& = text.cast[u8&]
+            index: mutable usize = 0
+            trusted Unsafe.UncheckedIndex:
+                while bytes[index] != 0 |index, list, bytes|:
+                    list.pool.push(bytes[index])
+                    index <- index + 1
+            length: u32 = list.pool.count.u32() - start
+            list.pool.push(0.u8()) if length == 9999.u32()
+
+# B: commands.push, but NO start/length reads
+def add_B(list: mutable DList&, text: cstr):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            bytes: u8& = text.cast[u8&]
+            index: mutable usize = 0
+            trusted Unsafe.UncheckedIndex:
+                while bytes[index] != 0 |index, list, bytes|:
+                    list.pool.push(bytes[index])
+                    index <- index + 1
+            list.commands.push(Cmd{kind: 11.u8(), color: 1.u32(), a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0, f: 6.0, ref: 0.u32(), len: 0.u32()})
+
+# C: commands.push BEFORE the loop
+def add_C(list: mutable DList&, text: cstr):
+    can Memory.Allocate, Abort.Panic:
+        trusted Unsafe.PointerCast:
+            list.commands.push(Cmd{kind: 11.u8(), color: 1.u32(), a: 1.0, b: 2.0, c: 3.0, d: 4.0, e: 5.0, f: 6.0, ref: 0.u32(), len: 0.u32()})
+            bytes: u8& = text.cast[u8&]
+            index: mutable usize = 0
+            trusted Unsafe.UncheckedIndex:
+                while bytes[index] != 0 |index, list, bytes|:
+                    list.pool.push(bytes[index])
+                    index <- index + 1
+
+def variant(which: i64, step: i64) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        list: mutable DList = dlist_new()
+        add_rect(&list, 0.0, 0.0)
+        add_rect(&list, 10.0, 20.0)
+        if which == 0:
+            add_A(&list, "Dual N-Back")
+            add_A(&list, "N =")
+        if which == 1:
+            add_B(&list, "Dual N-Back")
+            add_B(&list, "N =")
+        if which == 2:
+            add_C(&list, "Dual N-Back")
+            add_C(&list, "N =")
+        if which == 3:
+            add_text_nocmd(&list, "Dual N-Back")
+            add_text_nocmd(&list, "N =")
+        return list.pool.count.i64()
+
+export fn nw_variant(which: i64, step: i64) -> i64 = variant

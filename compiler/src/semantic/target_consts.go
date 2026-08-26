@@ -13,9 +13,13 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string, targetDebug bo
 	a.setTargetConstBool("ELISA_TARGET_OS_LINUX", osName == "linux")
 	a.setTargetConstBool("ELISA_TARGET_OS_WINDOWS", osName == "windows")
 	a.setTargetConstBool("ELISA_TARGET_OS_FREEBSD", osName == "freebsd")
-	a.setTargetConstBool("ELISA_TARGET_OS_POSIX", osName == "macos" || osName == "linux" || osName == "freebsd")
+	a.setTargetConstBool("ELISA_TARGET_OS_POSIX", isPOSIXish(osName))
+	a.setTargetConstBool("ELISA_TARGET_OS_WASI", osName == "wasi")
 	a.setTargetConstBool("ELISA_TARGET_ARCH_X86_64", archName == "x86_64")
 	a.setTargetConstBool("ELISA_TARGET_ARCH_ARM64", archName == "arm64" || archName == "aarch64")
+	a.setTargetConstBool("ELISA_TARGET_ARCH_WASM32", archName == "wasm32")
+	a.setTargetConstBool("ELISA_TARGET_ARCH_WASM64", archName == "wasm64")
+	a.setTargetConstBool("ELISA_TARGET_ARCH_WASM", archName == "wasm32" || archName == "wasm64")
 	a.setTargetConstAliasBool("PLATFORM_WINDOWS", osName == "windows")
 	a.setTargetConstAliasBool("PLATFORM_APPLE", osName == "macos")
 	a.setTargetConstAliasBool("PLATFORM_DARWIN", osName == "macos")
@@ -32,7 +36,7 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string, targetDebug bo
 	a.setTargetConstBool("target.release", !targetDebug)
 	a.setTargetConstBool("target.features.avx2", targetFeatureFromTriple(targetTriple, "avx2"))
 	a.setTargetConstBool("target.features.u128", compilerName != "msvc")
-	a.setTargetConstBool("target.features.posix", osName == "macos" || osName == "linux" || osName == "freebsd")
+	a.setTargetConstBool("target.features.posix", isPOSIXish(osName))
 	a.setTargetConstBool("target.libc.gnu_strerror_r", osName == "linux" && compilerName != "msvc")
 	a.setTargetConstNamespace("target", ConstValue{Kind: ConstRecord, Fields: map[string]ConstValue{
 		"os":       {Kind: ConstString, String: osName},
@@ -43,12 +47,23 @@ func (a *Analyzer) populateTargetConstValues(targetTriple string, targetDebug bo
 		"features": {Kind: ConstRecord, Fields: map[string]ConstValue{
 			"avx2":  {Kind: ConstBool, Bool: targetFeatureFromTriple(targetTriple, "avx2")},
 			"u128":  {Kind: ConstBool, Bool: compilerName != "msvc"},
-			"posix": {Kind: ConstBool, Bool: osName == "macos" || osName == "linux" || osName == "freebsd"},
+			"posix": {Kind: ConstBool, Bool: isPOSIXish(osName)},
 		}},
 		"libc": {Kind: ConstRecord, Fields: map[string]ConstValue{
 			"gnu_strerror_r": {Kind: ConstBool, Bool: osName == "linux" && compilerName != "msvc"},
 		}},
 	}})
+}
+
+// WASI counts as POSIX-ish because the only POSIX surface the runtime uses is
+// mmap/munmap/malloc/free/mem*/write, and both wasi-libc and the browser host
+// shim (shells/web/elisa-wasm-runtime.js) supply exactly that subset.
+func isPOSIXish(osName string) bool {
+	switch osName {
+	case "macos", "linux", "freebsd", "wasi":
+		return true
+	}
+	return false
 }
 
 func (a *Analyzer) setTargetConstBool(name string, value bool) {
@@ -91,6 +106,13 @@ func (a *Analyzer) setTargetConstNamespace(name string, value ConstValue) {
 	})
 }
 
+// The host is a default only when NO triple was given. When one IS given, its
+// components are the truth and an unrecognized component is UNKNOWN -- never
+// "whatever machine the compiler happens to be running on". Inheriting the host
+// silently made `-target-triple wasm32-unknown-wasi` compile as macOS/arm64:
+// ELISA_TARGET_OS_MACOS and ELISA_TARGET_ARCH_ARM64 both came out true, the
+// runtime picked macOS code paths, and ARENA_BACKEND_WASM_HEAPBASE became dead
+// code that no triple could ever select.
 func targetOSFromTriple(targetTriple string) string {
 	triple := strings.ToLower(strings.TrimSpace(targetTriple))
 	switch {
@@ -102,6 +124,16 @@ func targetOSFromTriple(targetTriple string) string {
 		return "windows"
 	case strings.Contains(triple, "freebsd"):
 		return "freebsd"
+	case strings.Contains(triple, "wasi") || strings.Contains(triple, "emscripten"):
+		return "wasi"
+	}
+	if triple != "" {
+		// A wasm arch with no OS component ("wasm32-unknown-unknown") is a
+		// freestanding wasm target, not the host.
+		if strings.HasPrefix(triple, "wasm") {
+			return "wasi"
+		}
+		return ""
 	}
 	switch runtime.GOOS {
 	case "darwin":
@@ -124,6 +156,16 @@ func targetArchFromTriple(targetTriple string) string {
 		return "x86_64"
 	case strings.Contains(triple, "aarch64") || strings.Contains(triple, "arm64"):
 		return "arm64"
+	case strings.Contains(triple, "wasm64"):
+		return "wasm64"
+	case strings.Contains(triple, "wasm32"):
+		return "wasm32"
+	}
+	if triple != "" {
+		// Standard triple layout is <arch>-<vendor>-<os>-<abi>, so an arch we
+		// do not have a normalized name for is still the first component. That
+		// is a far better answer than the host's arch.
+		return strings.SplitN(triple, "-", 2)[0]
 	}
 	switch runtime.GOARCH {
 	case "amd64":

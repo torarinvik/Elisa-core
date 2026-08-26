@@ -1,0 +1,22 @@
+# Repro (stage1 only): `catch` over a call returning `void error[E]` CRASHES the
+# stage1 compiler binary itself (Trace/BPT trap: 5) during codegen. stage0
+# compiles and runs this fine (exit 0). Found while porting elisacore_fileio
+# (2026-08-25). Related: `try <void error union> else ...` miscompiles under
+# stage0 (see repro/nw_fileio_try_void_else.elisa), so neither consumption form
+# of a void error union currently works across both compilers.
+
+error VoidErr:
+    Bad
+
+def do_thing(x: i64) -> void error[VoidErr]:
+    if x < 0:
+        raise VoidErr.Bad
+    return
+
+def main() -> i64:
+    catch do_thing(1):
+        ok:
+            0
+        error e:
+            1
+    return 0

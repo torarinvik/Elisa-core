@@ -360,3 +360,39 @@ func disposeLLVMErrorMessage(message *C.char, fallback string) string {
 	}
 	return text
 }
+
+// syncWordBitsWithTarget makes `usize`/`isize`/`int`/`uintptr` follow the
+// TARGET's pointer width instead of the host's.
+//
+// wordBits is seeded from unsafe.Sizeof(uintptr(0)) at construction, which is
+// the compiler's OWN pointer size. That is right for a native build and wrong
+// for every cross build: emitting for wasm32 on an arm64 host produced 4-byte
+// pointers alongside an 8-byte `usize`, so a darray header laid out as
+// {items, count, capacity} disagreed with the code indexing through it — the
+// first bytes of a freshly built darray came back holding the LAST bytes
+// written, and a module imported mmap(i64,…)->i64 next to memcpy(i32,i32,i64),
+// which no host implementation can satisfy with one convention.
+//
+// The size comes from LLVM's data layout for the resolved triple rather than
+// from matching triple strings, so a target this code has never heard of is
+// still correct.
+func (g *llvmGenerator) syncWordBitsWithTarget() error {
+	if g == nil {
+		return nil
+	}
+	if err := g.ensureTargetMachine(); err != nil {
+		return err
+	}
+	if g.targetData == nil {
+		return nil
+	}
+	// Address space 0: Elisa has no multi-address-space targets, and a
+	// target whose AS0 pointer differs from its generic pointer would need a
+	// deliberate decision here rather than a silent guess.
+	pointerBytes := uint64(C.LLVMPointerSizeForAS(g.targetData, C.unsigned(0)))
+	if pointerBytes == 0 {
+		return nil
+	}
+	g.wordBits = int(pointerBytes * 8)
+	return nil
+}

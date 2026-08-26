@@ -1,0 +1,51 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+def main() -> i64:
+    can Console.Write, Memory.Allocate, Abort.Panic:
+        region work(1 * 1024 * 1024)
+        arena: mutable Arena& = (&work).cast[mutable Arena&]
+        in arena:
+            name: cstr = "D"
+            out: dstr = f"C{name}"
+            printr(out)
+            print("|")
+        destroy work
+        return 0
+
+# stage1 gap: ANY f-string declines the whole unit.
+#
+# stage0 compiles and runs this file (prints "CD|"); stage1 reports
+#
+#   error: backend emitted no functions for this unit; declined 25: join,
+#     rt_concat2, rt_concat2_scratch, rt_int_to_string, rt_int_to_string_scratch,
+#     rt_bool_to_string, rt_bool_to_string_scratch, rt_char_to_string,
+#     rt_char_to_string_scratch, ctx_string_slice, __cast__, __cast__, ...
+#   note: every function in the unit is dropped when the backend declines one
+#
+# The declined-name list moves as stage1 changes -- an earlier build of the
+# same worktree reported 37 declines headed by store_get / store_count /
+# store_find for this identical file. What is stable is the shape: reaching the
+# std's string-formatting surface declines the unit, so nothing at all is
+# emitted. Same family as nw_print_int_generic_stage1.elisa and
+# nw_generic_protocol_impl_stage1.elisa.
+#
+# Worth keeping separate from the print(i64) repro: an f-string is a plain
+# language feature with no integer in sight, and the earlier repros make this
+# look like an integer-formatting problem. It is not -- string interpolation is
+# unusable on stage1 altogether.
+#
+# ---------------------------------------------------------------------------
+# VERIFIED (same toolchain, ELISA_STAGE1_SEMANTIC_GATE=1)
+# ---------------------------------------------------------------------------
+# * f"C{name}" with `name: cstr`: stage0 fine, stage1 declines (this file).
+# * f"{a}{b}" with sview operands: same decline.
+# * Building the same bytes by hand -- `out: mutable dstr = []` plus
+#   `out.push(byte)` in a loop over `sview_at` -- is fine on BOTH stages.
+# * `printr(dstr)`, `bytes_view(darray[u8])`, `sview(cstr, 0, -1)`,
+#   `sview_len` / `sview_at`: all fine on both stages.
+# * Ordinary darray work (push, index, iterate, remove_at), darray fields
+#   inside structs, and darray[EnumType] are unaffected on stage1.
+#
+# WORKAROUND IN nw-core: nw-core/src/gamemode.elisa builds every generated mode
+# name byte by byte (dstr_append_cstr / dstr_append_dstr / dstr_append_i64)
+# instead of using f-strings. Revert to f-strings once this lands.

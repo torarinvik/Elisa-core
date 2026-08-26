@@ -1,0 +1,43 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# stage1: a f64 const whose initializer is BINARY ARITHMETIC over other consts
+# is silently evaluated as 0.0. No diagnostic, no decline -- the program builds
+# and runs with the wrong number.
+#
+#   stage0: "572 OK"   DIFF.i64() = 572
+#   stage1: "WRONG"    DIFF.i64() = 0
+#
+# This is a SILENT WRONG ANSWER, which makes it the most serious defect in the
+# current repro set. It was found because it moved the n-back board's left edge
+# from x=286 to x=0 in a rendered frame; nothing failed, the layout was just
+# wrong, and only hand-checking a decoded display list caught it.
+#
+# Two shapes, two failure modes (both stage1, both absent on stage0):
+#
+#   const D: f64 = W - S            -> reads back 0.0, SILENTLY (this file)
+#   const D: f64 = (W - S) / 2.0    -> the backend DECLINES every function that
+#                                      reads the const. Loud in a small unit;
+#                                      in a large one where other functions
+#                                      still emit, the object is written with
+#                                      the function simply MISSING, and on macOS
+#                                      (-undefined dynamic_lookup) that surfaces
+#                                      only at load time as
+#                                      "symbol not found in flat namespace".
+#
+# Measured wrong (all -> 0.0): W - S, (W - S) * HALF, W * HALF, W + S, W - S - S.
+# Correct: integer const expressions (IW - IS, IW / 2, 912 - 340), and a plain
+# float literal (286.0). The same expression written inside a FUNCTION BODY is
+# also correct -- which is the workaround nw-core/src/scene_nback.elisa uses
+# (FIELD_LEFT became `def field_left()`).
+#
+# Reproduces under both stage1 checkouts and under plain `-emit exe` as well as
+# `-emit pymodule-so`, so it is not specific to the extension path.
+
+const W: f64 = 912.0
+const S: f64 = 340.0
+const DIFF: f64 = W - S
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        print("572 OK" if DIFF.i64() == 572 else "WRONG")
+        return 0
