@@ -517,8 +517,24 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 				if s.Value != nil {
 					collectValueStmts(s.Value)
 				}
-				if target, ok := s.Target.(*ast.Ident); ok && target != nil && s.Value != nil && regiony(s.Value) {
-					regionLocals[target.Name] = true
+				// The target's ROOT local, not just a bare ident: storing a region-allocated
+				// value INTO a field or element of a local makes that local carry region-backed
+				// storage, exactly as if it had been built by a struct literal.
+				//
+				//   board: mutable Board = zeroed
+				//   board.cells <- zeros(n)     # <- this
+				//   return board
+				//
+				// Without the FieldExpr case this compiled to a per-call arena that was
+				// arena_free'd before `ret`, so the returned struct's buffer pointer dangled:
+				// a silent use-after-free in safe code, `.count` reading fine and element reads
+				// segfaulting. The struct-literal spelling of the same function
+				// (`return Board{cells: zeros(n)}`) was already classified and worked — that
+				// divergence is what makes this a bug rather than a policy.
+				if s.Value != nil && regiony(s.Value) {
+					if root := rootIdentExpr(s.Target); root != nil {
+						regionLocals[root.Name] = true
+					}
 				}
 			case *ast.TupleBindStmt:
 				// A multi-target rebind/tuple bind whose RHS is region-allocated feeds
