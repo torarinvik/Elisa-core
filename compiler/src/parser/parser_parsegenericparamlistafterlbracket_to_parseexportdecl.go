@@ -150,7 +150,11 @@ func (p *Parser) parsePermissionRefs(bracketed bool) []ast.PermissionRef {
 	} else if p.match(lexer.TOKEN_LBRACKET) {
 		bracketed = true
 	}
-	refs := make([]ast.PermissionRef, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+	capacity := 1
+	if bracketed {
+		capacity = p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET)
+	}
+	refs := make([]ast.PermissionRef, 0, capacity)
 	for {
 		refs = append(refs, p.parsePermissionRefGroup()...)
 		if !p.match(lexer.TOKEN_COMMA) {

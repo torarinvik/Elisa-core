@@ -267,15 +267,16 @@ func (s *functionState) emitRegionDeclImpl(n *ast.RegionStmt, loopReset bool) er
 			return err
 		}
 	} else {
-		alloca, err = s.createEntryAlloca(n.Name, arenaType)
+		// The declaration may itself be nested in a conditional or loop.  Its cleanup is
+		// emitted at the scope's CFG merge, which can also be reached when the declaration
+		// was not entered.  Initialize the entry-dominating arena slot on every path so that
+		// that merge cleanup sees a valid zero arena instead of uninitialized stack bytes.
+		// Non-lazy regions are initialized with their first block below on the path that
+		// enters the declaration; this entry store is only the fail-safe empty state.
+		alloca, err = s.createEntryAllocaZeroed(n.Name, arenaType)
 		if err != nil {
 			return err
 		}
-		zero, zerr := s.zeroValue(arenaType)
-		if zerr != nil {
-			return zerr
-		}
-		C.LLVMBuildStore(s.builder, zero, alloca)
 	}
 	s.defineBinding(n.Name, valueBinding{ptr: alloca, typ: arenaType})
 	s.regions = append(s.regions, regionBinding{name: n.Name, ptr: alloca, typ: arenaType, owned: true})
@@ -467,15 +468,13 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 				return noop, err
 			}
 		} else {
-			alloca, err = s.createEntryAlloca(name, arenaType)
+			// As with the primary region slot, this stack can be cleaned up at a
+			// merge that is reachable without entering the scoped region.  Give it
+			// an entry-dominating empty state before any path-specific initialization.
+			alloca, err = s.createEntryAllocaZeroed(name, arenaType)
 			if err != nil {
 				return noop, err
 			}
-			zero, zerr := s.zeroValue(arenaType)
-			if zerr != nil {
-				return noop, zerr
-			}
-			C.LLVMBuildStore(s.builder, zero, alloca)
 		}
 		// Lazy arena: first block allocated on demand, free is a no-op if unused -> an unused
 		// parallel stack costs only the stack slot.

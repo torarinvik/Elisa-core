@@ -1357,8 +1357,9 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	}
 	name := strings.Join(parts[:len(parts)-1], ".")
 	variant := parts[len(parts)-1]
-	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	var args []ast.MatchPatternArg
 	if p.match(lexer.TOKEN_LPAREN) {
+		args = make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
 				args = append(args, p.parseMatchPatternArg())

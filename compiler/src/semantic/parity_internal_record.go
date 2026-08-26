@@ -28,7 +28,7 @@ func recordInternalParityCase(file *ast.File, options AnalyzeOptions, result *Re
 	if path == "" || file == nil || result == nil {
 		return
 	}
-	src, ok := lexer.ParitySourceFor(file.Filename)
+	src, ok := lexer.ConsumeParitySource(file.Filename)
 	if !ok {
 		return
 	}

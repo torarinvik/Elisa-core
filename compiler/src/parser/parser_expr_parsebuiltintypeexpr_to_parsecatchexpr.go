@@ -964,8 +964,8 @@ func (p *Parser) parseQualifiedVariantTarget() (string, string, lexer.Pos) {
 }
 func (p *Parser) parseVariantIsTestExpr() ast.Expr {
 	enumName, variant, pos := p.parseQualifiedVariantTarget()
-	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	p.expect(lexer.TOKEN_LPAREN)
+	args := make([]ast.MatchPatternArg, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 	if p.peek() != lexer.TOKEN_RPAREN {
 		for {
 			args = append(args, p.parseMatchPatternArg())

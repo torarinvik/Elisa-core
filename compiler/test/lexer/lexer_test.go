@@ -42,6 +42,23 @@ func TestSimpleIdent(t *testing.T) {
 	}
 }
 
+func TestLineWordDocumentationCommentDoesNotRetargetPosition(t *testing.T) {
+	l := lexer.New("original.elisa", []byte("#   line 7 generated.elisa\nx\n"))
+	tokens := l.Tokenize()
+	if len(tokens) == 0 {
+		t.Fatal("expected tokens")
+	}
+	if tokens[0].Kind != lexer.TOKEN_IDENT || tokens[0].Text != "x" {
+		t.Fatalf("expected identifier x, got %v", tokens[0])
+	}
+	if tokens[0].Pos.Line != 2 {
+		t.Fatalf("expected identifier on line 2, got %d", tokens[0].Pos.Line)
+	}
+	if tokens[0].Pos.File != "original.elisa" {
+		t.Fatalf("expected original filename, got %q", tokens[0].Pos.File)
+	}
+}
+
 func TestKeyword(t *testing.T) {
 	tokens := collectTokens("def foo:\n")
 	expect := []lexer.TokenKind{lexer.TOKEN_DEF, lexer.TOKEN_IDENT, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF}

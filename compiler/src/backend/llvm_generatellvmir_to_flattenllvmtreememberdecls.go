@@ -24,6 +24,7 @@ import (
 	"elisacore/src/semantic"
 	"fmt"
 	"os"
+	"path/filepath"
 	"unsafe"
 )
 
@@ -219,6 +220,7 @@ type llvmGenerator struct {
 	strictFP                  bool
 	noaliasMutableRefs        bool
 	perfWarnings              []string
+	transientCStringLifetime  bool
 }
 type typeMemoKey struct {
 	id  semantic.TypeID
@@ -232,12 +234,26 @@ func noteTypeKeyFor(t semantic.Type) typeMemoKey {
 	return typeMemoKey{typ: t}
 }
 func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
+	if result == nil {
+		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
+	}
 	activeFile := result.ActiveFile()
-	if result == nil || activeFile == nil || result.GlobalScope == nil {
+	if activeFile == nil || result.GlobalScope == nil {
 		return nil, fmt.Errorf("backend requires a semantic result with file and global scope")
 	}
 	ctx := C.LLVMContextCreate()
-	moduleName := cString(activeFile.Filename)
+	// LLVM's module identifier is not semantic source metadata.  Keeping the
+	// caller's absolute path here made object code depend on whether the same
+	// source was invoked as `src/file.elisa` or `/abs/.../src/file.elisa` on
+	// Darwin/AArch64.  The generated IR differed only in its module header, but
+	// LLVM's backend then took different machine-code paths and one variant
+	// could miscompile.  Use the stable basename for the module identity; source
+	// locations and compiler diagnostics still retain activeFile.Filename.
+	moduleID := filepath.Base(activeFile.Filename)
+	if moduleID == "." || moduleID == "" {
+		moduleID = "module.elisa"
+	}
+	moduleName := cString(moduleID)
 	defer C.free(unsafe.Pointer(moduleName))
 	mod := C.LLVMModuleCreateWithNameInContext(moduleName, ctx)
 	g := &llvmGenerator{
@@ -261,6 +277,8 @@ func newLLVMGenerator(result *semantic.Result) (*llvmGenerator, error) {
 		noteTypeDone:              map[typeMemoKey]bool{},
 		wordBits:                  int(unsafe.Sizeof(uintptr(0)) * 8),
 	}
+	beginModuleCStringLifetime()
+	g.transientCStringLifetime = true
 	for _, sym := range result.GlobalScope.Symbols {
 		if sym == nil || sym.Node == nil {
 			continue
@@ -326,6 +344,10 @@ func (g *llvmGenerator) dispose() {
 	}
 	if g.context != nil {
 		C.LLVMContextDispose(g.context)
+	}
+	if g.transientCStringLifetime {
+		endModuleCStringLifetime()
+		g.transientCStringLifetime = false
 	}
 }
 func (g *llvmGenerator) emitModule() error {

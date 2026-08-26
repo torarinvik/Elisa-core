@@ -172,10 +172,10 @@ func (l *Lexer) skipBlockComment() {
 // from rather than the flattened include buffer. Returns false for ordinary `#`
 // comments, which are skipped normally. Called with l.peek() == '#'.
 func (l *Lexer) tryConsumeLineDirective() bool {
+	// Include expansion emits the canonical `#line` spelling. Do not accept
+	// whitespace between `#` and `line`: ordinary documentation comments such as
+	// `#   line 1: ...` must remain comments and must not reset the source position.
 	i := l.pos + 1
-	for i < len(l.src) && (l.src[i] == ' ' || l.src[i] == '\t') {
-		i++
-	}
 	const kw = "line"
 	if i+len(kw) > len(l.src) {
 		return false

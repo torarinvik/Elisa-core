@@ -484,6 +484,22 @@ def na_loop() -> void:
 	runSingleTestProgramExpectOK(t, "na_loop", src, "new[auto] loop produced wrong result")
 }
 
+// A scoped region can be declared below a conditional inside a loop.  Its arena slot is
+// allocated in the function entry block, while initialization happens only on the branch that
+// enters the region.  Cleanup must therefore be safe on the loop/conditional merge even on an
+// iteration that skipped the declaration.  This guards the stage0 codegen regression where the
+// merge cleanup traversed uninitialized stack bytes as a Region chain.
+func TestConditionalScopedRegionCleanupUsesEmptyEntryState(t *testing.T) {
+	runSingleTestProgramExpectOK(t, "conditional_region_cleanup", `@test
+def conditional_region_cleanup() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        for i in 0..<3:
+            if i == 1:
+                region scratch(4096):
+                    pass
+`, "conditional scoped-region cleanup must not free an uninitialized arena")
+}
+
 // runSingleTestProgramExpectOK builds `src` as a native test binary, runs the single @test named
 // `testName`, and fails if the child exits non-zero (a segfault/panic from the regression).
 func runSingleTestProgramExpectOK(t *testing.T, testName, src, failHint string) {

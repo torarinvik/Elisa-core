@@ -91,3 +91,21 @@ func TestNoaliasNotStampedOnImmutableRef(t *testing.T) {
 		t.Fatalf("expected NO noalias on an immutable ref param, got:\n%s", output)
 	}
 }
+
+// Mutable darray refs may be forwarded to nested calls that reuse the same storage.
+// They must not receive an ABI-level noalias promise even with the opt-in enabled.
+const noaliasDarrayRefSrc = `def take(xs: mutable darray[i32]&) -> void:
+    return
+`
+
+func TestNoaliasNotStampedOnDarrayRef(t *testing.T) {
+	t.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
+	result := parseAndAnalyzeBackendTest(t, "na_darray.elisa", noaliasDarrayRefSrc)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if defineLineHasNoalias(output) {
+		t.Fatalf("expected NO noalias on a mutable darray ref, got:\n%s", output)
+	}
+}

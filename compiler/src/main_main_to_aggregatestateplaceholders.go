@@ -92,6 +92,7 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 	tokens := l.Tokenize()
 	frontendTimingLog("lex", lexStart)
 	if errs := l.Errors(); len(errs) > 0 {
+		lexer.DropParitySource(filename)
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
@@ -111,6 +112,7 @@ func parseProgram(filename string, src []byte, stderr io.Writer) (*ast.File, boo
 		}
 	}
 	if errs := p.Errors(); len(errs) > 0 {
+		lexer.DropParitySource(filename)
 		for _, e := range errs {
 			fmt.Fprintf(stderr, "%s\n", e)
 		}
@@ -332,10 +334,10 @@ func parseArgs(args []string) (cliOptions, error) {
 			// program reproducing another implementation's FP results bit-for-bit needs.
 			_ = os.Setenv("ELISACORE_STRICT_FP", "1")
 		case arg == "-fnoalias":
-			// Stamp LLVM `noalias` on the eligible `mutable T&` param subset (scalar/darray
-			// pointee). Sound (the alias checker makes a `mutable T&` the unique mutator of its
-			// pointee) but OFF by default: a noalias miscompile is silent. Read at codegen time
-			// (in-process build), same env the backend generator already consults.
+			// Stamp LLVM `noalias` only on the eligible numeric-scalar `mutable T&` subset.
+			// Mutable darray references are forwarded through nested calls and are deliberately
+			// excluded. The opt-in stays OFF by default because a noalias miscompile is silent.
+			// Read at codegen time (in-process build), same env the backend generator consults.
 			_ = os.Setenv("ELISACORE_NOALIAS_MUTABLE_REFS", "1")
 		case arg == "-Wperf":
 			// Graduated strictness (docs/70): promote the performance-friction lints

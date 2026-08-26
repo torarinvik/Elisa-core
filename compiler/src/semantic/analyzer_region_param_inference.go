@@ -43,6 +43,24 @@ var containerGrowthMethods = map[string]bool{
 // arena comes from.
 func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
 	cands := collectRegionPolyCandidateFuncs(decls)
+	// This pass runs before collectValueSymbols, so funcDeclUsings has not been
+	// populated yet. Keep the lexical resolution context alongside the function
+	// declarations: the region-valued argument probe below may need to resolve a
+	// callee's return annotation, and doing that in the caller's ambient context
+	// makes a perfectly valid unqualified module-local type look unknown.
+	funcScopes := map[*ast.FuncDecl]scopedDecl{}
+	for _, scoped := range decls {
+		switch n := scoped.Decl.(type) {
+		case *ast.FuncDecl:
+			funcScopes[n] = scoped
+		case *ast.ImplDecl:
+			for _, member := range n.Members {
+				if fn, ok := member.(*ast.FuncDecl); ok {
+					funcScopes[fn] = scoped
+				}
+			}
+		}
+	}
 	// Resolve direct free-function call targets by name for the forwarding trigger. Overloads/last-wins
 	// is acceptable: a wrong match only forgoes (or, at worst, conservatively adds) an inferred region
 	// param — soundness is unaffected (the region threading is still verified at the real call site).
@@ -78,7 +96,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			if fn == nil || explicit[fn] {
 				continue
 			}
-			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots) {
+			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes) {
 				changed = true
 			}
 		}
@@ -88,7 +106,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 }
 
-func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool) bool {
+func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl) bool {
 	if fn == nil || len(fn.Body) == 0 {
 		return false
 	}
@@ -116,7 +134,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		if cstamp, ok := regionlessRefContainer(p.Type); ok {
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
-			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName)
+			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
 			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) || grownWithRegionValue {
 				stamp = cstamp
 				if grownWithRegionValue && ambientGrownParam == "" && containerParamCount == 1 {
@@ -703,11 +721,11 @@ func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {
 // producing expression. Conservative both ways: an unresolved insert simply doesn't trigger (the prior
 // behavior, sound), and over-triggering only threads a region the caller — which owns the container —
 // can always supply.
-func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name string, funcByName map[string]*ast.FuncDecl) bool {
+func (a *Analyzer) containerParamGrownWithRegionValue(fn *ast.FuncDecl, name string, funcByName map[string]*ast.FuncDecl, funcScopes map[*ast.FuncDecl]scopedDecl) bool {
 	if fn == nil {
 		return false
 	}
-	argIsRegionValued := a.regionValueTester(fn, funcByName)
+	argIsRegionValued := a.regionValueTester(fn, funcByName, funcScopes)
 
 	// Scan for `name.<growth>(ARG…)` where any inserted ARG is region-valued.
 	found := false
@@ -820,7 +838,7 @@ func (a *Analyzer) functionWritesHandleToScalarOutParam(fn *ast.FuncDecl) bool {
 // returns a tester that classifies from RESOLVED TYPES only (callee return types, packed-enum
 // constructors, owned-less list literals/comprehensions) — never region-poly classification, which runs
 // after this pass. Conservative both ways: an unresolved value simply returns false.
-func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl) func(ast.Expr) bool {
+func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, funcScopes map[*ast.FuncDecl]scopedDecl) func(ast.Expr) bool {
 	// 1. Map each local name to the expression it was bound from, so an inserted ident resolves to its
 	//    producer: a var-decl value, an assignment, or an `if EXPR is x:` refinement scrutinee.
 	boundExpr := map[string]ast.Expr{}
@@ -905,6 +923,29 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 		}
 	}
 	collectBindings(fn.Body)
+	resolveCalleeReturnType := func(callee *ast.FuncDecl) Type {
+		if callee == nil || callee.ReturnType == nil {
+			return invalidType
+		}
+		resolve := func() Type {
+			// This is a conservative pre-classification probe. A malformed or
+			// not-yet-bound generic return type must not emit a second diagnostic;
+			// body analysis reports the authoritative error later.
+			savedSuppress := a.suppressDiagnostics
+			a.suppressDiagnostics = true
+			resolved := a.resolveType(callee.ReturnType)
+			a.suppressDiagnostics = savedSuppress
+			return resolved
+		}
+		if scoped, ok := funcScopes[callee]; ok {
+			var resolved Type
+			a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+				resolved = resolve()
+			})
+			return resolved
+		}
+		return resolve()
+	}
 
 	// 2. Decide whether an expression produces a region-carrying value (resolved types only).
 	argIsRegionValued := func(arg ast.Expr) bool {
@@ -951,7 +992,7 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 				// Otherwise resolve the callee's RETURN TYPE (region-carrying ⇒ region-valued).
 				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
 					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
-						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+						return a.typeIsRegionValued(resolveCalleeReturnType(callee))
 					}
 				}
 				return false
@@ -959,7 +1000,7 @@ func (a *Analyzer) regionValueTester(fn *ast.FuncDecl, funcByName map[string]*as
 				// Pre-analysis `Name(args)` parses as a StructLitExpr; resolve it as a call.
 				if cn, _, isCall := ast.PrepassCallShape(n); isCall {
 					if callee, ok := funcByName[cn]; ok && callee != nil && callee.ReturnType != nil {
-						return a.typeIsRegionValued(a.resolveType(callee.ReturnType))
+						return a.typeIsRegionValued(resolveCalleeReturnType(callee))
 					}
 				}
 				// A brace construction `Ty{field: value, …}` carries region storage when any

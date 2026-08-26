@@ -16,7 +16,49 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
+	"unsafe"
 )
+
+var moduleCStringState struct {
+	sync.Mutex
+	owned  []*C.char
+	byName map[string]*C.char
+	users  int
+}
+
+// LLVM retains some C API names until the containing value or module is
+// disposed, so freeing a name immediately after a builder call corrupts the
+// generated module. Keep one deduplicated owner pool for the active generator
+// lifetime and release it only after LLVMContextDispose. The reference count
+// also makes concurrent generators safe: one generator cannot release another
+// generator's names while its module is still alive.
+func beginModuleCStringLifetime() {
+	moduleCStringState.Lock()
+	defer moduleCStringState.Unlock()
+	if moduleCStringState.users == 0 {
+		moduleCStringState.owned = nil
+		moduleCStringState.byName = make(map[string]*C.char)
+	}
+	moduleCStringState.users++
+}
+
+func endModuleCStringLifetime() {
+	moduleCStringState.Lock()
+	defer moduleCStringState.Unlock()
+	if moduleCStringState.users == 0 {
+		return
+	}
+	moduleCStringState.users--
+	if moduleCStringState.users != 0 {
+		return
+	}
+	for _, ptr := range moduleCStringState.owned {
+		C.free(unsafe.Pointer(ptr))
+	}
+	moduleCStringState.owned = nil
+	moduleCStringState.byName = nil
+}
 
 const smallExactArenaFillUnrollLimit = 4
 const smallExactArenaCopyUnrollLimit = 4
@@ -1548,6 +1590,19 @@ func cStringFree(s string) *C.char {
 	if s == "" {
 		return nil
 	}
+	moduleCStringState.Lock()
+	defer moduleCStringState.Unlock()
+	if ptr := moduleCStringState.byName[s]; ptr != nil {
+		return ptr
+	}
 	ptr := C.CString(s)
+	if moduleCStringState.byName == nil {
+		// Production callers are enclosed by begin/endModuleCStringLifetime.
+		// Keep the helper total for isolated backend tests too; those tests must
+		// use the same lifetime pair when they exercise LLVM builders.
+		moduleCStringState.byName = make(map[string]*C.char)
+	}
+	moduleCStringState.byName[s] = ptr
+	moduleCStringState.owned = append(moduleCStringState.owned, ptr)
 	return ptr
 }

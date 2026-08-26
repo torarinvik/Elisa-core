@@ -80,7 +80,11 @@ const ELISA_TRACE_CAP: usize = 256
 # not a stable cross-platform symbol, e.g. it is __stderrp on macOS.)
 extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
 extern write(fd: int, buf: void&, count: usize) -> isize can[Console]
-extern getenv(name: u8&) -> u8&?
+# Keep the libc declaration canonical across the standard library and the LLVM-C
+# backend.  `getenv` takes a NUL-terminated C string; declaring the same symbol as
+# `u8&` as well created an ambiguous global binding in a self-hosted compiler after
+# include flattening, so gen2 selected the byte-reference overload for every cstr call.
+extern getenv(name: cstr) -> u8&?
 extern signal(sig: int, handler: void&?) -> void&?
 # `raise` is a reserved keyword in Elisa, so re-raise via kill(getpid(), sig).
 extern getpid() -> int
@@ -195,7 +199,7 @@ def elisa_trace_install_fault_handler() -> void:
 def elisa_trace_maybe_install_fault_handler() -> void:
     return if elisa_trace_fault_checked
     elisa_trace_fault_checked <- true
-    elisa_trace_install_fault_handler() if getenv("ELISA_TRACE_ON_FAULT".cast[u8&]) != null
+    elisa_trace_install_fault_handler() if getenv("ELISA_TRACE_ON_FAULT") != null
 
 def elisa_trace_dump() -> void:
     entries: u64 = elisa_trace_pos

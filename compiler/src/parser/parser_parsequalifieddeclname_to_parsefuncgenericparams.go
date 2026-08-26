@@ -308,8 +308,9 @@ func (p *Parser) parseEnumCommonFieldsInline() []ast.FieldDecl {
 func (p *Parser) parseEnumVariantDecl() ast.EnumVariantDecl {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	payload := make([]ast.EnumPayloadDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
+	var payload []ast.EnumPayloadDecl
 	if p.match(lexer.TOKEN_LPAREN) {
+		payload = make([]ast.EnumPayloadDecl, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RPAREN))
 		if p.peek() != lexer.TOKEN_RPAREN {
 			for {
 				payload = append(payload, p.parseEnumPayloadDecl())

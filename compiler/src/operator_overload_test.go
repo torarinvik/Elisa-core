@@ -395,3 +395,23 @@ def same(x: P, y: P) -> bool:
 		t.Fatalf("a struct with an __eq__ impl must still compare, got: %v", errs)
 	}
 }
+
+// Built-in aggregate values have no scalar equality lowering. They must be
+// diagnosed before the backend can attempt an invalid LLVM `icmp` over the
+// aggregate representation.
+func TestAggregateValueEqualityWithoutLoweringIsRejected(t *testing.T) {
+	result := analyzeOverloadSource(t, `
+def same(xs: darray[i64], ys: darray[i64]) -> bool:
+    return xs == ys
+`)
+	errs := result.Errors()
+	found := false
+	for _, err := range errs {
+		if strings.Contains(err, "aggregate values do not support ==") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected aggregate equality diagnostic before LLVM lowering, got: %v", errs)
+	}
+}

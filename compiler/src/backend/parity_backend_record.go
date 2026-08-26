@@ -31,7 +31,7 @@ func recordBackendParityCase(result *semantic.Result, optLevel OptimizationLevel
 	if path == "" || result == nil || result.File == nil {
 		return
 	}
-	src, ok := lexer.ParitySourceFor(result.File.Filename)
+	src, ok := lexer.ConsumeParitySource(result.File.Filename)
 	if !ok {
 		return
 	}

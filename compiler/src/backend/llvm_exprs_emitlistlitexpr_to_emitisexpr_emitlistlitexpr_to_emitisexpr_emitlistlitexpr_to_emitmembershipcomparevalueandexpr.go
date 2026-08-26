@@ -1570,6 +1570,13 @@ func (s *functionState) emitBinaryExpr(expr *ast.BinaryExpr) (C.LLVMValueRef, se
 	if value, actualType, handled, err := s.emitPointerArithmeticExpr(expr, leftType, rightType, resultType); handled {
 		return value, actualType, err
 	}
+	if (expr.Op == lexer.TOKEN_EQEQ || expr.Op == lexer.TOKEN_BANGEQ) &&
+		semantic.IsAggregateValueEqualityUnsupported(leftType) && semantic.IsAggregateValueEqualityUnsupported(rightType) {
+		// Semantic analysis rejects this shape first. Keep the backend total as
+		// well: a missed/externally-built AST must never reach LLVMBuildICmp with
+		// an aggregate operand and leave an invalid module behind.
+		return nil, nil, fmt.Errorf("aggregate values do not support %s", lexer.TokenName(expr.Op))
+	}
 	operandType := s.binaryOperandType(expr.Op, leftType, rightType)
 	// Auto-deref a reference operand to its numeric/bool pointee for `==`/`!=`.
 	// binaryOperandType leaves a ref as-is for equality (so the genuine pointer/null

@@ -737,6 +737,15 @@ def arena_free(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
         r: mutable heap Region&? = a.begin
 
+        # Detach the chain BEFORE releasing any block.  Backend epilogues may emit more than
+        # one cleanup edge for the same owned carrier (for example, an ordinary fallthrough
+        # plus a generated contract/defer edge).  Clearing the header first makes arena_free
+        # genuinely idempotent: a second call observes begin == null and cannot traverse or
+        # release already-freed memory.
+        a.begin as ! <- null
+        a.end as ! <- null
+        a.end_index <- 0
+
         trusted Unsafe.AssumeProgress:
             while r != null:
                 r0: mutable heap Region& = r
@@ -744,9 +753,6 @@ def arena_free(a: mutable Arena&):
                 trusted Unsafe.RawExtern:
                     free_region_backend(r0, a.strategy)
 
-        a.begin as ! <- null
-        a.end as ! <- null
-        a.end_index <- 0
 
 def arena_trim(a: mutable Arena&):
     can Memory.Release, Abort.Panic:

@@ -194,7 +194,9 @@ func TestRefinementDischargeViolatedTrapsInDebug(t *testing.T) {
 // -fbounds-check (ELISACORE_FORCE_BOUNDS_CHECK) legitimately forces the check even in release, so
 // clear it here to assert the pure-release elision (other tests in the suite may leave it set).
 func TestRefinementDischargeElidedInRelease(t *testing.T) {
-	t.Parallel()
+	// These are process-wide backend switches. Running this test in parallel with a test that
+	// enables -fbounds-check or -fnoalias races the environment and can turn a valid release
+	// build into a spurious trap.
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
 		if prev, had := os.LookupEnv(key); had {
 			_ = os.Unsetenv(key)
@@ -363,7 +365,8 @@ func TestInvariantRecheckViolatedTrapsInDebug(t *testing.T) {
 // The standing invariant is debug-only: at -O3 the re-checks are elided, so the same violating run
 // does NOT trap (debug verifies what release assumes).
 func TestInvariantRecheckElidedInRelease(t *testing.T) {
-	t.Parallel()
+	// Keep this environment-sensitive release assertion out of the parallel test group; the
+	// backend reads these process-wide switches while compiling the child program.
 	for _, key := range []string{"ELISACORE_FORCE_BOUNDS_CHECK", "ELISACORE_NOALIAS_MUTABLE_REFS"} {
 		if prev, had := os.LookupEnv(key); had {
 			_ = os.Unsetenv(key)
