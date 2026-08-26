@@ -1,19 +1,27 @@
-# An UNQUALIFIED call to a sibling inside a module binds to a STDLIB GENERIC of
-# the same name instead of the sibling. stage0 refuses this program:
+# FIXED. An UNQUALIFIED call to a sibling inside a module bound to a STDLIB
+# GENERIC of the same name instead of the sibling. stage0 refused this:
 #
 #   argument 1 to "add" expects mutable Flags[T]&, got mutable Box.Sack&
 #
-# stage1 compiles and runs it correctly (exit 7), because the backend prefers
-# the ENCLOSING module's member on an exact arity match. stage0 has no such
-# preference, so the two compilers disagree about a program that should plainly
-# be legal: a module member calling its own sibling by its own name.
+# while stage1 compiled and ran it correctly -- the two compilers disagreeing
+# about a module member calling its own sibling by its own name.
 #
-# The whole point of a namespace is that `add` inside Box means Box's `add`.
-# Without this, module members have to avoid every name the stdlib uses
-# generically -- push, add, get, count -- which is C-style prefixing again,
-# wearing a module block.
+# Cause: identifier resolution reaches the global scope through the ordinary
+# scope chain, so the stdlib's `add` was found there and returned before the
+# enclosing module was ever consulted. The namespace-aware lookup existed
+# (visibleNameCandidates puts `Box.add` first) but nothing on this path used it.
 #
-# Exits 7.
+# Fixed by rewriteEnclosingNamespaceCallee, which RENAMES a bare callee to the
+# enclosing module's member. Renaming, not merely resolving the type: the first
+# attempt preferred the member in ident analysis alone, so the call type-checked
+# against Box's signature while codegen still emitted the stdlib symbol -- this
+# file compiled clean and returned 0. A wrong answer is worse than the error it
+# replaced, and only running it showed that. Guarded at runtime by
+# compiler/src/module_sibling_runtime_test.go for exactly that reason.
+#
+# Locals and parameters still shadow.
+#
+# Kept as a runnable check: it must exit 7.
 
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
