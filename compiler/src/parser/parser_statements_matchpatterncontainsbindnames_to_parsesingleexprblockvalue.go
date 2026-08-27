@@ -632,6 +632,18 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			p.expectNewline()
 			return &ast.ExprStmt{Position: pos, Expr: expr}
 		}
+		// A bare `move x` with no `in`/`as` and nothing after it discards the moved
+		// value: it compiles to NOTHING. That is almost never what was written --
+		// `move` is a contextual keyword, so a call to a function actually named
+		// `move` parses as this operator applied to the parenthesised argument list
+		// and vanishes without a word. stage1 already refuses to build such a unit;
+		// stage0 used to emit a no-op, so the two compilers disagreed and the
+		// program silently did nothing.
+		if store == nil && (p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_EOF) {
+			p.errorf("a bare `move` statement discards the moved value and compiles to nothing; use `move x in store as pattern`, or -- if this is a call to a function named `move` -- qualify it (`Module::move(...)`) or rename it, because `move` in call position is the ownership operator")
+			p.expectNewline()
+			return &ast.ExprStmt{Position: pos, Expr: expr}
+		}
 	}
 
 	// A catch expression in statement position is always a complete statement: its
