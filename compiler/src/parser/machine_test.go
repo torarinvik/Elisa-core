@@ -64,6 +64,26 @@ const fstringMachine = `    machine over lexer.current_char() while not lexer.is
             -> InnerString(depth)
 `
 
+func TestMachineForDrivers(t *testing.T) {
+	src := `def scan(lexer: mutable Lexer&, count: u8, bytes: darray[u8]):
+    machine over lexer for _ in count..>0 -> lexer:
+        state Advance
+        start Advance
+        Advance, _:
+            lexer <- lexer.advance_char()
+            -> Advance
+    machine over bytes for byte in bytes:
+        state Visit
+        start Visit
+        Visit, _:
+            -> Visit
+`
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected machine-for parse errors: %v", errs)
+	}
+}
+
 func TestMachineDesugarShape(t *testing.T) {
 	file, errs := parseSourceFile(t, machineSrc(fstringMachine))
 	if len(errs) != 0 {

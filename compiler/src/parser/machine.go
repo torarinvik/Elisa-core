@@ -98,6 +98,19 @@ type machineInputRange struct {
 	inclusive bool
 }
 
+// machineForHeader is the optional iterator driver in
+// `machine over value for pattern in iterable:`.  Keeping it as an ordinary
+// for-loop AST node lets the existing range/iterator lowering do the driving;
+// the machine contributes only the typed state dispatch in its body.
+type machineForHeader struct {
+	pos      lexer.Pos
+	mode     ast.IterBindMode
+	pattern  ast.MoveBindPattern
+	source   ast.Expr
+	rangeEnd ast.Expr
+	rangeOp  lexer.TokenKind
+}
+
 // looksLikeMachineStmt gates the contextual keyword: `machine` begins a machine statement
 // only when followed by the ident `over` — no legal expression puts two bare identifiers
 // in sequence, so a variable named `machine` still parses normally.
@@ -114,6 +127,10 @@ func (p *Parser) parseMachineStmt() ast.Stmt {
 	// The header expressions are sub-parsed to their clause boundary: a top-level `->`
 	// would otherwise be eaten by the expression grammar as the removed `expr -> T` cast.
 	input := p.parseMachineHeaderExpr(true)
+	var forHeader *machineForHeader
+	if p.peekIdentText("for") {
+		forHeader = p.parseMachineForHeader()
+	}
 	var cond ast.Expr
 	if p.peek() == lexer.TOKEN_WHILE {
 		p.advance()
@@ -179,7 +196,44 @@ func (p *Parser) parseMachineStmt() ast.Stmt {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return p.desugarMachine(pos, input, cond, yield, states, startState, startArgs, startSeen, arms)
+	return p.desugarMachine(pos, input, cond, yield, forHeader, states, startState, startArgs, startSeen, arms)
+}
+
+func (p *Parser) parseMachineForHeader() *machineForHeader {
+	pos := p.advance().Pos // contextual `for`
+	mode := p.parseIterBindMode()
+	pattern := p.parseIterLoopPattern()
+	p.expect(lexer.TOKEN_IN)
+	source := p.parseMachineForSource()
+	h := &machineForHeader{pos: pos, mode: mode, pattern: pattern, source: source}
+	if p.peek() == lexer.TOKEN_RANGE || p.peek() == lexer.TOKEN_RANGE_LT || p.peek() == lexer.TOKEN_RANGE_GT || p.peek() == lexer.TOKEN_RANGE_LE {
+		op := p.advance()
+		h.rangeOp = op.Kind
+		h.rangeEnd = p.parseMachineHeaderExpr(false)
+	}
+	return h
+}
+
+func (p *Parser) parseMachineForSource() ast.Expr {
+	end := p.pos
+	depth := 0
+	for end < len(p.tokens) {
+		kind := p.tokens[end].Kind
+		switch kind {
+		case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACKET, lexer.TOKEN_LBRACE:
+			depth++
+		case lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_RBRACE:
+			if depth > 0 {
+				depth--
+			}
+		case lexer.TOKEN_RANGE, lexer.TOKEN_RANGE_LT, lexer.TOKEN_RANGE_GT, lexer.TOKEN_RANGE_LE, lexer.TOKEN_COLON, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
+			if depth == 0 {
+				return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+			}
+		}
+		end++
+	}
+	return p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
 }
 
 // parseMachineHeaderExpr sub-parses one machine-header clause expression, bounded at the
@@ -203,6 +257,10 @@ headerScan:
 			}
 		case lexer.TOKEN_WHILE:
 			if depth == 0 && stopAtWhile {
+				break headerScan
+			}
+		case lexer.TOKEN_IDENT:
+			if depth == 0 && stopAtWhile && p.tokens[end].Text == "for" {
 				break headerScan
 			}
 		}
@@ -454,7 +512,7 @@ func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 
 // --- desugar -------------------------------------------------------------------------
 
-func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, states []machineState, startState string, startArgs []ast.Expr, startSeen bool, arms []machineArm) ast.Stmt {
+func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forHeader *machineForHeader, states []machineState, startState string, startArgs []ast.Expr, startSeen bool, arms []machineArm) ast.Stmt {
 	stateByName := map[string]*machineState{}
 	for i := range states {
 		st := &states[i]
@@ -669,10 +727,32 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, stat
 		loopBody = append(loopBody, &ast.MachineCoverageStmt{Position: pos, Input: input, States: coverageStates})
 	}
 	loopBody = append(loopBody, &ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: modeVar}, Arms: matchArms})
-	loop := &ast.WhileStmt{
-		Position: pos,
-		Cond:     loopCond,
-		Body:     loopBody,
+	// A one-state, wildcard, payload-free self-loop is the machine spelling of a
+	// structured loop body.  Lower it directly: there is no runtime state to
+	// represent or dispatch, while evaluating `over` once per iteration preserves
+	// observable semantics. This is the key zero-overhead path for incremental
+	// replacement of ordinary loops.
+	if forHeader != nil && len(states) == 1 && len(arms) == 1 && len(states[0].fields) == 0 &&
+		arms[0].state == states[0].name && arms[0].inputWild && arms[0].guard == nil &&
+		arms[0].exit == machineExitTransition && arms[0].target == states[0].name && len(arms[0].args) == 0 {
+		lowered := p.lowerMachineArm(&arms[0], &states[0], stateByName, enumMember, inputVar, modeVar)
+		loopBody = append([]ast.Stmt{&ast.ExprStmt{Expr: input}}, lowered.body...)
+		decls = nil
+	}
+	var loop ast.Stmt
+	if forHeader != nil {
+		if forHeader.rangeEnd != nil {
+			name, ok := forHeader.pattern.(*ast.MoveBindNamePattern)
+			if !ok {
+				p.errorf("machine range driver requires a simple loop binding")
+				name = &ast.MoveBindNamePattern{Position: forHeader.pos, Name: "_"}
+			}
+			loop = &ast.ForStmt{Position: forHeader.pos, Name: name.Name, Start: forHeader.source, End: forHeader.rangeEnd, Op: forHeader.rangeOp, Body: loopBody}
+		} else {
+			loop = &ast.IterForStmt{Position: forHeader.pos, Pattern: forHeader.pattern, Mode: forHeader.mode, Source: forHeader.source, Body: loopBody}
+		}
+	} else {
+		loop = &ast.WhileStmt{Position: pos, Cond: loopCond, Body: loopBody}
 	}
 
 	hdr := &loopHeader{pos: pos, decls: decls, captures: sortedKeys(mutatedRoots), yield: yield}
