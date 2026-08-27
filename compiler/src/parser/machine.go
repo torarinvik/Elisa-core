@@ -148,7 +148,7 @@ func (p *Parser) parseMachineStmt() ast.Stmt {
 			if len(arms) > 0 || startSeen {
 				p.errorf("machine `state` declarations must precede `start` and the arms")
 			}
-			states = append(states, p.parseMachineStateDecl())
+			states = append(states, p.parseMachineStateDecls()...)
 			continue
 		case "start":
 			p.advance()
@@ -234,6 +234,28 @@ func (p *Parser) parseMachineStateDecl() machineState {
 	}
 	p.expectNewline()
 	return st
+}
+
+// parseMachineStateDecls accepts either one typed declaration (`state Name(payload: T)`)
+// or a concise group of payload-less declarations (`state {A, B, C}`). The grouped form
+// is declaration sugar only; downstream machine validation sees the same state slice.
+func (p *Parser) parseMachineStateDecls() []machineState {
+	if p.pos+1 >= len(p.tokens) || p.tokens[p.pos+1].Kind != lexer.TOKEN_LBRACE {
+		return []machineState{p.parseMachineStateDecl()}
+	}
+	p.advance() // state
+	p.expect(lexer.TOKEN_LBRACE)
+	states := make([]machineState, 0, 4)
+	for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
+		nameTok := p.expect(lexer.TOKEN_IDENT)
+		states = append(states, machineState{pos: nameTok.Pos, name: nameTok.Text})
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE)
+	p.expectNewline()
+	return states
 }
 
 // tokenTextSpan joins the raw text of tokens[start:end) — used to compare type spellings

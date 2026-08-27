@@ -36,14 +36,14 @@ import (
 // `state(…)`, or `state: T` — none of which put a bare identifier directly after `state`.
 func (p *Parser) looksLikeStateDeclStmt() bool {
 	return p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "state" &&
-		p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT
+		p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_LBRACE)
 }
 
 // parseStateDeclStmt consumes a `state` declaration into pendingStateDecls and produces no
 // statement (nil) — the declaration is a parser directive that materializes as a synthesized
 // enum when a `start` consumes it. parseBlock skips nil statements.
 func (p *Parser) parseStateDeclStmt() ast.Stmt {
-	p.pendingStateDecls = append(p.pendingStateDecls, p.parseMachineStateDecl())
+	p.pendingStateDecls = append(p.pendingStateDecls, p.parseMachineStateDecls()...)
 	return nil
 }
 
@@ -74,14 +74,26 @@ func (p *Parser) parseStartExpr() ast.Expr {
 
 	enumName := "__StartStates_" + machineNameSuffix(pos)
 	variants := make([]ast.EnumVariantDecl, 0, len(states))
+	payloadless := true
 	for _, st := range states {
+		if len(st.fields) != 0 {
+			payloadless = false
+		}
 		payload := make([]ast.EnumPayloadDecl, 0, len(st.fields))
 		for _, f := range st.fields {
 			payload = append(payload, ast.EnumPayloadDecl{Position: f.pos, Name: f.name, Type: f.typ})
 		}
 		variants = append(variants, ast.EnumVariantDecl{Position: st.pos, Name: st.name, Payload: payload})
 	}
-	p.pendingDecls = append(p.pendingDecls, &ast.EnumDecl{Position: pos, Name: enumName, Variants: variants})
+	if payloadless {
+		members := make([]ast.ConstEnumMemberDecl, 0, len(states))
+		for _, st := range states {
+			members = append(members, ast.ConstEnumMemberDecl{Position: st.pos, Name: st.name})
+		}
+		p.pendingDecls = append(p.pendingDecls, &ast.ConstEnumDecl{Position: pos, Name: enumName, Members: members})
+	} else {
+		p.pendingDecls = append(p.pendingDecls, &ast.EnumDecl{Position: pos, Name: enumName, Variants: variants})
+	}
 
 	machine := p.parseMachineFromTail(pos, enumName, startState)
 	if mf, ok := machine.(*ast.MachineFromExpr); ok {
