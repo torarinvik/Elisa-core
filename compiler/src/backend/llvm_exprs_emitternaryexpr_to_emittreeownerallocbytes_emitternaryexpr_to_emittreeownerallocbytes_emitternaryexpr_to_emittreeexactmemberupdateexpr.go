@@ -207,6 +207,18 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 	if err != nil {
 		return nil, nil, err
 	}
+	// A large literal is built in MEMORY rather than as a first-class aggregate.
+	// `insertvalue` on a multi-KB struct makes LLVM scalarize the field it is
+	// inserting: a struct holding a 3.5KB field came out of the O2 pipeline as
+	// 3,200 byte-wise loads and 3,223 insertvalues in ONE basic block, and
+	// SelectionDAG is superlinear in block size -- 98% of an eighty-six second
+	// compile was AArch64 instruction selection on that one block. Built in
+	// memory, each big field goes in through storeValue (which already lowers a
+	// large aggregate to memcpy) and the single load at the end is turned into a
+	// memcpy by whatever stores it.
+	if sizeBytes, sizeErr := s.g.abiSizeOfType(structType); sizeErr == nil && sizeBytes >= largeStructLiteralMemoryThresholdBytes {
+		return s.emitStructLitExprInMemory(expr, structType, llvmType, fields)
+	}
 	value := C.LLVMGetUndef(llvmType)
 	for i, spread := range expr.Spreads {
 		if i > 0 {
@@ -242,6 +254,73 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		return nil, nil, err
 	}
 	return value, structType, nil
+}
+
+// largeStructLiteralMemoryThresholdBytes is the size at/above which a struct
+// literal is assembled through memory instead of `insertvalue`. Matched to
+// largeAggregateCopyMemcpyThresholdBytes so that a field big enough to be
+// memcpy'd is also big enough to be written straight into its slot.
+const largeStructLiteralMemoryThresholdBytes = largeAggregateCopyMemcpyThresholdBytes
+
+// emitStructLitExprInMemory assembles a struct literal field by field into a
+// stack slot and loads it back once. Semantically identical to the
+// `insertvalue` form -- Elisa aggregates are POD -- but every large field moves
+// as a memcpy rather than as thousands of scalar loads in one basic block.
+//
+// The slot is not zeroed first. Without a spread every field is written (the
+// value form errors when one is missing, and so does this), and with one the
+// spread overwrites the whole struct before the fields go in, so the only bytes
+// left untouched are PADDING -- which the value form leaves as `undef` anyway
+// and which nothing reads: struct equality is field-wise, and `memcmp` is used
+// only for byte views.
+func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, structType semantic.Type, llvmType C.LLVMTypeRef, fields []structLiteralField) (C.LLVMValueRef, semantic.Type, error) {
+	alloca, err := s.createTempStorage("structlit", structType)
+	if err != nil {
+		return nil, nil, err
+	}
+	for i, spread := range expr.Spreads {
+		if i > 0 {
+			return nil, nil, fmt.Errorf("struct literal lowering supports at most one non-pack struct spread")
+		}
+		spreadValue, spreadType, err := s.emitExpr(spread, structType)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !semantic.AssignableTo(structType, spreadType) {
+			return nil, nil, fmt.Errorf("struct literal spread expects %s, got %s", structType, spreadType)
+		}
+		if err := s.storeValue(alloca, spreadValue, structType, "structlit.spread"); err != nil {
+			return nil, nil, err
+		}
+	}
+	args := expr.LoweredArgs()
+	for i, arg := range args {
+		if i >= len(fields) {
+			break
+		}
+		if arg == nil {
+			// Supplied by the spread already stored above; without one the
+			// value form errors here, and so does this.
+			if len(expr.Spreads) != 0 {
+				continue
+			}
+			return nil, nil, fmt.Errorf("struct literal field %d was not resolved", i)
+		}
+		fieldValue, _, err := s.emitExpr(arg, fields[i].Type)
+		if err != nil {
+			return nil, nil, err
+		}
+		fieldPtr := C.LLVMBuildStructGEP2(s.builder, llvmType, alloca, C.unsigned(i), cStringFree("structlit.field.ptr"))
+		if err := s.storeValue(fieldPtr, fieldValue, fields[i].Type, "structlit.field"); err != nil {
+			return nil, nil, err
+		}
+	}
+	if st, ok := structType.(*semantic.StructType); ok {
+		if err := s.emitStructInvariantChecksAt(alloca, st); err != nil {
+			return nil, nil, err
+		}
+	}
+	return C.LLVMBuildLoad2(s.builder, llvmType, alloca, cStringFree("structlit.val")), structType, nil
 }
 
 // backendStructTypeOf unwraps a struct type, or a reference to one, to its *StructType (else nil).
