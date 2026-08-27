@@ -1322,12 +1322,33 @@ func (a *Analyzer) regionPolyCalleeFuncType(call *ast.CallExpr) *FuncType {
 	if name == "" {
 		return nil
 	}
-	sym, _, ok := a.lookupVisibleGlobal(name)
-	if !ok || sym == nil {
-		return nil
+	if sym, _, ok := a.lookupVisibleGlobal(name); ok && sym != nil {
+		if fnType, isFn := sym.Type.(*FuncType); isFn && fnType != nil {
+			return fnType
+		}
 	}
-	fnType, _ := sym.Type.(*FuncType)
-	return fnType
+	// A BARE sibling call inside `module M:` -- `label_text(x)` meaning `M::label_text`.
+	// lookupVisibleGlobal only finds it through a.currentNamespace, which is not set
+	// during this classification PRE-PASS, so the callee was invisible and its caller
+	// never got a region wrapped around it. The call then failed at analysis with
+	// "must occur where a region can be inferred", for a program that compiles
+	// unchanged when the same two functions sit at top level.
+	//
+	// Same fallback, and the same soundness argument, as the UFCS case above: the
+	// simple-name index covers module methods, and over-classifying the region decision
+	// costs at most an unused threaded region.
+	if a.regionPolyCandidateFnTypes != nil {
+		cands := a.regionPolyCandidateFnTypes[simpleTypeNameSegment(name)]
+		for _, ft := range cands {
+			if ft != nil && ft.RegionPolymorphic {
+				return ft
+			}
+		}
+		if len(cands) == 1 {
+			return cands[0]
+		}
+	}
+	return nil
 }
 
 // regionPolyProtocolMethodFuncType resolves `B.method(...)` — B a generic param of the
