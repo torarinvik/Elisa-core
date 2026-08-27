@@ -1002,19 +1002,15 @@ func (p *Parser) lowerMachineArm(arm *machineArm, st *machineState, stateByName 
 
 // lowerMachineTransition emits the payload assigns + mode rebind for `-> State(args)`.
 // With 2+ args, argument values are captured into temps BEFORE any field assign so
-// cross-referencing payloads (`-> Swap(b, a)`) read pre-transition values. No-op assigns
-// (`field <- field`, self-state mode rebinds) are elided to keep the lowering the exact
-// hand-written pilot shape.
+// cross-referencing payloads (`-> Swap(b, a)`) read pre-transition values. Payload assigns
+// are retained even when both identifiers have the same spelling: an arm-local may shadow
+// the destination state slot, so `-> Next(value)` is not necessarily a no-op.
 func lowerMachineTransition(arm *machineArm, target *machineState, enumMember func(lexer.Pos, string) ast.Expr, modeVar string) []ast.Stmt {
 	var out []ast.Stmt
 	values := arm.args
 	if len(arm.args) > 1 {
 		values = make([]ast.Expr, len(arm.args))
 		for i, a := range arm.args {
-			if id, ok := a.(*ast.Ident); ok && i < len(target.fields) && id.Name == target.fields[i].name {
-				values[i] = a // no-op assign, elided below — no temp needed
-				continue
-			}
 			tmp := fmt.Sprintf("__machine_arg_%d_%d", arm.targetPos.Offset, i)
 			out = append(out, &ast.VarDeclStmt{Position: arm.targetPos, Name: tmp, Value: a})
 			values[i] = &ast.Ident{Position: arm.targetPos, Name: tmp}
@@ -1023,9 +1019,6 @@ func lowerMachineTransition(arm *machineArm, target *machineState, enumMember fu
 	for i, f := range target.fields {
 		if i >= len(values) {
 			break
-		}
-		if id, ok := values[i].(*ast.Ident); ok && id.Name == f.name {
-			continue // `depth <- depth` self-assign elided
 		}
 		out = append(out, &ast.AssignStmt{Position: arm.targetPos, Target: &ast.Ident{Position: arm.targetPos, Name: f.name}, Value: values[i]})
 	}

@@ -218,6 +218,32 @@ func TestMachineRefusalBranchInArm(t *testing.T) {
 	}
 }
 
+func TestMachineTransitionCopiesShadowingArmLocal(t *testing.T) {
+	pos := lexer.Pos{Offset: 17}
+	arm := &machineArm{
+		state:     "Read",
+		target:    "Ready",
+		targetPos: pos,
+		args:      []ast.Expr{&ast.Ident{Position: pos, Name: "value"}},
+	}
+	target := &machineState{name: "Ready", fields: []machineField{{name: "value"}}}
+	stmts := lowerMachineTransition(arm, target, func(p lexer.Pos, name string) ast.Expr {
+		return &ast.Ident{Position: p, Name: name}
+	}, "mode")
+	if len(stmts) != 2 {
+		t.Fatalf("shadowing transition emitted %d statements, want payload copy plus mode rebind", len(stmts))
+	}
+	assign, ok := stmts[0].(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("first transition statement = %T, want AssignStmt", stmts[0])
+	}
+	targetIdent, targetOK := assign.Target.(*ast.Ident)
+	valueIdent, valueOK := assign.Value.(*ast.Ident)
+	if !targetOK || !valueOK || targetIdent.Name != "value" || valueIdent.Name != "value" {
+		t.Fatalf("shadowing payload copy = %#v, want value <- value", assign)
+	}
+}
+
 // A `machine from` arm body must be straight-line — a nested branch before the
 // `next`/`done` terminator is the confirmed docs/125 §5 soundness hole (R1 for the
 // expression form). This mirrors TestMachineRefusalBranchInArm for `machine over`.
