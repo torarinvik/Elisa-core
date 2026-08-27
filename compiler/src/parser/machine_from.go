@@ -24,7 +24,8 @@ import (
 //
 // `machine` stays a contextual keyword; the `from` form is recognized only when the ident
 // `from` immediately follows (no legal expression puts two bare identifiers in sequence).
-// `next`/`done` are contextual arm terminators. Statement-position `machine from` is not
+// `->`/`=>` are the canonical transition/result terminators; `next`/`done` remain
+// source-compatible aliases. Statement-position `machine from` is not
 // intercepted by the statement dispatcher (it checks `over`), so it flows through as an
 // ordinary expression statement.
 
@@ -180,14 +181,15 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "next" || p.cur().Text == "done") {
+		if p.peek() == lexer.TOKEN_ARROW || p.peek() == lexer.TOKEN_FATARROW ||
+			(p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "next" || p.cur().Text == "done")) {
 			terminators = append(terminators, p.parseMachineFromTerminator())
 			continue
 		}
 		if len(terminators) > 0 {
 			// A plain statement after a transition can never run — the arm has already
 			// resolved on every path that reaches here.
-			p.errorf("machine arm statement follows a `next`/`done` transition — nothing after a resolution can run (docs/125 §5)")
+			p.errorf("machine arm statement follows a transition/result terminator — nothing after a resolution can run (docs/125 §5)")
 		}
 		stmt := p.parseStmt()
 		p.validateMachineFromArmStmt(stmt)
@@ -200,8 +202,8 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 
 func (p *Parser) parseMachineFromTerminator() ast.MachineFromTerminator {
 	pos := p.cur().Pos
-	kind := p.advance().Text // next | done
-	term := ast.MachineFromTerminator{Position: pos, IsDone: kind == "done"}
+	token := p.advance() // -> | => | next | done
+	term := ast.MachineFromTerminator{Position: pos, IsDone: token.Kind == lexer.TOKEN_FATARROW || token.Text == "done"}
 	if term.IsDone {
 		// The value is bounded at a top-level `if` (the guard) so `done 1 if c` parses
 		// as `done (1) if (c)`, not the else-less ternary `1 if c`.

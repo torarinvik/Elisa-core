@@ -234,13 +234,13 @@ def classify(x: i64) -> i64:
     state End(val: i64)
     return start Start:
         Start:
-            next Mid(true) if x > 0
-            next Mid(false)
+            -> Mid(true) if x > 0
+            -> Mid(false)
         Mid(flag):
-            next End(10) if flag
-            next End(20)
+            -> End(10) if flag
+            -> End(20)
         End(val):
-            done val
+            => val
 
 def set(i: i32) -> void:
     CHANGED[i.usize()] <- 1
