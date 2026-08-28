@@ -300,7 +300,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 	typeParams, regionParams, permissionParams, genericParams := p.parseFuncGenericParams()
 
 	p.expect(lexer.TOKEN_LPAREN)
-	params, _ := p.parseExplicitSignatureParamList(true, false)
+	params, variadic := p.parseExplicitSignatureParamList(true, true)
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var retType ast.TypeExpr
@@ -367,7 +367,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	fn := &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, ReturnType: retType, Body: body}
+	fn := &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, Variadic: variadic, ReturnType: retType, Body: body}
 	// docs/120 §2: validate and erase a declared lmut-threading return manifest
 	// (`-> (ch: char, lexer: lmut Lexer)`) before anything downstream sees the type.
 	p.applyDeclaredLmutThreading(fn)
