@@ -576,9 +576,37 @@ def arena_tail_offset_slots(data_base: heap u8&, ptr: void&) -> usize:
     trusted Unsafe.PointerCast:
         return (ptr.cast[heap u8&].usize() - data_base.usize()) / size_of(uintptr)
 
+# Return true only when `ptr` is the complete most-recent allocation in `r`. The
+# ownership check is essential for chained arenas: an old pointer may belong to an
+# earlier block, and subtracting it from the current block's base would manufacture
+# an apparently valid offset. Keep the raw-address arithmetic in this one trusted
+# helper so arena_realloc can use the same proof for every strategy.
+@internal
+def arena_region_is_tail_allocation(r: heap Region&, ptr: void&, size_bytes: usize) -> bool:
+    trusted Unsafe.PointerCast:
+        base: uintptr = arena_heap_u8_from_region_data(r).uintptr()
+        raw: uintptr = ptr.cast[heap u8&].uintptr()
+        end_raw: uintptr = raw + size_bytes.uintptr()
+        limit: uintptr = base + (r.capacity * size_of(uintptr)).uintptr()
+        return raw >= base and end_raw <= limit and end_raw == base + (r.count * size_of(uintptr)).uintptr()
+
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         arena_heap_void_from_mutable(oldptr) return if newsz <= oldsz
+
+        old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
+        new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
+
+        # A darray grows by reallocating its most recent backing allocation in the
+        # active arena. Reclaim that tail in place whenever the current block owns it;
+        # otherwise the old block may be earlier in a chained arena and cannot move.
+        # This is the general path, not just the stable reserve/fixed path, and avoids
+        # retaining one dead backing allocation for every geometric growth step.
+        if a.end != null and arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
+            if new_slots <= a.end.capacity - a.end.count:
+                a.end.count <- a.end.count + (new_slots - old_slots)
+                arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+                return arena_heap_void_from_mutable(oldptr)
 
         # RESERVE_COMMIT / FIXED grow in place: the base must never move (interior-pointer
         # stability, docs/68 §4). When oldptr is the region's tail allocation we just advance
@@ -588,14 +616,11 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         # invalidate references the type system already proved stable.
         if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
             assert a.end != null
-            old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
-            new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
-            data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
-            old_offset_slots: usize = arena_tail_offset_slots(data_base, oldptr)
-            if old_offset_slots + old_slots == a.end.count:
-                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if old_offset_slots + new_slots > a.end.capacity
-                a.end.count <- old_offset_slots + new_slots
-                # Windows: page-in the bytes the grown tail now spans (no-op elsewhere).
+            if arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
+                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if new_slots > a.end.capacity - a.end.count
+                # The successful tail case returns above; this branch is retained as
+                # an explicit invariant guard if the allocator representation changes.
+                a.end.count <- a.end.count + (new_slots - old_slots)
                 arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
                 return arena_heap_void_from_mutable(oldptr)
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
