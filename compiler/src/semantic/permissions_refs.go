@@ -385,16 +385,15 @@ func (a *Analyzer) recordFunctionPermissionRefs(refs []ast.PermissionRef) {
 	a.recordFunctionPermissionFamilies(permissionFamiliesFromRefs(refs))
 }
 
+// filterOutTrustedStdlibPermissionRefs removes only implementation-only effects
+// from a trusted runtime function's public row. Memory.Allocate/Release and
+// Abort.Panic are part of the allocator's public contracts (and are therefore
+// intentionally retained); erasing them would make callers appear effect-free
+// and would break the runtime API's permission accounting.
 func filterOutTrustedStdlibPermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 	out := refs[:0:0]
 	for _, ref := range refs {
 		if ref.Name == "Unsafe" {
-			continue
-		}
-		if ref.Name == "Memory" && (ref.Member == "Allocate" || ref.Member == "Release") {
-			continue
-		}
-		if ref.Name == "Abort" && ref.Member == "Panic" {
 			continue
 		}
 		out = append(out, ref)

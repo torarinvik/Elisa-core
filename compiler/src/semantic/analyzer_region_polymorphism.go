@@ -1067,11 +1067,23 @@ func (a *Analyzer) defineRegionParamValueSymbols(fn *ast.FuncDecl) {
 
 // regionPolymorphicCallerRegionArg produces the expression that threads the caller's ambient inferred
 // region into a region-polymorphic call. When the caller is itself region-polymorphic, its hidden
-// `__region_auto` parameter carries the region through. Otherwise the active `in auto:` region (the
-// same one `new[auto]` allocates into) supplies it. Returns false when no region is active.
+// `__region_auto` parameter carries the region through. An explicit region-polymorphic caller such as
+// `def f[@r](out: mutable darray[T]& @r)` carries the same ambient region in its declared region
+// parameter; use that value before looking for an `in auto:` scope. Otherwise the active `in
+// auto:` region (the same one `new[auto]` allocates into) supplies it. Returns false when no region
+// is active.
 func (a *Analyzer) regionPolymorphicCallerRegionArg() (ast.Expr, bool) {
 	if a.currentFuncType != nil && a.currentFuncType.RegionPolymorphic {
 		return &ast.Ident{Name: regionPolymorphicImplicitParamName}, true
+	}
+	// A function with an explicit region parameter has a caller-owned region even when it is
+	// not classified as a value-returning region-polymorphic function. This is the common
+	// out-param/grower shape: a helper returning a fresh AST/container value may be called from
+	// the @r function, and the result must be allocated in the same @r region before it is
+	// stored through the caller-owned out parameter. The parser defines each RegionParam as a
+	// value-level Arena symbol, so an identifier is the correct hidden argument expression.
+	if a.currentFuncType != nil && len(a.currentFuncType.RegionParams) == 1 {
+		return &ast.Ident{Name: a.currentFuncType.RegionParams[0]}, true
 	}
 	if region := a.activeContainerRegionName(); region != "" {
 		return &ast.Ident{Name: region}, true

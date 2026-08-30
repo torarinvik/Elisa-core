@@ -40,6 +40,7 @@ error RuntimeError:
 
 # ArenaFreeBlock is the intrusive free-list header used when arena_realloc moves
 # a non-tail darray backing allocation.
+@intrusive
 struct ArenaFreeBlock:
     next: mutable heap ArenaFreeBlock&?
     slots: mutable usize
@@ -213,7 +214,7 @@ extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
 extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
 
-const ARENA_DA_INIT_CAP: usize = 256
+const ARENA_DA_INIT_CAP: usize = 8
 
 const DICT_INIT_CAP: usize = 8
 

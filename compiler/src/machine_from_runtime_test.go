@@ -265,3 +265,40 @@ def state_start_sugar() -> void:
 	exit, stdout, stderr := runStressProgram(t, "machine_from_state_start", body)
 	assertAllPassed(t, exit, stdout, stderr, "state_start_sugar")
 }
+
+// A machine arm may call a region-polymorphic builder that returns a nested darray and then
+// store that result in the machine's driven resource. This is the runtime shape emitted by
+// stage1's machine-expression parser helpers; keep it in the stage0 oracle as well so the two
+// compilers cannot silently diverge on region adoption or nested aggregate copying.
+func TestMachineOverRegionPolymorphicReturnRuntime(t *testing.T) {
+	body := `
+def make_row[@r](owner: mutable darray[darray[i64]]& @r, width: i64) -> darray[i64] @r:
+    row: mutable darray[i64] @r = []
+    for i in 0..<width:
+        row.push(i)
+    return row
+
+def build[@r](rows: mutable darray[darray[i64]]& @r) -> void:
+    states: mutable darray[i64] = []
+    states.push(0)
+    machine over rows for state in states:
+        state Build
+        start Build
+
+        Build, _:
+            row: darray[i64] @r = make_row(rows, 4)
+            rows.push(row)
+            -> Build
+
+@test
+def nested_machine_region_return() -> void:
+    can Memory.Allocate, Abort.Panic:
+        rows: mutable darray[darray[i64]] = []
+        build(rows) can Memory.Allocate, Abort.Panic
+        row: darray[i64] = rows[0] can Unsafe.UncheckedIndex
+        if row.count != 4:
+            panic("machine arm lost region-polymorphic nested darray return")
+`
+	exit, stdout, stderr := runStressProgram(t, "machine_over_region_return", body)
+	assertAllPassed(t, exit, stdout, stderr, "nested_machine_region_return")
+}

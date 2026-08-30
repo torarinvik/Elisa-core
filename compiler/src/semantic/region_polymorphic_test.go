@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -129,5 +130,30 @@ def make() -> i64:
 	fn := regionPolymorphicFuncType(t, result, "make")
 	if fn.RegionPolymorphic {
 		t.Fatalf("returning a scalar field copy must NOT make a function region-polymorphic")
+	}
+}
+
+// An explicit region-parameter function is also a valid caller context for a
+// region-polymorphic builder. This is the out-parameter shape used by the
+// machine lowering helpers: the builder's fresh AST/container result must be
+// allocated in the caller's @r region before it is pushed through `out`.
+// Previously regionPolymorphicCallerRegionArg only recognized a hidden
+// __region_auto caller or an active `in NAME:` scope, so this sound program was
+// rejected as having no region in which to instantiate the callee.
+func TestRegionPolymorphicCallFromExplicitRegionParam(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "rp_explicit_region_caller.elisa", `def make_row(width: usize) -> darray[i64]:
+    row: mutable darray[i64] = []
+    i: mutable usize = 0
+    while i < width:
+        row.push(i.i64())
+        i <- i + 1
+    return row
+
+def append_row[@r](rows: mutable darray[darray[i64]]& @r, width: usize) -> void:
+    row: darray[i64] @r = make_row(width)
+    rows.push(row)
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("an explicit region-param caller must be able to call a region-polymorphic builder, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

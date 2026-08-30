@@ -1,0 +1,15 @@
+include "../runtime/elisacore_std/elisacore_runtime.elisa"
+
+@test
+def arena_capacity_local_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        arena: mutable Arena = zeroed
+        in arena:
+            xs: mutable darray[i64] @arena = []
+            xs.push(7)
+            used: usize = arena_used_slots(&arena)
+            if used == 8:
+                return
+            if used == 256:
+                panic("local runtime selected the stale 256-slot darray seed")
+            panic("local runtime selected an unexpected darray seed")

@@ -22,10 +22,11 @@ func (i *Interpreter) zeroValueForType(typ ast.TypeExpr) (Value, error) {
 		case "f32", "f64":
 			return FloatValue(0), nil
 		case "Arena":
-			return StructInstanceValue("Arena", []string{"begin", "end", "end_index"}, map[string]Value{
+			return StructInstanceValue("Arena", []string{"begin", "end", "end_index", "strategy"}, map[string]Value{
 				"begin":     NullValue(),
 				"end":       NullValue(),
 				"end_index": IntValue(0),
+				"strategy":  IntValue(0),
 			}), nil
 		case "ArenaMark":
 			return StructInstanceValue("ArenaMark", []string{"region", "count"}, map[string]Value{

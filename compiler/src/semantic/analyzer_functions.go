@@ -271,8 +271,6 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		fnType.FreshReturnShapeParams = mergeShapeParamNames(fnType.FreshReturnShapeParams, inferredFreshReturnShapeParams(a.returnFreshShapeStatus))
 		inferredRefs := canonicalizePermissionRefs(a.currentFunctionUsedPermissionRefs)
 		inferredPermissions := permissionFamiliesFromRefs(inferredRefs)
-		fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
-		fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 		// Trusted-runtime ENCAPSULATION: the stdlib implements safe abstractions with
 		// raw-memory/panic internals, so those implementation details are not propagated
 		// into the function's public signature (like Rust's `std` not being `unsafe` to
@@ -281,6 +279,9 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 		if a.enforceUnsafePermissions && fn != nil && isRuntimeStdPermissionInternal(fn.Pos().File) {
 			fnType.PermissionRefs = filterOutTrustedStdlibPermissionRefs(fnType.PermissionRefs)
 			fnType.Permissions = permissionFamiliesFromRefs(fnType.PermissionRefs)
+		} else {
+			fnType.PermissionRefs = mergePermissionRefs(fnType.DeclaredPermissionRefs, inferredRefs)
+			fnType.Permissions = mergePermissionFamilies(fnType.DeclaredPermissions, inferredPermissions)
 		}
 		a.checkHotContract(fn, fnType)
 		a.checkPerfContracts(fn, fnType)
