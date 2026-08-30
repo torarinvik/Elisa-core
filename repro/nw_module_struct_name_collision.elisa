@@ -1,0 +1,43 @@
+# FIXED. Two modules may now each declare a `Work`.
+#
+# Struct names shared ONE flat table keyed by bare name, so the second `Work`
+# overwrote the first and stage1 reported
+#
+#   struct literal "Work" is missing field "tally"
+#
+# for a program stage0 compiles and runs. Fixed in the compiler repo
+# (0d778490) across all three phases that key structs by name: the parser
+# records an owner column, the backend keys rows by (owner, name) and mangles
+# the LLVM type name per owner, and the semantic table gained a parallel module
+# column for its construct-site field checks.
+#
+# The note below said struct rows are shared "so Grade's and Score's records
+# are deliberately named differently" in the CONST fixture. That is still true
+# of that fixture, and no longer necessary -- it is left as it is because it
+# tests constants, and a fixture that fails for two reasons tells you less.
+#
+# Kept as a runnable check: it must exit 23.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+module Grade:
+    struct Work:
+        total: mutable i64
+
+    def Work() -> Work:
+        can Abort.Panic:
+            return Work{total: 3}
+
+module Score:
+    struct Work:
+        tally: mutable i64
+
+    def Work() -> Work:
+        can Abort.Panic:
+            return Work{tally: 20}
+
+def main() -> i64:
+    can Abort.Panic:
+        g: Grade::Work = Grade::Work()
+        s: Score::Work = Score::Work()
+        return g.total + s.tally

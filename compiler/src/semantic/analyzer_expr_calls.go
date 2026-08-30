@@ -195,6 +195,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		a.recordBuiltinHelperFuncType(expr, callIdentName(expr), helperType)
 		return helperType
 	}
+	a.rewriteEnclosingNamespaceCallee(expr)
 	a.rewriteQualifiedFunctionCallee(expr)
 	if enumType, variant, ok := a.enumConstructorCall(expr); ok {
 		if variant == nil {
@@ -297,6 +298,47 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 		return invalidType
 	}
 	return a.analyzeResolvedCallExprWithExpected(expr, ft, orderedArgs, expected)
+}
+
+// rewriteEnclosingNamespaceCallee renames a BARE callee to the enclosing module's own
+// member, when that module has one: inside `module M:`, `add(...)` means M's `add`.
+//
+// Identifier resolution reaches the global scope through the ordinary scope chain, so a
+// top-level or stdlib definition of the name was found there and returned before the
+// enclosing module was consulted. stage0 therefore bound a module member's call to its
+// own sibling to the stdlib generic:
+//
+//	module Box:
+//	    def add(s: mutable Sack&, v: i64): ...
+//	    def fill(s: mutable Sack&):
+//	        add(s, 7)      # argument 1 to "add" expects mutable Flags[T]&
+//
+// while the self-hosted stage1 resolved it correctly. Two compilers disagreeing about a
+// module member calling its own sibling by its own name.
+//
+// It renames rather than just resolving the type. Preferring the member in ident
+// analysis alone type-checked the call against M's signature while codegen still emitted
+// the stdlib symbol -- the repro compiled and returned 0 instead of 7. Renaming keeps the
+// type and the emitted symbol the same function.
+//
+// Locals and parameters still shadow (enclosingNamespaceMember declines when one exists),
+// so a `fn`-typed local named `add` is still what `add(...)` calls.
+func (a *Analyzer) rewriteEnclosingNamespaceCallee(expr *ast.CallExpr) {
+	if a == nil || expr == nil || expr.Func == nil {
+		return
+	}
+	ident, ok := expr.Func.(*ast.Ident)
+	if !ok || ident == nil {
+		return
+	}
+	sym, qualified, ok := a.enclosingNamespaceMember(ident.Name)
+	if !ok || sym == nil || qualified == ident.Name {
+		return
+	}
+	if _, isFunc := sym.Type.(*FuncType); !isFunc {
+		return
+	}
+	expr.Func = &ast.Ident{Position: ident.Position, Name: qualified}
 }
 
 func (a *Analyzer) rewriteQualifiedFunctionCallee(expr *ast.CallExpr) {
