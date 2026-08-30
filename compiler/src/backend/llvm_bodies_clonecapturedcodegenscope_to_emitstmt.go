@@ -1018,7 +1018,12 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 				C.LLVMBuildRet(s.builder, successValue)
 				return nil
 			}
-			C.LLVMBuildRetVoid(s.builder)
+			if s.mainReturnsStatus {
+				zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+				C.LLVMBuildRet(s.builder, zero)
+			} else {
+				C.LLVMBuildRetVoid(s.builder)
+			}
 			return nil
 		}
 		// When the function returns a reference (`T&`), pass that as the expected type so
