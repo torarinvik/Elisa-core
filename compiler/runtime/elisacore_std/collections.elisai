@@ -38,6 +38,12 @@ const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 error RuntimeError:
     OutOfMemory
 
+# ArenaFreeBlock is the intrusive free-list header used when arena_realloc moves
+# a non-tail darray backing allocation.
+struct ArenaFreeBlock:
+    next: mutable heap ArenaFreeBlock&?
+    slots: mutable usize
+
 struct Region:
     next: mutable heap Region&?
     count: mutable usize
@@ -46,6 +52,7 @@ struct Region:
     owner_next: mutable heap Region&?
     global_index: mutable usize
     committed: mutable usize
+    free_list: mutable heap ArenaFreeBlock&?
     data: tail uintptr
 
 struct Arena:
