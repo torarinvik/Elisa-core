@@ -171,6 +171,7 @@ func (p *Parser) parseWaitAllStmt() ast.Stmt {
 		},
 	}
 }
+
 // parseNotifyStmt recognizes the removed `notify one` / `notify all` condition-variable
 // notification statement and rejects it. The sugar desugared to a raw `notify_one` /
 // `notify_all` CondVar call, which the analyzer already rejects for user code as removed
@@ -1147,6 +1148,25 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	pos := p.cur().Pos
 	p.expectIdentText("can")
 	permissions := p.parsePermissionRefs(false)
+	var handlerName string
+	var handlerArgs []ast.Expr
+	if p.match(lexer.TOKEN_WITH) {
+		handlerName = p.expect(lexer.TOKEN_IDENT).Text
+		// A zero-capture handler may be installed as `with Noop` as well as
+		// `with Noop()`. Keeping both forms preserves the concise static-handler
+		// spelling without changing the AST or lowering strategy.
+		if p.match(lexer.TOKEN_LPAREN) {
+			if p.peek() != lexer.TOKEN_RPAREN {
+				for {
+					handlerArgs = append(handlerArgs, p.parseExpr())
+					if !p.match(lexer.TOKEN_COMMA) {
+						break
+					}
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN)
+		}
+	}
 	var asTarget string
 	if p.match(lexer.TOKEN_AS) {
 		asTarget = p.expect(lexer.TOKEN_IDENT).Text
@@ -1157,7 +1177,7 @@ func (p *Parser) parseCanStmt() *ast.CanStmt {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	body := p.parseBlock()
-	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body, As: asTarget}
+	return &ast.CanStmt{Position: pos, Permissions: permissions, Body: body, As: asTarget, HandlerName: handlerName, HandlerArgs: handlerArgs}
 }
 func (p *Parser) parseTrustedStmt() *ast.CanStmt {
 	pos := p.cur().Pos

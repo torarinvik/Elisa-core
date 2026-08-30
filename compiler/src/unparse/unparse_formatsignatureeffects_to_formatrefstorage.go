@@ -16,10 +16,25 @@ func formatPermissionRefs(refs []ast.PermissionRef) string {
 	return " can[" + strings.Join(parts, ", ") + "]"
 }
 func formatPermissionRef(ref ast.PermissionRef) string {
-	if ref.Member != "" {
-		return ref.Name + "." + ref.Member
+	name := ref.Name
+	if len(ref.TypeArgs) != 0 {
+		parts := make([]string, 0, len(ref.TypeArgs))
+		for _, arg := range ref.TypeArgs {
+			parts = append(parts, formatTypeExpr(arg))
+		}
+		name += "[" + strings.Join(parts, ", ") + "]"
 	}
-	return ref.Name
+	if ref.Member != "" {
+		name += "." + ref.Member
+	}
+	if len(ref.Via) != 0 {
+		parts := make([]string, 0, len(ref.Via))
+		for _, via := range ref.Via {
+			parts = append(parts, formatPermissionRef(via))
+		}
+		name += " via " + strings.Join(parts, ", ")
+	}
+	return name
 }
 func formatPermissionRefSurfaceList(refs []ast.PermissionRef) string {
 	if len(refs) == 0 {
@@ -27,11 +42,7 @@ func formatPermissionRefSurfaceList(refs []ast.PermissionRef) string {
 	}
 	parts := make([]string, 0, len(refs))
 	for _, ref := range refs {
-		if ref.Member != "" {
-			parts = append(parts, ref.Name+"."+ref.Member)
-		} else {
-			parts = append(parts, ref.Name)
-		}
+		parts = append(parts, formatPermissionRef(ref))
 	}
 	return strings.Join(parts, ", ")
 }

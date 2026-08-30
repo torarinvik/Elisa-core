@@ -73,6 +73,15 @@ type PermissionRef struct {
 	Position lexer.Pos
 	Name     string
 	Member   string
+	// TypeArgs are the type arguments of an abstract effect reference such as
+	// `Writer[sview]`. They are deliberately retained separately from Name so
+	// an effect remains distinguishable from a concrete permission family.
+	TypeArgs []TypeExpr
+	// Via is the concrete realization of an abstract effect, for example
+	// `Writer[sview] via Console.Write`. It is metadata, not a second effect
+	// row: callers can still inspect the abstract operation while permission
+	// checking uses the concrete refs as needed.
+	Via []PermissionRef
 }
 type EnsuresConditionKind int
 

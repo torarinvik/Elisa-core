@@ -151,6 +151,8 @@ F CanStmt 2 Body
 F CanStmt 3 Permissions
 F CanStmt 4 Position
 F CanStmt 5 SuppressPermissionInference
+F CanStmt 6 HandlerArgs
+F CanStmt 7 HandlerName
 
 T 25 CastExpr
 F CastExpr 1 Operand
@@ -902,6 +904,11 @@ F ImplDecl 3 GenericParams
 F ImplDecl 4 InterfaceName
 F ImplDecl 5 Members
 F ImplDecl 6 Position
+F ImplDecl 7 HandlerEffect
+F ImplDecl 8 HandlerName
+F ImplDecl 9 HandlerParams
+F ImplDecl 10 HandlerStatic
+F ImplDecl 11 IsHandler
 
 T 136 ImportDecl
 F ImportDecl 1 Module
@@ -935,6 +942,8 @@ F InterfaceDecl 1 Bases
 F InterfaceDecl 2 Members
 F InterfaceDecl 3 Name
 F InterfaceDecl 4 Position
+F InterfaceDecl 5 GenericParams
+F InterfaceDecl 6 IsEffect
 
 T 141 IsAliasExpr
 F IsAliasExpr 1 Alias
@@ -1342,6 +1351,8 @@ T 208 PermissionRef
 F PermissionRef 1 Member
 F PermissionRef 2 Name
 F PermissionRef 3 Position
+F PermissionRef 4 TypeArgs
+F PermissionRef 5 Via
 
 T 209 PoolStmt
 F PoolStmt 1 Body

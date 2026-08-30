@@ -11,7 +11,8 @@ import (
 
 // A chained arena can reclaim a darray's old backing allocation when that
 // allocation is still the current block's tail. The small initial capacity also
-// ensures this exercises several geometric growth steps.
+// ensures this exercises several geometric growth steps; without reclamation,
+// repeated growth retains every predecessor.
 func TestRunCLIChainedDarrayGrowsAtArenaTail(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("clang"); err != nil {
@@ -35,8 +36,8 @@ def chained_realloc_runtime_test() -> void:
             after: usize = arena_used_slots(&arena)
             if xs.count != 257 or xs.capacity != 512:
                 panic("chained darray did not grow geometrically")
-			if before != 8:
-				panic("chained darray initial capacity was unexpected")
+            if before != 8:
+                panic("chained darray initial capacity was unexpected")
             if after != 512:
                 panic("chained darray tail growth accounting failed")
             if xs[0] != 7 or xs[256] != 256:
@@ -62,7 +63,6 @@ def chained_realloc_runtime_test() -> void:
 		}
 	}
 }
-
 // A non-tail darray backing allocation must be returned to its owning region
 // after the replacement is copied. This is the case that occurs when recursive
 // AST construction grows one side table after another allocation has already

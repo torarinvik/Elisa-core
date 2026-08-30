@@ -1,0 +1,27 @@
+# A bare `move x` statement, which discards the moved value and compiles to
+# NOTHING. stage0 emitted a silent no-op; stage1 already refused to build it.
+#
+# Found the hard way: `move` is a CONTEXTUAL keyword, so
+#
+#     def move(cells: mutable darray[i64]&): ...
+#     move(cells)                              # <- parses as `move (cells)`
+#
+# is the ownership operator applied to the parenthesised argument list. The
+# function is never called, nothing is emitted, and nothing is said. A task
+# port lost an hour to a physics step that silently never ran.
+#
+# `Module::move(...)` still resolves to the function and is unaffected.
+#
+# Expected: rejected, with the message naming both readings.
+
+include "../../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region w(1024 * 1024)
+        in w:
+            cells: mutable darray[i64] = []
+            cells.push(3)
+            move cells
+        destroy w
+        return 0

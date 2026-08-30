@@ -17,6 +17,11 @@ type PermissionSet struct {
 	Includes  []string // families this one subsumes (qualified names, transitive at query time)
 	Decl      *ast.PermissionDecl
 	Builtin   bool
+	// Abstract marks an algebraic effect family. Abstract effects share the
+	// permission lattice for checking and inference, but their operation calls
+	// are resolved through a static handler rather than a concrete capability.
+	Abstract bool
+	Effect   *ast.InterfaceDecl
 }
 
 type Shape interface {

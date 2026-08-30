@@ -248,6 +248,7 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 		a.validatePermissionStmts(n.Body, cloneGrantedPermissionFamilies(granted))
 	case *ast.CanStmt:
 		refs := a.resolvePermissionRefs(n.Permissions, false)
+		refs = a.addHandlerConcretePermissionRefs(n, refs)
 		if !n.SuppressPermissionInference {
 			a.warnOnRedundantLocalGrant(n.Pos(), "can block", refs, granted)
 		}

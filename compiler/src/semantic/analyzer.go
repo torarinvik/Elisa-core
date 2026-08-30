@@ -130,6 +130,7 @@ type Analyzer struct {
 	finalizingRefinements bool
 	staticInterfaces      map[string]*StaticInterface
 	staticImpls           map[string]*StaticImpl
+	effectHandlers        map[string]*EffectHandler
 	// regionPolyFn is the function under examination by the region-polymorphism
 	// classification pre-pass; it supplies the generic-param protocol bounds for
 	// resolving `B.method(...)` callees. Nil outside the pre-pass.
@@ -235,6 +236,7 @@ type Analyzer struct {
 	deathEscapeStats      map[string]DeathTimeEscapeStats
 	paramRetained         map[*ast.FuncDecl][]bool
 	paramStoreTargets     map[*ast.FuncDecl][]map[int]bool
+	handlerCaptureCounter uint64
 	recordDeathCohortsOpt bool
 	exprDenseNodeKeys     map[ast.Expr]DenseNodeKeyInfo
 	exprNodeTables        map[ast.Expr]NodeTableInfo
@@ -850,6 +852,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		namedTypes:                        map[string]Type{},
 		staticInterfaces:                  map[string]*StaticInterface{},
 		staticImpls:                       map[string]*StaticImpl{},
+		effectHandlers:                    map[string]*EffectHandler{},
 		extensionMethodsByName:            map[string][]*ExtensionMethod{},
 		ufcsFunctionsByName:               map[string][]*Symbol{},
 		permissions:                       map[string]*PermissionSet{},
@@ -951,6 +954,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectRefineAliases(activeDecls)
 	a.collectCapabilityAliases(activeDecls)
 	a.collectStaticInterfaces(activeDecls)
+	a.collectEffectPermissions(activeDecls)
+	a.collectEffectHandlers(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
 	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
@@ -976,6 +981,8 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		a.collectRefineAliases(generatedScopedDecls)
 		a.collectCapabilityAliases(generatedScopedDecls)
 		a.collectStaticInterfaces(generatedScopedDecls)
+		a.collectEffectPermissions(generatedScopedDecls)
+		a.collectEffectHandlers(generatedScopedDecls)
 		a.populateConstEnumMembers(generatedScopedDecls)
 		a.populateStructFields(generatedScopedDecls)
 		a.populateEnumVariants(generatedScopedDecls)

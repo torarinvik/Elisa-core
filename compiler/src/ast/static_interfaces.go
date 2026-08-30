@@ -5,6 +5,11 @@ import "elisacore/src/lexer"
 type InterfaceDecl struct {
 	Position lexer.Pos
 	Name     string
+	// IsEffect marks an abstract algebraic effect signature. Effects reuse the
+	// static protocol representation for operation signatures, but do not
+	// require a receiver data type or a runtime dictionary.
+	IsEffect      bool
+	GenericParams []GenericParam
 	// Bases names the protocols this protocol inherits from (`protocol Ord is Eq, Show:`).
 	// A type conforming to this protocol must also satisfy every base protocol; the base
 	// protocols' members (signatures and defaults) are folded into this protocol's member set.
@@ -38,6 +43,17 @@ type ImplDecl struct {
 	GenericParams []GenericParam
 	ForType       TypeExpr
 	Members       []ImplMember
+	// IsHandler marks a static realization of an abstract effect. Handler
+	// parameters are captured resources (for example `stream: Stream`), not a
+	// receiver value, and are prepended to each emitted operation method.
+	IsHandler     bool
+	HandlerName   string
+	HandlerParams []ParamDecl
+	HandlerEffect TypeExpr
+	// HandlerStatic is an explicit source marker (`handler static ...`). Static
+	// handlers are lowered to direct calls; the marker is retained so later
+	// handler modes cannot silently acquire a runtime representation.
+	HandlerStatic bool
 }
 
 type ImplMember interface {

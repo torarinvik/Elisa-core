@@ -1,0 +1,55 @@
+# Repro: a struct literal holding a large aggregate field took MINUTES to
+# compile at -O2, nearly all of it in AArch64 instruction selection.
+#
+#   elisacore -emit obj -O2 -o /tmp/x.o repro/large_struct_literal_insertvalue_isel_blowup.elisa
+#
+# Before the fix:   24s for these forty lines. On the algebra port's sweep it
+#                   was 86s, of which `llc -time-passes` reported 98.6% in
+#                   "AArch64 Instruction Selection" -- the `default<O2>`
+#                   pipeline itself took 1.1s of it.
+# After the fix:    under a second here, 9s there. Both exit 14, as they must.
+#
+# WHY. `emitStructLitExpr` assembled every literal as a first-class aggregate
+# with `insertvalue` per field. A field that is itself several kilobytes has to
+# be materialised as an aggregate VALUE to be inserted, so the O2 pipeline
+# scalarised the load: one `getelementptr` and one `load i8` per byte, plus an
+# `insertvalue` apiece, all in a single basic block. Measured on the algebra
+# port's `new_problem`: 3,200 byte loads and 3,223 insertvalues in ONE block of
+# 9,635 instructions. SelectionDAG builds a DAG per basic block and is
+# superlinear in its size, so that one block was the whole compile.
+#
+# The fix builds a large literal in MEMORY instead: each field is written
+# straight into its slot through `storeValue`, which already lowers a large
+# aggregate to `llvm.memcpy`, and the single load at the end is turned into a
+# memcpy by whatever stores it. Same semantics -- Elisa aggregates are POD --
+# and the largest block drops to a third of its size.
+#
+# The threshold is shared with `largeAggregateCopyMemcpyThresholdBytes`, so a
+# field big enough to be memcpy'd is also big enough to be written in place.
+
+struct Cell:
+    tag: mutable i64
+    digits: mutable u8[96]
+
+struct Row:
+    count: mutable i64
+    cells: mutable Cell[16]
+
+struct Holder:
+    live: mutable bool
+    label: mutable i64
+    first: mutable Row
+    second: mutable Row
+
+def blank_row() -> Row:
+    return Row{count: 0, cells: zeroed}
+
+def new_holder(label: i64) -> Holder:
+    return Holder{live: false, label: label, first: blank_row(), second: blank_row()}
+
+def main() -> i64:
+    can Abort.Panic:
+        held: mutable Holder = new_holder(7)
+        held.first.cells[3.usize()].tag <- 5
+        held.second.cells[9.usize()].tag <- 2
+        return held.label + held.first.cells[3.usize()].tag + held.second.cells[9.usize()].tag

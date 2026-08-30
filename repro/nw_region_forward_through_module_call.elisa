@@ -1,0 +1,66 @@
+# FIXED (stage0). Kept as a runnable end-to-end check: compile it, run it, and
+# it must exit 12. The Go regression lives in
+# compiler/src/semantic/region_module_qualified_forward_test.go, which asserts
+# the error is gone -- it does NOT check that the threaded region is the right
+# one, and this file does.
+#
+# What was wrong, and what my first note here got wrong.
+#
+# I recorded this as "Both compilers reject this; it is a language-level gap".
+# That was wrong on both counts. Measured:
+#
+#   stage0  -emit obj  ->  rejected: cannot infer region parameter "__rg_s"
+#   stage1  -emit exe  ->  compiles, runs, exits 12
+#
+# So it was a stage0 bug, and stage1 was already right.
+#
+# The cause: region-param inference resolved call targets through a map keyed by
+# the FuncDecl's Name. Flattening leaves a module member's Name BARE ("stow")
+# and carries "Box" alongside on the scopedDecl, while `Box::stow(...)` parses
+# to a single joined Ident, "Box.stow". Nothing ever matched, so `fill` never
+# learned it had to become region-polymorphic, and the call then had no region
+# to bind. The fix registers module members under the qualified name too.
+#
+# Why it mattered: it blocked module blocks for anything with a growable API.
+# Every renderer in nw-core takes `mutable DisplayList&` and forwards it, so
+# `Display::rect(list, ...)` could not be reached from a function that received
+# `list` as a parameter -- which is all of them.
+#
+# One thing measured on the way, worth keeping: the sibling shape
+#
+#     def grow(out: mutable darray[i64]&, v: i64):
+#         region scratch(32):
+#             in scratch:
+#                 out.push(v)
+#
+# looks like it grows the caller's container into an arena freed at return. It
+# does not: `out` is region-polymorphic, so the push goes to the THREADED
+# caller region and `in scratch:` is overridden. Verified by shrinking scratch
+# to 32 bytes -- far too small for the growth -- and getting the right answer
+# anyway. That shape was already accepted unqualified and at top level; this
+# fix only makes the qualified spelling agree.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+module Box:
+    struct Sack:
+        items: mutable darray[i64]
+
+    def stow(s: mutable Sack&, v: i64):
+        can Memory.Allocate, Abort.Panic:
+            s.items.push(v)
+
+def fill(s: mutable Box::Sack&):
+    can Memory.Allocate, Abort.Panic:
+        Box::stow(s, 12)
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region w(64 * 1024)
+        result: mutable i64 = 0
+        in w:
+            s: mutable Box::Sack = Box::Sack{items: []}
+            fill(&s)
+            result <- get s.items[0] else 0
+        destroy w
+        return result
