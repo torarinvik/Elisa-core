@@ -482,6 +482,7 @@ F FuncDecl 31 ReturnType
 F FuncDecl 32 Static
 F FuncDecl 33 TypeParams
 F FuncDecl 34 Uses
+F FuncDecl 35 Variadic
 
 T 72 FuncTypeExpr
 F FuncTypeExpr 1 Params

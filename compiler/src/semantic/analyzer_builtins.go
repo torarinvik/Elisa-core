@@ -70,6 +70,17 @@ func (a *Analyzer) registerBuiltinPermission(name string, members []string) {
 }
 
 func (a *Analyzer) registerBuiltinRuntimeStructs() {
+	// ArenaFreeBlock is the intrusive header written into reclaimed non-tail arena
+	// allocations by arena_realloc.  It is a runtime carrier just like Region: the
+	// runtime source declares its concrete shape, but the analyzer must pre-register
+	// that shape before Region is registered because Region's free_list points at it.
+	// Keeping this in the builtin table also prevents the source declaration from
+	// being treated as a second user-visible type and keeps stage0/stage1 ABI layouts
+	// identical when the runtime is compiled through either compiler.
+	a.registerBuiltinStructType("ArenaFreeBlock", nil, false, []builtinFieldSpec{
+		{name: "next", typ: heapRefTypeExpr("ArenaFreeBlock", true), mutable: true},
+		{name: "slots", typ: namedTypeExpr("usize", false), mutable: true},
+	})
 	a.registerBuiltinStructType("Thread", []string{"T", "S"}, true, []builtinFieldSpec{
 		{name: "handle", typ: namedTypeExpr("uintptr", false), mutable: true},
 		{name: "state", typ: refTypeExpr("void", true), mutable: true},
@@ -108,6 +119,11 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 		// reserve_commit/fixed lazy MEM_RESERVE+MEM_COMMIT path (arena.elisa). Must mirror the
 		// runtime Region struct field-for-field or the builtin shadows the source with a stale shape.
 		{name: "committed", typ: namedTypeExpr("usize", false), mutable: true},
+		// Reclaimed non-tail darray backing blocks are chained per region. This field is
+		// deliberately part of the builtin ABI shape; omitting it makes field accesses
+		// resolve against the old eight-field Region even though the runtime source has
+		// already grown to nine fields.
+		{name: "free_list", typ: heapRefTypeExpr("ArenaFreeBlock", true), mutable: true},
 		{name: "data", typ: namedTypeExpr("uintptr", false), isTail: true},
 	})
 	a.registerBuiltinStructType("Arena", nil, false, []builtinFieldSpec{
@@ -293,7 +309,7 @@ func astTypeGenericParams(typeParams []string) []ast.GenericParam {
 
 func isBuiltinRuntimeStructName(name string) bool {
 	switch name {
-	case "Thread", "Task", "ThreadPool", "TaskGroup", "Mutex", "MutexGuard", "CondVar", "atomic":
+	case "ArenaFreeBlock", "Thread", "Task", "ThreadPool", "TaskGroup", "Mutex", "MutexGuard", "CondVar", "atomic":
 		return true
 	case "Region", "Arena", "ArenaMark", "StringView", "DynArray", "DynArrayView", "DictBucket", "DynDict":
 		return true

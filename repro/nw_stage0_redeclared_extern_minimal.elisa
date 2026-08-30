@@ -1,0 +1,10 @@
+# Same symbol shape as nw_stage0_redeclared_extern_link, without the runtime
+# include. Keeping the incompatible declaration first reproduces the old
+# stage0 lowering path in isolation.
+extern getenv(name: u8&) -> u8&?
+extern getenv(name: cstr) -> u8&?
+
+def main() -> i64:
+    trusted Unsafe.RawExtern:
+        name: cstr = "PATH"
+        return 1 if getenv(name) is found else 0

@@ -1,0 +1,19 @@
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+# Reduced stage0 repro for a C symbol that is declared with two incompatible
+# Elisa parameter types. The cstr declaration is the ABI-correct binding used
+# by the runtime; the u8& declaration is intentionally incompatible and must
+# not turn the cstr call into an Elisa overload symbol.
+extern getenv(name: u8&) -> u8&?
+extern getenv(name: cstr) -> u8&?
+
+def probe() -> i64:
+    can Abort.Panic:
+        trusted Unsafe.RawExtern:
+            name: cstr = "PATH"
+            return 1 if getenv(name) is found else 0
+
+def main() -> i64:
+    can Console.Write, Abort.Panic:
+        print("duplicate extern link OK" if probe() >= 0 else "no")
+        return 0

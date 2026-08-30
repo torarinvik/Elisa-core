@@ -173,6 +173,9 @@ type FuncDecl struct {
 	// implies no fixed point, so assuming the equation would be unsound).
 	DecreasesWild string
 	Params        []ParamDecl
+	// Variadic marks a source-defined C-ABI variadic function (`def f(x: T, ...)`).
+	// The unnamed tail is available through the llvm.va_* intrinsic surface.
+	Variadic   bool
 	ReturnType    TypeExpr
 	Body          []Stmt
 	// LmutThreadSlots records the declared lmut-threading manifest (docs/120 §2): return-tuple

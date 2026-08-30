@@ -6,7 +6,10 @@ include "./deque.elisa"
 
 extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
 
-const ARENA_DA_INIT_CAP: usize = 256
+# Keep tiny AST/parser lists cheap. The arena allocator can reclaim non-tail
+# backing allocations, but avoiding oversized seed buffers still reduces cache
+# pressure and the amount of live memory touched by recursive AST construction.
+const ARENA_DA_INIT_CAP: usize = 8
 const DICT_INIT_CAP: usize = 8
 
 struct DynArray[T]:

@@ -58,11 +58,29 @@ func (g *llvmGenerator) applyTypeAlignment(value C.LLVMValueRef, t semantic.Type
 	C.elisacoreSetAlignment(value, C.uint(alignment))
 }
 func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef, error) {
+	return g.lowerFunctionTypeInternal(fn, false)
+}
+
+// lowerFunctionTypeForSymbol applies symbol-level ABI adaptations that do not belong
+// in semantic.FuncType. In particular, a source-level `void main` is still void to
+// Elisa callers, but the externally visible C entry point must return an i32 status.
+// Keeping this override at the declaration boundary preserves the language type while
+// making the process exit status deterministic.
+func (g *llvmGenerator) lowerFunctionTypeForSymbol(name string, fn *semantic.FuncType) (C.LLVMTypeRef, error) {
+	if name == "main" && fn != nil && isVoidType(fn.Return) {
+		return g.lowerFunctionTypeInternal(fn, true)
+	}
+	return g.lowerFunctionType(fn)
+}
+
+func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entryStatus bool) (C.LLVMTypeRef, error) {
 	if g == nil || fn == nil {
 		return nil, fmt.Errorf("missing function type for LLVM lowering")
 	}
-	if cached, ok := g.functionTypes[fn]; ok && cached != nil {
-		return cached, nil
+	if !entryStatus {
+		if cached, ok := g.functionTypes[fn]; ok && cached != nil {
+			return cached, nil
+		}
 	}
 	returnType, err := g.lowerFunctionReturnType(fn.Return)
 	if err != nil {
@@ -83,6 +101,9 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 	sretReturn := !isErrorUnionReturn && !nicheOptionalReturn && g.aggregateIsMemoryClassABI(fn.Return, cabi)
 	if sretReturn {
 		returnType = C.LLVMVoidTypeInContext(g.context)
+	}
+	if entryStatus {
+		returnType = C.LLVMInt32TypeInContext(g.context)
 	}
 	params := make([]C.LLVMTypeRef, 0, len(fn.Params)+1)
 	if unionType, ok := nonVoidErrorUnion(fn.Return); ok {
@@ -120,7 +141,9 @@ func (g *llvmGenerator) lowerFunctionType(fn *semantic.FuncType) (C.LLVMTypeRef,
 		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 	}
 	lowered := C.LLVMFunctionType(returnType, llvmTypeSlicePtr(params), C.unsigned(len(params)), boolToLLVMBool(fn.Variadic))
-	g.functionTypes[fn] = lowered
+	if !entryStatus {
+		g.functionTypes[fn] = lowered
+	}
 	return lowered, nil
 }
 func (g *llvmGenerator) lowerFunctionReturnType(t semantic.Type) (C.LLVMTypeRef, error) {

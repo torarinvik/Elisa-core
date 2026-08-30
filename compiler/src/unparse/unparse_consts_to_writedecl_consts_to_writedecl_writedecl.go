@@ -459,7 +459,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 				f.writeLine(level+1, "type "+m.Name+" = "+formatTypeExpr(m.Type))
 			case *ast.FuncDecl:
 				f.writeAnnotations(level+1, m.Annotations)
-				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, false)
+				header := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, m.Params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
 				if m.Override {
 					header = "override " + header
 				}
@@ -478,7 +478,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 	case *ast.FuncDecl:
 		f.writeAnnotations(level, n.Annotations)
-		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, false)
+		header := formatFuncHeader(n.Name, n.GenericParams, n.TypeParams, n.RegionParams, n.PermissionParams, n.Params, n.ReturnType, n.Permissions, n.Ensures, n.Variadic)
 		if n.Static {
 			header = "static " + header
 		}

@@ -42,9 +42,17 @@ test-full:
 	@echo ">>> FULL SUITE — this is the ~8-minute run (elisacore/src native-runtime tests). <<<"
 	go test -p 1 ./src/...
 
-# build: build + install the elisac binary.
+# build: build the local worktree binary.  Keep this target local so compiler
+# dogfooding cannot overwrite the user's installed compiler or race another
+# worktree.  Use `make install` only when an explicit installation is wanted.
 .PHONY: build
 build:
+	mkdir -p bin
+	go build -o bin/elisac ./src
+
+# install: explicit opt-in installation for users who really want it.
+.PHONY: install
+install:
 	mkdir -p $${HOME}/.elisac
 	go build -o $${HOME}/.elisac/elisac ./src
 
@@ -54,4 +62,5 @@ help:
 	@echo "make test-semantic verification/prover blast radius (~10s)"
 	@echo "make test-prover   semantic + smt"
 	@echo "make test-full     FULL suite, SLOW ~8min (pre-commit only)"
-	@echo "make build         build+install elisac"
+	@echo "make build          build local compiler -> compiler/bin/elisac"
+	@echo "make install        explicitly install -> ~/.elisac/elisac"

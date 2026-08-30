@@ -42,8 +42,9 @@ Changed files:
 
 NOTE: `worktrees/elisa-compiler-nw` is a worktree of `Elisa Projects/Elisa-compiler`
 and another agent works in that repo's main worktree. Commit on the nw-port branch
-only. Never `make build` from a worktree — it installs over ~/.elisac/elisac,
-which is theirs.
+only. `make build` from a worktree writes `compiler/bin/elisac` locally; use the
+explicit `make install` target only when an installed compiler is intentionally
+being updated.
 
 ## Then: the port work that was BLOCKED all session
 
@@ -87,6 +88,6 @@ write them without the reference source.
   * repro/nw_stage1_accepts_unsatisfied_protocol_bound.elisa — stage1 is more
     permissive than stage0 on an unsatisfied generic bound (missing check, not a
     miscompile).
-  * repro/nw_stage1_redeclared_extern_signature.elisa notes a SEPARATE stage0
-    defect: it compiles a redeclared extern but the object does not link
-    (`___ovl__getenv__cstr__getenv`).
+  * repro/nw_stage1_redeclared_extern_signature.elisa records the stage1
+    redeclared-extern fix; stage0's native-link-name regression is fixed and
+    reduced in `repro/nw_stage0_redeclared_extern_minimal.elisa`.

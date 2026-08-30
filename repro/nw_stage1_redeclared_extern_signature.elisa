@@ -22,18 +22,17 @@ include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 # work in this session -- debug_referee.elisa and elisac.elisa were last modified
 # 2026-08-25 16:41, hours before any edit here.
 #
-# CAREFUL, stage0 is NOT a clean oracle for this shape. It COMPILES this file
+# CAREFUL, stage0 was NOT a clean oracle for this shape. It compiled this file
 # (exit 0, both declaration orders), which is what the stage1 fix was measured
-# against -- but the object does not LINK:
+# against -- but the object did not LINK:
 #
 #   Undefined symbols: "___ovl__getenv__cstr__getenv", referenced from _main
 #
-# stage0 treats the redeclaration as an OVERLOAD and mangles the call, instead of
-# binding to the C symbol `getenv`. So "stage0 accepts it" means accepts it at
-# COMPILE time only. That is a separate stage0 defect and is NOT fixed here; it
-# does not bite the self-host build, where the same duplicate pair links fine, so
-# the mangling evidently depends on the declarations' scopes. Worth reducing on
-# its own before anyone relies on redeclared externs deliberately.
+# stage0 treated the redeclaration as an OVERLOAD and mangled the call, instead
+# of binding to the C symbol `getenv`. Stage0 now preserves the native link name
+# on source-mangled extern overloads; the reduced regression is
+# `repro/nw_stage0_redeclared_extern_minimal.elisa`, and its LLVM output contains
+# `@getenv` with no `@__ovl__getenv__...` import.
 
 extern getenv(name: cstr) -> u8&?
 

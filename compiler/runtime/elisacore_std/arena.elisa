@@ -62,6 +62,15 @@ error RuntimeError:
 # Basic low-level types
 # ------------------------------------------------------------
 
+# A reclaimed non-tail allocation. Bump allocation remains the fast path, but
+# darray growth can copy an older backing block after another allocation has
+# been made. Keeping the reclaimed span as an intrusive free block makes that
+# copy reclaimable without a side table or a second allocator.
+@intrusive
+struct ArenaFreeBlock:
+    next: mutable heap ArenaFreeBlock&?
+    slots: mutable usize
+
 struct Region:
     next: mutable heap Region&?
     count: mutable usize
@@ -73,6 +82,7 @@ struct Region:
     # MEM_RESERVE+MEM_COMMIT path); 0 on POSIX/WASM/malloc where the block is fully backed at
     # creation, so arena_region_ensure_committed no-ops there.
     committed: mutable usize
+    free_list: mutable heap ArenaFreeBlock&?
     data: tail uintptr
 
 struct Arena:
@@ -350,6 +360,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         r.owner_next <- null
         r.global_index <- 0
         r.committed <- 0
+        r.free_list <- null
         return r
 
 def new_region(capacity: usize) -> mutable heap Region&:
@@ -373,6 +384,7 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
         r.owner_next <- null
         r.global_index <- 0
         r.committed <- 0
+        r.free_list <- null
         return r
 
 # A reserve-only region block for the reserve_commit/fixed strategies. On Windows the block's
@@ -417,6 +429,7 @@ def new_region_reserve(capacity: usize) -> mutable heap Region&:
             r.owner_next <- null
             r.global_index <- 0
             r.committed <- initial
+            r.free_list <- null
             return r
         static else:
             return new_region(capacity)
@@ -460,6 +473,68 @@ def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
         # plain block source.
         new_region_reserve(capacity) return if strategy == ARENA_STRATEGY_RESERVE_COMMIT or strategy == ARENA_STRATEGY_FIXED
         return new_region(capacity)
+
+@internal
+def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable heap void&?:
+    header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+    previous: mutable heap ArenaFreeBlock&? = null
+    current: mutable heap ArenaFreeBlock&? = r.free_list
+    while current != null:
+        if current.slots >= need_slots:
+            block: mutable heap ArenaFreeBlock& = current
+            remainder: usize = current.slots - need_slots
+            if remainder >= header_slots:
+                split: mutable heap ArenaFreeBlock& = zeroed
+                trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+                    split <- (block.cast[mutable heap u8&] + need_slots * size_of(uintptr)).cast[mutable heap ArenaFreeBlock&]
+                split.slots <- remainder
+                split.next <- current.next
+                if previous != null:
+                    previous.next <- split
+                else:
+                    r.free_list as & <- split
+            else:
+                if previous != null:
+                    previous.next <- current.next
+                else:
+                    r.free_list <- current.next
+            trusted Unsafe.PointerCast:
+                return block.cast[mutable heap void&]
+        previous <- current
+        current <- current.next
+    return null
+
+@internal
+def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable heap void&?:
+    cursor: mutable heap Region&? = a.begin
+    while cursor != null:
+        # Reclaimed spans are safe to reuse even in an adopted block: the owner tag
+        # prevents bump allocation from overwriting live adopted data, while this free
+        # list contains only ranges whose old darray backing has already been replaced.
+        if arena_take_free_block(cursor, need_slots) is reclaimed:
+            return reclaimed
+        cursor <- cursor.next
+    return null
+
+@internal
+def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize):
+    header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+    return if old_slots < header_slots
+
+    cursor: mutable heap Region&? = a.begin
+    while cursor != null:
+        trusted Unsafe.PointerCast:
+            base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
+            raw: uintptr = oldptr.cast[heap u8&].uintptr()
+            end_raw: uintptr = raw + (old_slots * size_of(uintptr)).uintptr()
+            limit: uintptr = base + (cursor.capacity * size_of(uintptr)).uintptr()
+            if raw >= base and end_raw <= limit:
+                block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
+                block.slots <- old_slots
+                block.next <- cursor.free_list
+                cursor.free_list as & <- block
+                return
+        cursor <- cursor.next
 
 def free_region(r: heap Region&):
     can Memory.Release, Abort.Panic:
@@ -506,7 +581,11 @@ def free_region_backend(r: heap Region&, strategy: int):
 
 def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        size: usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
+        size: mutable usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
+        size <- 1 if size == 0
+
+        if arena_take_free_block_chain(a, size) is reclaimed:
+            return reclaimed
 
         # RESERVE_COMMIT / FIXED: one contiguous block, never chained. The block is created
         # up front by the region declaration with the full reservation as its capacity, so
@@ -576,9 +655,37 @@ def arena_tail_offset_slots(data_base: heap u8&, ptr: void&) -> usize:
     trusted Unsafe.PointerCast:
         return (ptr.cast[heap u8&].usize() - data_base.usize()) / size_of(uintptr)
 
+# Return true only when `ptr` is the complete most-recent allocation in `r`. The
+# ownership check is essential for chained arenas: an old pointer may belong to an
+# earlier block, and subtracting it from the current block's base would manufacture
+# an apparently valid offset. Keep the raw-address arithmetic in this one trusted
+# helper so arena_realloc can use the same proof for every strategy.
+@internal
+def arena_region_is_tail_allocation(r: heap Region&, ptr: void&, size_bytes: usize) -> bool:
+    trusted Unsafe.PointerCast:
+        base: uintptr = arena_heap_u8_from_region_data(r).uintptr()
+        raw: uintptr = ptr.cast[heap u8&].uintptr()
+        end_raw: uintptr = raw + size_bytes.uintptr()
+        limit: uintptr = base + (r.capacity * size_of(uintptr)).uintptr()
+        return raw >= base and end_raw <= limit and end_raw == base + (r.count * size_of(uintptr)).uintptr()
+
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         arena_heap_void_from_mutable(oldptr) return if newsz <= oldsz
+
+        old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
+        new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
+
+        # A darray grows by reallocating its most recent backing allocation in the
+        # active arena. Reclaim that tail in place whenever the current block owns it;
+        # otherwise the old block may be earlier in a chained arena and cannot move.
+        # This is the general path, not just the stable reserve/fixed path, and avoids
+        # retaining one dead backing allocation for every geometric growth step.
+        if a.end != null and arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
+            if new_slots <= a.end.capacity - a.end.count:
+                a.end.count <- a.end.count + (new_slots - old_slots)
+                arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+                return arena_heap_void_from_mutable(oldptr)
 
         # RESERVE_COMMIT / FIXED grow in place: the base must never move (interior-pointer
         # stability, docs/68 §4). When oldptr is the region's tail allocation we just advance
@@ -588,14 +695,11 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         # invalidate references the type system already proved stable.
         if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
             assert a.end != null
-            old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
-            new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
-            data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
-            old_offset_slots: usize = arena_tail_offset_slots(data_base, oldptr)
-            if old_offset_slots + old_slots == a.end.count:
-                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if old_offset_slots + new_slots > a.end.capacity
-                a.end.count <- old_offset_slots + new_slots
-                # Windows: page-in the bytes the grown tail now spans (no-op elsewhere).
+            if arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
+                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if new_slots > a.end.capacity - a.end.count
+                # The successful tail case returns above; this branch is retained as
+                # an explicit invariant guard if the allocator representation changes.
+                a.end.count <- a.end.count + (new_slots - old_slots)
                 arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
                 return arena_heap_void_from_mutable(oldptr)
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
@@ -607,6 +711,8 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         trusted Unsafe.UncheckedIndex:
             for i in 0..<oldsz:
                 newptr_bytes[i] <- oldptr_bytes[i]
+
+        arena_reclaim_allocation(a, oldptr, old_slots)
 
         return newptr
 
@@ -702,6 +808,7 @@ def arena_reset(a: mutable Arena&):
     trusted Unsafe.AssumeProgress:
         while r != null:
             r.count <- 0
+            r.free_list <- null
             r <- r.next
 
     a.end <- a.begin
@@ -714,11 +821,13 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
 
     region: heap Region& = m.region
     region.count <- m.count
+    region.free_list <- null
 
     r: mutable heap Region&? = region.next
     trusted Unsafe.AssumeProgress:
         while r != null:
             r.count <- 0
+            r.free_list <- null
             r <- r.next
 
     a.end as & <- region

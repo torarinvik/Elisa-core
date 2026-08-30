@@ -892,7 +892,11 @@ func (s *functionState) emitBuiltinDArrayEnsureCapacity(darrayPtr C.LLVMValueRef
 
 	C.LLVMPositionBuilderAtEnd(s.builder, growBB)
 	zero := C.LLVMConstInt(usizeLLVMType, 0, 0)
-	initCap := C.LLVMConstInt(usizeLLVMType, 256, 0)
+	// Keep the compiler's builtin push lowering in lockstep with
+	// elisacore_std.collections' ARENA_DA_INIT_CAP. A stale 256 here defeats
+	// the runtime's small-seed policy and multiplies peak memory during the
+	// recursive AST construction that motivated that policy.
+	initCap := C.LLVMConstInt(usizeLLVMType, 8, 0)
 	doubledOrNeeded, err := s.emitSafeDoubledCapacity(currentCapacity, neededValue, usizeLLVMType, name)
 	if err != nil {
 		return err

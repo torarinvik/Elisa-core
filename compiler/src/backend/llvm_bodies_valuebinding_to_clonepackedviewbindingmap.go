@@ -60,6 +60,10 @@ type functionState struct {
 	specializedFuncTypes map[*semantic.FuncType]*semantic.FuncType
 	resultSlot           C.LLVMValueRef
 	sretReturn           bool
+	// A source-level `void main` retains its Elisa type but is emitted as the
+	// process entry point with an i32 return. Every void return path must therefore
+	// return an explicit zero rather than exposing an arbitrary register value.
+	mainReturnsStatus bool
 	// scalarGrantDepth > 0 means the code currently being emitted sits inside a `can Scalar` grant
 	// (a `can Scalar:` block, or the whole function via `can[Scalar]` on its signature). While
 	// granted, loops are NOT tagged expected-to-vectorize, so the post-optimization autovec
@@ -535,12 +539,13 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:       g,
-		decl:    decl,
-		fnValue: fnValue,
-		fnType:  fnType,
-		builder: builder,
-		typeMap: typeBindings,
+		g:                 g,
+		decl:              decl,
+		fnValue:           fnValue,
+		fnType:            fnType,
+		builder:           builder,
+		typeMap:           typeBindings,
+		mainReturnsStatus: decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
 	}
 	// MONOMORPHIZATION: re-analyze this body with the type parameters bound to their
 	// concrete arguments, so type-directed typing rules are decided on the INSTANTIATED
@@ -718,7 +723,12 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			if err := state.emitHeapTempCleanup(); err != nil {
 				return err
 			}
-			C.LLVMBuildRetVoid(builder)
+			if state.mainReturnsStatus {
+				zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(g.context), 0, 0)
+				C.LLVMBuildRet(builder, zero)
+			} else {
+				C.LLVMBuildRetVoid(builder)
+			}
 		} else if retUnion, ok := fnType.Return.(*semantic.ErrorUnionType); ok && isVoidType(retUnion.Value) {
 			zeroCode, err := state.errorCodeConstant(0)
 			if err != nil {
@@ -799,7 +809,12 @@ func (s *functionState) emitFunctionReturn(value C.LLVMValueRef, actual semantic
 		if err := s.emitHeapTempCleanup(); err != nil {
 			return err
 		}
-		C.LLVMBuildRetVoid(s.builder)
+		if s.mainReturnsStatus {
+			zero := C.LLVMConstInt(C.LLVMInt32TypeInContext(s.g.context), 0, 0)
+			C.LLVMBuildRet(s.builder, zero)
+		} else {
+			C.LLVMBuildRetVoid(s.builder)
+		}
 		return nil
 	}
 	coerced, err := s.coerceValue(value, actual, s.fnType.Return)

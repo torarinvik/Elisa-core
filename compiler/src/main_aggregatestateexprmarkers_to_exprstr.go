@@ -240,6 +240,12 @@ func typeStr(t ast.TypeExpr) string {
 			ret = " -> " + typeStr(n.Return)
 		}
 		return "fn(" + strings.Join(parts, ", ") + ")" + ret + formatPermissionRefs(n.Permissions)
+	case *ast.TupleTypeExpr:
+		parts := make([]string, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			parts = append(parts, field.Name+": "+typeStr(field.Type))
+		}
+		return "(" + strings.Join(parts, ", ") + ")"
 	case *ast.ErrorSetExpr:
 		parts := make([]string, 0, len(n.Tags)+1)
 		for _, tag := range n.Tags {

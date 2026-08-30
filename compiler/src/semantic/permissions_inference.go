@@ -22,6 +22,13 @@ func (a *Analyzer) inferFunctionPermissionEffects(decls []scopedDecl) {
 					return
 				}
 				usedRefs := a.collectFunctionPermissionRefs(fn)
+				// The body collector runs after ordinary function analysis and can
+				// rediscover Unsafe implementation details through newly inferred
+				// callees. Apply the same trusted-runtime boundary at the fixpoint;
+				// keep public Memory/Abort effects intact.
+				if a.enforceUnsafePermissions && isRuntimeStdPermissionInternal(fn.Pos().File) {
+					usedRefs = filterOutTrustedStdlibPermissionRefs(usedRefs)
+				}
 				mergedRefs := mergePermissionRefs(fnType.DeclaredPermissionRefs, usedRefs)
 				mergedFamilies := mergePermissionFamilies(fnType.DeclaredPermissions, permissionFamiliesFromRefs(mergedRefs))
 				if !samePermissionRefs(fnType.PermissionRefs, mergedRefs) {

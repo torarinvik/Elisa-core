@@ -381,6 +381,24 @@ extern puts(text: u8&) -> u64
 	}
 }
 
+func TestNativeExternOverloadKeepsCLinkNameAfterSourceMangle(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "native_extern_overload_link_name.elisa", `
+extern bridge(value: u8&) -> int
+extern bridge(value: cstr) -> int
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected native extern overload declarations to analyze, got:\n%s", strings.Join(errs, "\n"))
+	}
+
+	sym, ok := result.GlobalScope.Lookup("__ovl__bridge__cstr__bridge")
+	if !ok || sym == nil {
+		t.Fatalf("expected cstr extern overload symbol, got %#v", result.GlobalScope.Symbols)
+	}
+	if sym.LinkName != "bridge" {
+		t.Fatalf("expected source-mangled native extern to retain C link name, got %q", sym.LinkName)
+	}
+}
+
 func TestPascalCaseFunctionCallCanFallbackFromStructLiteralSyntax(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "pascal_case_function_call.elisa", `
 def DivCeil(value: usize, divisor: usize) -> usize:

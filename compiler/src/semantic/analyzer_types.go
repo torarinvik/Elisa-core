@@ -67,6 +67,14 @@ func (a *Analyzer) defineReceiverOverloadGlobal(visibleName string, sym *Symbol,
 		// existing stays bare; a receiver existing keeps it as before) and the new one
 		// gets a receiver-mangled name.
 		a.registerUFCSFunction(visibleName, existing)
+		// Native extern overloads are still one C symbol. The source-level name is
+		// mangled only to select the Elisa signature; without preserving the native
+		// spelling here, backend lookup emits `__ovl__...` as an undefined linker
+		// symbol instead of calling the declared C function. Module-interface externs
+		// use Elisa ABI names and deliberately do not get this link-name fallback.
+		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil && fnType.IsNativeExtern && sym.LinkName == "" {
+			sym.LinkName = visibleName
+		}
 		sym.Name = ReceiverOverloadSymbolName(visibleName, newReceiver, visibleName)
 		if fnType, ok := sym.Type.(*FuncType); ok && fnType != nil {
 			fnType.Name = sym.Name

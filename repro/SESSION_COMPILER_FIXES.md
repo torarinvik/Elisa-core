@@ -67,13 +67,14 @@ An extern whose declarations disagree is now UNMODELED for this check rather tha
 pinned to whichever the walk reached first. See
 `nw_stage1_redeclared_extern_signature.elisa`.
 
-CORRECTION TO THE ORACLE USED: stage0 COMPILES that shape (exit 0, both
-declaration orders), which is what the fix was measured against -- but the object
-does not LINK. stage0 mangles the redeclared call as an overload
-(`___ovl__getenv__cstr__getenv`) instead of binding the C symbol `getenv`. So
-stage0 was only a compile-time oracle here, and there is a SEPARATE stage0 defect
-in that shape, unfixed. The real evidence for the stage1 fix is the self-host
-fixpoint below: it went from "cannot build gen2 at all" to byte-identical.
+CORRECTION TO THE ORACLE USED: stage0 COMPILED that shape (exit 0, both declaration orders),
+which is what the fix was measured against -- but the object did not LINK. stage0 used to
+mangle the redeclared call as an overload (`___ovl__getenv__cstr__getenv`) instead of binding
+the C symbol `getenv`. Stage0 now preserves the native link name on source-mangled extern
+overloads; the reduced regression is `repro/nw_stage0_redeclared_extern_minimal.elisa`, whose
+LLVM output contains `@getenv` and no `@__ovl__getenv__...` import. The real evidence for the
+stage1 fix remains the self-host fixpoint below: it went from "cannot build gen2 at all" to
+byte-identical.
 
 NOTE: this break PRE-DATED the session's other work -- `debug_referee.elisa` and
 `elisac.elisa` were last modified 2026-08-25 16:41, hours before any edit here.
@@ -311,4 +312,3 @@ different compiler than the one being gated.
 Declines are down to 5 from the 40 recorded earlier, so the earlier generic work
 helped, but the remaining ones are in the monomorphization path and were not traced
 to a cause. It does not block the port -- the differential sweeps already avoid it.
-
