@@ -13,11 +13,11 @@
 # Fast packages: everything EXCEPT the heavy elisacore/src package. ~12s cold, instant cached.
 # Includes the fixture suites under ./test/ that are fast (analyzer/lexer-level, no native
 # runtime) and green — gating them here stops the silent rot that let removed-syntax and
-# stale-contract drift accumulate while nothing ran them. (./test/backend is NOT yet listed:
-# it has its own pre-existing rot; add it once de-rotted.)
+# stale-contract drift accumulate while nothing ran them. The backend fixture package is
+# included now that its region-cleanup ownership regression is fixed.
 FAST_PKGS := ./src/semantic/ ./src/smt/ ./src/backend/ ./src/parser/ ./src/lexer/ \
              ./src/interpreter/ ./src/easm/ ./src/frontendir/ ./src/unparse/ \
-             ./test/semantic/ ./test/lexer/
+             ./test/backend/ ./test/semantic/ ./test/lexer/
 
 # test: fast inner-loop suite. The default. Does NOT run the slow ./src native-runtime tests.
 .PHONY: test
@@ -35,12 +35,12 @@ test-semantic:
 test-prover:
 	go test ./src/semantic/ ./src/smt/
 
-# test-full: THE FULL SUITE — SLOW (~8 minutes; the elisacore/src native-runtime tests).
+# test-full: THE FULL SUITE — SLOW (~8 minutes; includes the elisacore/src native-runtime tests).
 # Run this only as the final pre-commit gate, never in the inner loop.
 .PHONY: test-full
 test-full:
-	@echo ">>> FULL SUITE — this is the ~8-minute run (elisacore/src native-runtime tests). <<<"
-	go test -p 1 ./src/...
+	@echo ">>> FULL SUITE — this is the ~8-minute run (native-runtime and fixture tests). <<<"
+	go test -p 1 ./...
 
 # build: build the local worktree binary.  Keep this target local so compiler
 # dogfooding cannot overwrite the user's installed compiler or race another
