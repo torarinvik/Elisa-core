@@ -249,8 +249,11 @@ func TestGenerateLLVMIRLowersNestedRegionCheckpoints(t *testing.T) {
 	if got := strings.Count(output, "call ptr @new_region_backend(i64 1024, i64 0)"); got != 2 {
 		t.Fatalf("expected 2 scoped region allocations, got %d\n%s", got, output)
 	}
-	if got := strings.Count(output, "call void @arena_free(ptr"); got != 4 {
-		t.Fatalf("expected scoped and function-exit region frees, got %d\n%s", got, output)
+	// Scoped regions are released by their lexical-scope cleanup. They are marked
+	// non-function-owned at registration time, so the function-exit cleanup must
+	// not emit a duplicate free for the same arena.
+	if got := strings.Count(output, "call void @arena_free(ptr"); got != 2 {
+		t.Fatalf("expected one lexical-scope free per region, got %d\n%s", got, output)
 	}
 }
 func TestGenerateLLVMIRLowersEnumConstructorsAndMatch(t *testing.T) {
