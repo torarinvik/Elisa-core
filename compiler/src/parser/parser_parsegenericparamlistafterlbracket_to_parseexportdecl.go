@@ -108,11 +108,27 @@ func isBuiltinValueGenericParamTypeName(name string) bool {
 func (p *Parser) parsePermissionRef() ast.PermissionRef {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeArgs := p.parsePermissionTypeArgs()
 	member := ""
 	if p.match(lexer.TOKEN_DOT) {
 		member = p.expect(lexer.TOKEN_IDENT).Text
 	}
-	return ast.PermissionRef{Position: pos, Name: name, Member: member}
+	return ast.PermissionRef{Position: pos, Name: name, Member: member, TypeArgs: typeArgs}
+}
+
+func (p *Parser) parsePermissionTypeArgs() []ast.TypeExpr {
+	if !p.match(lexer.TOKEN_LBRACKET) {
+		return nil
+	}
+	args := make([]ast.TypeExpr, 0, p.estimateCommaSeparatedCount(lexer.TOKEN_RBRACKET))
+	for {
+		args = append(args, p.parseTypeExpr())
+		if !p.match(lexer.TOKEN_COMMA) {
+			break
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACKET)
+	return args
 }
 
 // parsePermissionRefGroup parses one permission item, expanding the member-brace sugar
@@ -121,12 +137,13 @@ func (p *Parser) parsePermissionRef() ast.PermissionRef {
 func (p *Parser) parsePermissionRefGroup() []ast.PermissionRef {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	typeArgs := p.parsePermissionTypeArgs()
 	if p.match(lexer.TOKEN_LBRACE) {
 		var refs []ast.PermissionRef
 		for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
 			mpos := p.cur().Pos
 			member := p.expect(lexer.TOKEN_IDENT).Text
-			refs = append(refs, ast.PermissionRef{Position: mpos, Name: name, Member: member})
+			refs = append(refs, ast.PermissionRef{Position: mpos, Name: name, Member: member, TypeArgs: typeArgs})
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
 			}
@@ -138,7 +155,11 @@ func (p *Parser) parsePermissionRefGroup() []ast.PermissionRef {
 	if p.match(lexer.TOKEN_DOT) {
 		member = p.expect(lexer.TOKEN_IDENT).Text
 	}
-	return []ast.PermissionRef{{Position: pos, Name: name, Member: member}}
+	ref := ast.PermissionRef{Position: pos, Name: name, Member: member, TypeArgs: typeArgs}
+	if p.matchIdentText("via") {
+		ref.Via = []ast.PermissionRef{p.parsePermissionRef()}
+	}
+	return []ast.PermissionRef{ref}
 }
 func signatureHasExplicitErrorEffects(retType ast.TypeExpr) bool {
 	_, ok := retType.(*ast.ErrorUnionTypeExpr)

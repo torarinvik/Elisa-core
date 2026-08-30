@@ -1,3 +1,21 @@
+# FIXED. Both compilers now print the same thing:
+#
+#   alpha.total(3,4)+SIZE = 14
+#   beta.total(2) = 200
+#
+# The cause was the CONSTANT collision: `SIZE` was keyed by bare name in one
+# flat table, so Alpha's and Beta's collapsed onto one row and the second
+# overwrote the first. Fixed in the compiler repo (1cbaed1e) by keying consts
+# on (owner, name).
+#
+# The note below records six shapes that were tried and worked, on the theory
+# that the trigger needed several together. It did not -- it needed exactly one
+# thing, two modules declaring the same const name, and the minimisation stalled
+# because every probe kept only one of them. Left in place: knowing which
+# probes did NOT reproduce is still what a minimisation is made of.
+#
+# Kept as a runnable check: both stages must print the two lines above.
+
 include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
 
 # stage1 SILENTLY MISCOMPILES this: it prints "ALPHA WRONG" where stage0 prints

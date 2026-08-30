@@ -325,7 +325,7 @@ func (g *llvmGenerator) ensureDeclaredFunctionType(name string, value C.LLVMValu
 	if g == nil || value == nil || fn == nil {
 		return nil
 	}
-	expectedType, err := g.lowerFunctionType(fn)
+	expectedType, err := g.lowerFunctionTypeForSymbol(name, fn)
 	if err != nil {
 		return err
 	}
@@ -362,7 +362,7 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 		return C.LLVMGetIntrinsicDeclaration(g.module, intrinsicID, llvmTypeSlicePtr(overloadedParamTypes), C.size_t(len(overloadedParamTypes))), nil
 	}
 
-	fnType, err := g.lowerFunctionType(fn)
+	fnType, err := g.lowerFunctionTypeForSymbol(name, fn)
 	if err != nil {
 		return nil, err
 	}

@@ -200,6 +200,19 @@ func (s *functionState) resolveCallTarget(expr *ast.CallExpr) (C.LLVMValueRef, *
 	return callee, fnType, nil
 }
 func (s *functionState) directCallTarget(expr ast.Expr) bool {
+	// An explicit generic application (`identity[LargeResult](x)`) is still a direct
+	// monomorphized function call. Treating its Specialize callee as a function value
+	// routes the call through tagged-pointer dispatch, which cannot merge a large sret
+	// result (and used to reach LLVMBuildPhi with a void type). The resolver has already
+	// materialized the specialization before this ABI decision, so the application shape
+	// is sufficient here.
+	switch expr.(type) {
+	case *ast.SpecializeExpr:
+		return true
+	}
+	if index, ok := expr.(*ast.IndexExpr); ok && index.AsSpecialize != nil {
+		return true
+	}
 	// `value.call_as[func(...)->T](args)` lowers its receiver to a raw function
 	// pointer (an opaque `ptr`). Treat it as a "direct" callee so the call uses
 	// buildTypedCall (a plain LLVMBuildCall2 on the pointer) instead of the

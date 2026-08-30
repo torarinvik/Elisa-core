@@ -20,6 +20,7 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("protocol")
 	name := p.expect(lexer.TOKEN_IDENT).Text
+	_, _, _, genericParams := p.parseFuncGenericParams()
 
 	// Optional base-protocol list (protocol inheritance): `protocol Ord is Eq, Show:`.
 	// `is` is the language's one subtype/conformance spelling (enum hierarchies
@@ -91,7 +92,36 @@ func (p *Parser) parseInterfaceDecl() *ast.InterfaceDecl {
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
-	return &ast.InterfaceDecl{Position: pos, Name: name, Bases: bases, Members: members}
+	return &ast.InterfaceDecl{Position: pos, Name: name, GenericParams: genericParams, Bases: bases, Members: members}
+}
+
+// parseEffectDecl parses an abstract algebraic effect signature. Effects use the
+// same operation-signature representation as protocols, but are handled by name
+// rather than by a receiver type: `effect Writer[T]: def write(value: T) -> void`.
+func (p *Parser) parseEffectDecl() *ast.InterfaceDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("effect")
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	_, _, _, genericParams := p.parseFuncGenericParams()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	members := make([]ast.InterfaceMember, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		if p.peek() == lexer.TOKEN_DEF {
+			members = append(members, p.parseInterfaceMethodDecl())
+			continue
+		}
+		p.errorf("abstract effect members must be operation declarations, got %s", p.cur())
+		p.advance()
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.InterfaceDecl{Position: pos, Name: name, IsEffect: true, GenericParams: genericParams, Members: members}
 }
 
 func (p *Parser) parseAssociatedTypeDecl() *ast.AssociatedTypeDecl {
@@ -331,6 +361,71 @@ func (p *Parser) parseImplDeclWithAnnotations(annotations []ast.Annotation) *ast
 	p.expect(lexer.TOKEN_DEDENT)
 
 	return &ast.ImplDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), InterfaceName: interfaceName, GenericParams: genericParams, ForType: forType, Members: members}
+}
+
+// parseHandlerDecl parses a static, first-order realization of an abstract
+// effect. Captured handler parameters are prepended to every operation method;
+// the semantic pass later rewrites abstract operation calls to those direct
+// methods, so no handler object or continuation allocation is needed at runtime.
+func (p *Parser) parseHandlerDecl() *ast.ImplDecl {
+	pos := p.cur().Pos
+	p.expectIdentText("handler")
+	handlerStatic := false
+	for {
+		if p.peek() == lexer.TOKEN_STATIC {
+			p.advance()
+			handlerStatic = true
+			continue
+		}
+		break
+	}
+	handlerName := p.expect(lexer.TOKEN_IDENT).Text
+	p.expect(lexer.TOKEN_LPAREN)
+	handlerParams, _ := p.parseExplicitSignatureParamList(false, false)
+	p.expect(lexer.TOKEN_RPAREN)
+	p.expectIdentText("for")
+	effectType := p.parseTypeExpr()
+	p.expect(lexer.TOKEN_COLON)
+	p.expectNewline()
+	p.expect(lexer.TOKEN_INDENT)
+
+	members := make([]ast.ImplMember, 0, p.estimateIndentedItemCount())
+	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+		p.skipNewlines()
+		if p.peek() == lexer.TOKEN_DEDENT {
+			break
+		}
+		annotations := p.parseAnnotations()
+		if p.peek() != lexer.TOKEN_DEF {
+			p.errorf("effect handlers may only contain operation methods, got %s", p.cur())
+			p.advance()
+			continue
+		}
+		member := p.parseImplMethodDeclWithAnnotations(annotations, false)
+		if fn, ok := member.(*ast.FuncDecl); ok {
+			params := make([]ast.ParamDecl, 0, len(handlerParams)+len(fn.Params))
+			params = append(params, handlerParams...)
+			params = append(params, fn.Params...)
+			fn.Params = params
+		} else if fn, ok := member.(*ast.ExternFuncDecl); ok {
+			params := make([]ast.ParamDecl, 0, len(handlerParams)+len(fn.Params))
+			params = append(params, handlerParams...)
+			params = append(params, fn.Params...)
+			fn.Params = params
+		}
+		members = append(members, member)
+	}
+	p.expect(lexer.TOKEN_DEDENT)
+	return &ast.ImplDecl{
+		Position:      pos,
+		HandlerName:   handlerName,
+		HandlerParams: handlerParams,
+		HandlerEffect: effectType,
+		ForType:       effectType,
+		IsHandler:     true,
+		HandlerStatic: handlerStatic,
+		Members:       members,
+	}
 }
 
 func (p *Parser) parseImplAssociatedTypeDecl() *ast.ImplAssociatedTypeDecl {

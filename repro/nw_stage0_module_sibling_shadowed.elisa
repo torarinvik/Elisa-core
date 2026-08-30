@@ -1,0 +1,56 @@
+# FIXED, on BOTH compilers. It must exit 7 on each.
+#
+# An unqualified call to a sibling inside a module bound to a STDLIB GENERIC of
+# the same name instead of the sibling.
+#
+# What this header used to say, and why it was wrong:
+#
+#   "stage1 compiles and runs it correctly (exit 7)"
+#
+# It did not. stage1 emitted `call void @add__i64(ptr, i64)` -- the stdlib's
+# `add[T](mutable Flags[T]&, T)`. That TYPE-CHECKS, so the program compiled
+# clean and returned 0: the stdlib call left `s.items` untouched. I verified
+# stage1 by COMPILING this file rather than running it, and then treated it as
+# the reference for fixing stage0. Both compilers were wrong; stage1 was the
+# quieter one, and a silent wrong answer is worse than stage0's hard error.
+#
+# Caught later by running all four fixed repros end to end and comparing exit
+# codes across both stages.
+#
+# The two causes are the same shape one layer apart:
+#
+#   stage0  identifier resolution reached the global scope through the ordinary
+#           scope chain, so the stdlib `add` was found before the enclosing
+#           module was consulted. Fixed by RENAMING the callee (resolving only
+#           its type left codegen emitting the stdlib symbol -- exit 0 again).
+#   stage1  the generic dispatch ran BEFORE the enclosing-module scan. Fixed by
+#           preferring the enclosing module first, on an exact arity match.
+#
+# Guarded by compiler/src/module_sibling_runtime_test.go (stage0) and
+# test/parity/module_sibling_beats_generic_smoke.sh (both stages). Both check
+# the EXIT CODE. A compile-only guard passes against this bug.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+module Box:
+    struct Sack:
+        items: mutable darray[i64]
+
+    def add(s: mutable Sack&, v: i64):
+        can Memory.Allocate, Abort.Panic:
+            s.items.push(v)
+
+    def fill(s: mutable Sack&):
+        can Memory.Allocate, Abort.Panic:
+            add(s, 7)
+
+def main() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region w(64 * 1024)
+        out: mutable i64 = 0
+        in w:
+            s: mutable Box::Sack = Box::Sack{items: []}
+            Box::fill(&s)
+            out <- get s.items[0] else 0
+        destroy w
+        return out

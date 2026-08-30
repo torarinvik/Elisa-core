@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"reflect"
+	"strings"
 
 	"elisacore/src/ast"
 )
@@ -42,7 +43,7 @@ var containerGrowthMethods = map[string]bool{
 // (checkNestedRegionStoreEscape et al.); inference only decides where the param's own backing
 // arena comes from.
 func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) {
-	cands := collectRegionPolyCandidateFuncs(decls)
+	cands, namespaceOf := collectRegionPolyCandidateFuncsScoped(decls)
 	// This pass runs before collectValueSymbols, so funcDeclUsings has not been
 	// populated yet. Keep the lexical resolution context alongside the function
 	// declarations: the region-valued argument probe below may need to resolve a
@@ -79,6 +80,24 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			continue
 		}
 		funcByName[fn.Name] = fn
+		// ALSO key a module member by the name a `::` call site actually writes. `Box::stow(bag, 12)`
+		// parses to Ident{Name: "Box.stow"}, but flattening leaves the FuncDecl's Name bare ("stow"),
+		// so keying by fn.Name alone made every module member invisible to the forwarding trigger:
+		// the caller never learned it had to thread a region, and the call was then rejected with
+		// "cannot infer region parameter" -- for a program the SAME module accepts when the sibling
+		// is called unqualified, and that stage1 compiles and runs correctly.
+		//
+		// That gap is what blocked module blocks for anything with a growable API: every renderer in
+		// nw-core takes `mutable DisplayList&` and forwards it onward, so `Display::rect(list, ...)`
+		// was unreachable from any function that received `list` as a parameter.
+		//
+		// Both keys are registered, not one: the bare name is what an unqualified sibling call and
+		// every top-level call site write, and dropping it would trade this bug for its mirror image.
+		// The two can never collide -- an identifier cannot contain a dot, so a qualified key is
+		// unreachable as a bare name.
+		if qualified := joinQualifiedName(namespaceOf[fn], fn.Name); qualified != fn.Name {
+			funcByName[qualified] = fn
+		}
 		// Functions that already manage regions explicitly are left alone: a hand-written `[@r]` owns
 		// the threading, and an `Arena&` param self-threads its allocator.
 		if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
@@ -186,6 +205,42 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 		}
 	}
 	return changed
+}
+
+// calleeReturnTypeIsRegionValued resolves a callee's declared return type for the
+// region-valued PROBE: in the callee's own namespace, and without reporting.
+//
+// Both halves matter, and both only became reachable when module members started
+// resolving in funcByName at all:
+//
+//   - A module member's return type is written BARE inside its module
+//     (`def spacer() -> Row` in `module M:`). Resolving it from the CALLER's namespace
+//     cannot see `M.Row`.
+//
+//   - resolveType REPORTS. So a probe that only asks "is this region-valued?" emitted a
+//     real "unknown type Row" error, pinned at the callee's own signature, and failed
+//     the compile — for this, which the pre-fix compiler accepted:
+//
+//     def fill(rows: mutable darray[M::Row]&):
+//     rows.push(M::spacer())
+//
+//     Note the shape: it needs a darray PARAMETER. Pushing onto a darray LOCAL, or
+//     binding the result to a local, never reaches this probe.
+//
+// A probe must not be able to fail a compile on its own, so the suppression is not
+// merely belt-and-braces: any future type this cannot resolve should make the probe
+// answer "no", not report.
+func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *ast.FuncDecl) bool {
+	savedNamespace := a.currentNamespace
+	savedSuppress := a.suppressDiagnostics
+	if idx := strings.LastIndex(qualifiedName, "."); idx >= 0 {
+		a.currentNamespace = qualifiedName[:idx]
+	}
+	a.suppressDiagnostics = true
+	resolved := a.resolveType(callee.ReturnType)
+	a.suppressDiagnostics = savedSuppress
+	a.currentNamespace = savedNamespace
+	return a.typeIsRegionValued(resolved)
 }
 
 // paramForwardedToRegionRequiringCallee reports whether the body passes the named parameter (as a bare

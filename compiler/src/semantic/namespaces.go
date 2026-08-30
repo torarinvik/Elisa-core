@@ -360,6 +360,68 @@ func (a *Analyzer) identNameResolvesAsValue(name string) bool {
 	return false
 }
 
+// lookupLocalSymbol finds `name` in the scope chain WITHOUT reaching the global scope,
+// so a local or parameter can be told apart from a top-level definition. Scope.Lookup
+// walks all the way through the global scope, which is exactly the distinction the
+// enclosing-namespace preference below needs.
+func (a *Analyzer) lookupLocalSymbol(name string) (*Symbol, bool) {
+	if a == nil {
+		return nil, false
+	}
+	for cur := a.currentScope; cur != nil && cur != a.globalScope; cur = cur.Parent {
+		if sym, ok := cur.Symbols[name]; ok {
+			return sym, true
+		}
+	}
+	return nil, false
+}
+
+// enclosingNamespaceMember resolves a BARE name to the enclosing module's own member.
+//
+// Inside `module M:`, `add(...)` means M's `add` -- that is what a namespace is for.
+// Identifier resolution reaches the global scope through the ordinary scope chain, so a
+// top-level or stdlib `add` was found there and returned before the enclosing module was
+// ever consulted:
+//
+//	module Box:
+//	    def add(s: mutable Sack&, v: i64): ...
+//	    def fill(s: mutable Sack&):
+//	        add(s, 7)      # argument 1 to "add" expects mutable Flags[T]&
+//
+// The self-hosted stage1 already prefers the enclosing module's member, so the two
+// compilers disagreed about a module member calling its own sibling by its own name.
+// Without this, module members must avoid every name the stdlib uses generically --
+// push, add, get, count -- which is C-style prefixing again, wearing a module block.
+//
+// Locals and parameters still shadow: a local binding is found before the global scope
+// is reached, and is checked for here explicitly so the preference never overrides one.
+func (a *Analyzer) enclosingNamespaceMember(name string) (*Symbol, string, bool) {
+	if a == nil || a.globalScope == nil || name == "" || strings.Contains(name, ".") {
+		return nil, "", false
+	}
+	namespace := a.currentNamespace
+	if namespace == "" && a.currentFuncType != nil {
+		if idx := strings.LastIndex(a.currentFuncType.Name, "."); idx >= 0 {
+			namespace = a.currentFuncType.Name[:idx]
+		}
+	}
+	if namespace == "" {
+		return nil, "", false
+	}
+	if _, shadowed := a.lookupLocalSymbol(name); shadowed {
+		return nil, "", false
+	}
+	qualified := joinQualifiedName(namespace, name)
+	sym, ok := a.globalScope.Lookup(qualified)
+	if !ok || sym == nil {
+		return nil, "", false
+	}
+	if sym.Private && !a.canAccessPrivateName(qualified) {
+		return nil, "", false
+	}
+	return sym, qualified, true
+}
+
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {

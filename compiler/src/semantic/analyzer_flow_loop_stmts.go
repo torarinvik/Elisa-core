@@ -9,6 +9,10 @@ import (
 
 func (a *Analyzer) analyzeCanStmt(stmt *ast.CanStmt) {
 	refs := a.resolvePermissionRefs(stmt.Permissions, true)
+	handler := a.handlerForCan(stmt, refs)
+	if handler != nil {
+		refs = mergePermissionRefs(refs, handlerConcretePermissionRefs(handler))
+	}
 	if stmt.As != "" {
 		a.analyzeCanCastStmt(stmt, refs)
 		return

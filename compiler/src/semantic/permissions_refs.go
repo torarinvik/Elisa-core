@@ -28,6 +28,18 @@ func permissionRefKey(ref ast.PermissionRef) string {
 	return ref.Name
 }
 
+func clonePermissionRef(ref ast.PermissionRef) ast.PermissionRef {
+	clone := ref
+	clone.TypeArgs = append([]ast.TypeExpr(nil), ref.TypeArgs...)
+	if len(ref.Via) != 0 {
+		clone.Via = make([]ast.PermissionRef, len(ref.Via))
+		for i, via := range ref.Via {
+			clone.Via[i] = clonePermissionRef(via)
+		}
+	}
+	return clone
+}
+
 func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 	if len(refs) == 0 {
 		return nil
@@ -39,7 +51,7 @@ func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 			continue
 		}
 		if ref.Member == "" {
-			familyRefs[ref.Name] = ast.PermissionRef{Position: ref.Position, Name: ref.Name}
+			familyRefs[ref.Name] = clonePermissionRef(ref)
 			for key, existing := range memberRefs {
 				if existing.Name == ref.Name {
 					delete(memberRefs, key)
@@ -50,7 +62,7 @@ func canonicalizePermissionRefs(refs []ast.PermissionRef) []ast.PermissionRef {
 		if _, ok := familyRefs[ref.Name]; ok {
 			continue
 		}
-		memberRefs[permissionRefKey(ref)] = ast.PermissionRef{Position: ref.Position, Name: ref.Name, Member: ref.Member}
+		memberRefs[permissionRefKey(ref)] = clonePermissionRef(ref)
 	}
 	out := make([]ast.PermissionRef, 0, len(familyRefs)+len(memberRefs))
 	for _, ref := range familyRefs {
@@ -92,6 +104,12 @@ func (a *Analyzer) grantedPermissionRefs(refs []ast.PermissionRef) map[string]bo
 			continue
 		}
 		granted[permissionRefKey(ref)] = true
+		for _, via := range ref.Via {
+			granted[permissionRefKey(via)] = true
+			if via.Member == "" {
+				a.markSubsumedFamilies(via.Name, granted)
+			}
+		}
 		if ref.Member == "" {
 			a.markSubsumedFamilies(ref.Name, granted)
 		}
@@ -286,7 +304,7 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 				}
 				continue
 			}
-			valid = append(valid, ast.PermissionRef{Position: ref.Position, Name: permissionAnyName})
+			valid = append(valid, clonePermissionRef(ref))
 			continue
 		}
 		if a.lookupPermissionParam(ref.Name) {
@@ -296,7 +314,7 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 				}
 				continue
 			}
-			valid = append(valid, ast.PermissionRef{Position: ref.Position, Name: ref.Name})
+			valid = append(valid, clonePermissionRef(ref))
 			continue
 		}
 		permission, _, ok := a.lookupVisiblePermission(ref.Name)
@@ -312,7 +330,39 @@ func (a *Analyzer) resolvePermissionRefs(refs []ast.PermissionRef, report bool) 
 			}
 			continue
 		}
-		valid = append(valid, ref)
+		if permission.Abstract && len(ref.TypeArgs) != len(permission.Effect.GenericParams) {
+			if report {
+				a.errorf(ref.Position, "abstract effect %q expects %d type arguments, got %d", ref.Name, len(permission.Effect.GenericParams), len(ref.TypeArgs))
+			}
+			continue
+		}
+		clone := clonePermissionRef(ref)
+		valid = append(valid, clone)
+		for _, via := range ref.Via {
+			viaClone := clonePermissionRef(via)
+			viaClone.Via = nil
+			if viaClone.Name == permissionAnyName || a.lookupPermissionParam(viaClone.Name) {
+				if viaClone.Member != "" && report {
+					a.errorf(viaClone.Position, "concrete realization %q cannot use a member on a permission parameter or `any`", permissionRefKey(viaClone))
+				}
+				valid = append(valid, viaClone)
+				continue
+			}
+			concrete, _, concreteOK := a.lookupVisiblePermission(viaClone.Name)
+			if !concreteOK || concrete.Abstract {
+				if report {
+					a.errorf(viaClone.Position, "effect realization %q must name a concrete permission", PermissionRefString(viaClone))
+				}
+				continue
+			}
+			if viaClone.Member != "" && !concrete.MemberSet[viaClone.Member] {
+				if report {
+					a.errorf(viaClone.Position, "permission %q has no member %q", viaClone.Name, viaClone.Member)
+				}
+				continue
+			}
+			valid = append(valid, viaClone)
+		}
 	}
 	return canonicalizePermissionRefs(valid)
 }

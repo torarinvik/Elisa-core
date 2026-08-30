@@ -106,6 +106,112 @@ def run() -> void can[FooEffect, ConsoleEffect.Write]:
 	}
 }
 
+func TestParseAbstractEffectAndStaticHandler(t *testing.T) {
+	src := `effect Writer[T]:
+    def write(value: T) -> void
+
+permission Console:
+    Write
+
+handler ConsoleLines(stream: Stream) for Writer[sview]:
+    def write(value: sview) -> void can[Console.Write]:
+        Console.write(stream, value)
+        Console.write(stream, "\n")
+
+def main() -> void can[Writer[sview] via Console.Write]:
+    can Writer[sview] with ConsoleLines(stdout):
+        Writer.write("hello")
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 4 {
+		t.Fatalf("expected effect, handler, and function declarations, got %d: %#v", len(file.Decls), file.Decls)
+	}
+	effect, ok := file.Decls[0].(*ast.InterfaceDecl)
+	if !ok || !effect.IsEffect || len(effect.GenericParams) != 1 || len(effect.Members) != 1 {
+		t.Fatalf("unexpected effect declaration: %#v", file.Decls[0])
+	}
+	handler, ok := file.Decls[2].(*ast.ImplDecl)
+	if !ok || !handler.IsHandler || handler.HandlerName != "ConsoleLines" || len(handler.HandlerParams) != 1 {
+		t.Fatalf("unexpected handler declaration: %#v", file.Decls[2])
+	}
+	method := handler.Members[0].(*ast.FuncDecl)
+	if len(method.Params) != 2 || method.Params[0].Name != "stream" {
+		t.Fatalf("expected captured handler parameter to be prepended, got %#v", method.Params)
+	}
+	mainFn := file.Decls[3].(*ast.FuncDecl)
+	if len(mainFn.Permissions) != 1 || len(mainFn.Permissions[0].TypeArgs) != 1 || len(mainFn.Permissions[0].Via) != 1 {
+		t.Fatalf("unexpected abstract effect realization: %#v", mainFn.Permissions)
+	}
+	can := mainFn.Body[0].(*ast.CanStmt)
+	if can.HandlerName != "ConsoleLines" || len(can.HandlerArgs) != 1 {
+		t.Fatalf("unexpected handler installation: %#v", can)
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "effect Writer[T]:") || !strings.Contains(formatted, "handler ConsoleLines(stream: Stream) for Writer[sview]:") || !strings.Contains(formatted, "with ConsoleLines(stdout):") {
+		t.Fatalf("formatter lost effect syntax:\n%s", formatted)
+	}
+	if _, errs := parseSourceFile(t, formatted); len(errs) != 0 {
+		t.Fatalf("expected formatted effect program to parse cleanly, got %v\n%s", errs, formatted)
+	}
+}
+
+func TestParseStaticHandlerWithoutCaptureArguments(t *testing.T) {
+	src := `effect Tick:
+    def ping() -> void
+
+handler Noop() for Tick:
+    def ping() -> void:
+        return
+
+def main() -> i64:
+    can Tick with Noop:
+        Tick.ping()
+    return 42
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	mainFn := file.Decls[2].(*ast.FuncDecl)
+	can := mainFn.Body[0].(*ast.CanStmt)
+	if can.HandlerName != "Noop" || len(can.HandlerArgs) != 0 {
+		t.Fatalf("unexpected zero-capture handler installation: %#v", can)
+	}
+}
+
+func TestParseZeroOverheadHandlerInfersTailResume(t *testing.T) {
+	src := `effect Tick:
+    def ping() -> void
+
+handler static Noop() for Tick:
+    def ping() -> void:
+        resume()
+
+def main() -> i64:
+    can Tick with Noop:
+        Tick.ping()
+    return 42
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	handler, ok := file.Decls[1].(*ast.ImplDecl)
+	if !ok || !handler.IsHandler || !handler.HandlerStatic {
+		t.Fatalf("expected static handler metadata, got %#v", file.Decls[1])
+	}
+	formatted := unparse.FormatFile(file)
+	if !strings.Contains(formatted, "handler static Noop() for Tick:") || strings.Contains(formatted, "one_shot") {
+		t.Fatalf("expected unparse to preserve handler mode, got:\n%s", formatted)
+	}
+	if _, errs := parseSourceFile(t, formatted); len(errs) != 0 {
+		t.Fatalf("expected formatted zero-overhead handler to parse cleanly, got %v\n%s", errs, formatted)
+	}
+}
+
 func TestUnparsePermissionDeclAndSignalStmt(t *testing.T) {
 	src := `permission FooEffect:
     pass

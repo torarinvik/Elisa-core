@@ -208,6 +208,14 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 			}
 		}
 		return i.execBlock(frame, n.Else)
+	case *ast.MatchStmt:
+		return i.execMatchStmt(frame, n)
+	case *ast.MachineCoverageStmt:
+		// Machine coverage is a compile-time semantic obligation attached by the
+		// parser's desugaring. The runtime machine is already represented by the
+		// lowered input read and dispatch statements around this marker, so the
+		// interpreter must treat it exactly like the LLVM backend: as a no-op.
+		return controlSignal{}, nil
 	default:
 		return controlSignal{}, annotateRuntimeError(stmt.Pos(), fmt.Errorf("unsupported interpreter statement %T", stmt))
 	}

@@ -188,7 +188,7 @@ func (a *Analyzer) analyzeInitHookStructConstructor(expr *ast.StructLitExpr, tar
 				continue
 			}
 			knownChecks++
-			if paramIndex >= len(fnType.Params) || !AssignableTo(fnType.Params[paramIndex], approxTypes[sourceIndex]) {
+			if paramIndex >= len(fnType.Params) || !initHookArgFits(fnType.Params[paramIndex], approxTypes[sourceIndex]) {
 				valid = false
 				break
 			}
@@ -252,6 +252,32 @@ func (a *Analyzer) analyzeInitHookStructConstructor(expr *ast.StructLitExpr, tar
 	}
 	return resultType, true
 }
+
+// initHookArgFits is AssignableTo plus the literal-to-view adaptation, for deciding
+// whether a constructor overload is a candidate.
+//
+// A string literal approximates to `u8& static` (inferLiteralType), and that is NOT
+// AssignableTo an `sview` parameter -- so `def Row(k: i64, s: sview) -> Row` was
+// discarded as a candidate and `Row(3, "x")` fell through to the all-fields positional
+// path, which rejected it while ASKING FOR THE CONSTRUCTOR DEFINED THREE LINES ABOVE:
+//
+//	positional construction Row(...) is not allowed; ... or define a constructor
+//	`def Row(...) -> Row`
+//
+// The ordinary call path accepts the same literal for the same parameter, so this was
+// the overload FILTER disagreeing with the language, not a real type error. Measured:
+// passing an `sview` LOCAL instead of the literal compiled fine, and the struct having
+// an sview FIELD had nothing to do with it.
+//
+// isStringViewType/isStaticStringLiteralRefType are the pair already used for this same
+// equivalence in match-arm folding.
+func initHookArgFits(param Type, arg Type) bool {
+	if AssignableTo(param, arg) {
+		return true
+	}
+	return isStringViewType(param) && isStaticStringLiteralRefType(arg)
+}
+
 func (a *Analyzer) approximateInitHookArgType(expr ast.Expr) Type {
 	if expr == nil {
 		return nil

@@ -420,8 +420,12 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeField(level+1, field)
 		}
 	case *ast.InterfaceDecl:
-		header := "protocol " + n.Name + ":"
-		if len(n.Bases) != 0 {
+		keyword := "protocol"
+		if n.IsEffect {
+			keyword = "effect"
+		}
+		header := keyword + " " + n.Name + formatGenericParams(n.GenericParams, nil, nil, nil) + ":"
+		if !n.IsEffect && len(n.Bases) != 0 {
 			header = "protocol " + n.Name + " is " + strings.Join(n.Bases, ", ") + ":"
 		}
 		f.writeLine(level, header)
@@ -444,6 +448,37 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			}
 		}
 	case *ast.ImplDecl:
+		if n.IsHandler {
+			mode := ""
+			if n.HandlerStatic {
+				mode += "static "
+			}
+			header := "handler " + mode + n.HandlerName + "(" + formatExplicitParamList(n.HandlerParams, false) + ") for " + formatTypeExpr(n.HandlerEffect) + ":"
+			f.writeLine(level, header)
+			for _, member := range n.Members {
+				switch m := member.(type) {
+				case *ast.FuncDecl:
+					f.writeAnnotations(level+1, m.Annotations)
+					params := m.Params
+					if len(params) >= len(n.HandlerParams) {
+						params = params[len(n.HandlerParams):]
+					}
+					line := formatFuncHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic)
+					f.writeLine(level+1, line)
+					for _, stmt := range m.Body {
+						f.writeStmt(level+2, stmt)
+					}
+				case *ast.ExternFuncDecl:
+					f.writeAnnotations(level+1, m.Annotations)
+					params := m.Params
+					if len(params) >= len(n.HandlerParams) {
+						params = params[len(n.HandlerParams):]
+					}
+					f.writeLine(level+1, formatImplMethodHeader(m.Name, m.GenericParams, m.TypeParams, m.RegionParams, m.PermissionParams, params, m.ReturnType, m.Permissions, m.Ensures, m.Variadic))
+				}
+			}
+			return
+		}
 		f.writeAnnotations(level, n.Annotations)
 		header := ""
 		implParams := formatGenericParams(n.GenericParams, nil, nil, nil)

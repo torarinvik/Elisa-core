@@ -1,0 +1,45 @@
+# FIXED. A constructor overload was not recognised when a STRING LITERAL was
+# passed to an `sview` parameter.
+#
+#   positional construction Row(...) is not allowed; use the brace form Row{...}
+#   for default field initialization, or define a constructor
+#   `def Row(...) -> Row`
+#
+# ...asking for the constructor defined three lines above.
+#
+# What my first note here got wrong. I wrote "it is the view type, not the
+# module and not the arity", framing it around the struct's sview FIELD. The
+# field has nothing to do with it. Measured:
+#
+#   Row(3, "x")       literal   -> REFUSED
+#   name: sview = "x"
+#   Row(3, name)      local     -> OK
+#   struct with NO sview field, sview PARAM, literal arg -> REFUSED
+#
+# So it is the literal meeting an `sview` PARAMETER.
+#
+# Cause: inferLiteralType gives a string literal `u8& static`, which is not
+# AssignableTo an `sview`, so the overload filter discarded the only candidate
+# and fell through to the all-fields positional path. The ORDINARY call path
+# accepts the same literal for the same parameter -- this was the overload
+# filter disagreeing with the language, not a real type error.
+#
+# Fixed by initHookArgFits, which is AssignableTo plus the literal-to-view
+# adaptation already used for match-arm folding.
+#
+# Kept as a runnable check: it must exit 3.
+
+include "../compiler/runtime/elisacore_std/elisacore_runtime.elisa"
+
+struct Row:
+    k: mutable i64
+    s: sview
+
+def Row(k: i64, s: sview) -> Row:
+    can Abort.Panic:
+        return Row{k: k, s: s}
+
+def main() -> i64:
+    can Abort.Panic:
+        b: Row = Row(3, "x")
+        return b.k

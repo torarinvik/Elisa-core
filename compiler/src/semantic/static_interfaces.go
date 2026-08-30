@@ -463,6 +463,17 @@ func (a *Analyzer) resolveInterfaceMethodExprType(expr *ast.FieldExpr) (Type, bo
 		a.interfaceMethodRefs[expr] = &InterfaceMethodRef{InterfaceName: iface.Name, MethodName: expr.Field}
 		return a.specializeInterfaceMethodSignature(method.Signature, receiver), true
 	}
+	// Abstract effect operations are namespace-like calls (`Writer.write(x)`),
+	// not receiver methods. Their signature is still recorded here so malformed
+	// or unhandled calls get ordinary type diagnostics after the handler rewrite.
+	if iface, _, ok := a.lookupVisibleStaticInterface(ownerName); ok && iface != nil && iface.Decl != nil && iface.Decl.IsEffect {
+		method, ok := iface.Methods[expr.Field]
+		if !ok || method == nil || method.Signature == nil {
+			return nil, false
+		}
+		a.interfaceMethodRefs[expr] = &InterfaceMethodRef{InterfaceName: iface.Name, MethodName: expr.Field}
+		return method.Signature, true
+	}
 	receiver, _, ok := a.lookupVisibleType(ownerName)
 	if !ok || receiver == nil {
 		return nil, false
@@ -532,34 +543,36 @@ func (a *Analyzer) collectStaticInterfaces(decls []scopedDecl) {
 				iface.AssociatedTypes[assocDecl.Name] = assocDecl
 				assocBindings[assocDecl.Name] = &AssociatedTypeProjection{Receiver: &TypeParamType{Name: staticInterfaceSelfName}, InterfaceName: qualifiedName, Name: assocDecl.Name}
 			}
-			a.withInterfaceAssocTypes(assocBindings, func() {
-				for _, member := range decl.Members {
-					switch methodDecl := member.(type) {
-					case *ast.ExternFuncDecl:
-						if _, exists := iface.Methods[methodDecl.Name]; exists {
-							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
-							continue
+			a.withGenericParams(decl.GenericParams, nil, func() {
+				a.withInterfaceAssocTypes(assocBindings, func() {
+					for _, member := range decl.Members {
+						switch methodDecl := member.(type) {
+						case *ast.ExternFuncDecl:
+							if _, exists := iface.Methods[methodDecl.Name]; exists {
+								a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
+								continue
+							}
+							signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
+							iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
+						case *ast.FuncDecl:
+							if methodDecl.IsLaw {
+								// Protocol law: a universally-quantified predicate over Self. Recorded for
+								// per-impl discharge; not a callable method, so it does not enter Methods.
+								iface.Laws = append(iface.Laws, methodDecl)
+								continue
+							}
+							// Default method: a protocol method carrying a body. Its signature is
+							// typechecked exactly like a bodiless one; the body is recorded so a
+							// conforming impl that omits the method inherits it (synthesized later).
+							if _, exists := iface.Methods[methodDecl.Name]; exists {
+								a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
+								continue
+							}
+							signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, false)
+							iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: nil, Default: methodDecl}
 						}
-						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, methodDecl.Variadic)
-						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: methodDecl}
-					case *ast.FuncDecl:
-						if methodDecl.IsLaw {
-							// Protocol law: a universally-quantified predicate over Self. Recorded for
-							// per-impl discharge; not a callable method, so it does not enter Methods.
-							iface.Laws = append(iface.Laws, methodDecl)
-							continue
-						}
-						// Default method: a protocol method carrying a body. Its signature is
-						// typechecked exactly like a bodiless one; the body is recorded so a
-						// conforming impl that omits the method inherits it (synthesized later).
-						if _, exists := iface.Methods[methodDecl.Name]; exists {
-							a.errorf(methodDecl.Pos(), "duplicate interface method %q in interface %q", methodDecl.Name, decl.Name)
-							continue
-						}
-						signature := a.funcTypeFromDecl(qualifiedName+"."+methodDecl.Name, methodDecl.TypeParams, methodDecl.GenericParams, methodDecl.RegionParams, methodDecl.PermissionParams, methodDecl.Permissions, methodDecl.Ensures, methodDecl.Requires, methodDecl.EnsureValues, methodDecl.Params, methodDecl.ReturnType, false)
-						iface.Methods[methodDecl.Name] = &StaticInterfaceMethod{Name: methodDecl.Name, Signature: signature, Decl: nil, Default: methodDecl}
 					}
-				}
+				})
 			})
 		})
 	}
@@ -569,6 +582,9 @@ func (a *Analyzer) collectStaticImpls(decls []scopedDecl) {
 	for _, scoped := range decls {
 		decl, ok := scoped.Decl.(*ast.ImplDecl)
 		if !ok {
+			continue
+		}
+		if decl.IsHandler {
 			continue
 		}
 		if decl.IsExtension() {
