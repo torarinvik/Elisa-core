@@ -77,8 +77,13 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 				members = append(members, &ast.FuncDecl{Position: m.Position, Annotations: append([]ast.Annotation(nil), m.Annotations...), Name: m.Name, TypeParams: append([]string(nil), m.TypeParams...), PermissionParams: append([]string(nil), m.PermissionParams...), GenericParams: append([]ast.GenericParam(nil), m.GenericParams...), RegionParams: append([]string(nil), m.RegionParams...), Permissions: append([]ast.PermissionRef(nil), m.Permissions...), Ensures: append([]ast.EnsuresClause(nil), m.Ensures...), Params: append([]ast.ParamDecl(nil), m.Params...), ReturnType: m.ReturnType, Body: m.Body})
 			}
 		}
-		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, Bases: append([]string(nil), n.Bases...), Members: members}
+		return &ast.InterfaceDecl{Position: n.Position, Name: n.Name, IsEffect: n.IsEffect, GenericParams: append([]ast.GenericParam(nil), n.GenericParams...), Bases: append([]string(nil), n.Bases...), Members: members}
 	case *ast.ImplDecl:
+		if n.IsHandler {
+			// Handlers are local static realizations. An interface file exports the
+			// abstract effect contract, not an implementation choice or its captures.
+			return nil
+		}
 		members := make([]ast.ImplMember, 0, len(n.Members))
 		for _, member := range n.Members {
 			switch m := member.(type) {

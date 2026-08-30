@@ -564,6 +564,10 @@ type CanStmt struct {
 	Body                        []Stmt
 	SuppressPermissionInference bool
 	As                          string // checked `as <Family>` re-attribution target (Phase 4); "" if absent
+	// HandlerName/HandlerArgs are populated by `can Effect with Handler(args):`.
+	// The handler is selected statically; no runtime handler object is created.
+	HandlerName string
+	HandlerArgs []Expr
 }
 type ScopeStmt struct {
 	Position lexer.Pos

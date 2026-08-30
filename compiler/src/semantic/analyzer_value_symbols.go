@@ -108,6 +108,41 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				}
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
+				if n.IsHandler {
+					handler, _, ok := a.lookupVisibleEffectHandler(n.HandlerName)
+					if !ok || handler == nil {
+						return
+					}
+					for _, member := range n.Members {
+						switch fnDecl := member.(type) {
+						case *ast.FuncDecl:
+							symbolName := handler.MethodSymbols[fnDecl.Name]
+							if symbolName == "" {
+								continue
+							}
+							fnType := a.funcTypeFromDeclWithFrame(symbolName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
+							sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, Mutable: false}
+							a.functionTypes[symbolName] = fnType
+							a.funcDeclSymbols[fnDecl] = sym
+							a.funcDeclUsings[fnDecl] = append([]string(nil), a.currentUsings...)
+							a.defineGlobal(sym, fnDecl.Pos())
+							handler.ConcreteRefs = mergePermissionRefs(handler.ConcreteRefs, functionPermissionRefs(fnType))
+						case *ast.ExternFuncDecl:
+							symbolName := handler.MethodSymbols[fnDecl.Name]
+							if symbolName == "" {
+								continue
+							}
+							fnType := a.funcTypeFromExternDecl(symbolName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+							a.applyExternFuncAnnotations(fnDecl, fnType)
+							a.markRawExternFuncType(fnDecl, fnType)
+							sym := &Symbol{Name: symbolName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, Mutable: false}
+							a.functionTypes[symbolName] = fnType
+							a.defineGlobal(sym, fnDecl.Pos())
+							handler.ConcreteRefs = mergePermissionRefs(handler.ConcreteRefs, functionPermissionRefs(fnType))
+						}
+					}
+					return
+				}
 				a.withGenericParams(n.GenericParams, nil, func() {
 					receiver := a.resolveType(n.ForType)
 					if receiver == nil || IsInvalidType(receiver) {

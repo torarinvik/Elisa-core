@@ -339,6 +339,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	if p.peekIdentText("protocol") {
 		return p.parseInterfaceDecl()
 	}
+	if p.peekIdentText("effect") {
+		return p.parseEffectDecl()
+	}
 	if p.peekIdentText("typestate") {
 		return p.parseTypestateDecl()
 	}
@@ -357,6 +360,9 @@ func (p *Parser) parseDecl() ast.Decl {
 	}
 	if p.peekIdentText("impl") {
 		return p.parseImplDecl()
+	}
+	if p.peekIdentText("handler") {
+		return p.parseHandlerDecl()
 	}
 	if p.peekIdentText("permission") {
 		return p.parsePermissionDecl()

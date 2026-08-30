@@ -55,6 +55,7 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 					return
 				}
 				a.analyzeFunctionAnnotations(n)
+				a.rewriteEffectHandlers(n.Body)
 				if n.Static {
 					a.staticContextDepth++
 					a.analyzeFunc(n)
@@ -75,6 +76,17 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 			case *ast.StaticGenerateDecl:
 			case *ast.InterfaceDecl:
 			case *ast.ImplDecl:
+				if n.IsHandler {
+					for _, member := range n.Members {
+						fnDecl, ok := member.(*ast.FuncDecl)
+						if !ok {
+							continue
+						}
+						a.analyzeFunctionAnnotations(fnDecl)
+						a.analyzeFunc(fnDecl)
+					}
+					return
+				}
 				// `Self` inside an impl method body/signature stands for the concrete
 				// implementing type; bind it (under the impl's generic params) so that
 				// `def m(self: Self)` resolves to the receiver during body analysis,

@@ -68,10 +68,44 @@ func IsFrozenPackedEnumStoreType(t Type) bool {
 }
 
 func PermissionRefString(ref ast.PermissionRef) string {
-	if ref.Member != "" {
-		return ref.Name + "." + ref.Member
+	name := ref.Name
+	if len(ref.TypeArgs) != 0 {
+		parts := make([]string, 0, len(ref.TypeArgs))
+		for _, arg := range ref.TypeArgs {
+			parts = append(parts, permissionTypeExprString(arg))
+		}
+		name += "[" + strings.Join(parts, ", ") + "]"
 	}
-	return ref.Name
+	if ref.Member != "" {
+		name += "." + ref.Member
+	}
+	if len(ref.Via) != 0 {
+		via := make([]string, 0, len(ref.Via))
+		for _, realization := range ref.Via {
+			via = append(via, PermissionRefString(realization))
+		}
+		name += " via " + strings.Join(via, ", ")
+	}
+	return name
+}
+
+func permissionTypeExprString(typ ast.TypeExpr) string {
+	switch n := typ.(type) {
+	case *ast.NamedType:
+		return n.Name
+	case *ast.GenericType:
+		parts := make([]string, 0, len(n.Args))
+		for _, arg := range n.Args {
+			parts = append(parts, permissionTypeExprString(arg))
+		}
+		return n.Name + "[" + strings.Join(parts, ", ") + "]"
+	case *ast.MutableType:
+		return "mutable " + permissionTypeExprString(n.Elem)
+	case *ast.RefType:
+		return permissionTypeExprString(n.Elem) + "&"
+	default:
+		return "<type>"
+	}
 }
 
 func PermissionRefsString(refs []ast.PermissionRef) string {

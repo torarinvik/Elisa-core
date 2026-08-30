@@ -281,15 +281,25 @@ func (f *formatter) writeStmt(level int, stmt ast.Stmt) {
 			f.writeStmt(level+1, stmt)
 		}
 	case *ast.CanStmt:
-		if line, ok := formatSingleStmtCanBlock(n); ok {
-			f.writePrefixedMultiline(level, "", line)
-			return
+		if n.HandlerName == "" {
+			if line, ok := formatSingleStmtCanBlock(n); ok {
+				f.writePrefixedMultiline(level, "", line)
+				return
+			}
 		}
 		keyword := "can"
 		if n.SuppressPermissionInference {
 			keyword = "trusted"
 		}
-		f.writeLine(level, keyword+" "+formatPermissionRefSurfaceList(n.Permissions)+":")
+		line := keyword + " " + formatPermissionRefSurfaceList(n.Permissions)
+		if n.HandlerName != "" {
+			args := make([]string, 0, len(n.HandlerArgs))
+			for _, arg := range n.HandlerArgs {
+				args = append(args, formatExpr(arg))
+			}
+			line += " with " + n.HandlerName + "(" + strings.Join(args, ", ") + ")"
+		}
+		f.writeLine(level, line+":")
 		for _, stmt := range n.Body {
 			f.writeStmt(level+1, stmt)
 		}
@@ -560,6 +570,7 @@ func formatExternFuncHeader(name string, genericParams []ast.GenericParam, typeP
 	line += formatEnsuresClauses(ensures)
 	return line
 }
+
 // formatExportTargetName renders an export target's internal dotted qualified
 // name back to source `::` form so the unparsed text round-trips (the parser
 // consumes `::`, not `.`, in export-target position).
