@@ -152,6 +152,85 @@ func (a *Analyzer) collectAmbientForwardedContainers(body []ast.Stmt, candidates
 	return out
 }
 
+// collectRegionParamForwardedContainers returns fresh region containers passed at a parameter
+// position whose type carries a callee region parameter. Such a call shares the candidate's
+// allocation region with the callee. The callee can allocate between two growth operations on the
+// candidate even when it does not insert a region-valued payload into the candidate itself. A
+// reserve_commit backing would then make the next realloc a non-tail growth, so the backing must
+// remain chained.
+func (a *Analyzer) regionParamCalleeIndices(calleeName string) map[int]bool {
+	if a == nil {
+		return nil
+	}
+	if indices := a.regionParamCalleeParamIndex[calleeName]; len(indices) != 0 {
+		return indices
+	}
+	for i := len(calleeName) - 1; i >= 0; i-- {
+		if calleeName[i] != '.' {
+			continue
+		}
+		if indices := a.regionParamCalleeParamIndex[calleeName[i+1:]]; len(indices) != 0 {
+			return indices
+		}
+		break
+	}
+	return nil
+}
+
+func (a *Analyzer) collectRegionParamForwardedContainers(body []ast.Stmt, candidates map[string]bool) map[string]bool {
+	out := map[string]bool{}
+	if a == nil || len(a.regionParamCalleeParamIndex) == 0 || len(candidates) == 0 {
+		return out
+	}
+	checkCall := func(expr ast.Expr) {
+		calleeName, args, isCall := ast.PrepassCallShape(expr)
+		if !isCall {
+			return
+		}
+		for idx := range a.regionParamCalleeIndices(calleeName) {
+			if idx < 0 || idx >= len(args) {
+				continue
+			}
+			for n := range candidates {
+				if forwardsParamIdent(args[idx], n) {
+					out[n] = true
+				}
+			}
+		}
+	}
+	var rec func(v reflect.Value)
+	rec = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if expr, ok := v.Interface().(ast.Expr); ok {
+				checkCall(expr)
+			}
+			rec(v.Elem())
+		case reflect.Interface:
+			if v.IsNil() {
+				return
+			}
+			rec(v.Elem())
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				rec(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				rec(v.Index(i))
+			}
+		}
+	}
+	rec(reflect.ValueOf(body))
+	return out
+}
+
 func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[string]bool) RegionStackAssignment {
 	asn := RegionStackAssignment{StackOf: map[string]int{}, StackKind: map[int]string{0: "shared"}, StackStrategy: map[int]string{}, StackCapacity: map[int]ast.Expr{}, StackElemType: map[int]Type{}, StackEarlyFreeAfter: map[int]int{}, StackCount: 1}
 	order := make([]string, 0, 4)
@@ -200,6 +279,9 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 	// container keeps the chained (relocating) backing. The proven-bound interior-ref path below
 	// is unaffected: its capacity is preallocated up front, so it never reallocs at all.
 	ambientForwarded := a.collectAmbientForwardedContainers(region.Body, seen)
+	// The broader region-parameter summary covers ordinary region-requiring callees too. The
+	// ambient map remains separate because it also controls the callee's ambient allocation binding.
+	regionParamForwarded := a.collectRegionParamForwardedContainers(region.Body, seen)
 
 	next := 1
 	mergeStack := -1
@@ -253,7 +335,7 @@ func (a *Analyzer) assignRegionStacks(region *ast.RegionStmt, paramNames map[str
 		// docs/73 §5: gated on mmap-overcommit targets (POSIX). On Windows (VirtualAlloc) and the
 		// libc-malloc backend a 256 MiB reservation would commit eagerly, so those keep chained —
 		// the checker reads this same strategy, so trust and runtime stay consistent everywhere.
-		if a.targetMmapOvercommit() && !ambientForwarded[n] {
+		if a.targetMmapOvercommit() && !ambientForwarded[n] && !regionParamForwarded[n] {
 			asn.StackStrategy[next] = "reserve_commit"
 		}
 		next++

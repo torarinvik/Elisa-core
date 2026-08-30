@@ -104,6 +104,33 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			break
 		}
 	}
+	// Keep a call-site summary for region-stack assignment. The inference fixpoint above answers
+	// whether a callee needs a region parameter; this dual summary records which explicit argument
+	// positions receive values allocated in that region. It must be built after the fixpoint because
+	// a callee can become region-polymorphic only after another function is stamped in an earlier
+	// iteration.
+	if a.regionParamCalleeParamIndex == nil {
+		a.regionParamCalleeParamIndex = map[string]map[int]bool{}
+	}
+	for _, fn := range cands {
+		if fn == nil || len(fn.RegionParams) == 0 {
+			continue
+		}
+		params := a.expandedFuncDeclParams(fn)
+		rps := map[string]bool{}
+		for _, rp := range fn.RegionParams {
+			rps[rp] = true
+		}
+		for i, param := range params {
+			if !typeExprCarriesRegionParam(param.Type, rps) {
+				continue
+			}
+			if a.regionParamCalleeParamIndex[fn.Name] == nil {
+				a.regionParamCalleeParamIndex[fn.Name] = map[int]bool{}
+			}
+			a.regionParamCalleeParamIndex[fn.Name][i] = true
+		}
+	}
 }
 
 func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl) bool {

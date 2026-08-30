@@ -739,6 +739,82 @@ def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Pani
 	}
 }
 
+// A region-polymorphic function may return one local container while using another local
+// container as scratch storage. The returned container must stay on the caller-owned stack, but
+// scratch must use a private stack: otherwise a reserve_commit caller arena sees a non-tail growth
+// after the scratch allocation and aborts with "not the tail allocation".
+func TestRegionPolyReturnedContainerHasPrivateScratchStack(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def build() -> darray[u8] can[Memory.Allocate, Abort.Panic]:
+    out: mutable darray[u8] = []
+    scratch: mutable darray[u8] = []
+    scratch.resize(8192)
+    i: mutable usize = 0
+    while i < 300:
+        out.push(i.u8())
+        i <- i + 1
+    return out
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    xs: darray[u8] = build() can Memory.Allocate, Abort.Panic
+    print(xs.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "300" {
+		t.Fatalf("returned region-poly container must not share its caller arena with scratch growth; expected RAN 300, got %s %q", status, out)
+	}
+}
+
+// A returned darray may contain structs whose own darray fields were built in a
+// nested temporary scope. The outer header is not enough: every copied nested
+// backing must follow the returned aggregate into the caller-owned region.
+func TestRegionPolyReturnedAggregateDeepStorageNoUAF(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `struct Arm:
+    body: darray[i64]
+    tag: i64
+def build() -> darray[Arm] can[Memory.Allocate, Abort.Panic]:
+    arms: mutable darray[Arm] = []
+    body: mutable darray[i64] = []
+    body.push(41)
+    arms.push(Arm{body: body, tag: 1})
+    return arms
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    arms: darray[Arm] = build() can Memory.Allocate, Abort.Panic
+    print((arms[0].body[0] + arms[0].tag).i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "42" {
+		t.Fatalf("returned aggregate must retain nested darray storage; expected RAN 42, got %s %q", status, out)
+	}
+}
+
+// An inferred region parameter can be introduced by a void grower rather than by a
+// RegionPolymorphic return signature.  Its synthesized auto region must still adopt the
+// caller arena, and a region-polymorphic local initializer inside that function must use the
+// private scratch arena.  Before the backend bound only explicit __region_auto parameters, the
+// call to build() below allocated after the caller-owned report buffer; report's later growth
+// then aborted with "reserve_commit/fixed array cannot grow in place: not the tail allocation".
+func TestInferredGrowerUsesPrivateScratchForRegionPolyLocal(t *testing.T) {
+	t.Parallel()
+	status, out := s4CompileRun(t, `def make_bytes() -> darray[u8] can[Memory.Allocate, Abort.Panic]:
+    values: mutable darray[u8] = []
+    i: mutable usize = 0
+    while i < 256:
+        values.push(i.u8())
+        i <- i + 1
+    return values
+def consume(report: mutable darray[u8]&) -> void can[Memory.Allocate, Abort.Panic]:
+    captured: darray[u8] = make_bytes() can Memory.Allocate, Abort.Panic
+    for value in captured:
+        report.push(value)
+def main() -> int can[Console.Write, Memory.Allocate, Console.Format, Abort.Panic]:
+    report: mutable darray[u8] = [0]
+    consume(report) can Memory.Allocate, Abort.Panic
+    print(report.count.i64()) can Console.Write, Memory.Allocate, Console.Format, Abort.Panic
+    return 0`)
+	if status != "RAN" || out != "257" {
+		t.Fatalf("an inferred grower must isolate a non-escaping region-poly local; expected RAN 257, got %s %q", status, out)
+	}
+}
+
 // Void grower called MANY times: the caller's container outgrows its initial capacity, so its
 // arena must tolerate the callee's adopted payload allocations interleaved between growth
 // steps. Before the ambient-forwarded chained-backing demotion (assignRegionStacks), the

@@ -58,6 +58,32 @@ func TestRegionStacksReservedSharesStackZero(t *testing.T) {
 	}
 }
 
+// A fresh container forwarded to a region-requiring callee cannot use the POSIX default
+// reserve_commit backing. The callee receives the same region and can allocate between growths of
+// the caller's container, so its backing must remain relocatable even when the callee is not an
+// ambient-grown value inserter.
+func TestRegionStacksDemotesForwardedRegionParamContainer(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "rs_forwarded_region_param.elisa", `def fill(out: mutable darray[i64]&) -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        out.push(1)
+
+def parent() -> void:
+    can Memory.Allocate, Memory.Release, Abort.Panic:
+        xs: mutable darray[i64] = []
+        fill(xs)
+        xs.push(2)
+`, AnalyzeOptions{TargetTriple: "x86_64-unknown-linux-gnu"})
+	for _, asn := range result.RegionStacks {
+		if stack, ok := asn.StackOf["xs"]; ok {
+			if got := asn.stackStrategy(stack); got != "chained" {
+				t.Fatalf("container forwarded to a region-requiring callee must stay chained, got %q / %v", got, asn.StackStrategy)
+			}
+			return
+		}
+	}
+	t.Fatalf("expected a region stack assignment for forwarded container xs, got %d assignments", len(result.RegionStacks))
+}
+
 // Phase C strategy inference (hard-bound): a darray whose footprint is PROVABLE — its sole growth
 // is a single counting-loop push — AND which has an interior reference taken into it gets its own
 // reserve_commit stack (stable base). A provably-bounded darray without an interior ref stays on

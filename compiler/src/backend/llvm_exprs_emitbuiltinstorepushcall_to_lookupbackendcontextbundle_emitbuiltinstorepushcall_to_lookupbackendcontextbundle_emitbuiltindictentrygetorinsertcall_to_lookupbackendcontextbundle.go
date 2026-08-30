@@ -233,6 +233,17 @@ func backendStructLikeValueType(t semantic.Type) bool {
 }
 
 func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, semantic.Type, error) {
+	// A region-polymorphic callee's hidden __region_auto argument normally comes
+	// from the caller's visible region binding. While a synthesized auto region
+	// emits a non-escaping region-carrying local initializer, however, the current
+	// tree owner is the function-local/private scratch arena and the hidden argument
+	// must follow that owner. If it is left on the caller arena, the callee's result
+	// is allocated immediately after caller-owned reserve/fixed storage and a later
+	// growth can reject the non-tail realloc. Scalar initializers are excluded: a
+	// region-polymorphic call used for a side effect must retain the caller binding.
+	if value, ok, err := s.regionPolyImplicitArgForActiveInitializer(expected, fnType, index); ok {
+		return value, expected, err
+	}
 	if s != nil && fnType != nil && fnType.SinkParamsKnown && index >= 0 && index < len(fnType.SinkParams) && fnType.SinkParams[index] {
 		if operand, moved := backendExplicitMoveOperand(arg); moved {
 			return s.emitMovedValue(operand, expected)
@@ -274,4 +285,36 @@ func (s *functionState) emitCallArg(arg ast.Expr, expected semantic.Type, fnType
 		}
 	}
 	return s.emitExpr(arg, expected)
+}
+
+func (s *functionState) regionPolyImplicitArgForActiveInitializer(expected semantic.Type, fnType *semantic.FuncType, index int) (C.LLVMValueRef, bool, error) {
+	if s == nil || fnType == nil || index < 0 {
+		return nil, false, nil
+	}
+	explicitCount := backendExplicitParamCount(fnType, s.decl)
+	implicitIndex := index - explicitCount
+	if implicitIndex < 0 || implicitIndex >= len(fnType.ImplicitParamNames) || fnType.ImplicitParamNames[implicitIndex] != semantic.RegionPolymorphicImplicitParamName {
+		return nil, false, nil
+	}
+	// A region-carrying local initializer inside a synthesized auto region uses that region's
+	// current owner. In an adopted region this is either the caller owner or the private scratch
+	// owner selected for the current initializer; in an ordinary inferred function it is the
+	// function-local auto arena. Calls used only for scalar side effects deliberately fall through
+	// to their analyzer-resolved caller binding.
+	if s.activeSynthesizedAutoRegion && s.activeInitializerCarriesRegionStorage && (s.treeAllocOwner.arenaRef != nil || s.treeAllocOwner.arenaRefPtr != nil) {
+		if s.callerStorageArenas != nil {
+			if arena, ok := s.callerStorageArenas[s.activeInitializerName]; ok && arena != nil {
+				return arena, true, nil
+			}
+		}
+		value, err := s.treeOwnerArenaRefValue(s.treeAllocOwner, "auto.region")
+		if err != nil {
+			return nil, true, err
+		}
+		if value == nil {
+			return nil, true, fmt.Errorf("active auto-region owner has no Arena value")
+		}
+		return value, true, nil
+	}
+	return nil, false, nil
 }

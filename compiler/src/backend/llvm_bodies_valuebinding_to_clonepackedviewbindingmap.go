@@ -128,6 +128,36 @@ type functionState struct {
 	// rather than creating a fresh, locally-freed arena, so `new[auto]` allocates into the caller's
 	// region and the returned handle outlives the call. Zero value (nil arenaRef) for ordinary fns.
 	regionPolyOwner treeAllocOwnerBinding
+	// scratchArena is an owned temporary carrier used while an adopted region-polymorphic function
+	// evaluates a local initializer. Returned/caller-visible values stay in regionPolyOwner, while
+	// a non-escaping local result (for example read_file's captured bytes) must not append a dead
+	// allocation after the caller's reserve/fixed report buffer. It is registered as a function
+	// cleanup, not as a region binding, because the adopted source region belongs to the caller.
+	scratchArena C.LLVMValueRef
+	// adoptedEscapeNames contains locals whose storage may be observed outside the current adopted
+	// function (return values, copied call arguments, or assignment initializers). Such locals keep
+	// the caller-owned arena; all other fresh locals may use scratchArena.
+	adoptedEscapeNames map[string]bool
+	// callerStorageArenas maps a local result name to the caller-owned arena of the aggregate it is
+	// copied into. This is distinct from regionPolyOwner: a void helper can return a storage-carrying
+	// aggregate into a local auto region and immediately push it into a by-reference output parameter.
+	// In that case the result must be built in the output parameter's arena, or the auto region can be
+	// freed while the output still contains the nested backing.
+	callerStorageArenas map[string]C.LLVMValueRef
+	// activeInitializerName is set only while emitting a local initializer. It lets the implicit
+	// region argument for a storage-carrying call follow callerStorageArenas precisely, without
+	// routing unrelated temporary results to an output arena.
+	activeInitializerName string
+	// activeSynthesizedAutoRegion is true while lowering the body of a synthesized function-level
+	// `__auto_*` region. Region-polymorphic calls made in that body must receive the current scoped
+	// arena for their hidden region argument; otherwise a temporary result is allocated in the caller
+	// arena even though the enclosing function has a private auto region.
+	activeSynthesizedAutoRegion bool
+	// activeInitializerCarriesRegionStorage is true only while emitting a local initializer whose
+	// result can retain region-backed storage. It prevents a region-polymorphic call used solely for
+	// a scalar side effect from being redirected to scratch just because its enclosing function has
+	// an adopted or inferred auto region.
+	activeInitializerCarriesRegionStorage bool
 	// ambientGrownContainerRegion (the void-grower fix) is the `__rg_<param>` region of a caller-owned
 	// container this function grows with region-allocated inserts; when set, the function's synthesized
 	// `__auto_*` region adopts that container's arena so inserted region-poly values land in the
@@ -539,13 +569,14 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 
 	state := &functionState{
-		g:                 g,
-		decl:              decl,
-		fnValue:           fnValue,
-		fnType:            fnType,
-		builder:           builder,
-		typeMap:           typeBindings,
-		mainReturnsStatus: decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
+		g:                  g,
+		decl:               decl,
+		fnValue:            fnValue,
+		fnType:             fnType,
+		builder:            builder,
+		typeMap:            typeBindings,
+		adoptedEscapeNames: adoptedEscapeNamesForBody(decl.Body),
+		mainReturnsStatus:  decl.Name == "main" && isVoidType(fnType.Return) && C.GoString(C.LLVMGetValueName(fnValue)) == "main",
 	}
 	// MONOMORPHIZATION: re-analyze this body with the type parameters bound to their
 	// concrete arguments, so type-directed typing rules are decided on the INSTANTIATED
@@ -673,6 +704,7 @@ func (g *llvmGenerator) defineFunctionBodyWithBindings(decl *ast.FuncDecl, fnTyp
 			state.regions = append(state.regions, regionBinding{name: regionName, ptr: arenaParam, typ: arenaType, owned: false})
 		}
 	}
+	state.callerStorageArenas = state.callerStorageArenasForBody(decl, fnType, decl.Body)
 
 	// Void-grower ambient region (docs/75 cross-fn container growth): when this function grows a
 	// caller-owned container by INSERTING region-allocated values (`out.push(make_node())`), bind its
@@ -915,8 +947,8 @@ func (s *functionState) emitScopedCleanup(binding scopedCleanupBinding) error {
 		return s.emitDeferredBody(binding.deferBody)
 	}
 	if binding.kind == scopedCleanupRegion {
-		// arena_free is idempotent (nulls begin/end) and an adopted/destroyed region is already
-		// zeroed, so freeing here is safe even though the function-return cleanup also frees it.
+		// The matching region binding is marked scope-owned, so this is the sole free on the
+		// function's normal and abrupt scope exits. Function-owned regions are not registered here.
 		return s.emitArenaFree(binding.ptr, binding.typ)
 	}
 	if binding.kind == scopedCleanupRegionReset {

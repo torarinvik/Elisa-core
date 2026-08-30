@@ -223,6 +223,11 @@ type Analyzer struct {
 	// stack to chained — the callee interleaves adopted payload allocations into the container's
 	// arena, so tail-only growth would panic at the first non-tail realloc.
 	ambientGrownCalleeParamIndex map[string]int
+	// regionParamCalleeParamIndex maps each function name to explicit parameter positions whose
+	// types carry one of that function's region parameters. Forwarding a fresh region container to
+	// any such position shares its allocation region with the callee, which may allocate between
+	// growth operations on the caller's container. Region-stack assignment keeps that backing chained.
+	regionParamCalleeParamIndex map[string]map[int]bool
 	// deathTimeCohorts holds the docs/91 G0 inferred death cohorts per function, recorded when
 	// ELISA_DUMP_DEATHTIME is set or RecordDeathTimeCohorts is requested (read-only observability;
 	// surfaced on Result).
@@ -874,6 +879,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		numericLiteralSuffixWarnings:      make(map[ast.Expr]bool, exprCapacity/64+8),
 		ambiguousDArrayBuilders:           make(map[*ast.VarDeclStmt]bool),
 		ambientGrownCalleeParamIndex:      make(map[string]int),
+		regionParamCalleeParamIndex:       make(map[string]map[int]bool),
 		treeConstructorCallees:            make(map[ast.Expr]bool, exprCapacity/16+8),
 		resolvedCastHooks:                 make(map[ast.Expr]*Symbol, resolvedCastHookCapacity),
 		unsafeLifetimeWidenCasts:          make(map[*ast.CastExpr]bool),

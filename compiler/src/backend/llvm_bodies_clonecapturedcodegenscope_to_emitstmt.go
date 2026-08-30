@@ -15,6 +15,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"reflect"
 	"strings"
 )
 
@@ -134,6 +135,23 @@ func (s *functionState) registerScopedCleanup(binding scopedCleanupBinding) {
 func (s *functionState) registerFunctionCleanup(binding scopedCleanupBinding) {
 	binding.owner = nil
 	s.scopedCleanups = append(s.scopedCleanups, binding)
+}
+
+// markRegionScopeOwned removes a scoped region from the function-return cleanup set. A region
+// entered with `in <arena>:` is released by its scope cleanup on every normal and abrupt exit;
+// retaining it in s.regions as function-owned emitted a second arena_free on the function return.
+// Loop-reset regions are deliberately kept function-owned because their scope cleanup resets them
+// for reuse and the function exit must perform the final free.
+func (s *functionState) markRegionScopeOwned(ptr C.LLVMValueRef) {
+	if s == nil || ptr == nil {
+		return
+	}
+	for i := len(s.regions) - 1; i >= 0; i-- {
+		if s.regions[i].ptr == ptr {
+			s.regions[i].owned = false
+			return
+		}
+	}
 }
 func (s *functionState) discardScopeCleanups(scope *codegenScope) {
 	if scope == nil || len(s.scopedCleanups) == 0 {
@@ -318,11 +336,504 @@ func backendIsSynthesizedAutoRegion(name string) bool {
 	return len(name) > len(prefix) && name[:len(prefix)] == prefix
 }
 
+// backendTypeCarriesRegionStorage mirrors the semantic lifetime predicate for the backend's one
+// allocation-routing decision. A scalar result must not redirect a region-polymorphic call made
+// for side effects, while a container/borrow/aggregate result may retain the callee's allocation.
+func backendTypeCarriesRegionStorage(t semantic.Type) bool {
+	return backendTypeCarriesRegionStorageRec(t, map[semantic.Type]bool{})
+}
+
+func backendTypeCarriesRegionStorageRec(t semantic.Type, seen map[semantic.Type]bool) bool {
+	if t == nil || seen[t] {
+		return false
+	}
+	seen[t] = true
+	switch tt := t.(type) {
+	case *semantic.DArrayType, *semantic.DictType, *semantic.SetType, *semantic.DStrType, *semantic.SViewType, *semantic.ViewType:
+		return true
+	case *semantic.RefType:
+		return tt != nil && backendTypeCarriesRegionStorageRec(tt.Elem, seen)
+	case *semantic.OptionalType:
+		return tt != nil && backendTypeCarriesRegionStorageRec(tt.Value, seen)
+	case *semantic.TupleType:
+		if tt == nil {
+			return false
+		}
+		for _, field := range tt.Fields {
+			if backendTypeCarriesRegionStorageRec(field.Type, seen) {
+				return true
+			}
+		}
+	case *semantic.AggregateStateType:
+		return tt != nil && backendTypeCarriesRegionStorageRec(tt.Base, seen)
+	case *semantic.StructType:
+		if tt == nil {
+			return false
+		}
+		if tt.Store {
+			return true
+		}
+		for _, field := range tt.Fields {
+			if backendTypeCarriesRegionStorageRec(field.Type, seen) {
+				return true
+			}
+		}
+	case *semantic.GenericInstanceType:
+		if tt == nil {
+			return false
+		}
+		if backendTypeCarriesRegionStorageRec(tt.Base, seen) {
+			return true
+		}
+		for _, arg := range tt.Args {
+			if backendTypeCarriesRegionStorageRec(arg, seen) {
+				return true
+			}
+		}
+	case *semantic.EnumType:
+		if tt == nil || tt.Packed || tt.Root().Packed {
+			return false
+		}
+		for _, variant := range tt.Variants {
+			if variant == nil {
+				continue
+			}
+			for _, payload := range variant.Payload {
+				if backendTypeCarriesRegionStorageRec(payload, seen) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func backendMutatesAggregateMethod(name string) bool {
+	switch name {
+	case "push", "extend", "insert", "put", "add", "append", "set", "update":
+		return true
+	default:
+		return false
+	}
+}
+
+func backendAggregateRootName(expr ast.Expr) string {
+	switch n := expr.(type) {
+	case *ast.Ident:
+		if n != nil {
+			return n.Name
+		}
+	case *ast.FieldExpr:
+		if n != nil {
+			return backendAggregateRootName(n.Object)
+		}
+	case *ast.IndexExpr:
+		if n != nil {
+			return backendAggregateRootName(n.Object)
+		}
+	case *ast.SliceExpr:
+		if n != nil {
+			return backendAggregateRootName(n.Object)
+		}
+	case *ast.ParenExpr:
+		if n != nil {
+			return backendAggregateRootName(n.Inner)
+		}
+	case *ast.AddrOfExpr:
+		if n != nil {
+			return backendAggregateRootName(n.Operand)
+		}
+	}
+	return ""
+}
+
+// backendAggregateIdentifierNames returns source identifiers contained in an ordinary value
+// expression. It is intentionally called only on mutator arguments, never on the callee, so a
+// receiver such as `terminators` is not mistaken for a value copied into itself. The scan is
+// conservative: retaining one extra local in the caller arena is safe, while missing a nested
+// storage dependency leaves a dangling darray backing after the callee's auto region is freed.
+func backendAggregateIdentifierNames(expr ast.Expr) map[string]bool {
+	names := map[string]bool{}
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		if v.Kind() == reflect.Interface {
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+			return
+		}
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return
+			}
+			if ident, ok := v.Interface().(*ast.Ident); ok && ident != nil {
+				names[ident.Name] = true
+				return
+			}
+			walk(v.Elem())
+			return
+		}
+		switch v.Kind() {
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(expr))
+	return names
+}
+
+// callerStorageArenasForBody computes the direct ownership edges created by mutating calls into
+// caller-owned aggregate parameters. For example, `terminators.push(term)` records that `term`
+// must be allocated in terminators' region. The fixed point also handles `outer.push(inner)` after
+// `inner.push(value)`, and avoids a broad all-results-to-caller-arena rule that would make unrelated
+// temporary allocations violate reserve/fixed tail growth.
+func (s *functionState) callerStorageArenasForBody(decl *ast.FuncDecl, fnType *semantic.FuncType, body []ast.Stmt) map[string]C.LLVMValueRef {
+	result := map[string]C.LLVMValueRef{}
+	if s == nil || decl == nil || fnType == nil {
+		return result
+	}
+	paramArenas := map[string]C.LLVMValueRef{}
+	explicitCount := backendExplicitParamCount(fnType, decl)
+	if explicitCount > len(decl.Params) {
+		explicitCount = len(decl.Params)
+	}
+	for i := 0; i < explicitCount; i++ {
+		region := containerRegionName(fnType.Params[i])
+		if region == "" {
+			continue
+		}
+		if owner, ok := s.regionArenaOwner(region); ok && owner.arenaRef != nil {
+			paramArenas[decl.Params[i].Name] = owner.arenaRef
+		}
+	}
+	dependencies := map[string]map[string]bool{}
+	var walk func(reflect.Value)
+	walk = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		if v.Kind() == reflect.Interface {
+			if !v.IsNil() {
+				walk(v.Elem())
+			}
+			return
+		}
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && backendMutatesAggregateMethod(field.Field) {
+					dst := backendAggregateRootName(field.Object)
+					if dst != "" {
+						deps := dependencies[dst]
+						if deps == nil {
+							deps = map[string]bool{}
+							dependencies[dst] = deps
+						}
+						for _, arg := range call.Args {
+							for name := range backendAggregateIdentifierNames(arg) {
+								deps[name] = true
+							}
+						}
+					}
+				}
+			}
+			walk(v.Elem())
+			return
+		}
+		switch v.Kind() {
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walk(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walk(v.Index(i))
+			}
+		}
+	}
+	walk(reflect.ValueOf(body))
+	for name, arena := range paramArenas {
+		result[name] = arena
+	}
+	for changed := true; changed; {
+		changed = false
+		for owner, sources := range dependencies {
+			arena, escapes := result[owner]
+			if !escapes || arena == nil {
+				continue
+			}
+			for source := range sources {
+				if _, already := result[source]; already {
+					continue
+				}
+				result[source] = arena
+				changed = true
+			}
+		}
+	}
+	return result
+}
+
+// adoptedEscapeNamesForBody computes the ownership fact needed when a synthesized auto region
+// adopts a caller arena. A local returned from the function, copied as an ordinary call argument,
+// or used to initialize another value that may escape must remain in the caller arena. Method
+// receivers are deliberately excluded: `report.push(value)` mutates report in place, but its
+// argument is the only value that can be copied into report. The scan is conservative; a false
+// positive retains caller ownership, while a false negative would leave a dangling container
+// header after the temporary arena is freed.
+func adoptedEscapeNamesForBody(body []ast.Stmt) map[string]bool {
+	escaped := map[string]bool{}
+	// dependencies records values copied into a mutable aggregate.  A returned
+	// aggregate is an escape root, so every value copied into it must use the
+	// caller-owned region too.  This is especially important for a struct pushed
+	// into a returned darray: a shallow aggregate copy otherwise leaves a nested
+	// darray backing in adopted.scratch, which is freed before the return value is
+	// observed.
+	dependencies := map[string]map[string]bool{}
+	addDependencies := func(dst string, values []ast.Expr) {
+		if dst == "" {
+			return
+		}
+		deps := dependencies[dst]
+		if deps == nil {
+			deps = map[string]bool{}
+			dependencies[dst] = deps
+		}
+		var collectNames func(reflect.Value)
+		collectNames = func(v reflect.Value) {
+			if !v.IsValid() || !v.CanInterface() {
+				return
+			}
+			if v.Kind() == reflect.Interface {
+				if !v.IsNil() {
+					collectNames(v.Elem())
+				}
+				return
+			}
+			if v.Kind() == reflect.Pointer {
+				if v.IsNil() {
+					return
+				}
+				if ident, ok := v.Interface().(*ast.Ident); ok && ident != nil {
+					deps[ident.Name] = true
+					return
+				}
+				collectNames(v.Elem())
+				return
+			}
+			switch v.Kind() {
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					collectNames(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					collectNames(v.Index(i))
+				}
+			}
+		}
+		for _, value := range values {
+			collectNames(reflect.ValueOf(value))
+		}
+	}
+	var aggregateRootName func(ast.Expr) string
+	aggregateRootName = func(expr ast.Expr) string {
+		switch n := expr.(type) {
+		case *ast.Ident:
+			if n != nil {
+				return n.Name
+			}
+		case *ast.FieldExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.IndexExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.SliceExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.ParenExpr:
+			if n != nil {
+				return aggregateRootName(n.Inner)
+			}
+		case *ast.AddrOfExpr:
+			if n != nil {
+				return aggregateRootName(n.Operand)
+			}
+		}
+		return ""
+	}
+	// These are the built-in mutators that copy their ordinary argument values
+	// into a receiver.  Read-only methods are intentionally excluded so a value
+	// returned from a function does not unnecessarily retain unrelated scratch
+	// allocations.
+	mutatesAggregate := func(name string) bool {
+		switch name {
+		case "push", "extend", "insert", "put", "add", "append", "set", "update":
+			return true
+		default:
+			return false
+		}
+	}
+	var collectExpr func(reflect.Value)
+	collectExpr = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		if v.Kind() == reflect.Interface {
+			if v.IsNil() {
+				return
+			}
+			collectExpr(v.Elem())
+			return
+		}
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return
+			}
+			if ident, ok := v.Interface().(*ast.Ident); ok && ident != nil {
+				escaped[ident.Name] = true
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				// A field/scope callee is a receiver, not a copied value. Its
+				// ordinary arguments are still escape candidates.
+				for _, arg := range call.Args {
+					collectExpr(reflect.ValueOf(arg))
+				}
+				return
+			}
+			collectExpr(v.Elem())
+			return
+		}
+		switch v.Kind() {
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				collectExpr(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				collectExpr(v.Index(i))
+			}
+		}
+	}
+	var walkStmt func(reflect.Value)
+	walkStmt = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		if v.Kind() == reflect.Interface {
+			if v.IsNil() {
+				return
+			}
+			walkStmt(v.Elem())
+			return
+		}
+		if v.Kind() != reflect.Pointer {
+			switch v.Kind() {
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					walkStmt(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					walkStmt(v.Index(i))
+				}
+			}
+			return
+		}
+		if v.IsNil() {
+			return
+		}
+		if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+			if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && mutatesAggregate(field.Field) {
+				addDependencies(aggregateRootName(field.Object), call.Args)
+			}
+		}
+		if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
+			collectExpr(reflect.ValueOf(ret.Value))
+		}
+		if decl, ok := v.Interface().(*ast.VarDeclStmt); ok && decl != nil {
+			// Propagate ownership through `local = other`; if the local is later
+			// returned/copied, keeping the source in scratch would be unsound.
+			collectExpr(reflect.ValueOf(decl.Value))
+		}
+		if assign, ok := v.Interface().(*ast.AssignStmt); ok && assign != nil {
+			collectExpr(reflect.ValueOf(assign.Value))
+		}
+		walkStmt(v.Elem())
+	}
+	walkStmt(reflect.ValueOf(body))
+	// Propagate escape through aggregate-copy edges until reaching a fixed point.
+	// This handles chains such as `inner` -> `arms_buffer` -> return, while still
+	// keeping unrelated scratch containers private.
+	for changed := true; changed; {
+		changed = false
+		for owner, sources := range dependencies {
+			if !escaped[owner] {
+				continue
+			}
+			for source := range sources {
+				if !escaped[source] {
+					escaped[source] = true
+					changed = true
+				}
+			}
+		}
+	}
+	return escaped
+}
+
+func (s *functionState) ensureAdoptedScratchArena() error {
+	if s == nil || s.scratchArena != nil {
+		return nil
+	}
+	if s.g == nil || s.g.result == nil || s.g.result.NamedTypes["Arena"] == nil {
+		return fmt.Errorf("missing builtin Arena type for adopted scratch arena")
+	}
+	arenaType := s.g.result.NamedTypes["Arena"]
+	alloca, err := s.createEntryAllocaZeroed("adopted.scratch", arenaType)
+	if err != nil {
+		return err
+	}
+	s.scratchArena = alloca
+	s.registerFunctionCleanup(scopedCleanupBinding{kind: scopedCleanupRegion, name: "adopted.scratch", ptr: alloca, typ: arenaType})
+	return nil
+}
+
+func (s *functionState) adoptedScratchForLocal(name string) C.LLVMValueRef {
+	if s == nil || s.scratchArena == nil {
+		return nil
+	}
+	if s.adoptedEscapeNames != nil && s.adoptedEscapeNames[name] {
+		return nil
+	}
+	return s.scratchArena
+}
+
 func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	s.pushScope()
 	scope := s.scope
 	defer s.popScope()
 	savedTreeOwner := s.treeAllocOwner
+	savedSynthesizedAutoRegion := s.activeSynthesizedAutoRegion
+	if backendIsSynthesizedAutoRegion(n.Name) {
+		s.activeSynthesizedAutoRegion = true
+	}
 	// docs/74: the implicit region-backed packed stores are region-scoped — a store built in this
 	// region must not leak out to (or into) an enclosing region. Clone on entry, restore on exit, so
 	// each `in auto:` owns its own stores and a long-lived outer tree keeps its store across inner
@@ -332,16 +843,32 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 	restoreOwnerAlias := s.noteScopedArenaOwnerAlias(n)
 	defer func() {
 		s.treeAllocOwner = savedTreeOwner
+		s.activeSynthesizedAutoRegion = savedSynthesizedAutoRegion
 		s.packedStores = savedPackedStores
 		restoreOwnerAlias()
 	}()
 	if s.regionPolyAutoAdopts(n) {
 		// Adopt the threaded caller region: bind the region name to it, route new[auto] to it, emit
-		// the body, and run scope cleanups — but create no arena and register no free (the caller
-		// reclaims it). This is what makes a recursive `new[auto]` builder land its whole tree in the
-		// caller's region instead of a per-call arena freed on return.
+		// the body, and run scope cleanups. The result-bearing stack stays in the caller's arena, but
+		// non-escaping growable locals get private stacks below. This distinction matters for a
+		// region-polymorphic builder such as `read_file`: its returned `contents` must be adopted by
+		// the caller, while its scratch `chunk` must not be allocated on top of `contents` in a
+		// reserve_commit arena. The old all-or-nothing adoption made that second growth panic at
+		// runtime with "not the tail allocation".
 		s.defineBinding(n.Name, valueBinding{ptr: s.regionPolyOwner.arenaRef, typ: s.g.result.NamedTypes["Arena"]})
 		s.treeAllocOwner = s.regionPolyOwner
+		if err := s.ensureAdoptedScratchArena(); err != nil {
+			return err
+		}
+		if assignment, ok := s.g.result.RegionStacks[n]; ok && assignment.StackCount > 1 {
+			escaped := adoptedRegionEscapingStacks(n, assignment)
+			private := adoptedRegionStackAssignment(assignment, escaped)
+			restoreTags, err := s.emitRegionExtraStacksWithAssignment(n, false, private)
+			if err != nil {
+				return err
+			}
+			defer restoreTags()
+		}
 		if err := s.emitInStore(backendScopedArenaInStoreStmt(n)); err != nil {
 			return err
 		}
@@ -366,6 +893,9 @@ func (s *functionState) emitScopedArenaStmt(n *ast.RegionStmt) error {
 			kind = scopedCleanupRegionReset
 		}
 		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: n.Name, ptr: binding.ptr, typ: binding.typ})
+		if !loopReset {
+			s.markRegionScopeOwned(binding.ptr)
+		}
 	}
 	restoreTags, err := s.emitRegionExtraStacks(n, loopReset)
 	if err != nil {
@@ -453,6 +983,18 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 	if !ok || asn.StackCount <= 1 {
 		return noop, nil
 	}
+	return s.emitRegionExtraStacksWithAssignment(n, loopReset, asn)
+}
+
+// emitRegionExtraStacksWithAssignment is the common implementation for ordinary inferred regions
+// and adopted region-polymorphic regions. In the ordinary case every stack is private to the
+// current function/scope. In the adopted case the caller-owned result stacks are rewritten to stack
+// zero by adoptedRegionStackAssignment, while only non-escaping stacks get a local arena.
+func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, loopReset bool, asn semantic.RegionStackAssignment) (func(), error) {
+	noop := func() {}
+	if asn.StackCount <= 1 {
+		return noop, nil
+	}
 	arenaType := s.g.result.NamedTypes["Arena"]
 	if arenaType == nil {
 		return noop, fmt.Errorf("missing builtin Arena type for region %s", n.Name)
@@ -485,6 +1027,9 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 			kind = scopedCleanupRegionReset
 		}
 		s.registerScopedCleanup(scopedCleanupBinding{kind: kind, name: name, ptr: alloca, typ: arenaType})
+		if !loopReset {
+			s.markRegionScopeOwned(alloca)
+		}
 		// Phase C1c: a reserve_commit stack is eagerly initialized with a contiguous reservation
 		// sized to its proven element bound, so the base never moves and interior refs survive
 		// growth. Skipped under loopReset (a per-iteration reset region) — chained stays correct
@@ -557,6 +1102,224 @@ func (s *functionState) emitRegionExtraStacks(n *ast.RegionStmt, loopReset bool)
 			}
 		}
 	}, nil
+}
+
+// withAdoptedEscapes keeps escaping allocations on the caller-owned ambient stack (stack zero) and
+// leaves every non-escaping stack private to the adopted function. Stack IDs are intentionally not
+// renumbered: preserving the analyzer's IDs keeps the darray tags and the proven reserve/fixed
+// strategy metadata aligned, while an unused private slot is lazy and costs no backing allocation.
+func adoptedRegionStackAssignment(asn semantic.RegionStackAssignment, escaped map[int]bool) semantic.RegionStackAssignment {
+	private := asn
+	private.StackOf = make(map[string]int, len(asn.StackOf))
+	for name, stack := range asn.StackOf {
+		if escaped[stack] {
+			private.StackOf[name] = 0
+		} else {
+			private.StackOf[name] = stack
+		}
+	}
+	private.StackEarlyFreeAfter = make(map[int]int, len(asn.StackEarlyFreeAfter))
+	for stack, offset := range asn.StackEarlyFreeAfter {
+		for name, assigned := range private.StackOf {
+			if assigned == stack && asn.StackOf[name] == stack {
+				private.StackEarlyFreeAfter[stack] = offset
+				break
+			}
+		}
+	}
+	return private
+}
+
+// adoptedRegionEscapingStacks conservatively identifies which inferred-region stacks contribute to
+// a value returned by a region-polymorphic function. A direct returned local, a field/index rooted
+// at that local, and a struct/tuple/call argument containing that local are all recognized through
+// the AST walk. If the return shape cannot be tied to a known stack, all stacks remain caller-owned;
+// that preserves the existing safety invariant instead of guessing that a value is temporary.
+func adoptedRegionEscapingStacks(region *ast.RegionStmt, asn semantic.RegionStackAssignment) map[int]bool {
+	escaped := map[int]bool{}
+	if region == nil {
+		return escaped
+	}
+	// Keep the stack-level escape computation aligned with adoptedEscapeNamesForBody. A returned
+	// container can acquire region-backed values through a mutating method (for example
+	// `arms.push(Arm{body: body})`), so the nested value's stack is an escape dependency even when it
+	// is not itself named by the return expression.
+	dependencies := map[string]map[string]bool{}
+	addDependencies := func(dst string, values []ast.Expr) {
+		if dst == "" {
+			return
+		}
+		deps := dependencies[dst]
+		if deps == nil {
+			deps = map[string]bool{}
+			dependencies[dst] = deps
+		}
+		var collectNames func(reflect.Value)
+		collectNames = func(v reflect.Value) {
+			if !v.IsValid() || !v.CanInterface() {
+				return
+			}
+			if v.Kind() == reflect.Interface {
+				if !v.IsNil() {
+					collectNames(v.Elem())
+				}
+				return
+			}
+			if v.Kind() == reflect.Pointer {
+				if v.IsNil() {
+					return
+				}
+				if ident, ok := v.Interface().(*ast.Ident); ok && ident != nil {
+					deps[ident.Name] = true
+					return
+				}
+				collectNames(v.Elem())
+				return
+			}
+			switch v.Kind() {
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					collectNames(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					collectNames(v.Index(i))
+				}
+			}
+		}
+		for _, value := range values {
+			collectNames(reflect.ValueOf(value))
+		}
+	}
+	var aggregateRootName func(ast.Expr) string
+	aggregateRootName = func(expr ast.Expr) string {
+		switch n := expr.(type) {
+		case *ast.Ident:
+			if n != nil {
+				return n.Name
+			}
+		case *ast.FieldExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.IndexExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.SliceExpr:
+			if n != nil {
+				return aggregateRootName(n.Object)
+			}
+		case *ast.ParenExpr:
+			if n != nil {
+				return aggregateRootName(n.Inner)
+			}
+		case *ast.AddrOfExpr:
+			if n != nil {
+				return aggregateRootName(n.Operand)
+			}
+		}
+		return ""
+	}
+	mutatesAggregate := func(name string) bool {
+		switch name {
+		case "push", "extend", "insert", "put", "add", "append", "set", "update":
+			return true
+		default:
+			return false
+		}
+	}
+	sawReturn := false
+	sawUnknown := false
+	var walkExpr func(reflect.Value)
+	walkExpr = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if id, ok := v.Interface().(*ast.Ident); ok && id != nil {
+				if stack, known := asn.StackOf[id.Name]; known {
+					escaped[stack] = true
+				} else {
+					sawUnknown = true
+				}
+			}
+			walkExpr(v.Elem())
+		case reflect.Interface:
+			if !v.IsNil() {
+				walkExpr(v.Elem())
+			}
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walkExpr(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walkExpr(v.Index(i))
+			}
+		}
+	}
+	var walkStmt func(reflect.Value)
+	walkStmt = func(v reflect.Value) {
+		if !v.IsValid() || !v.CanInterface() {
+			return
+		}
+		switch v.Kind() {
+		case reflect.Pointer:
+			if v.IsNil() {
+				return
+			}
+			if call, ok := v.Interface().(*ast.CallExpr); ok && call != nil {
+				if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && mutatesAggregate(field.Field) {
+					addDependencies(aggregateRootName(field.Object), call.Args)
+				}
+			}
+			if ret, ok := v.Interface().(*ast.ReturnStmt); ok && ret != nil {
+				sawReturn = true
+				walkExpr(reflect.ValueOf(ret.Value))
+				return
+			}
+			walkStmt(v.Elem())
+		case reflect.Interface:
+			if !v.IsNil() {
+				walkStmt(v.Elem())
+			}
+		case reflect.Struct:
+			for i := 0; i < v.NumField(); i++ {
+				walkStmt(v.Field(i))
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < v.Len(); i++ {
+				walkStmt(v.Index(i))
+			}
+		}
+	}
+	walkStmt(reflect.ValueOf(region.Body))
+	for changed := true; changed; {
+		changed = false
+		for owner, sources := range dependencies {
+			ownerStack, ownerKnown := asn.StackOf[owner]
+			if !ownerKnown || !escaped[ownerStack] {
+				continue
+			}
+			for source := range sources {
+				if sourceStack, known := asn.StackOf[source]; known && !escaped[sourceStack] {
+					escaped[sourceStack] = true
+					changed = true
+				}
+			}
+		}
+	}
+	if !sawReturn || sawUnknown {
+		for _, stack := range asn.StackOf {
+			escaped[stack] = true
+		}
+	}
+	return escaped
 }
 func (s *functionState) emitDeferredBody(binding *deferredBodyBinding) error {
 	if binding == nil || binding.stmt == nil {
@@ -678,6 +1441,24 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		// declaration's initializer belongs to the enclosing scope.
 		var initValue C.LLVMValueRef
 		if n.Value != nil {
+			savedInitializerCarriesRegionStorage := s.activeInitializerCarriesRegionStorage
+			savedInitializerName := s.activeInitializerName
+			s.activeInitializerCarriesRegionStorage = backendTypeCarriesRegionStorage(declType)
+			s.activeInitializerName = n.Name
+			defer func() {
+				s.activeInitializerCarriesRegionStorage = savedInitializerCarriesRegionStorage
+				s.activeInitializerName = savedInitializerName
+			}()
+			// A returned-container call in an adopted region-polymorphic function must
+			// use the fresh local's owner, not the caller's ambient owner. Otherwise a
+			// later growth of a caller-owned darray sees the temporary result after its
+			// own backing allocation and reserve_commit correctly rejects the non-tail
+			// realloc. Escaping locals retain the adopted caller owner.
+			savedTreeOwner := s.treeAllocOwner
+			if scratch := s.adoptedScratchForLocal(n.Name); scratch != nil {
+				s.treeAllocOwner = treeAllocOwnerBinding{arenaRef: scratch}
+				defer func() { s.treeAllocOwner = savedTreeOwner }()
+			}
 			// If this local is a stack-tagged darray, tell a seeded container initializer to
 			// allocate its initial backing into that SAME parallel arena (consumed once by the
 			// literal/comprehension emit), so later growth through a grower never straddles the
