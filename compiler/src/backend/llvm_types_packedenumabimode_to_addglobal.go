@@ -43,6 +43,7 @@ static void elisacoreSetInstructionCallConv(LLVMValueRef Call, unsigned CallConv
 import "C"
 
 import (
+	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
 	"strings"
@@ -384,8 +385,35 @@ func (g *llvmGenerator) addFunction(name string, fn *semantic.FuncType) (C.LLVMV
 	if callConv, ok := g.llvmCallConvForFunc(fn); ok {
 		C.elisacoreSetFunctionCallConv(value, callConv)
 	}
+	if module := g.wasmImportModule(name); module != "" {
+		g.addFunctionStringAttribute(value, "wasm-import-module", module)
+	}
 	g.applyAggregateAbiAttrs(value, fn)
 	return value, nil
+}
+
+// wasmImportModule reads the target-specific WIT namespace from the extern
+// declaration. It is deliberately kept separate from LinkName: LLVM uses the
+// latter for the core symbol and this string attribute for the component
+// interface/package namespace.
+func (g *llvmGenerator) wasmImportModule(name string) string {
+	if g == nil || g.result == nil || g.result.GlobalScope == nil {
+		return ""
+	}
+	sym, ok := g.result.GlobalScope.Lookup(name)
+	if !ok || sym == nil {
+		return ""
+	}
+	decl, ok := sym.Node.(*ast.ExternFuncDecl)
+	if !ok || decl == nil {
+		return ""
+	}
+	for _, annotation := range decl.Annotations {
+		if annotation.Name == "wasm_import_module" && len(annotation.Args) == 1 {
+			return strings.TrimSpace(annotation.Args[0])
+		}
+	}
+	return ""
 }
 
 func (g *llvmGenerator) llvmCallConvForFunc(fn *semantic.FuncType) (C.uint, bool) {
@@ -653,7 +681,17 @@ func (g *llvmGenerator) lookupIntrinsic(name string, fn *semantic.FuncType) (C.u
 	if intrinsicID == 0 {
 		return 0, nil, false, nil
 	}
-	overloadParams := intrinsicOverloadParams(name, fn)
+	// LLVMGetIntrinsicDeclaration only accepts overload types for intrinsics
+	// that are actually overloaded. Passing the source function's ordinary
+	// parameter types to a fully mangled intrinsic such as
+	// llvm.wasm.memory.grow.i32 makes LLVM append another `.i32` and emit the
+	// malformed declaration `llvm.wasm.memory.grow.i32.i32`. This matters for
+	// freestanding WASM component runtimes, whose memory intrinsics are already
+	// fully specialized in their @intrinsic spelling.
+	overloadParams := []semantic.Type(nil)
+	if C.LLVMIntrinsicIsOverloaded(intrinsicID) != 0 {
+		overloadParams = intrinsicOverloadParams(name, fn)
+	}
 	paramTypes := make([]C.LLVMTypeRef, 0, len(overloadParams))
 	for _, param := range overloadParams {
 		paramType, err := g.lowerType(param)
@@ -669,6 +707,11 @@ func intrinsicOverloadParams(name string, fn *semantic.FuncType) []semantic.Type
 		return nil
 	}
 	switch name {
+	case "llvm.wasm.memory.grow", "llvm.wasm.memory.grow.i32", "llvm.wasm.memory.size", "llvm.wasm.memory.size.i32":
+		// The WASM memory intrinsics are overloaded by their result type, not
+		// by every ordinary call argument. Supplying the function parameters
+		// would append both `i32` arguments to an already-specialized name.
+		return []semantic.Type{fn.Return}
 	case "memset", "llvm.memset":
 		if len(fn.Params) >= 3 {
 			return []semantic.Type{fn.Params[0], fn.Params[2]}

@@ -79,6 +79,19 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			declType = invalidType
 		}
 		bindingType := declType
+		// `mutable T&` is parsed with mutability on the binding declaration while
+		// the resolved reference type may still be read-only.  Promote the stored
+		// binding type so a later `slot <- value` is analyzed as a write through
+		// the reference rather than as an attempted replacement of the reference
+		// itself.  This mirrors the existing mutable-view promotion above and is
+		// required for explicit writable-reference locals in stage0.
+		if n.Mutable {
+			if ref, ok := bindingType.(*RefType); ok && ref != nil && !ref.Mutable {
+				cloned := cloneRefType(ref)
+				cloned.Mutable = true
+				bindingType = cloned
+			}
+		}
 		if dstRef, ok := bindingType.(*RefType); ok {
 			if srcRef, ok := valueType.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable && AssignableTo(bindingType, valueType) {
 				cloned := cloneRefType(dstRef)

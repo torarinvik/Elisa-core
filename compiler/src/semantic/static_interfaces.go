@@ -341,6 +341,7 @@ func (a *Analyzer) typePathNameForReceiver(receiver Type) (string, bool) {
 	if a == nil || receiver == nil {
 		return "", false
 	}
+	receiver = unwrapReceiverRef(receiver)
 	for name, t := range a.namedTypes {
 		if t != nil && SameType(t, receiver) {
 			return name, true
@@ -382,6 +383,7 @@ func (a *Analyzer) staticImplsForReceiver(receiver Type) []*StaticImpl {
 	if a == nil || receiver == nil || len(a.staticImpls) == 0 {
 		return nil
 	}
+	receiver = unwrapReceiverRef(receiver)
 	out := make([]*StaticImpl, 0, 2)
 	for _, impl := range a.staticImpls {
 		if impl == nil || impl.Receiver == nil {

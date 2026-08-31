@@ -39,7 +39,7 @@ func removedAnnotationMigration(name string) (string, bool) {
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "link_name", "intrinsic", "callconv", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
+	case "borrows_return", "link_name", "intrinsic", "wasm_import_module", "callconv", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
 		return true
 	default:
 		return false
@@ -519,6 +519,10 @@ func (a *Analyzer) applyExternFuncAnnotations(fn *ast.ExternFuncDecl, fnType *Fu
 			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 				a.errorf(annotation.Position, "@link_name on extern function %q expects exactly one non-empty symbol name", fn.Name)
 			}
+		case "wasm_import_module":
+			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+				a.errorf(annotation.Position, "@wasm_import_module on extern function %q expects exactly one non-empty interface namespace", fn.Name)
+			}
 		case "intrinsic":
 			if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
 				a.errorf(annotation.Position, "@intrinsic on extern function %q expects exactly one non-empty LLVM intrinsic name", fn.Name)
@@ -753,4 +757,3 @@ func (a *Analyzer) applyExternBorrowsReturnFieldPayload(fn *ast.ExternFuncDecl, 
 	fnType.ReturnProvenanceKnown = true
 	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
-

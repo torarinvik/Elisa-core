@@ -43,6 +43,32 @@ export fn probe(seed: u64) -> u32 = local_impl
 	}
 }
 
+// Component exports need a linker spelling that is not a valid Elisa
+// identifier. An annotation immediately before `export fn` must be retained
+// instead of being rejected as an orphan annotation.
+func TestParseExportFuncLinkNameAnnotation(t *testing.T) {
+	file, errs := parseSourceFile(t, `
+def local_impl() -> void:
+	pass
+
+@link_name("example:guest#start")
+export fn start() -> void = local_impl
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	decl, ok := file.Decls[1].(*ast.ExportFuncDecl)
+	if !ok {
+		t.Fatalf("expected annotated ExportFuncDecl, got %T", file.Decls[1])
+	}
+	if len(decl.Annotations) != 1 || decl.Annotations[0].Name != "link_name" {
+		t.Fatalf("expected @link_name on export fn, got %#v", decl.Annotations)
+	}
+	if len(decl.Annotations[0].Args) != 1 || decl.Annotations[0].Args[0] != "example:guest#start" {
+		t.Fatalf("expected component export link name, got %#v", decl.Annotations[0].Args)
+	}
+}
+
 // `export global Mod::g` accepts a qualified target; the default public alias is
 // its last segment (a dotted name is not a valid C export symbol), and an
 // explicit `as` still overrides it.

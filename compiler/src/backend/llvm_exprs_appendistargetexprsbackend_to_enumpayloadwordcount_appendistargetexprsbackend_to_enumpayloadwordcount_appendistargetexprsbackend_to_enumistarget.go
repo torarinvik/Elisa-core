@@ -460,6 +460,12 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 		return s.emitDerivedStateExpr(n.Inner, selfValue, selfType)
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.BoolLit, *ast.NullLit:
 		return s.emitExpr(expr, nil)
+	case *ast.FieldExpr:
+		// Qualified zero-payload enum variants are immutable constants. The
+		// semantic pass admits them as pure derived-state operands; use the
+		// ordinary field emitter so packed and non-packed enum representations
+		// retain their normal construction rules.
+		return s.emitExpr(n, nil)
 	case *ast.UnaryExpr:
 		operand, operandType, err := s.emitDerivedStateExpr(n.Operand, selfValue, selfType)
 		if err != nil {
@@ -583,6 +589,22 @@ func (s *functionState) emitDerivedStateExpr(expr ast.Expr, selfValue C.LLVMValu
 	}
 }
 func (s *functionState) emitDerivedStateSelfPath(selfValue C.LLVMValueRef, selfType semantic.Type, path []string) (C.LLVMValueRef, semantic.Type, error) {
+	// A named-state test is commonly applied to a borrowed value (`value is
+	// App[Running]`). The semantic type retains that reference transport while
+	// the derived predicate describes fields of the referenced struct. Load the
+	// aggregate once before walking its field path; otherwise `fieldInfo` sees a
+	// pointer-like type and rejects an otherwise ordinary `self.phase` access.
+	if refType, ok := selfType.(*semantic.RefType); ok {
+		if refType == nil || refType.Elem == nil {
+			return nil, nil, fmt.Errorf("derived-state self reference has no element type")
+		}
+		var err error
+		selfValue, err = s.loadValue(selfValue, refType.Elem, "isstate.self")
+		if err != nil {
+			return nil, nil, err
+		}
+		selfType = refType.Elem
+	}
 	currentValue := selfValue
 	currentType := selfType
 	if len(path) == 0 {

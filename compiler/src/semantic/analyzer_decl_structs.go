@@ -312,6 +312,13 @@ func (a *Analyzer) isSupportedDerivedStateExpr(expr ast.Expr) bool {
 	case *ast.Ident:
 		return n.Name == "self"
 	case *ast.FieldExpr:
+		// Qualified enum variants are immutable constants and are therefore safe
+		// operands in a derived-state predicate, e.g. `self.phase == Phase.Cold`.
+		// Keep this check side-effect free; analyzeExpr below remains responsible
+		// for reporting an unknown enum or variant.
+		if a.isDerivedStateEnumVariantExpr(n) {
+			return true
+		}
 		return a.isSupportedDerivedStateExpr(n.Object)
 	case *ast.IntLit, *ast.FloatLit, *ast.StringLit, *ast.CharLit, *ast.BoolLit, *ast.NullLit:
 		return true
@@ -337,6 +344,26 @@ func (a *Analyzer) isSupportedDerivedStateExpr(expr ast.Expr) bool {
 	default:
 		return false
 	}
+}
+
+func (a *Analyzer) isDerivedStateEnumVariantExpr(expr *ast.FieldExpr) bool {
+	if expr == nil {
+		return false
+	}
+	baseName, ok := qualifiedTypePathFromExpr(expr.Object)
+	if !ok {
+		return false
+	}
+	base, _, ok := a.lookupVisibleType(baseName)
+	if !ok {
+		return false
+	}
+	enumType, ok := base.(*EnumType)
+	if !ok || enumType == nil {
+		return false
+	}
+	_, ok = enumType.Variant(expr.Field)
+	return ok
 }
 
 // analyzeStructFieldWhereRefinement validates the where predicate on a struct field declaration.

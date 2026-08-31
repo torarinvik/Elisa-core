@@ -342,6 +342,7 @@ F ExportFuncDecl 3 Position
 F ExportFuncDecl 4 ReturnType
 F ExportFuncDecl 5 TargetName
 F ExportFuncDecl 6 TargetTypeArgs
+F ExportFuncDecl 7 Annotations
 
 T 57 ExportGlobalDecl
 F ExportGlobalDecl 1 Alias

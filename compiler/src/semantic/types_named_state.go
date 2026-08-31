@@ -5,6 +5,17 @@ import (
 )
 
 func namedStateStructBase(t Type) (*StructType, bool) {
+	// A named-state value is commonly carried through a borrow (`App&` or
+	// `mutable App&`).  State predicates inspect the value's logical struct,
+	// not the transport reference, so peel the reference before matching.  Do
+	// this here rather than making every `is`/flow caller know about references.
+	for {
+		ref, ok := t.(*RefType)
+		if !ok || ref == nil {
+			break
+		}
+		t = ref.Elem
+	}
 	switch tt := t.(type) {
 	case *StructType:
 		return tt, tt != nil && len(tt.NamedStateCases) != 0
@@ -17,6 +28,13 @@ func namedStateStructBase(t Type) (*StructType, bool) {
 }
 
 func namedStateArgs(t Type) ([]Type, bool) {
+	for {
+		ref, ok := t.(*RefType)
+		if !ok || ref == nil {
+			break
+		}
+		t = ref.Elem
+	}
 	gi, ok := t.(*GenericInstanceType)
 	if !ok || gi == nil {
 		return nil, false
