@@ -834,7 +834,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 // — no caller-side scratch, no presize/header threading. (This replaced an earlier inline
 // `{ out=[]; out.resize(...); par_map(slice(&src), slice(&out), ...); out }` block that existed only
 // because a function couldn't build-and-return an owned container; now one can.) Gated to a no-filter
-// map over a plain darray identifier with no head bindings and a reconstructible element type;
+// map over a plain darray identifier with no head bindings;
 // otherwise a clear diagnostic.
 func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExpr, elemType Type, expectedDArray *DArrayType, useExpectedDArray bool) Type {
 	result := Type(invalidType)
@@ -844,7 +844,7 @@ func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExp
 		result, _ = a.stampContainerRegion(&DArrayType{Elem: elemType, Shape: &WildcardShape{}, SurfaceName: "darray"}).(*DArrayType)
 	}
 	fail := func(pos lexer.Pos, reason string) Type {
-		a.errorf(pos, "`by par` map %s; it must be `[ f(%s) for %s in <darray> by par ]` (no filter or head bindings, a darray source, and a reconstructible element type)", reason, expr.Name, expr.Name)
+		a.errorf(pos, "`by par` map %s; it must be `[ f(%s) for %s in <darray> by par ]` (no filter or head bindings and a darray source)", reason, expr.Name, expr.Name)
 		a.exprTypes[expr] = result
 		return result
 	}
@@ -868,11 +868,12 @@ func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExp
 		a.exprTypes[expr] = result
 		return result
 	}
-	elemTypeExpr := typeToTypeExpr(elemType, expr.Position)
-	if elemTypeExpr == nil {
-		return fail(expr.Pos(), "over element type "+elemType.String()+" is not yet supported")
-	}
-
+	// Pass the comprehension result as the expected return type below. The ordinary generic-call
+	// path then binds par_map_collect's U directly from darray[U] -> result, and uses that binding
+	// to contextually type the synthesized lambda. Do not reconstruct a surface TypeExpr here:
+	// that was only needed by the old inline out-buffer lowering and incorrectly rejected valid
+	// element types (notably generic instances) even though the current call lowering is fully
+	// structural.
 	pos := expr.Position
 	transform := &ast.LambdaExpr{Position: pos, Keyword: "lambda", UsesShorthandParams: true,
 		Params: []ast.ParamDecl{{Position: pos, Name: expr.Name}}, BodyExpr: expr.Value}

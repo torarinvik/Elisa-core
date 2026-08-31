@@ -503,7 +503,7 @@ func (p *Parser) validateMachineArmStmt(stmt ast.Stmt, arm *machineArm) {
 		for _, inner := range s.Body {
 			p.validateMachineArmStmt(inner, arm)
 		}
-	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.ExprStmt:
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt:
 		_ = s // allowed straight-line forms; mutation targets are checked at desugar time
 	default:
 		p.errorf("machine arms allow only straight-line statements ending in `-> State`, `return`, or `break` (docs/123 §5)")
@@ -591,7 +591,7 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 		armsByState[arm.state] = append(armsByState[arm.state], i)
 	}
 	// Per-state input coverage, verified later against the input's TYPE (docs/125 §9): the
-	// totality rule depends on whether the input is an open domain (char/int — needs a final
+	// totality rule depends on whether the input is an open domain (char/int/float/bool/string — needs a final
 	// `_`) or a closed const enum (needs all tags spelled, `_` rejected). The parser can't
 	// see types, so it records coverage and a MachineCoverageStmt carries it to the analyzer.
 	var coverageStates []ast.MachineCoverageState
@@ -631,7 +631,7 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 				}
 			}
 		}
-		// Early Tier-1 diagnosis: an open-domain state (char/int/range arms) with no `_` can
+		// Early Tier-1 diagnosis: an open-domain state (literal/range arms) with no `_` can
 		// never be exhaustive, and the parser can prove it without types. Enum-tag states are
 		// left to the coverage check, which knows the enum and its full variant set.
 		if !cover.HasWildcard && hasOpenDomainInput {
@@ -649,10 +649,43 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 		collectExprRootIdents(cond, overRoots)
 	}
 	mutatedRoots := map[string]bool{}
+	// The input expression, while condition, and arm classifier expressions execute inside
+	// the generated loop. A call in any of them can mutate a driven root just like a call in
+	// an arm body, so include their call arguments and receivers in the capture manifest.
+	collectMachineCallArgRoots(&ast.ExprStmt{Expr: input}, overRoots, mutatedRoots)
+	collectMachineCallArgRoots(&ast.ExprStmt{Expr: cond}, overRoots, mutatedRoots)
 	for i := range arms {
 		armLocals := map[string]bool{}
+		// Payload aliases and input binders are introduced by the arm header, so
+		// they are already in scope for every statement in that arm.  Register
+		// them before mutation validation; otherwise an assignment such as
+		// `State(value), item: item = ...` is incorrectly reported as foreign
+		// state.  A payload bind with the field's own spelling is not an alias —
+		// it names the scalarized payload slot and must remain protected.
+		if arms[i].inputBind != "" {
+			armLocals[arms[i].inputBind] = true
+		}
+		if st, ok := stateByName[arms[i].state]; ok {
+			for payloadIndex, pat := range arms[i].payload {
+				if pat.bind == "" || payloadIndex < len(st.fields) && pat.bind == st.fields[payloadIndex].name {
+					continue
+				}
+				armLocals[pat.bind] = true
+			}
+		}
 		for _, arg := range arms[i].args {
 			collectMachineCallArgRoots(&ast.ExprStmt{Expr: arg}, overRoots, mutatedRoots)
+		}
+		collectMachineCallArgRoots(&ast.ExprStmt{Expr: arms[i].guard}, overRoots, mutatedRoots)
+		for _, payload := range arms[i].payload {
+			collectMachineCallArgRoots(&ast.ExprStmt{Expr: payload.cond}, overRoots, mutatedRoots)
+		}
+		for _, literal := range arms[i].inputs {
+			collectMachineCallArgRoots(&ast.ExprStmt{Expr: literal}, overRoots, mutatedRoots)
+		}
+		for _, inputRange := range arms[i].inputRanges {
+			collectMachineCallArgRoots(&ast.ExprStmt{Expr: inputRange.lo}, overRoots, mutatedRoots)
+			collectMachineCallArgRoots(&ast.ExprStmt{Expr: inputRange.hi}, overRoots, mutatedRoots)
 		}
 		p.checkMachineArmMutations(arms[i].body, armLocals, fieldByName, overRoots, mutatedRoots)
 	}
@@ -694,23 +727,14 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 	for i := range states {
 		st := &states[i]
 		var loweredArms []loweredMachineArm
-		// Input BIND names are hoisted to the head of the state's match arm — a bound
-		// input is referenced from arm GUARDS (if-ladder conditions), which run before
-		// any per-arm body statement could declare it.
-		var bindDecls []ast.Stmt
-		bindSeen := map[string]bool{}
 		for _, idx := range armsByState[st.name] {
 			arm := &arms[idx]
-			if arm.inputBind != "" && !bindSeen[arm.inputBind] {
-				bindSeen[arm.inputBind] = true
-				bindDecls = append(bindDecls, &ast.VarDeclStmt{Position: arm.pos, Name: arm.inputBind, Value: &ast.Ident{Position: arm.pos, Name: inputVar}})
-			}
 			loweredArms = append(loweredArms, p.lowerMachineArm(arm, st, stateByName, enumMember, inputVar, modeVar))
 		}
 		matchArms = append(matchArms, ast.MatchArm{
 			Position: st.pos,
 			Pattern:  &ast.MatchVariantPattern{Position: st.pos, EnumName: enumName, Variant: st.name},
-			Body:     append(bindDecls, buildMachineArmChain(st.pos, loweredArms)...),
+			Body:     buildMachineArmChain(st.pos, loweredArms),
 		})
 	}
 
@@ -727,18 +751,6 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 		loopBody = append(loopBody, &ast.MachineCoverageStmt{Position: pos, Input: input, States: coverageStates})
 	}
 	loopBody = append(loopBody, &ast.MatchStmt{Position: pos, Value: &ast.Ident{Position: pos, Name: modeVar}, Arms: matchArms})
-	// A one-state, wildcard, payload-free self-loop is the machine spelling of a
-	// structured loop body.  Lower it directly: there is no runtime state to
-	// represent or dispatch, while evaluating `over` once per iteration preserves
-	// observable semantics. This is the key zero-overhead path for incremental
-	// replacement of ordinary loops.
-	if forHeader != nil && len(states) == 1 && len(arms) == 1 && len(states[0].fields) == 0 &&
-		arms[0].state == states[0].name && arms[0].inputWild && arms[0].guard == nil &&
-		arms[0].exit == machineExitTransition && arms[0].target == states[0].name && len(arms[0].args) == 0 {
-		lowered := p.lowerMachineArm(&arms[0], &states[0], stateByName, enumMember, inputVar, modeVar)
-		loopBody = append([]ast.Stmt{&ast.ExprStmt{Expr: input}}, lowered.body...)
-		decls = nil
-	}
 	var loop ast.Stmt
 	if forHeader != nil {
 		if forHeader.rangeEnd != nil {
@@ -764,6 +776,25 @@ func (p *Parser) desugarMachine(pos lexer.Pos, input, cond, yield ast.Expr, forH
 // capture licensing. A driven root passed to any call may be mutated THROUGH the call
 // (`advance(scanner, 1)` with a `mutable&` param), so those join the capture set too.
 func (p *Parser) checkMachineArmMutations(stmts []ast.Stmt, armLocals map[string]bool, fieldByName map[string]machineField, overRoots, mutatedRoots map[string]bool) {
+	checkAssignmentTarget := func(target ast.Expr) {
+		root := assignRootIdent(target)
+		if root == "" {
+			p.errorf("machine arm assignment target is not rooted in a named binding")
+			return
+		}
+		if armLocals[root] {
+			return
+		}
+		if _, isField := fieldByName[root]; isField {
+			p.errorf("machine arm assigns payload field %q directly — payloads change only through `-> State(args)` transitions (docs/123 §5)", root)
+			return
+		}
+		if !overRoots[root] {
+			p.errorf("machine arms may only mutate the driven resource (%s) — %q is foreign state (docs/123 §5)", strings.Join(sortedKeys(overRoots), ", "), root)
+			return
+		}
+		mutatedRoots[root] = true
+	}
 	for _, stmt := range stmts {
 		collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
 		switch s := stmt.(type) {
@@ -772,23 +803,11 @@ func (p *Parser) checkMachineArmMutations(stmts []ast.Stmt, armLocals map[string
 		case *ast.VarDeclStmt:
 			armLocals[s.Name] = true
 		case *ast.AssignStmt:
-			root := assignRootIdent(s.Target)
-			if root == "" {
-				p.errorf("machine arm assignment target is not rooted in a named binding")
-				continue
-			}
-			if armLocals[root] {
-				continue
-			}
-			if _, isField := fieldByName[root]; isField {
-				p.errorf("machine arm assigns payload field %q directly — payloads change only through `-> State(args)` transitions (docs/123 §5)", root)
-				continue
-			}
-			if !overRoots[root] {
-				p.errorf("machine arms may only mutate the driven resource (%s) — %q is foreign state (docs/123 §5)", strings.Join(sortedKeys(overRoots), ", "), root)
-				continue
-			}
-			mutatedRoots[root] = true
+			checkAssignmentTarget(s.Target)
+		case *ast.AugAssignStmt:
+			checkAssignmentTarget(s.Target)
+		case *ast.AsRefAssignStmt:
+			checkAssignmentTarget(s.Target)
 		}
 	}
 }
@@ -821,7 +840,7 @@ func machinePayloadUnconditional(arm *machineArm) bool {
 }
 
 // machineArmHasOpenDomainInput reports whether an arm names any OPEN-domain input — a
-// char/int/bool/string literal or a range. Such a state cannot be exhaustive without the
+// char/int/float/bool/string literal or a range. Such a state cannot be exhaustive without the
 // wildcard `_`, and (unlike an enum-tag state) the parser can prove that without types, so
 // a missing `_` is diagnosed early rather than deferred to the coverage check (docs/125 §9).
 func machineArmHasOpenDomainInput(arm *machineArm) bool {
@@ -829,17 +848,28 @@ func machineArmHasOpenDomainInput(arm *machineArm) bool {
 		return true
 	}
 	for _, alt := range arm.inputs {
-		switch alt.(type) {
-		case *ast.CharLit, *ast.IntLit, *ast.BoolLit, *ast.StringLit:
+		if machineExprHasOpenDomainInput(alt) {
 			return true
 		}
 	}
 	return false
 }
 
+func machineExprHasOpenDomainInput(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.CharLit, *ast.IntLit, *ast.FloatLit, *ast.BoolLit, *ast.StringLit:
+		return true
+	case *ast.UnaryExpr:
+		return machineExprHasOpenDomainInput(n.Operand)
+	case *ast.ParenExpr:
+		return machineExprHasOpenDomainInput(n.Inner)
+	}
+	return false
+}
+
 // machineArmTagNames returns the enum-member names an arm's input alternatives name, when
 // they are enum-tag patterns: a qualified `Enum.Member` (FieldExpr) or a leading-dot
-// `.Member` (ShorthandMemberExpr). A non-tag input (a char/int literal) contributes nothing.
+// `.Member` (ShorthandMemberExpr). A non-tag input (a literal or range) contributes nothing.
 // Used to build the per-state tag-coverage set for the closed-enum totality check (docs/125
 // §9); the caller restricts this to unguarded, payload-unconditional arms.
 func machineArmTagNames(arm *machineArm) []string {
@@ -858,7 +888,7 @@ func machineArmTagNames(arm *machineArm) []string {
 }
 
 // machineArmInputLiteralKeys returns a canonical coverage key for each of an arm's literal
-// or enum-tag input alternatives (`'a'`, `7`, `true`, `TokenKind.Ident`). Ranges and
+// or enum-tag input alternatives (`'a'`, `7`, `1.0`, `true`, `TokenKind.Ident`). Ranges and
 // non-literal expressions yield no key — duplicate detection is intentionally exact
 // (0-FP): it fires only when the SAME literal is handled twice, not on possibly-overlapping
 // ranges, which the analyzer cannot compare without the value domain.
@@ -883,6 +913,8 @@ func machineLiteralKey(e ast.Expr) (string, bool) {
 			return "int:hex:" + n.Value, true
 		}
 		return "int:" + n.Value, true
+	case *ast.FloatLit:
+		return "float:" + n.Value, true
 	case *ast.StringLit:
 		return "str:" + n.Value, true
 	case *ast.BoolLit:
@@ -890,10 +922,26 @@ func machineLiteralKey(e ast.Expr) (string, bool) {
 			return "bool:true", true
 		}
 		return "bool:false", true
+	case *ast.UnaryExpr:
+		if key, ok := machineLiteralKey(n.Operand); ok {
+			// The machine-value grammar currently admits only unary minus here. Keep the
+			// operator out of the key: the operand key is already distinct from every
+			// direct literal key, and this avoids depending on TokenKind stringification.
+			return "unary:" + key, true
+		}
+	case *ast.ParenExpr:
+		return machineLiteralKey(n.Inner)
 	case *ast.FieldExpr:
 		// A qualified enum member `Enum.Variant` (classified-dispatch tags).
 		if obj, ok := n.Object.(*ast.Ident); ok {
 			return "tag:" + obj.Name + "." + n.Field, true
+		}
+	case *ast.ShorthandMemberExpr:
+		// A leading-dot enum member `.Variant` (classified-dispatch tag). Keep the
+		// complete shorthand path so repeated spellings are rejected exactly without
+		// conflating it with a qualified member from an unrelated enum.
+		if len(n.Parts) > 0 {
+			return "tag:." + strings.Join(n.Parts, "."), true
 		}
 	}
 	return "", false
@@ -908,6 +956,10 @@ func machineInputLiteralDisplay(key string) string {
 		return strings.TrimPrefix(key, "int:hex:")
 	case strings.HasPrefix(key, "int:"):
 		return strings.TrimPrefix(key, "int:")
+	case strings.HasPrefix(key, "float:"):
+		return strings.TrimPrefix(key, "float:")
+	case strings.HasPrefix(key, "unary:"):
+		return "-" + machineInputLiteralDisplay(strings.TrimPrefix(key, "unary:"))
 	case strings.HasPrefix(key, "str:"):
 		return "\"" + strings.TrimPrefix(key, "str:") + "\""
 	case strings.HasPrefix(key, "bool:"):
@@ -985,19 +1037,73 @@ func (p *Parser) lowerMachineArm(arm *machineArm, st *machineState, stateByName 
 		}
 		cond = andJoin(cond, inputCond)
 	}
-	cond = andJoin(cond, arm.guard)
+	guard := arm.guard
+	if guard != nil && arm.inputBind != "" {
+		// The input binder is only in scope for this arm. Keep it visible while
+		// evaluating the guard without hoisting it into sibling arms.
+		guard = &ast.ExprBlock{
+			Position: arm.pos,
+			Stmts: []ast.Stmt{
+				&ast.VarDeclStmt{Position: arm.pos, Name: arm.inputBind, Value: &ast.Ident{Position: arm.pos, Name: inputVar}},
+			},
+			Value: guard,
+		}
+	}
+	cond = andJoin(cond, guard)
 
-	body := append([]ast.Stmt(nil), aliasDecls...)
+	var body []ast.Stmt
+	if arm.inputBind != "" {
+		// The body has a separate arm-local binder. The guard's ExprBlock above
+		// has its own scope, so neither path leaks the name to a sibling arm.
+		body = append(body, &ast.VarDeclStmt{Position: arm.pos, Name: arm.inputBind, Value: &ast.Ident{Position: arm.pos, Name: inputVar}})
+	}
+	body = append(body, aliasDecls...)
 	body = append(body, arm.body...)
 	if arm.exit == machineExitTransition {
 		if target, ok := stateByName[arm.target]; ok {
-			body = append(body, lowerMachineTransition(arm, target, enumMember, modeVar)...)
+			// The dispatch arm already has a scope of its own, but that is also the
+			// scope in which arm-local declarations live.  If an arm-local shadows a
+			// target payload field, a name-only backend lookup would otherwise turn
+			// `-> Next(value)` into a store to the arm-local.  Put the pre-transition
+			// body in one more lexical scope and emit the actual payload stores after
+			// it.  Transition arguments are captured before leaving that scope so a
+			// valid `-> Next(local)` keeps working as well.
+			if machineArmDeclaresAnyField(body, target.fields) {
+				tempDecls, captures, transition := lowerMachineTransitionAfterScope(arm, target, enumMember, modeVar)
+				captures = append(body, captures...)
+				body = append(tempDecls, &ast.CanStmt{Position: arm.pos, Body: captures})
+				body = append(body, transition...)
+			} else {
+				body = append(body, lowerMachineTransition(arm, target, enumMember, modeVar)...)
+			}
 		}
 	}
 	if len(body) == 0 {
 		body = append(body, &ast.PassStmt{Position: arm.pos})
 	}
 	return loweredMachineArm{pos: arm.pos, cond: cond, body: body}
+}
+
+// machineArmDeclaresAnyField reports whether the lowered arm body introduces a
+// binding whose name is also a destination payload field.  CanStmt is the only
+// transparent wrapper permitted in a source arm, but recurse through it so the
+// test remains correct for `can Effect: value: T = …` as well.
+func machineArmDeclaresAnyField(stmts []ast.Stmt, fields []machineField) bool {
+	for _, stmt := range stmts {
+		switch n := stmt.(type) {
+		case *ast.VarDeclStmt:
+			for _, field := range fields {
+				if field.name == n.Name {
+					return true
+				}
+			}
+		case *ast.CanStmt:
+			if machineArmDeclaresAnyField(n.Body, fields) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // lowerMachineTransition emits the payload assigns + mode rebind for `-> State(args)`.
@@ -1026,6 +1132,53 @@ func lowerMachineTransition(arm *machineArm, target *machineState, enumMember fu
 		out = append(out, &ast.AssignStmt{Position: arm.targetPos, Target: &ast.Ident{Position: arm.targetPos, Name: modeVar}, Value: enumMember(arm.targetPos, target.name)})
 	}
 	return out
+}
+
+// lowerMachineTransitionAfterScope splits a transition into outer temporary declarations,
+// captures which run while arm locals are still in scope, and stores which run after the
+// internal scope has closed.  The declarations deliberately live outside the CanStmt: a
+// transition argument may refer to an arm-local, but the resulting value must survive long
+// enough for the post-scope payload store to target the enclosing machine state slot.
+func lowerMachineTransitionAfterScope(arm *machineArm, target *machineState, enumMember func(lexer.Pos, string) ast.Expr, modeVar string) ([]ast.Stmt, []ast.Stmt, []ast.Stmt) {
+	tempDecls := make([]ast.Stmt, 0, len(arm.args))
+	captures := make([]ast.Stmt, 0, len(arm.args))
+	values := make([]ast.Expr, len(arm.args))
+	for i, arg := range arm.args {
+		name := fmt.Sprintf("__machine_arg_%s_%d", machineNameSuffix(arm.pos), i)
+		var typ ast.TypeExpr
+		if i < len(target.fields) {
+			typ = target.fields[i].typ
+		}
+		tempDecls = append(tempDecls, &ast.VarDeclStmt{
+			Position: arm.targetPos,
+			Name:     name,
+			Mutable:  true,
+			Type:     typ,
+			Value:    &ast.ZeroedLit{Position: arm.targetPos},
+		})
+		captures = append(captures, &ast.AssignStmt{Position: arm.targetPos, Target: &ast.Ident{Position: arm.targetPos, Name: name}, Value: arg})
+		values[i] = &ast.Ident{Position: arm.targetPos, Name: name}
+	}
+
+	transition := make([]ast.Stmt, 0, len(target.fields)+1)
+	for i, field := range target.fields {
+		if i >= len(values) {
+			break
+		}
+		transition = append(transition, &ast.AssignStmt{
+			Position: arm.targetPos,
+			Target:   &ast.Ident{Position: arm.targetPos, Name: field.name},
+			Value:    values[i],
+		})
+	}
+	if target.name != arm.state {
+		transition = append(transition, &ast.AssignStmt{
+			Position: arm.targetPos,
+			Target:   &ast.Ident{Position: arm.targetPos, Name: modeVar},
+			Value:    enumMember(arm.targetPos, target.name),
+		})
+	}
+	return tempDecls, captures, transition
 }
 
 // buildMachineArmChain folds a state's lowered arms into a single if/elif/else ladder —
@@ -1068,6 +1221,135 @@ func machineNameSuffix(pos lexer.Pos) string {
 // invisible without types, so any driven root touching a call is conservatively licensed.
 func collectMachineCallArgRoots(stmt ast.Stmt, overRoots, out map[string]bool) {
 	var visit func(ast.Expr)
+	var visitStatements func([]ast.Stmt)
+	visitStatements = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			switch s := stmt.(type) {
+			case *ast.ExprStmt:
+				visit(s.Expr)
+			case *ast.AssignStmt:
+				visit(s.Target)
+				visit(s.Value)
+			case *ast.AugAssignStmt:
+				visit(s.Target)
+				visit(s.Value)
+			case *ast.AsRefAssignStmt:
+				visit(s.Target)
+				visit(s.Value)
+			case *ast.VarDeclStmt:
+				visit(s.Value)
+			case *ast.LetDestructureStmt:
+				visit(s.Value)
+			case *ast.TupleBindStmt:
+				visit(s.Value)
+			case *ast.MoveBindStmt:
+				visit(s.Value)
+				visit(s.Store)
+			case *ast.DeferStmt:
+				visitStatements(s.Body)
+			case *ast.ReturnStmt:
+				visit(s.Value)
+			case *ast.IfStmt:
+				visit(s.Cond)
+				visitStatements(s.Then)
+				for _, clause := range s.Elifs {
+					visit(clause.Cond)
+					visitStatements(clause.Body)
+				}
+				visitStatements(s.Else)
+			case *ast.WhileStmt:
+				visit(s.Cond)
+				visitStatements(s.Body)
+			case *ast.ForStmt:
+				visit(s.Start)
+				visit(s.End)
+				visit(s.Step)
+				visitStatements(s.Body)
+			case *ast.IterForStmt:
+				visit(s.Source)
+				visit(s.WhereFilter)
+				visit(s.Filter)
+				visitStatements(s.Body)
+			case *ast.ParallelForStmt:
+				visit(s.Source)
+				visitStatements(s.Body)
+			case *ast.MatchStmt:
+				visit(s.Value)
+				visit(s.Store)
+				for _, arm := range s.Arms {
+					visit(arm.Guard)
+					visitStatements(arm.Body)
+				}
+			case *ast.ExpectPatternStmt:
+				visit(s.Value)
+			case *ast.InStoreStmt:
+				visit(s.Store)
+				visitStatements(s.Body)
+			case *ast.CanStmt:
+				for _, arg := range s.HandlerArgs {
+					visit(arg)
+				}
+				visitStatements(s.Body)
+			case *ast.ScopeStmt:
+				visit(s.Guard)
+				visitStatements(s.Body)
+			case *ast.PoolStmt:
+				visit(s.Workers)
+				visitStatements(s.Body)
+			case *ast.LockStmt:
+				visit(s.Mutex)
+				visitStatements(s.Body)
+			case *ast.PanicStmt:
+				visit(s.Message)
+			case *ast.StaticIfStmt:
+				visit(s.Cond)
+				visitStatements(s.Then)
+				for _, clause := range s.Elifs {
+					visit(clause.Cond)
+					visitStatements(clause.Body)
+				}
+				visitStatements(s.Else)
+			case *ast.StaticErrorStmt:
+				visit(s.Message)
+			case *ast.StaticAssertStmt:
+				visit(s.Cond)
+				visit(s.Message)
+			case *ast.AssertByStmt:
+				visit(s.Cond)
+				visitStatements(s.Proof)
+			case *ast.ProofBlockStmt:
+				visit(s.Goal)
+				visitStatements(s.Proof)
+			case *ast.ProofUseStmt:
+				for _, citation := range s.Citations {
+					visit(citation)
+				}
+			case *ast.ContractStmt:
+				visit(s.Cond)
+				visitStatements(s.Proof)
+				for _, arg := range s.UsesArgs {
+					visit(arg)
+				}
+			case *ast.StaticBlockStmt:
+				visitStatements(s.Body)
+			case *ast.DiscardStmt:
+				visit(s.Value)
+			case *ast.RegionStmt:
+				visit(s.Capacity)
+				visitStatements(s.Body)
+			case *ast.PromoteStmt:
+				visit(s.Value)
+			case *ast.CheckpointStmt:
+				visit(s.Target)
+				visitStatements(s.Body)
+			case *ast.GroupedCheckpointStmt:
+				for _, target := range s.Targets {
+					visit(target)
+				}
+				visitStatements(s.Body)
+			}
+		}
+	}
 	visit = func(e ast.Expr) {
 		if e == nil {
 			return
@@ -1093,20 +1375,134 @@ func collectMachineCallArgRoots(stmt ast.Stmt, overRoots, out map[string]bool) {
 		case *ast.IndexExpr:
 			visit(n.Object)
 			visit(n.Index)
+			visit(n.Index2)
+			visit(n.Fallback)
+		case *ast.SliceExpr:
+			visit(n.Object)
+			visit(n.Start)
+			visit(n.End)
 		case *ast.CastExpr:
 			visit(n.Operand)
+		case *ast.ListLitExpr:
+			for _, elem := range n.Elems {
+				visit(elem)
+			}
+			for _, key := range n.Keys {
+				visit(key)
+			}
+			visit(n.Owner)
+		case *ast.MembershipRangeExpr:
+			visit(n.Start)
+			visit(n.End)
+		case *ast.ListComprehensionExpr:
+			visit(n.Value)
+			visit(n.Source)
+			visit(n.RangeEnd)
+			visit(n.RangeStep)
+			visit(n.Filter)
+			visit(n.Owner)
+			visit(n.Key)
+			visit(n.LoweredParallel)
+			visitStatements(n.Bindings)
+		case *ast.QueryExpr:
+			visit(n.Source)
+			visit(n.Filter)
+			visit(n.Projection)
+			visit(n.Owner)
+		case *ast.TernaryExpr:
+			visit(n.Value)
+			visit(n.Cond)
+			visit(n.Alt)
+		case *ast.AddrOfExpr:
+			visit(n.Operand)
+		case *ast.SpecializeExpr:
+			visit(n.Operand)
+		case *ast.StructLitExpr:
+			for _, arg := range n.Args {
+				visit(arg)
+			}
+			for _, spread := range n.Spreads {
+				visit(spread)
+			}
+		case *ast.RecordUpdateExpr:
+			visit(n.Base)
+			for _, arg := range n.Args {
+				visit(arg)
+			}
+		case *ast.TupleExpr:
+			for _, elem := range n.Elems {
+				visit(elem)
+			}
+		case *ast.OptionalBindExpr:
+			visit(n.Value)
+		case *ast.AllocExpr:
+			visit(n.Owner)
+			visit(n.Value)
+		case *ast.CanExpr:
+			visit(n.Expr)
+		case *ast.RaiseExpr:
+			visit(n.Error)
+		case *ast.IsPatternExpr:
+			for _, target := range n.Targets {
+				visit(target)
+			}
+		case *ast.IsAliasExpr:
+			visit(n.Target)
+		case *ast.ExprBlock:
+			visitStatements(n.Stmts)
+			visit(n.Value)
+		case *ast.LambdaExpr:
+			visitStatements(n.Body)
+			visit(n.BodyExpr)
+		case *ast.FoldExpr:
+			visit(n.Value)
+			for _, arm := range n.Arms {
+				visit(arm.Guard)
+				visitStatements(arm.Body)
+			}
+		case *ast.EmitExpr:
+			visit(n.Value)
+		case *ast.TryExpr:
+			visit(n.Value)
+			visit(n.Fallback)
+			if n.Recovery != nil {
+				visit(n.Recovery.Value)
+				visitStatements(n.Recovery.Body)
+			}
+		case *ast.GetExpr:
+			visit(n.Value)
+			visit(n.Fallback)
+			if n.Recovery != nil {
+				visit(n.Recovery.Value)
+				visitStatements(n.Recovery.Body)
+			}
+		case *ast.UnwrapElseExpr:
+			visit(n.Value)
+			visit(n.Fallback)
+			if n.Recovery != nil {
+				visit(n.Recovery.Value)
+				visitStatements(n.Recovery.Body)
+			}
+		case *ast.CatchExpr:
+			visit(n.Value)
+			visitStatements(n.Success.Body)
+			for _, arm := range n.Arms {
+				visitStatements(arm.Body)
+			}
+		case *ast.MatchExpr:
+			visit(n.Value)
+			visit(n.Store)
+			for _, arm := range n.Arms {
+				visit(arm.Guard)
+				visitStatements(arm.Body)
+			}
 		}
 	}
-	switch s := stmt.(type) {
-	case *ast.ExprStmt:
-		visit(s.Expr)
-	case *ast.AssignStmt:
-		visit(s.Value)
-	case *ast.VarDeclStmt:
-		visit(s.Value)
-	case *ast.ReturnStmt:
-		visit(s.Value)
-	}
+	// Enter through the same complete statement dispatcher used for nested bodies. The
+	// machine-arm validator now accepts compound and as-ref assignments, and routing only
+	// plain assignments here would miss calls in their targets or values when the statement
+	// is at arm level.
+	visitStatements([]ast.Stmt{stmt})
 }
 
 // assignRootIdent walks an lvalue to its root identifier (`lexer.pos` → "lexer").
@@ -1148,6 +1544,8 @@ func collectExprRootIdents(expr ast.Expr, out map[string]bool) {
 	case *ast.IndexExpr:
 		collectExprRootIdents(e.Object, out)
 		collectExprRootIdents(e.Index, out)
+		collectExprRootIdents(e.Index2, out)
+		collectExprRootIdents(e.Fallback, out)
 	case *ast.CastExpr:
 		// A postfix value cast/ctor (`box.data[i].char()`) is a CastExpr, not a method
 		// call — the driven resource is rooted in its operand (`box`), so descend.
@@ -1159,6 +1557,322 @@ func collectExprRootIdents(expr ast.Expr, out map[string]bool) {
 		collectExprRootIdents(e.Operand, out)
 	case *ast.ParenExpr:
 		collectExprRootIdents(e.Inner, out)
+	case *ast.SliceExpr:
+		collectExprRootIdents(e.Object, out)
+		collectExprRootIdents(e.Start, out)
+		collectExprRootIdents(e.End, out)
+	case *ast.ListLitExpr:
+		for _, elem := range e.Elems {
+			collectExprRootIdents(elem, out)
+		}
+		for _, key := range e.Keys {
+			collectExprRootIdents(key, out)
+		}
+		collectExprRootIdents(e.Owner, out)
+	case *ast.MembershipRangeExpr:
+		collectExprRootIdents(e.Start, out)
+		collectExprRootIdents(e.End, out)
+	case *ast.ListComprehensionExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Source, out)
+		collectExprRootIdents(e.RangeEnd, out)
+		collectExprRootIdents(e.RangeStep, out)
+		collectExprRootIdents(e.Filter, out)
+		collectExprRootIdents(e.Owner, out)
+		collectExprRootIdents(e.Key, out)
+		collectExprRootIdents(e.LoweredParallel, out)
+		for _, binding := range e.Bindings {
+			collectStmtRootIdents(binding, out)
+		}
+	case *ast.QueryExpr:
+		collectExprRootIdents(e.Source, out)
+		collectExprRootIdents(e.Filter, out)
+		collectExprRootIdents(e.Projection, out)
+		collectExprRootIdents(e.Owner, out)
+	case *ast.TernaryExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Cond, out)
+		collectExprRootIdents(e.Alt, out)
+	case *ast.AddrOfExpr:
+		collectExprRootIdents(e.Operand, out)
+	case *ast.SpecializeExpr:
+		collectExprRootIdents(e.Operand, out)
+	case *ast.StructLitExpr:
+		for _, arg := range e.Args {
+			collectExprRootIdents(arg, out)
+		}
+		for _, spread := range e.Spreads {
+			collectExprRootIdents(spread, out)
+		}
+	case *ast.RecordUpdateExpr:
+		collectExprRootIdents(e.Base, out)
+		for _, arg := range e.Args {
+			collectExprRootIdents(arg, out)
+		}
+	case *ast.TupleExpr:
+		for _, elem := range e.Elems {
+			collectExprRootIdents(elem, out)
+		}
+	case *ast.OptionalBindExpr:
+		collectExprRootIdents(e.Value, out)
+	case *ast.AllocExpr:
+		collectExprRootIdents(e.Owner, out)
+		collectExprRootIdents(e.Value, out)
+	case *ast.CanExpr:
+		collectExprRootIdents(e.Expr, out)
+	case *ast.RaiseExpr:
+		collectExprRootIdents(e.Error, out)
+	case *ast.IsPatternExpr:
+		for _, target := range e.Targets {
+			collectExprRootIdents(target, out)
+		}
+	case *ast.IsAliasExpr:
+		collectExprRootIdents(e.Target, out)
+	case *ast.ExprBlock:
+		for _, stmt := range e.Stmts {
+			collectStmtRootIdents(stmt, out)
+		}
+		collectExprRootIdents(e.Value, out)
+	case *ast.LambdaExpr:
+		for _, stmt := range e.Body {
+			collectStmtRootIdents(stmt, out)
+		}
+		collectExprRootIdents(e.BodyExpr, out)
+	case *ast.FoldExpr:
+		collectExprRootIdents(e.Value, out)
+		for _, arm := range e.Arms {
+			collectExprRootIdents(arm.Guard, out)
+			for _, stmt := range arm.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	case *ast.EmitExpr:
+		collectExprRootIdents(e.Value, out)
+	case *ast.TryExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Fallback, out)
+		if e.Recovery != nil {
+			collectExprRootIdents(e.Recovery.Value, out)
+			for _, stmt := range e.Recovery.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	case *ast.GetExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Fallback, out)
+		if e.Recovery != nil {
+			collectExprRootIdents(e.Recovery.Value, out)
+			for _, stmt := range e.Recovery.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	case *ast.UnwrapElseExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Fallback, out)
+		if e.Recovery != nil {
+			collectExprRootIdents(e.Recovery.Value, out)
+			for _, stmt := range e.Recovery.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	case *ast.CatchExpr:
+		collectExprRootIdents(e.Value, out)
+		for _, stmt := range e.Success.Body {
+			collectStmtRootIdents(stmt, out)
+		}
+		for _, arm := range e.Arms {
+			for _, stmt := range arm.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	case *ast.MatchExpr:
+		collectExprRootIdents(e.Value, out)
+		collectExprRootIdents(e.Store, out)
+		for _, arm := range e.Arms {
+			collectExprRootIdents(arm.Guard, out)
+			for _, stmt := range arm.Body {
+				collectStmtRootIdents(stmt, out)
+			}
+		}
+	}
+}
+
+// collectStmtRootIdents extends collectExprRootIdents into statement-bearing expression
+// children (blocks, lambdas, recovery/handler arms, and nested control flow). Those bodies
+// execute conditionally but still need their driven-resource roots licensed by the enclosing
+// machine.
+func collectStmtRootIdents(stmt ast.Stmt, out map[string]bool) {
+	switch s := stmt.(type) {
+	case *ast.ExprStmt:
+		collectExprRootIdents(s.Expr, out)
+	case *ast.AssignStmt:
+		collectExprRootIdents(s.Target, out)
+		collectExprRootIdents(s.Value, out)
+	case *ast.AugAssignStmt:
+		collectExprRootIdents(s.Target, out)
+		collectExprRootIdents(s.Value, out)
+	case *ast.AsRefAssignStmt:
+		collectExprRootIdents(s.Target, out)
+		collectExprRootIdents(s.Value, out)
+	case *ast.VarDeclStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.LetDestructureStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.TupleBindStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.MoveBindStmt:
+		collectExprRootIdents(s.Value, out)
+		collectExprRootIdents(s.Store, out)
+	case *ast.DeferStmt:
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ReturnStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.IfStmt:
+		collectExprRootIdents(s.Cond, out)
+		for _, nested := range s.Then {
+			collectStmtRootIdents(nested, out)
+		}
+		for _, clause := range s.Elifs {
+			collectExprRootIdents(clause.Cond, out)
+			for _, nested := range clause.Body {
+				collectStmtRootIdents(nested, out)
+			}
+		}
+		for _, nested := range s.Else {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.WhileStmt:
+		collectExprRootIdents(s.Cond, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ForStmt:
+		collectExprRootIdents(s.Start, out)
+		collectExprRootIdents(s.End, out)
+		collectExprRootIdents(s.Step, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.IterForStmt:
+		collectExprRootIdents(s.Source, out)
+		collectExprRootIdents(s.WhereFilter, out)
+		collectExprRootIdents(s.Filter, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ParallelForStmt:
+		collectExprRootIdents(s.Source, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.MatchStmt:
+		collectExprRootIdents(s.Value, out)
+		collectExprRootIdents(s.Store, out)
+		for _, arm := range s.Arms {
+			collectExprRootIdents(arm.Guard, out)
+			for _, nested := range arm.Body {
+				collectStmtRootIdents(nested, out)
+			}
+		}
+	case *ast.ExpectPatternStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.InStoreStmt:
+		collectExprRootIdents(s.Store, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.CanStmt:
+		for _, arg := range s.HandlerArgs {
+			collectExprRootIdents(arg, out)
+		}
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ScopeStmt:
+		collectExprRootIdents(s.Guard, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.PoolStmt:
+		collectExprRootIdents(s.Workers, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.LockStmt:
+		collectExprRootIdents(s.Mutex, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.PanicStmt:
+		collectExprRootIdents(s.Message, out)
+	case *ast.StaticIfStmt:
+		collectExprRootIdents(s.Cond, out)
+		for _, nested := range s.Then {
+			collectStmtRootIdents(nested, out)
+		}
+		for _, clause := range s.Elifs {
+			collectExprRootIdents(clause.Cond, out)
+			for _, nested := range clause.Body {
+				collectStmtRootIdents(nested, out)
+			}
+		}
+		for _, nested := range s.Else {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.StaticErrorStmt:
+		collectExprRootIdents(s.Message, out)
+	case *ast.StaticAssertStmt:
+		collectExprRootIdents(s.Cond, out)
+		collectExprRootIdents(s.Message, out)
+	case *ast.AssertByStmt:
+		collectExprRootIdents(s.Cond, out)
+		for _, nested := range s.Proof {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ProofBlockStmt:
+		collectExprRootIdents(s.Goal, out)
+		for _, nested := range s.Proof {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.ProofUseStmt:
+		for _, citation := range s.Citations {
+			collectExprRootIdents(citation, out)
+		}
+	case *ast.ContractStmt:
+		collectExprRootIdents(s.Cond, out)
+		for _, nested := range s.Proof {
+			collectStmtRootIdents(nested, out)
+		}
+		for _, arg := range s.UsesArgs {
+			collectExprRootIdents(arg, out)
+		}
+	case *ast.StaticBlockStmt:
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.DiscardStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.RegionStmt:
+		collectExprRootIdents(s.Capacity, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.PromoteStmt:
+		collectExprRootIdents(s.Value, out)
+	case *ast.CheckpointStmt:
+		collectExprRootIdents(s.Target, out)
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
+	case *ast.GroupedCheckpointStmt:
+		for _, target := range s.Targets {
+			collectExprRootIdents(target, out)
+		}
+		for _, nested := range s.Body {
+			collectStmtRootIdents(nested, out)
+		}
 	}
 }
 
@@ -1168,6 +1882,7 @@ func collectExprRootIdents(expr ast.Expr, out map[string]bool) {
 func exprMentionsIdent(expr ast.Expr, name string) bool {
 	found := false
 	var walk func(ast.Expr)
+	var walkStatements func([]ast.Stmt)
 	walk = func(e ast.Expr) {
 		if found || e == nil {
 			return
@@ -1187,6 +1902,12 @@ func exprMentionsIdent(expr ast.Expr, name string) bool {
 		case *ast.IndexExpr:
 			walk(n.Object)
 			walk(n.Index)
+			walk(n.Index2)
+			walk(n.Fallback)
+		case *ast.SliceExpr:
+			walk(n.Object)
+			walk(n.Start)
+			walk(n.End)
 		case *ast.CastExpr:
 			walk(n.Operand)
 		case *ast.BinaryExpr:
@@ -1196,6 +1917,250 @@ func exprMentionsIdent(expr ast.Expr, name string) bool {
 			walk(n.Operand)
 		case *ast.ParenExpr:
 			walk(n.Inner)
+		case *ast.ListLitExpr:
+			for _, elem := range n.Elems {
+				walk(elem)
+			}
+			for _, key := range n.Keys {
+				walk(key)
+			}
+			walk(n.Owner)
+		case *ast.MembershipRangeExpr:
+			walk(n.Start)
+			walk(n.End)
+		case *ast.ListComprehensionExpr:
+			walk(n.Value)
+			walk(n.Source)
+			walk(n.RangeEnd)
+			walk(n.RangeStep)
+			walk(n.Filter)
+			walk(n.Owner)
+			walk(n.Key)
+			walk(n.LoweredParallel)
+			walkStatements(n.Bindings)
+		case *ast.QueryExpr:
+			walk(n.Source)
+			walk(n.Filter)
+			walk(n.Projection)
+			walk(n.Owner)
+		case *ast.TernaryExpr:
+			walk(n.Value)
+			walk(n.Cond)
+			walk(n.Alt)
+		case *ast.AddrOfExpr:
+			walk(n.Operand)
+		case *ast.SpecializeExpr:
+			walk(n.Operand)
+		case *ast.StructLitExpr:
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+			for _, spread := range n.Spreads {
+				walk(spread)
+			}
+		case *ast.RecordUpdateExpr:
+			walk(n.Base)
+			for _, arg := range n.Args {
+				walk(arg)
+			}
+		case *ast.TupleExpr:
+			for _, elem := range n.Elems {
+				walk(elem)
+			}
+		case *ast.OptionalBindExpr:
+			walk(n.Value)
+		case *ast.AllocExpr:
+			walk(n.Owner)
+			walk(n.Value)
+		case *ast.CanExpr:
+			walk(n.Expr)
+		case *ast.RaiseExpr:
+			walk(n.Error)
+		case *ast.IsPatternExpr:
+			for _, target := range n.Targets {
+				walk(target)
+			}
+		case *ast.IsAliasExpr:
+			walk(n.Target)
+		case *ast.ExprBlock:
+			walkStatements(n.Stmts)
+			walk(n.Value)
+		case *ast.LambdaExpr:
+			walkStatements(n.Body)
+			walk(n.BodyExpr)
+		case *ast.FoldExpr:
+			walk(n.Value)
+			for _, arm := range n.Arms {
+				walk(arm.Guard)
+				walkStatements(arm.Body)
+			}
+		case *ast.EmitExpr:
+			walk(n.Value)
+		case *ast.TryExpr:
+			walk(n.Value)
+			walk(n.Fallback)
+			if n.Recovery != nil {
+				walk(n.Recovery.Value)
+				walkStatements(n.Recovery.Body)
+			}
+		case *ast.GetExpr:
+			walk(n.Value)
+			walk(n.Fallback)
+			if n.Recovery != nil {
+				walk(n.Recovery.Value)
+				walkStatements(n.Recovery.Body)
+			}
+		case *ast.UnwrapElseExpr:
+			walk(n.Value)
+			walk(n.Fallback)
+			if n.Recovery != nil {
+				walk(n.Recovery.Value)
+				walkStatements(n.Recovery.Body)
+			}
+		case *ast.CatchExpr:
+			walk(n.Value)
+			walkStatements(n.Success.Body)
+			for _, arm := range n.Arms {
+				walkStatements(arm.Body)
+			}
+		case *ast.MatchExpr:
+			walk(n.Value)
+			walk(n.Store)
+			for _, arm := range n.Arms {
+				walk(arm.Guard)
+				walkStatements(arm.Body)
+			}
+		}
+	}
+	walkStatements = func(stmts []ast.Stmt) {
+		for _, stmt := range stmts {
+			if found {
+				return
+			}
+			switch s := stmt.(type) {
+			case *ast.ExprStmt:
+				walk(s.Expr)
+			case *ast.AssignStmt:
+				walk(s.Target)
+				walk(s.Value)
+			case *ast.AugAssignStmt:
+				walk(s.Target)
+				walk(s.Value)
+			case *ast.AsRefAssignStmt:
+				walk(s.Target)
+				walk(s.Value)
+			case *ast.VarDeclStmt:
+				walk(s.Value)
+			case *ast.LetDestructureStmt:
+				walk(s.Value)
+			case *ast.TupleBindStmt:
+				walk(s.Value)
+			case *ast.MoveBindStmt:
+				walk(s.Value)
+				walk(s.Store)
+			case *ast.DeferStmt:
+				walkStatements(s.Body)
+			case *ast.ReturnStmt:
+				walk(s.Value)
+			case *ast.IfStmt:
+				walk(s.Cond)
+				walkStatements(s.Then)
+				for _, clause := range s.Elifs {
+					walk(clause.Cond)
+					walkStatements(clause.Body)
+				}
+				walkStatements(s.Else)
+			case *ast.WhileStmt:
+				walk(s.Cond)
+				walkStatements(s.Body)
+			case *ast.ForStmt:
+				walk(s.Start)
+				walk(s.End)
+				walk(s.Step)
+				walkStatements(s.Body)
+			case *ast.IterForStmt:
+				walk(s.Source)
+				walk(s.WhereFilter)
+				walk(s.Filter)
+				walkStatements(s.Body)
+			case *ast.ParallelForStmt:
+				walk(s.Source)
+				walkStatements(s.Body)
+			case *ast.MatchStmt:
+				walk(s.Value)
+				walk(s.Store)
+				for _, arm := range s.Arms {
+					walk(arm.Guard)
+					walkStatements(arm.Body)
+				}
+			case *ast.ExpectPatternStmt:
+				walk(s.Value)
+			case *ast.InStoreStmt:
+				walk(s.Store)
+				walkStatements(s.Body)
+			case *ast.CanStmt:
+				for _, arg := range s.HandlerArgs {
+					walk(arg)
+				}
+				walkStatements(s.Body)
+			case *ast.ScopeStmt:
+				walk(s.Guard)
+				walkStatements(s.Body)
+			case *ast.PoolStmt:
+				walk(s.Workers)
+				walkStatements(s.Body)
+			case *ast.LockStmt:
+				walk(s.Mutex)
+				walkStatements(s.Body)
+			case *ast.PanicStmt:
+				walk(s.Message)
+			case *ast.StaticIfStmt:
+				walk(s.Cond)
+				walkStatements(s.Then)
+				for _, clause := range s.Elifs {
+					walk(clause.Cond)
+					walkStatements(clause.Body)
+				}
+				walkStatements(s.Else)
+			case *ast.StaticErrorStmt:
+				walk(s.Message)
+			case *ast.StaticAssertStmt:
+				walk(s.Cond)
+				walk(s.Message)
+			case *ast.AssertByStmt:
+				walk(s.Cond)
+				walkStatements(s.Proof)
+			case *ast.ProofBlockStmt:
+				walk(s.Goal)
+				walkStatements(s.Proof)
+			case *ast.ProofUseStmt:
+				for _, citation := range s.Citations {
+					walk(citation)
+				}
+			case *ast.ContractStmt:
+				walk(s.Cond)
+				walkStatements(s.Proof)
+				for _, arg := range s.UsesArgs {
+					walk(arg)
+				}
+			case *ast.StaticBlockStmt:
+				walkStatements(s.Body)
+			case *ast.DiscardStmt:
+				walk(s.Value)
+			case *ast.RegionStmt:
+				walk(s.Capacity)
+				walkStatements(s.Body)
+			case *ast.PromoteStmt:
+				walk(s.Value)
+			case *ast.CheckpointStmt:
+				walk(s.Target)
+				walkStatements(s.Body)
+			case *ast.GroupedCheckpointStmt:
+				for _, target := range s.Targets {
+					walk(target)
+				}
+				walkStatements(s.Body)
+			}
 		}
 	}
 	walk(expr)

@@ -203,6 +203,101 @@ func TestMachineDesugarShape(t *testing.T) {
 	}
 }
 
+func TestMachineSingleStateSelfLoopRetainsDispatch(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Text
+        start Text
+        Text, _:
+            lexer <- lexer.advance_char()
+            -> Text
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	var enum *ast.EnumDecl
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		switch n := decl.(type) {
+		case *ast.EnumDecl:
+			enum = n
+		case *ast.FuncDecl:
+			fn = n
+		}
+	}
+	if enum == nil || fn == nil {
+		t.Fatal("single-state machine must still synthesize its mode enum and host function")
+	}
+	if len(enum.Variants) != 1 || enum.Variants[0].Name != "Text" {
+		t.Fatalf("mode enum variants = %#v, want [Text]", enum.Variants)
+	}
+	if len(fn.Body) == 0 {
+		t.Fatal("host function has no lowered machine body")
+	}
+	wrapper, ok := fn.Body[0].(*ast.IfStmt)
+	if !ok || len(wrapper.Then) != 2 {
+		t.Fatalf("single-state machine must retain scoped mode declaration and loop, got %T with %d statements", fn.Body[0], func() int {
+			if ok {
+				return len(wrapper.Then)
+			}
+			return 0
+		}())
+	}
+	if _, ok := wrapper.Then[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("first scoped statement = %T, want mode declaration", wrapper.Then[0])
+	}
+	loop, ok := wrapper.Then[1].(*ast.WhileStmt)
+	if !ok || len(loop.Body) != 3 {
+		t.Fatalf("single-state machine must retain input, coverage, and dispatch body, got %T with %d statements", wrapper.Then[1], func() int {
+			if ok {
+				return len(loop.Body)
+			}
+			return 0
+		}())
+	}
+	if _, ok := loop.Body[2].(*ast.MatchStmt); !ok {
+		t.Fatalf("single-state machine body = %T, want mode dispatch match", loop.Body[2])
+	}
+}
+
+// Calls in arm classifiers execute inside the generated loop. A driven resource used only
+// by a guard must therefore still be licensed by the loop capture manifest.
+func TestMachineGuardCallCapturesDrivenRoot(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Text
+        start Text
+        Text, _ if lexer.peek(1) == '{':
+            -> Text
+        Text, _:
+            break
+`)
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors: %v", errs)
+	}
+	var fn *ast.FuncDecl
+	for _, decl := range file.Decls {
+		if candidate, ok := decl.(*ast.FuncDecl); ok {
+			fn = candidate
+			break
+		}
+	}
+	if fn == nil || len(fn.Body) == 0 {
+		t.Fatal("host function missing")
+	}
+	wrapper, ok := fn.Body[0].(*ast.IfStmt)
+	if !ok || len(wrapper.Then) == 0 {
+		t.Fatalf("expected scoped machine wrapper, got %#v", fn.Body[0])
+	}
+	loop, ok := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
+	if !ok {
+		t.Fatalf("expected while loop, got %T", wrapper.Then[len(wrapper.Then)-1])
+	}
+	if len(loop.Captures) != 1 || loop.Captures[0] != "lexer" {
+		t.Fatalf("guard-only call captures = %v, want [lexer]", loop.Captures)
+	}
+}
+
 func TestMachineRefusalBranchInArm(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Text
@@ -241,6 +336,61 @@ func TestMachineTransitionCopiesShadowingArmLocal(t *testing.T) {
 	valueIdent, valueOK := assign.Value.(*ast.Ident)
 	if !targetOK || !valueOK || targetIdent.Name != "value" || valueIdent.Name != "value" {
 		t.Fatalf("shadowing payload copy = %#v, want value <- value", assign)
+	}
+}
+
+func TestMachineTransitionLeavesArmLocalScopeBeforePayloadStore(t *testing.T) {
+	pos := lexer.Pos{Offset: 31}
+	arm := &machineArm{
+		pos:       pos,
+		state:     "Read",
+		target:    "Ready",
+		targetPos: pos,
+		exit:      machineExitTransition,
+		body: []ast.Stmt{
+			&ast.VarDeclStmt{Name: "value", Value: &ast.IntLit{Value: "7"}},
+		},
+		args: []ast.Expr{&ast.Ident{Position: pos, Name: "value"}},
+	}
+	state := &machineState{name: "Read", fields: []machineField{{name: "input"}}}
+	target := &machineState{name: "Ready", fields: []machineField{{name: "value"}}}
+	lowered := (&Parser{}).lowerMachineArm(arm, state, map[string]*machineState{
+		"Read":  state,
+		"Ready": target,
+	}, func(p lexer.Pos, name string) ast.Expr {
+		return &ast.Ident{Position: p, Name: name}
+	}, "input", "mode")
+	if len(lowered.body) != 4 {
+		t.Fatalf("lowered shadowing arm has %d statements, want temp declaration, scoped body, payload store, mode store", len(lowered.body))
+	}
+	if _, ok := lowered.body[0].(*ast.VarDeclStmt); !ok {
+		t.Fatalf("first shadowing statement = %T, want outer temporary declaration", lowered.body[0])
+	}
+	if scoped, ok := lowered.body[1].(*ast.CanStmt); !ok || len(scoped.Body) != 2 {
+		t.Fatalf("lowered shadowing arm body = %#v, want an internal scope containing local and captured arg", lowered.body)
+	}
+	assign, ok := lowered.body[2].(*ast.AssignStmt)
+	if !ok {
+		t.Fatalf("post-scope transition statement = %T, want AssignStmt", lowered.body[2])
+	}
+	targetIdent, ok := assign.Target.(*ast.Ident)
+	if !ok || targetIdent.Name != "value" {
+		t.Fatalf("post-scope payload target = %#v, want outer Ready.value binding", assign.Target)
+	}
+}
+
+// A payload alias is an arm-local binding. Mutating it is legal, while the scalarized
+// destination field remains protected and is updated only by the transition.
+func TestMachinePayloadAliasMutationAccepted(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Read(depth: usize)
+        start Read(0)
+        Read(value), _:
+            value <- value + 1
+            -> Read(value)
+`)
+	if _, errs := parseSourceFile(t, src); len(errs) != 0 {
+		t.Fatalf("payload alias mutation should parse, got %v", errs)
 	}
 }
 
@@ -296,6 +446,37 @@ func TestMachineFromStraightLineArmAccepted(t *testing.T) {
 	_, errs := parseSourceFile(t, src)
 	if len(errs) != 0 {
 		t.Fatalf("expected blessed machine-from arm to parse, got %v", errs)
+	}
+}
+
+// Qualified machine-from state references must keep the start enum's identity. The AST stores
+// only variant names, so the parser has to reject a foreign prefix before it is discarded.
+func TestMachineFromRejectsForeignEnumQualifier(t *testing.T) {
+	src := "enum Scan:\n    A\n    B\n\n" +
+		"enum Other:\n    A\n    B\n\n" +
+		"def probe() -> i64:\n" +
+		"    result: i64 = machine from Scan.A:\n" +
+		"        Other.A:\n" +
+		"            next Other.B\n" +
+		"        Scan.B:\n" +
+		"            done 1\n" +
+		"    return result\n"
+	_, errs := parseSourceFile(t, src)
+	all := strings.Join(errs, "\n")
+	if !strings.Contains(all, "uses enum") {
+		t.Fatalf("expected foreign machine-from enum qualifier refusal, got %v", errs)
+	}
+}
+
+func TestMachineFromRequiresQualifiedStartState(t *testing.T) {
+	src := "def probe() -> i64:\n" +
+		"    result: i64 = machine from A:\n" +
+		"        A:\n" +
+		"            done 1\n" +
+		"    return result\n"
+	_, errs := parseSourceFile(t, src)
+	if !strings.Contains(strings.Join(errs, "\n"), "qualified start state") {
+		t.Fatalf("expected qualified machine-from start-state refusal, got %v", errs)
 	}
 }
 
@@ -360,6 +541,41 @@ func TestMachineRefusalDuplicateLiteralArm(t *testing.T) {
 	}
 }
 
+func TestMachineRefusalDuplicateFloatLiteralArm(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char() while not lexer.is_end_of_source():
+        state Go
+        start Go
+        Go, 1.0:
+            -> Go
+        Go, (1.0):
+            -> Go
+        Go, _:
+            break
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "repeats input 1.0") {
+		t.Fatalf("expected duplicate-float-arm refusal, got %v", errs)
+	}
+}
+
+func TestMachineRefusalDuplicateEnumTagArms(t *testing.T) {
+	for _, tag := range []string{"TokenKind.A", ".A"} {
+		src := machineSrc("    machine over lexer.current_char():\n" +
+			"        state Text\n" +
+			"        start Text\n" +
+			"        Text, " + tag + ":\n" +
+			"            -> Text\n" +
+			"        Text, " + tag + ":\n" +
+			"            -> Text\n" +
+			"        Text, _:\n" +
+			"            break\n")
+		_, errs := parseSourceFile(t, src)
+		if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "repeats input") {
+			t.Fatalf("duplicate enum tag %s was not refused: %v", tag, errs)
+		}
+	}
+}
+
 // A literal shared between a guarded arm and an unguarded arm is NOT a duplicate — the
 // guard distinguishes them (0-FP discipline).
 func TestMachineGuardedArmSharesLiteralAccepted(t *testing.T) {
@@ -416,6 +632,20 @@ func TestMachineRefusalNonExhaustiveState(t *testing.T) {
 	_, errs := parseSourceFile(t, src)
 	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "does not cover all inputs") {
 		t.Fatalf("expected exhaustiveness refusal, got %v", errs)
+	}
+}
+
+func TestMachineRefusalOpenDomainLiterals(t *testing.T) {
+	for _, literal := range []string{"true", `"done"`, "1.0", "-1"} {
+		src := machineSrc("    machine over lexer.current_char():\n" +
+			"        state Text\n" +
+			"        start Text\n" +
+			"        Text, " + literal + ":\n" +
+			"            return 1\n")
+		_, errs := parseSourceFile(t, src)
+		if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "does not cover all inputs") {
+			t.Fatalf("open-domain literal %s without wildcard was accepted: %v", literal, errs)
+		}
 	}
 }
 
@@ -482,6 +712,196 @@ func TestMachineDrivenRootThroughCast(t *testing.T) {
 	}
 }
 
+// Calls embedded in an indexed assignment target can mutate a driven resource too:
+// `table[scanner.next()] <- value`. The target walk must visit the index expression;
+// visiting only the assignment RHS loses `scanner` from the value-block capture set.
+func TestMachineCallInAssignmentTargetDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	call := &ast.CallExpr{
+		Position: position,
+		Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+	}
+	stmt := &ast.AssignStmt{
+		Position: position,
+		Target: &ast.IndexExpr{
+			Position: position,
+			Object:   &ast.Ident{Position: position, Name: "table"},
+			Index:    call,
+		},
+		Value: &ast.IntLit{Position: position, Value: "1"},
+	}
+	overRoots := map[string]bool{"scanner": true}
+	mutatedRoots := map[string]bool{}
+	collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
+	if !mutatedRoots["scanner"] {
+		t.Fatal("call in assignment target was not recorded as a driven mutation")
+	}
+}
+
+// Compound and as-ref assignments are also allowed straight-line machine-arm forms. Their
+// call-bearing values must enter the same capture walk as ordinary assignments.
+func TestMachineCallInCompoundAssignmentsDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	overRoots := map[string]bool{"scanner": true}
+	for _, stmt := range []ast.Stmt{
+		&ast.AugAssignStmt{
+			Position: position,
+			Target:   &ast.Ident{Position: position, Name: "value"},
+			Value: &ast.CallExpr{
+				Position: position,
+				Func:     &ast.FieldExpr{Position: position, Object: &ast.Ident{Position: position, Name: "scanner"}, Field: "next"},
+			},
+		},
+		&ast.AsRefAssignStmt{
+			Position: position,
+			Target:   &ast.Ident{Position: position, Name: "value"},
+			AsKind:   "ref",
+			Value: &ast.CallExpr{
+				Position: position,
+				Func:     &ast.FieldExpr{Position: position, Object: &ast.Ident{Position: position, Name: "scanner"}, Field: "next"},
+			},
+		},
+	} {
+		mutatedRoots := map[string]bool{}
+		collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
+		if !mutatedRoots["scanner"] {
+			t.Fatalf("call in %T was not recorded as a driven mutation", stmt)
+		}
+	}
+}
+
+// Recovery/handler statement bodies are executable children of a value expression. A call in
+// `get value else:` must therefore contribute its driven root just like a call in an ordinary
+// expression statement; otherwise machine lowering can omit the capture and reject valid code.
+func TestMachineCallInGetRecoveryDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	recoveryCall := &ast.CallExpr{
+		Position: position,
+		Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+	}
+	expr := &ast.GetExpr{
+		Position: position,
+		Value:    &ast.IntLit{Position: position, Value: "0"},
+		Recovery: &ast.RecoveryClause{Body: []ast.Stmt{&ast.ExprStmt{Position: position, Expr: recoveryCall}}},
+	}
+	stmt := &ast.ExprStmt{Position: position, Expr: expr}
+	overRoots := map[string]bool{"scanner": true}
+	mutatedRoots := map[string]bool{}
+	collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
+	if !mutatedRoots["scanner"] {
+		t.Fatal("call in get recovery body was not recorded as a driven mutation")
+	}
+}
+
+func TestMachineDrivenRootInGetRecoveryIsCollected(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	expr := &ast.GetExpr{
+		Position: position,
+		Value:    &ast.IntLit{Position: position, Value: "0"},
+		Recovery: &ast.RecoveryClause{Body: []ast.Stmt{&ast.ExprStmt{
+			Position: position,
+			Expr: &ast.CallExpr{
+				Position: position,
+				Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+			},
+		}}},
+	}
+	roots := map[string]bool{}
+	collectExprRootIdents(expr, roots)
+	if !roots["scanner"] {
+		t.Fatal("get recovery root was not collected for machine over capture analysis")
+	}
+}
+
+// Match-expression arms are also executable children of a value expression. A driven
+// resource call in an arm body must be visible to machine capture analysis, including when
+// the arm is guarded; stopping at the match node would silently omit the capture.
+func TestMachineCallInMatchArmDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	call := &ast.CallExpr{
+		Position: position,
+		Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+	}
+	expr := &ast.MatchExpr{
+		Position: position,
+		Value:    &ast.IntLit{Position: position, Value: "0"},
+		Arms: []ast.MatchArm{{
+			Position: position,
+			Guard:    &ast.BoolLit{Position: position, Value: true},
+			Body:     []ast.Stmt{&ast.ExprStmt{Position: position, Expr: call}},
+		}},
+	}
+	stmt := &ast.ExprStmt{Position: position, Expr: expr}
+	overRoots := map[string]bool{"scanner": true}
+	mutatedRoots := map[string]bool{}
+	collectMachineCallArgRoots(stmt, overRoots, mutatedRoots)
+	if !mutatedRoots["scanner"] {
+		t.Fatal("call in match arm was not recorded as a driven mutation")
+	}
+}
+
+func TestMachineCallInValueBlockStatementDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	call := &ast.CallExpr{
+		Position: position,
+		Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+	}
+	expr := &ast.ExprBlock{
+		Position: position,
+		Stmts:    []ast.Stmt{&ast.ExprStmt{Position: position, Expr: call}},
+		Value:    &ast.IntLit{Position: position, Value: "0"},
+	}
+	overRoots := map[string]bool{"scanner": true}
+	mutatedRoots := map[string]bool{}
+	collectMachineCallArgRoots(&ast.ExprStmt{Position: position, Expr: expr}, overRoots, mutatedRoots)
+	if !mutatedRoots["scanner"] {
+		t.Fatal("call in value-block statements was not recorded as a driven mutation")
+	}
+}
+
+func TestMachineCallInLambdaBodyDrivesCapture(t *testing.T) {
+	position := lexer.Pos{}
+	scanner := &ast.Ident{Position: position, Name: "scanner"}
+	call := &ast.CallExpr{
+		Position: position,
+		Func:     &ast.FieldExpr{Position: position, Object: scanner, Field: "next"},
+	}
+	expr := &ast.LambdaExpr{
+		Position: position,
+		Body:     []ast.Stmt{&ast.ExprStmt{Position: position, Expr: call}},
+	}
+	overRoots := map[string]bool{"scanner": true}
+	mutatedRoots := map[string]bool{}
+	collectMachineCallArgRoots(&ast.ExprStmt{Position: position, Expr: expr}, overRoots, mutatedRoots)
+	if !mutatedRoots["scanner"] {
+		t.Fatal("call in lambda body was not recorded as a driven mutation")
+	}
+}
+
+func TestMachinePayloadPredicateWalksAggregate(t *testing.T) {
+	position := lexer.Pos{}
+	expr := &ast.TupleExpr{
+		Position: position,
+		Elems: []ast.Expr{
+			&ast.IntLit{Position: position, Value: "0"},
+			&ast.BinaryExpr{
+				Position: position,
+				Op:       lexer.TOKEN_GT,
+				Left:     &ast.Ident{Position: position, Name: "depth"},
+				Right:    &ast.IntLit{Position: position, Value: "1"},
+			},
+		},
+	}
+	if !exprMentionsIdent(expr, "depth") {
+		t.Fatal("payload predicate identifier hidden inside tuple was not found")
+	}
+}
+
 func TestMachineRefusalPayloadDirectAssign(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Expr(depth: usize)
@@ -493,6 +913,34 @@ func TestMachineRefusalPayloadDirectAssign(t *testing.T) {
 	_, errs := parseSourceFile(t, src)
 	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "payload field") {
 		t.Fatalf("expected payload-assign refusal, got %v", errs)
+	}
+}
+
+func TestMachineCompoundAssignmentUsesMutationRules(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Text
+        start Text
+        Text, _:
+            lexer += 1
+            -> Text
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("compound assignment in a machine arm was rejected: %v", errs)
+	}
+}
+
+func TestMachineRefusalForeignCompoundAssignment(t *testing.T) {
+	src := machineSrc(`    machine over lexer.current_char():
+        state Text
+        start Text
+        Text, _:
+            other += 1
+            -> Text
+`)
+	_, errs := parseSourceFile(t, src)
+	if len(errs) == 0 || !strings.Contains(strings.Join(errs, "\n"), "foreign state") {
+		t.Fatalf("foreign compound assignment was not refused: %v", errs)
 	}
 }
 
@@ -573,7 +1021,7 @@ func TestMachineContextualKeywordFallthrough(t *testing.T) {
 }
 
 // Input bind pattern: `Scanning, character if character.is_ident():` — binds the input
-// for call-predicate dispatch; the bind hoists above the guard ladder.
+// for call-predicate dispatch. The guard and body each get an arm-local binding.
 func TestMachineInputBindPattern(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Scanning
@@ -597,11 +1045,20 @@ func TestMachineInputBindPattern(t *testing.T) {
 	wrapper := fn.Body[0].(*ast.IfStmt)
 	loop := wrapper.Then[len(wrapper.Then)-1].(*ast.WhileStmt)
 	matchStmt := loop.Body[2].(*ast.MatchStmt)
-	bind, ok := matchStmt.Arms[0].Body[0].(*ast.VarDeclStmt)
-	if !ok || bind.Name != "character" {
-		t.Fatalf("expected hoisted input-bind decl, got %#v", matchStmt.Arms[0].Body[0])
+	dispatch, ok := matchStmt.Arms[0].Body[0].(*ast.IfStmt)
+	if !ok {
+		t.Fatalf("expected guard ladder after arm-local binding, got %T", matchStmt.Arms[0].Body[0])
 	}
-	if _, ok := matchStmt.Arms[0].Body[1].(*ast.IfStmt); !ok {
-		t.Fatalf("expected guard ladder after bind, got %T", matchStmt.Arms[0].Body[1])
+	guard, ok := dispatch.Cond.(*ast.ExprBlock)
+	if !ok || len(guard.Stmts) != 1 {
+		t.Fatalf("expected guard expression block with one binding, got %#v", dispatch.Cond)
+	}
+	guardBind, ok := guard.Stmts[0].(*ast.VarDeclStmt)
+	if !ok || guardBind.Name != "character" {
+		t.Fatalf("expected guard-local input binding, got %#v", guard.Stmts[0])
+	}
+	bodyBind, ok := dispatch.Then[0].(*ast.VarDeclStmt)
+	if !ok || bodyBind.Name != "character" {
+		t.Fatalf("expected body-local input binding, got %#v", dispatch.Then[0])
 	}
 }

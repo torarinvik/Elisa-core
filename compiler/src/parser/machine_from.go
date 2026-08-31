@@ -41,6 +41,9 @@ func (p *Parser) parseMachineFromExpr() ast.Expr {
 	p.expectIdentText("from")
 
 	startEnum, startState := p.parseMachineFromStateRef()
+	if startEnum == "" {
+		p.errorf("`machine from` needs a qualified start state `Enum.State` so the state enum is known")
+	}
 	return p.parseMachineFromTail(pos, startEnum, startState)
 }
 
@@ -89,7 +92,7 @@ func (p *Parser) parseMachineFromTail(pos lexer.Pos, startEnum, startState strin
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		arms = append(arms, p.parseMachineFromArm())
+		arms = append(arms, p.parseMachineFromArm(startEnum))
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 
@@ -137,7 +140,7 @@ func (p *Parser) parseMachineFromArmBindings() []string {
 // parseMachineFromDeclaredOut parses the optional R5 out-edge contract `-> {A, B}` after an
 // arm header's state (and payload bindings). Returns (targets, true) when present so an
 // empty `-> {}` (a terminal arm) is distinguishable from an omitted clause.
-func (p *Parser) parseMachineFromDeclaredOut() ([]string, bool) {
+func (p *Parser) parseMachineFromDeclaredOut(expectedEnum string) ([]string, bool) {
 	if !(p.peek() == lexer.TOKEN_ARROW) {
 		return nil, false
 	}
@@ -145,7 +148,8 @@ func (p *Parser) parseMachineFromDeclaredOut() ([]string, bool) {
 	p.expect(lexer.TOKEN_LBRACE)
 	targets := []string{}
 	for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
-		_, target := p.parseMachineFromStateRef()
+		enumName, target := p.parseMachineFromStateRef()
+		p.validateMachineFromEnumPrefix(enumName, expectedEnum)
 		targets = append(targets, target)
 		if !p.match(lexer.TOKEN_COMMA) {
 			break
@@ -153,6 +157,15 @@ func (p *Parser) parseMachineFromDeclaredOut() ([]string, bool) {
 	}
 	p.expect(lexer.TOKEN_RBRACE)
 	return targets, true
+}
+
+// validateMachineFromEnumPrefix keeps bare state shorthand (`B`) legal while refusing an
+// explicitly qualified state from another enum (`T.B` inside a machine over `S`). The AST stores
+// only the variant name, so this check must happen while the prefix is still available.
+func (p *Parser) validateMachineFromEnumPrefix(actual, expected string) {
+	if actual != "" && expected != "" && actual != expected {
+		p.errorf("machine state reference uses enum %q, but this machine uses enum %q", actual, expected)
+	}
 }
 
 // parseMachineFromStateRef parses `Enum.State` (or a bare `State`, whose enum defaults to
@@ -165,11 +178,12 @@ func (p *Parser) parseMachineFromStateRef() (string, string) {
 	return "", first
 }
 
-func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
+func (p *Parser) parseMachineFromArm(expectedEnum string) ast.MachineFromArm {
 	pos := p.cur().Pos
-	_, state := p.parseMachineFromStateRef()
+	armEnum, state := p.parseMachineFromStateRef()
+	p.validateMachineFromEnumPrefix(armEnum, expectedEnum)
 	bindings := p.parseMachineFromArmBindings()
-	declaredOut, hasDeclaredOut := p.parseMachineFromDeclaredOut()
+	declaredOut, hasDeclaredOut := p.parseMachineFromDeclaredOut(expectedEnum)
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -183,7 +197,7 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 		}
 		if p.peek() == lexer.TOKEN_ARROW || p.peek() == lexer.TOKEN_FATARROW ||
 			(p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "next" || p.cur().Text == "done")) {
-			terminators = append(terminators, p.parseMachineFromTerminator())
+			terminators = append(terminators, p.parseMachineFromTerminator(expectedEnum))
 			continue
 		}
 		if len(terminators) > 0 {
@@ -200,7 +214,7 @@ func (p *Parser) parseMachineFromArm() ast.MachineFromArm {
 	return ast.MachineFromArm{Position: pos, State: state, Bindings: bindings, DeclaredOut: declaredOut, HasDeclaredOut: hasDeclaredOut, Body: body, Terminators: terminators}
 }
 
-func (p *Parser) parseMachineFromTerminator() ast.MachineFromTerminator {
+func (p *Parser) parseMachineFromTerminator(expectedEnum string) ast.MachineFromTerminator {
 	pos := p.cur().Pos
 	token := p.advance() // -> | => | next | done
 	term := ast.MachineFromTerminator{Position: pos, IsDone: token.Kind == lexer.TOKEN_FATARROW || token.Text == "done"}
@@ -209,7 +223,9 @@ func (p *Parser) parseMachineFromTerminator() ast.MachineFromTerminator {
 		// as `done (1) if (c)`, not the else-less ternary `1 if c`.
 		term.Value = p.parseMachineFromValueExpr()
 	} else {
-		_, term.Target = p.parseMachineFromStateRef()
+		nextEnum, target := p.parseMachineFromStateRef()
+		p.validateMachineFromEnumPrefix(nextEnum, expectedEnum)
+		term.Target = target
 		// `next Num.Exponent(was_fraction)` constructs the successor's payload.
 		term.Args = p.parseMachineFromCallArgs()
 	}
@@ -266,7 +282,7 @@ func (p *Parser) validateMachineFromArmStmt(stmt ast.Stmt) {
 		for _, inner := range s.Body {
 			p.validateMachineFromArmStmt(inner)
 		}
-	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.ExprStmt:
+	case *ast.VarDeclStmt, *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt, *ast.ExprStmt:
 		_ = s // allowed straight-line forms
 	case nil:
 		// parse error already reported

@@ -8,9 +8,8 @@ import (
 	"testing"
 )
 
-// `by par` on a map is gated to a no-filter map over a plain darray identifier with a
-// reconstructible element type, so the parallel decomposition is well-defined. Ineligible maps are a
-// clear error, not a silent sequential fallback.
+// `by par` on a map is gated to a no-filter map over a plain darray identifier, so the parallel
+// decomposition is well-defined. Ineligible maps are a clear error, not a silent sequential fallback.
 func TestByParMapRejectsIneligible(t *testing.T) {
 	t.Parallel()
 	cases := map[string]string{
@@ -32,6 +31,28 @@ func TestByParMapRejectsIneligible(t *testing.T) {
 				t.Fatalf("expected a clear `by par` map eligibility error for %s, got stderr:\n%s", name, stderr.String())
 			}
 		})
+	}
+}
+
+// Generic instances are valid map elements. The old lowering reconstructed a surface type
+// declaration from the resolved element type before analyzing the synthesized call; that helper
+// intentionally returned nil for GenericInstanceType and rejected this otherwise structural case.
+func TestByParMapAcceptsGenericElement(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	src := "include \"" + filepath.Join(repoRootFromMainTest(t), "compiler", "runtime", "elisacore_std", "elisacore_runtime.elisa") + "\"\n" +
+		"struct Box[T]:\n\tvalue: T\n\n" +
+		"def t(a: darray[Box[i64]]&) -> usize:\n\tcan Parallel, Memory.Allocate, Memory.Release, Abort.Panic:\n\t\tout: darray[Box[i64]] = [x for x in a by par]\n\t\treturn out.count\n"
+	path := filepath.Join(dir, "bymap_generic.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "semantic", path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("generic by-par map should pass semantic analysis (%d):\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if strings.Contains(stderr.String(), "`by par` map") {
+		t.Fatalf("generic element should use structural par-map inference, got stderr:\n%s", stderr.String())
 	}
 }
 
