@@ -231,8 +231,10 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 	}
 
 	seenPublicNames[decl.Name] = true
+	linkName, _ := externLinkNameFromAnnotations(decl.Annotations)
 	a.exportedFuncs = append(a.exportedFuncs, &ExportedFunc{
 		PublicName:        decl.Name,
+		LinkName:          linkName,
 		Signature:         signature,
 		TargetName:        decl.TargetName,
 		TargetBase:        targetBase,
@@ -416,7 +418,7 @@ func isCABICompatibleType(t Type) bool {
 		return true
 	case *BuiltinType:
 		switch tt.Name {
-		case "void", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "int", "isize", "usize", "uintptr":
+		case "void", "bool", "char", "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "int", "isize", "usize", "uintptr":
 			return true
 		default:
 			return false

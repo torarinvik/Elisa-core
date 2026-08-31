@@ -183,6 +183,15 @@ func terminalTypestateLeakKind(t Type) string {
 	return "typestate value left in non-terminal state"
 }
 
+func isTerminalTypestate(t Type) bool {
+	base, ok := trackedNamedStateStructBase(t)
+	if !ok || base == nil || len(base.TerminalStateCases) == 0 {
+		return false
+	}
+	current, ok := trackedNamedStateCurrentArg(t)
+	return ok && current != nil && namedStateSubsetOf(current, base.TerminalStateCases)
+}
+
 func namedStateSubsetOf(t Type, allowed []string) bool {
 	if len(allowed) == 0 {
 		return false
@@ -579,9 +588,23 @@ func (a *Analyzer) refreshTerminalTypestateTracking(sym *Symbol, tracked Type) {
 	if a == nil || sym == nil || a.currentAffineValues == nil {
 		return
 	}
+	// A reference parameter is a borrowed view of the caller's typestate value.
+	// Its terminal-state obligation belongs to the caller, so the callee must
+	// not report its receiver (`self`) as leaked at scope exit. By-value
+	// parameters and locals remain owned and continue through this tracker.
+	if sym.Kind == SymbolParam {
+		if _, borrowed := sym.Type.(*RefType); borrowed {
+			return
+		}
+	}
 	key := affineValueKey{Root: sym}
 	state := a.currentAffineValues[key]
-	if terminalTypestateLeakKind(state.LiveProtocolType) != "" || terminalTypestateLeakKind(tracked) != "" {
+	// A terminal state is represented by the ABSENCE of a leak kind, so checking
+	// only terminalTypestateLeakKind(tracked) cannot clear a previously recorded
+	// non-terminal state when a transition returns to (for example) Closed.
+	// Clear both sides of the transition explicitly, then re-register only a
+	// currently non-terminal typestate.
+	if terminalTypestateLeakKind(state.LiveProtocolType) != "" || isTerminalTypestate(state.LiveProtocolType) || isTerminalTypestate(tracked) {
 		state.LiveProtocolType = nil
 		state.LiveProtocolDescription = ""
 		a.currentAffineValues[key] = state

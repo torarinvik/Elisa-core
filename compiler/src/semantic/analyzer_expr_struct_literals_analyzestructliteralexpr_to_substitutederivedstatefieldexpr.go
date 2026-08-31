@@ -513,6 +513,14 @@ func instantiateNamedStateStructLiteralType(base *StructType, template Type, sta
 	if base == nil || state == nil {
 		return template
 	}
+	// Preserve the reference transport while specializing the logical named
+	// state.  Flow refinement routinely receives `App&` here, whereas the
+	// generic state argument lives on its `App[State]` element type.
+	var refTemplate *RefType
+	if ref, ok := template.(*RefType); ok && ref != nil {
+		refTemplate = ref
+		template = ref.Elem
+	}
 	template = StripAggregateStateType(template)
 	gi, ok := template.(*GenericInstanceType)
 	if !ok || gi == nil {
@@ -528,7 +536,13 @@ func instantiateNamedStateStructLiteralType(base *StructType, template Type, sta
 	}
 	args := append([]Type(nil), gi.Args...)
 	args[idx] = state
-	return &GenericInstanceType{Name: gi.Name, Base: gi.Base, Args: args}
+	instantiated := Type(&GenericInstanceType{Name: gi.Name, Base: gi.Base, Args: args})
+	if refTemplate != nil {
+		ref := cloneRefType(refTemplate)
+		ref.Elem = instantiated
+		return ref
+	}
+	return instantiated
 }
 func (a *Analyzer) inferStructLiteralNamedState(expr *ast.StructLitExpr, base *StructType) Type {
 	if expr == nil || base == nil || len(base.NamedStateCases) == 0 {

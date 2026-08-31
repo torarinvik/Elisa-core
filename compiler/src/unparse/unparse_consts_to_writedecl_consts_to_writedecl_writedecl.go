@@ -535,6 +535,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 	case *ast.ExportTypeDecl:
 		f.writeLine(level, "export type "+formatTypeExpr(n.ExportedType)+" as "+n.Alias)
 	case *ast.ExportFuncDecl:
+		f.writeAnnotations(level, n.Annotations)
 		f.writeLine(level, formatExportFuncHeader(n))
 	case *ast.ExportGlobalDecl:
 		line := "export global " + formatExportTargetName(n.TargetName)

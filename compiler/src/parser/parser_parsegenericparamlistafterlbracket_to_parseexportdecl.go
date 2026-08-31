@@ -630,6 +630,10 @@ func (p *Parser) parseUsesContractAfterKeyword() *ast.ContractStmt {
 	return &ast.ContractStmt{Position: pos, Kind: ast.ContractUses, UsesName: cname, UsesTypeArgs: typeArgs, UsesArgs: args}
 }
 func (p *Parser) parseExportDecl() ast.Decl {
+	return p.parseExportDeclWithAnnotations(nil)
+}
+
+func (p *Parser) parseExportDeclWithAnnotations(annotations []ast.Annotation) ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_EXPORT)
 	kindText := ""
@@ -683,7 +687,7 @@ func (p *Parser) parseExportDecl() ast.Decl {
 			p.expect(lexer.TOKEN_RBRACKET)
 		}
 		p.expectNewline()
-		return &ast.ExportFuncDecl{Position: pos, Name: name, Params: params, ReturnType: retType, TargetName: targetName, TargetTypeArgs: targetTypeArgs}
+		return &ast.ExportFuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: name, Params: params, ReturnType: retType, TargetName: targetName, TargetTypeArgs: targetTypeArgs}
 	case "global":
 		// A `::`-qualified target (`Mod::g`) stores as the internal dotted name; the
 		// default public alias is its last segment, since a dotted name is not a

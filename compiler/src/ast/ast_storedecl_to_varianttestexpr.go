@@ -185,8 +185,8 @@ type FuncDecl struct {
 	// Variadic marks a source-defined C-ABI variadic function (`def f(x: T, ...)`).
 	// The unnamed tail is available through the llvm.va_* intrinsic surface.
 	Variadic   bool
-	ReturnType    TypeExpr
-	Body          []Stmt
+	ReturnType TypeExpr
+	Body       []Stmt
 	// LmutThreadSlots records the declared lmut-threading manifest (docs/120 §2): return-tuple
 	// fields spelled `name: lmut T` that were validated against the same-named `lmut` parameters
 	// and ERASED — from ReturnType and from every return expression — by the parser post-pass
@@ -349,6 +349,7 @@ type ExportTypeDecl struct {
 }
 type ExportFuncDecl struct {
 	Position       lexer.Pos
+	Annotations    []Annotation
 	Name           string
 	Params         []ParamDecl
 	ReturnType     TypeExpr

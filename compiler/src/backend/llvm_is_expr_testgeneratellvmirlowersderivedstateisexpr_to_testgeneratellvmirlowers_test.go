@@ -31,6 +31,32 @@ def score(player: Player) -> int:
 		}
 	}
 }
+func TestGenerateLLVMIRLowersEnumDerivedStateIsExprThroughReference(t *testing.T) {
+	src := `enum Lifecycle:
+	Cold
+	Running
+
+struct App[state Cold | Running]:
+	phase: Lifecycle
+
+	derive state:
+		Cold when self.phase == Lifecycle.Cold
+		Running when self.phase == Lifecycle.Running
+
+def is_running(app: App&) -> bool:
+	return app is App[Running]
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_derived_state_enum_variant_ref.elisa", src)
+	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
+	if err != nil {
+		t.Fatalf("generateLLVMIRWithDefaultPackedLoweringForTest returned error: %v", err)
+	}
+	for _, check := range []string{"define i1 @is_running(", "isstate.self", "isstate.icmp"} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected enum-derived-state lowering to include %q, got:\n%s", check, output)
+		}
+	}
+}
 func TestGenerateLLVMIRLowersEnumIsExprWithLiteralPayloadPattern(t *testing.T) {
 	src := `enum Expr:
 	Float(PI: f64)

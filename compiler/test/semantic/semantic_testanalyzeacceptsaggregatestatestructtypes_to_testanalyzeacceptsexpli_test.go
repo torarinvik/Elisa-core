@@ -102,6 +102,22 @@ def route(player: Player) -> int:
 	requireExprTypeString(t, result, ret.Value, "Player[Alive]")
 	requireFunctionReturnTypeString(t, result, "route", "int")
 }
+func TestAnalyzeAcceptsEnumVariantInDerivedStructStateRule(t *testing.T) {
+	src := `enum Lifecycle:
+	Cold
+	Running
+
+struct App[state Cold | Running]:
+	phase: Lifecycle
+
+	derive state:
+		Cold when self.phase == Lifecycle.Cold
+		Running when self.phase == Lifecycle.Running
+`
+	result, errs := parseAndAnalyze(t, "derived_struct_states_enum_variant.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+}
 func TestAnalyzeRejectsExplicitDerivedStateConstructorMismatch(t *testing.T) {
 	src := `struct Player[state Alive | Dead]:
 	health: int

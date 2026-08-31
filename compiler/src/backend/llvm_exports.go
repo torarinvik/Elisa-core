@@ -69,7 +69,11 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		return fmt.Errorf("export wrapper %s return %s is not supported by the current ABI lowering: %w", exported.PublicName, exported.Signature.Return.String(), err)
 	}
 	fnType := C.LLVMFunctionType(returnLowering.llvmType, llvmTypeSlicePtr(paramTypes), C.unsigned(len(paramTypes)), 0)
-	fnValue, err := g.ensureExportFunctionDeclared(exported.PublicName, fnType)
+	exportSymbol := exported.PublicName
+	if exported.LinkName != "" {
+		exportSymbol = exported.LinkName
+	}
+	fnValue, err := g.ensureExportFunctionDeclared(exportSymbol, fnType)
 	if err != nil {
 		return err
 	}

@@ -468,6 +468,8 @@ func (p *Parser) parseDecl() ast.Decl {
 			return p.parseFuncDeclWithAnnotations(annotations)
 		case lexer.TOKEN_EXTERN:
 			return p.parseExternDeclWithAnnotations(annotations)
+		case lexer.TOKEN_EXPORT:
+			return p.parseExportDeclWithAnnotations(annotations)
 		case lexer.TOKEN_REPR:
 			return p.parseStructDeclWithAnnotations(annotations)
 		case lexer.TOKEN_PACKED:

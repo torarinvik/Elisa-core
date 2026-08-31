@@ -957,8 +957,13 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	a.collectEffectPermissions(activeDecls)
 	a.collectEffectHandlers(activeDecls)
 	a.populateConstEnumMembers(activeDecls)
-	a.populateStructFields(activeDecls)
 	a.populateEnumVariants(activeDecls)
+	// Struct-derived-state predicates may compare fields with qualified enum
+	// variants (for example, `self.phase == Lifecycle.Cold`). Enum variants
+	// therefore have to be populated before struct validation analyzes those
+	// predicates. Both passes operate on already-collected type skeletons, so
+	// enum payloads can still resolve struct types declared later in the file.
+	a.populateStructFields(activeDecls)
 	a.assignHierarchyEnumTags(activeDecls)
 	a.inheritHierarchyCommonFields(activeDecls)
 	generatedDecls := make(map[ast.Decl]bool)

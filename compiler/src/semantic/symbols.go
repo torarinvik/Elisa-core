@@ -301,7 +301,12 @@ type ExportedType struct {
 }
 
 type ExportedFunc struct {
-	PublicName        string
+	PublicName string
+	// LinkName is the optional linker spelling from @link_name on the export
+	// declaration. PublicName remains the source/API name; the backend uses
+	// LinkName for the emitted symbol when a target ABI needs punctuation such
+	// as a WIT component export name.
+	LinkName          string
 	Signature         *FuncType
 	TargetName        string
 	TargetBase        *FuncType
