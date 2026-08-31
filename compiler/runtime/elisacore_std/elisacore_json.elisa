@@ -409,6 +409,57 @@ def json_decode_escape(p: mutable JsonParser&) -> i64:
 # String parsing
 # ------------------------------------------------------------
 
+# Scan a string without changing the parser cursor. This gives the common
+# unescaped case a zero-copy representation into the input buffer while still
+# validating control bytes and finding the exact decoded-buffer upper bound for
+# strings that contain escapes.
+def json_string_scan(p: JsonParser&, start: i64, stop: mutable i64&, has_escape: mutable bool&) -> bool:
+    cursor: mutable i64 = p.pos
+    cursor <- start
+    has_escape <- false
+    while cursor < p.text.len:
+        ch: i64 = string_view_index(p.text, cursor)
+        if ch == JSON_CH_DQUOTE:
+            stop <- cursor
+            return true
+        return false if ch < JSON_CH_SPACE
+        has_escape <- true if ch == JSON_CH_BSLASH
+        cursor <- cursor + 1
+    return false
+
+# Count immediate members/elements without changing the parser cursor. The
+# scan understands nested containers and quoted strings, so reserving exactly
+# here prevents arena_realloc from retaining obsolete backing arrays as a
+# parent container grows around already-parsed children.
+def json_container_item_count(p: JsonParser&, closing: i64) -> usize:
+    cursor: mutable i64 = p.pos
+    depth: mutable i64 = 0
+    count: mutable usize = 1.usize()
+    in_string: mutable bool = false
+    escaped: mutable bool = false
+    while cursor < p.text.len:
+        ch: i64 = string_view_index(p.text, cursor)
+        if in_string:
+            if escaped:
+                escaped <- false
+            elif ch == JSON_CH_BSLASH:
+                escaped <- true
+            elif ch == JSON_CH_DQUOTE:
+                in_string <- false
+        else:
+            if ch == JSON_CH_DQUOTE:
+                in_string <- true
+            elif ch == JSON_CH_LBRACKET or ch == JSON_CH_LBRACE:
+                depth <- depth + 1
+            elif ch == JSON_CH_RBRACKET or ch == JSON_CH_RBRACE:
+                if depth == 0:
+                    return count if ch == closing else count
+                depth <- depth - 1
+            elif ch == JSON_CH_COMMA and depth == 0:
+                count <- count + 1.usize()
+        cursor <- cursor + 1
+    return count
+
 # Parse a quoted string into freshly arena-allocated, escape-decoded bytes.
 # The cursor sits on the opening quote on entry and just past the closing quote
 # on return. A NUL byte is always appended (not counted in `len`), so the result
@@ -419,8 +470,18 @@ def json_parse_string_ref(a: mutable Arena&, p: mutable JsonParser&) -> JsonStri
             return json_fail_string(p, JsonErrorCode.UNEXPECTED_CHAR, p.pos)
         open_pos: i64 = p.pos
         json_bump(p)
+        content_start: i64 = p.pos
+        raw_stop: mutable i64 = -1
+        has_escape: mutable bool = false
+        if not json_string_scan(p, content_start, raw_stop, has_escape):
+            return json_fail_string(p, JsonErrorCode.INVALID_STRING, open_pos)
+        if not has_escape:
+            p.pos <- raw_stop + 1
+            raw: sview = string_view_slice(p.text, content_start, raw_stop)
+            return JsonStringRef{data_bits: raw.data.cast[u8&].cast[uintptr], len: raw.len}
         in a:
             out: mutable darray[u8] = []
+            _ = arena_da_reserve(a, &out, (raw_stop - content_start + 1).usize())
             closed: mutable bool = false
             while not closed:
                 ch: i64 = json_peek(p)
@@ -540,6 +601,7 @@ def json_parse_value(a: mutable Arena&, p: mutable JsonParser&) -> JsonValue:
 
             in a:
                 items: mutable darray[JsonValue] = []
+                _ = arena_da_reserve(a, &items, json_container_item_count(p, JSON_CH_RBRACKET))
                 items_done: mutable bool = false
                 while not items_done:
                     item: JsonValue = json_parse_value(a, p)
@@ -574,6 +636,7 @@ def json_parse_value(a: mutable Arena&, p: mutable JsonParser&) -> JsonValue:
 
             in a:
                 members: mutable darray[JsonMember] = []
+                _ = arena_da_reserve(a, &members, json_container_item_count(p, JSON_CH_RBRACE))
                 members_done: mutable bool = false
                 while not members_done:
                     json_skip_ws(p)

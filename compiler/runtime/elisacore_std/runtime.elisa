@@ -180,6 +180,11 @@ protocol Eq:
 protocol Ord:
     def __cmp__(self: Self, other: Self) -> i64
 
+protocol Index:
+    type Key
+    type Elem
+    def __index__(self: Self&, key: Key) -> Elem&
+
 protocol Str:
     def __cast__(self: Self) -> cstr can[Memory.Allocate, Console.Format, Abort.Panic]
 
