@@ -119,6 +119,7 @@ struct ElisaTraceEntry:
     line: mutable u32
     repeat: mutable u32
     has_value: mutable u8
+    is_signed: mutable u8
 
 global mutable elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP] = zeroed
 global mutable elisa_trace_pos: u64 = 0     # ring head: number of distinct entries written
@@ -145,8 +146,19 @@ def elisa_trace_record(name: cstr, line: u32) -> void:
     elisa_trace_ring[idx].has_value <- 0
     elisa_trace_pos <- elisa_trace_pos + 1
 
+# Function-entry and function-exit hooks share the ordinary trace ring so existing
+# collectors continue to work. A host profiler may interpose these symbols when it needs
+# distinct call counts; the bundled runtime deliberately keeps them allocation-free.
+def elisa_trace_function_entry(name: cstr, line: u32) -> void:
+    elisa_trace_record(name, line)
+
+
+def elisa_trace_function_exit(name: cstr, line: u32) -> void:
+    elisa_trace_record(name, line)
+
+
 # Value record: a variable received a (scalar/pointer) value at this step.
-def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) -> void:
+def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32) -> void:
     elisa_trace_total <- elisa_trace_total + 1
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
     elisa_trace_ring[idx].name <- name
@@ -155,6 +167,7 @@ def elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64) 
     elisa_trace_ring[idx].value <- value
     elisa_trace_ring[idx].repeat <- 0
     elisa_trace_ring[idx].has_value <- 1
+    elisa_trace_ring[idx].is_signed <- 1 if signed != 0 else 0
     elisa_trace_pos <- elisa_trace_pos + 1
 
 def elisa_trace_count() -> u64:

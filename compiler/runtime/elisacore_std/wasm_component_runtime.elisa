@@ -1,0 +1,86 @@
+# Freestanding runtime support for WASM component canonical ABI lowering.
+#
+# This file is deliberately independent of the host/native Elisa runtime. A WIT
+# string or list lowerer may call `cabi_realloc`; the component must satisfy that
+# call inside linear memory without importing libc, `env`, or JavaScript glue.
+
+@intrinsic("llvm.wasm.memory.grow.i32")
+extern wasm_memory_grow(memory_index: u32, pages: u32) -> i32
+
+@intrinsic("llvm.wasm.memory.size.i32")
+extern wasm_memory_size(memory_index: u32) -> u32
+
+@intrinsic("llvm.trap")
+extern wasm_trap() -> void
+
+global mutable wasm_component_heap_cursor: u32 = 1048576
+
+# Error-union and deferred-scope lowering may emit the native runtime's
+# `arena_free` epilogue even when a component function only uses fixed-size
+# values. Component memory is instance-owned and the monotonic allocator has
+# no reclaim operation, so the freestanding equivalent is intentionally a
+# no-op. Defining it here keeps the component ABI closed over WIT imports.
+def arena_free(a: mutable void&) -> void:
+    pass
+
+def wasm_component_align_up(value: u32, alignment: u32) -> u32:
+    return ((value + alignment - 1) / alignment) * alignment
+
+def wasm_component_ensure_capacity(end: u32):
+    current: u32 = wasm_memory_size(0) * 65536
+    if end > current:
+        needed: u32 = end - current
+        pages: u32 = (needed + 65535) / 65536
+        result: i32 = wasm_memory_grow(0, pages)
+        if result < 0:
+            wasm_trap()
+
+def wasm_component_copy_bytes(destination: u32, source: u32, count: u32):
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic, Unsafe.UncheckedIndex]:
+        dst: mutable u8& = destination.cast[mutable u8&]
+        src: u8& = source.cast[u8&]
+        for index in 0..<count.usize():
+            dst[index] <- src[index]
+
+# Canonical ABI allocator signature:
+#   cabi_realloc(old_ptr, old_size, align, new_size) -> new_ptr
+# The linker calls this for WIT strings/lists/results. Most allocations remain
+# monotonic, but the top allocation is resized or released in place. Canonical
+# lowering commonly follows a LIFO lifetime, so this small rule prevents a
+# long-running guest from leaking every temporary string/list buffer while
+# keeping the runtime independent of host allocation functions.
+def wasm_component_cabi_realloc(
+    old_ptr: u32,
+    old_size: u32,
+    alignment: u32,
+    new_size: u32
+) -> u32:
+    effective_alignment: u32 = alignment if alignment > 0 else 1
+
+    old_end: u32 = old_ptr + old_size
+    old_is_top: bool = old_ptr != 0 and old_end >= old_ptr and old_end == wasm_component_heap_cursor
+
+    if new_size == 0:
+        wasm_component_heap_cursor <- old_ptr if old_is_top
+        return 0
+
+    if old_is_top and old_ptr % effective_alignment == 0:
+        resized_end: u32 = old_ptr + new_size
+        if resized_end < old_ptr:
+            wasm_trap()
+            return 0
+        wasm_component_ensure_capacity(resized_end)
+        wasm_component_heap_cursor <- resized_end
+        return old_ptr
+
+    start: u32 = wasm_component_align_up(wasm_component_heap_cursor, effective_alignment)
+    end: u32 = start + new_size
+    if end < start:
+        wasm_trap()
+        return 0
+    wasm_component_ensure_capacity(end)
+    wasm_component_copy_bytes(start, old_ptr, old_size if old_size < new_size else new_size) if old_ptr != 0
+    wasm_component_heap_cursor <- end
+    return start
+
+export fn cabi_realloc(old_ptr: u32, old_size: u32, alignment: u32, new_size: u32) -> u32 = wasm_component_cabi_realloc
