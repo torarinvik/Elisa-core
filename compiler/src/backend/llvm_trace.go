@@ -41,15 +41,16 @@ static void elisacoreBuildTraceCall(LLVMBuilderRef b, LLVMContextRef ctx, LLVMTy
 	LLVMBuildCall2(b, fnTy, fn, args, 2, "");
 }
 
-// Declare (idempotently) void elisa_trace_record_value(i8* name, i32 line, i8* var, i64 value).
+// Declare (idempotently) void elisa_trace_record_value(i8* name, i32 line, i8* var, i64 value, i32 signed).
 static LLVMValueRef elisacoreDeclareTraceRecordValue(LLVMModuleRef m, LLVMContextRef ctx, LLVMTypeRef *outFnTy) {
 	LLVMTypeRef i8ptr = LLVMPointerType(LLVMInt8TypeInContext(ctx), 0);
-	LLVMTypeRef params[4];
+	LLVMTypeRef params[5];
 	params[0] = i8ptr;
 	params[1] = LLVMInt32TypeInContext(ctx);
 	params[2] = i8ptr;
 	params[3] = LLVMInt64TypeInContext(ctx);
-	LLVMTypeRef fnTy = LLVMFunctionType(LLVMVoidTypeInContext(ctx), params, 4, 0);
+	params[4] = LLVMInt32TypeInContext(ctx);
+	LLVMTypeRef fnTy = LLVMFunctionType(LLVMVoidTypeInContext(ctx), params, 5, 0);
 	*outFnTy = fnTy;
 	LLVMValueRef fn = LLVMGetNamedFunction(m, "elisa_trace_record_value");
 	if (fn == NULL) {
@@ -84,13 +85,14 @@ static LLVMValueRef elisacoreTraceValueToI64(LLVMBuilderRef b, LLVMContextRef ct
 }
 
 static void elisacoreBuildTraceValueCall(LLVMBuilderRef b, LLVMContextRef ctx, LLVMTypeRef fnTy, LLVMValueRef fn,
-		LLVMValueRef nameGlobal, unsigned line, LLVMValueRef varGlobal, LLVMValueRef value64) {
-	LLVMValueRef args[4];
+		LLVMValueRef nameGlobal, unsigned line, LLVMValueRef varGlobal, LLVMValueRef value64, unsigned signedValue) {
+	LLVMValueRef args[5];
 	args[0] = nameGlobal;
 	args[1] = LLVMConstInt(LLVMInt32TypeInContext(ctx), line, 0);
 	args[2] = varGlobal;
 	args[3] = value64;
-	LLVMBuildCall2(b, fnTy, fn, args, 4, "");
+	args[4] = LLVMConstInt(LLVMInt32TypeInContext(ctx), signedValue, 0);
+	LLVMBuildCall2(b, fnTy, fn, args, 5, "");
 }
 */
 import "C"
@@ -178,7 +180,26 @@ func (t *traceState) recordValue(state *functionState, line int, varName string,
 	}
 	varGlobal := t.nameGlobalFor(varName)
 	C.elisacoreBuildTraceValueCall(state.builder, t.g.context, t.valueFnTy, t.valueFn,
-		state.traceNameGlobal, C.unsigned(line), varGlobal, v64)
+		state.traceNameGlobal, C.unsigned(line), varGlobal, v64, C.unsigned(traceValueSigned(valueType)))
+}
+
+func traceValueSigned(t semantic.Type) uint {
+	if t == nil {
+		return 0
+	}
+	if bitInt, ok := t.(*semantic.BitIntType); ok && bitInt.Signed {
+		return 1
+	}
+	builtin, ok := t.(*semantic.BuiltinType)
+	if !ok {
+		return 0
+	}
+	switch builtin.Name {
+	case "int", "i8", "i16", "i32", "i64", "isize":
+		return 1
+	default:
+		return 0
+	}
 }
 
 // recordStmt emits the per-statement record call. It runs after setLoc so the call
