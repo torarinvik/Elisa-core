@@ -7,6 +7,26 @@ const PACKED_STORE_MIN_ROWS_PER_REGION: usize = 64
 @inline(always)
 def packed_store_region_data(r: heap Region&) -> heap u8&:
     return (r.cast[heap u8&] + size_of(Region))
+# Process-wide count of rows ever allocated across every packed/AoS store — one
+# add per node construction. Read by the driver's env-gated node-count report
+# (ELISA_DEBUG_NODE_COUNT) to measure real AST node density; the struct-global-
+# by-reference shape and __elisa_ weak prefix follow the ArenaRegionCache notes.
+struct StoreRowStats:
+    rows: mutable usize
+
+global mutable __elisa_store_row_stats: StoreRowStats = StoreRowStats{rows: 0}
+
+def ctx_store_rows_observed() -> usize:
+    trusted Unsafe.MutableGlobal:
+        stats: StoreRowStats& = &__elisa_store_row_stats
+        return stats.rows
+
+@internal
+def store_rows_note():
+    trusted Unsafe.MutableGlobal:
+        stats: mutable StoreRowStats& = &__elisa_store_row_stats
+        stats.rows <- stats.rows + 1
+
 def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darray[heap Region&?]&:
     return &state.regions
 def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
@@ -163,6 +183,7 @@ def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable h
         return state.cast[heap void&]
 def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag: uintptr, state: mutable PackedStoreState&):
     can Memory.Allocate, Abort.Panic:
+        store_rows_note()
         if state.alloc_region == null:
             capacity: mutable usize = state.preferred_region_capacity
             capacity <- size if capacity < size
@@ -224,6 +245,7 @@ def ctx_packed_store_alloc_result_slow(a: mutable Arena&, size: usize, owner_tag
         packed_store_register_region(a, state, a.end, a.end_index)
 def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintptr, state: mutable PackedStoreState&):
     can Memory.Allocate, Abort.Panic:
+        store_rows_note()
         size: usize = state.row_words
         assert size > 0
 

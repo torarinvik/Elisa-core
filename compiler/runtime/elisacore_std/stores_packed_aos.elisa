@@ -50,6 +50,7 @@ def ctx_aos_store_new_with_side_words(a: mutable Arena&, record_bytes: usize, si
 # chunk (cold commons) grows in lockstep so the same handle indexes both arrays.
 def ctx_aos_store_alloc(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
+        store_rows_note()
         state: mutable heap PackedAoSStore& = state_bits.cast[heap PackedAoSStore&]
         # chunk_records is the fixed power-of-2 PACKED_AOS_CHUNK_RECORDS, so dividing by the
         # CONSTANT (not the runtime field) lets the backend strength-reduce / and % to shift/mask
