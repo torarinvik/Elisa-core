@@ -321,7 +321,19 @@ def sfree[T](ptr: heap T&) -> heap T!:
 # giant block is never pinned). Plain global, unsynchronized — the same posture as
 # perm_arena, which is likewise mutated on every permanent allocation; a thread-local
 # pool is the documented end state for ARENA_STRATEGY_SCRATCH and can subsume this.
-global mutable region_cache_slot: mutable heap Region&? = null
+# Both cache fields live in ONE struct-typed global accessed through a reference —
+# the perm_arena pattern. stage0 attaches Unsafe.MutableGlobal to a function's
+# required effects on DIRECT scalar-global access (warning every ungranted caller
+# transitively: 113 across the runtime), while stage1 warns at the access site in
+# strict mode (4 diagnostics); struct-global-by-reference is the one shape both
+# analyzers accept silently, and it is what every existing runtime global uses.
+struct ArenaRegionCache:
+    slot: mutable heap Region&?
+    # Process-wide count of spans sitting on region free lists; see
+    # arena_take_free_block_chain.
+    reclaimed_spans: mutable usize
+
+global mutable __elisa_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
 
 # Largest region the cache will park, in SLOTS (uintptr-sized): 128Ki slots = 1 MiB of
 # payload on 64-bit. Scratch regions are far smaller; anything bigger is unmapped as
@@ -336,8 +348,9 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
         static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            if region_cache_slot is cached and cached.capacity >= capacity:
-                region_cache_slot <- null
+            reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+            if reuse_cache.slot is cached and cached.capacity >= capacity:
+                reuse_cache.slot <- null
                 cached.next <- null
                 cached.count <- 0
                 cached.owner_tag <- owner_tag
@@ -534,7 +547,9 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
     while current != null and probes_left > 0:
         probes_left <- probes_left - 1
         if current.slots >= need_slots:
-            arena_reclaimed_spans <- arena_reclaimed_spans - 1 if arena_reclaimed_spans > 0
+            trusted Unsafe.MutableGlobal:
+                take_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                take_cache.reclaimed_spans <- take_cache.reclaimed_spans - 1 if take_cache.reclaimed_spans > 0
             block: mutable heap ArenaFreeBlock& = current
             remainder: usize = current.slots - need_slots
             if remainder >= header_slots:
@@ -558,19 +573,18 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
         current <- current.next
     return null
 
-# Process-wide count of spans sitting on region free lists. arena_alloc consults it
-# before walking the region chain: the overwhelmingly common arena (an AST or scratch
-# arena that only ever bumps) has never reclaimed anything, yet paid an O(regions)
-# walk from a.begin on EVERY allocation — sampling put ~18% of product cpu inside
-# arena_alloc, led by Parser.postfix_expression building AST nodes. The counter is a
-# HINT with the same unsynchronized posture as perm_arena/region_cache_slot: a racy
-# read can only cost one skipped reuse or one wasted walk, never correctness.
-global mutable arena_reclaimed_spans: usize = 0
+# The reclaimed-span count is a HINT with the same unsynchronized posture as
+# perm_arena: a racy read can only cost one skipped reuse or one wasted walk,
+# never correctness. arena_alloc consults it before walking the region chain —
+# the common bump-only arena never reclaims, yet paid an O(regions) walk on
+# EVERY allocation (~18% of product cpu, led by AST node construction).
 
 
 @internal
 def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable heap void&?:
-    return null if arena_reclaimed_spans == 0
+    trusted Unsafe.MutableGlobal:
+        cache: ArenaRegionCache& = &__elisa_region_cache
+        return null if cache.reclaimed_spans == 0
     cursor: mutable heap Region&? = a.begin
     while cursor != null:
         # Reclaimed spans are safe to reuse even in an adopted block: the owner tag
@@ -598,7 +612,8 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                 block.slots <- old_slots
                 block.next <- cursor.free_list
                 cursor.free_list as & <- block
-                arena_reclaimed_spans <- arena_reclaimed_spans + 1
+                reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
                 return
         cursor <- cursor.next
 
@@ -610,7 +625,7 @@ def free_region(r: heap Region&):
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
             # Park instead of unmapping when the slot is free and the region is small
-            # enough to be worth keeping — see region_cache_slot above.
+            # enough to be worth keeping — see __elisa_region_cache above.
             #
             # The used span is ZEROED before parking. A fresh anonymous mmap is
             # kernel-zeroed, and handing back a dirty recycled region broke that
@@ -619,12 +634,13 @@ def free_region(r: heap Region&):
             # free-listed spans live inside it, so zeroing [0, count) restores
             # bit-for-bit fresh-region semantics at memset cost instead of
             # munmap+mmap+page-fault cost.
-            if region_cache_slot == null and r.capacity <= REGION_CACHE_MAX_SLOTS:
+            park_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+            if park_cache.slot == null and r.capacity <= REGION_CACHE_MAX_SLOTS:
                 trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
                     used_bytes: usize = r.count * size_of(uintptr)
                     if used_bytes > 0:
                         _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
-                    region_cache_slot <- r.cast[mutable heap Region&]
+                    park_cache.slot <- r.cast[mutable heap Region&]
                 return
             size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
             ret: mutable int = 0
