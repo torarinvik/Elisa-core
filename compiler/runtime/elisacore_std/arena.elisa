@@ -25,7 +25,12 @@ static elif ELISA_TARGET_OS_POSIX:
 static else:
     const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
 
-const ARENA_REGION_DEFAULT_CAPACITY: usize = 8 * 1024
+# 128Ki slots = 1 MiB of payload on 64-bit (was 8Ki slots / 64 KiB). A driver-sized
+# compile chained THOUSANDS of 64 KiB regions, and both the per-allocation free-block
+# chain walk and the mmap count scale with region count. Anonymous mmap pages are
+# committed on first touch, so idle capacity in the tail region costs address space,
+# not RSS. Matches REGION_CACHE_MAX_SLOTS so default regions stay cacheable.
+const ARENA_REGION_DEFAULT_CAPACITY: usize = 128 * 1024
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 
 # Per-region strategy stored in Arena.strategy (the surface `region r(N) using <strategy>`).
@@ -109,6 +114,8 @@ extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 extern free(ptr: heap void&) can[Memory.Release]
 # Used by the region cache to restore fresh-mmap zeroing when parking a region.
 extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+# Used by arena_realloc's relocation copy.
+extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 
 static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     const ELISA_ARENA_PROT_READ = 0x1
@@ -527,6 +534,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
     while current != null and probes_left > 0:
         probes_left <- probes_left - 1
         if current.slots >= need_slots:
+            arena_reclaimed_spans <- arena_reclaimed_spans - 1 if arena_reclaimed_spans > 0
             block: mutable heap ArenaFreeBlock& = current
             remainder: usize = current.slots - need_slots
             if remainder >= header_slots:
@@ -550,8 +558,19 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
         current <- current.next
     return null
 
+# Process-wide count of spans sitting on region free lists. arena_alloc consults it
+# before walking the region chain: the overwhelmingly common arena (an AST or scratch
+# arena that only ever bumps) has never reclaimed anything, yet paid an O(regions)
+# walk from a.begin on EVERY allocation — sampling put ~18% of product cpu inside
+# arena_alloc, led by Parser.postfix_expression building AST nodes. The counter is a
+# HINT with the same unsynchronized posture as perm_arena/region_cache_slot: a racy
+# read can only cost one skipped reuse or one wasted walk, never correctness.
+global mutable arena_reclaimed_spans: usize = 0
+
+
 @internal
 def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable heap void&?:
+    return null if arena_reclaimed_spans == 0
     cursor: mutable heap Region&? = a.begin
     while cursor != null:
         # Reclaimed spans are safe to reuse even in an adopted block: the owner tag
@@ -579,6 +598,7 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                 block.slots <- old_slots
                 block.next <- cursor.free_list
                 cursor.free_list as & <- block
+                arena_reclaimed_spans <- arena_reclaimed_spans + 1
                 return
         cursor <- cursor.next
 
@@ -768,12 +788,14 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
 
         newptr: heap void& = arena_alloc(a, newsz)
-        newptr_bytes: heap u8& = arena_heap_u8_from_void(newptr)
-        oldptr_bytes: u8& = arena_u8_from_void(oldptr)
 
-        trusted Unsafe.UncheckedIndex:
-            for i in 0..<oldsz:
-                newptr_bytes[i] <- oldptr_bytes[i]
+        # memcpy, not a byte loop. Every darray relocation lands here, and the
+        # element-per-iteration copy moved one byte per loop trip — megabytes per
+        # compile through the geometric-growth steps, and unvectorized in the -O0
+        # builds the self-host fixpoint gate runs. The regions never overlap (newptr
+        # is a fresh allocation), so plain memcpy is the exact same operation.
+        trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+            _ = memcpy(arena_heap_void_from_mutable(newptr).cast[mutable void&], arena_u8_from_void(oldptr).cast[void&], oldsz)
 
         arena_reclaim_allocation(a, oldptr, old_slots)
 
