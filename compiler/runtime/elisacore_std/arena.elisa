@@ -107,6 +107,8 @@ struct ArenaMark:
 # itself does not use them for regions.
 extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 extern free(ptr: heap void&) can[Memory.Release]
+# Used by the region cache to restore fresh-mmap zeroing when parking a region.
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
 
 static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
     const ELISA_ARENA_PROT_READ = 0x1
@@ -303,9 +305,42 @@ def sfree[T](ptr: heap T&) -> heap T!:
 # Region allocation / freeing
 # ------------------------------------------------------------
 
+# A single-slot cache of the most recently freed mmap-backed region. Sampling the -O2
+# compiler showed 15.5% of ALL cpu inside mmap/munmap: ordinary backend helpers each
+# spin up a scratch region and tear it down again, so the same-sized block is unmapped
+# and re-mapped thousands of times per compile. The slot holds ONE parked region;
+# new_region_with_owner reuses it when its capacity suffices, and free_region parks
+# instead of unmapping when the slot is empty and the region is not oversized (so a
+# giant block is never pinned). Plain global, unsynchronized — the same posture as
+# perm_arena, which is likewise mutated on every permanent allocation; a thread-local
+# pool is the documented end state for ARENA_STRATEGY_SCRATCH and can subsume this.
+global mutable region_cache_slot: mutable heap Region&? = null
+
+# Largest region the cache will park, in SLOTS (uintptr-sized): 128Ki slots = 1 MiB of
+# payload on 64-bit. Scratch regions are far smaller; anything bigger is unmapped as
+# before so RSS never pins a large one-off block.
+const REGION_CACHE_MAX_SLOTS: usize = 131072
+
+
 def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
         size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+
+        # Reuse the parked region when it is big enough — its own (possibly larger)
+        # capacity is kept, exactly as if the caller had asked for that size.
+        static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            if region_cache_slot is cached and cached.capacity >= capacity:
+                region_cache_slot <- null
+                cached.next <- null
+                cached.count <- 0
+                cached.owner_tag <- owner_tag
+                cached.owner_next <- null
+                cached.global_index <- 0
+                cached.committed <- 0
+                cached.free_list <- null
+                return cached
+        static else:
+            pass
 
         static if ARENA_BACKEND == ARENA_BACKEND_LIBC_MALLOC:
             raw: mutable heap void&? = null
@@ -477,9 +512,20 @@ def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
 @internal
 def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable heap void&?:
     header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+    # FIRST-FIT WITH A BOUNDED PROBE. The exhaustive walk made every allocation
+    # O(live free blocks): a compiler-sized run reclaims thousands of darray backings
+    # into this list, and sampling stage1 compiling its own driver put ~35% of ALL
+    # cpu inside this walk (arena_take_free_block + _chain + reclaim, plus the
+    # mmap/munmap churn it drives). Reuse is a best-effort memory optimisation, not a
+    # correctness contract: after the probe budget the caller simply bump-allocates,
+    # and the unvisited blocks stay listed for later requests. Insertion is LIFO, so
+    # the bounded probe still sees the most recently freed — cache-warm and, in the
+    # grow-in-place realloc pattern that dominates, right-sized — blocks first.
+    probes_left: mutable usize = 32
     previous: mutable heap ArenaFreeBlock&? = null
     current: mutable heap ArenaFreeBlock&? = r.free_list
-    while current != null:
+    while current != null and probes_left > 0:
+        probes_left <- probes_left - 1
         if current.slots >= need_slots:
             block: mutable heap ArenaFreeBlock& = current
             remainder: usize = current.slots - need_slots
@@ -543,6 +589,23 @@ def free_region(r: heap Region&):
                 free(arena_heap_void_from_region(r))
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+            # Park instead of unmapping when the slot is free and the region is small
+            # enough to be worth keeping — see region_cache_slot above.
+            #
+            # The used span is ZEROED before parking. A fresh anonymous mmap is
+            # kernel-zeroed, and handing back a dirty recycled region broke that
+            # accidental-but-relied-upon contract (one corpus program changed its
+            # answer). r.count bounds everything ever bumped in this region, and
+            # free-listed spans live inside it, so zeroing [0, count) restores
+            # bit-for-bit fresh-region semantics at memset cost instead of
+            # munmap+mmap+page-fault cost.
+            if region_cache_slot == null and r.capacity <= REGION_CACHE_MAX_SLOTS:
+                trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                    used_bytes: usize = r.count * size_of(uintptr)
+                    if used_bytes > 0:
+                        _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
+                    region_cache_slot <- r.cast[mutable heap Region&]
+                return
             size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
             ret: mutable int = 0
             trusted Unsafe.RawExtern:
