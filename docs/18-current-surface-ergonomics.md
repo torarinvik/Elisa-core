@@ -647,7 +647,11 @@ Current rules:
   Each line is an ordinary `field <- value` assignment through a hidden reference to the
   place, so the place expression is evaluated ONCE and the fields are assigned in the order
   written. The type name is optional (`ws[2] with { kind <- 6 }`); when present, the place
-  must have that type. It is parser-level sugar, identical in both compilers.
+  must have that type. A bare field name puns to the local of the same name, so
+  `ws[2] with { kind, parent }` is `kind <- kind` and `parent <- parent`; struct literals
+  accept the same shorthand (`Widget{ kind, parent, x: 0.0 }`). Use `with` for partial
+  updates and a whole struct literal for a reset, since a literal must name every field.
+  It is parser-level sugar, identical in both compilers.
 - a struct literal `T{b: f(), a: g()}` evaluates its field initializers left-to-right in the order they are WRITTEN, whatever order the fields are declared in; side effects observe that order (a literal whose initializers register things in a table registers them in source order)
 - `elif value is name:` is the optional-bind continuation form for an `if` chain
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references

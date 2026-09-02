@@ -827,8 +827,15 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 			break
 		}
 		fieldTok := p.expect(lexer.TOKEN_IDENT)
-		p.expect(lexer.TOKEN_LARROW)
-		value := p.parseValueExprAllowTuple()
+		var value ast.Expr
+		if p.peek() == lexer.TOKEN_LARROW {
+			p.advance()
+			value = p.parseValueExprAllowTuple()
+		} else {
+			// Field punning: `with { kind, parent }` assigns each field from the
+			// local of the same name.
+			value = &ast.Ident{Position: fieldTok.Pos, Name: fieldTok.Text}
+		}
 		body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: &ast.FieldExpr{Position: fieldTok.Pos, Object: temp, Field: fieldTok.Text}, Value: value})
 		if p.peek() == lexer.TOKEN_COMMA {
 			p.advance()
