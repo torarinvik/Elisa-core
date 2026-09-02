@@ -266,7 +266,8 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 				// the common prefix -- so a write is the same GEP the read already uses, with
 				// no variant discrimination. It does not weaken the opaque-handle rule either:
 				// `w.x <- v` emits the store internally and never materialises a raw `T&` for
-				// user code.
+				// user code. This was gated off "in v1" while the read path was built; the
+				// motivating case is a node's per-frame data, e.g. a widget's resolved box.
 				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: commonDecl.Mutable, PackedStorage: storage}
 			}
 			variants := make([]*EnumVariant, 0, len(enumDecl.Variants))

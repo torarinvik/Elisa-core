@@ -163,10 +163,34 @@ Meaning:
   surface. When the implementation's lowered signature already IS the C ABI
   signature (scalars, pointers), the implementation is the export: no wrapper is
   emitted and the symbol stays `add`.
-- when the ABI lowering differs (an aggregate up to 8 bytes crosses as an
-  integer, an error-union return, a hidden parameter), the implementation is
-  emitted as `add.impl` and the wrapper owns the public symbol `add`. Internal
-  callers are unaffected: they resolve by semantic name.
+- when the ABI lowering differs (an aggregate that the target's C ABI passes in
+  a different form, an error-union return, a hidden parameter), the
+  implementation is emitted as `add.impl` and the wrapper owns the public symbol
+  `add`. Internal callers are unaffected: they resolve by semantic name.
+
+### Aggregates at the boundary follow the target's C ABI exactly
+
+Struct and array parameters and returns of ANY size cross an export boundary the
+way clang lowers them for the target, so a C caller compiled with any compiler
+agrees with the header:
+
+- arm64 (AAPCS64): a homogeneous floating-point aggregate of 1..4 members is
+  passed as `[N x float]` / `[N x double]` and returned as the struct; any other
+  aggregate up to 8 bytes is passed as `i64` and returned at its exact width,
+  9..16 bytes as `[2 x i64]`, larger ones by a pointer to a caller copy and
+  returned through `sret`.
+- x86-64 (SysV): up to 16 bytes, each eightbyte is classified INTEGER or SSE
+  (`i64`/`i32`/`i24`, `double`, `<2 x float>`, `float`) and a two-eightbyte value
+  is two parameters or a `{a, b}` return; larger values are `byval` / `sret`.
+- wasm32: a single scalar member is passed as that scalar; anything else is
+  `byval` / `sret`.
+
+The classification is checked against clang for every shape in
+`llvm_export_cabi_test.go`: the same structs are compiled with
+`clang -emit-llvm -target <triple>` and the parameter and return types must be
+identical. One known gap: x86-64 register exhaustion (more than six INTEGER or
+eight SSE eightbytes across a call's parameters) is not modelled; such a
+signature is passed in memory by C and in registers here.
 - `export type T as T` and `export global G as G` register nothing new; the
   existing declaration gains its public C name.
 
