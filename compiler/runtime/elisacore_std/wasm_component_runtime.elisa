@@ -14,26 +14,155 @@ extern wasm_memory_size(memory_index: u32) -> u32
 extern wasm_trap() -> void
 
 global mutable wasm_component_heap_cursor: u32 = 1048576
+global mutable wasm_component_free_chunk: u32 = 0
 
-# Error-union and deferred-scope lowering may emit the native runtime's
-# `arena_free` epilogue even when a component function only uses fixed-size
-# values. Component memory is instance-owned and the monotonic allocator has
-# no reclaim operation, so the freestanding equivalent is intentionally a
-# no-op. Defining it here keeps the component ABI closed over WIT imports.
-def arena_free(a: mutable void&) -> void:
-    pass
+# The compiler's Arena is four wasm32 words:
+#   begin, end, end_index, strategy
+#
+# Component mode intentionally does not link the native Region implementation, but it
+# still receives pointers to this ABI-shaped value from generated code. Keep the private
+# component representation bit-compatible with that layout. `begin` and `end` point at
+# component chunk headers; `end_index` is the used payload byte count of the active chunk.
+# `strategy` remains owned by the compiler and is not interpreted here.
+struct WasmComponentArenaState:
+    begin: mutable u32
+    end: mutable u32
+    end_index: mutable u32
+    strategy: mutable i32
 
+const WASM_COMPONENT_CHUNK_HEADER_BYTES: u32 = 8
+const WASM_COMPONENT_CHUNK_DEFAULT_BYTES: u32 = 65536
+
+def wasm_component_arena_state(a: mutable void&) -> mutable WasmComponentArenaState&:
+    trusted Unsafe.PointerCast:
+        return a.cast[mutable WasmComponentArenaState&]
+
+def wasm_component_load_word(address: u32) -> u32:
+    trusted [Unsafe.PointerCast, Unsafe.UncheckedIndex]:
+        words: u32& = address.cast[u8&].cast[u32&]
+        return words[0]
+
+def wasm_component_store_word(address: u32, value: u32):
+    trusted [Unsafe.PointerCast, Unsafe.UncheckedIndex]:
+        words: mutable u32& = address.cast[mutable u8&].cast[mutable u32&]
+        words[0] <- value
+
+# The normal Elisa container lowering uses the same arena ABI as native code:
+# `arena_alloc(arena, bytes)` and `arena_realloc(arena, old, old_bytes,
+# new_bytes)`. Component guests do not have the native Region implementation,
+# but they still need ordinary darrays for local list construction and canonical
+# WIT lowering.
+#
+# Each owned arena gets a linked list of linear-memory chunks. A chunk is never
+# returned to the global bump cursor: CABI strings/lists may have been allocated
+# after it. Instead, arena_free moves whole chunks to a private reusable free list.
+# This gives arena lifetimes real reclamation without invalidating unrelated live
+# allocations. Reallocation remains copy-and-grow within the same arena; all of
+# its old backing becomes reclaimable when the arena is freed.
 def wasm_component_align_up(value: u32, alignment: u32) -> u32:
-    return ((value + alignment - 1) / alignment) * alignment
+    return value if alignment <= 1
+    remainder: u32 = value % alignment
+    return value if remainder == 0
+    delta: u32 = alignment - remainder
+    result: u32 = value + delta
+    if result < value:
+        wasm_trap()
+        return 0
+    return result
 
 def wasm_component_ensure_capacity(end: u32):
     current: u32 = wasm_memory_size(0) * 65536
     if end > current:
         needed: u32 = end - current
-        pages: u32 = (needed + 65535) / 65536
+        pages: mutable u32 = needed / 65536
+        pages <- pages + 1 if needed % 65536 != 0
         result: i32 = wasm_memory_grow(0, pages)
         if result < 0:
             wasm_trap()
+
+def wasm_component_chunk_take(required_bytes: u32) -> u32:
+    requested: mutable u32 = required_bytes if required_bytes > WASM_COMPONENT_CHUNK_DEFAULT_BYTES else WASM_COMPONENT_CHUNK_DEFAULT_BYTES
+    requested <- wasm_component_align_up(requested, 8)
+
+    previous: mutable u32 = 0
+    candidate: mutable u32 = wasm_component_free_chunk
+    while candidate != 0:
+        capacity: u32 = wasm_component_load_word(candidate + 4)
+        next: u32 = wasm_component_load_word(candidate)
+        if capacity >= requested:
+            if previous == 0:
+                wasm_component_free_chunk <- next
+            else:
+                wasm_component_store_word(previous, next)
+            wasm_component_store_word(candidate, 0)
+            return candidate
+        previous <- candidate
+        candidate <- next
+
+    start: u32 = wasm_component_align_up(wasm_component_heap_cursor, 8)
+    payload: u32 = start + WASM_COMPONENT_CHUNK_HEADER_BYTES
+    end: u32 = payload + requested
+    if payload < start or end < payload:
+        wasm_trap()
+        return 0
+    wasm_component_ensure_capacity(end)
+    wasm_component_heap_cursor <- end
+    wasm_component_store_word(start, 0)
+    wasm_component_store_word(start + 4, requested)
+    return start
+
+def wasm_component_arena_alloc(a: mutable void&, size_bytes: usize) -> u32:
+    state: mutable WasmComponentArenaState& = wasm_component_arena_state(a)
+    requested: mutable u32 = size_bytes.u32()
+    requested <- 1 if requested == 0
+    requested <- wasm_component_align_up(requested, 8)
+
+    current: u32 = state.end
+    if current != 0:
+        capacity: u32 = wasm_component_load_word(current + 4)
+        used: u32 = state.end_index
+        if used <= capacity and requested <= capacity - used:
+            result: u32 = current + WASM_COMPONENT_CHUNK_HEADER_BYTES + used
+            state.end_index <- used + requested
+            return result
+
+    fresh: u32 = wasm_component_chunk_take(requested)
+    if state.end != 0:
+        wasm_component_store_word(state.end, fresh)
+    else:
+        state.begin <- fresh
+    state.end <- fresh
+    state.end_index <- requested
+    return fresh + WASM_COMPONENT_CHUNK_HEADER_BYTES
+
+def arena_alloc(a: mutable void&, size_bytes: usize) -> mutable void&:
+    return wasm_component_arena_alloc(a, size_bytes).cast[mutable void&]
+
+def arena_realloc(
+    a: mutable void&,
+    oldptr: mutable void&,
+    oldsz: usize,
+    newsz: usize
+) -> mutable void&:
+    return oldptr if newsz <= oldsz
+    newptr: mutable void& = arena_alloc(a, newsz)
+    trusted [Unsafe.PointerCast]:
+        destination: u32 = newptr.cast[uintptr].u32()
+        source: u32 = oldptr.cast[uintptr].u32()
+        wasm_component_copy_bytes(destination, source, oldsz.u32())
+    return newptr
+
+def arena_free(a: mutable void&) -> void:
+    state: mutable WasmComponentArenaState& = wasm_component_arena_state(a)
+    current: mutable u32 = state.begin
+    while current != 0:
+        next: u32 = wasm_component_load_word(current)
+        wasm_component_store_word(current, wasm_component_free_chunk)
+        wasm_component_free_chunk <- current
+        current <- next
+    state.begin <- 0
+    state.end <- 0
+    state.end_index <- 0
 
 def wasm_component_copy_bytes(destination: u32, source: u32, count: u32):
     trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic, Unsafe.UncheckedIndex]:
