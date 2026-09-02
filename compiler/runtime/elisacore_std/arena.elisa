@@ -348,17 +348,18 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
         static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-            if reuse_cache.slot is cached and cached.capacity >= capacity:
-                reuse_cache.slot <- null
-                cached.next <- null
-                cached.count <- 0
-                cached.owner_tag <- owner_tag
-                cached.owner_next <- null
-                cached.global_index <- 0
-                cached.committed <- 0
-                cached.free_list <- null
-                return cached
+            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+                reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                if reuse_cache.slot is cached and cached.capacity >= capacity:
+                    reuse_cache.slot <- null
+                    cached.next <- null
+                    cached.count <- 0
+                    cached.owner_tag <- owner_tag
+                    cached.owner_next <- null
+                    cached.global_index <- 0
+                    cached.committed <- 0
+                    cached.free_list <- null
+                    return cached
         static else:
             pass
 
@@ -547,7 +548,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
     while current != null and probes_left > 0:
         probes_left <- probes_left - 1
         if current.slots >= need_slots:
-            trusted Unsafe.MutableGlobal:
+            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
                 take_cache: mutable ArenaRegionCache& = &__elisa_region_cache
                 take_cache.reclaimed_spans <- take_cache.reclaimed_spans - 1 if take_cache.reclaimed_spans > 0
             block: mutable heap ArenaFreeBlock& = current
@@ -582,7 +583,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
 
 @internal
 def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable heap void&?:
-    trusted Unsafe.MutableGlobal:
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
         cache: ArenaRegionCache& = &__elisa_region_cache
         return null if cache.reclaimed_spans == 0
     cursor: mutable heap Region&? = a.begin
@@ -612,9 +613,10 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                 block.slots <- old_slots
                 block.next <- cursor.free_list
                 cursor.free_list as & <- block
-                reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-                reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
-                return
+                trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+                    reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                    reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
+                    return
         cursor <- cursor.next
 
 def free_region(r: heap Region&):
@@ -634,19 +636,20 @@ def free_region(r: heap Region&):
             # free-listed spans live inside it, so zeroing [0, count) restores
             # bit-for-bit fresh-region semantics at memset cost instead of
             # munmap+mmap+page-fault cost.
-            park_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-            if park_cache.slot == null and r.capacity <= REGION_CACHE_MAX_SLOTS:
-                trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-                    used_bytes: usize = r.count * size_of(uintptr)
-                    if used_bytes > 0:
-                        _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
-                    park_cache.slot <- r.cast[mutable heap Region&]
-                return
-            size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
-            ret: mutable int = 0
-            trusted Unsafe.RawExtern:
-                ret <- munmap(arena_heap_void_from_region(r), size_bytes)
-            assert ret == 0
+            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+                park_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                if park_cache.slot == null and r.capacity <= REGION_CACHE_MAX_SLOTS:
+                    trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                        used_bytes: usize = r.count * size_of(uintptr)
+                        if used_bytes > 0:
+                            _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
+                        park_cache.slot <- r.cast[mutable heap Region&]
+                    return
+                size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
+                ret: mutable int = 0
+                trusted Unsafe.RawExtern:
+                    ret <- munmap(arena_heap_void_from_region(r), size_bytes)
+                assert ret == 0
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             ok: bool = VirtualFreeEx(

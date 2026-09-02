@@ -877,8 +877,24 @@ func (a *Analyzer) lowerParallelListComprehension(expr *ast.ListComprehensionExp
 	pos := expr.Position
 	transform := &ast.LambdaExpr{Position: pos, Keyword: "lambda", UsesShorthandParams: true,
 		Params: []ast.ParamDecl{{Position: pos, Name: expr.Name}}, BodyExpr: expr.Value}
-	srcSlice := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "slice"},
-		Args: []ast.Expr{&ast.AddrOfExpr{Position: pos, Operand: srcIdent}}}
+	// `slice` wants a reference to the darray. A source that is ALREADY a reference (a
+	// `darray[T]&` parameter) is passed as-is; taking its address again produced a
+	// reference-to-reference that no `slice` overload accepts.
+	// The map only READS its source. An owned darray is borrowed as a Slice through
+	// `slice(&src)`; a source that is already a reference is passed as-is (taking its
+	// address again gave a reference-to-reference nothing accepts), and an IMMUTABLE
+	// reference goes through `read_view` -- the ReadView overload of par_map_collect --
+	// because `slice` would hand the workers a writable view the caller never granted.
+	viewName := "slice"
+	var srcArg ast.Expr = &ast.AddrOfExpr{Position: pos, Operand: srcIdent}
+	if ref, isRef := a.analyzeExpr(srcIdent).(*RefType); isRef {
+		srcArg = srcIdent
+		if !ref.Mutable {
+			viewName = "read_view"
+		}
+	}
+	srcSlice := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: viewName},
+		Args: []ast.Expr{srcArg}}
 	lowered := &ast.CallExpr{Position: pos, Func: &ast.Ident{Position: pos, Name: "par_map_collect"},
 		Args: []ast.Expr{srcSlice, transform}}
 

@@ -14,6 +14,13 @@ def mk(x: i64) -> Pair:
 # filled via the runtime `par_map` combinator over the source's disjoint bands (docs/79 Part IV).
 # This fixture proves the parallel result equals the sequential map for an identity-ish transform, a
 # type-changing transform (i64 element -> f64 output), and a struct element type.
+# The read-only path: a map over an IMMUTABLE `darray[T]&` parameter. `slice` would
+# demand a mutable reference, so the desugar borrows the source through `read_view`
+# and the ReadView overload of par_map_collect. Results must be the same.
+def doubled_through_ref(src: darray[i64]&) -> darray[i64]:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		return [x * 2 for x in src by par]
+
 @test
 def by_par_map_smoke():
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
@@ -35,3 +42,12 @@ def by_par_map_smoke():
 		# struct element type (exercises the semantic.Type -> TypeExpr reconstruction)
 		pairs: darray[Pair] = [mk(x) for x in a by par]
 		assert pairs[9.usize()].b == 81
+
+		# immutable-reference source (read_view path), checked element-wise
+		via_ref: darray[i64] = doubled_through_ref(&a)
+		assert via_ref.count == a.count
+		ref_ok: mutable bool = true
+		for j in 0..<a.count:
+			if via_ref[j] != a[j] * 2:
+				ref_ok <- false
+		assert ref_ok
