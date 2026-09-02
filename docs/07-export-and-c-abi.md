@@ -138,6 +138,41 @@ def vec2i_len(v: Vec2i) -> i32:
 
 This is optional sugar; the core feature should still be the explicit `export func public_name(...) -> Return = target` form.
 
+### Exporting under the implementation's own name
+
+The public name may simply be the implementation's name. This is the common case
+and needs no renaming on the implementation side:
+
+```elisa
+def add(a: i32, b: i32) -> i32:
+    return a + b
+export fn add(a: i32, b: i32) -> i32 = add
+
+struct Vec2 layout(c):
+    x: i32
+    y: i32
+export type Vec2 as Vec2
+
+global MAGIC: i32 = 1337
+export global MAGIC as MAGIC
+```
+
+Meaning:
+
+- `export fn add(...) = add` is not a collision; it marks `add` as the ABI-facing
+  surface. When the implementation's lowered signature already IS the C ABI
+  signature (scalars, pointers), the implementation is the export: no wrapper is
+  emitted and the symbol stays `add`.
+- when the ABI lowering differs (an aggregate up to 8 bytes crosses as an
+  integer, an error-union return, a hidden parameter), the implementation is
+  emitted as `add.impl` and the wrapper owns the public symbol `add`. Internal
+  callers are unaffected: they resolve by semantic name.
+- `export type T as T` and `export global G as G` register nothing new; the
+  existing declaration gains its public C name.
+
+The `foo_impl` / `export fn foo(...) = foo_impl` spelling keeps working and
+remains the way to give an export a name that differs from its implementation.
+
 ### Exporting a global
 
 ```elisa

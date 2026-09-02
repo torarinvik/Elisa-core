@@ -73,10 +73,6 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if exported.LinkName != "" {
 		exportSymbol = exported.LinkName
 	}
-	fnValue, err := g.ensureExportFunctionDeclared(exportSymbol, fnType)
-	if err != nil {
-		return err
-	}
 
 	var (
 		targetValue C.LLVMValueRef
@@ -90,6 +86,33 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	} else {
 		targetType = exported.TargetSpecialized
 		targetValue, err = g.ensureFunctionDeclared(exported.TargetName, targetType)
+		if err != nil {
+			return err
+		}
+	}
+
+	var fnValue C.LLVMValueRef
+	if g.isSameNameExport(exported) {
+		// The public name is the implementation's own name. Two cases:
+		//  - the implementation's lowered type already IS the export ABI type: it is
+		//    the export. No wrapper; setDefinedFunctionLinkage keeps it external.
+		//  - it differs (an aggregate coerced to an integer, an error-union return, a
+		//    hidden parameter): the implementation was emitted as `<name>.impl` (see
+		//    llvmSymbolName) and the wrapper below takes the public symbol. Internal
+		//    callers still reach the implementation through g.functions, which is
+		//    keyed by the semantic name, so nothing else changes.
+		if !g.sameNameExportNeedsWrapper(exported) {
+			return nil
+		}
+		nameC := cString(exportSymbol)
+		defer C.free(unsafe.Pointer(nameC))
+		if existing := C.LLVMGetNamedFunction(g.module, nameC); existing != nil {
+			return nil
+		}
+		fnValue = C.LLVMAddFunction(g.module, nameC, fnType)
+		C.LLVMSetLinkage(fnValue, C.LLVMExternalLinkage)
+	} else {
+		fnValue, err = g.ensureExportFunctionDeclared(exportSymbol, fnType)
 		if err != nil {
 			return err
 		}
@@ -248,4 +271,86 @@ func (g *llvmGenerator) packExportABIValue(builder C.LLVMBuilderRef, value C.LLV
 	C.LLVMBuildStore(builder, value, storage)
 	castPtr := C.LLVMBuildBitCast(builder, storage, C.LLVMPointerTypeInContext(g.context, 0), cStringFree(name+".cast"))
 	return C.LLVMBuildLoad2(builder, lowering.llvmType, castPtr, cStringFree(name+".load")), nil
+}
+
+// isSameNameExport reports whether an exported function's public name is its
+// implementation's own name (`export fn foo(...) = foo`).
+func (g *llvmGenerator) isSameNameExport(exported *semantic.ExportedFunc) bool {
+	// TargetGenericDecl is set for plain functions too; a generic INSTANTIATION is
+	// recognised by its bindings, exactly as emitExportedFunction does.
+	return exported != nil && len(exported.TargetBindings) == 0 && exported.PublicName == exported.TargetName
+}
+
+// sameNameExportNeedsWrapper decides whether a same-name export can BE its
+// implementation (direct: the implementation's lowered LLVM type equals the export
+// ABI type) or needs a wrapper, in which case the implementation moves to
+// `<name>.impl`. Compared by lowered type, not by a list of coercing cases, so a
+// hidden parameter or an sret return is caught the same way as an aggregate coercion.
+func (g *llvmGenerator) sameNameExportNeedsWrapper(exported *semantic.ExportedFunc) bool {
+	if exported == nil || exported.Signature == nil {
+		return false
+	}
+	if g.sameNameWrapperDecisions == nil {
+		g.sameNameWrapperDecisions = map[*semantic.ExportedFunc]bool{}
+	}
+	if decided, ok := g.sameNameWrapperDecisions[exported]; ok {
+		return decided
+	}
+	// Asked from llvmSymbolName while functions are being DECLARED, before the
+	// export emitter's own ensureTargetMachine call; the ABI size query below needs
+	// the target data, so bring it up here rather than inherit a half-initialised
+	// generator. No answer is cached on failure: a wrapper is the safe default.
+	if err := g.ensureTargetMachine(); err != nil {
+		return true
+	}
+	decided := g.sameNameExportNeedsWrapperUncached(exported)
+	g.sameNameWrapperDecisions[exported] = decided
+	return decided
+}
+
+func (g *llvmGenerator) sameNameExportNeedsWrapperUncached(exported *semantic.ExportedFunc) bool {
+	if exported.TargetSpecialized == nil {
+		return false
+	}
+	if len(exported.TargetSpecialized.ImplicitParamNames) != 0 {
+		return true
+	}
+	implType, err := g.lowerFunctionTypeForSymbol(exported.TargetName, exported.TargetSpecialized)
+	if err != nil {
+		return true
+	}
+	paramTypes := make([]C.LLVMTypeRef, 0, len(exported.Signature.Params))
+	for _, param := range exported.Signature.Params {
+		lowering, err := g.exportABILowering(param)
+		if err != nil {
+			return true
+		}
+		paramTypes = append(paramTypes, lowering.llvmType)
+	}
+	returnLowering, err := g.exportABILowering(exported.Signature.Return)
+	if err != nil {
+		return true
+	}
+	abiType := C.LLVMFunctionType(returnLowering.llvmType, llvmTypeSlicePtr(paramTypes), C.unsigned(len(paramTypes)), 0)
+	if implType == abiType {
+		return false
+	}
+	return disposeLLVMMessage(C.LLVMPrintTypeToString(implType), "a") != disposeLLVMMessage(C.LLVMPrintTypeToString(abiType), "b")
+}
+
+// sameNameExportImplSymbol returns the symbol an implementation is emitted under when
+// a same-name export needs a wrapper: `<name>.impl`. Empty when `name` is not such a
+// target, so llvmSymbolName falls through to its usual answer.
+func (g *llvmGenerator) sameNameExportImplSymbol(name string) string {
+	if g == nil || g.result == nil {
+		return ""
+	}
+	for _, exported := range g.result.ExportedFuncs {
+			if g.isSameNameExport(exported) && exported.TargetName == name {
+			if g.sameNameExportNeedsWrapper(exported) {
+				return name + ".impl"
+			}
+		}
+	}
+	return ""
 }

@@ -316,6 +316,9 @@ func (g *llvmGenerator) llvmSymbolName(name string) string {
 	if g == nil || g.result == nil || g.result.GlobalScope == nil {
 		return name
 	}
+	if impl := g.sameNameExportImplSymbol(name); impl != "" {
+		return impl
+	}
 	sym, ok := g.result.GlobalScope.Lookup(name)
 	if !ok || sym == nil || strings.TrimSpace(sym.LinkName) == "" {
 		return name
@@ -450,7 +453,7 @@ func (g *llvmGenerator) isDirectlyExportedFunction(name string) bool {
 		if exported == nil {
 			continue
 		}
-		if exported.PublicName == name && exported.TargetName == name {
+		if exported.PublicName == name && exported.TargetName == name && !g.sameNameExportNeedsWrapper(exported) {
 			return true
 		}
 	}
