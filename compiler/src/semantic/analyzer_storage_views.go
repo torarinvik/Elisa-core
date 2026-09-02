@@ -211,6 +211,11 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 			if addr, ok := stripOptimizationParens(call.Args[0]).(*ast.AddrOfExpr); ok && addr.Operand != nil {
 				return storageViewDependencyFromSource(addr.Operand)
 			}
+			// A source that is already a reference (`slice(xs)` where `xs: darray[T]&`, the
+			// `by par` desugar's form) borrows the same backing as `slice(&xs)`.
+			if ident, ok := stripOptimizationParens(call.Args[0]).(*ast.Ident); ok && ident != nil {
+				return storageViewDependencyFromSource(ident)
+			}
 		}
 		return storageViewDependencyState{}, false
 	case "read_view":
@@ -221,6 +226,11 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 		if len(call.Args) == 1 {
 			if addr, ok := stripOptimizationParens(call.Args[0]).(*ast.AddrOfExpr); ok && addr.Operand != nil {
 				return storageViewDependencyFromSource(addr.Operand)
+			}
+			// A source that is already a reference (`read_view(xs)` where `xs: darray[T]&`, the
+			// `by par` desugar's form) borrows the same backing as `read_view(&xs)`.
+			if ident, ok := stripOptimizationParens(call.Args[0]).(*ast.Ident); ok && ident != nil {
+				return storageViewDependencyFromSource(ident)
 			}
 		}
 		return storageViewDependencyState{}, false

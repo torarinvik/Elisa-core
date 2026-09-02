@@ -120,8 +120,18 @@ struct ReadView[T]:
 
 # Borrow a darray's full backing as a read-only view. The one unsafe pointer
 # view, encapsulated here; no writes are possible through the returned value.
-def read_view[T](da: mutable darray[T]&) -> ReadView[T]:
+def read_view[T](da: darray[T]&) -> ReadView[T]:
 	return ReadView[T] { base: (&da[0.usize()]).cast[uintptr], count: da.count }
+
+# Band `idx` of `nbands` over a read-only view -- the same arithmetic as Slice's
+# split, so a parallel reader and a parallel writer band the same way.
+def split[T](v: ReadView[T], nbands: usize, idx: usize) -> ReadView[T]:
+	band: usize = (v.count + nbands - 1.usize()) / nbands
+	lo: usize = idx * band
+	ReadView[T] { base: v.base, count: 0.usize() } return if lo >= v.count
+	hi: usize = (lo + band if lo + band < v.count else v.count)
+	p: T& = v.base.cast[T&]
+	return ReadView[T] { base: (&p[lo]).cast[uintptr], count: hi - lo }
 
 # Number of elements. `v.len()`.
 def len[T](v: ReadView[T]) -> usize:

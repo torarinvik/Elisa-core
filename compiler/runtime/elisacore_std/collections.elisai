@@ -17,7 +17,7 @@ static elif ELISA_TARGET_OS_POSIX:
 static else:
     const ARENA_BACKEND: int = ARENA_BACKEND_LIBC_MALLOC
 
-const ARENA_REGION_DEFAULT_CAPACITY: usize = (8 * 1024)
+const ARENA_REGION_DEFAULT_CAPACITY: usize = (128 * 1024)
 
 const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
 
@@ -68,6 +68,10 @@ extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 
 extern free(ptr: heap void&) can[Memory.Release]
 
+extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+
+extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
+
 static if (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
     const ELISA_ARENA_PROT_READ = 0x1
     const ELISA_ARENA_PROT_WRITE = 0x2
@@ -105,6 +109,14 @@ extern clamp(x: usize, lo: usize, hi: usize) -> usize
 extern inv_handle(ptr: heap void&?) -> bool
 
 extern sfree[T](ptr: heap T&) -> heap T!
+
+struct ArenaRegionCache:
+    slot: mutable heap Region&?
+    reclaimed_spans: mutable usize
+
+extern __elisa_region_cache: ArenaRegionCache
+
+const REGION_CACHE_MAX_SLOTS: usize = 131072
 
 extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&
 

@@ -81,6 +81,25 @@ def par_map_worker[T, U](a: ParMapArg[T, U]) -> i64:
 		a.dst.set_unchecked(i, a.transform(a.src.get_unchecked(i)))
 	return 0
 
+# The read-only twin: a map only READS its source, so an immutable `darray[T]&`
+# (a by-reference parameter) feeds it through a ReadView rather than a Slice,
+# which would permit writes the caller never granted.
+struct ParMapViewArg[T, U]:
+	src: ReadView[T]
+	dst: Slice[U]
+	transform: fn(T) -> U
+def par_map_view_worker[T, U](a: ParMapViewArg[T, U]) -> i64:
+	n: usize = a.src.len()
+	for i in 0..<n:
+		a.dst.set_unchecked(i, a.transform(a.src.get_unchecked(i)))
+	return 0
+def par_map[T, U](src: ReadView[T], dst: Slice[U], transform: fn(T) -> U, w: usize = 0.usize()) -> void:
+	can Parallel:
+		nw: usize = w if w != 0.usize() else default_workers_for(src.len())
+		nursery workers(nw):
+			for t in 0..<nw:
+				submit par_map_view_worker[T, U](ParMapViewArg[T, U] { src: src.split(nw, t), dst: dst.split(nw, t), transform: transform })
+
 # Parallel map-into: fills the already-allocated `dst` with `transform(src[i])` over disjoint bands
 # in parallel. `dst` must already have the same length as `src` (the caller allocates it, so the
 # result lives in the caller's region — no darray crosses the call boundary). The `[... by par]`
@@ -98,6 +117,15 @@ def par_map[T, U](src: Slice[T], dst: Slice[U], transform: fn(T) -> U, w: usize 
 # `[f(x) for x in xs by par]` map lowers to one call, no caller-side scratch. Equivalent to
 # `out = []; out.resize(src.len()); par_map(src, slice(&out), transform); out`.
 def par_map_collect[T, U](src: Slice[T], transform: fn(T) -> U, w: usize = 0.usize()) -> darray[U]:
+	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
+		out: mutable darray[U] = []
+		_ = out.resize(src.len())
+		par_map(src, slice(&out), transform, w)
+		return out
+
+# `[f(x) for x in xs by par]` over an immutable `darray[T]&` source: the same collect,
+# reading through a ReadView.
+def par_map_collect[T, U](src: ReadView[T], transform: fn(T) -> U, w: usize = 0.usize()) -> darray[U]:
 	can Parallel, Memory.Allocate, Memory.Release, Abort.Panic:
 		out: mutable darray[U] = []
 		_ = out.resize(src.len())
