@@ -133,9 +133,27 @@ func (s *functionState) emitPackedDirectFieldReadAtOrigin(ops *packedStoreOps, h
 			shiftBits := C.LLVMConstInt(uintptrLLVMType, C.ulonglong(byteOffsetInWord*8), 0)
 			wordValue = C.LLVMBuildLShr(s.builder, wordValue, shiftBits, cStringFree(name+".shift"))
 		}
-		coerced, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
-		if err != nil {
-			return nil, err
+		// The word holds the field's BIT PATTERN, so a FLOAT field must be reinterpreted,
+		// not numerically converted. coerceValue emits `uitofp`, which turned the stored
+		// 7.0f (bits 0x40E00000) into the value 1088421888.0 -- an `@storage(inline)` common
+		// under the AoS profile read back garbage while the constructor's own row GEP was
+		// correct. The multi-word path below already reinterprets, via a memcpy through
+		// allocas; this fast path did not.
+		var coerced C.LLVMValueRef
+		if semantic.IsFloatType(fieldType) {
+			fieldLLVMType, err := s.g.lowerType(fieldType)
+			if err != nil {
+				return nil, err
+			}
+			bitsType := C.LLVMIntTypeInContext(s.g.context, C.unsigned(fieldSizeBytes*8))
+			truncated := C.LLVMBuildTrunc(s.builder, wordValue, bitsType, cStringFree(name+".bits"))
+			coerced = C.LLVMBuildBitCast(s.builder, truncated, fieldLLVMType, cStringFree(name+".float"))
+		} else {
+			converted, err := s.coerceValue(wordValue, s.g.result.NamedTypes["uintptr"], fieldType)
+			if err != nil {
+				return nil, err
+			}
+			coerced = converted
 		}
 		if cacheDirectField {
 			s.packedDirectFieldReads[cacheKey] = coerced
