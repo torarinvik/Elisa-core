@@ -280,6 +280,22 @@ func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue C.LLVMValueRef, 
 	s.nonPackedEnumMatchTemps[enumValue] = ptr
 	return ptr, nil
 }
+// canonicalArmOwnerName resolves a variant pattern's enum name the way
+// resolveEnumArmVariant does and returns that enum's canonical name.
+func (s *functionState) canonicalArmOwnerName(enumType *semantic.EnumType, pattern *ast.MatchVariantPattern) string {
+	if pattern.EnumName == "" || pattern.EnumName == enumType.Name {
+		return enumType.Name
+	}
+	wanted := strings.ReplaceAll(pattern.EnumName, "::", ".")
+	if resolved, ok := s.g.result.NamedTypes[wanted].(*semantic.EnumType); ok && resolved != nil {
+		return resolved.Name
+	}
+	if refinement := findEnumRefinementNamed(enumType, wanted); refinement != nil {
+		return refinement.Name
+	}
+	return pattern.EnumName
+}
+
 func (s *functionState) matchIsExhaustive(enumType *semantic.EnumType, arms []ast.MatchArm) bool {
 	if enumType == nil {
 		return false
@@ -298,7 +314,10 @@ func (s *functionState) matchIsExhaustive(enumType *semantic.EnumType, arms []as
 			return true
 		case *ast.MatchVariantPattern:
 			covered[pattern.Variant] = true
-			coveredQualified[pattern.EnumName+"."+pattern.Variant] = true
+			// Key by the CANONICAL owner name: the pattern keeps its source
+			// spelling (`Ui::Container`, or a bare `Container` inside `module Ui`),
+			// while the leaf walk below uses `Ui.Container`.
+			coveredQualified[s.canonicalArmOwnerName(enumType, pattern)+"."+pattern.Variant] = true
 		case *ast.MatchBindPattern:
 			// docs/77 §2 category arm: covers its category's whole leaf range. A plain
 			// (non-category) bind arm catches everything, like a wildcard.

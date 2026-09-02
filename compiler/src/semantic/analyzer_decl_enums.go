@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 	"elisacore/src/ast"
 )
 
@@ -153,7 +154,9 @@ func enumDescendantLeaves(root *EnumType) []enumLeafItem {
 func (a *Analyzer) resolveEnumMatchPatternCategory(expected *EnumType, pattern *ast.MatchVariantPattern) (*EnumType, *EnumVariant, bool) {
 	owner := expected
 	if pattern.EnumName != expected.Name {
-		base, _, ok := a.lookupVisibleType(pattern.EnumName)
+		// A pattern keeps its source spelling, so a refinement named through a
+		// module (`Ui::Container.Box`) arrives with `::`; canonical names use `.`.
+		base, _, ok := a.lookupVisibleType(strings.ReplaceAll(pattern.EnumName, "::", "."))
 		if !ok {
 			a.errorf(pattern.Pos(), "match arm expects enum %q or a refinement of it, got %q", expected.Name, pattern.EnumName)
 			return nil, nil, false
