@@ -633,6 +633,7 @@ Current rules:
 
 - `if value is name:` accepts value optionals such as `T?` and nullable references such as `T&?`
 - `if first is a and second is b:` runs only when every optional binding is present; bindings are evaluated left-to-right
+- a struct literal `T{b: f(), a: g()}` evaluates its field initializers left-to-right in the order they are WRITTEN, whatever order the fields are declared in; side effects observe that order (a literal whose initializers register things in a table registers them in source order)
 - `elif value is name:` is the optional-bind continuation form for an `if` chain
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
 - `if source[a:b] is name:` performs a checked slice bind and exposes the bounded view only when the slice is in range
