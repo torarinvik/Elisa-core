@@ -234,9 +234,10 @@ func (s *functionState) emitStructLitExpr(expr *ast.StructLitExpr) (C.LLVMValueR
 		value = spreadValue
 	}
 	args := expr.LoweredArgs()
-	for i, arg := range args {
+	for _, i := range structLitEvalOrder(expr, args) {
+		arg := args[i]
 		if i >= len(fields) {
-			break
+			continue
 		}
 		if arg == nil {
 			if len(expr.Spreads) != 0 {
@@ -294,9 +295,10 @@ func (s *functionState) emitStructLitExprInMemory(expr *ast.StructLitExpr, struc
 		}
 	}
 	args := expr.LoweredArgs()
-	for i, arg := range args {
+	for _, i := range structLitEvalOrder(expr, args) {
+		arg := args[i]
 		if i >= len(fields) {
-			break
+			continue
 		}
 		if arg == nil {
 			// Supplied by the spread already stored above; without one the
@@ -410,4 +412,30 @@ func (s *functionState) rewriteDefaultExactMemberType(_ ast.Expr) (semantic.Type
 }
 func (s *functionState) emitTreeExactMemberUpdateExpr(_ *ast.RecordUpdateExpr, memberType semantic.Type, _ *treeAllocOwnerBinding) (C.LLVMValueRef, semantic.Type, error) {
 	return nil, nil, fmt.Errorf("tree exact member update is no longer supported for %s", memberType.String())
+}
+
+// structLitEvalOrder returns the declared field index of each initializer in the order
+// the initializers were WRITTEN. A struct literal evaluates its initializers
+// left-to-right as written (docs/18), whatever order the fields are declared in:
+// stage1 always did, stage0 walked the declared order, and the compiler's own
+// `Runtime{...}` literal -- whose initializers each declare a runtime symbol --
+// then declared them in a generation-dependent order and broke the gen3 fixpoint.
+func structLitEvalOrder(expr *ast.StructLitExpr, lowered []ast.Expr) []int {
+	order := make([]int, 0, len(lowered))
+	seen := make(map[int]bool, len(lowered))
+	for _, written := range expr.Args {
+		for i, arg := range lowered {
+			if arg == written && !seen[i] {
+				order = append(order, i)
+				seen[i] = true
+				break
+			}
+		}
+	}
+	for i := range lowered {
+		if !seen[i] {
+			order = append(order, i)
+		}
+	}
+	return order
 }
