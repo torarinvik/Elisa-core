@@ -290,6 +290,11 @@ func (s *functionState) canonicalArmOwnerName(enumType *semantic.EnumType, patte
 	if resolved, ok := s.g.result.NamedTypes[wanted].(*semantic.EnumType); ok && resolved != nil {
 		return resolved.Name
 	}
+	// A bare arm naming the scrutinee's own enum from inside its module
+	// (`Event.None` on a `UiEvent.Event`).
+	if strings.HasSuffix(enumType.Name, "."+wanted) {
+		return enumType.Name
+	}
 	if refinement := findEnumRefinementNamed(enumType, wanted); refinement != nil {
 		return refinement.Name
 	}
