@@ -3,6 +3,7 @@ package parser
 import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
+	"fmt"
 	"strings"
 )
 
@@ -715,6 +716,9 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		}
 		return p.takeStmtGuard(&ast.AssignStmt{Position: pos, Target: expr, Value: value})
 
+	case lexer.TOKEN_WITH:
+		return p.parseWithFieldsStmt(pos, expr)
+
 	case lexer.TOKEN_QASSIGN:
 		p.advance()
 		value := p.parseValueExprAllowTuple()
@@ -776,4 +780,60 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 func (p *Parser) parseSingleExprBlockValue() ast.Expr {
 	pos := p.cur().Pos
 	return p.parseExprBlockValue(pos, true)
+}
+
+// parseWithFieldsStmt parses the multi-field place update
+//
+//	place with Type{
+//	    field <- value
+//	    ...
+//	}
+//
+// and desugars it, parser-level like `machine` and the match `with`, into a hidden
+// reference to the place followed by one ordinary assignment per field:
+//
+//	if true:
+//	    __with_N: mutable Type& = &place     (the type is optional; omitted, it is inferred)
+//	    __with_N.field <- value
+//	    ...
+//
+// The place is evaluated ONCE, the fields are assigned in the order written, and the
+// `if true:` block scopes the hidden binding. Nothing new reaches the analyzer or the
+// backend, so the feature is identical in both compilers by construction.
+func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
+	p.expect(lexer.TOKEN_WITH)
+	var typeName string
+	if p.peek() == lexer.TOKEN_IDENT {
+		typeName = p.advance().Text
+	}
+	p.expect(lexer.TOKEN_LBRACE)
+	tempName := fmt.Sprintf("__with_%d_%d", pos.Line, pos.Col)
+	temp := &ast.Ident{Position: pos, Name: tempName}
+	decl := &ast.VarDeclStmt{Position: pos, Name: tempName, Mutable: false, Value: &ast.AddrOfExpr{Position: pos, Operand: place}}
+	if typeName != "" {
+		decl.Type = &ast.MutableType{Position: pos, Elem: &ast.RefType{Position: pos, Elem: &ast.NamedType{Position: pos, Name: typeName}}}
+	}
+	body := []ast.Stmt{decl}
+	for {
+		for p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_INDENT || p.peek() == lexer.TOKEN_DEDENT {
+			p.advance()
+		}
+		if p.peek() == lexer.TOKEN_RBRACE {
+			p.advance()
+			break
+		}
+		if p.peek() == lexer.TOKEN_EOF {
+			p.errorf("unterminated `with` block: expected `}`")
+			break
+		}
+		fieldTok := p.expect(lexer.TOKEN_IDENT)
+		p.expect(lexer.TOKEN_LARROW)
+		value := p.parseValueExprAllowTuple()
+		body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: &ast.FieldExpr{Position: fieldTok.Pos, Object: temp, Field: fieldTok.Text}, Value: value})
+		if p.peek() == lexer.TOKEN_COMMA {
+			p.advance()
+		}
+	}
+	p.expectNewline()
+	return &ast.IfStmt{Position: pos, Cond: &ast.BoolLit{Position: pos, Value: true}, Then: body}
 }
