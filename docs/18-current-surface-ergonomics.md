@@ -3222,6 +3222,8 @@ Current rules:
 - `.cast[T]` is the explicit cast surface in expression position
 - `.ref[T&]` is the explicit lvalue/reference reinterpretation surface
 - postfix shorthand like `op.i64()` dispatches to a visible exact `__cast__(value: Source) -> Target` hook when one exists
+- the target may be any type, including an enum or a sealed hierarchy root, and hooks may be overloaded in both directions (`__cast__(Event) -> i32` alongside `__cast__(i32) -> Event`)
+- the pair is EXACT on both ends, so an untyped literal is given a type first: `5.i32().Event()`, not `5.Event()`
 - prefix type-constructor shorthand like `i64(op)` uses the same cast path and the same exact `__cast__` hook lookup as `op.i64()`
 - optional postfix shorthand like `text.int?()` dispatches to a visible exact `__cast__(value: Source) -> int?` hook when one exists
 - ordinary explicit `.cast[T]` conversions continue to use normal cast rules rather than hook dispatch
