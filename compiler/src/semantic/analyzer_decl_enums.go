@@ -253,9 +253,6 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 			}
 			for _, commonDecl := range enumDecl.Common {
 				storage := a.analyzePackedCommonFieldAnnotations(enumDecl, commonDecl)
-				if commonDecl.Mutable {
-					a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be mutable in v1", enumDecl.Name, commonDecl.Name)
-				}
 				if commonDecl.IsTail {
 					a.errorf(commonDecl.Position, "packed enum %q common field %q cannot be tail-allocated", enumDecl.Name, commonDecl.Name)
 				}
@@ -264,7 +261,14 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 					continue
 				}
 				commonType := a.resolveType(commonDecl.Type)
-				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: false, PackedStorage: storage}
+				// A common field may be declared `mutable`. It sits at a FIXED offset in every
+				// row of the store -- identical across variants, which is the whole point of
+				// the common prefix -- so a write is the same GEP the read already uses, with
+				// no variant discrimination. It does not weaken the opaque-handle rule either:
+				// `w.x <- v` emits the store internally and never materialises a raw `T&` for
+				// user code. This was gated off "in v1" while the read path was built; the
+				// motivating case is a node's per-frame data, e.g. a widget's resolved box.
+				enumType.Common[commonDecl.Name] = Field{Name: commonDecl.Name, Type: commonType, Mutable: commonDecl.Mutable, PackedStorage: storage}
 			}
 			variants := make([]*EnumVariant, 0, len(enumDecl.Variants))
 			for i := range enumDecl.Variants {
