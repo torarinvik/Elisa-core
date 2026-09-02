@@ -5,6 +5,7 @@ package backend
 /*
 #include <stdlib.h>
 #include <llvm-c/Core.h>
+#include <llvm-c/Target.h>
 */
 import "C"
 
@@ -15,10 +16,6 @@ import (
 	"elisacore/src/semantic"
 )
 
-type exportABILowering struct {
-	llvmType      C.LLVMTypeRef
-	needsCoercion bool
-}
 
 func (g *llvmGenerator) emitExportedGlobal(exported *semantic.ExportedGlobal) error {
 	if exported == nil {
@@ -54,21 +51,11 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if err := g.ensureTargetMachine(); err != nil {
 		return err
 	}
-	paramLowerings := make([]exportABILowering, 0, len(exported.Signature.Params))
-	paramTypes := make([]C.LLVMTypeRef, 0, len(exported.Signature.Params))
-	for _, param := range exported.Signature.Params {
-		lowering, err := g.exportABILowering(param)
-		if err != nil {
-			return fmt.Errorf("export wrapper %s parameter %s is not supported by the current ABI lowering: %w", exported.PublicName, param.String(), err)
-		}
-		paramLowerings = append(paramLowerings, lowering)
-		paramTypes = append(paramTypes, lowering.llvmType)
-	}
-	returnLowering, err := g.exportABILowering(exported.Signature.Return)
+	abi, err := g.exportFuncABI(exported.Signature)
 	if err != nil {
-		return fmt.Errorf("export wrapper %s return %s is not supported by the current ABI lowering: %w", exported.PublicName, exported.Signature.Return.String(), err)
+		return fmt.Errorf("export wrapper %s: %w", exported.PublicName, err)
 	}
-	fnType := C.LLVMFunctionType(returnLowering.llvmType, llvmTypeSlicePtr(paramTypes), C.unsigned(len(paramTypes)), 0)
+	fnType := abi.fnType
 	exportSymbol := exported.PublicName
 	if exported.LinkName != "" {
 		exportSymbol = exported.LinkName
@@ -93,14 +80,6 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 
 	var fnValue C.LLVMValueRef
 	if g.isSameNameExport(exported) {
-		// The public name is the implementation's own name. Two cases:
-		//  - the implementation's lowered type already IS the export ABI type: it is
-		//    the export. No wrapper; setDefinedFunctionLinkage keeps it external.
-		//  - it differs (an aggregate coerced to an integer, an error-union return, a
-		//    hidden parameter): the implementation was emitted as `<name>.impl` (see
-		//    llvmSymbolName) and the wrapper below takes the public symbol. Internal
-		//    callers still reach the implementation through g.functions, which is
-		//    keyed by the semantic name, so nothing else changes.
 		if !g.sameNameExportNeedsWrapper(exported) {
 			return nil
 		}
@@ -117,46 +96,65 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 			return err
 		}
 	}
+	g.cAbiApplyAttrs(fnValue, abi)
 	g.applyFunctionNoRecurseAttributes(fnValue, targetType)
 	g.applyFunctionTemperatureAttributes(fnValue, targetType)
 	if C.LLVMCountBasicBlocks(fnValue) != 0 {
 		return nil
 	}
+	if len(targetType.ImplicitParamNames) != 0 {
+		return fmt.Errorf("export wrapper %s has unsupported implicit parameters", exported.PublicName)
+	}
 
 	builder := C.LLVMCreateBuilderInContext(g.context)
 	defer C.LLVMDisposeBuilder(builder)
-
-	entryName := cString("entry")
-	defer C.free(unsafe.Pointer(entryName))
-	entry := C.LLVMAppendBasicBlockInContext(g.context, fnValue, entryName)
+	entry := C.LLVMAppendBasicBlockInContext(g.context, fnValue, cStringFree("entry"))
 	C.LLVMPositionBuilderAtEnd(builder, entry)
 	llvmTargetType, err := g.lowerFunctionType(targetType)
 	if err != nil {
 		return err
 	}
+
+	// Unpack each parameter from its ABI form into the value the implementation takes.
+	pos := 0
+	var sretPtr C.LLVMValueRef
+	if abi.ret.sret {
+		sretPtr = C.LLVMGetParam(fnValue, 0)
+		pos = 1
+	}
 	args := make([]C.LLVMValueRef, 0, len(exported.Signature.Params))
-	for i, paramType := range exported.Signature.Params {
-		arg := C.LLVMGetParam(fnValue, C.unsigned(i))
-		unpacked, err := g.unpackExportABIValue(builder, arg, paramLowerings[i], paramType, fmt.Sprintf("export.arg.%d", i))
-		if err != nil {
-			return err
+	for i, plan := range abi.args {
+		name := fmt.Sprintf("export.arg.%d", i)
+		if !plan.direct {
+			ptr := C.LLVMGetParam(fnValue, C.unsigned(pos))
+			pos++
+			args = append(args, C.LLVMBuildLoad2(builder, plan.llvmType, ptr, cStringFree(name)))
+			continue
 		}
-		args = append(args, unpacked)
+		if !plan.aggregate {
+			args = append(args, C.LLVMGetParam(fnValue, C.unsigned(pos)))
+			pos++
+			continue
+		}
+		bytes := uint64(C.LLVMABISizeOfType(g.targetData, plan.llvmType))
+		for j, part := range plan.parts {
+			if end := plan.partOffsets[j] + uint64(C.LLVMABISizeOfType(g.targetData, part)); end > bytes {
+				bytes = end
+			}
+		}
+		slot := g.cAbiSlot(builder, bytes, name+".slot")
+		for j, part := range plan.parts {
+			_ = part
+			C.LLVMBuildStore(builder, C.LLVMGetParam(fnValue, C.unsigned(pos)), g.cAbiPtrAt(builder, slot, plan.partOffsets[j], name+".part"))
+			pos++
+		}
+		args = append(args, C.LLVMBuildLoad2(builder, plan.llvmType, slot, cStringFree(name)))
 	}
-	explicitCount := backendExplicitParamCount(targetType, nil)
-	if explicitCount == 0 && len(exported.Signature.Params) != 0 {
-		explicitCount = len(exported.Signature.Params)
-	}
-	if len(targetType.ImplicitParamNames) != 0 {
-		return fmt.Errorf("export wrapper %s has unsupported implicit parameters", exported.PublicName)
-	}
+
 	callName := ""
 	if !isVoidType(targetType.Return) {
 		callName = "export.call"
 	}
-	// The call's result name must be a non-nil C string even when empty: LLVM's
-	// LLVMBuildCall2 forwards it into a Twine(const char*), which dereferences Name[0].
-	// cStringFree("") returns nil (crash), so use cString (always non-nil) and free it.
 	callNameC := cString(callName)
 	defer C.free(unsafe.Pointer(callNameC))
 	var call C.LLVMValueRef
@@ -178,10 +176,6 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 		}
 		targetResult = C.LLVMGetUndef(unionLLVMType)
 		targetResult = C.LLVMBuildInsertValue(builder, targetResult, call, 0, cStringFree("export.ret.err"))
-		// The internal non-void error-union descriptor is {error, payload*}.
-		// Keep the wrapper's result slot alive through ABI packing and place its
-		// address in the descriptor; inserting the payload value itself recreates
-		// the obsolete inline representation and produces invalid LLVM IR.
 		targetResult = C.LLVMBuildInsertValue(builder, targetResult, resultSlot, 1, cStringFree("export.ret.val.ptr"))
 	} else {
 		call = C.LLVMBuildCall2(builder, llvmTargetType, targetValue, llvmValueSlicePtr(args), C.unsigned(len(args)), callNameC)
@@ -194,11 +188,23 @@ func (g *llvmGenerator) emitExportedFunction(exported *semantic.ExportedFunc) er
 	if !semantic.SameType(exported.Signature.Return, targetType.Return) {
 		return fmt.Errorf("export wrapper %s return type %s does not match target return type %s", exported.PublicName, exported.Signature.Return.String(), targetType.Return.String())
 	}
-	packed, err := g.packExportABIValue(builder, targetResult, targetType.Return, returnLowering, "export.ret")
-	if err != nil {
-		return err
+	// Pack the implementation's result into its ABI form.
+	if abi.ret.sret {
+		C.LLVMBuildStore(builder, targetResult, sretPtr)
+		C.LLVMBuildRetVoid(builder)
+		return nil
 	}
-	C.LLVMBuildRet(builder, packed)
+	if !g.cAbiIsAggregate(exported.Signature.Return) || abi.ret.retType == abi.ret.llvmType {
+		C.LLVMBuildRet(builder, targetResult)
+		return nil
+	}
+	bytes := uint64(C.LLVMABISizeOfType(g.targetData, abi.ret.llvmType))
+	if abiBytes := uint64(C.LLVMABISizeOfType(g.targetData, abi.ret.retType)); abiBytes > bytes {
+		bytes = abiBytes
+	}
+	slot := g.cAbiSlot(builder, bytes, "export.ret.slot")
+	C.LLVMBuildStore(builder, targetResult, slot)
+	C.LLVMBuildRet(builder, C.LLVMBuildLoad2(builder, abi.ret.retType, slot, cStringFree("export.ret")))
 	return nil
 }
 
@@ -214,64 +220,8 @@ func (g *llvmGenerator) ensureExportFunctionDeclared(name string, fnType C.LLVMT
 	return value, nil
 }
 
-func (g *llvmGenerator) exportABILowering(t semantic.Type) (exportABILowering, error) {
-	if isVoidType(t) {
-		llvmType, err := g.lowerType(t)
-		return exportABILowering{llvmType: llvmType, needsCoercion: false}, err
-	}
-	switch t.(type) {
-	case *semantic.BuiltinType, *semantic.RefType:
-		llvmType, err := g.lowerType(t)
-		return exportABILowering{llvmType: llvmType, needsCoercion: false}, err
-	case *semantic.ArrayType, *semantic.StructType, *semantic.GenericInstanceType:
-		size, err := g.abiSizeOfType(t)
-		if err != nil {
-			return exportABILowering{}, err
-		}
-		if size == 0 {
-			llvmType, err := g.lowerType(t)
-			return exportABILowering{llvmType: llvmType, needsCoercion: false}, err
-		}
-		if size > 8 {
-			return exportABILowering{}, fmt.Errorf("aggregate ABI lowering currently supports exported values up to 8 bytes, got %d bytes", size)
-		}
-		return exportABILowering{llvmType: C.LLVMIntTypeInContext(g.context, C.unsigned(size*8)), needsCoercion: true}, nil
-	default:
-		llvmType, err := g.lowerType(t)
-		if err != nil {
-			return exportABILowering{}, err
-		}
-		return exportABILowering{llvmType: llvmType, needsCoercion: false}, nil
-	}
-}
 
-func (g *llvmGenerator) unpackExportABIValue(builder C.LLVMBuilderRef, value C.LLVMValueRef, lowering exportABILowering, semanticType semantic.Type, name string) (C.LLVMValueRef, error) {
-	if !lowering.needsCoercion {
-		return value, nil
-	}
-	semanticLLVMType, err := g.lowerType(semanticType)
-	if err != nil {
-		return nil, err
-	}
-	storage := C.LLVMBuildAlloca(builder, lowering.llvmType, cStringFree(name+".abi"))
-	C.LLVMBuildStore(builder, value, storage)
-	castPtr := C.LLVMBuildBitCast(builder, storage, C.LLVMPointerTypeInContext(g.context, 0), cStringFree(name+".cast"))
-	return C.LLVMBuildLoad2(builder, semanticLLVMType, castPtr, cStringFree(name+".load")), nil
-}
 
-func (g *llvmGenerator) packExportABIValue(builder C.LLVMBuilderRef, value C.LLVMValueRef, semanticType semantic.Type, lowering exportABILowering, name string) (C.LLVMValueRef, error) {
-	if !lowering.needsCoercion {
-		return value, nil
-	}
-	semanticLLVMType, err := g.lowerType(semanticType)
-	if err != nil {
-		return nil, err
-	}
-	storage := C.LLVMBuildAlloca(builder, semanticLLVMType, cStringFree(name+".semantic"))
-	C.LLVMBuildStore(builder, value, storage)
-	castPtr := C.LLVMBuildBitCast(builder, storage, C.LLVMPointerTypeInContext(g.context, 0), cStringFree(name+".cast"))
-	return C.LLVMBuildLoad2(builder, lowering.llvmType, castPtr, cStringFree(name+".load")), nil
-}
 
 // isSameNameExport reports whether an exported function's public name is its
 // implementation's own name (`export fn foo(...) = foo`).
@@ -309,6 +259,9 @@ func (g *llvmGenerator) sameNameExportNeedsWrapper(exported *semantic.ExportedFu
 }
 
 func (g *llvmGenerator) sameNameExportNeedsWrapperUncached(exported *semantic.ExportedFunc) bool {
+	if exported == nil || exported.Signature == nil {
+		return false
+	}
 	if exported.TargetSpecialized == nil {
 		return false
 	}
@@ -319,23 +272,14 @@ func (g *llvmGenerator) sameNameExportNeedsWrapperUncached(exported *semantic.Ex
 	if err != nil {
 		return true
 	}
-	paramTypes := make([]C.LLVMTypeRef, 0, len(exported.Signature.Params))
-	for _, param := range exported.Signature.Params {
-		lowering, err := g.exportABILowering(param)
-		if err != nil {
-			return true
-		}
-		paramTypes = append(paramTypes, lowering.llvmType)
-	}
-	returnLowering, err := g.exportABILowering(exported.Signature.Return)
+	abi, err := g.exportFuncABI(exported.Signature)
 	if err != nil {
 		return true
 	}
-	abiType := C.LLVMFunctionType(returnLowering.llvmType, llvmTypeSlicePtr(paramTypes), C.unsigned(len(paramTypes)), 0)
-	if implType == abiType {
+	if implType == abi.fnType {
 		return false
 	}
-	return disposeLLVMMessage(C.LLVMPrintTypeToString(implType), "a") != disposeLLVMMessage(C.LLVMPrintTypeToString(abiType), "b")
+	return disposeLLVMMessage(C.LLVMPrintTypeToString(implType), "a") != disposeLLVMMessage(C.LLVMPrintTypeToString(abi.fnType), "b")
 }
 
 // sameNameExportImplSymbol returns the symbol an implementation is emitted under when
