@@ -532,9 +532,18 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 	refined := assignedRefinementType(targetType, valueType)
 	if refined == nil {
 		delete(a.currentScope.Refinements, key)
+		a.currentScope.SetNarrowedOptional(key, nil)
 		return
 	}
 	a.currentScope.Refinements[key] = refined
+	// Remember the optional we narrowed AWAY from, so absence can still be asked about.
+	// nil on every other outcome, which also shadows a stale entry from an outer scope
+	// (`x <- 5` in a branch, then `x <- null`).
+	var narrowedFrom Type
+	if targetOptional, ok := targetType.(*OptionalType); ok && refined == targetOptional.Value {
+		narrowedFrom = targetOptional
+	}
+	a.currentScope.SetNarrowedOptional(key, narrowedFrom)
 }
 func assignedRefinementType(targetType Type, valueType Type) Type {
 	targetRef, ok := targetType.(*RefType)

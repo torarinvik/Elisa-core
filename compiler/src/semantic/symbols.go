@@ -434,6 +434,14 @@ type Scope struct {
 	Parent                  *Scope
 	Symbols                 map[string]*Symbol
 	Refinements             map[string]Type
+	// narrowedOptionals records, for a place whose refinement narrowed `T?` down to `T`
+	// (recordAssignmentRefinement, after `x <- 5`), the DECLARED optional type. The
+	// narrowing is a useful fact -- `x` reads as a plain T afterwards -- but it must not
+	// take away the ability to ASK about absence: the storage still carries its present
+	// flag, so `x == null` and `if x is v:` stay meaningful (and answer statically).
+	// Without this they were rejected outright, which is what made an optional common
+	// unusable after its first write. A nil value shadows an outer scope's entry.
+	narrowedOptionals       map[string]Type
 	ConditionalBindingHints map[string]string
 	// rangeFacts holds known integer bounds for IMMUTABLE variables within this scope, gathered
 	// from a branch condition (`if a > 5` → a ∈ [6,∞)). Used by the refinement flow prover (docs/85
@@ -499,7 +507,7 @@ type Scope struct {
 }
 
 func NewScope(parent *Scope) *Scope {
-	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
+	return &Scope{Parent: parent, Symbols: map[string]*Symbol{}, Refinements: map[string]Type{}, narrowedOptionals: map[string]Type{}, ConditionalBindingHints: map[string]string{}}
 }
 
 func (s *Scope) Define(sym *Symbol) (*Symbol, bool) {
@@ -526,6 +534,27 @@ func (s *Scope) LookupRefinement(key string) (Type, bool) {
 		}
 	}
 	return nil, false
+}
+
+// LookupNarrowedOptional returns the DECLARED optional type of a place that an
+// assignment narrowed to its payload, or nil. See Scope.narrowedOptionals.
+func (s *Scope) LookupNarrowedOptional(key string) (Type, bool) {
+	for cur := s; cur != nil; cur = cur.Parent {
+		if t, ok := cur.narrowedOptionals[key]; ok {
+			return t, t != nil
+		}
+	}
+	return nil, false
+}
+
+func (s *Scope) SetNarrowedOptional(key string, declared Type) {
+	if s == nil || key == "" {
+		return
+	}
+	if s.narrowedOptionals == nil {
+		s.narrowedOptionals = map[string]Type{}
+	}
+	s.narrowedOptionals[key] = declared
 }
 
 func (s *Scope) LookupConditionalBindingHint(name string) (string, bool) {

@@ -414,6 +414,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		return
 	case *ast.OptionalBindExpr:
 		valueType := a.analyzeExpr(n.Value)
+		// A place an assignment narrowed from `T?` to `T` still carries its present flag
+		// in storage, so the bind is meaningful -- it simply always succeeds. Record it at
+		// the DECLARED optional type: the backend lowers the test off this same table, and
+		// with the narrowed type there it had no optional to unwrap and refused the body.
+		if _, bindable := conditionOptionalBindType(valueType); !bindable {
+			if declared, narrowed := a.narrowedOptionalDeclaredType(n.Value); narrowed {
+				valueType = declared
+			}
+		}
 		if a.optionalBindSourceTypes != nil {
 			if existing, ok := a.optionalBindSourceTypes[n]; !ok {
 				a.optionalBindSourceTypes[n] = valueType
@@ -918,4 +927,18 @@ func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
 		a.reportShapeMismatchNotes(recovery.Position, expectedReturn, valueType)
 	}
 	a.consumeAffineValueExpr(recovery.Value, expectedReturn, "return")
+}
+
+
+// narrowedOptionalDeclaredType returns the declared optional type of a place that an
+// assignment narrowed to its payload. See Scope.narrowedOptionals.
+func (a *Analyzer) narrowedOptionalDeclaredType(place ast.Expr) (Type, bool) {
+	if a.currentScope == nil || place == nil {
+		return nil, false
+	}
+	key, ok := exprRefinementKey(place)
+	if !ok {
+		return nil, false
+	}
+	return a.currentScope.LookupNarrowedOptional(key)
 }

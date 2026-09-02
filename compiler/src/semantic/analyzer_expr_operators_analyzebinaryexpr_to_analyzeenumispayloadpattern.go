@@ -71,6 +71,12 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 				compareRight = valueRight
 			}
 		}
+		if !typesComparableForEquality(compareLeft, compareRight) && a.comparesNarrowedOptionalAgainstNull(expr, left, right) {
+			// The place was narrowed non-null by an assignment, but it is still declared
+			// optional and its storage still carries the present flag. Asking is legal;
+			// the answer just happens to be statically known.
+			return a.namedTypes["bool"]
+		}
 		if !typesComparableForEquality(compareLeft, compareRight) {
 			a.errorf(expr.Pos(), "cannot compare %s and %s", left, right)
 		} else if st := plainStructValueType(compareLeft); st != nil && plainStructValueType(compareRight) != nil {
@@ -988,4 +994,29 @@ func plainStructValueType(t Type) *StructType {
 		}
 	}
 	return nil
+}
+
+
+// comparesNarrowedOptionalAgainstNull reports whether one side of an equality is `null`
+// and the other is a place whose DECLARED type is optional but which an assignment
+// narrowed to the payload type. See Scope.narrowedOptionals.
+func (a *Analyzer) comparesNarrowedOptionalAgainstNull(expr *ast.BinaryExpr, left Type, right Type) bool {
+	if a.currentScope == nil {
+		return false
+	}
+	var place ast.Expr
+	switch {
+	case IsNullType(right):
+		place = expr.Left
+	case IsNullType(left):
+		place = expr.Right
+	default:
+		return false
+	}
+	key, ok := exprRefinementKey(place)
+	if !ok {
+		return false
+	}
+	_, narrowed := a.currentScope.LookupNarrowedOptional(key)
+	return narrowed
 }
