@@ -177,6 +177,7 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 }
 
 type llvmGenerator struct {
+	sameNameWrapperDecisions map[*semantic.ExportedFunc]bool
 	result                    *semantic.Result
 	optLevel                  OptimizationLevel
 	context                   C.LLVMContextRef

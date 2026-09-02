@@ -119,13 +119,20 @@ func (a *Analyzer) collectExportTypeAliases(decls []scopedDecl) {
 			continue
 		}
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
-			if _, exists := a.namedTypes[exportDecl.Alias]; exists {
-				a.errorf(exportDecl.Pos(), "%s", DuplicateTypeMessage(exportDecl.Alias))
-				return
-			}
 			resolved := a.resolveType(exportDecl.ExportedType)
 			if IsInvalidType(resolved) {
 				return
+			}
+			// `export type Vec as Vec` exports a type under its own name: nothing new is
+			// registered, the existing type simply gains a public C name. Only a DIFFERENT
+			// type already holding the alias is a duplicate.
+			sameName := false
+			if existing, exists := a.namedTypes[exportDecl.Alias]; exists {
+				if existing != resolved && !SameType(existing, resolved) {
+					a.errorf(exportDecl.Pos(), "%s", DuplicateTypeMessage(exportDecl.Alias))
+					return
+				}
+				sameName = true
 			}
 			if containsTypeParam(resolved) {
 				a.errorf(exportDecl.Pos(), "export type %q must name a concrete C-ABI-compatible struct or concrete instantiation", exportDecl.Alias)
@@ -139,7 +146,9 @@ func (a *Analyzer) collectExportTypeAliases(decls []scopedDecl) {
 				a.errorf(exportDecl.Pos(), "export type %q is not C-ABI-compatible", exportDecl.Alias)
 				return
 			}
-			a.namedTypes[exportDecl.Alias] = resolved
+			if !sameName {
+				a.namedTypes[exportDecl.Alias] = resolved
+			}
 			a.exportedTypes = append(a.exportedTypes, &ExportedType{PublicName: exportDecl.Alias, Type: resolved, Decl: exportDecl})
 		})
 	}
@@ -170,8 +179,16 @@ func (a *Analyzer) analyzeExportFunc(decl *ast.ExportFuncDecl, seenPublicNames m
 		return
 	}
 	if existing, ok := a.globalScope.Lookup(decl.Name); ok {
-		a.errorf(decl.Pos(), "exported symbol %q collides with existing %s", decl.Name, existing.Kind)
-		return
+		// `export fn foo(...) -> R = foo`: the public name IS the implementation's name.
+		// That is not a collision, it is the common case -- an ABI-facing surface that
+		// keeps the internal name -- and forbidding it forced every exporter to rename
+		// its implementation `foo_impl`. The backend keeps the implementation's symbol
+		// when its lowering already matches the export ABI, and otherwise moves the
+		// implementation to `foo.impl` so the wrapper can own `foo`.
+		if !(decl.Name == decl.TargetName && existing.Kind == SymbolFunc) {
+			a.errorf(decl.Pos(), "exported symbol %q collides with existing %s", decl.Name, existing.Kind)
+			return
+		}
 	}
 
 	signature := a.funcTypeFromDecl(decl.Name, nil, nil, nil, nil, nil, nil, nil, nil, decl.Params, decl.ReturnType, false)
