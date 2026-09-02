@@ -125,7 +125,10 @@ func (g *llvmGenerator) fieldInfo(objType semantic.Type, fieldName string) (sema
 				return nil, 0, nil, false, err
 			}
 			if !layout.StoredInline {
-				return nil, 0, nil, false, fmt.Errorf("packed enum common field %s.%s is stored in a side table and does not have an inline address", enumType.Name, fieldName)
+				// A side-tabled common is an SoA column reached through read helpers, so it has no
+				// address to write through. Name the fix: an inline common lives at a fixed offset
+				// in the row and is written with the same GEP its read already uses.
+				return nil, 0, nil, false, fmt.Errorf("packed enum common field %s.%s is stored in a side table (SoA column) and has no inline address, so it cannot be assigned; annotate it @storage(inline) to place it in the row", enumType.Name, fieldName)
 			}
 			return layout.Field.Type, layout.RowFieldIndex, enumType, true, nil
 		}
