@@ -807,13 +807,25 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 		typeName = p.advance().Text
 	}
 	p.expect(lexer.TOKEN_LBRACE)
-	tempName := fmt.Sprintf("__with_%d_%d", pos.Line, pos.Col)
-	temp := &ast.Ident{Position: pos, Name: tempName}
-	decl := &ast.VarDeclStmt{Position: pos, Name: tempName, Mutable: false, Value: &ast.AddrOfExpr{Position: pos, Operand: place}}
-	if typeName != "" {
-		decl.Type = &ast.MutableType{Position: pos, Elem: &ast.RefType{Position: pos, Elem: &ast.NamedType{Position: pos, Name: typeName}}}
+	// A bare identifier is already a place that costs nothing to re-evaluate,
+	// and taking its address would turn a reference parameter into a
+	// reference to a reference; assign through it directly. Any other place
+	// (an index, a call) is bound ONCE to a hidden reference. The typed form
+	// always binds, since the binding is what checks the type.
+	var target ast.Expr
+	var body []ast.Stmt
+	if ident, isIdent := place.(*ast.Ident); isIdent && typeName == "" {
+		target = ident
+	} else {
+		tempName := fmt.Sprintf("__with_%d_%d", pos.Line, pos.Col)
+		temp := &ast.Ident{Position: pos, Name: tempName}
+		decl := &ast.VarDeclStmt{Position: pos, Name: tempName, Mutable: false, Value: &ast.AddrOfExpr{Position: pos, Operand: place}}
+		if typeName != "" {
+			decl.Type = &ast.MutableType{Position: pos, Elem: &ast.RefType{Position: pos, Elem: &ast.NamedType{Position: pos, Name: typeName}}}
+		}
+		target = temp
+		body = []ast.Stmt{decl}
 	}
-	body := []ast.Stmt{decl}
 	for {
 		for p.peek() == lexer.TOKEN_NEWLINE || p.peek() == lexer.TOKEN_INDENT || p.peek() == lexer.TOKEN_DEDENT {
 			p.advance()
@@ -830,13 +842,15 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 		var value ast.Expr
 		if p.peek() == lexer.TOKEN_LARROW {
 			p.advance()
-			value = p.parseValueExprAllowTuple()
+			// Not the tuple form: a comma ends the field, it does not extend
+			// the value (`{ kind <- 7, x <- 1.5 }`).
+			value = p.parseExpr()
 		} else {
 			// Field punning: `with { kind, parent }` assigns each field from the
 			// local of the same name.
 			value = &ast.Ident{Position: fieldTok.Pos, Name: fieldTok.Text}
 		}
-		body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: &ast.FieldExpr{Position: fieldTok.Pos, Object: temp, Field: fieldTok.Text}, Value: value})
+		body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: &ast.FieldExpr{Position: fieldTok.Pos, Object: target, Field: fieldTok.Text}, Value: value})
 		if p.peek() == lexer.TOKEN_COMMA {
 			p.advance()
 		}
