@@ -644,9 +644,10 @@ Current rules:
   }
   ```
 
-  Each line is an ordinary `field <- value` assignment through a hidden reference to the
-  place, so the place expression is evaluated ONCE and the fields are assigned in the order
-  written. The type name is optional (`ws[2] with { kind <- 6 }`); when present, the place
+  Each line is an ordinary `field <- value` assignment. A bare identifier place is assigned
+  through directly (so it works on a `mutable T&` parameter); any other place is bound ONCE
+  to a hidden reference, so the place expression is evaluated once and the fields are
+  assigned in the order written. A value ends at the comma: `{ kind <- 7, x <- 1.5 }`. The type name is optional (`ws[2] with { kind <- 6 }`); when present, the place
   must have that type. A bare field name puns to the local of the same name, so
   `ws[2] with { kind, parent }` is `kind <- kind` and `parent <- parent`; struct literals
   accept the same shorthand (`Widget{ kind, parent, x: 0.0 }`). Use `with` for partial
