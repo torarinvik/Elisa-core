@@ -283,6 +283,42 @@ func (a *Analyzer) lookupVisibleStaticInterface(name string) (*StaticInterface, 
 	return nil, "", false
 }
 
+// callIsProtocolBoundMethod reports whether a call is `S.method(...)` where `S` names a
+// type parameter bound to a protocol that declares `method`.
+//
+// The builtin collection chain in analyzeCallExpr keys on the FIELD NAME alone -- `push`,
+// `clear`, `reserve`, `rows`, `truncate`, `valid`, and the dict/set `insert` rewrite -- so a
+// protocol whose method happened to share one of those names had its call claimed by the
+// builtin path. That path then evaluated the type parameter as a VALUE and reported
+// `undefined identifier "S"`, naming something plainly in scope. `Surface.clear` is the
+// motivating case; the same trap sits on every protocol built around a collection-shaped
+// vocabulary. Protocol dispatch wins, and the ordinary path reaches
+// resolveInterfaceMethodExprType as it already does for every non-colliding name.
+func (a *Analyzer) callIsProtocolBoundMethod(expr *ast.CallExpr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	fieldExpr, ok := expr.Func.(*ast.FieldExpr)
+	if !ok || fieldExpr == nil || fieldExpr.Safe || fieldExpr.Field == "" {
+		return false
+	}
+	recvIdent, ok := fieldExpr.Object.(*ast.Ident)
+	if !ok || recvIdent == nil {
+		return false
+	}
+	// A real value receiver keeps the builtin meaning: a local named `xs` whose type is a
+	// darray still gets `xs.push(v)` even inside a function with a bound type parameter.
+	if a.identNameResolvesAsValue(recvIdent.Name) {
+		return false
+	}
+	iface, ok := a.lookupTypeParamInterface(recvIdent.Name)
+	if !ok || iface == nil {
+		return false
+	}
+	method, ok := iface.Methods[fieldExpr.Field]
+	return ok && method != nil
+}
+
 func (a *Analyzer) lookupTypeParamInterface(name string) (*StaticInterface, bool) {
 	for i := len(a.typeParamInterfaceScopes) - 1; i >= 0; i-- {
 		if iface, ok := a.typeParamInterfaceScopes[i][name]; ok {
