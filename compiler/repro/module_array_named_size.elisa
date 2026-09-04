@@ -1,0 +1,45 @@
+# stage0/stage1 divergence: `Elem[SIZE]` with a user-defined element type and a
+# BARE IDENTIFIER size is array-or-generic by NAMING CONVENTION in stage0, and
+# stage1 does not share the rule.
+#
+# stage0's parser (isConstantStyleArraySizeIdentifier) reads the brackets as an
+# ARRAY only when the size identifier is uppercase/digits AND CONTAINS AN
+# UNDERSCORE, or when the element name is a single uppercase letter. Otherwise
+# they are type arguments, and this file is rejected with
+#
+#   repro/module_array_named_size.elisa:31:30-33: type "Row" expects 0 generic
+#   arguments, got 1
+#
+# followed by `<invalid>` for every index into the array.
+#
+# The underscore is load-bearing, not a typo: `Box[T]` and `Row[CAP]` are the
+# same shape, so something has to separate a const from a type parameter without
+# resolving names first. What is arguably wrong is only the edge -- `CAP` and
+# `CAPACITY` are as constant-style as `MAX_ROWS`, and they lose.
+#
+# MEASURED, one variable at a time:
+#   Row[CAP]       -> rejected (no underscore)          <- this file
+#   Row[CAPACITY]  -> rejected (no underscore)
+#   Row[MAX_ROWS]  -> accepted
+#   Row[4]         -> accepted (literal)
+#   i32[CAP]       -> accepted (builtin element, other parse path)
+#   Row[M::CAP]    -> accepted (`::` defeats the ident lookahead)
+# Module nesting makes NO difference; an earlier reading of this blamed modules.
+#
+# stage1 accepts every spelling, so a file written against stage1 can be
+# unbuildable by stage0 for a reason that never appears in either compiler's
+# documentation. elisa-ui's src/widgets/ui_controls.elisa was exactly this: it
+# used CAPACITY and was renamed to MAX_CONTROLS to build with both.
+const CAP: usize = 4
+
+struct Row:
+    v: mutable i32
+
+global mutable rows: Row[CAP] = zeroed
+
+extern printf(format: cstr, ...) -> i32
+
+def main() -> i64:
+    rows[2].v <- 41
+    _ = printf("named-size array: %d (want 41)\n", rows[2].v)
+    return 0
