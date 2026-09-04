@@ -1,0 +1,68 @@
+include "./elisacore_std/elisacore_runtime.elisa"
+
+# Collection stacks (arena.elisa, collection_stack_acquire): a dict/set table lives in an
+# owner-tagged region of its own and growth ping-pongs between a live stack and a spare.
+# So ~14 doublings must add at most TWO regions to the arena (live + spare), not one per
+# rehash; every entry must survive every rehash and tombstones must clear; and a
+# reset-then-regrow must reuse the pooled stacks (region count flat across rounds) with
+# the buckets re-zeroed -- a reused stack still holds the dead table until then.
+@test
+def dict_growth_ping_pongs_two_stacks() -> void:
+    can Abort.Panic, Memory.Allocate:
+        arena: mutable Arena = zeroed
+        in arena:
+            d: mutable dict[i64, i64] = arena_dict_new(arena, 0)
+            _ = arena_dict_put_or_panic(arena, d, 1, 10)
+            regions_before: usize = arena_region_count(&arena)
+            for i in 2..<100001:
+                _ = arena_dict_put_or_panic(arena, d, i.i64(), i.i64() * 10)
+            panic("count after 100000 puts") if d.count != 100000
+            panic("capacity is not a power of two past the 3/4 load") if d.capacity < 133334 or (d.capacity & (d.capacity - 1)) != 0
+            panic("growth chained more than the live+spare pair of stacks") if arena_region_count(&arena) > regions_before + 2
+            for i in 1..<100001:
+                value: i64&? = arena_dict_get(d, i.i64())
+                panic("entry lost across rehash") if value == null
+                panic("entry corrupted across rehash") if value != i.i64() * 10
+            for i in 1..<50001:
+                panic("remove failed") if not arena_dict_remove(d, i.i64())
+            for i in 100001..<200001:
+                _ = arena_dict_put_or_panic(arena, d, i.i64(), i.i64() * 10)
+            panic("count after remove+regrow") if d.count != 150000
+            panic("removed key came back") if arena_dict_contains(d, 25000)
+            value2: i64&? = arena_dict_get(d, 150000)
+            panic("late entry lost") if value2 == null or value2 != 1500000
+
+@test
+def reset_then_regrow_reuses_stacks() -> void:
+    can Abort.Panic, Memory.Allocate:
+        arena: mutable Arena = zeroed
+        regions_after_first: mutable usize = 0
+        for round in 0..<3:
+            in arena:
+                d: mutable dict[i64, i64] = arena_dict_new(arena, 0)
+                for i in 0..<20000:
+                    _ = arena_dict_put_or_panic(arena, d, i.i64() + round.i64(), i.i64())
+                panic("round count") if d.count != 20000
+                for i in 0..<20000:
+                    v: i64&? = arena_dict_get(d, i.i64() + round.i64())
+                    panic("reused stack held a stale bucket") if v == null or v != i.i64()
+                panic("a key from a previous round survived a reset") if round > 0 and arena_dict_contains(d, -1)
+                regions_after_first <- arena_region_count(&arena) if round == 0
+                panic("a later round mapped new stacks instead of reusing pooled ones") if round > 0 and arena_region_count(&arena) != regions_after_first
+            arena_reset(&arena)
+
+@test
+def set_growth_ping_pongs_two_stacks() -> void:
+    can Abort.Panic, Memory.Allocate:
+        arena: mutable Arena = zeroed
+        in arena:
+            s: mutable set[i64] = arena_set_new[i64](arena, 0)
+            _ = arena_set_add_or_panic(arena, s, 1)
+            regions_before: usize = arena_region_count(&arena)
+            for i in 2..<50001:
+                _ = arena_set_add_or_panic(arena, s, i.i64())
+            panic("set count") if s.count != 50000
+            panic("set growth chained more than the live+spare pair") if arena_region_count(&arena) > regions_before + 2
+            for i in 1..<50001:
+                panic("set member lost across rehash") if not arena_set_contains(s, i.i64())
+            panic("set has a member it never got") if arena_set_contains(s, 0)

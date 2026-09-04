@@ -90,92 +90,99 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 			}
 		}
 	}
-	switch a.rewriteBuiltinDictMethodCall(expr) {
-	case builtinDictMethodRewriteApplied:
-		return a.analyzeCallExpr(expr)
-	case builtinDictMethodRewriteInvalid:
-		return invalidType
-	}
-	switch a.rewriteBuiltinSetMethodCall(expr) {
-	case builtinDictMethodRewriteApplied:
-		return a.analyzeCallExpr(expr)
-	case builtinDictMethodRewriteInvalid:
-		return invalidType
-	}
-	if resultType, ok := a.analyzeConstReflectionCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinFStrCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDictEntryInsertCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDictEntryGetOrInsertCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDictRegionMutationCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinSetRegionMutationCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeHashBuiltinCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeCloneBuiltinCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeCopyBuiltinCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayPopCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayExtendCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayReserveCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayResizeCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarraySviewCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayCstrCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayClearCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinDarrayTruncateCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinStorePushCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinStoreReserveCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinStoreClearCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinStoreTruncateCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinStoreRowsCall(expr); ok {
-		return resultType
-	}
-	if resultType, ok := a.analyzeBuiltinSOAValidCall(expr); ok {
-		return resultType
+	// `S.push(v)` where S is a PROTOCOL-BOUND TYPE PARAMETER is protocol dispatch, not a
+	// builtin collection method. Everything below keys on the field name alone, so a protocol
+	// method sharing a builtin's name (`clear`, `push`, `reserve`, `rows`, `truncate`, `valid`,
+	// dict/set `insert`) had its call claimed here, and the receiver was then evaluated as a
+	// value -- reporting `undefined identifier "S"` for a name that is plainly in scope.
+	if !a.callIsProtocolBoundMethod(expr) {
+		switch a.rewriteBuiltinDictMethodCall(expr) {
+		case builtinDictMethodRewriteApplied:
+			return a.analyzeCallExpr(expr)
+		case builtinDictMethodRewriteInvalid:
+			return invalidType
+		}
+		switch a.rewriteBuiltinSetMethodCall(expr) {
+		case builtinDictMethodRewriteApplied:
+			return a.analyzeCallExpr(expr)
+		case builtinDictMethodRewriteInvalid:
+			return invalidType
+		}
+		if resultType, ok := a.analyzeConstReflectionCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinFStrCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDictEntryCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDictEntryInsertCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDictEntryGetOrInsertCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDictRegionMutationCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinSetRegionMutationCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeHashBuiltinCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeCloneBuiltinCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeCopyBuiltinCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayPushCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayPopCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayExtendCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayReserveCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayResizeCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarraySviewCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayCstrCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayClearCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinDarrayTruncateCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinStorePushCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinStoreReserveCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinStoreClearCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinStoreTruncateCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinStoreRowsCall(expr); ok {
+			return resultType
+		}
+		if resultType, ok := a.analyzeBuiltinSOAValidCall(expr); ok {
+			return resultType
+		}
 	}
 	a.rewriteFreeCallReceiverOverload(expr)
 	switch a.rewriteExtensionMethodCall(expr) {

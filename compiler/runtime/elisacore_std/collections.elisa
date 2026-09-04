@@ -108,6 +108,18 @@ def collections_void_from_items[T](items: T&) -> void&:
     trusted Unsafe.PointerCast:
         return items.cast[void&]
 
+# The optional form, for handing a possibly-absent table to collection_stack_acquire.
+@internal
+def collections_void_from_items_opt[T](items: T&?) -> void&?:
+    trusted Unsafe.PointerCast:
+        return items.cast[void&?]
+
+# uintptr slots covering `bytes`, rounded the way the arena counts them; never 0.
+@internal
+def collections_table_slots(bytes: usize) -> usize:
+    slots: usize = (bytes + size_of(uintptr) - 1) / size_of(uintptr)
+    return slots if slots > 0 else 1
+
 @internal
 def collections_mutable_void_from_items[T](items: mutable T&) -> mutable void&:
     trusted Unsafe.PointerCast:
@@ -896,7 +908,10 @@ def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, 
         capacity: usize = arena_dict_next_capacity(initial_capacity)
         out return if capacity == 0
 
-        items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(a, capacity * size_of(DictBucket[K, T])))
+        # The table lives on a stack of its own (collection_stack_acquire in arena.elisa),
+        # not in the arena's bump chain, so growing it never strands the old table.
+        table_stack: mutable heap Region& = collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(DictBucket[K, T])))
+        items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(items, capacity)
 
         out.items as & <- items
@@ -910,13 +925,23 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
 
         return if target_capacity <= m.capacity
 
+        # A table this module placed sits at its stack's data base and is handed back so
+        # the stack becomes the new table's spare. A const dict's static buckets have no
+        # arena; they are foreign, only ever READ from during the rehash below.
+        had_stack: bool = m.arena != null and m.items != null and m.capacity > 0
+
         owner: mutable Arena& = m.arena if m.arena != null else a
         m.arena as & <- owner if m.arena == null
 
         old_items_opt: mutable DictBucket[K, T]&? = m.items
         old_capacity: usize = m.capacity
 
-        new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](arena_alloc(owner, target_capacity * size_of(DictBucket[K, T])))
+        live_table: void&? = collections_void_from_items_opt[DictBucket[K, T]](old_items_opt) if had_stack else null
+        # Ping-pong: the spare stack (or a pooled/fresh one) takes the new table; the old
+        # table's stack becomes the spare. Reused storage still holds the dead table, so
+        # the buckets are zeroed here as before.
+        table_stack: mutable heap Region& = collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(DictBucket[K, T])))
+        new_items: mutable DictBucket[K, T]& = collections_items_from_alloc[DictBucket[K, T]](collection_stack_table(table_stack))
         arena_dict_zero_buckets(new_items, target_capacity)
 
         # Rehash through a distinct dictionary value so reads from the old
@@ -1177,7 +1202,9 @@ def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
         capacity: usize = arena_dict_next_capacity(initial_capacity)
         out return if capacity == 0
 
-        items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(a, capacity * size_of(SetBucket[T])))
+        # Same as arena_dict_new: the table is on a collection stack of its own.
+        table_stack: mutable heap Region& = collection_stack_acquire(a, null, collections_table_slots(capacity * size_of(SetBucket[T])))
+        items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(items, capacity)
 
         out.items as & <- items
@@ -1191,13 +1218,18 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
 
         return if target_capacity <= s.capacity
 
+        # Same shape as arena_dict_reserve: see the comments there.
+        had_stack: bool = s.arena != null and s.items != null and s.capacity > 0
+
         owner: mutable Arena& = s.arena if s.arena != null else a
         s.arena as & <- owner if s.arena == null
 
         old_items_opt: mutable SetBucket[T]&? = s.items
         old_capacity: usize = s.capacity
 
-        new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](arena_alloc(owner, target_capacity * size_of(SetBucket[T])))
+        live_table: void&? = collections_void_from_items_opt[SetBucket[T]](old_items_opt) if had_stack else null
+        table_stack: mutable heap Region& = collection_stack_acquire(owner, live_table, collections_table_slots(target_capacity * size_of(SetBucket[T])))
+        new_items: mutable SetBucket[T]& = collections_items_from_alloc[SetBucket[T]](collection_stack_table(table_stack))
         arena_set_zero_buckets(new_items, target_capacity)
 
         # Rehash through a separate set value. This keeps the old backing read

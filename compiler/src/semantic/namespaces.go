@@ -470,7 +470,20 @@ func (a *Analyzer) canonicalizeMatchEnumName(name string, expectedName string) s
 			}
 		}
 		if expectedOK {
-			if candidateType, ok := a.namedTypes[candidate]; ok && SameType(candidateType, expectedType) {
+			candidateType, ok := a.namedTypes[candidate]
+			if !ok {
+				continue
+			}
+			// A refinement of the scrutinee's hierarchy (`Ui::Container.Box` on a
+			// `Ui.Widget`) is the same store but NOT the same case set: keep the
+			// child's own canonical name so its variants resolve, exactly as the
+			// unqualified `Container.Box` does.
+			if childEnum, isEnum := candidateType.(*EnumType); isEnum && childEnum.Parent != nil && candidate != expectedName {
+				if expectedEnum, expectedIsEnum := expectedType.(*EnumType); expectedIsEnum && childEnum.Root() == expectedEnum.Root() {
+					return candidate
+				}
+			}
+			if SameType(candidateType, expectedType) {
 				return expectedName
 			}
 		}

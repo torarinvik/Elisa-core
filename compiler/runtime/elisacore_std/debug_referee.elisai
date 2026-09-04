@@ -12,9 +12,9 @@ const DEBUG_TRACE_KIND_VALUE: int = 2
 
 const DEBUG_TRACE_KIND_BOUNDARY: int = 3
 
-const DEBUG_TRACE_HASH_INITIAL: u64 = 0x12345678.u64()
+const DEBUG_TRACE_HASH_INITIAL: u64 = 0x12345678
 
-const DEBUG_TRACE_HASH_PRIME: u64 = 16777619.u64()
+const DEBUG_TRACE_HASH_PRIME: u64 = 16777619
 
 const DEBUG_REFEREE_KIND_CHECK_CALLABLE: int = 1
 
@@ -32,17 +32,17 @@ const DEBUG_REFEREE_REASON_NEAR_NULL: int = 2
 
 const DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64: int = 3
 
-const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000.uintptr()
+const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000
 
-const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000.uintptr()
+const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000
 
-const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001.uintptr()
+const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001
 
-const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002.uintptr()
+const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002
 
-const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003.uintptr()
+const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003
 
-const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004.uintptr()
+const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004
 
 struct DebugRefereeEvent:
     sequence: mutable u64
@@ -84,6 +84,76 @@ extern debug_trace_hash: u64
 extern debug_trace_last_event: DebugTraceEvent
 
 extern debug_trace_events: DebugTraceEvent[DEBUG_TRACE_TAPE_CAP]
+
+const ELISA_TRACE_CAP: usize = 256
+
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
+
+extern write(fd: int, buf: void&, count: usize) -> isize can[Console]
+
+extern getenv(name: cstr) -> u8&?
+
+extern signal(sig: int, handler: void&?) -> void&?
+
+extern getpid() -> int
+
+extern kill(pid: int, sig: int) -> int
+
+extern sigaction(sig: int, act: void&, oldact: void&?) -> int
+
+const ELISA_SIG_ILL: int = 4
+
+const ELISA_SIG_ABRT: int = 6
+
+const ELISA_SIG_FPE: int = 8
+
+const ELISA_SIG_SEGV: int = 11
+
+const ELISA_SA_SIGINFO: i32 = 0x40
+
+const ELISA_SIGINFO_ADDR_OFFSET_DARWIN: u64 = 24
+
+struct ElisaSigaction:
+    handler: mutable uintptr
+    mask: mutable u32
+    flags: mutable i32
+
+extern elisa_trace_fault_checked: bool
+
+struct ElisaTraceEntry:
+    name: mutable cstr
+    var_name: mutable cstr
+    value: mutable u64
+    line: mutable u32
+    repeat: mutable u32
+    has_value: mutable u8
+    is_signed: mutable u8
+
+extern elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP]
+
+extern elisa_trace_pos: u64
+
+extern elisa_trace_total: u64
+
+extern elisa_trace_record(name: cstr, line: u32) -> void
+
+extern elisa_trace_function_entry(name: cstr, line: u32) -> void
+
+extern elisa_trace_function_exit(name: cstr, line: u32) -> void
+
+extern elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32) -> void
+
+extern elisa_trace_count() -> u64
+
+extern elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void
+
+extern elisa_trace_install_one(sig: int) -> void
+
+extern elisa_trace_install_fault_handler() -> void
+
+extern elisa_trace_maybe_install_fault_handler() -> void
+
+extern elisa_trace_dump() -> void
 
 extern debug_referee_set_enabled(enabled: bool) can[Debug.Referee]
 
@@ -154,19 +224,5 @@ extern debug_trace_checkpoint(label: cstr) can[Debug.Trace]
 extern debug_trace_value(label: cstr, value: uintptr) can[Debug.Trace]
 
 extern debug_trace_boundary(label: cstr, a: uintptr, b: uintptr, c: uintptr) can[Debug.Trace]
-
-extern elisa_trace_record(name: cstr, line: u32)
-
-extern elisa_trace_function_entry(name: cstr, line: u32)
-
-extern elisa_trace_function_exit(name: cstr, line: u32)
-
-extern elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32)
-
-extern elisa_trace_count() -> u64
-
-extern elisa_trace_dump()
-
-extern elisa_trace_install_fault_handler()
 
 extern debug_trace_assert_fingerprint(expected: u64) can[Debug.Trace, Abort.Panic]

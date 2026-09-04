@@ -408,6 +408,18 @@ func (s *functionState) emitPackedCommonFieldExpr(expr *ast.FieldExpr) (C.LLVMVa
 		}
 		return value, fieldType, true, nil
 	}
+	// A MUTABLE inline common must be read from the ROW, which is the only place a
+	// write goes. The word reader serves any word below the store's prefix_words out of
+	// the parallel COLUMN arrays that ctx_packed_store_record_prefix_words filled at
+	// construction, and nothing refreshes those on `w.field <- v` -- so a post-construction
+	// write was invisible whenever the read happened to take this path (a read in the same
+	// block reuses the decoded row pointer and answered correctly, which is what made this
+	// look intermittent). Falling through here decodes the handle and GEPs the row.
+	//
+	// Immutable commons keep the fast path: with no writes, row and column cannot disagree.
+	if layout.Field.Mutable {
+		return nil, nil, false, nil
+	}
 	ops, ok := s.packedStoreOpsFromBinding(&store)
 	if !ok || !ops.canDirectWordRead() {
 		return nil, nil, false, nil

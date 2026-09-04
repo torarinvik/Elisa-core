@@ -60,6 +60,22 @@ const ARENA_STRATEGY_SCRATCH: int = 4
 const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
 const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 
+# Owner tag of a COLLECTION STACK (see "Collection stacks" below). Non-zero is what keeps
+# arena_alloc from ever bumping into one; 1 is arena_adopt's marker, so this is 2.
+const ARENA_OWNER_TAG_COLLECTION: usize = 2
+
+# Address space reserved per collection stack on the demand-paged backends, in uintptr
+# slots: 1Mi slots = 8 MiB, committed page by page as the table is touched, so a doubled
+# table lands in the spare with no new mapping. On the eager backends (libc malloc, wasm)
+# reserving IS paying, so a stack is sized to twice its first table and the spare fits
+# every other growth. A table past the reservation gets a bespoke stack of twice its size.
+static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 1048576
+static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 1048576
+static else:
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 0
+
 error RuntimeError:
     OutOfMemory
 
@@ -1011,6 +1027,130 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
     child.begin as ! <- null
     child.end as ! <- null
     child.end_index <- 0
+
+# ------------------------------------------------------------
+# Collection stacks
+# ------------------------------------------------------------
+# A hash table cannot grow in place: a rehash needs a differently sized table, and the
+# old one is dead the moment its last entry moves. Bump-allocated in a region, that dead
+# table sat below the live one until the region died -- a dict grown 16 -> 1024 slots
+# kept every intermediate table resident. So a growing collection gets two stacks of its
+# own and ping-pongs between them: rehash into the spare, which becomes the live table,
+# while the old live stack becomes the spare -- reset, never freed, reused on the next
+# growth with no allocation at all. Steady state is one live table and one spare holding
+# its high-water mark; that retention is the model's accepted cost and what makes the
+# next growth free.
+#
+# A stack IS a region of the arena: created by the arena's own strategy-dispatched block
+# source, linked into the `begin` chain, and marked with ARENA_OWNER_TAG_COLLECTION. That
+# rides machinery that already exists for packed stores -- arena_alloc skips any owned
+# region so nothing is ever bumped into a table (it has no neighbour above it, which is
+# the whole point), arena_free frees the chain, arena_reset zeroes every count (which
+# POOLS every stack), arena_adopt splices the chain. Nothing is added to Arena: an
+# earlier attempt kept a separate list in a new Arena field, and that field was not
+# zero-initialised on every path stage0 creates an arena, so arena_free walked garbage.
+# A stack is linked at the chain's TAIL and never becomes the bump cursor: the
+# reserve/fixed strategies bump straight into a.end without looking at owner_tag.
+#
+# Claimed: count == the table it holds. Pooled: count == 0. A live table's stack links
+# its spare through owner_next; DynDict/DynSet are untouched (pinned in both compilers),
+# so the live stack is found by matching the table pointer against the chain.
+
+# The table a stack holds: its data base.
+def collection_stack_table(r: heap Region&) -> mutable heap void&:
+    return arena_heap_void_from_data_base(arena_heap_u8_from_region_data(r), 0)
+
+# The collection stack whose data base IS `table`, or null. A dict/set built from a
+# literal or comprehension gets its first table straight from the bump chain (the
+# backend allocates it), so a table pointer alone cannot be assumed to sit at a stack's
+# base -- matched, never computed. Walked only on growth.
+@internal
+def collection_stack_of_table(a: mutable Arena&, table: void&) -> mutable heap Region&?:
+    trusted [Unsafe.PointerCast, Unsafe.AssumeProgress]:
+        target: uintptr = table.cast[heap u8&].uintptr()
+        cursor: mutable heap Region&? = a.begin
+        while cursor != null:
+            return cursor if cursor.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and arena_heap_u8_from_region_data(cursor).uintptr() == target
+            cursor <- cursor.next
+    return null
+
+# Link a fresh stack at the chain's tail. Never at a.end: an empty arena first
+# materialises its own block through its strategy's path (one slot, once), so the bump
+# cursor is always an ordinary block.
+@internal
+def collection_stack_link(a: mutable Arena&, fresh: mutable heap Region&):
+    can Memory.Allocate, Abort.Panic:
+        if a.end == null:
+            _ = arena_alloc(a, size_of(uintptr))
+        assert a.end != null
+        last_block: mutable heap Region&? = a.end
+        trusted Unsafe.AssumeProgress:
+            while last_block != null and last_block.next != null:
+                last_block <- last_block.next
+        assert last_block != null
+        tail_region: mutable heap Region& = last_block
+        tail_region.next as & <- fresh
+        fresh.global_index <- tail_region.global_index + 1
+
+# Claim a stack for a table of `needed_slots` (uintptr slots) in arena `a`, for the
+# collection whose current table is `live_table` (null when it has none). Preference:
+# the collection's own spare when the table fits; a pooled stack that fits; a fresh
+# mapping. The result is claimed and committed where that is a separate step; the CALLER
+# zeroes the buckets, because a reused stack still holds the dead table. When the
+# collection had a live stack, it becomes the returned stack's spare.
+def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&:
+    can Memory.Allocate, Abort.Panic:
+        live: mutable heap Region&? = null
+        chosen: mutable heap Region&? = null
+        if live_table != null:
+            live_ref: void& = live_table
+            live <- collection_stack_of_table(a, live_ref)
+            if live != null:
+                live_stack: mutable heap Region& = live
+                spare: mutable heap Region&? = live_stack.owner_next
+                chosen <- spare if spare != null and spare.capacity >= needed_slots
+
+        if chosen == null:
+            probe: mutable heap Region&? = a.begin
+            trusted Unsafe.AssumeProgress:
+                while probe != null:
+                    if probe.owner_tag == ARENA_OWNER_TAG_COLLECTION.uintptr() and probe.count == 0 and probe.capacity >= needed_slots:
+                        chosen <- probe
+                        probe <- null
+                    else:
+                        probe <- probe.next
+
+        # Fresh, from the arena's own block source so arena_free's strategy-dispatched
+        # free matches it. Running out is a panic inside new_region_*; there is no error
+        # to return.
+        if chosen == null:
+            capacity: mutable usize = COLLECTION_STACK_RESERVE_SLOTS
+            capacity <- needed_slots * 2 if capacity < needed_slots * 2
+            fresh: mutable heap Region& = new_region_backend(capacity, a.strategy)
+            fresh.owner_tag <- ARENA_OWNER_TAG_COLLECTION.uintptr()
+            collection_stack_link(a, fresh)
+            chosen <- fresh
+
+        assert chosen != null
+        claimed: mutable heap Region& = chosen
+        claimed.count <- needed_slots
+        claimed.free_list <- null
+        arena_region_ensure_committed(claimed, size_of(Region) + needed_slots * size_of(uintptr))
+
+        # Ping-pong: the old live stack is the new spare. A spare too small for this table
+        # is unpaired and pooled for a smaller one.
+        if live != null:
+            old_live: mutable heap Region& = live
+            dropped: mutable heap Region&? = old_live.owner_next
+            if dropped != null and dropped != chosen:
+                dropped_stack: mutable heap Region& = dropped
+                dropped_stack.count <- 0
+                dropped_stack.owner_next <- null
+            old_live.owner_next <- null
+            claimed.owner_next <- old_live
+        else:
+            claimed.owner_next <- null
+        return claimed
 
 # ------------------------------------------------------------
 # Optional stdio formatting stubs

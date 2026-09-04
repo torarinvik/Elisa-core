@@ -35,6 +35,15 @@ const ARENA_DEFAULT_RESERVE_COMMIT_SLOTS: usize = 33554432
 
 const ARENA_NARROW_RESERVE_COMMIT_SLOTS: usize = 2097152
 
+const ARENA_OWNER_TAG_COLLECTION: usize = 2
+
+static if (ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP):
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 1048576
+static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 1048576
+static else:
+    const COLLECTION_STACK_RESERVE_SLOTS: usize = 0
+
 error RuntimeError:
     OutOfMemory
 
@@ -159,6 +168,10 @@ extern arena_free(a: mutable Arena&)
 extern arena_trim(a: mutable Arena&)
 
 extern arena_adopt(parent: mutable Arena&, child: mutable Arena&)
+
+extern collection_stack_table(r: heap Region&) -> mutable heap void&
+
+extern collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&
 
 extern va_list
 

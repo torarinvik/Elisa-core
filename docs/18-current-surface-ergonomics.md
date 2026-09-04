@@ -644,10 +644,15 @@ Current rules:
   }
   ```
 
-  Each line is an ordinary `field <- value` assignment through a hidden reference to the
-  place, so the place expression is evaluated ONCE and the fields are assigned in the order
-  written. The type name is optional (`ws[2] with { kind <- 6 }`); when present, the place
-  must have that type. It is parser-level sugar, identical in both compilers.
+  Each line is an ordinary `field <- value` assignment. A bare identifier place is assigned
+  through directly (so it works on a `mutable T&` parameter); any other place is bound ONCE
+  to a hidden reference, so the place expression is evaluated once and the fields are
+  assigned in the order written. A value ends at the comma: `{ kind <- 7, x <- 1.5 }`. The type name is optional (`ws[2] with { kind <- 6 }`); when present, the place
+  must have that type. A bare field name puns to the local of the same name, so
+  `ws[2] with { kind, parent }` is `kind <- kind` and `parent <- parent`; struct literals
+  accept the same shorthand (`Widget{ kind, parent, x: 0.0 }`). Use `with` for partial
+  updates and a whole struct literal for a reset, since a literal must name every field.
+  It is parser-level sugar, identical in both compilers.
 - a struct literal `T{b: f(), a: g()}` evaluates its field initializers left-to-right in the order they are WRITTEN, whatever order the fields are declared in; side effects observe that order (a literal whose initializers register things in a table registers them in source order)
 - `elif value is name:` is the optional-bind continuation form for an `if` chain
 - inside the then-branch, `name` has type `T` for value optionals and `T&` for nullable references
@@ -3217,6 +3222,8 @@ Current rules:
 - `.cast[T]` is the explicit cast surface in expression position
 - `.ref[T&]` is the explicit lvalue/reference reinterpretation surface
 - postfix shorthand like `op.i64()` dispatches to a visible exact `__cast__(value: Source) -> Target` hook when one exists
+- the target may be any type, including an enum or a sealed hierarchy root, and hooks may be overloaded in both directions (`__cast__(Event) -> i32` alongside `__cast__(i32) -> Event`)
+- the pair is EXACT on both ends, so an untyped literal is given a type first: `5.i32().Event()`, not `5.Event()`
 - prefix type-constructor shorthand like `i64(op)` uses the same cast path and the same exact `__cast__` hook lookup as `op.i64()`
 - optional postfix shorthand like `text.int?()` dispatches to a visible exact `__cast__(value: Source) -> int?` hook when one exists
 - ordinary explicit `.cast[T]` conversions continue to use normal cast rules rather than hook dispatch

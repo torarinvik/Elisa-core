@@ -135,6 +135,13 @@ func (a *Analyzer) mergeMatchExprArmTypes(resultType, armType Type, arms []ast.M
 	if !IsInvalidType(merged) {
 		return merged
 	}
+	// docs/77: widening is free, so arms naming different refinements of one sealed
+	// hierarchy merge to their LOWEST COMMON ANCESTOR (`MouseEvent.Move` and
+	// `Event.Quit` yield `Event`). The bits are identical — an upcast is a typed
+	// no-op — so this needs nothing from the backend.
+	if merged := mergeHierarchyEnumArmTypes(resultType, armType); merged != nil {
+		return merged
+	}
 	if isStringViewType(resultType) && isStaticStringLiteralRefType(armType) && matchArmTailIsStringLiteral(arms[index].Body) {
 		return resultType
 	}
@@ -297,4 +304,23 @@ func mergeTernaryBranchTypes(left, right Type, leftExpr, rightExpr ast.Expr) Typ
 func isBareStringLit(expr ast.Expr) bool {
 	_, ok := expr.(*ast.StringLit)
 	return ok
+}
+
+// mergeHierarchyEnumArmTypes returns the lowest common ancestor of two sealed-hierarchy
+// enum types, or nil when they are not both enums of the same hierarchy.
+func mergeHierarchyEnumArmTypes(left, right Type) Type {
+	leftEnum, leftOK := StripAggregateStateType(left).(*EnumType)
+	rightEnum, rightOK := StripAggregateStateType(right).(*EnumType)
+	if !leftOK || !rightOK || leftEnum == nil || rightEnum == nil {
+		return nil
+	}
+	if !SameType(leftEnum.Root(), rightEnum.Root()) {
+		return nil
+	}
+	for cursor := leftEnum; cursor != nil; cursor = cursor.Parent {
+		if enumDescendsFrom(rightEnum, cursor) {
+			return cursor
+		}
+	}
+	return nil
 }

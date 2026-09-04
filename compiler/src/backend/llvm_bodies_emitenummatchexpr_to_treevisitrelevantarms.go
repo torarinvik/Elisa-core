@@ -11,6 +11,7 @@ void elisa_coreSetBranchWeights(LLVMValueRef branch, LLVMContextRef ctx, unsigne
 import "C"
 
 import (
+	"strings"
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
@@ -22,11 +23,31 @@ import (
 func (s *functionState) resolveEnumArmVariant(enumType *semantic.EnumType, pattern *ast.MatchVariantPattern) (*semantic.EnumVariant, bool) {
 	owner := enumType
 	if pattern.EnumName != "" && pattern.EnumName != enumType.Name {
-		if resolved, ok := s.g.result.NamedTypes[pattern.EnumName].(*semantic.EnumType); ok && resolved != nil {
+		// The pattern keeps its source spelling; canonical names use `.` and
+		// carry the module prefix, so `Ui::Container` and a bare `Container`
+		// written inside `module Ui` both have to find `Ui.Container`.
+		wanted := strings.ReplaceAll(pattern.EnumName, "::", ".")
+		if resolved, ok := s.g.result.NamedTypes[wanted].(*semantic.EnumType); ok && resolved != nil {
 			owner = resolved
+		} else if refinement := findEnumRefinementNamed(enumType, wanted); refinement != nil {
+			owner = refinement
 		}
 	}
 	return owner.Variant(pattern.Variant)
+}
+
+// findEnumRefinementNamed walks the sealed hierarchy below root for the
+// refinement whose canonical name is `name` or ends in `.name`.
+func findEnumRefinementNamed(root *semantic.EnumType, name string) *semantic.EnumType {
+	for _, child := range root.Children {
+		if child.Name == name || strings.HasSuffix(child.Name, "."+name) {
+			return child
+		}
+		if found := findEnumRefinementNamed(child, name); found != nil {
+			return found
+		}
+	}
+	return nil
 }
 
 func (s *functionState) emitEnumMatchExpr(expr *ast.MatchExpr, resultType semantic.Type, enumType *semantic.EnumType) (C.LLVMValueRef, semantic.Type, error) {

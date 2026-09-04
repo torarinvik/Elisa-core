@@ -22,6 +22,17 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 	targetType := a.structLiteralTargetType(expr, expected)
 	base, bindings, regionBindings, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || base == nil {
+		// `Event(code)` on a non-struct target is the PREFIX type-constructor cast
+		// (docs/18: `T(x)` and `x.T()` share one `__cast__` hook lookup). The parser
+		// reads any `Name(args)` as a struct literal, so an enum/alias target never
+		// reached the cast path and reported "is not a struct". Only claim it when a
+		// visible hook actually exists, so a genuine misuse keeps its own diagnostic.
+		if castCall, castOK := a.structLiteralAsTypeConstructorCast(expr, targetType); castOK {
+			a.loweredInitCalls[expr] = castCall
+			result := a.analyzeCallExpr(castCall)
+			a.exprTypes[expr] = result
+			return result
+		}
 		if call, callOK := a.structLiteralAsPascalCaseFunctionCall(expr); callOK {
 			a.loweredInitCalls[expr] = call
 			result := a.analyzeCallExpr(call)
@@ -674,4 +685,30 @@ func substituteDerivedStateFieldExpr(expr ast.Expr, fieldValues map[string]ast.E
 	default:
 		return nil, false
 	}
+}
+
+// structLiteralAsTypeConstructorCast rewrites a one-argument `T(x)` whose target is not a
+// struct into the equivalent constructor CALL, but only when a `__cast__` hook from the
+// argument's type to T is visible. The call path (analyzeTypeConstructorCall) then resolves
+// and records the hook exactly as the postfix `x.T()` spelling already does.
+func (a *Analyzer) structLiteralAsTypeConstructorCast(expr *ast.StructLitExpr, targetType Type) (*ast.CallExpr, bool) {
+	if a == nil || expr == nil || expr.Name == "" || expr.Brace || targetType == nil || IsInvalidType(targetType) {
+		return nil, false
+	}
+	if len(expr.Args) != 1 || len(expr.ArgNames) != 0 {
+		return nil, false
+	}
+	savedSuppress := a.suppressDiagnostics
+	a.suppressDiagnostics = true
+	sourceType := a.analyzeExpr(expr.Args[0])
+	a.suppressDiagnostics = savedSuppress
+	hookSym, ok := a.lookupVisibleCastHook(sourceType, targetType)
+	if !ok || a.isSelfCastHook(hookSym) {
+		return nil, false
+	}
+	return &ast.CallExpr{
+		Position: expr.Position,
+		Func:     &ast.Ident{Position: expr.Position, Name: expr.Name},
+		Args:     []ast.Expr{expr.Args[0]},
+	}, true
 }

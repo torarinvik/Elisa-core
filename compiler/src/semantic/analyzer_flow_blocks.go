@@ -631,7 +631,17 @@ func (a *Analyzer) optionalBindBoundType(value ast.Expr, valueType Type) (Type, 
 		}
 		return valueType, true
 	}
-	return conditionOptionalBindType(valueType)
+	if bound, ok := conditionOptionalBindType(valueType); ok {
+		return bound, true
+	}
+	// A place an assignment narrowed from `T?` to `T` is still DECLARED optional and its
+	// storage still carries the present flag, so a refutable bind stays meaningful -- it
+	// simply always succeeds. Re-ask against the declared type rather than rejecting the
+	// bind outright, which is what made an optional unusable after its first write.
+	if declared, narrowed := a.narrowedOptionalDeclaredType(value); narrowed {
+		return conditionOptionalBindType(declared)
+	}
+	return nil, false
 }
 
 func conditionOptionalBindType(valueType Type) (Type, bool) {
