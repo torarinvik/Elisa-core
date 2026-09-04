@@ -51,7 +51,7 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 	if fn == nil {
 		return nil
 	}
-	collector := permissionEffectCollector{analyzer: a}
+	collector := permissionEffectCollector{analyzer: a, shadowed: collectShadowedNames(fn)}
 	// docs/126 §3: a moved-in drop-typed parameter is released by this frame, so its
 	// destructor's effects belong to this function's own row.
 	collector.addRefs(a.implicitDropPermissionRefs(fn))
@@ -62,6 +62,10 @@ func (a *Analyzer) collectFunctionPermissionRefs(fn *ast.FuncDecl) []ast.Permiss
 type permissionEffectCollector struct {
 	analyzer *Analyzer
 	seen     []ast.PermissionRef
+	// Names the enclosing function binds (parameters and locals). The collector walks a
+	// body with no scope pushed, so without this a parameter named after a global reads
+	// as that global; see permission_collector_shadowing.go.
+	shadowed map[string]bool
 }
 
 func (c *permissionEffectCollector) refs() []ast.PermissionRef {
@@ -266,7 +270,7 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		if sym, ok := c.analyzer.globalStorageSymbolForIdent(n.Name); ok {
+		if sym, ok := c.globalStorageSymbolForIdent(n.Name); ok {
 			c.addRefs(globalReadRefs(n.Position))
 			if c.analyzer.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
 				c.addRefs(unsafeMutableGlobalRefs(n.Position))
@@ -467,7 +471,7 @@ func (c *permissionEffectCollector) collectWriteTarget(expr ast.Expr, alsoRead b
 	if expr == nil {
 		return
 	}
-	if sym, ok := c.analyzer.globalStorageRoot(expr); ok {
+	if sym, ok := c.globalStorageRoot(expr); ok {
 		c.addRefs(globalWriteRefs(expr.Pos()))
 		if alsoRead {
 			c.addRefs(globalReadRefs(expr.Pos()))

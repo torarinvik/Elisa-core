@@ -1687,3 +1687,44 @@ def main() -> i64:
 		t.Fatalf("Global{Read, Write} must grant both members, got:\n%s", got)
 	}
 }
+
+// A parameter named after a global is that PARAMETER, not the global. The permission
+// collector runs over a bare body with no scope pushed, so before it carried its own
+// shadow set this function inferred Global.Read (and, under strict, Unsafe.MutableGlobal)
+// from a name that never touches the global. The analyzer's scope-aware paths always got
+// this right -- `shadowed`'s own fact_snapshot reports no required effect -- which is why
+// the collector's disagreement with them went unnoticed until stage1 grew the same family.
+func TestGlobalPermissionsRespectShadowingByParamsAndLocals(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_shadowed.elisa", `
+global mutable hot: i32 = 0
+
+def shadowed(hot: i32) -> i32:
+	return hot
+
+def local_shadowed() -> i32:
+	hot: i32 = 3
+	return hot
+
+def genuinely_reads() -> i32:
+	return hot
+
+def main() -> i64:
+	return 1 if shadowed(1) != 1
+	return 2 if local_shadowed() != 3
+	return 3 if genuinely_reads() != 0
+	return 0
+`, AnalyzeOptions{EnforceGlobalPermissions: true})
+
+	got := allDiagnostics(result)
+	if strings.Contains(got, `call to "shadowed"`) {
+		t.Fatalf("a parameter named after a global must not infer Global, got:\n%s", got)
+	}
+	if strings.Contains(got, `call to "local_shadowed"`) {
+		t.Fatalf("a local named after a global must not infer Global, got:\n%s", got)
+	}
+	// The control: the SAME name, unshadowed, still carries the effect. Without this the
+	// test would pass just as well if the family stopped being inferred at all.
+	if !strings.Contains(got, `call to "genuinely_reads" requires can[Global] and has no explicit local effect grant; add can Global.Read`) {
+		t.Fatalf("an unshadowed read must still require Global.Read, got:\n%s", got)
+	}
+}
