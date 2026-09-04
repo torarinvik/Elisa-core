@@ -53,12 +53,12 @@ build:
 # install: explicit opt-in installation for users who really want it.
 .PHONY: install
 # The binary is `elisac-stage0`, so a command line says which compiler it is
-# using next to the self-hosted `elisac-stage1`; `elisac` stays as a symlink to
-# it for scripts that default to the old name.
+# using next to the self-hosted `elisac-stage1`. There is deliberately no bare
+# `elisac`: a script that wants a compiler names its stage.
 install:
 	mkdir -p $${HOME}/.elisac
 	go build -o $${HOME}/.elisac/elisac-stage0 ./src
-	ln -sfn elisac-stage0 $${HOME}/.elisac/elisac
+	rm -f $${HOME}/.elisac/elisac
 
 .PHONY: help
 help:
@@ -67,4 +67,4 @@ help:
 	@echo "make test-prover   semantic + smt"
 	@echo "make test-full     FULL suite, SLOW ~8min (pre-commit only)"
 	@echo "make build          build local compiler -> compiler/bin/elisac"
-	@echo "make install        explicitly install -> ~/.elisac/elisac-stage0 (+ elisac symlink)"
+	@echo "make install        explicitly install -> ~/.elisac/elisac-stage0"
