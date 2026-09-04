@@ -17,7 +17,12 @@ func (a *Analyzer) permissionRefsRequiringLocalGrant(fnType *FuncType) []ast.Per
 	declared := a.grantedPermissionRefs(fnType.DeclaredPermissionRefs)
 	filtered := make([]ast.PermissionRef, 0, len(refs))
 	for _, ref := range refs {
-		if isGlobalPermissionRef(ref) && !permissionRefGranted(ref, declared) {
+		// A Global ref that the function DECLARED is always enforced -- that has been
+		// true since the family was added, and is what lets a caller be told it needs
+		// `can[Global.Write]` to reach a declared writer. An INFERRED one is dropped
+		// unless `-Wglobals` is on, because demanding it everywhere would rewrite the
+		// `can` row of every function in every existing program that touches a global.
+		if isGlobalPermissionRef(ref) && !permissionRefGranted(ref, declared) && !a.enforceGlobalPermissions {
 			continue
 		}
 		filtered = append(filtered, ref)

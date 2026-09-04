@@ -1610,3 +1610,80 @@ def build() -> i64:
 		t.Fatalf("expected no redundant grant warning for grant outside surrounding scope, got:\n%s", all)
 	}
 }
+
+// -Wglobals (EnforceGlobalPermissions) promotes the Global family from a
+// declaration-only annotation to a real requirement: an INFERRED Global.Read /
+// Global.Write propagates to callers the way Memory.Allocate does. Off, the same
+// program is silent -- which is the pre-existing default and what every codebase
+// that predates the dial relies on.
+func TestGlobalPermissionsRequiredOnlyUnderTheDial(t *testing.T) {
+	const src = `
+global mutable hot: i32 = 0
+
+def bump() -> i32:
+	hot <- hot + 1
+	return hot
+
+def main() -> i64:
+	return 1 if bump() != 1
+	return 0
+`
+	off := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_dial_off.elisa", src, AnalyzeOptions{})
+	if got := allDiagnostics(off); strings.Contains(got, "can[Global]") {
+		t.Fatalf("Global must stay silent without the dial, got:\n%s", got)
+	}
+
+	on := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_dial_on.elisa", src, AnalyzeOptions{EnforceGlobalPermissions: true})
+	if got := allDiagnostics(on); !strings.Contains(got, `call to "bump" requires can[Global] and has no explicit local effect grant; add can[Global.Read, Global.Write]`) {
+		t.Fatalf("expected the write to require Global.Read and Global.Write, got:\n%s", got)
+	}
+}
+
+// Reading demands Read alone; a `const` is not a global and stays pure. The two
+// members are what make the family worth having over a single "touches a global"
+// bit -- a reader and a writer are different obligations.
+func TestGlobalReadDemandsReadOnlyAndConstStaysPure(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_read_only.elisa", `
+const LIMIT: i32 = 10
+global mutable hot: i32 = 0
+
+def peek() -> i32:
+	return hot
+
+def scale(width: i32) -> i32:
+	return width * LIMIT
+
+def main() -> i64:
+	return 1 if peek() != 0
+	return 2 if scale(2) != 20
+	return 0
+`, AnalyzeOptions{EnforceGlobalPermissions: true})
+	all := allDiagnostics(result)
+	if !strings.Contains(all, `call to "peek" requires can[Global] and has no explicit local effect grant; add can Global.Read`) {
+		t.Fatalf("expected a read to require Global.Read alone, got:\n%s", all)
+	}
+	if strings.Contains(all, `call to "scale"`) {
+		t.Fatalf("reading a const is pure and must carry no Global effect, got:\n%s", all)
+	}
+}
+
+// The member-brace sugar is the ergonomic half: `Global{Read, Write}` is exactly
+// `Global.Read, Global.Write`, and a surrounding grant written that way silences
+// the requirement.
+func TestGlobalBraceSugarGrantsBothMembers(t *testing.T) {
+	result := analyzePermissionGrantTestSourceAllowingErrorsWithOptions(t, "globals_brace_grant.elisa", `
+global mutable hot: i32 = 0
+
+def bump() -> i32:
+	hot <- hot + 1
+	return hot
+
+def main() -> i64:
+	can Global{Read, Write}:
+		return 1 if bump() != 1
+	return 0
+`, AnalyzeOptions{EnforceGlobalPermissions: true})
+	if got := allDiagnostics(result); strings.Contains(got, "can[Global]") {
+		t.Fatalf("Global{Read, Write} must grant both members, got:\n%s", got)
+	}
+}

@@ -477,6 +477,7 @@ type Analyzer struct {
 	// address-compare footgun and must not be flagged by the C-string comparison lint.
 	inCompileTimeQueryPredicate bool
 	enforceUnsafePermissions    bool
+	enforceGlobalPermissions    bool
 	enforceProgressSafety       bool
 	enforceStrictConcurrency    bool
 	enforcePerfLints            bool
@@ -748,6 +749,16 @@ type poolScopeState struct {
 
 type AnalyzeOptions struct {
 	EnforceUnsafePermissions bool
+	// EnforceGlobalPermissions makes the Global family a REQUIREMENT rather than a
+	// declaration-only annotation (`-Wglobals`, implied by `-Wstrict`). Reading a
+	// `global` already infers Global.Read and writing one infers Global.Write at
+	// every access; without this the inferred ref is dropped unless the function
+	// happens to declare it, so only hand-written rows are ever checked. With it on
+	// they propagate to callers like Memory.Allocate, and a function's `can` row
+	// states whether it touches process-wide state. Reading a `const` is pure and
+	// carries no effect either way. Off by default: it is correct for new code and a
+	// large diff for existing code.
+	EnforceGlobalPermissions bool
 	EnforceProgressSafety    bool
 	// EnforceStrictConcurrency promotes legacy raw-concurrency migration diagnostics
 	// from deprecations to hard errors while the proof-carrying surface matures.
@@ -915,6 +926,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		privateTypeNames:                  map[string]bool{},
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
+		enforceGlobalPermissions:          options.EnforceGlobalPermissions,
 		enforceProgressSafety:             options.EnforceProgressSafety,
 		enforceStrictConcurrency:          options.EnforceStrictConcurrency,
 		enforcePerfLints:                  options.EnforcePerfLints,

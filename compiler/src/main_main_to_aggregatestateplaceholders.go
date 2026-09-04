@@ -241,6 +241,7 @@ type cliOptions struct {
 	optLevel          backend.OptimizationLevel
 	hasOptLevel       bool
 	strictPolicy      bool
+	globalsStrict     bool
 	perfStrict        bool
 	proofStrict       bool
 	warnUnused        bool
@@ -368,6 +369,17 @@ func parseArgs(args []string) (cliOptions, error) {
 			// Graduated strictness (docs/09): promote legacy raw-concurrency migration
 			// diagnostics to hard errors for strict-mode code.
 			options.concurrencyStrict = true
+		case arg == "-Wglobals":
+			// Global state as a first-class effect: reading a `global` requires
+			// can[Global.Read], writing one requires can[Global.Write], and both
+			// propagate to callers exactly as Memory.Allocate does. The refs are
+			// already inferred at every access; without this dial an INFERRED one is
+			// dropped rather than demanded, so only a hand-declared `can[Global...]`
+			// row is ever enforced. Reading a `const` stays pure — it is not a
+			// `global` and carries no effect. Off by default: turning it on names
+			// every function that touches process-wide state, which is the point and
+			// is also a large diff for an existing codebase.
+			options.globalsStrict = true
 		case arg == "-Wprogress":
 			// docs/102: activate the (already-built but dormant) progress-safety obligation
 			// checker on its own dial — every `while` loop / recursive cycle must show progress
@@ -405,6 +417,7 @@ func parseArgs(args []string) (cliOptions, error) {
 		case arg == "-Wstrict":
 			// Unified strictness: turn on the shipped safety/performance proof levers together.
 			options.strictPolicy = true
+			options.globalsStrict = true
 			options.perfStrict = true
 			options.concurrencyStrict = true
 			options.progressStrict = true
