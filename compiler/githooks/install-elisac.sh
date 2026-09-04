@@ -1,13 +1,19 @@
 #!/bin/sh
-# Rebuild + install the elisac compiler so the canonical binary
-# (~/.elisac/elisac) never lags the source tree. Invoked by the
-# post-commit / post-merge / post-checkout hooks in this directory.
-# Incremental builds are ~1-2s; a cold build is ~10s.
+# Rebuild + install the Go compiler as ~/.elisac/elisac-stage0 so the canonical
+# binary never lags the source tree. Invoked by the post-commit / post-merge /
+# post-checkout hooks in this directory. Incremental builds are ~1-2s; a cold
+# build is ~10s.
+#
+# Named by STAGE: the self-hosted compiler installs beside it as elisac-stage1
+# (Elisa-compiler scripts/install_stage1.sh), and the explicit names say which
+# one a command line is using. `elisac` is kept as a symlink to stage0 for the
+# scripts that still default to the old name.
 COMPILER_DIR="$(git rev-parse --show-toplevel)/compiler"
 [ -d "$COMPILER_DIR" ] || exit 0
 mkdir -p "${HOME}/.elisac"
-if go build -C "$COMPILER_DIR" -o "${HOME}/.elisac/elisac" ./src 2>/tmp/elisac-autoinstall.log; then
-    echo "[hook] elisac reinstalled -> ${HOME}/.elisac/elisac"
+if go build -C "$COMPILER_DIR" -o "${HOME}/.elisac/elisac-stage0" ./src 2>/tmp/elisac-autoinstall.log; then
+    ln -sfn elisac-stage0 "${HOME}/.elisac/elisac"
+    echo "[hook] elisac-stage0 reinstalled -> ${HOME}/.elisac/elisac-stage0 (elisac -> elisac-stage0)"
 else
     echo "[hook] elisac rebuild FAILED (binary left as-is); see /tmp/elisac-autoinstall.log" >&2
 fi
