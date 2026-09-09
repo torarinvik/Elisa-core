@@ -1,0 +1,12 @@
+linear typestate Ticket:
+	id: i64
+	states: Fresh, Used
+	terminal: Used
+	transition redeem: Fresh -> Used
+
+def make() -> Ticket[Fresh]:
+	return Ticket.new(id: 1)
+
+def run() -> void:
+	t: mutable Ticket[Fresh] = make()
+	redeem(t)
