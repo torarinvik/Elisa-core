@@ -49,3 +49,4 @@ compiler/vr_probe.lowered.elisa
 
 # CI workflows live in a dot-dir; keep them tracked despite the .*/ rule above
 !.github/
+compiler/compiler/bin/elisac-local

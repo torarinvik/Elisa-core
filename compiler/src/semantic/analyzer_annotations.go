@@ -86,6 +86,24 @@ func externLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) 
 	return "", false
 }
 
+// functionLinkNameFromAnnotations returns the native symbol spelling for an
+// Elisa-defined function. Unlike externLinkNameFromAnnotations, this only
+// accepts @link_name: @intrinsic is meaningful for native declarations, not
+// for a function body that Elisa emits itself.
+func functionLinkNameFromAnnotations(annotations []ast.Annotation) (string, bool) {
+	for _, annotation := range annotations {
+		if annotation.Name != "link_name" || len(annotation.Args) != 1 {
+			continue
+		}
+		linkName := strings.TrimSpace(annotation.Args[0])
+		if linkName == "" {
+			continue
+		}
+		return linkName, true
+	}
+	return "", false
+}
+
 func normalizeExternCallConvAnnotationArg(value string) (string, bool) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "c", "cdecl", "default":
@@ -753,4 +771,3 @@ func (a *Analyzer) applyExternBorrowsReturnFieldPayload(fn *ast.ExternFuncDecl, 
 	fnType.ReturnProvenanceKnown = true
 	fnType.ReturnBorrowedOwnerRefsKnown = true
 }
-

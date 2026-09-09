@@ -396,6 +396,13 @@ func (a *Analyzer) validateFunctionAnnotation(annotation ast.Annotation, fn *ast
 	if annotation.Name == "skip" {
 		return true
 	}
+	if annotation.Name == "link_name" {
+		if len(annotation.Args) != 1 || strings.TrimSpace(annotation.Args[0]) == "" {
+			a.errorf(annotation.Position, "@link_name on function %q expects exactly one non-empty symbol name", fn.Name)
+			return false
+		}
+		return true
+	}
 	if annotation.Name == "internal" {
 		if len(annotation.Args) != 0 {
 			a.errorf(annotation.Position, "@internal on function %q does not take arguments", fn.Name)
@@ -923,7 +930,7 @@ func annotationsHave(annotations []ast.Annotation, name string) bool {
 
 func isSupportedFunctionAnnotation(name string) bool {
 	switch name {
-	case "test", "bench", "property", "differential", "lockstep", "fixture", "skip", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock":
+	case "test", "bench", "property", "differential", "lockstep", "fixture", "skip", "inline", "fast_math", "norecurse", "hot", "cold", "callconv", "guard_nonnull", "guard_variant", "internal", "main_thread", "init", "async_entry", "segment_agnostic", "segment_establishing", "segment_transition", "reentrant_safe", "deprecated", "noalloc", "inbounds", "nolock", "link_name":
 		return true
 	case "boundary_pointer_args":
 		return true
