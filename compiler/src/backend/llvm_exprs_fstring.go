@@ -59,7 +59,7 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 			if err != nil {
 				return nil, nil, true, err
 			}
-			parts = append(parts, fstrPart{ptr: value, len: C.LLVMConstInt(usizeLLVM, C.uint64_t(len(lit.Value)), 0)})
+			parts = append(parts, fstrPart{ptr: value, len: C.LLVMConstInt(usizeLLVM, C.ulonglong(len(lit.Value)), 0)})
 			continue
 		}
 		argType := s.exprType(arg)

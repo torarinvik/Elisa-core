@@ -14,11 +14,11 @@ import (
 // types of the exported function against ours. clang is the oracle; no execution
 // is needed, so x86-64 and wasm32 are checked on any host.
 var cAbiOracleShapes = []struct {
-	name   string
-	elisa  []string // field: type
-	c      string   // C struct body
-	ret    string   // elisa scalar return type of the taker
-	cret   string
+	name  string
+	elisa []string // field: type
+	c     string   // C struct body
+	ret   string   // elisa scalar return type of the taker
+	cret  string
 }{
 	{"C1", []string{"a: i8"}, "signed char a;", "i64", "long long"},
 	{"C3", []string{"a: i8", "b: i8", "c: i8"}, "signed char a, b, c;", "i64", "long long"},

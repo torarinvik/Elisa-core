@@ -16,7 +16,6 @@ import (
 	"elisacore/src/semantic"
 )
 
-
 func (g *llvmGenerator) emitExportedGlobal(exported *semantic.ExportedGlobal) error {
 	if exported == nil {
 		return nil
@@ -220,9 +219,6 @@ func (g *llvmGenerator) ensureExportFunctionDeclared(name string, fnType C.LLVMT
 	return value, nil
 }
 
-
-
-
 // isSameNameExport reports whether an exported function's public name is its
 // implementation's own name (`export fn foo(...) = foo`).
 func (g *llvmGenerator) isSameNameExport(exported *semantic.ExportedFunc) bool {
@@ -290,7 +286,7 @@ func (g *llvmGenerator) sameNameExportImplSymbol(name string) string {
 		return ""
 	}
 	for _, exported := range g.result.ExportedFuncs {
-			if g.isSameNameExport(exported) && exported.TargetName == name {
+		if g.isSameNameExport(exported) && exported.TargetName == name {
 			if g.sameNameExportNeedsWrapper(exported) {
 				return name + ".impl"
 			}
