@@ -957,6 +957,7 @@ def arena_dict_reserve[K, T](a: mutable Arena&, m: mutable dict[K, T]&, min_capa
                 arena_dict_place_fresh(rehash, old_items[i].key, old_items[i].value) if old_items[i].state == 1
 
         m.items as & <- rehash.items
+        collection_stack_profile_release(owner, live_table)
         m.capacity <- rehash.capacity
         m.count <- rehash.count
         m.used <- rehash.used
@@ -1246,6 +1247,7 @@ def arena_set_reserve[T](a: mutable Arena&, s: mutable set[T]&, min_capacity: us
                 arena_set_place_fresh(rehash, old_items[i].key) if old_items[i].state == 1
 
         s.items as & <- rehash.items
+        collection_stack_profile_release(owner, live_table)
         s.capacity <- rehash.capacity
         s.count <- rehash.count
         s.used <- rehash.used

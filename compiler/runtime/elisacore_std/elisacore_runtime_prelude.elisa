@@ -3,6 +3,7 @@
 # Split prelude: shared declarations, caches, builders
 # ============================================================
 
+include "./profiler_hooks.elisa"
 include "./test.elisa"
 include "./stores.elisa"
 

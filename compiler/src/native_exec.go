@@ -266,7 +266,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	timing.ObjectWrite = time.Since(objectStart)
 	runtimeObjectPath := ""
 	debugRefereeObjectPath := ""
-	if !resultDefinesDefaultElisaCoreRuntime(result) {
+	profilerFallbackObjectPath := ""
+	selfProvidesRuntime := resultDefinesDefaultElisaCoreRuntime(result)
+	if !selfProvidesRuntime {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
 		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
 			cleanup()
@@ -281,6 +283,17 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		// guard skips programs that already define the referee, avoiding duplicate symbols.
 		debugRefereeObjectPath = filepath.Join(tempDir, "elisacore_debug_referee.o")
 		if err := writeDebugRefereeObject(debugRefereeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
+	}
+	if selfProvidesRuntime {
+		// A source that includes the runtime supplies arena_profile_* itself and therefore
+		// intentionally skips the auto-linked runtime object above. It still needs the
+		// optional hook fallback; otherwise macOS's dynamic lookup leaves the negotiation
+		// function at NULL and the first arena allocation jumps through address zero.
+		profilerFallbackObjectPath = filepath.Join(tempDir, "elisacore_profiler_fallback.o")
+		if err := writeElisaCoreProfilerFallbackObject(clangPath, profilerFallbackObjectPath, targetTriple, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
 		}
@@ -362,6 +375,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	if debugRefereeObjectPath != "" {
 		linkArgs = append(linkArgs, debugRefereeObjectPath)
+	}
+	if profilerFallbackObjectPath != "" {
+		linkArgs = append(linkArgs, profilerFallbackObjectPath)
 	}
 	linkArgs = append(linkArgs, foreignFiles...)
 	linkArgs = append(linkArgs, linkFlags...)
@@ -1450,6 +1466,102 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 	return nil
 }
 
+const defaultElisaCoreProfilerFallbackSource = `#include <stddef.h>
+#include <stdint.h>
+
+#if defined(__GNUC__) || defined(__clang__)
+#define ELISA_WEAK __attribute__((weak))
+#else
+#define ELISA_WEAK
+#endif
+
+/* The profiler ABI is optional.  Keep ordinary runtime objects self-contained,
+   while allowing a final executable to replace these weak hooks with a real
+   collector. */
+ELISA_WEAK uint32_t elisa_profile_allocation_negotiate(uint32_t version) {
+    (void)version;
+    return 0;
+}
+
+ELISA_WEAK uint32_t elisa_profile_region_layout_negotiate(uint32_t version) {
+    (void)version;
+    return 0;
+}
+
+ELISA_WEAK void elisa_profile_region_layout_v1(
+    uintptr_t arena,
+    size_t region,
+    uintptr_t header,
+    uintptr_t data,
+    size_t capacity
+) {
+    (void)arena;
+    (void)region;
+    (void)header;
+    (void)data;
+    (void)capacity;
+}
+
+ELISA_WEAK void elisa_profile_allocation_event_v1(
+    uint32_t kind,
+    uintptr_t address,
+    size_t size,
+    uintptr_t old_address,
+    size_t old_size,
+    uintptr_t arena,
+    size_t region
+) {
+    (void)kind;
+    (void)address;
+    (void)size;
+    (void)old_address;
+    (void)old_size;
+    (void)arena;
+    (void)region;
+}
+`
+
+// writeElisaCoreProfilerFallbackObject makes the optional profiler ABI available to a native
+// link. The weak definitions keep ordinary executables self-contained while allowing a final
+// link to replace them with a real collector.
+func writeElisaCoreProfilerFallbackObject(clangPath string, outputPath string, targetTriple string, stderr io.Writer) error {
+	sourcePath := outputPath + ".profiler.c"
+	defer os.Remove(sourcePath)
+	if err := os.WriteFile(sourcePath, []byte(defaultElisaCoreProfilerFallbackSource), 0o644); err != nil {
+		return fmt.Errorf("failed to write default profiler fallback: %w", err)
+	}
+	compileArgs := append([]string{}, targetClangArgs(targetTriple)...)
+	compileArgs = append(compileArgs, "-c", sourcePath, "-o", outputPath)
+	compile := exec.Command(clangPath, compileArgs...)
+	compile.Stdout = stderr
+	compile.Stderr = stderr
+	if err := compile.Run(); err != nil {
+		return fmt.Errorf("failed to compile default profiler fallback: %w", err)
+	}
+	return nil
+}
+
+// addDefaultElisaCoreProfilerFallback makes the auto-linked runtime object safe for
+// ordinary programs.  The runtime deliberately exposes the profiler ABI as extern hooks so
+// a final link can provide a collector; without these weak definitions, a dynamic-lookup link
+// succeeds on macOS and then calls address zero on the first arena allocation.
+func addDefaultElisaCoreProfilerFallback(clangPath string, runtimeObjectPath string, outputPath string, targetTriple string, stderr io.Writer) error {
+	hooksObjectPath := outputPath + ".profiler.o"
+	defer os.Remove(hooksObjectPath)
+	if err := writeElisaCoreProfilerFallbackObject(clangPath, hooksObjectPath, targetTriple, stderr); err != nil {
+		return err
+	}
+	mergeArgs := append([]string{}, targetClangArgs(targetTriple)...)
+	mergeArgs = append(mergeArgs, "-r", "-Wl,-w", "-o", outputPath, runtimeObjectPath, hooksObjectPath)
+	merge := exec.Command(clangPath, mergeArgs...)
+	merge.Stdout = stderr
+	merge.Stderr = stderr
+	if err := merge.Run(); err != nil {
+		return fmt.Errorf("failed to link default profiler fallback: %w", err)
+	}
+	return nil
+}
+
 func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend.PackedLoweringProfile, targetTriple string, stderr io.Writer) error {
 	runtimePath, err := defaultElisaCoreRuntimeSupportPath()
 	if err != nil {
@@ -1485,8 +1597,14 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 		}
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
-		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, false, stderr); err == nil {
-			return nil
+		runtimeObjectPath := outputPath + ".runtime"
+		defer os.Remove(runtimeObjectPath)
+		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, runtimeObjectPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, false, stderr); err == nil {
+			if err := addDefaultElisaCoreProfilerFallback(clangPath, runtimeObjectPath, outputPath, targetTriple, stderr); err == nil {
+				return nil
+			} else {
+				return err
+			}
 		} else if strings.TrimSpace(targetTriple) != "" {
 			return err
 		}

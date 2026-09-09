@@ -267,7 +267,8 @@ def string_view_eq(view: sview, other: u8&?) -> int:
     return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view.len.usize()) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
-    0 return if lhs.len != rhs.len
+    if likely lhs.len != rhs.len:
+        return 0
 
     #1 return if lhs.len == 0
     #1 return if lhs.data == rhs.data

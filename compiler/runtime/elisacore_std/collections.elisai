@@ -173,6 +173,8 @@ extern collection_stack_table(r: heap Region&) -> mutable heap void&
 
 extern collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots: usize) -> mutable heap Region&
 
+extern collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void
+
 extern va_list
 
 extern va_copy(args: va_list) -> va_list
