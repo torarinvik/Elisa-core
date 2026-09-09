@@ -29,16 +29,24 @@ func TestIndexWatchdogTrapsInDebug(t *testing.T) {
 	}
 }
 
-// In release the trusted/unchecked index is exactly as before — zero watchdog
-// overhead.
-func TestIndexWatchdogAbsentInRelease(t *testing.T) {
-	result := parseAndAnalyzeBackendTest(t, "watchdog_trusted_release.elisa", watchdogTrustedIndexSrc)
+// In release the unproven index is checked exactly as in debug. This test used
+// to assert the OPPOSITE ("zero watchdog overhead in release"); that policy made
+// every optimized build memory-unsafe, and `trusted` discharges the permission,
+// not the runtime check. Only a proof elides the guard (see the Subsumed tests).
+func TestIndexWatchdogPresentInRelease(t *testing.T) {
+	// EXPORTED, or -O2 removes the unreferenced private function and the module has
+	// no body to inspect -- which is how the old "absent in release" assertion held
+	// without ever looking at a guard.
+	src := watchdogTrustedIndexSrc + "\nexport fn at_exported(xs: darray[i32]&, i: usize) -> i32 = at\n"
+	result := parseAndAnalyzeBackendTest(t, "watchdog_trusted_release.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel2)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	if strings.Contains(output, "wd.in_bounds") || strings.Contains(output, "wd.fail") {
-		t.Fatalf("expected no watchdog instrumentation in release, got:\n%s", output)
+	// The -O2 pipeline drops block names, so the surviving evidence is the trap call
+	// the guard's fail arm makes; a function with no check has nothing to trap on.
+	if !strings.Contains(output, "@llvm.trap") {
+		t.Fatalf("expected the watchdog bounds check (llvm.trap) in release too, got:\n%s", output)
 	}
 }
 
