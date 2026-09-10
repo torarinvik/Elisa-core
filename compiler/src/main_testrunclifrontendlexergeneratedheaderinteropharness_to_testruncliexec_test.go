@@ -46,6 +46,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -91,6 +92,7 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -200,6 +202,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -415,6 +418,7 @@ func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -460,6 +464,7 @@ func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}
@@ -505,6 +510,7 @@ func TestRunCLIExecutesDequePortSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
+	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
 	if runtime.GOOS == "darwin" {
 		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
 	}

@@ -140,7 +140,8 @@ def main() -> i64:
 		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
 	}
 	exePath := filepath.Join(fixtureDir, "neg")
-	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
+	linkArgs := appendProfilerFallbackSource(t, repoRoot, []string{objPath, "-o", exePath})
+	if out, err := exec.Command("clang", linkArgs...).CombinedOutput(); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
 	got := 0
@@ -240,7 +241,8 @@ def main() -> i64:
 		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
 	}
 	exePath := filepath.Join(fixtureDir, "op")
-	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
+	linkArgs := appendProfilerFallbackSource(t, repoRootFromMainTest(t), []string{objPath, "-o", exePath})
+	if out, err := exec.Command("clang", linkArgs...).CombinedOutput(); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
 	// All 5 operators correct -> each contributes a distinct bit -> 255.
@@ -335,7 +337,8 @@ def main() -> i64:
 		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
 	}
 	exePath := filepath.Join(fixtureDir, "canon")
-	if out, err := exec.Command("clang", objPath, "-o", exePath).CombinedOutput(); err != nil {
+	linkArgs := appendProfilerFallbackSource(t, repoRoot, []string{objPath, "-o", exePath})
+	if out, err := exec.Command("clang", linkArgs...).CombinedOutput(); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
 	got := 0

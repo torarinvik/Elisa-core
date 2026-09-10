@@ -163,6 +163,7 @@ func buildCachedNativeArtifacts(tb testing.TB, repoRoot string, spec nativeArtif
 		}
 		compileArgs = append(compileArgs, harnessPath)
 		compileArgs = append(compileArgs, spec.shimPaths...)
+		compileArgs = appendProfilerFallbackSource(tb, repoRoot, compileArgs)
 		compileArgs = append(compileArgs, buildArtifacts.object, "-o", buildArtifacts.executable)
 
 		compileCmd := exec.Command(clangPath, compileArgs...)
