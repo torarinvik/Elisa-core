@@ -1,3 +1,37 @@
+const ELISA_PROFILE_ALLOCATION_ALLOC: u32 = 1
+
+const ELISA_PROFILE_ALLOCATION_REALLOC_IN_PLACE: u32 = 2
+
+const ELISA_PROFILE_ALLOCATION_REALLOC_MOVE: u32 = 3
+
+const ELISA_PROFILE_ALLOCATION_RECLAIM: u32 = 4
+
+const ELISA_PROFILE_ALLOCATION_REGION_CREATE: u32 = 5
+
+const ELISA_PROFILE_ALLOCATION_REGION_RESET: u32 = 6
+
+const ELISA_PROFILE_ALLOCATION_REGION_TRIM: u32 = 7
+
+const ELISA_PROFILE_ALLOCATION_REGION_FREE: u32 = 8
+
+const ELISA_PROFILE_ALLOCATION_ARENA_ADOPT: u32 = 9
+
+const ELISA_PROFILE_ALLOCATION_REGION_REWIND: u32 = 10
+
+const ELISA_PROFILE_ALLOCATION_ABI_V1: u32 = 1
+
+const ELISA_PROFILE_REGION_LAYOUT_ABI_V1: u32 = 1
+
+extern elisa_profile_region_layout_negotiate(requested_version: u32) -> u32
+
+extern elisa_profile_region_layout_v1(arena: uintptr, region: usize, header: uintptr, data_base: uintptr, capacity_bytes: usize) -> void
+
+extern elisa_profile_allocation_negotiate(requested_version: u32) -> u32
+
+extern elisa_profile_allocation_event_v1(kind: u32, address: uintptr, size: usize, old_address: uintptr, old_size: usize, arena: uintptr, region: usize) -> void
+
+extern arena_profile_allocation_event(kind: u32, address: uintptr, size: usize, old_address: uintptr, old_size: usize, arena: uintptr, region: usize) -> void
+
 const ARENA_BACKEND_LIBC_MALLOC = 0
 
 const ARENA_BACKEND_LINUX_MMAP = 1
@@ -125,7 +159,15 @@ struct ArenaRegionCache:
 
 extern __elisa_region_cache: ArenaRegionCache
 
+struct ArenaFreeHint:
+    owner: mutable uintptr
+    region: mutable heap Region&?
+
+extern __elisa_free_hint: ArenaFreeHint
+
 const REGION_CACHE_MAX_SLOTS: usize = 131072
+
+const REGION_CACHE_MAX_ENTRIES: usize = 128
 
 extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&
 
