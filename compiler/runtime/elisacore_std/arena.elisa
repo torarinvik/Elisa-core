@@ -1317,6 +1317,24 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
             claimed.owner_next <- null
         return claimed
 
+# Rehash callers invoke this only after the last read of the old table. The stack
+# remains pooled for reuse, but the profiler must see the logical retirement so
+# allocation pressure and retained table capacity are not understated.
+def collection_stack_profile_release(a: mutable Arena&, table: void&?) -> void:
+    return if table == null
+    old_table: void& = table
+    old_backing: mutable heap Region&? = collection_stack_of_table(a, old_table)
+    if old_backing != null:
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_RECLAIM,
+            0.uintptr(),
+            0.usize(),
+            old_table.cast[uintptr],
+            old_backing.count * size_of(uintptr),
+            a.cast[uintptr],
+            old_backing.global_index
+        )
+
 # ------------------------------------------------------------
 # Optional stdio formatting stubs
 # ------------------------------------------------------------
