@@ -44,6 +44,7 @@ import "C"
 
 import (
 	"fmt"
+	"reflect"
 	"unsafe"
 
 	"elisacore/src/ast"
@@ -64,12 +65,13 @@ func permissionRefsGrantScalar(refs []ast.PermissionRef) bool {
 
 // userLoopVectorEligible reports whether a USER-WRITTEN loop body is the clean element-wise shape
 // the vectorizer should handle: straight-line (no branches, nested loops, breaks, or returns),
-// call-free, and containing at least one indexed store (`dst[i] <- value`). Loops outside this
-// shape are NOT tagged — a call, branch, or I/O in the body already explains scalar execution, so
-// demanding `can Scalar` there would be noise, and accumulator reductions (`s <- s + x`, an
-// assignment to a bare name) are excluded because a strict-FP reduction legitimately cannot
-// vectorize without reassociation (the fold-comprehension form is the vectorizable spelling).
-func userLoopVectorEligible(body []ast.Stmt) bool {
+// call-free, containing at least one indexed store (`dst[i] <- value`), and with every indexed
+// access already covered by a semantic bounds proof. The last condition is essential: a dynamic
+// bounds trap inside the loop is an early exit that LLVM is not required to vectorize, so marking
+// such a loop would turn a necessary safety check into a false-positive performance obligation.
+// Loops outside this shape are NOT tagged — a call, branch, I/O, or accumulator dependency already
+// explains scalar execution, and demanding `can Scalar` there would be noise.
+func (s *functionState) userLoopVectorEligible(body []ast.Stmt) bool {
 	hasIndexedStore := false
 	for _, stmt := range body {
 		switch n := stmt.(type) {
@@ -96,7 +98,64 @@ func userLoopVectorEligible(body []ast.Stmt) bool {
 			return false
 		}
 	}
-	return hasIndexedStore
+	return hasIndexedStore && s.allIndexedAccessesProven(body)
+}
+
+// allIndexedAccessesProven is deliberately conservative. It reflect-walks only the AST subtree of
+// a loop body and rejects the whole marker if it encounters an IndexExpr that is not in the
+// analyzer's proof map. A missing map entry keeps the runtime guard, so treating it as ineligible
+// preserves safety and only gives up a diagnostic/optimization opportunity.
+func (s *functionState) allIndexedAccessesProven(body []ast.Stmt) bool {
+	if s == nil || s.g == nil || s.g.result == nil {
+		return false
+	}
+	seen := map[uintptr]bool{}
+	var walk func(reflect.Value) bool
+	walk = func(value reflect.Value) bool {
+		if !value.IsValid() {
+			return true
+		}
+		switch value.Kind() {
+		case reflect.Interface:
+			if value.IsNil() {
+				return true
+			}
+			return walk(value.Elem())
+		case reflect.Pointer:
+			if value.IsNil() {
+				return true
+			}
+			if ptr := value.Pointer(); ptr != 0 {
+				if seen[ptr] {
+					return true
+				}
+				seen[ptr] = true
+			}
+			if index, ok := value.Interface().(*ast.IndexExpr); ok {
+				return s.indexBoundsProven(index)
+			}
+			return walk(value.Elem())
+		case reflect.Struct:
+			for i := 0; i < value.NumField(); i++ {
+				if !walk(value.Field(i)) {
+					return false
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < value.Len(); i++ {
+				if !walk(value.Index(i)) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	for _, stmt := range body {
+		if !walk(reflect.ValueOf(stmt)) {
+			return false
+		}
+	}
+	return true
 }
 
 // tagAutovecExpectedLoop marks a loop's latch branch as expected-to-vectorize (compiler-synthesized

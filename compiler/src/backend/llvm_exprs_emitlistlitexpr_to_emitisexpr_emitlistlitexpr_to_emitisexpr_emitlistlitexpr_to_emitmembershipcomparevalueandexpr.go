@@ -447,6 +447,12 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		}
 		return e
 	}
+	markSynthesizedIndexProof := func(index *ast.IndexExpr) *ast.IndexExpr {
+		if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
+			s.g.result.IndexBoundsProven[index] = true
+		}
+		return index
+	}
 
 	resultDecl := &ast.VarDeclStmt{Position: pos, Name: resultName, Mutable: true, Value: resultInit}
 	resizeCall := &ast.CallExpr{
@@ -455,8 +461,10 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 		Args:     []ast.Expr{srcCount()},
 	}
 
-	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: registerElemType(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent})}
-	store := &ast.AssignStmt{Position: pos, Target: registerElemType(&ast.IndexExpr{Position: pos, Object: resultIdent, Index: idxIdent}), Value: expr.Value}
+	sourceIndex := markSynthesizedIndexProof(&ast.IndexExpr{Position: pos, Object: srcIdent, Index: idxIdent})
+	resultIndex := markSynthesizedIndexProof(&ast.IndexExpr{Position: pos, Object: resultIdent, Index: idxIdent})
+	elemDecl := &ast.VarDeclStmt{Position: pos, Name: bindName, Value: registerElemType(sourceIndex)}
+	store := &ast.AssignStmt{Position: pos, Target: registerElemType(resultIndex), Value: expr.Value}
 	body := []ast.Stmt{ast.Stmt(elemDecl)}
 	body = append(body, expr.Bindings...)
 	body = append(body, ast.Stmt(store))
@@ -1156,7 +1164,13 @@ func (s *functionState) indexedStoreRangeComprehensionBlock(expr *ast.ListCompre
 	}
 
 	storeIndex := reg(&ast.BinaryExpr{Position: pos, Op: lexer.TOKEN_MINUS, Left: reg(&ast.Ident{Position: pos, Name: loopName}, rangeType), Right: start}, rangeType)
-	store := &ast.AssignStmt{Position: pos, Target: &ast.IndexExpr{Position: pos, Object: resultIdent, Index: storeIndex}, Value: expr.Value}
+	resultIndex := &ast.IndexExpr{Position: pos, Object: resultIdent, Index: storeIndex}
+	// For every executed range iteration, end > start and 0 <= loopName-start < end-start;
+	// the clamped resize therefore establishes a real bounds proof for this synthesized store.
+	if s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven != nil {
+		s.g.result.IndexBoundsProven[resultIndex] = true
+	}
+	store := &ast.AssignStmt{Position: pos, Target: resultIndex, Value: expr.Value}
 	body := append([]ast.Stmt{}, expr.Bindings...)
 	body = append(body, ast.Stmt(store))
 

@@ -514,7 +514,7 @@ func (s *functionState) emitIterForStmt(stmt *ast.IterForStmt) error {
 		_, isColumnScan := iterSourceExpr.(*ast.EnumColumnExpr)
 		if stmt.PatternFilter == nil && stmt.WhereFilter == nil && stmt.Filter == nil && !stmt.Reverse &&
 			len(transforms) == 0 && !isColumnScan && !iterLoopIsDictSource(iterSourceType) &&
-			userLoopVectorEligible(stmt.Body) {
+			s.userLoopVectorEligible(stmt.Body) {
 			s.tagAutovecExpectedLoop(backedge, stmt.Position, "loop")
 		}
 	}

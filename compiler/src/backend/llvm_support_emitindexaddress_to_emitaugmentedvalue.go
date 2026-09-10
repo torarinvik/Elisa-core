@@ -60,7 +60,22 @@ import (
 // is only an optimization hint — a wrong inbounds flag would produce undefined behaviour,
 // so we only set it when the proof is complete.
 func (s *functionState) indexBoundsProven(expr *ast.IndexExpr) bool {
-	return expr != nil && s.g != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr]
+	if expr == nil || s == nil || s.g == nil || s.g.result == nil {
+		return false
+	}
+	if s.g.result.IndexBoundsProven[expr] {
+		return true
+	}
+	// Static lowering can rebuild a user statement while preserving its source position. The
+	// semantic proof map is pointer-keyed because that is exact for the original tree, but a
+	// rebuilt node must not lose a proof and regain a redundant watchdog. Match only an exact
+	// source span; a shared line or column is insufficient because two accesses can be adjacent.
+	for provenExpr, proven := range s.g.result.IndexBoundsProven {
+		if proven && provenExpr != nil && provenExpr.Position == expr.Position {
+			return true
+		}
+	}
+	return false
 }
 
 // emitIndexAddress computes the address of an indexed element. userFacing marks
