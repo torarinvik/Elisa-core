@@ -2,6 +2,8 @@
 # Arena allocator - Elisa core runtime dialect
 # ============================================================
 
+include "./profiler_hooks.elisa"
+
 const ARENA_BACKEND_LIBC_MALLOC = 0
 const ARENA_BACKEND_LINUX_MMAP = 1
 const ARENA_BACKEND_WIN32_VIRTUALALLOC = 2
@@ -598,7 +600,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
 
 
 @internal
-def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable heap void&?:
+def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&?:
     trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
         cache: ArenaRegionCache& = &__elisa_region_cache
         return null if cache.reclaimed_spans == 0
@@ -608,12 +610,22 @@ def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize) -> mutable
         # prevents bump allocation from overwriting live adopted data, while this free
         # list contains only ranges whose old darray backing has already been replaced.
         if arena_take_free_block(cursor, need_slots) is reclaimed:
+            arena_profile_region_layout(a, cursor)
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_ALLOC,
+                reclaimed.cast[uintptr],
+                size_bytes,
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                cursor.global_index
+            )
             return reclaimed
         cursor <- cursor.next
     return null
 
 @internal
-def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize):
+def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
     header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
     return if old_slots < header_slots
 
@@ -632,7 +644,16 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                 trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
                     reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
                     reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
-                    return
+                arena_profile_allocation_event(
+                    ELISA_PROFILE_ALLOCATION_RECLAIM,
+                    0.uintptr(),
+                    0.usize(),
+                    oldptr.cast[uintptr],
+                    old_size,
+                    a.cast[uintptr],
+                    cursor.global_index
+                )
+                return
         cursor <- cursor.next
 
 def free_region(r: heap Region&):
@@ -702,7 +723,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
         size: mutable usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
         size <- 1 if size == 0
 
-        if arena_take_free_block_chain(a, size) is reclaimed:
+        if arena_take_free_block_chain(a, size, size_bytes) is reclaimed:
             return reclaimed
 
         # RESERVE_COMMIT / FIXED: one contiguous block, never chained. The block is created
@@ -721,14 +742,33 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
                 a.end as & <- new_region_backend(cap, a.strategy)
                 a.begin <- a.end
                 a.end_index <- 0
+                arena_profile_allocation_event(
+                    ELISA_PROFILE_ALLOCATION_REGION_CREATE,
+                    a.end.cast[uintptr],
+                    a.end.capacity * size_of(uintptr),
+                    0.uintptr(),
+                    0.usize(),
+                    a.cast[uintptr],
+                    a.end_index
+                )
             assert a.end != null
             panic("region overflow: reservation exhausted (reserve_commit/fixed)") if a.end.count + size > a.end.capacity
             data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
+            arena_profile_region_layout(a, a.end) if a.end.count == 0
             offset_bytes: usize = a.end.count * size_of(uintptr)
             result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
             a.end.count <- a.end.count + size
             # Windows: page-in the bytes this allocation now spans (no-op elsewhere).
             arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_ALLOC,
+                result.cast[uintptr],
+                size_bytes,
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                a.end_index
+            )
             return result
 
         if a.end == null:
@@ -741,6 +781,15 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             a.begin <- a.end
             a.end_index <- 0
             a.end.global_index <- 0
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_REGION_CREATE,
+                a.end.cast[uintptr],
+                a.end.capacity * size_of(uintptr),
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                a.end_index
+            )
 
         assert a.end != null
 
@@ -759,11 +808,30 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             a.end <- a.end.next
             a.end_index <- a.end_index + 1
             a.end.global_index <- a.end_index
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_REGION_CREATE,
+                a.end.cast[uintptr],
+                a.end.capacity * size_of(uintptr),
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                a.end_index
+            )
 
         data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
+        arena_profile_region_layout(a, a.end) if a.end.count == 0
         offset_bytes: usize = a.end.count * size_of(uintptr)
         result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
         a.end.count <- a.end.count + size
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_ALLOC,
+            result.cast[uintptr],
+            size_bytes,
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            a.end_index
+        )
         return result
 
 # Slot offset of an in-region allocation from the region's data base. All pointer->int
@@ -793,6 +861,7 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
 
         old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
         new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
+        growth_slots: usize = new_slots - old_slots
 
         # A darray grows by reallocating its most recent backing allocation in the
         # active arena. Reclaim that tail in place whenever the current block owns it;
@@ -801,8 +870,17 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         # retaining one dead backing allocation for every geometric growth step.
         if a.end != null and arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
             if new_slots <= a.end.capacity - a.end.count:
-                a.end.count <- a.end.count + (new_slots - old_slots)
+                a.end.count <- a.end.count + growth_slots
                 arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+                arena_profile_allocation_event(
+                    ELISA_PROFILE_ALLOCATION_REALLOC_IN_PLACE,
+                    oldptr.cast[uintptr],
+                    newsz,
+                    oldptr.cast[uintptr],
+                    oldsz,
+                    a.cast[uintptr],
+                    a.end_index
+                )
                 return arena_heap_void_from_mutable(oldptr)
 
         # RESERVE_COMMIT / FIXED grow in place: the base must never move (interior-pointer
@@ -832,7 +910,17 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
             _ = memcpy(arena_heap_void_from_mutable(newptr).cast[mutable void&], arena_u8_from_void(oldptr).cast[void&], oldsz)
 
-        arena_reclaim_allocation(a, oldptr, old_slots)
+        arena_reclaim_allocation(a, oldptr, old_slots, oldsz)
+
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REALLOC_MOVE,
+            newptr.cast[uintptr],
+            newsz,
+            oldptr.cast[uintptr],
+            oldsz,
+            a.cast[uintptr],
+            a.end_index
+        )
 
         return newptr
 
@@ -933,6 +1021,15 @@ def arena_reset(a: mutable Arena&):
 
     a.end <- a.begin
     a.end_index <- 0
+    arena_profile_allocation_event(
+        ELISA_PROFILE_ALLOCATION_REGION_RESET,
+        0.uintptr(),
+        0.usize(),
+        0.uintptr(),
+        0.usize(),
+        a.cast[uintptr],
+        a.end_index
+    )
 
 def arena_rewind(a: mutable Arena&, m: ArenaMark):
     if m.region == null:
@@ -961,6 +1058,15 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
 
     assert current != null
     a.end_index <- region_index
+    arena_profile_allocation_event(
+        ELISA_PROFILE_ALLOCATION_REGION_REWIND,
+        region.cast[uintptr],
+        m.count * size_of(uintptr),
+        0.uintptr(),
+        0.usize(),
+        a.cast[uintptr],
+        region_index
+    )
 
 def arena_free(a: mutable Arena&):
     can Memory.Release, Abort.Panic:
@@ -974,6 +1080,16 @@ def arena_free(a: mutable Arena&):
         a.begin as ! <- null
         a.end as ! <- null
         a.end_index <- 0
+
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_FREE,
+            0.uintptr(),
+            0.usize(),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            0.usize()
+        )
 
         trusted Unsafe.AssumeProgress:
             while r != null:
@@ -996,6 +1112,15 @@ def arena_trim(a: mutable Arena&):
                     free_region_backend(r0, a.strategy)
 
         a.end.next as ! <- null
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_REGION_TRIM,
+            0.uintptr(),
+            0.usize(),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            a.end_index
+        )
 
 # Splice an entire child region's block chain onto the parent (docs/67 adopt).
 # Zero-copy: the child's blocks (and the data they already hold) are appended to
@@ -1024,9 +1149,30 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
                 last <- last.next
         last.next as & <- child.begin if last != null
 
+    # Adopted blocks become part of the parent's region namespace. Refresh their
+    # indices before publishing the lifecycle event so profile records never alias
+    # a child-local index with an existing parent block.
+    adopted_index: mutable usize = 0
+    adopted_cursor: mutable heap Region&? = parent.begin
+    trusted Unsafe.AssumeProgress:
+        while adopted_cursor != null:
+            adopted_cursor.global_index <- adopted_index
+            arena_profile_region_layout(parent, adopted_cursor)
+            adopted_index <- adopted_index + 1
+            adopted_cursor <- adopted_cursor.next
+
     child.begin as ! <- null
     child.end as ! <- null
     child.end_index <- 0
+    arena_profile_allocation_event(
+        ELISA_PROFILE_ALLOCATION_ARENA_ADOPT,
+        0.uintptr(),
+        0.usize(),
+        child.cast[uintptr],
+        0.usize(),
+        parent.cast[uintptr],
+        parent.end_index
+    )
 
 # ------------------------------------------------------------
 # Collection stacks
@@ -1129,6 +1275,15 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
             fresh: mutable heap Region& = new_region_backend(capacity, a.strategy)
             fresh.owner_tag <- ARENA_OWNER_TAG_COLLECTION.uintptr()
             collection_stack_link(a, fresh)
+            arena_profile_allocation_event(
+                ELISA_PROFILE_ALLOCATION_REGION_CREATE,
+                fresh.cast[uintptr],
+                fresh.capacity * size_of(uintptr),
+                0.uintptr(),
+                0.usize(),
+                a.cast[uintptr],
+                fresh.global_index
+            )
             chosen <- fresh
 
         assert chosen != null
@@ -1136,6 +1291,16 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
         claimed.count <- needed_slots
         claimed.free_list <- null
         arena_region_ensure_committed(claimed, size_of(Region) + needed_slots * size_of(uintptr))
+        arena_profile_region_layout(a, claimed)
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_ALLOC,
+            collection_stack_table(claimed).cast[uintptr],
+            needed_slots * size_of(uintptr),
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            claimed.global_index
+        )
 
         # Ping-pong: the old live stack is the new spare. A spare too small for this table
         # is unpaired and pooled for a smaller one.

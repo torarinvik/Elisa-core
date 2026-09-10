@@ -120,6 +120,15 @@ func buildCArchive(result *semantic.Result, sourcePath string, outputPath string
 		objectPaths = append(objectPaths, runtimeObjectPath)
 		manifestObjects = append(manifestObjects, "elisacore_runtime.o")
 		runtimeIncluded = true
+	} else {
+		// A source-provided runtime still contains the optional profiler wrappers,
+		// so archives that own their runtime must carry the weak callbacks too.
+		profileFallbackPath := filepath.Join(tempDir, "elisacore_profile_hooks.o")
+		if err := writeProfilerFallbackObject(profileFallbackPath, targetTriple, stderr); err != nil {
+			return err
+		}
+		objectPaths = append(objectPaths, profileFallbackPath)
+		manifestObjects = append(manifestObjects, "elisacore_profile_hooks.o")
 	}
 
 	arPath, err := exec.LookPath("ar")
@@ -265,6 +274,7 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	result.EASMModules = easmModules
 	timing.ObjectWrite = time.Since(objectStart)
 	runtimeObjectPath := ""
+	profilerFallbackObjectPath := ""
 	debugRefereeObjectPath := ""
 	if !resultDefinesDefaultElisaCoreRuntime(result) {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
@@ -272,17 +282,28 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 			cleanup()
 			return "", func() {}, timing, err
 		}
-	} else if !resultDefinesDebugReferee(result) {
-		// The program self-provides the core runtime, so the default runtime object -- which
-		// also carries debug_referee.elisa -- is skipped above. When the program still
-		// references the debug referee (e.g. via debug_referee.elisai's externs) without
-		// defining it, link a standalone debug_referee object so its trace globals/functions
-		// resolve instead of failing at load ("symbol not found in flat namespace"). The
-		// guard skips programs that already define the referee, avoiding duplicate symbols.
-		debugRefereeObjectPath = filepath.Join(tempDir, "elisacore_debug_referee.o")
-		if err := writeDebugRefereeObject(debugRefereeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+	} else {
+		// A source-provided runtime still includes the optional profiler wrappers.
+		// Supply the weak callbacks at the native executable link boundary as well;
+		// otherwise an uninstrumented program would call an unresolved optional hook
+		// through a null address. Strong host collectors can override these symbols.
+		profilerFallbackObjectPath = filepath.Join(tempDir, "elisacore_profile_hooks.o")
+		if err := writeProfilerFallbackObject(profilerFallbackObjectPath, targetTriple, stderr); err != nil {
 			cleanup()
 			return "", func() {}, timing, err
+		}
+		if !resultDefinesDebugReferee(result) {
+			// The program self-provides the core runtime, so the default runtime object -- which
+			// also carries debug_referee.elisa -- is skipped above. When the program still
+			// references the debug referee (e.g. via debug_referee.elisai's externs) without
+			// defining it, link a standalone debug_referee object so its trace globals/functions
+			// resolve instead of failing at load ("symbol not found in flat namespace"). The
+			// guard skips programs that already define the referee, avoiding duplicate symbols.
+			debugRefereeObjectPath = filepath.Join(tempDir, "elisacore_debug_referee.o")
+			if err := writeDebugRefereeObject(debugRefereeObjectPath, packedProfile, targetTriple, stderr); err != nil {
+				cleanup()
+				return "", func() {}, timing, err
+			}
 		}
 	}
 	headerGenStart := time.Now()
@@ -362,6 +383,9 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	}
 	if debugRefereeObjectPath != "" {
 		linkArgs = append(linkArgs, debugRefereeObjectPath)
+	}
+	if profilerFallbackObjectPath != "" {
+		linkArgs = append(linkArgs, profilerFallbackObjectPath)
 	}
 	linkArgs = append(linkArgs, foreignFiles...)
 	linkArgs = append(linkArgs, linkFlags...)
@@ -1416,6 +1440,86 @@ func defaultElisaCoreRuntimeSupportPath() (string, error) {
 	return path, nil
 }
 
+func profilerFallbackSourcePath() (string, error) {
+	repoRoot, err := compilerRepoRootForNativeExec()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(repoRoot, "compiler", "runtime", "profile_hooks.c")
+	if _, err := os.Stat(path); err != nil {
+		return "", fmt.Errorf("failed to locate profiler fallback source %s: %w", path, err)
+	}
+	return path, nil
+}
+
+func writeProfilerFallbackObject(outputPath string, targetTriple string, stderr io.Writer) error {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		return fmt.Errorf("clang is required for the profiler fallback: %w", err)
+	}
+	sourcePath, err := profilerFallbackSourcePath()
+	if err != nil {
+		return err
+	}
+	args := []string{"-c", "-O2", "-o", outputPath, sourcePath}
+	if strings.TrimSpace(targetTriple) != "" {
+		args = append([]string{"-target", targetTriple}, args...)
+	}
+	cmd := exec.Command(clangPath, args...)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to compile profiler fallback: %w", err)
+	}
+	return nil
+}
+
+func mergeProfilerFallbackObject(outputPath string, targetTriple string, stderr io.Writer) error {
+	dir := filepath.Dir(outputPath)
+	fallbackFile, err := os.CreateTemp(dir, ".elisacore-profile-hooks-*.o")
+	if err != nil {
+		return err
+	}
+	fallbackPath := fallbackFile.Name()
+	if err := fallbackFile.Close(); err != nil {
+		_ = os.Remove(fallbackPath)
+		return err
+	}
+	defer os.Remove(fallbackPath)
+	if err := writeProfilerFallbackObject(fallbackPath, targetTriple, stderr); err != nil {
+		return err
+	}
+
+	mergedFile, err := os.CreateTemp(dir, ".elisacore-runtime-merged-*.o")
+	if err != nil {
+		return err
+	}
+	mergedPath := mergedFile.Name()
+	if err := mergedFile.Close(); err != nil {
+		_ = os.Remove(mergedPath)
+		return err
+	}
+	defer os.Remove(mergedPath)
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
+		return fmt.Errorf("clang is required to merge the profiler fallback: %w", err)
+	}
+	args := []string{"-r", "-o", mergedPath, outputPath, fallbackPath}
+	if strings.TrimSpace(targetTriple) != "" {
+		args = append([]string{"-target", targetTriple}, args...)
+	}
+	cmd := exec.Command(clangPath, args...)
+	cmd.Stdout = stderr
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("failed to merge profiler fallback: %w", err)
+	}
+	if err := os.Rename(mergedPath, outputPath); err != nil {
+		return fmt.Errorf("failed to publish profiler fallback: %w", err)
+	}
+	return nil
+}
+
 // writeDefaultElisaCoreRuntimeObject emits the default runtime support object, serving it
 // from the content-addressed runtime-object cache when possible. The underlying compile
 // (parse + analyze + -O3 codegen of the include-expanded runtime) is identical across every
@@ -1486,16 +1590,19 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, false, stderr); err == nil {
-			return nil
+			return mergeProfilerFallbackObject(outputPath, targetTriple, stderr)
 		} else if strings.TrimSpace(targetTriple) != "" {
 			return err
 		}
 	}
-	return backend.WriteLLVMObjectFileWithOptions(runtimeResult, outputPath, backend.LLVMObjectEmitOptions{
+	if err := backend.WriteLLVMObjectFileWithOptions(runtimeResult, outputPath, backend.LLVMObjectEmitOptions{
 		OptLevel:      backend.OptimizationLevel3,
 		PackedProfile: packedProfile,
 		TargetTriple:  targetTriple,
-	})
+	}); err != nil {
+		return err
+	}
+	return mergeProfilerFallbackObject(outputPath, targetTriple, stderr)
 }
 
 func resultDefinesDefaultElisaCoreRuntime(result *semantic.Result) bool {

@@ -94,6 +94,15 @@ func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, 
 		return runtimeObjectCacheArtifact{}, err
 	}
 	testRunnerCacheWriteBytes(hash, "elisacore-runtime-support", runtimeSource)
+	profilePath, err := profilerFallbackSourcePath()
+	if err != nil {
+		return runtimeObjectCacheArtifact{}, err
+	}
+	profileSource, err := os.ReadFile(profilePath)
+	if err != nil {
+		return runtimeObjectCacheArtifact{}, err
+	}
+	testRunnerCacheWriteBytes(hash, "elisacore-profile-fallback", profileSource)
 	stamp, err := compilerSourceStamp()
 	if err != nil {
 		return runtimeObjectCacheArtifact{}, err

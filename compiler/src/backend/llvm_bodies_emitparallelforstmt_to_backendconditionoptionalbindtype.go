@@ -17,6 +17,8 @@ import (
 	"fmt"
 )
 
+const profileAllocationRegionCreate uint64 = 5
+
 func (s *functionState) emitParallelForStmt(stmt *ast.ParallelForStmt) error {
 	info, ok := s.g.result.ParallelFor[stmt]
 	if !ok || info == nil {
@@ -667,6 +669,68 @@ func (s *functionState) emitRegionInitValue(arenaPtr C.LLVMValueRef, arenaType s
 	endPtr := C.LLVMBuildStructGEP2(s.builder, arenaLLVMType, arenaPtr, 1, cStringFree("region.end"))
 	C.LLVMBuildStore(s.builder, regionValue, beginPtr)
 	C.LLVMBuildStore(s.builder, regionValue, endPtr)
+	if err := s.emitRegionProfileCreate(arenaPtr, regionValue, capacityValue); err != nil {
+		return err
+	}
+	return nil
+}
+
+// emitRegionProfileCreate reports the backing block that an explicit region
+// obtains during initialization. Lazy arenas already report this from arena_alloc;
+// explicit regions bypass that path, so omitting this call loses their lifecycle
+// entirely from the profiler stream.
+func (s *functionState) emitRegionProfileCreate(arenaPtr C.LLVMValueRef, regionValue C.LLVMValueRef, capacityValue C.LLVMValueRef) error {
+	u32Type := s.g.result.NamedTypes["u32"]
+	uintptrType := s.g.result.NamedTypes["uintptr"]
+	usizeType := s.g.result.NamedTypes["usize"]
+	voidType := s.g.result.NamedTypes["void"]
+	if u32Type == nil || uintptrType == nil || usizeType == nil || voidType == nil {
+		return fmt.Errorf("missing builtin type for profiler region-create event")
+	}
+	profileType := &semantic.FuncType{
+		Name: "arena_profile_allocation_event",
+		Params: []semantic.Type{
+			u32Type, uintptrType, usizeType, uintptrType,
+			usizeType, uintptrType, usizeType,
+		},
+		Return: voidType,
+	}
+	callee, err := s.g.ensureFunctionDeclared(profileType.Name, profileType)
+	if err != nil {
+		return err
+	}
+	llvmFnType, err := s.g.lowerFunctionType(profileType)
+	if err != nil {
+		return err
+	}
+	u32LLVMType, err := s.g.lowerType(u32Type)
+	if err != nil {
+		return err
+	}
+	uintptrLLVMType, err := s.g.lowerType(uintptrType)
+	if err != nil {
+		return err
+	}
+	usizeLLVMType, err := s.g.lowerType(usizeType)
+	if err != nil {
+		return err
+	}
+	capacityBytes := C.LLVMBuildMul(
+		s.builder,
+		capacityValue,
+		C.LLVMConstInt(usizeLLVMType, C.ulonglong(s.g.wordBits/8), 0),
+		cStringFree("profile.region.bytes"),
+	)
+	args := []C.LLVMValueRef{
+		C.LLVMConstInt(u32LLVMType, C.ulonglong(profileAllocationRegionCreate), 0),
+		C.LLVMBuildPtrToInt(s.builder, regionValue, uintptrLLVMType, cStringFree("profile.region.address")),
+		capacityBytes,
+		C.LLVMConstInt(uintptrLLVMType, 0, 0),
+		C.LLVMConstInt(usizeLLVMType, 0, 0),
+		C.LLVMBuildPtrToInt(s.builder, arenaPtr, uintptrLLVMType, cStringFree("profile.arena.address")),
+		C.LLVMConstInt(usizeLLVMType, 0, 0),
+	}
+	s.buildCall(llvmFnType, callee, args, "")
 	return nil
 }
 func (s *functionState) emitArenaFree(arenaPtr C.LLVMValueRef, arenaType semantic.Type) error {

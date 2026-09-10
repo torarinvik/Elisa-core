@@ -540,6 +540,8 @@ func (g *llvmGenerator) isDefaultNativeRuntimeSupportExport(name string) bool {
 		"arena_free",
 		"arena_adopt",
 		"arena_trim",
+		"arena_profile_region_layout",
+		"arena_profile_allocation_event",
 		"alloc_perm",
 		"alloc_scratch",
 		"reset_scratch",
