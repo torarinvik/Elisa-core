@@ -126,7 +126,7 @@ func publishCachedRuntimeObject(artifact runtimeObjectCacheArtifact, builtObject
 	if err := os.MkdirAll(filepath.Dir(artifact.dir), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(artifact.object); err == nil {
+	if usableCachedFile(artifact.object, false) {
 		return nil
 	}
 	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-runtime-object-stage-*")
@@ -139,7 +139,7 @@ func publishCachedRuntimeObject(artifact runtimeObjectCacheArtifact, builtObject
 		return err
 	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
-		if _, statErr := os.Stat(artifact.object); statErr == nil {
+		if usableCachedFile(artifact.object, false) {
 			return nil
 		}
 		return err

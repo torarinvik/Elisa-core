@@ -870,7 +870,7 @@ func lookupCachedObject(key string) (string, bool) {
 		return "", false
 	}
 	path := filepath.Join(dir, key+".o")
-	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+	if usableCachedFile(path, false) {
 		return path, true
 	}
 	return "", false
@@ -1471,7 +1471,7 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 		// compile rather than failing the build.
 		return compileDefaultElisaCoreRuntimeObject(outputPath, packedProfile, targetTriple, stderr)
 	}
-	if _, statErr := os.Stat(artifact.object); statErr == nil {
+	if usableCachedFile(artifact.object, false) {
 		if copyErr := copyExecutableFile(artifact.object, outputPath); copyErr == nil {
 			debugRuntimeObjectCache(stderr, "hit", artifact)
 			return nil

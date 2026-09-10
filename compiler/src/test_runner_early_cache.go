@@ -82,7 +82,7 @@ func locateEarlyTestCache(key string) (earlyTestCacheMeta, bool) {
 	if strings.TrimSpace(meta.Executable) == "" {
 		return earlyTestCacheMeta{}, false
 	}
-	if _, err := os.Stat(meta.Executable); err != nil {
+	if !usableCachedFile(meta.Executable, true) {
 		return earlyTestCacheMeta{}, false
 	}
 	return meta, true
