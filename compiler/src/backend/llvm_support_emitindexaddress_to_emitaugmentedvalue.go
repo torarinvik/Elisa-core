@@ -207,22 +207,25 @@ func (s *functionState) emitRuntimeIndexedAddress(containerPtr C.LLVMValueRef, c
 	return s.emitRuntimePointerIndexedAddressWithType(containerPtr, containerLLVMType, elemType, indexValue)
 }
 
-// emitDebugIndexBoundsGuard is the debug-mode watchdog: in debug builds
-// (OptimizationLevel0) every dynamic container index is bounds-checked at
-// runtime and traps on violation — so statically-proven and `trusted`-unchecked
-// accesses, which emit no check in release, are still verified while testing.
-// In release builds this is a no-op (zero overhead): "debug verifies what
-// release assumes." Only containers carrying a runtime count are guarded.
+// emitDebugIndexBoundsGuard is the index watchdog: every dynamic container index
+// that the analyzer did not PROVE in-bounds is compared against the container's
+// count at runtime and traps on violation, AT EVERY OPTIMIZATION LEVEL.
+//
+// It used to be debug-only ("debug verifies what release assumes"), which made
+// a release build memory-unsafe by construction: an unproven index -- including
+// one inside `trusted Unsafe.UncheckedIndex` -- GEPed past the array silently.
+// The self-hosted compiler mirrored that gate and shipped an out-of-bounds store
+// into a neighbouring global (2026-09-09, a text copy landing on
+// UiFlat.widget_count). The language is memory safe only if the check is the
+// default everywhere; what a proof elides is the only zero-cost path, and
+// `trusted` discharges the PERMISSION, not the runtime check. Only containers
+// carrying a compile-time or runtime count are guarded.
 func (s *functionState) emitDebugIndexBoundsGuard(expr *ast.IndexExpr, containerPtr C.LLVMValueRef, containerType semantic.Type, indexValue C.LLVMValueRef) error {
 	if s == nil || s.g == nil {
 		return nil
 	}
-	// Active in debug (-O0) builds, or in any build when forced via -fbounds-check
-	// (ELISACORE_FORCE_BOUNDS_CHECK). The forced mode lets optimized/cross builds trap
-	// at the offending indexing site rather than crashing later on a derived bad pointer.
-	if s.g.optLevel != OptimizationLevel0 && !s.g.forceBoundsCheck {
-		return nil
-	}
+	// No optimization-level gate: see the comment above. -fbounds-check
+	// (ELISACORE_FORCE_BOUNDS_CHECK) still exists for the dereference guard below.
 	// Watchdog subsumption (docs/85 §9.6, docs/86 86-3): the analyzer proved this index in-bounds,
 	// so the debug guard would be redundant. Skip it — a proven access is never double-instrumented.
 	if expr != nil && s.g.result != nil && s.g.result.IndexBoundsProven[expr] {
