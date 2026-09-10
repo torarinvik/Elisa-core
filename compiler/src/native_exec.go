@@ -484,13 +484,25 @@ func findNullBoundRuntimeHelperSymbols(nmOutput string) []string {
 
 // findSplitNullBoundSymbols extracts undefined external symbols carrying a `.<digits>`
 // LLVM dedup suffix (e.g. `_mprotect.1`) from `nm -m` output. Such a symbol is the
-// flat-namespace duplicate that binds to NULL under -undefined,dynamic_lookup.
+// flat-namespace duplicate that binds to NULL under -undefined,dynamic_lookup, but only
+// when the unsuffixed symbol is also present. Without that base symbol, a user may have
+// deliberately chosen a link name ending in `.N`; rejecting that ordinary FFI name would
+// contradict the dynamic-lookup contract preserved by this gate.
 func findSplitNullBoundSymbols(nmOutput string) []string {
-	re := regexp.MustCompile(`\(undefined\)[^\n]*\b(_[A-Za-z0-9_$]+\.\d+)\b`)
+	lineSymbol := regexp.MustCompile(`\b(_[A-Za-z0-9_$]+(?:\.\d+)?)\b`)
+	undefinedSplit := regexp.MustCompile(`\(undefined\)[^\n]*\b(_[A-Za-z0-9_$]+\.\d+)\b`)
+	symbols := map[string]bool{}
+	for _, line := range strings.Split(nmOutput, "\n") {
+		if sym := lineSymbol.FindStringSubmatch(line); len(sym) == 2 {
+			symbols[sym[1]] = true
+		}
+	}
 	seen := map[string]bool{}
 	var split []string
-	for _, m := range re.FindAllStringSubmatch(nmOutput, -1) {
-		if sym := m[1]; !seen[sym] {
+	for _, m := range undefinedSplit.FindAllStringSubmatch(nmOutput, -1) {
+		sym := m[1]
+		base := sym[:strings.LastIndexByte(sym, '.')]
+		if symbols[base] && !seen[sym] {
 			seen[sym] = true
 			split = append(split, sym)
 		}
