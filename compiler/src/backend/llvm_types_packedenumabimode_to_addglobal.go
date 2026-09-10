@@ -46,6 +46,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/semantic"
 	"fmt"
+	"os"
 	"strings"
 	"unsafe"
 )
@@ -497,6 +498,7 @@ func (g *llvmGenerator) setDefinedFunctionLinkage(name string, value C.LLVMValue
 		}
 		g.applyFunctionNoRecurseAttributes(value, fnType)
 		g.applyFunctionTemperatureAttributes(value, fnType)
+		g.applyProfileTemperatureAttributes(name, value, fnType)
 		g.applyFunctionSegmentSafetyAttributes(value, fnType)
 	}
 	if explicitInlineMode {
@@ -590,6 +592,33 @@ func (g *llvmGenerator) applyFunctionTemperatureAttributes(fn C.LLVMValueRef, fn
 		g.addHotAttribute(fn)
 	case semantic.FuncTemperatureModeCold:
 		g.addColdAttribute(fn)
+	}
+}
+
+func profileHotFunctionsFromEnvironment() map[string]bool {
+	result := make(map[string]bool)
+	for _, name := range strings.Split(os.Getenv("ELISACORE_PGO_HOT_FUNCTIONS"), "\n") {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			result[name] = true
+		}
+	}
+	return result
+}
+
+func (g *llvmGenerator) applyProfileTemperatureAttributes(name string, fn C.LLVMValueRef, fnType *semantic.FuncType) {
+	if g == nil || fn == nil || fnType == nil || fnType.HasTemperatureMode {
+		return
+	}
+	if g.profileHotFunctions[name] {
+		g.addHotAttribute(fn)
+		return
+	}
+	// Trace records use the source-level name while generic LLVM functions carry a
+	// specialization suffix such as `map__i64`. Let one profile entry guide all concrete
+	// specializations without making the profile depend on mangling.
+	if separator := strings.Index(name, "__"); separator > 0 && g.profileHotFunctions[name[:separator]] {
+		g.addHotAttribute(fn)
 	}
 }
 func (g *llvmGenerator) applyFunctionSegmentSafetyAttributes(fn C.LLVMValueRef, fnType *semantic.FuncType) {

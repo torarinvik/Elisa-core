@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -56,6 +57,18 @@ func runCLI(args []string, stdout io.Writer, stderr io.Writer) int {
 	return runWithOptions(options, stdout, stderr)
 }
 func runWithOptions(options cliOptions, stdout io.Writer, stderr io.Writer) int {
+	// Keep profile selection process-local and deterministic. The backend reads this bridge while
+	// constructing LLVM functions; an empty value explicitly disables inherited hints for a normal
+	// invocation, preventing one in-process CLI test from leaking profile state into the next.
+	profileNames := make([]string, 0, len(options.profileHotFunctions))
+	for name := range options.profileHotFunctions {
+		profileNames = append(profileNames, name)
+	}
+	sort.Strings(profileNames)
+	if err := os.Setenv("ELISACORE_PGO_HOT_FUNCTIONS", strings.Join(profileNames, "\n")); err != nil {
+		fmt.Fprintf(stderr, "error: cannot configure optimization profile: %s\n", err)
+		return 1
+	}
 	if options.emit == emitServe {
 		if err := serveCompileServer(options.addr, stdout, stderr); err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
@@ -215,44 +228,83 @@ const (
 )
 
 type cliOptions struct {
-	emit              string
-	filename          string
-	output            string
-	addr              string
-	filter            string
-	unsafeBudget      string
-	foreignFiles      []string
-	linkFlags         []string
-	linkNative        bool
-	runNative         bool
-	targetTriple      string
-	debugInfo         bool
-	recordTrace       bool
-	debug             bool
-	debugBreak        string
-	debugBreakRaise   bool
-	debugFormat       string
-	debugTraceLimit   int
-	debugFullTrace    bool
-	debugContext      int
-	debugRepl         bool
-	debugSaveTrace    string
-	packedProfile     backend.PackedLoweringProfile
-	optLevel          backend.OptimizationLevel
-	hasOptLevel       bool
-	strictPolicy      bool
-	globalsStrict     bool
-	perfStrict        bool
-	proofStrict       bool
-	warnUnused        bool
-	strictExterns     bool
-	explainProofs     bool
-	explainHole       bool
-	enableSMT         bool
-	concurrencyStrict bool
-	progressStrict    bool
-	requiresReport    bool
-	flowLintMode      semantic.FlowLintMode
+	emit                string
+	filename            string
+	output              string
+	addr                string
+	filter              string
+	unsafeBudget        string
+	foreignFiles        []string
+	linkFlags           []string
+	linkNative          bool
+	runNative           bool
+	targetTriple        string
+	debugInfo           bool
+	recordTrace         bool
+	debug               bool
+	debugBreak          string
+	debugBreakRaise     bool
+	debugFormat         string
+	debugTraceLimit     int
+	debugFullTrace      bool
+	debugContext        int
+	debugRepl           bool
+	debugSaveTrace      string
+	profileUse          bool
+	profileHotFunctions map[string]bool
+	packedProfile       backend.PackedLoweringProfile
+	optLevel            backend.OptimizationLevel
+	hasOptLevel         bool
+	strictPolicy        bool
+	globalsStrict       bool
+	perfStrict          bool
+	proofStrict         bool
+	warnUnused          bool
+	strictExterns       bool
+	explainProofs       bool
+	explainHole         bool
+	enableSMT           bool
+	concurrencyStrict   bool
+	progressStrict      bool
+	requiresReport      bool
+	flowLintMode        semantic.FlowLintMode
+}
+
+// loadOptimizationProfile reads the intentionally small, compiler-facing profile contract.
+// It is advisory input only: a malformed profile is rejected, while a valid but stale profile
+// can at worst change optimization choices. The profile producer writes readable names because
+// they remain useful across generic specialization; the backend also matches a specialization's
+// base name before applying a hot attribute.
+//
+// Format:
+//
+//	ELISA_PGO_V1
+//	hot <qualified-function-name>
+//
+// Blank lines are accepted. Unknown records are rejected so a truncated or accidentally mixed
+// artifact can never be presented as a valid optimization profile.
+func loadOptimizationProfile(path string) (map[string]bool, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("cannot read optimization profile %q: %w", path, err)
+	}
+	lines := strings.Split(strings.ReplaceAll(string(data), "\r\n", "\n"), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) != "ELISA_PGO_V1" {
+		return nil, fmt.Errorf("invalid optimization profile %q: expected ELISA_PGO_V1 header", path)
+	}
+	result := make(map[string]bool)
+	for lineIndex, raw := range lines[1:] {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] != "hot" || fields[1] == "" {
+			return nil, fmt.Errorf("invalid optimization profile %q at line %d: expected 'hot FUNCTION'", path, lineIndex+2)
+		}
+		result[fields[1]] = true
+	}
+	return result, nil
 }
 
 func parseArgs(args []string) (cliOptions, error) {
@@ -321,6 +373,20 @@ func parseArgs(args []string) (cliOptions, error) {
 			options.debugInfo = true
 		case arg == "-ftrace" || arg == "-record-trace":
 			options.recordTrace = true
+		case arg == "-fprofile-use":
+			if options.profileUse {
+				return cliOptions{}, fmt.Errorf("-fprofile-use may be specified only once")
+			}
+			i++
+			if i >= len(args) || strings.TrimSpace(args[i]) == "" {
+				return cliOptions{}, fmt.Errorf("missing path after -fprofile-use")
+			}
+			hotFunctions, profileErr := loadOptimizationProfile(strings.TrimSpace(args[i]))
+			if profileErr != nil {
+				return cliOptions{}, profileErr
+			}
+			options.profileUse = true
+			options.profileHotFunctions = hotFunctions
 		case arg == "-fbounds-check":
 			// Force the debug index-bounds watchdog on regardless of optimization level.
 			// The watchdog gate reads this env var at codegen time (build is in-process).
@@ -611,7 +677,7 @@ func parseArgs(args []string) (cliOptions, error) {
 }
 func printUsage(w io.Writer) {
 	emitModes := []string{emitAST, emitLowered, emitSemantic, emitFacts, emitUnsafe, emitProgress, emitFmt, emitDoc, emitInterface, emitDeps, emitDepsJSON, emitIR, emitInterpret, emitServe, emitTests, emitBenches, emitFixtures, emitTest, emitTestRunner, emitLLVM, emitPacked, emitCBindCheck, emitCBindJSON, emitHeader, emitBitcode, emitObject, emitCArchive, emitTokens}
-	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O1|-O2|-O3] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
+	fmt.Fprintf(w, "Usage: elisacore [-emit %s] [-addr <host:port>] [-filter <substring>] [-target-triple <llvm-triple>] [-O0|-O1|-O2|-O3] [-fprofile-use <profile>] [-o <output>] [-link <flag>|-L <dir>|-l <name>] <file%s|file%s|file%s>\n", strings.Join(emitModes, "|"), sourceExtension, interfaceExtension, frontendIRExtension)
 	fmt.Fprintln(w, "       elisacore init <name> [--path <dir>] [--strict]")
 	fmt.Fprintln(w, "       elisacore init-lib <name> [--path <dir>]")
 	fmt.Fprintln(w, "       elisacore build|run|test|bench [target] [--project <dir|project.json>]")

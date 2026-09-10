@@ -150,6 +150,7 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 	// cover the SROA'd inner data buffer, and scalar refs are arg-promoted by value before it
 	// matters. Real kernel-vectorization wins need buffer-level alias.scope metadata.
 	g.noaliasMutableRefs = os.Getenv("ELISACORE_NOALIAS_MUTABLE_REFS") != ""
+	g.profileHotFunctions = profileHotFunctionsFromEnvironment()
 	g.optLevel = optLevel
 	g.packedProfile = profile
 	g.packedEnumABI = profile.packedModeForStore(nil)
@@ -177,7 +178,7 @@ func compileLLVMModuleWithTargetDebugTrace(result *semantic.Result, optLevel Opt
 }
 
 type llvmGenerator struct {
-	sameNameWrapperDecisions map[*semantic.ExportedFunc]bool
+	sameNameWrapperDecisions  map[*semantic.ExportedFunc]bool
 	result                    *semantic.Result
 	optLevel                  OptimizationLevel
 	context                   C.LLVMContextRef
@@ -220,6 +221,7 @@ type llvmGenerator struct {
 	globalFastMath            bool
 	strictFP                  bool
 	noaliasMutableRefs        bool
+	profileHotFunctions       map[string]bool
 	perfWarnings              []string
 	transientCStringLifetime  bool
 }
