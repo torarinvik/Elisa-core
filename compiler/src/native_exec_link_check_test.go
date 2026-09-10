@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -59,5 +60,24 @@ func TestFindNullBoundRuntimeHelperSymbolsClean(t *testing.T) {
                  (undefined) external _malloc (from libSystem)`
 	if got := findNullBoundRuntimeHelperSymbols(nmOut); len(got) != 0 {
 		t.Fatalf("expected no helper symbols on clean binary, got %v", got)
+	}
+}
+
+func TestNullBoundSymbolsErrorIsActionable(t *testing.T) {
+	t.Parallel()
+	err := nullBoundSymbolsError([]string{"_mprotect.1"}, []string{"_ctx_aos_store_new"})
+	if err == nil {
+		t.Fatal("expected null-bound symbols to produce a hard error")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"native link rejected",
+		"_mprotect.1",
+		"_ctx_aos_store_new",
+		"ELISACORE_NO_LINK_BINDING_CHECK=1",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error %q does not contain %q", message, want)
+		}
 	}
 }

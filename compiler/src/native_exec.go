@@ -399,13 +399,17 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		fmt.Fprintf(stderr, "[build-timing] link: %v | object-write(IR-gen+llc): %v\n", timing.Link.Round(time.Millisecond), timing.ObjectWrite.Round(time.Millisecond))
 	}
 
-	// Safety diagnostic: catch the null-bind symbol-split class (the CUSA07399 boot
+	// Safety gate: catch the null-bind symbol-split class (the CUSA07399 boot
 	// SIGSEGV root cause) — an undefined `_sym.N` produced when two declarations of the
 	// same link symbol get LLVM-renamed; under -undefined,dynamic_lookup the duplicate
 	// flat-namespace stub binds to NULL and crashes on first call. Best-effort, darwin
-	// only, warning-only; skip with ELISACORE_NO_LINK_BINDING_CHECK=1.
+	// only. Missing Elisa runtime helpers are equally certain to bind to NULL. Skip
+	// explicitly with ELISACORE_NO_LINK_BINDING_CHECK=1 when overriding this safety gate.
 	if isMachOTriple(targetTriple) && os.Getenv("ELISACORE_NO_LINK_BINDING_CHECK") == "" {
-		warnOnSplitNullBoundSymbols(exePath, stderr)
+		if err := rejectNullBoundSymbols(exePath); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
 	}
 
 	// On Mach-O targets DWARF stays in the .o files (a "debug map" in the executable),
@@ -423,30 +427,39 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	return exePath, cleanup, timing, nil
 }
 
-// warnOnSplitNullBoundSymbols inspects a freshly-linked Mach-O for the symbol-split
+// rejectNullBoundSymbols inspects a freshly-linked Mach-O for the symbol-split
 // null-bind hazard: an undefined external `_sym.N` (LLVM's dedup rename) that exists
 // alongside the base `_sym`. Under `-Wl,-undefined,dynamic_lookup` the `.N` flat-
 // namespace stub resolves to NULL, so the first call through it crashes (this was the
-// CUSA07399 boot SIGSEGV: `_mprotect.1`). Best-effort and warning-only.
-func warnOnSplitNullBoundSymbols(exePath string, stderr io.Writer) {
+// CUSA07399 boot SIGSEGV: `_mprotect.1`). It also rejects undefined Elisa runtime helpers,
+// which have no system-library provider. The check is deliberately limited to compiler-owned
+// hazards; arbitrary user `extern` declarations retain the existing dynamic-lookup FFI contract.
+func rejectNullBoundSymbols(exePath string) error {
 	nmPath, err := exec.LookPath("nm")
 	if err != nil {
-		return
+		return nil
 	}
 	out, err := exec.Command(nmPath, "-m", exePath).Output()
 	if err != nil {
-		return
+		return nil
 	}
 	split := findSplitNullBoundSymbols(string(out))
-	if len(split) != 0 {
-		fmt.Fprintf(stderr, "warning: linked binary has %d undefined split-symbol(s) that may bind to NULL under dynamic_lookup (symbol-split null-bind hazard; e.g. duplicate externs sharing a link_name): %s\n", len(split), strings.Join(split, ", "))
-		fmt.Fprintf(stderr, "         this is the CUSA07399-class fault; consolidate the duplicate declaration(s). Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
-	}
 	helpers := findNullBoundRuntimeHelperSymbols(string(out))
-	if len(helpers) != 0 {
-		fmt.Fprintf(stderr, "warning: linked binary has %d undefined elisa runtime helper symbol(s) that will bind to NULL under dynamic_lookup and segfault on first call: %s\n", len(helpers), strings.Join(helpers, ", "))
-		fmt.Fprintf(stderr, "         the default runtime object likely kept them private (isDefaultNativeRuntimeSupportExport whitelist) -- add them there, or include the std runtime. Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
+	if len(split) == 0 && len(helpers) == 0 {
+		return nil
 	}
+	return nullBoundSymbolsError(split, helpers)
+}
+
+func nullBoundSymbolsError(split []string, helpers []string) error {
+	var problems []string
+	if len(split) != 0 {
+		problems = append(problems, fmt.Sprintf("undefined split symbol(s) %s", strings.Join(split, ", ")))
+	}
+	if len(helpers) != 0 {
+		problems = append(problems, fmt.Sprintf("undefined Elisa runtime helper(s) %s", strings.Join(helpers, ", ")))
+	}
+	return fmt.Errorf("native link rejected: %s; these symbols bind to NULL under dynamic_lookup and can segfault on first call (fix the duplicate/runtime declaration or set ELISACORE_NO_LINK_BINDING_CHECK=1 to override)", strings.Join(problems, "; "))
 }
 
 // findNullBoundRuntimeHelperSymbols extracts dynamically-looked-up undefined symbols that
