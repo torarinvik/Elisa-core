@@ -1,7 +1,6 @@
 package semantic
 
 import (
-	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -24,17 +23,16 @@ import (
 // no error-level diagnostics for that branch.
 //
 // Manual equivalent:
-//   elisac -emit semantic -target-triple=x86_64-pc-windows-msvc \
-//       runtime/elisacore_std/arena.elisa
+//
+//	elisac -emit semantic -target-triple=x86_64-pc-windows-msvc \
+//	    runtime/elisacore_std/arena.elisa
+//
 // (exit 0 == clean).
 func TestArenaWindowsBackendTypeChecks(t *testing.T) {
 	// Tests run with CWD = the package dir (src/semantic); the runtime tree is two
 	// levels up under compiler/runtime.
 	arenaPath := filepath.Join("..", "..", "runtime", "elisacore_std", "arena.elisa")
-	src, err := os.ReadFile(arenaPath)
-	if err != nil {
-		t.Fatalf("read arena.elisa: %v", err)
-	}
+	src := readSemanticTestSourceWithIncludes(t, arenaPath)
 
 	l := lexer.New(arenaPath, src)
 	tokens := l.Tokenize()
