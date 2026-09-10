@@ -857,9 +857,13 @@ func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (stri
 	h.Write([]byte(strings.TrimSpace(targetTriple)))
 	h.Write([]byte{0})
 	h.Write([]byte(llcPath))
-	// Mix in the llc binary's size+modtime as a cheap toolchain-version proxy.
-	if info, statErr := os.Stat(llcPath); statErr == nil {
-		fmt.Fprintf(h, "\x00%d\x00%d", info.Size(), info.ModTime().UnixNano())
+	// Hash the tool contents rather than relying on size+mtime: an in-place toolchain
+	// replacement can preserve both of those metadata fields and must still invalidate
+	// the object cache.
+	if stamp, stampErr := toolchainContentStamp(llcPath); stampErr == nil {
+		testRunnerCacheWriteString(h, "llc-content="+stamp)
+	} else {
+		return "", false
 	}
 	return hex.EncodeToString(h.Sum(nil)), true
 }

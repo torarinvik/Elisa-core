@@ -124,6 +124,11 @@ func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module
 		return err
 	}
 	testRunnerCacheWriteString(hash, "clang="+clangPath)
+	clangStamp, err := toolchainContentStamp(clangPath)
+	if err != nil {
+		return err
+	}
+	testRunnerCacheWriteString(hash, "clang-content="+clangStamp)
 	for _, module := range easmModules {
 		if module == nil {
 			continue

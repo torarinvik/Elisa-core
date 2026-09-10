@@ -92,6 +92,11 @@ func buildCacheObjectArtifactFor(options cliOptions) (buildCacheArtifact, bool) 
 
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
+		stamp, stampErr := toolchainContentStamp(clangPath)
+		if stampErr != nil {
+			return buildCacheArtifact{}, false
+		}
+		testRunnerCacheWriteString(hash, "clang-content="+stamp)
 	} else {
 		testRunnerCacheWriteString(hash, "clang=none")
 	}

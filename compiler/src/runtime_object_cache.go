@@ -80,6 +80,11 @@ func runtimeObjectCacheArtifactFor(packedProfile backend.PackedLoweringProfile, 
 	testRunnerCacheWriteString(hash, "targetTriple="+strings.TrimSpace(targetTriple))
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
+		stamp, stampErr := toolchainContentStamp(clangPath)
+		if stampErr != nil {
+			return runtimeObjectCacheArtifact{}, stampErr
+		}
+		testRunnerCacheWriteString(hash, "clang-content="+stamp)
 	} else {
 		// No clang: the fallback backend emitter path is used instead. Distinguish the key
 		// so a clang/no-clang environment swap cannot collide.

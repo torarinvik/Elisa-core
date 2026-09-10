@@ -44,3 +44,34 @@ func TestUsableCachedFileRejectsInvalidEntries(t *testing.T) {
 		t.Fatal("directory cache entry was accepted")
 	}
 }
+
+func TestToolchainContentStampDistinguishesToolBytes(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	first := filepath.Join(dir, "tool-a")
+	second := filepath.Join(dir, "tool-b")
+	if err := os.WriteFile(first, []byte("toolchain-v1"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(second, []byte("toolchain-v2"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	firstStamp, err := toolchainContentStamp(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondStamp, err := toolchainContentStamp(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if firstStamp == secondStamp {
+		t.Fatalf("different tool contents produced the same stamp: %q", firstStamp)
+	}
+	again, err := toolchainContentStamp(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again != firstStamp {
+		t.Fatalf("tool stamp was not stable: %q != %q", again, firstStamp)
+	}
+}
