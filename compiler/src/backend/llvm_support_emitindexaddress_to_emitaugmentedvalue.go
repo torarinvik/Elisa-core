@@ -121,6 +121,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 		if err != nil {
 			return nil, nil, err
 		}
+		s.markComprehensionElementPtr(expr.Object, ptr)
 		if s.indexBoundsProven(expr) {
 			C.LLVMSetIsInBounds(ptr, 1)
 		}
@@ -180,6 +181,7 @@ func (s *functionState) emitIndexAddress(expr *ast.IndexExpr, userFacing bool) (
 			if err != nil {
 				return nil, nil, err
 			}
+			s.markComprehensionElementPtr(expr.Object, ptr)
 			if s.indexBoundsProven(expr) {
 				C.LLVMSetIsInBounds(ptr, 1)
 			}
@@ -365,6 +367,19 @@ func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMVa
 	if s == nil || inst == nil || ptr == nil {
 		return
 	}
+	if s.comprehensionElementScopes != nil {
+		if access, ok := s.comprehensionElementScopes[ptr]; ok {
+			// The generated map loop has a fresh result allocation. Its source and
+			// destination element accesses are therefore disjoint, but only inside
+			// this loop-specific metadata domain.
+			if s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[ptr] {
+				s.attachDarrayAndComprehensionScope(inst, access.domainName, access.aliasScope, access.noAliasScope)
+			} else {
+				s.attachAliasScopeMetadataWithNames(inst, access.domainName, access.aliasScope, []string{access.noAliasScope})
+			}
+			return
+		}
+	}
 	aliasSafe := s.aliasSafeElementPtrs != nil && s.aliasSafeElementPtrs[ptr]
 	var disjointScope *disjointParamScope
 	if s.disjointElementPtrs != nil {
@@ -380,6 +395,30 @@ func (s *functionState) tagDarrayElementAccess(inst C.LLVMValueRef, ptr C.LLVMVa
 	if disjointScope != nil {
 		s.tagDisjointParamElementAccess(inst, disjointScope)
 	}
+}
+
+func (s *functionState) markComprehensionElementPtr(object ast.Expr, ptr C.LLVMValueRef) {
+	if s == nil || ptr == nil || s.comprehensionAliasContext == nil {
+		return
+	}
+	ident, ok := object.(*ast.Ident)
+	if !ok || ident == nil {
+		return
+	}
+	context := s.comprehensionAliasContext
+	access := comprehensionAliasAccess{}
+	switch ident.Name {
+	case context.sourceName:
+		access = comprehensionAliasAccess{domainName: context.domainName, aliasScope: context.sourceScope, noAliasScope: context.destinationScope}
+	case context.destinationName:
+		access = comprehensionAliasAccess{domainName: context.domainName, aliasScope: context.destinationScope, noAliasScope: context.sourceScope}
+	default:
+		return
+	}
+	if s.comprehensionElementScopes == nil {
+		s.comprehensionElementScopes = map[C.LLVMValueRef]comprehensionAliasAccess{}
+	}
+	s.comprehensionElementScopes[ptr] = access
 }
 func (s *functionState) loweredEnumStorageType(enumType *semantic.EnumType) (C.LLVMTypeRef, error) {
 	if enumType == nil {

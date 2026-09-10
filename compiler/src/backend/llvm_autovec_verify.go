@@ -50,6 +50,54 @@ import (
 	"elisacore/src/lexer"
 )
 
+// comprehensionAliasContextForLoop recognizes the backend's fresh-result map
+// lowering. The synthesized loop contains a source element binding and a
+// destination indexed store, both over plain identifiers. Those two darrays are
+// distinct because the destination was freshly allocated before the loop. Do not
+// apply this fact to self-extend or user-written loops: a false no-alias claim is a
+// silent miscompile, so failure to recognize the exact shape stays conservative.
+func (s *functionState) comprehensionAliasContextForLoop(stmt *ast.ForStmt) *comprehensionAliasContext {
+	if s == nil || stmt == nil || stmt.AutovecReason != "comprehension map" {
+		return nil
+	}
+	var sourceName, destinationName string
+	for _, bodyStmt := range stmt.Body {
+		switch n := bodyStmt.(type) {
+		case *ast.VarDeclStmt:
+			if sourceName == "" {
+				if index, ok := n.Value.(*ast.IndexExpr); ok {
+					if object, ok := index.Object.(*ast.Ident); ok {
+						sourceName = object.Name
+					}
+				}
+			}
+		case *ast.AssignStmt:
+			if destinationName == "" {
+				if index, ok := n.Target.(*ast.IndexExpr); ok {
+					if object, ok := index.Object.(*ast.Ident); ok {
+						destinationName = object.Name
+					}
+				}
+			}
+		}
+	}
+	if sourceName == "" || destinationName == "" || sourceName == destinationName {
+		return nil
+	}
+	sequence := 0
+	if s.g != nil {
+		sequence = s.g.syntheticCounter
+		s.g.syntheticCounter++
+	}
+	return &comprehensionAliasContext{
+		domainName:       fmt.Sprintf("elisa.comprehension.%d", sequence),
+		sourceName:       sourceName,
+		destinationName:  destinationName,
+		sourceScope:      "source",
+		destinationScope: "destination",
+	}
+}
+
 // permissionRefsGrantScalar reports whether a permission list grants the Scalar family — either
 // the bare-family spelling `can Scalar` or any member spelling (`can Scalar.Loop`). Used to
 // suppress expected-to-vectorize loop tagging inside the grant's lexical extent.

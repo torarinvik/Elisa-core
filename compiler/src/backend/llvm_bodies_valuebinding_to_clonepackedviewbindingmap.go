@@ -27,6 +27,18 @@ type conditionBindingInfo struct {
 	name string
 	typ  semantic.Type
 }
+type comprehensionAliasContext struct {
+	domainName       string
+	sourceName       string
+	destinationName  string
+	sourceScope      string
+	destinationScope string
+}
+type comprehensionAliasAccess struct {
+	domainName   string
+	aliasScope   string
+	noAliasScope string
+}
 type codegenScope struct {
 	parent                   *codegenScope
 	bindingName              string
@@ -77,6 +89,11 @@ type functionState struct {
 	// header, so hdr != elt is always true (nested darray[darray[...]] is left untagged). All element
 	// accesses share ONE "elt" scope, so they remain may-alias to each other (no spurious vectorization).
 	aliasSafeElementPtrs map[C.LLVMValueRef]bool
+	// A compiler-generated fresh-result comprehension can prove that its source and
+	// destination darrays are distinct. Keep that fact scoped to the loop; self-extend
+	// and user-written loops remain conservative.
+	comprehensionAliasContext  *comprehensionAliasContext
+	comprehensionElementScopes map[C.LLVMValueRef]comprehensionAliasAccess
 	// disjointScopes carries the per-parameter alias.scope identities for proven-distinct
 	// container-ref params (docs/84 Increment 3b). Nil unless -fnoalias is on AND the
 	// analyzer's whole-program FuncDisjointParams proved a self-noalias group for this fn.

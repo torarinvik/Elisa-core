@@ -335,10 +335,14 @@ func (s *functionState) emitForStmt(stmt *ast.ForStmt) error {
 	s.defineBinding(stmt.Name, valueBinding{ptr: loopVarAlloca, typ: loopType})
 	C.LLVMBuildStore(s.builder, currentValue, loopVarAlloca)
 	s.pushLoopTargets(exitBB, stepBB)
-	if err := s.emitBlock(stmt.Body, true); err != nil {
+	savedComprehensionAliasContext := s.comprehensionAliasContext
+	s.comprehensionAliasContext = s.comprehensionAliasContextForLoop(stmt)
+	bodyErr := s.emitBlock(stmt.Body, true)
+	s.comprehensionAliasContext = savedComprehensionAliasContext
+	if bodyErr != nil {
 		s.popLoopTargets()
 		s.popScope()
-		return err
+		return bodyErr
 	}
 	s.popLoopTargets()
 	s.popScope()
