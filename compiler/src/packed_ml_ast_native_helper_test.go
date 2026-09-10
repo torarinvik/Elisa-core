@@ -320,6 +320,11 @@ func nativeArtifactCacheKey(repoRoot string, spec nativeArtifactSpec) (string, s
 	if err := hashGoFilesUnder(hash, filepath.Join(repoRoot, "compiler", "src")); err != nil {
 		return "", "", err
 	}
+	profilerFallbackPath := filepath.Join(repoRoot, "compiler", "runtime", "profile_hooks.c")
+	writeHashString(hash, "profiler_fallback")
+	if err := hashFileInto(hash, profilerFallbackPath); err != nil {
+		return "", "", err
+	}
 
 	cacheRoot, err := nativeArtifactCacheRoot()
 	if err != nil {
