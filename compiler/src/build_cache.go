@@ -92,6 +92,11 @@ func buildCacheObjectArtifactFor(options cliOptions) (buildCacheArtifact, bool) 
 
 	if clangPath, err := exec.LookPath("clang"); err == nil {
 		testRunnerCacheWriteString(hash, "clang="+clangPath)
+		stamp, stampErr := toolchainContentStamp(clangPath)
+		if stampErr != nil {
+			return buildCacheArtifact{}, false
+		}
+		testRunnerCacheWriteString(hash, "clang-content="+stamp)
 	} else {
 		testRunnerCacheWriteString(hash, "clang=none")
 	}
@@ -115,7 +120,7 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string) e
 	if err := os.MkdirAll(filepath.Dir(artifact.dir), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(artifact.object); err == nil {
+	if usableCachedFile(artifact.object, false) {
 		return nil
 	}
 	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-build-object-stage-*")
@@ -128,7 +133,7 @@ func publishCachedBuildObject(artifact buildCacheArtifact, builtObject string) e
 		return err
 	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
-		if _, statErr := os.Stat(artifact.object); statErr == nil {
+		if usableCachedFile(artifact.object, false) {
 			return nil
 		}
 		return err
@@ -161,7 +166,7 @@ func tryBuildObjectCache(options cliOptions, stdout io.Writer, stderr io.Writer)
 	}
 	outputPath := outputPathForEmit(options.filename, options.output, ".o")
 
-	if _, err := os.Stat(artifact.object); err == nil {
+	if usableCachedFile(artifact.object, false) {
 		if err := ensureOutputParentExists(outputPath); err == nil {
 			if err := copyExecutableFile(artifact.object, outputPath); err == nil {
 				debugBuildCache(stderr, "hit", artifact)

@@ -276,7 +276,8 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	runtimeObjectPath := ""
 	profilerFallbackObjectPath := ""
 	debugRefereeObjectPath := ""
-	if !resultDefinesDefaultElisaCoreRuntime(result) {
+	selfProvidesRuntime := resultDefinesDefaultElisaCoreRuntime(result)
+	if !selfProvidesRuntime {
 		runtimeObjectPath = filepath.Join(tempDir, "elisacore_runtime.o")
 		if err := writeDefaultElisaCoreRuntimeObject(runtimeObjectPath, packedProfile, targetTriple, stderr); err != nil {
 			cleanup()
@@ -304,6 +305,17 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 				cleanup()
 				return "", func() {}, timing, err
 			}
+		}
+	}
+	if selfProvidesRuntime {
+		// A source that includes the runtime supplies arena_profile_* itself and therefore
+		// intentionally skips the auto-linked runtime object above. It still needs the
+		// optional hook fallback; otherwise macOS's dynamic lookup leaves the negotiation
+		// function at NULL and the first arena allocation jumps through address zero.
+		profilerFallbackObjectPath = filepath.Join(tempDir, "elisacore_profiler_fallback.o")
+		if err := writeElisaCoreProfilerFallbackObject(clangPath, profilerFallbackObjectPath, targetTriple, stderr); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
 		}
 	}
 	headerGenStart := time.Now()
@@ -407,13 +419,17 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 		fmt.Fprintf(stderr, "[build-timing] link: %v | object-write(IR-gen+llc): %v\n", timing.Link.Round(time.Millisecond), timing.ObjectWrite.Round(time.Millisecond))
 	}
 
-	// Safety diagnostic: catch the null-bind symbol-split class (the CUSA07399 boot
+	// Safety gate: catch the null-bind symbol-split class (the CUSA07399 boot
 	// SIGSEGV root cause) — an undefined `_sym.N` produced when two declarations of the
 	// same link symbol get LLVM-renamed; under -undefined,dynamic_lookup the duplicate
 	// flat-namespace stub binds to NULL and crashes on first call. Best-effort, darwin
-	// only, warning-only; skip with ELISACORE_NO_LINK_BINDING_CHECK=1.
+	// only. Missing Elisa runtime helpers are equally certain to bind to NULL. Skip
+	// explicitly with ELISACORE_NO_LINK_BINDING_CHECK=1 when overriding this safety gate.
 	if isMachOTriple(targetTriple) && os.Getenv("ELISACORE_NO_LINK_BINDING_CHECK") == "" {
-		warnOnSplitNullBoundSymbols(exePath, stderr)
+		if err := rejectNullBoundSymbols(exePath); err != nil {
+			cleanup()
+			return "", func() {}, timing, err
+		}
 	}
 
 	// On Mach-O targets DWARF stays in the .o files (a "debug map" in the executable),
@@ -431,30 +447,39 @@ func buildNativeExecutableWithClang(clangPath string, result *semantic.Result, f
 	return exePath, cleanup, timing, nil
 }
 
-// warnOnSplitNullBoundSymbols inspects a freshly-linked Mach-O for the symbol-split
+// rejectNullBoundSymbols inspects a freshly-linked Mach-O for the symbol-split
 // null-bind hazard: an undefined external `_sym.N` (LLVM's dedup rename) that exists
 // alongside the base `_sym`. Under `-Wl,-undefined,dynamic_lookup` the `.N` flat-
 // namespace stub resolves to NULL, so the first call through it crashes (this was the
-// CUSA07399 boot SIGSEGV: `_mprotect.1`). Best-effort and warning-only.
-func warnOnSplitNullBoundSymbols(exePath string, stderr io.Writer) {
+// CUSA07399 boot SIGSEGV: `_mprotect.1`). It also rejects undefined Elisa runtime helpers,
+// which have no system-library provider. The check is deliberately limited to compiler-owned
+// hazards; arbitrary user `extern` declarations retain the existing dynamic-lookup FFI contract.
+func rejectNullBoundSymbols(exePath string) error {
 	nmPath, err := exec.LookPath("nm")
 	if err != nil {
-		return
+		return nil
 	}
 	out, err := exec.Command(nmPath, "-m", exePath).Output()
 	if err != nil {
-		return
+		return nil
 	}
 	split := findSplitNullBoundSymbols(string(out))
-	if len(split) != 0 {
-		fmt.Fprintf(stderr, "warning: linked binary has %d undefined split-symbol(s) that may bind to NULL under dynamic_lookup (symbol-split null-bind hazard; e.g. duplicate externs sharing a link_name): %s\n", len(split), strings.Join(split, ", "))
-		fmt.Fprintf(stderr, "         this is the CUSA07399-class fault; consolidate the duplicate declaration(s). Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
-	}
 	helpers := findNullBoundRuntimeHelperSymbols(string(out))
-	if len(helpers) != 0 {
-		fmt.Fprintf(stderr, "warning: linked binary has %d undefined elisa runtime helper symbol(s) that will bind to NULL under dynamic_lookup and segfault on first call: %s\n", len(helpers), strings.Join(helpers, ", "))
-		fmt.Fprintf(stderr, "         the default runtime object likely kept them private (isDefaultNativeRuntimeSupportExport whitelist) -- add them there, or include the std runtime. Suppress with ELISACORE_NO_LINK_BINDING_CHECK=1.\n")
+	if len(split) == 0 && len(helpers) == 0 {
+		return nil
 	}
+	return nullBoundSymbolsError(split, helpers)
+}
+
+func nullBoundSymbolsError(split []string, helpers []string) error {
+	var problems []string
+	if len(split) != 0 {
+		problems = append(problems, fmt.Sprintf("undefined split symbol(s) %s", strings.Join(split, ", ")))
+	}
+	if len(helpers) != 0 {
+		problems = append(problems, fmt.Sprintf("undefined Elisa runtime helper(s) %s", strings.Join(helpers, ", ")))
+	}
+	return fmt.Errorf("native link rejected: %s; these symbols bind to NULL under dynamic_lookup and can segfault on first call (fix the duplicate/runtime declaration or set ELISACORE_NO_LINK_BINDING_CHECK=1 to override)", strings.Join(problems, "; "))
 }
 
 // findNullBoundRuntimeHelperSymbols extracts dynamically-looked-up undefined symbols that
@@ -479,13 +504,25 @@ func findNullBoundRuntimeHelperSymbols(nmOutput string) []string {
 
 // findSplitNullBoundSymbols extracts undefined external symbols carrying a `.<digits>`
 // LLVM dedup suffix (e.g. `_mprotect.1`) from `nm -m` output. Such a symbol is the
-// flat-namespace duplicate that binds to NULL under -undefined,dynamic_lookup.
+// flat-namespace duplicate that binds to NULL under -undefined,dynamic_lookup, but only
+// when the unsuffixed symbol is also present. Without that base symbol, a user may have
+// deliberately chosen a link name ending in `.N`; rejecting that ordinary FFI name would
+// contradict the dynamic-lookup contract preserved by this gate.
 func findSplitNullBoundSymbols(nmOutput string) []string {
-	re := regexp.MustCompile(`\(undefined\)[^\n]*\b(_[A-Za-z0-9_$]+\.\d+)\b`)
+	lineSymbol := regexp.MustCompile(`\b(_[A-Za-z0-9_$]+(?:\.\d+)?)\b`)
+	undefinedSplit := regexp.MustCompile(`\(undefined\)[^\n]*\b(_[A-Za-z0-9_$]+\.\d+)\b`)
+	symbols := map[string]bool{}
+	for _, line := range strings.Split(nmOutput, "\n") {
+		if sym := lineSymbol.FindStringSubmatch(line); len(sym) == 2 {
+			symbols[sym[1]] = true
+		}
+	}
 	seen := map[string]bool{}
 	var split []string
-	for _, m := range re.FindAllStringSubmatch(nmOutput, -1) {
-		if sym := m[1]; !seen[sym] {
+	for _, m := range undefinedSplit.FindAllStringSubmatch(nmOutput, -1) {
+		sym := m[1]
+		base := sym[:strings.LastIndexByte(sym, '.')]
+		if symbols[base] && !seen[sym] {
 			seen[sym] = true
 			split = append(split, sym)
 		}
@@ -840,9 +877,13 @@ func llcObjectCacheKey(irPath string, targetTriple string, llcPath string) (stri
 	h.Write([]byte(strings.TrimSpace(targetTriple)))
 	h.Write([]byte{0})
 	h.Write([]byte(llcPath))
-	// Mix in the llc binary's size+modtime as a cheap toolchain-version proxy.
-	if info, statErr := os.Stat(llcPath); statErr == nil {
-		fmt.Fprintf(h, "\x00%d\x00%d", info.Size(), info.ModTime().UnixNano())
+	// Hash the tool contents rather than relying on size+mtime: an in-place toolchain
+	// replacement can preserve both of those metadata fields and must still invalidate
+	// the object cache.
+	if stamp, stampErr := toolchainContentStamp(llcPath); stampErr == nil {
+		testRunnerCacheWriteString(h, "llc-content="+stamp)
+	} else {
+		return "", false
 	}
 	return hex.EncodeToString(h.Sum(nil)), true
 }
@@ -853,7 +894,7 @@ func lookupCachedObject(key string) (string, bool) {
 		return "", false
 	}
 	path := filepath.Join(dir, key+".o")
-	if info, err := os.Stat(path); err == nil && info.Size() > 0 {
+	if usableCachedFile(path, false) {
 		return path, true
 	}
 	return "", false
@@ -1534,7 +1575,7 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 		// compile rather than failing the build.
 		return compileDefaultElisaCoreRuntimeObject(outputPath, packedProfile, targetTriple, stderr)
 	}
-	if _, statErr := os.Stat(artifact.object); statErr == nil {
+	if usableCachedFile(artifact.object, false) {
 		if copyErr := copyExecutableFile(artifact.object, outputPath); copyErr == nil {
 			debugRuntimeObjectCache(stderr, "hit", artifact)
 			return nil
@@ -1550,6 +1591,102 @@ func writeDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backend
 		debugRuntimeObjectCache(stderr, "publish-error", artifact)
 	} else {
 		debugRuntimeObjectCache(stderr, "publish", artifact)
+	}
+	return nil
+}
+
+const defaultElisaCoreProfilerFallbackSource = `#include <stddef.h>
+#include <stdint.h>
+
+#if defined(__GNUC__) || defined(__clang__)
+#define ELISA_WEAK __attribute__((weak))
+#else
+#define ELISA_WEAK
+#endif
+
+/* The profiler ABI is optional.  Keep ordinary runtime objects self-contained,
+   while allowing a final executable to replace these weak hooks with a real
+   collector. */
+ELISA_WEAK uint32_t elisa_profile_allocation_negotiate(uint32_t version) {
+    (void)version;
+    return 0;
+}
+
+ELISA_WEAK uint32_t elisa_profile_region_layout_negotiate(uint32_t version) {
+    (void)version;
+    return 0;
+}
+
+ELISA_WEAK void elisa_profile_region_layout_v1(
+    uintptr_t arena,
+    size_t region,
+    uintptr_t header,
+    uintptr_t data,
+    size_t capacity
+) {
+    (void)arena;
+    (void)region;
+    (void)header;
+    (void)data;
+    (void)capacity;
+}
+
+ELISA_WEAK void elisa_profile_allocation_event_v1(
+    uint32_t kind,
+    uintptr_t address,
+    size_t size,
+    uintptr_t old_address,
+    size_t old_size,
+    uintptr_t arena,
+    size_t region
+) {
+    (void)kind;
+    (void)address;
+    (void)size;
+    (void)old_address;
+    (void)old_size;
+    (void)arena;
+    (void)region;
+}
+`
+
+// writeElisaCoreProfilerFallbackObject makes the optional profiler ABI available to a native
+// link. The weak definitions keep ordinary executables self-contained while allowing a final
+// link to replace them with a real collector.
+func writeElisaCoreProfilerFallbackObject(clangPath string, outputPath string, targetTriple string, stderr io.Writer) error {
+	sourcePath := outputPath + ".profiler.c"
+	defer os.Remove(sourcePath)
+	if err := os.WriteFile(sourcePath, []byte(defaultElisaCoreProfilerFallbackSource), 0o644); err != nil {
+		return fmt.Errorf("failed to write default profiler fallback: %w", err)
+	}
+	compileArgs := append([]string{}, targetClangArgs(targetTriple)...)
+	compileArgs = append(compileArgs, "-c", sourcePath, "-o", outputPath)
+	compile := exec.Command(clangPath, compileArgs...)
+	compile.Stdout = stderr
+	compile.Stderr = stderr
+	if err := compile.Run(); err != nil {
+		return fmt.Errorf("failed to compile default profiler fallback: %w", err)
+	}
+	return nil
+}
+
+// addDefaultElisaCoreProfilerFallback makes the auto-linked runtime object safe for
+// ordinary programs.  The runtime deliberately exposes the profiler ABI as extern hooks so
+// a final link can provide a collector; without these weak definitions, a dynamic-lookup link
+// succeeds on macOS and then calls address zero on the first arena allocation.
+func addDefaultElisaCoreProfilerFallback(clangPath string, runtimeObjectPath string, outputPath string, targetTriple string, stderr io.Writer) error {
+	hooksObjectPath := outputPath + ".profiler.o"
+	defer os.Remove(hooksObjectPath)
+	if err := writeElisaCoreProfilerFallbackObject(clangPath, hooksObjectPath, targetTriple, stderr); err != nil {
+		return err
+	}
+	mergeArgs := append([]string{}, targetClangArgs(targetTriple)...)
+	mergeArgs = append(mergeArgs, "-r", "-Wl,-w", "-o", outputPath, runtimeObjectPath, hooksObjectPath)
+	merge := exec.Command(clangPath, mergeArgs...)
+	merge.Stdout = stderr
+	merge.Stderr = stderr
+	if err := merge.Run(); err != nil {
+		return fmt.Errorf("failed to link default profiler fallback: %w", err)
 	}
 	return nil
 }
@@ -1589,8 +1726,14 @@ func compileDefaultElisaCoreRuntimeObject(outputPath string, packedProfile backe
 		}
 	}
 	if clangPath, err := exec.LookPath("clang"); err == nil {
-		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, outputPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, false, stderr); err == nil {
-			return mergeProfilerFallbackObject(outputPath, targetTriple, stderr)
+		// The fallback source is an embedded constant here, not a file located
+		// relative to the repo, so an installed compiler does not depend on the
+		// checkout still being present. The non-IR path below keeps
+		// mergeProfilerFallbackObject, which rewrites outputPath in place.
+		runtimeObjectPath := outputPath + ".runtime"
+		defer os.Remove(runtimeObjectPath)
+		if err := writeNativeObjectViaClangIR(clangPath, runtimeResult, runtimeObjectPath, backend.OptimizationLevel3, packedProfile, targetTriple, false, false, stderr); err == nil {
+			return addDefaultElisaCoreProfilerFallback(clangPath, runtimeObjectPath, outputPath, targetTriple, stderr)
 		} else if strings.TrimSpace(targetTriple) != "" {
 			return err
 		}

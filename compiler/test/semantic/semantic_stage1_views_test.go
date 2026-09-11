@@ -130,10 +130,7 @@ func TestAnalyzeShapeOpsFixture(t *testing.T) {
 
 func TestAnalyzeArenaRuntimeFile(t *testing.T) {
 	fixture := filepath.Join(repoRootFromTestFile(t), "compiler", "runtime", "elisacore_std", "arena.elisa")
-	src, err := os.ReadFile(fixture)
-	if err != nil {
-		t.Fatalf("failed to read arena runtime fixture: %v", err)
-	}
+	src := loadSourceWithIncludes(t, fixture, map[string]bool{})
 	_, errs := parseAndAnalyze(t, fixture, string(src))
 	requireNoErrors(t, errs)
 }

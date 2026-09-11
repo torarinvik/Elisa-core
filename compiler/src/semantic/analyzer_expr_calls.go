@@ -580,6 +580,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		appliedType = ft
 	}
 	if len(specializedParamTypes) != 0 {
+		declaredReturnContract := appliedType.ReturnRegion != ""
 		if clonedApplied, ok := a.substituteType(appliedType, nil, nil, nil, nil).(*FuncType); ok && clonedApplied != nil {
 			appliedType = clonedApplied
 		}
@@ -588,8 +589,10 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				appliedType.Params[i] = specializedType
 			}
 		}
-		appliedType.ReturnProvenance = regionRefState{}
-		appliedType.ReturnProvenanceKnown = false
+		if !declaredReturnContract {
+			appliedType.ReturnProvenance = regionRefState{}
+			appliedType.ReturnProvenanceKnown = false
+		}
 		appliedType.ReturnBorrowedOwnerRefs = borrowedOwnerRefSummary{}
 		appliedType.ReturnBorrowedOwnerRefsKnown = false
 		appliedType.ReturnIsolation = ReturnIsolationSummary{}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -12,6 +13,7 @@ func TestFindSplitNullBoundSymbols(t *testing.T) {
 	nmOut := `                 (undefined) external _mprotect (from libSystem)
                  (undefined) external _mprotect.1 (dynamically looked up)
 0000000100003f00 (__TEXT,__text) external _main
+                 (undefined) external _munmap (from libSystem)
                  (undefined) external _munmap.2 (dynamically looked up)
                  (undefined) external _malloc (from libSystem)`
 	got := findSplitNullBoundSymbols(nmOut)
@@ -29,6 +31,18 @@ func TestFindSplitNullBoundSymbolsClean(t *testing.T) {
                  (undefined) external _malloc (from libSystem)`
 	if got := findSplitNullBoundSymbols(nmOut); len(got) != 0 {
 		t.Fatalf("expected no split symbols on clean binary, got %v", got)
+	}
+}
+
+// A deliberately chosen FFI link name may itself end in `.N`. Without the unsuffixed
+// symbol there is no evidence that LLVM renamed a duplicate declaration, so the safety
+// gate must leave that user symbol alone.
+func TestFindSplitNullBoundSymbolsIgnoresStandaloneSuffixedUserName(t *testing.T) {
+	t.Parallel()
+	nmOut := `                 (undefined) external _user_callback.1 (dynamically looked up)
+                 (undefined) external _malloc (from libSystem)`
+	if got := findSplitNullBoundSymbols(nmOut); len(got) != 0 {
+		t.Fatalf("expected standalone suffixed user symbol to remain allowed, got %v", got)
 	}
 }
 
@@ -59,5 +73,24 @@ func TestFindNullBoundRuntimeHelperSymbolsClean(t *testing.T) {
                  (undefined) external _malloc (from libSystem)`
 	if got := findNullBoundRuntimeHelperSymbols(nmOut); len(got) != 0 {
 		t.Fatalf("expected no helper symbols on clean binary, got %v", got)
+	}
+}
+
+func TestNullBoundSymbolsErrorIsActionable(t *testing.T) {
+	t.Parallel()
+	err := nullBoundSymbolsError([]string{"_mprotect.1"}, []string{"_ctx_aos_store_new"})
+	if err == nil {
+		t.Fatal("expected null-bound symbols to produce a hard error")
+	}
+	message := err.Error()
+	for _, want := range []string{
+		"native link rejected",
+		"_mprotect.1",
+		"_ctx_aos_store_new",
+		"ELISACORE_NO_LINK_BINDING_CHECK=1",
+	} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("error %q does not contain %q", message, want)
+		}
 	}
 }

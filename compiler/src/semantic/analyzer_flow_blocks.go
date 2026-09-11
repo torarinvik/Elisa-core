@@ -536,6 +536,15 @@ func inferSimpleLiteralTypeExpr(expr ast.Expr) ast.TypeExpr {
 }
 
 func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
+	a.analyzeBlockWithRegionCloneCapture(stmts, scope)
+}
+
+// analyzeBlockWithRegionCloneCapture analyzes a branch against a private copy of
+// the region ownership state and returns the state at that branch's fallthrough.
+// Region ownership is path-sensitive: restoring only the caller's state after a
+// branch used to erase `destroy`/`adopt` effects and could make a dead region look
+// live after control-flow joined.
+func (a *Analyzer) analyzeBlockWithRegionCloneCapture(stmts []ast.Stmt, scope *Scope) map[*Symbol]regionState {
 	savedRegions := a.currentRegions
 	savedRegionMarks := a.currentRegionMarks
 	savedCheckpoints := a.currentCheckpoints
@@ -551,6 +560,7 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	a.currentPackedStores = a.clonePackedStores()
 	a.currentPackedStoreResolutions = a.clonePackedStoreResolutions()
 	a.analyzeBlockInScope(stmts, scope)
+	branchRegions := a.cloneRegionStates()
 	a.currentRegions = savedRegions
 	a.currentRegionMarks = savedRegionMarks
 	a.currentCheckpoints = savedCheckpoints
@@ -558,9 +568,11 @@ func (a *Analyzer) analyzeBlockWithRegionClone(stmts []ast.Stmt, scope *Scope) {
 	a.currentPackedVariantViews = savedPackedVariantViews
 	a.currentPackedStores = savedPackedStores
 	a.currentPackedStoreResolutions = savedPackedStoreResolutions
+	return branchRegions
 }
 
 type affineFlowSnapshot struct {
+	Regions                    map[*Symbol]regionState
 	Affine                     map[affineValueKey]affineValueState
 	BorrowedOwnerRefs          map[*Symbol]borrowedOwnerRefState
 	FunctionValues             map[*Symbol]*FuncType
@@ -1273,8 +1285,8 @@ func (a *Analyzer) analyzeBlockWithAffineClonePrepared(stmts []ast.Stmt, scope *
 	if prepare != nil {
 		prepare()
 	}
-	a.analyzeBlockWithRegionClone(stmts, scope)
-	snapshot := affineFlowSnapshot{Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
+	branchRegions := a.analyzeBlockWithRegionCloneCapture(stmts, scope)
+	snapshot := affineFlowSnapshot{Regions: branchRegions, Affine: a.cloneAffineValueStates(), BorrowedOwnerRefs: a.cloneBorrowedOwnerRefBindings(), FunctionValues: a.cloneFunctionValueBindings(), SpecializedValueTypes: a.cloneSpecializedValueTypeBindings(), ValueBindings: a.cloneValueBindings(), RangeFacts: a.visibleRangeFacts(), StorageViewDeps: a.cloneStorageViewDeps(), AliasCarriers: a.cloneAliasCarriers(), AliasCarrierFieldOverrides: a.cloneAliasCarrierFieldOverrides()}
 	a.currentAffineValues = savedAffine
 	a.currentBorrowedOwnerRefs = savedBorrowedOwnerRefs
 	a.currentFunctionValues = savedFunctionValues

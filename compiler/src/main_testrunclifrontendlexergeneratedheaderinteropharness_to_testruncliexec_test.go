@@ -11,6 +11,28 @@ import (
 	"testing"
 )
 
+func compileNativeTestExecutable(t *testing.T, clangPath string, outputDir string, compileArgs []string) ([]byte, error) {
+	t.Helper()
+	fallbackPath := filepath.Join(outputDir, "elisacore_profiler_fallback.o")
+	var fallbackStderr bytes.Buffer
+	if err := writeElisaCoreProfilerFallbackObject(clangPath, fallbackPath, "", &fallbackStderr); err != nil {
+		return fallbackStderr.Bytes(), err
+	}
+
+	linkArgs := append([]string(nil), compileArgs...)
+	if runtime.GOOS == "darwin" {
+		linkArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, linkArgs...)
+	}
+	for i, arg := range linkArgs {
+		if arg == "-o" && i+1 < len(linkArgs) {
+			linkArgs = append(linkArgs[:i], append([]string{fallbackPath}, linkArgs[i:]...)...)
+			break
+		}
+	}
+	compileCmd := exec.Command(clangPath, linkArgs...)
+	return compileCmd.CombinedOutput()
+}
+
 func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	t.Parallel()
 	clangPath, err := exec.LookPath("clang")
@@ -46,12 +68,7 @@ func TestRunCLIJSONParserGeneratedHeaderInteropBuildSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, harnessPath, shimPath, objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}
@@ -92,12 +109,7 @@ func TestRunCLIJSONParserParallelBenchBuildSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}
@@ -202,12 +214,7 @@ func TestRunCLIJSONParserDOMBenchSmoke(t *testing.T) {
 	}
 
 	compileArgs := []string{"-pthread", "-I", outputDir, benchPath, shimPath, objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}
@@ -418,12 +425,7 @@ func TestRunCLIExecutesCharLiteralSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}
@@ -464,12 +466,7 @@ func TestRunCLIExecutesAllocatorPortSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}
@@ -510,12 +507,7 @@ func TestRunCLIExecutesDequePortSmokeProgram(t *testing.T) {
 	}
 
 	compileArgs := []string{objectPath, "-o", exePath}
-	compileArgs = appendProfilerFallbackSource(t, repoRoot, compileArgs)
-	if runtime.GOOS == "darwin" {
-		compileArgs = append([]string{"-Wl,-undefined,dynamic_lookup"}, compileArgs...)
-	}
-	compileCmd := exec.Command(clangPath, compileArgs...)
-	compileOutput, err := compileCmd.CombinedOutput()
+	compileOutput, err := compileNativeTestExecutable(t, clangPath, outputDir, compileArgs)
 	if err != nil {
 		t.Fatalf("clang failed: %v\n%s", err, string(compileOutput))
 	}

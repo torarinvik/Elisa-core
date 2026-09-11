@@ -1,12 +1,11 @@
 include "./runtime/elisacore_std/elisacore_runtime.elisa"
 
-# A user range loop in the same vector-eligible shape as scalar_loop_warn_probe, but with an f64
-# multiply — which vectorizes cleanly. Fixed-size arrays make both indexed accesses statically
-# provable, so the verifier checks the actual vectorizer result instead of a possible bounds trap.
-def scaled_into(a: array[f64, 1024]&, out: mutable array[f64, 1024]&) -> usize:
+# A user range loop in the single-buffer vector-eligible shape. An in-place f64 multiply vectorizes
+# without requiring an unproven alias claim between two caller-owned buffers.
+def scaled_into(a: mutable darray[f64]&) -> usize:
 	can Memory.Allocate, Abort.Panic:
-		for i in 0..<1024:
-			out[i] <- a[i] * 2.0
-		return 1024
+		for i in 0..<a.count:
+			a[i] <- a[i] * 2.0
+		return a.count
 
-export fn probe_scalar_clean(a: array[f64, 1024]&, out: mutable array[f64, 1024]&) -> usize = scaled_into
+export fn probe_scalar_clean(a: mutable darray[f64]&) -> usize = scaled_into

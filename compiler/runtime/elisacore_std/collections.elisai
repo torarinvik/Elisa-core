@@ -159,7 +159,15 @@ struct ArenaRegionCache:
 
 extern __elisa_region_cache: ArenaRegionCache
 
+struct ArenaFreeHint:
+    owner: mutable uintptr
+    region: mutable heap Region&?
+
+extern __elisa_free_hint: ArenaFreeHint
+
 const REGION_CACHE_MAX_SLOTS: usize = 131072
+
+const REGION_CACHE_MAX_ENTRIES: usize = 128
 
 extern new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&
 

@@ -125,7 +125,10 @@ def ctx_string_view_eq(view: sview, other: cstr[shape_other]) -> int:
     return string_view_eq(view, other)
 
 def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
-    return string_views_eq(lhs, rhs)
+    if likely lhs.len != rhs.len:
+        return 0
+    1 return if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
+    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
 def ctx_string_from_view(view: sview) -> cstr[shape_out]:
     return string_view_copy(view).cast[u8&] can Memory.Allocate, Abort.Panic

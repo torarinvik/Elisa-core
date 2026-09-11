@@ -99,7 +99,8 @@ def use(a: P) -> i64:
 // End-to-end: compile and RUN `-x` on a value type, both directly and through a `[T: Neg]` bound.
 func TestRunCLIUnaryNegNative(t *testing.T) {
 	t.Parallel()
-	if _, err := exec.LookPath("clang"); err != nil {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
 		t.Skip("clang not available")
 	}
 	repoRoot := repoRootFromMainTest(t)
@@ -140,8 +141,7 @@ def main() -> i64:
 		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
 	}
 	exePath := filepath.Join(fixtureDir, "neg")
-	linkArgs := appendProfilerFallbackSource(t, repoRoot, []string{objPath, "-o", exePath})
-	if out, err := exec.Command("clang", linkArgs...).CombinedOutput(); err != nil {
+	if out, err := compileNativeTestExecutable(t, clangPath, fixtureDir, []string{objPath, "-o", exePath}); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
 	got := 0
@@ -264,7 +264,8 @@ def main() -> i64:
 // all correct -> 255.
 func TestRunCLICanonicalOperatorProtocols(t *testing.T) {
 	t.Parallel()
-	if _, err := exec.LookPath("clang"); err != nil {
+	clangPath, err := exec.LookPath("clang")
+	if err != nil {
 		t.Skip("clang not available")
 	}
 	repoRoot := repoRootFromMainTest(t)
@@ -337,8 +338,7 @@ def main() -> i64:
 		t.Fatalf("compile failed (exit %d):\n%s", code, stderr.String())
 	}
 	exePath := filepath.Join(fixtureDir, "canon")
-	linkArgs := appendProfilerFallbackSource(t, repoRoot, []string{objPath, "-o", exePath})
-	if out, err := exec.Command("clang", linkArgs...).CombinedOutput(); err != nil {
+	if out, err := compileNativeTestExecutable(t, clangPath, fixtureDir, []string{objPath, "-o", exePath}); err != nil {
 		t.Fatalf("link failed: %v\n%s", err, out)
 	}
 	got := 0

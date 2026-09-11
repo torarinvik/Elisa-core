@@ -1,8 +1,6 @@
 package semantic
 
-import (
-	"elisacore/src/ast"
-)
+import "elisacore/src/ast"
 
 func (a *Analyzer) clonePackedStores() map[string]*PackedEnumStoreType {
 	if a.currentPackedStores == nil {

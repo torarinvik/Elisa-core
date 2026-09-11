@@ -110,6 +110,30 @@ static void elisa_coreAttachAliasScopeMetadata(LLVMValueRef inst, LLVMContextRef
 		elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, noAliasCount);
 	}
 }
+
+// elisa_coreAttachDarrayAndComprehensionScope combines the shared darray header/element
+// separation with a comprehension's fresh-source/destination separation. LLVM has one metadata
+// slot for each list, so setting the two domains separately would overwrite one of them.
+static void elisa_coreAttachDarrayAndComprehensionScope(LLVMValueRef inst, LLVMContextRef ctx,
+	const char* comprehensionDomainName, const char* comprehensionAliasScopeName,
+	const char* comprehensionNoAliasScopeName) {
+	if (inst == NULL || ctx == NULL || comprehensionDomainName == NULL ||
+		comprehensionAliasScopeName == NULL || comprehensionNoAliasScopeName == NULL ||
+		comprehensionDomainName[0] == '\0' || comprehensionAliasScopeName[0] == '\0' ||
+		comprehensionNoAliasScopeName[0] == '\0') {
+		return;
+	}
+	LLVMMetadataRef darrayDomain = elisa_coreCreateAliasScopeDomain(ctx, "elisa.darray.aa");
+	LLVMMetadataRef comprehensionDomain = elisa_coreCreateAliasScopeDomain(ctx, comprehensionDomainName);
+	LLVMMetadataRef aliasScopes[2];
+	aliasScopes[0] = elisa_coreCreateAliasScope(ctx, darrayDomain, "elt");
+	aliasScopes[1] = elisa_coreCreateAliasScope(ctx, comprehensionDomain, comprehensionAliasScopeName);
+	LLVMMetadataRef noAliasScopes[2];
+	noAliasScopes[0] = elisa_coreCreateAliasScope(ctx, darrayDomain, "hdr");
+	noAliasScopes[1] = elisa_coreCreateAliasScope(ctx, comprehensionDomain, comprehensionNoAliasScopeName);
+	elisa_coreSetMetadataList(inst, ctx, "alias.scope", aliasScopes, 2);
+	elisa_coreSetMetadataList(inst, ctx, "noalias", noAliasScopes, 2);
+}
 */
 import "C"
 
@@ -118,6 +142,7 @@ import (
 	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
+	"unsafe"
 )
 
 func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
@@ -292,6 +317,19 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 	current = C.LLVMBuildInsertValue(s.builder, current, capacityValue, 2, cStringFree("darray.literal.capacity"))
 	return current, darrayType, nil
 }
+
+func (s *functionState) attachDarrayAndComprehensionScope(inst C.LLVMValueRef, domainName string, aliasScopeName string, noAliasScopeName string) {
+	if s == nil || s.g == nil || inst == nil {
+		return
+	}
+	domainC := cString(domainName)
+	defer C.free(unsafe.Pointer(domainC))
+	aliasC := cString(aliasScopeName)
+	defer C.free(unsafe.Pointer(aliasC))
+	noAliasC := cString(noAliasScopeName)
+	defer C.free(unsafe.Pointer(noAliasC))
+	C.elisa_coreAttachDarrayAndComprehensionScope(inst, s.g.context, domainC, aliasC, noAliasC)
+}
 func (s *functionState) emitSpreadListLitExpr(expr *ast.ListLitExpr, darrayType *semantic.DArrayType) (C.LLVMValueRef, semantic.Type, error) {
 	resultName := s.g.nextSyntheticName("list.spread.result.")
 	resultInit := &ast.ListLitExpr{Position: expr.Position}
@@ -444,6 +482,13 @@ func (s *functionState) indexedStoreComprehensionBlock(expr *ast.ListComprehensi
 	registerElemType := func(e ast.Expr) ast.Expr {
 		if s.g != nil && s.g.result != nil && s.g.result.ExprTypes != nil {
 			s.g.result.ExprTypes[e] = srcDarray.Elem
+			// The synthesized loop is exactly `0..<src.count`, and the result
+			// was resized to that count immediately before it. Both indexed
+			// accesses are therefore proved in bounds; retaining that fact keeps
+			// the mandatory bounds watchdog out of the vectorizable loop.
+			if index, ok := e.(*ast.IndexExpr); ok {
+				s.g.result.IndexBoundsProven[index] = true
+			}
 		}
 		return e
 	}

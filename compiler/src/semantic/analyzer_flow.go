@@ -474,6 +474,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if restoreAllocExpr {
 			a.currentAllocExpr = savedAllocExpr
 		}
+		// A mutable scalar reference has two intentional assignment forms. If the
+		// RHS is a scalar, `<-` writes through the reference; if the RHS is another
+		// reference, it rebinds the reference slot. Decide only after RHS analysis
+		// so global reference slots do not get mistaken for scalar destinations.
+		if ref, ok := a.mutableScalarRefTarget(n.Target); ok && !isBorrowLikeType(valueType) && AssignableTo(ref.Elem, valueType) {
+			targetType = ref.Elem
+		}
 		// docs/120 §8 single-target arg-manifest `x <- x.method(…)`: a `<-` whose RHS is a
 		// void call that mutates x in place (x passed as its receiver/arg). Nothing to
 		// assign — the `x <-` is a manifest of what the call mutates. Erase to the
@@ -785,7 +792,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// snapshot that is analyzed and merged below, so entry survives the join
 		// only when it actually should.
 		entryAffine := a.cloneAffineValueStates()
+		entryRegions := a.cloneRegionStates()
 		var mergedAffine map[affineValueKey]affineValueState
+		regionBranches := make([]map[*Symbol]regionState, 0, len(n.Elifs)+2)
+		constantCondition, conditionIsConstant := a.evalConstBoolExpr(n.Cond)
 		mergedBorrowedOwnerRefs := a.cloneBorrowedOwnerRefBindings()
 		mergedStorageViewDeps := a.cloneStorageViewDeps()
 		var mergedAliasCarriers map[string][]string
@@ -795,8 +805,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		entryRangeFacts := a.visibleRangeFacts()
 		rangeBranches := make([]map[string]numRange, 0, len(n.Elifs)+2)
 		thenSnapshot := a.analyzeBlockWithConditionAffineClone(n.Then, a.currentScope, n.Cond, true)
-		if !blockDefinitelyExits(n.Then) {
+		if (!conditionIsConstant || constantCondition) && !blockDefinitelyExits(n.Then) {
 			mergedAffine = mergeAffineValueStates(mergedAffine, thenSnapshot.Affine)
+			regionBranches = append(regionBranches, thenSnapshot.Regions)
 			mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, thenSnapshot.BorrowedOwnerRefs)
 			mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, thenSnapshot.StorageViewDeps)
 			mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, thenSnapshot.AliasCarriers, thenSnapshot.AliasCarrierFieldOverrides)
@@ -811,8 +822,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.errorf(elif.Position, "elif condition must be bool, got %s", elifType)
 			}
 			elifSnapshot := a.analyzeBlockWithConditionAffineClone(elif.Body, a.currentScope, elif.Cond, true)
-			if !blockDefinitelyExits(elif.Body) {
+			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(elif.Body) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elifSnapshot.Affine)
+				regionBranches = append(regionBranches, elifSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elifSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elifSnapshot.StorageViewDeps)
 				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elifSnapshot.AliasCarriers, elifSnapshot.AliasCarrierFieldOverrides)
@@ -824,8 +836,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if len(n.Elifs) == 0 {
 			elseSnapshot := a.analyzeBlockWithConditionAffineClone(n.Else, a.currentScope, n.Cond, false)
-			if !blockDefinitelyExits(n.Else) {
+			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
+				regionBranches = append(regionBranches, elseSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
 				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elseSnapshot.AliasCarriers, elseSnapshot.AliasCarrierFieldOverrides)
@@ -836,8 +849,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		} else {
 			elseSnapshot := a.analyzeBranchBlockWithAffineClone(n.Else, NewScope(a.currentScope))
-			if !blockDefinitelyExits(n.Else) {
+			if (!conditionIsConstant || !constantCondition) && !blockDefinitelyExits(n.Else) {
 				mergedAffine = mergeAffineValueStates(mergedAffine, elseSnapshot.Affine)
+				regionBranches = append(regionBranches, elseSnapshot.Regions)
 				mergedBorrowedOwnerRefs = mergeBorrowedOwnerRefBindings(mergedBorrowedOwnerRefs, elseSnapshot.BorrowedOwnerRefs)
 				mergedStorageViewDeps = mergeStorageViewDependencyStates(mergedStorageViewDeps, elseSnapshot.StorageViewDeps)
 				mergedAliasCarrierFieldOverrides = mergeAliasCarrierFieldOverrides(mergedAliasCarriers, mergedAliasCarrierFieldOverrides, elseSnapshot.AliasCarriers, elseSnapshot.AliasCarrierFieldOverrides)
@@ -848,6 +862,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 		}
 		if len(n.Else) == 0 {
+			if !conditionIsConstant || !constantCondition {
+				regionBranches = append(regionBranches, entryRegions)
+			}
 			functionValueBranches = append(functionValueBranches, a.currentFunctionValues)
 			specializedValueTypeBranches = append(specializedValueTypeBranches, a.currentSpecializedValueTypes)
 			rangeBranches = append(rangeBranches, entryRangeFacts)
@@ -858,6 +875,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// flow state stays non-nil for downstream analysis.
 			mergedAffine = entryAffine
 		}
+		joinedRegions, inconsistentRegions := joinRegionStateBranches(entryRegions, regionBranches)
+		for _, sym := range inconsistentRegions {
+			a.errorf(n.Pos(), "region %q is destroyed on some control-flow paths and remains live on others; consume it consistently before the paths join", sym.Name)
+		}
+		a.currentRegions = joinedRegions
 		a.currentAffineValues = mergedAffine
 		a.currentBorrowedOwnerRefs = mergedBorrowedOwnerRefs
 		a.currentStorageViewDeps = mergedStorageViewDeps

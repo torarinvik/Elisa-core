@@ -137,11 +137,19 @@ extern elisa_trace_total: u64
 
 extern elisa_trace_record(name: cstr, line: u32) -> void
 
+extern elisa_trace_record_id(name: cstr, line: u32, identity: u64) -> void
+
 extern elisa_trace_function_entry(name: cstr, line: u32) -> void
+
+extern elisa_trace_function_entry_id(name: cstr, line: u32, identity: u64) -> void
 
 extern elisa_trace_function_exit(name: cstr, line: u32) -> void
 
+extern elisa_trace_function_exit_id(name: cstr, line: u32, identity: u64) -> void
+
 extern elisa_trace_record_value(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32) -> void
+
+extern elisa_trace_record_value_id(name: cstr, line: u32, var_name: cstr, value: u64, signed: u32, identity: u64) -> void
 
 extern elisa_trace_count() -> u64
 

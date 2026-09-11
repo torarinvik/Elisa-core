@@ -256,12 +256,23 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.checkNarrowableHandleWidths(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {
-		if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
-			fnType.ReturnProvenance = summary
-		} else {
-			fnType.ReturnProvenance = regionRefState{}
+		// An explicit `-> T @r` contract is authoritative. Body inference may
+		// fail to observe the dependency when the returned value is rebuilt in a
+		// helper or a generic branch, but replacing the declared contract with an
+		// empty summary would make callers lose the lifetime guarantee.
+		declaredReturnProvenance := fnType.ReturnProvenance
+		declaredReturnProvenanceKnown := fnType.ReturnRegion != "" && fnType.ReturnProvenanceKnown
+		if !declaredReturnProvenanceKnown {
+			if summary, ok := abstractParamOnlyRegionRefState(a.currentReturnProvenance); ok {
+				fnType.ReturnProvenance = summary
+			} else {
+				fnType.ReturnProvenance = regionRefState{}
+			}
 		}
 		fnType.ReturnProvenanceKnown = true
+		if declaredReturnProvenanceKnown {
+			fnType.ReturnProvenance = declaredReturnProvenance
+		}
 		if hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
 			fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs)
 		} else {
@@ -464,12 +475,19 @@ func (a *Analyzer) inferFuncReturnProvenance(fn *ast.FuncDecl, fnType *FuncType)
 		})
 	})
 
-	if hasRegionProvenance(a.currentReturnProvenance) {
-		fnType.ReturnProvenance = cloneRegionRefState(a.currentReturnProvenance)
-	} else {
-		fnType.ReturnProvenance = regionRefState{}
+	declaredReturnProvenance := fnType.ReturnProvenance
+	declaredReturnProvenanceKnown := fnType.ReturnRegion != "" && fnType.ReturnProvenanceKnown
+	if !declaredReturnProvenanceKnown {
+		if hasRegionProvenance(a.currentReturnProvenance) {
+			fnType.ReturnProvenance = cloneRegionRefState(a.currentReturnProvenance)
+		} else {
+			fnType.ReturnProvenance = regionRefState{}
+		}
 	}
 	fnType.ReturnProvenanceKnown = true
+	if declaredReturnProvenanceKnown {
+		fnType.ReturnProvenance = declaredReturnProvenance
+	}
 	if hasBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs) {
 		fnType.ReturnBorrowedOwnerRefs = cloneBorrowedOwnerRefSummary(a.currentReturnBorrowedOwnerRefs)
 	} else {

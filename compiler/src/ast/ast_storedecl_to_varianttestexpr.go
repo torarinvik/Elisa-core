@@ -186,7 +186,11 @@ type FuncDecl struct {
 	// The unnamed tail is available through the llvm.va_* intrinsic surface.
 	Variadic   bool
 	ReturnType TypeExpr
-	Body       []Stmt
+	// ReturnRegion records the function-level `-> T @r` lifetime contract. It is
+	// deliberately separate from TypeExpr.Region: the stage1 parser treats this
+	// suffix as a return contract, not as a region-instantiated enum type.
+	ReturnRegion string
+	Body         []Stmt
 	// LmutThreadSlots records the declared lmut-threading manifest (docs/120 §2): return-tuple
 	// fields spelled `name: lmut T` that were validated against the same-named `lmut` parameters
 	// and ERASED — from ReturnType and from every return expression — by the parser post-pass
@@ -425,6 +429,7 @@ type TypeExpr interface {
 type NamedType struct {
 	Position lexer.Pos
 	Name     string
+	Region   string
 }
 type RefState int
 

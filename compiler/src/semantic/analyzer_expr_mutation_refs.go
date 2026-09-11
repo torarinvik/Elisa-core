@@ -162,6 +162,29 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 	}
 }
 
+// mutableScalarRefTarget recognizes a mutable scalar reference whose assignment
+// meaning depends on the RHS: `place <- 1` writes through it, while
+// `place <- other_ref` rebinds the reference slot. The decision belongs after
+// RHS analysis because the same syntax supports both operations.
+func (a *Analyzer) mutableScalarRefTarget(expr ast.Expr) (*RefType, bool) {
+	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
+	if !ok || ident == nil || a == nil || a.currentScope == nil {
+		return nil, false
+	}
+	sym, found := a.currentScope.Lookup(ident.Name)
+	if !found {
+		sym, _, found = a.lookupVisibleGlobal(ident.Name)
+	}
+	if !found || sym == nil || !sym.Mutable {
+		return nil, false
+	}
+	ref, ok := sym.Type.(*RefType)
+	if !ok || ref == nil || !ref.Mutable || (!IsNumericType(ref.Elem) && !IsBoolType(ref.Elem)) {
+		return nil, false
+	}
+	return ref, true
+}
+
 func (a *Analyzer) optionalAssignmentTargetType(expr ast.Expr) Type {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:

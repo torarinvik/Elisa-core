@@ -44,6 +44,20 @@ func debugTestRunnerCache(stderr io.Writer, status string, artifact testRunnerCa
 	fmt.Fprintf(stderr, "[ cache    ] %s key=%s exe=%s\n", status, prefix, artifact.executable)
 }
 
+// usableCachedFile is the minimum integrity check before a cache entry can affect a
+// compiler result. Cache publication is atomic, but an entry can still be truncated or
+// replaced outside the process (for example by cleanup tooling or a damaged filesystem).
+// Treating any existing path as a hit would then report success while copying a directory
+// or an empty artifact to the caller. Executable entries additionally need an execute bit
+// because the early runner cache uses the cached path directly.
+func usableCachedFile(path string, executable bool) bool {
+	info, err := os.Stat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return false
+	}
+	return !executable || info.Mode().Perm()&0o111 != 0
+}
+
 func locateCachedTestRunner(runnerSource string, shimSource string, easmModules []*easm.Module, foreignFiles []string, linkFlags []string, optLevel backend.OptimizationLevel, packedProfile backend.PackedLoweringProfile, targetTriple string) (testRunnerCacheArtifact, bool, error) {
 	artifact, err := testRunnerCacheArtifactFor(runnerSource, shimSource, easmModules, foreignFiles, linkFlags, optLevel, packedProfile, targetTriple)
 	if err != nil {
@@ -52,9 +66,9 @@ func locateCachedTestRunner(runnerSource string, shimSource string, easmModules 
 	if artifact.executable == "" {
 		return artifact, false, nil
 	}
-	if _, err := os.Stat(artifact.executable); err == nil {
+	if usableCachedFile(artifact.executable, true) {
 		return artifact, true, nil
-	} else if !os.IsNotExist(err) {
+	} else if _, err := os.Stat(artifact.executable); err != nil && !os.IsNotExist(err) {
 		return artifact, false, err
 	}
 	return artifact, false, nil
@@ -67,7 +81,7 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 	if err := os.MkdirAll(filepath.Dir(artifact.dir), 0o755); err != nil {
 		return err
 	}
-	if _, err := os.Stat(artifact.executable); err == nil {
+	if usableCachedFile(artifact.executable, true) {
 		return nil
 	}
 	stagingDir, err := os.MkdirTemp(filepath.Dir(artifact.dir), ".elisa-test-runner-stage-*")
@@ -85,7 +99,7 @@ func publishCachedTestRunner(artifact testRunnerCacheArtifact, builtExecutable s
 		return err
 	}
 	if err := os.Rename(stagingDir, artifact.dir); err != nil {
-		if _, statErr := os.Stat(artifact.executable); statErr == nil {
+		if usableCachedFile(artifact.executable, true) {
 			return nil
 		}
 		return err
@@ -110,6 +124,11 @@ func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module
 		return err
 	}
 	testRunnerCacheWriteString(hash, "clang="+clangPath)
+	clangStamp, err := toolchainContentStamp(clangPath)
+	if err != nil {
+		return err
+	}
+	testRunnerCacheWriteString(hash, "clang-content="+clangStamp)
 	for _, module := range easmModules {
 		if module == nil {
 			continue

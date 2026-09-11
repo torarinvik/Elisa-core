@@ -45,6 +45,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			if a.resolvedTypeNames != nil && canonical != "" && canonical != n.Name {
 				a.resolvedTypeNames[n] = canonical
 			}
+			if n.Region != "" {
+				a.errorf(n.Pos(), "region annotation `@%s` is only valid on a function return type; named values do not carry an independent region", n.Region)
+			}
 			return DefaultStatefulType(t)
 		}
 		if t, ok := a.resolveProjectedAssociatedType(n); ok {

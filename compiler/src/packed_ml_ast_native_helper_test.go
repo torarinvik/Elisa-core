@@ -126,6 +126,16 @@ func buildCachedNativeArtifacts(tb testing.TB, repoRoot string, spec nativeArtif
 				return
 			}
 		}
+		// The packed-runtime fixtures include the core runtime directly. That runtime's
+		// profiler ABI is deliberately optional, but Darwin's dynamic-lookup link mode
+		// resolves an omitted hook to NULL and the first arena allocation then jumps
+		// through address zero. Keep this standalone native harness on the same safe
+		// fallback path as buildNativeExecutableWithClang.
+		profilerFallbackPath := filepath.Join(buildDir, spec.name+"_profiler_fallback.c")
+		if err := os.WriteFile(profilerFallbackPath, []byte(defaultElisaCoreProfilerFallbackSource), 0o644); err != nil {
+			entry.errMessage = "failed to write profiler fallback: " + err.Error()
+			return
+		}
 
 		runCLICommands := make([][]string, 0, 2)
 		if spec.generateHeader {
@@ -296,6 +306,10 @@ func nativeArtifactCacheKey(repoRoot string, spec nativeArtifactSpec) (string, s
 	}
 	writeHashString(hash, "clang="+clangPath)
 	writeHashString(hash, "generateHeader="+fmt.Sprintf("%t", spec.generateHeader))
+	// Keep cache entries from before the standalone profiler fallback out of the
+	// executable path. Test files are intentionally omitted from hashGoFilesUnder,
+	// so this ABI input must be explicit here.
+	writeHashBytes(hash, "profiler_fallback", []byte(defaultElisaCoreProfilerFallbackSource))
 	writeHashString(hash, "fixturePath="+spec.fixturePath)
 	if spec.hashExpandedSrc {
 		expandedFixture, err := readSourceWithIncludes(spec.fixturePath, map[string]bool{})

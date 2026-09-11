@@ -600,5 +600,12 @@ func (a *Analyzer) validateRequiredPermissions(pos lexer.Pos, fnType *FuncType, 
 	if len(missing) == 0 {
 		return
 	}
+	// The runtime standard library is the trusted implementation boundary for
+	// low-level operations. Its public wrappers may call raw profiler/allocator
+	// externs without forcing every caller to grant Unsafe.RawExtern; ordinary
+	// user code still reaches the warning/error paths below.
+	if isRuntimeStdPermissionInternal(pos.File) && allUnsafeFamilies(missing) {
+		return
+	}
 	a.warnf(pos, effectAuthorityGrantMessage("call to "+quoteFactTarget(fnType.Name), missing, permissionGrantHint(requiredRefs, missing)))
 }

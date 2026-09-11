@@ -221,6 +221,22 @@ func TestGenerateLLVMIRLowersRangeListComprehensionExpr(t *testing.T) {
 	}
 }
 
+func TestGenerateLLVMIRDoesNotClaimFreshAliasForSelfExtendComprehension(t *testing.T) {
+	src := `def build(items: mutable darray[i64]&) -> usize:
+    can Memory.Allocate, Abort.Panic:
+        items.extend([item + 1 for item in items])
+        return items.count
+`
+	result := parseAndAnalyzeBackendTest(t, "backend_self_extend_comprehension.elisa", src)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel3)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "elisa.comprehension.") {
+		t.Fatalf("self-extend comprehension must not receive fresh-result noalias metadata, got:\n%s", output)
+	}
+}
+
 func TestGenerateLLVMIRLowersQueryExprFamily(t *testing.T) {
 	src := `def has_positive(items: darray[i64]) -> bool:
     return any item in items where item > 0

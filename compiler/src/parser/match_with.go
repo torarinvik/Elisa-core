@@ -54,7 +54,7 @@ func (p *Parser) parseTopLevelMatchArmAlternatives() []matchArmAlternative {
 
 func (p *Parser) parseMatchArmAlternative() matchArmAlternative {
 	pos := p.cur().Pos
-	pattern := p.parseMatchPatternNoOr()
+	pattern := p.parseMatchPatternNoPipe()
 	return matchArmAlternative{pos: pos, pattern: pattern, withDecls: p.parseOptionalWithBindings()}
 }
 
