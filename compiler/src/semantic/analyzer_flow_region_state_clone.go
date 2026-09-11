@@ -11,6 +11,62 @@ func (a *Analyzer) cloneRegionStates() map[*Symbol]regionState {
 	return cloned
 }
 
+// joinRegionStateBranches computes the state that is safe after a control-flow
+// join. A region is usable only when every fallthrough path leaves it live; a
+// destroy on just one path is therefore reported to the caller as inconsistent
+// rather than silently discarded. The returned symbols identify those mixed
+// live/destroyed joins so the diagnostic can point at the joining statement.
+func joinRegionStateBranches(entry map[*Symbol]regionState, branches []map[*Symbol]regionState) (map[*Symbol]regionState, []*Symbol) {
+	joined := cloneRegionStateMap(entry)
+	if len(branches) == 0 {
+		return joined, nil
+	}
+	inconsistent := make([]*Symbol, 0)
+	for sym, entryState := range entry {
+		joinedState := entryState
+		anyDestroyed := false
+		allDestroyed := true
+		maxGeneration := entryState.Generation
+		for _, branch := range branches {
+			state, ok := branch[sym]
+			if !ok {
+				state = entryState
+			}
+			if state.Destroyed {
+				anyDestroyed = true
+			} else {
+				allDestroyed = false
+			}
+			if state.Generation > maxGeneration {
+				maxGeneration = state.Generation
+			}
+		}
+		if anyDestroyed && !allDestroyed {
+			inconsistent = append(inconsistent, sym)
+			// Keep the owner live in the joined map so the ordinary affine
+			// discharge still requires cleanup on the paths that did not destroy
+			// it. The join diagnostic is the authoritative rejection.
+			joinedState.Destroyed = false
+		} else {
+			joinedState.Destroyed = allDestroyed
+		}
+		joinedState.Generation = maxGeneration
+		joined[sym] = joinedState
+	}
+	return joined, inconsistent
+}
+
+func cloneRegionStateMap(src map[*Symbol]regionState) map[*Symbol]regionState {
+	if src == nil {
+		return nil
+	}
+	cloned := make(map[*Symbol]regionState, len(src))
+	for sym, state := range src {
+		cloned[sym] = state
+	}
+	return cloned
+}
+
 func (a *Analyzer) cloneRegionMarkStates() map[*Symbol]regionMarkState {
 	if a.currentRegionMarks == nil {
 		return nil

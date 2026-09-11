@@ -639,6 +639,19 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	}
 	valueRegion := containerOrEntryRegion(valueType)
 	if valueRegion == "" {
+		// Region-polymorphic enum results keep their lifetime in the region-ref
+		// provenance side table rather than in the nominal enum type. Prefer that
+		// proven caller-parameter region before classifying the value as a fresh
+		// enum allocation; otherwise a returned AST node can be mistaken for a
+		// short-lived auto-region value when it is pushed back into the same
+		// caller-owned container.
+		if state, ok := a.regionRefStateForExpr(argExpr); ok {
+			if parameterRegion, known := a.currentParamRegionFromRefState(state); known {
+				valueRegion = parameterRegion
+			}
+		}
+	}
+	if valueRegion == "" {
 		// An INLINE value-enum constructor (`out.push(Item.Row(make_vals(10)))`) wraps its
 		// payload directly, but the enum TYPE carries no region stamp, so the store looked
 		// region-free and slipped past this check (silent use-after-free). When a payload
@@ -669,6 +682,57 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
 	}
+}
+
+// currentParamRegionFromRefState resolves a region-ref summary's parameter
+// dependencies against the active function signature. It returns a region only
+// when every dependency names the same region-bearing parameter and no local or
+// packed-store dependency is mixed in; ambiguity stays conservative and lets the
+// existing fresh-value checks reject the store.
+func (a *Analyzer) currentParamRegionFromRefState(state regionRefState) (string, bool) {
+	if a == nil || a.currentFuncType == nil || len(state.Deps) != 0 || len(state.StoreDeps) != 0 {
+		return "", false
+	}
+	region := ""
+	seenParam := false
+	acceptParam := func(index int) bool {
+		if index < 0 || index >= len(a.currentFuncType.Params) {
+			return false
+		}
+		candidate := regionParamReturnTypeRegion(a.currentFuncType.Params[index])
+		if candidate == "" {
+			return false
+		}
+		if region == "" {
+			region = candidate
+		} else if region != candidate {
+			return false
+		}
+		seenParam = true
+		return true
+	}
+	if state.HasDirectParamDep && !acceptParam(state.DirectParamDep) {
+		return "", false
+	}
+	valid := true
+	state.ParamDeps.ForEach(func(index int) {
+		if valid && !acceptParam(index) {
+			valid = false
+		}
+	})
+	for _, fieldState := range state.Fields {
+		if valid {
+			fieldRegion, fieldKnown := a.currentParamRegionFromRefState(fieldState)
+			if !fieldKnown {
+				valid = false
+			} else if region == "" {
+				region = fieldRegion
+			} else if fieldRegion != region {
+				valid = false
+			}
+		}
+	}
+	return region, valid && seenParam
 }
 
 // enumCtorPayloadFreshRegion classifies an enum-constructor expression — bare (`Item.Row(x)`) or
@@ -1166,6 +1230,14 @@ func (a *Analyzer) checkFreshContainerStoreEscape(targetExpr ast.Expr, targetTyp
 // leaves the stored interior dangling.
 func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetRegion string, valueExpr ast.Expr, via string) {
 	valueRegion := a.valueInteriorRegion(valueExpr)
+	if state, ok := a.regionRefStateForExpr(valueExpr); ok {
+		if parameterRegion, known := a.currentParamRegionFromRefState(state); known {
+			// The side-table is more precise than the nominal enum/container type:
+			// a region-polymorphic return may carry caller-owned interior storage
+			// even when valueInteriorRegion sees only the callee's auto region.
+			valueRegion = parameterRegion
+		}
+	}
 	if valueRegion == "" {
 		return // scalar / regionless interior can't dangle.
 	}

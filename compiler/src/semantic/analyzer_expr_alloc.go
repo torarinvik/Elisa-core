@@ -20,11 +20,13 @@ func (a *Analyzer) analyzeAllocExpr(expr *ast.AllocExpr) Type {
 }
 
 func allocValueExpectedType(expected Type) Type {
-	refExpected, ok := expected.(*RefType)
-	if !ok || refExpected == nil {
-		return nil
+	if refExpected, ok := expected.(*RefType); ok && refExpected != nil {
+		return refExpected.Elem
 	}
-	return refExpected.Elem
+	// A writable reference assignment auto-dereferences a fresh allocation at
+	// the store site. Preserve that contextual value type so `new[r] 3` is
+	// analyzed as an `i64` payload when the target is `mutable i64&`.
+	return expected
 }
 
 func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Type) Type {
@@ -93,7 +95,10 @@ func (a *Analyzer) analyzeAllocExprWithExpected(expr *ast.AllocExpr, expected Ty
 	if a.containsAffineHandleValues(valueType, map[string]bool{}) {
 		a.errorf(expr.Value.Pos(), "cannot allocate a value containing linear handles into region %q: a region frees its contents in bulk (destroy/reset) without consuming them, so the linear value could never be consumed; keep it outside the region and store a borrow, or consume it explicitly", ident.Name)
 	}
-	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
+	// Fresh storage is writable by construction. The binding may choose to expose
+	// it through a read-only `T&`, but the allocation itself must retain mutable
+	// capability so a writable alias can be initialized or rebound from it.
+	return &RefType{Elem: valueType, Mutable: true, State: RefStateNonNull, Storage: RefStorageAny, Region: ident.Name, ExplicitStorage: true}
 }
 
 // analyzeAutoAllocExpr lowers `new[auto] T(...)`: heap-allocate T into the INNERMOST active
@@ -134,5 +139,5 @@ func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type
 	if a.containsAffineHandleValues(valueType, map[string]bool{}) {
 		a.errorf(expr.Value.Pos(), "cannot allocate a value containing linear handles via new[auto]: an inferred region frees its contents in bulk without consuming them")
 	}
-	return &RefType{Elem: valueType, State: RefStateNonNull, Storage: RefStorageAny, Region: region, ExplicitStorage: true}
+	return &RefType{Elem: valueType, Mutable: true, State: RefStateNonNull, Storage: RefStorageAny, Region: region, ExplicitStorage: true}
 }

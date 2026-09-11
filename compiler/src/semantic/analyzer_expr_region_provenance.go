@@ -1,8 +1,6 @@
 package semantic
 
-import (
-	"elisacore/src/ast"
-)
+import "elisacore/src/ast"
 
 func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 	if expr == nil {

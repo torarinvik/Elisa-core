@@ -24,6 +24,37 @@ def f() -> i64:
 	}
 }
 
+// Fresh explicit-region allocations are writable storage. A read-only binding may
+// narrow that capability, but a mutable alias must still be able to initialize from
+// and rebind to a `new[r]` result, matching stage1's region allocation contract.
+func TestExplicitRegionNewProducesWritableReference(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "new_region_writable_alias.elisa", `def f() -> i64 can[Memory.Allocate, Abort.Panic]:
+    region scratch(4096):
+        value: i64& = new[scratch] 1
+        alias: mutable i64& = value
+        alias <- new[scratch] 3
+        return 1
+`, AnalyzeOptions{})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("fresh region allocation must initialize and rebind a writable alias, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+// A region-qualified writable reference remains a write-through place even when
+// its binding was declared with `mutable`; this is the scalar counterpart of the
+// fresh-allocation mutability regression above.
+func TestRegionQualifiedMutableReferenceWritesThrough(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "region_mutable_ref_write.elisa", `def f[@r](source: mutable i64& @r) -> i64:
+    alias: mutable i64& @r = source
+    source <- 1
+    alias <- 2
+    return 0
+`, AnalyzeOptions{})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("region-qualified mutable reference assignments must write through the referent, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // docs/75: returning a new[auto] value is NOT an escape — it makes the function region-polymorphic.
 // The inferred region is threaded from the caller (the hidden `__region_auto` Arena& param), so the
 // result outlives the call by construction. Such a function compiles cleanly and is classified

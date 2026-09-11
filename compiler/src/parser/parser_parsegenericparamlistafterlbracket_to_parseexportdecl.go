@@ -311,6 +311,21 @@ func (p *Parser) parseFuncDeclWithAnnotationsAndStatic(annotations []ast.Annotat
 	return p.parseFuncDeclRest(pos, annotations, isStatic)
 }
 
+// takeReturnTypeRegion consumes the parser-side region suffix attached to the
+// return type. Stage1 records `-> T @r` as a function return contract rather
+// than changing the nominal type T; keeping that distinction is essential for
+// recursive packed enums, whose constructor views must remain assignable to T.
+func takeReturnTypeRegion(typ ast.TypeExpr) string {
+	switch t := typ.(type) {
+	case *ast.NamedType:
+		region := t.Region
+		t.Region = ""
+		return region
+	default:
+		return ""
+	}
+}
+
 // parseFuncDeclRest parses everything after the opening keyword of a function-shaped declaration
 // (`def` or `lemma`): the name, signature, contract clauses, and body. Shared so a `lemma` reuses
 // the entire function grammar (generics, params, requires/ensure, body) and differs only by the
@@ -325,8 +340,10 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 	p.expect(lexer.TOKEN_RPAREN)
 
 	var retType ast.TypeExpr
+	returnRegion := ""
 	if p.match(lexer.TOKEN_ARROW) {
 		retType = p.parseTypeExpr()
+		returnRegion = takeReturnTypeRegion(retType)
 	}
 
 	var permissions []ast.PermissionRef
@@ -388,7 +405,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 		desugarDStrReturnLiterals(body, retType)
 		body = p.maybeWrapFunctionBodyInAutoRegion(body, params, pos)
 	}
-	fn := &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, Variadic: variadic, ReturnType: retType, Body: body}
+	fn := &ast.FuncDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Static: isStatic, Name: name, TypeParams: typeParams, RegionParams: regionParams, PermissionParams: permissionParams, GenericParams: genericParams, Permissions: permissions, Ensures: ensures, Changes: changes, Preserves: preserves, Fulfills: fulfills, Requires: requires, RequiresProofs: requireProofs, EnsureValues: ensures2, EnsureProofs: ensureProofs, Decreases: decreases, DecreasesWild: decreasesWild, Uses: uses, Params: params, Variadic: variadic, ReturnType: retType, ReturnRegion: returnRegion, Body: body}
 	// docs/120 §2: validate and erase a declared lmut-threading return manifest
 	// (`-> (ch: char, lexer: lmut Lexer)`) before anything downstream sees the type.
 	p.applyDeclaredLmutThreading(fn)

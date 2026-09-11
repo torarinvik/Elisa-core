@@ -111,6 +111,13 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
 			return sym.Type
 		}
+		// A writable reference to a scalar is a write-through place for `<-`.
+		// Aggregate/heap references remain pointer-rebinding places: runtime cursor
+		// variables such as `mutable heap Region&?` intentionally move from one
+		// node to the next. Rebinding a scalar reference can still use `as &`.
+		if ref, ok := sym.Type.(*RefType); ok && ref.Mutable && (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) {
+			return ref.Elem
+		}
 		if a.currentScope != nil {
 			if current, exists := a.currentScope.Symbols[n.Name]; exists && current == sym && a.currentScope.Parent != nil {
 				if parent, ok := a.currentScope.Parent.Lookup(n.Name); ok && parent.Node == sym.Node && parent.Kind == sym.Kind && parent.Mutable {

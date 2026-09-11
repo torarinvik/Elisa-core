@@ -79,6 +79,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 					}
 				}
 				fnType := a.funcTypeFromDeclWithFrame(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Changes, n.Fulfills, n.Params, n.ReturnType, n.Variadic, false)
+				a.applyDeclaredReturnRegion(n, fnType)
 				fnType.Static = n.Static
 				initLookupName, constructorSugar := a.constructorDeclInitHookName(scoped.Namespace, n, fnType)
 				symbolName := qualifiedName
@@ -122,6 +123,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 								continue
 							}
 							fnType := a.funcTypeFromDeclWithFrame(symbolName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
+							a.applyDeclaredReturnRegion(fnDecl, fnType)
 							linkName, _ := functionLinkNameFromAnnotations(fnDecl.Annotations)
 							sym := &Symbol{Name: symbolName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
 							a.functionTypes[symbolName] = fnType
@@ -157,6 +159,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 								visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
 								qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
 								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
+								a.applyDeclaredReturnRegion(fnDecl, fnType)
 								linkName, _ := functionLinkNameFromAnnotations(fnDecl.Annotations)
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType
@@ -193,6 +196,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 							case *ast.FuncDecl:
 								qualifiedName := StaticImplMethodSymbolName(interfaceName, receiver, fnDecl.Name)
 								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
+								a.applyDeclaredReturnRegion(fnDecl, fnType)
 								linkName, _ := functionLinkNameFromAnnotations(fnDecl.Annotations)
 								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
 								a.functionTypes[qualifiedName] = fnType

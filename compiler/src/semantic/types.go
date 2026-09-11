@@ -644,15 +644,19 @@ type FuncType struct {
 	// the whole place to just the written subpaths (`f(&r.x)` where `f changes self.a` writes only
 	// `r.x.a`); an unbounded callee keeps the conservative whole-place rule. Pure `preserves` does not
 	// bound writes, so it does not set FrameBounded.
-	FrameWrites                  []FrameParamWrite
-	FrameBounded                 bool
-	Params                       []Type
-	ExplicitParamCount           int
-	ExplicitParamNames           []string
-	ExplicitParamDefaultExprs    []ast.Expr
-	ExplicitParamHasDefault      []bool
-	ImplicitParamNames           []string
-	Return                       Type
+	FrameWrites               []FrameParamWrite
+	FrameBounded              bool
+	Params                    []Type
+	ExplicitParamCount        int
+	ExplicitParamNames        []string
+	ExplicitParamDefaultExprs []ast.Expr
+	ExplicitParamHasDefault   []bool
+	ImplicitParamNames        []string
+	Return                    Type
+	// ReturnRegion is the function-level `-> T @r` contract. It records the
+	// lifetime tie without changing the nominal return type (especially for
+	// recursive packed enums whose constructors are packed variant views).
+	ReturnRegion                 string
 	Variadic                     bool
 	SinkParams                   []bool
 	SinkParamsKnown              bool

@@ -110,6 +110,10 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		p.advance() // '@'
 		regionName := p.advance().Text
 		switch t := typ.(type) {
+		case *ast.NamedType:
+			if t != nil {
+				t.Region = regionName
+			}
 		case *ast.BuiltinTypeExpr:
 			if t != nil {
 				t.Region = regionName
