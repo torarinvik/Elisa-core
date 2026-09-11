@@ -39,11 +39,48 @@ static void elisacoreTagAutovecLoop(LLVMContextRef ctx, LLVMValueRef branchInst,
 static unsigned elisacoreLoopMDKind(LLVMContextRef ctx) {
 	return LLVMGetMDKindIDInContext(ctx, "llvm.loop", 9);
 }
+
+// LLVM also attaches `llvm.loop.isvectorized` to scalar unrolled remainder loops. Treat that
+// marker as proof of vectorization only when the loop latch's block actually contains a vector
+// typed instruction; otherwise -Wperf would silently bless a scalar unroll as SIMD.
+static int elisacoreBasicBlockHasVectorInstruction(LLVMBasicBlockRef block) {
+	if (block == NULL) {
+		return 0;
+	}
+	for (LLVMValueRef inst = LLVMGetFirstInstruction(block); inst != NULL; inst = LLVMGetNextInstruction(inst)) {
+		LLVMTypeRef resultType = LLVMTypeOf(inst);
+		if (resultType != NULL && LLVMGetTypeKind(resultType) == LLVMVectorTypeKind) {
+			return 1;
+		}
+		unsigned operands = LLVMGetNumOperands(inst);
+		for (unsigned i = 0; i < operands; i++) {
+			LLVMValueRef operand = LLVMGetOperand(inst, i);
+			LLVMTypeRef operandType = operand == NULL ? NULL : LLVMTypeOf(operand);
+			if (operandType != NULL && LLVMGetTypeKind(operandType) == LLVMVectorTypeKind) {
+				return 1;
+			}
+		}
+	}
+	return 0;
+}
+
+static int elisacoreFunctionHasVectorInstruction(LLVMValueRef function) {
+	if (function == NULL) {
+		return 0;
+	}
+	for (LLVMBasicBlockRef block = LLVMGetFirstBasicBlock(function); block != NULL; block = LLVMGetNextBasicBlock(block)) {
+		if (elisacoreBasicBlockHasVectorInstruction(block)) {
+			return 1;
+		}
+	}
+	return 0;
+}
 */
 import "C"
 
 import (
 	"fmt"
+	"reflect"
 	"unsafe"
 
 	"elisacore/src/ast"
@@ -119,18 +156,28 @@ func permissionRefsGrantScalar(refs []ast.PermissionRef) bool {
 // vectorize without reassociation (the fold-comprehension form is the vectorizable spelling).
 func userLoopVectorEligible(body []ast.Stmt) bool {
 	hasIndexedStore := false
+	indexedObjects := map[string]bool{}
 	for _, stmt := range body {
 		switch n := stmt.(type) {
 		case *ast.VarDeclStmt:
 			if n.Value != nil && ast.ExprContainsCall(n.Value) {
 				return false
 			}
+			if !collectUserLoopIndexedObjects(n.Value, indexedObjects) {
+				return false
+			}
 		case *ast.ExprStmt:
 			if ast.ExprContainsCall(n.Expr) {
 				return false
 			}
+			if !collectUserLoopIndexedObjects(n.Expr, indexedObjects) {
+				return false
+			}
 		case *ast.AssignStmt:
 			if n.Optional || ast.ExprContainsCall(n.Target) || ast.ExprContainsCall(n.Value) {
+				return false
+			}
+			if !collectUserLoopIndexedObjects(n.Target, indexedObjects) || !collectUserLoopIndexedObjects(n.Value, indexedObjects) {
 				return false
 			}
 			if _, ok := n.Target.(*ast.IndexExpr); ok {
@@ -144,7 +191,69 @@ func userLoopVectorEligible(body []ast.Stmt) bool {
 			return false
 		}
 	}
-	return hasIndexedStore
+	// Without a proof that two buffers are disjoint, LLVM must conservatively keep an alias
+	// check (and may legitimately leave the loop scalar). Marking such a loop as an obligation
+	// would turn a valid program into a false -Wperf failure. Single-buffer loops remain sound:
+	// the loop-carried accesses are to one known storage object and LLVM can vectorize or reject
+	// them based on the operation itself. A future proof-backed disjointness fact can widen this
+	// gate without changing the diagnostic contract.
+	return hasIndexedStore && len(indexedObjects) <= 1
+}
+
+// collectUserLoopIndexedObjects records the named containers used by indexed accesses in one
+// straight-line user-loop statement. An unknown/indexed receiver is rejected conservatively: it
+// may hide a second buffer or an aliasing field projection that the local shape check cannot prove.
+func collectUserLoopIndexedObjects(value ast.Expr, objects map[string]bool) bool {
+	if value == nil {
+		return true
+	}
+	seen := map[uintptr]bool{}
+	var walk func(reflect.Value) bool
+	walk = func(current reflect.Value) bool {
+		if !current.IsValid() {
+			return true
+		}
+		switch current.Kind() {
+		case reflect.Interface:
+			if current.IsNil() {
+				return true
+			}
+			return walk(current.Elem())
+		case reflect.Pointer:
+			if current.IsNil() {
+				return true
+			}
+			if ptr := current.Pointer(); ptr != 0 {
+				if seen[ptr] {
+					return true
+				}
+				seen[ptr] = true
+			}
+			if index, ok := current.Interface().(*ast.IndexExpr); ok {
+				ident, ok := index.Object.(*ast.Ident)
+				if !ok || ident == nil || ident.Name == "" {
+					return false
+				}
+				objects[ident.Name] = true
+				return walk(reflect.ValueOf(index.Index))
+			}
+			return walk(current.Elem())
+		case reflect.Struct:
+			for i := 0; i < current.NumField(); i++ {
+				if !walk(current.Field(i)) {
+					return false
+				}
+			}
+		case reflect.Slice, reflect.Array:
+			for i := 0; i < current.Len(); i++ {
+				if !walk(current.Index(i)) {
+					return false
+				}
+			}
+		}
+		return true
+	}
+	return walk(reflect.ValueOf(value))
 }
 
 // tagAutovecExpectedLoop marks a loop's latch branch as expected-to-vectorize (compiler-synthesized
@@ -169,12 +278,10 @@ func (s *functionState) tagAutovecExpectedLoop(branchInst C.LLVMValueRef, pos le
 }
 
 // verifyAutovecExpectations runs after the optimization pipeline. It scans every loop's `!llvm.loop`
-// metadata for the `elisa.autovec.expected` marker and warns for any marked loop that lacks
-// `llvm.loop.isvectorized`. LLVM stamps `isvectorized` on the vector body AND the scalar remainder
-// of every loop it vectorizes, so a marked loop without it genuinely fell back to scalar code — a
-// real efficiency regression. Because the marker rides in the IR it is found wherever inlining moved
-// the loop, and because the check keys on isvectorized there are no false positives on a vectorized
-// loop's remainder. Warnings are deduplicated by source position.
+// metadata for the `elisa.autovec.expected` marker and warns for any marked loop that lacks a real
+// vector instruction in its latch block. LLVM stamps `isvectorized` on scalar-unrolled loops too, so
+// that flag alone is not proof that SIMD was generated. The marker rides in the IR and is found
+// wherever inlining moved the loop; warnings are deduplicated by source position.
 func (g *llvmGenerator) verifyAutovecExpectations() {
 	if g == nil || g.module == nil || g.optLevel == OptimizationLevel0 {
 		return
@@ -192,6 +299,9 @@ func (g *llvmGenerator) verifyAutovecExpectations() {
 				continue
 			}
 			pos, reason, marked, vectorized := inspectAutovecLoopMetadata(loopMD)
+			if vectorized && C.elisacoreBasicBlockHasVectorInstruction(bb) == 0 && C.elisacoreFunctionHasVectorInstruction(fn) == 0 {
+				vectorized = false
+			}
 			if !marked || vectorized || seen[pos] {
 				continue
 			}

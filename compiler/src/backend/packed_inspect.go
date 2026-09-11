@@ -32,23 +32,36 @@ func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfi
 
 	packedEnums := make([]*semantic.EnumType, 0)
 	seen := map[string]bool{}
-	if result != nil && result.File != nil {
-		for _, decl := range result.File.Decls {
-			enumDecl, ok := decl.(*ast.EnumDecl)
-			if !ok {
-				continue
+	var collect func([]ast.Decl, string)
+	collect = func(decls []ast.Decl, namespace string) {
+		for _, decl := range decls {
+			switch n := decl.(type) {
+			case *ast.NamespaceDecl:
+				nextNamespace := n.Name
+				if namespace != "" {
+					nextNamespace = namespace + "." + n.Name
+				}
+				collect(n.Decls, nextNamespace)
+			case *ast.EnumDecl:
+				qualifiedName := n.Name
+				if namespace != "" {
+					qualifiedName = namespace + "." + n.Name
+				}
+				named, ok := result.NamedTypes[qualifiedName]
+				if !ok {
+					continue
+				}
+				enumType, ok := named.(*semantic.EnumType)
+				if !ok || enumType == nil || !enumType.Packed || seen[enumType.Name] {
+					continue
+				}
+				seen[enumType.Name] = true
+				packedEnums = append(packedEnums, enumType)
 			}
-			named, ok := result.NamedTypes[enumDecl.Name]
-			if !ok {
-				continue
-			}
-			enumType, ok := named.(*semantic.EnumType)
-			if !ok || enumType == nil || !enumType.Packed || seen[enumType.Name] {
-				continue
-			}
-			seen[enumType.Name] = true
-			packedEnums = append(packedEnums, enumType)
 		}
+	}
+	if result != nil && result.File != nil && result.NamedTypes != nil {
+		collect(result.File.Decls, "")
 	}
 	if len(packedEnums) == 0 {
 		builder.WriteString("  enums: none\n")
