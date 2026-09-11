@@ -217,7 +217,7 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 	if result == nil || result.GlobalScope == nil {
 		return summary
 	}
-	summary.TrustedUses = collectTrustedUnsafeUses(result.ActiveFile())
+	summary.TrustedUses = collectTrustedUnsafeUses(result)
 	for _, use := range summary.TrustedUses {
 		for _, permission := range use.Permissions {
 			summary.TrustedTotal++
@@ -350,13 +350,17 @@ func activeBoundaryInvariants(summary unsafeSummary) []boundaryInvariant {
 	return active
 }
 
-func collectTrustedUnsafeUses(file *ast.File) []unsafeTrustedSummary {
+func collectTrustedUnsafeUses(result *semantic.Result) []unsafeTrustedSummary {
+	if result == nil {
+		return nil
+	}
+	file := result.ActiveFile()
 	if file == nil {
 		return nil
 	}
 	var out []unsafeTrustedSummary
 	for _, decl := range file.Decls {
-		collectTrustedUnsafeUsesFromDecl(decl, "", &out)
+		collectTrustedUnsafeUsesFromDecl(result, decl, "", &out)
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Function == out[j].Function {
@@ -367,21 +371,21 @@ func collectTrustedUnsafeUses(file *ast.File) []unsafeTrustedSummary {
 	return out
 }
 
-func collectTrustedUnsafeUsesFromDecl(decl ast.Decl, namespace string, out *[]unsafeTrustedSummary) {
+func collectTrustedUnsafeUsesFromDecl(result *semantic.Result, decl ast.Decl, namespace string, out *[]unsafeTrustedSummary) {
 	switch n := decl.(type) {
 	case *ast.FuncDecl:
 		name := n.Name
 		if namespace != "" {
 			name = namespace + "." + name
 		}
-		collectTrustedUnsafeUsesFromStmts(n.Body, name, out)
+		collectTrustedUnsafeUsesFromStmts(result, n.Body, name, out)
 	case *ast.NamespaceDecl:
 		next := n.Name
 		if namespace != "" {
 			next = namespace + "." + next
 		}
 		for _, child := range n.Decls {
-			collectTrustedUnsafeUsesFromDecl(child, next, out)
+			collectTrustedUnsafeUsesFromDecl(result, child, next, out)
 		}
 	case *ast.ImplDecl:
 		for _, member := range n.Members {
@@ -390,13 +394,13 @@ func collectTrustedUnsafeUsesFromDecl(decl ast.Decl, namespace string, out *[]un
 				if namespace != "" {
 					name = namespace + "." + name
 				}
-				collectTrustedUnsafeUsesFromStmts(fn.Body, name, out)
+				collectTrustedUnsafeUsesFromStmts(result, fn.Body, name, out)
 			}
 		}
 	}
 }
 
-func collectTrustedUnsafeUsesFromStmts(stmts []ast.Stmt, function string, out *[]unsafeTrustedSummary) {
+func collectTrustedUnsafeUsesFromStmts(result *semantic.Result, stmts []ast.Stmt, function string, out *[]unsafeTrustedSummary) {
 	for _, stmt := range stmts {
 		switch n := stmt.(type) {
 		case *ast.CanStmt:
@@ -406,41 +410,43 @@ func collectTrustedUnsafeUsesFromStmts(stmts []ast.Stmt, function string, out *[
 					*out = append(*out, unsafeTrustedSummary{Function: function, Permissions: permissions})
 				}
 			}
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.IfStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Then, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Then, function, out)
 			for _, elif := range n.Elifs {
-				collectTrustedUnsafeUsesFromStmts(elif.Body, function, out)
+				collectTrustedUnsafeUsesFromStmts(result, elif.Body, function, out)
 			}
-			collectTrustedUnsafeUsesFromStmts(n.Else, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Else, function, out)
 		case *ast.WhileStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.ForStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.IterForStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.ParallelForStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.MatchStmt:
 			for _, arm := range n.Arms {
-				collectTrustedUnsafeUsesFromStmts(arm.Body, function, out)
+				collectTrustedUnsafeUsesFromStmts(result, arm.Body, function, out)
 			}
 		case *ast.InStoreStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.ScopeStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.PoolStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.LockStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		case *ast.StaticIfStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Then, function, out)
-			for _, elif := range n.Elifs {
-				collectTrustedUnsafeUsesFromStmts(elif.Body, function, out)
-			}
-			collectTrustedUnsafeUsesFromStmts(n.Else, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, result.ActiveStaticStmtBranch(n), function, out)
 		case *ast.StaticBlockStmt:
-			collectTrustedUnsafeUsesFromStmts(n.Body, function, out)
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
+		case *ast.RegionStmt:
+			// Function-body and loop-local auto regions are transparent to the
+			// trusted audit.  They are compiler-generated wrappers, not trust
+			// boundaries, so their nested `can`/`trusted` blocks still belong to
+			// the enclosing function's report.
+			collectTrustedUnsafeUsesFromStmts(result, n.Body, function, out)
 		}
 	}
 }

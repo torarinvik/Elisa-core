@@ -99,6 +99,35 @@ def safe_wrapper(value: uintptr) -> heap u8&:
 	}
 }
 
+func TestUnsafeReportIncludesTrustedUsesInsideAutoRegion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "unsafe_auto_region.elisa")
+	src := `
+def wrapped(value: uintptr) -> void:
+    in auto:
+        trusted Unsafe.PointerCast:
+            pass
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "unsafe", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	for _, want := range []string{
+		"trusted-total: 1",
+		"wrapped: Unsafe.PointerCast",
+	} {
+		if !strings.Contains(stdout.String(), want) {
+			t.Fatalf("expected unsafe report to contain %q, got:\n%s", want, stdout.String())
+		}
+	}
+}
+
 func TestUnsafeSummaryIncludesEASMExportsAndRequires(t *testing.T) {
 	t.Parallel()
 	report := generateUnsafeReport(&semantic.Result{

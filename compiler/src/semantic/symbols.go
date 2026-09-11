@@ -154,6 +154,17 @@ func (r *Result) ActiveFile() *ast.File {
 	return r.File
 }
 
+// ActiveStaticStmtBranch returns the target-selected branch of a statement-level
+// `static if`.  The backend and the semantic passes must agree about which branch
+// is live; consumers that inspect the analyzed AST (for example the unsafe audit)
+// must not walk every platform branch as if it were executable.
+func (r *Result) ActiveStaticStmtBranch(stmt *ast.StaticIfStmt) []ast.Stmt {
+	if r == nil || r.analyzer == nil || stmt == nil {
+		return nil
+	}
+	return r.analyzer.activeStmtBranch(stmt)
+}
+
 type SafeCallInfo struct {
 	ResolvedFuncName string
 	ResolvedFuncType *FuncType
