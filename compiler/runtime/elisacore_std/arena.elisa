@@ -438,14 +438,14 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                 )
             assert not inv_handle(raw)
             assert raw != null
-            r:mutable mutable heap Region& = arena_region_from_raw(raw)
+            r: mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 raw <- malloc(size_bytes)
             assert raw != null
-            r:mutable mutable heap Region& = arena_region_from_raw(raw)
+            r: mutable heap Region& = arena_region_from_raw(raw)
 
         static else:
             static error("Unknown arena backend")
