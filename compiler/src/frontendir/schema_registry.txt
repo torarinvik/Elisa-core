@@ -486,6 +486,7 @@ F FuncDecl 32 Static
 F FuncDecl 33 TypeParams
 F FuncDecl 34 Uses
 F FuncDecl 35 Variadic
+F FuncDecl 36 ReturnRegion
 
 T 72 FuncTypeExpr
 F FuncTypeExpr 1 Params
@@ -1280,6 +1281,7 @@ F MutableType 3 Position
 T 194 NamedType
 F NamedType 1 Name
 F NamedType 2 Position
+F NamedType 3 Region
 
 T 195 NamespaceDecl
 F NamespaceDecl 1 Const

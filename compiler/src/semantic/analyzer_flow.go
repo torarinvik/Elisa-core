@@ -474,6 +474,13 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		if restoreAllocExpr {
 			a.currentAllocExpr = savedAllocExpr
 		}
+		// A mutable scalar reference has two intentional assignment forms. If the
+		// RHS is a scalar, `<-` writes through the reference; if the RHS is another
+		// reference, it rebinds the reference slot. Decide only after RHS analysis
+		// so global reference slots do not get mistaken for scalar destinations.
+		if ref, ok := a.mutableScalarRefTarget(n.Target); ok && !isBorrowLikeType(valueType) && AssignableTo(ref.Elem, valueType) {
+			targetType = ref.Elem
+		}
 		// docs/120 §8 single-target arg-manifest `x <- x.method(…)`: a `<-` whose RHS is a
 		// void call that mutates x in place (x passed as its receiver/arg). Nothing to
 		// assign — the `x <-` is a manifest of what the call mutates. Erase to the
