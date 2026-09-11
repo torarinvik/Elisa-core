@@ -116,8 +116,8 @@ def alloc_and_format_heap_buffer() -> int error[MemoryError, FormatError]:
             if buffer != null:
                 buffer as ! <- (sfree_bytes(buffer))
 
-        raw: heap u8&? = alloc_bytes(32)
-        buffer_live: heap u8& = get raw else raise MemoryError.OutOfMemory
+        raw: mutable heap u8&? = alloc_bytes(32)
+        buffer_live: mutable heap u8& = get raw else raise MemoryError.OutOfMemory
         buffer <- buffer_live
         written: int = try checked_write_into_heap(buffer_live, 32, "num=%d")
         return written

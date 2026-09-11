@@ -152,7 +152,7 @@ def register_perm_string_len(ptr: u8&?, len: usize):
 					return
 				entry <- entry.next
 
-		new_entry: heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
+		new_entry: mutable heap StringLenCacheEntry& = alloc_perm(size_of(StringLenCacheEntry).i64()).cast[heap StringLenCacheEntry&]
 		new_entry.next <- string_len_cache[bucket]
 		# ptr is the caller's string pointer cached in a program-long table; callers
 		# pass stable (static/interned) string data, a contract the type system can't
@@ -215,7 +215,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# Experimental note:
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
-		out: heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
+		out: mutable heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
 		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
 		register_perm_string_len(out.cast[u8&], len)
@@ -234,8 +234,8 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 			snprintf(&text[0], len.usize() + 1, "%lld", value)
 			return intern_small_string(&text[0], len.usize())
 
-		out: heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
-		snprintf(out.cast[u8&?], len.usize() + 1, "%lld", value)
+		out: mutable heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
+		snprintf(out.cast[mutable u8&?], len.usize() + 1, "%lld", value)
 
 		register_perm_string_len(out.cast[u8&], len.usize()) if arena == &perm_arena
 

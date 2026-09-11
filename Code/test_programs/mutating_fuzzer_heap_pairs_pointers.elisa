@@ -34,8 +34,8 @@ def mutate_205_recursive_free_pair_chain(node: mutable heap HeapPairNode&?) -> v
 
 
 def mutate_206_build_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- FuzzPair(206, 207)
     second_live.pair <- FuzzPair(208, 209)
     first_live.next <- second_live
@@ -71,9 +71,9 @@ def mutate_211_recursive_pair_node_count(node: heap HeapPairNode&) -> int error[
 
 
 def mutate_212_build_three_pair_chain_sum() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    third_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- FuzzPair(212, 213)
     second_live.pair <- FuzzPair(214, 215)
     third_live.pair <- FuzzPair(216, 217)
@@ -86,8 +86,8 @@ def mutate_212_build_three_pair_chain_sum() -> int error[MemoryError, LogicError
 
 
 def mutate_213_build_three_pair_chain_count() -> int error[MemoryError, LogicError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.next <- second_live
     second_live.next <- third_live
@@ -98,7 +98,7 @@ def mutate_213_build_three_pair_chain_count() -> int error[MemoryError, LogicErr
 
 
 def mutate_214_heap_pair_any_roundtrip() -> bool error[MemoryError]:
-    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- root_pair
     same: bool = (&live.pair).cast[FuzzPair&].uintptr() == (&live.pair).cast[FuzzPair&].uintptr()
     handle: mutable heap HeapPairNode&? = live
@@ -138,7 +138,7 @@ def mutate_219_use_static_any_pair_sum() -> int:
 
 
 def mutate_220_use_heap_pair_any_sum() -> int error[MemoryError, DiskError, NetError]:
-    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- root_pair
     total: int = try mutate_218_recursive_any_pair_sum(2, (&live.pair).cast[FuzzPair&])
     handle: mutable heap HeapPairNode&? = live
@@ -246,8 +246,8 @@ def mutate_236_recursive_heap_any_mix(depth: int) -> uintptr error[MemoryError]:
 
 
 def mutate_237_pair_chain_from_static_pairs() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- root_pair
     second_live.pair <- pair_table[1]
     first_live.next <- second_live

@@ -409,7 +409,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             trusted Unsafe.RawExtern:
                 raw <- malloc(size_bytes)
             assert raw != null
-            r: heap Region& = arena_region_from_raw(raw)
+            r: mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
             raw_addr: mutable uintptr = 0.uintptr()
@@ -424,7 +424,7 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                 )
             assert raw_addr != MAP_FAILED()
             assert raw_addr != 0.uintptr()
-            r: heap Region& = arena_region_from_uintptr(raw_addr)
+            r: mutable heap Region& = arena_region_from_uintptr(raw_addr)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             raw: mutable heap void&? = null
@@ -438,14 +438,14 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                 )
             assert not inv_handle(raw)
             assert raw != null
-            r: heap Region& = arena_region_from_raw(raw)
+            r:mutable mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 raw <- malloc(size_bytes)
             assert raw != null
-            r: heap Region& = arena_region_from_raw(raw)
+            r:mutable mutable heap Region& = arena_region_from_raw(raw)
 
         static else:
             static error("Unknown arena backend")
@@ -473,7 +473,7 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
         trusted Unsafe.RawExtern:
             raw <- malloc(size_bytes)
         assert raw != null
-        r: heap Region& = arena_region_from_raw(raw)
+        r: mutable heap Region& = arena_region_from_raw(raw)
         r.next <- null
         r.count <- 0
         r.capacity <- capacity
@@ -518,7 +518,7 @@ def new_region_reserve(capacity: usize) -> mutable heap Region&:
                     PAGE_READWRITE
                 )
             assert not inv_handle(commit_raw)
-            r: heap Region& = arena_region_from_raw(raw)
+            r: mutable heap Region& = arena_region_from_raw(raw)
             r.next <- null
             r.count <- 0
             r.capacity <- capacity
@@ -825,7 +825,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
             arena_profile_region_layout(a, a.end) if a.end.count == 0
             offset_bytes: usize = a.end.count * size_of(uintptr)
-            result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
+            result: mutable heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
             a.end.count <- a.end.count + size
             # Windows: page-in the bytes this allocation now spans (no-op elsewhere).
             arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
@@ -890,7 +890,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
         data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
         arena_profile_region_layout(a, a.end) if a.end.count == 0
         offset_bytes: usize = a.end.count * size_of(uintptr)
-        result: heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
+        result: mutable heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
         a.end.count <- a.end.count + size
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_ALLOC,
@@ -978,7 +978,7 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
                 return arena_heap_void_from_mutable(oldptr)
             panic("reserve_commit/fixed array cannot grow in place: not the tail allocation")
 
-        newptr: heap void& = arena_alloc(a, newsz)
+        newptr: mutable heap void& = arena_alloc(a, newsz)
 
         # memcpy, not a byte loop. Every darray relocation lands here, and the
         # element-per-iteration copy moved one byte per loop trip — megabytes per
@@ -1119,7 +1119,7 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
         arena_reset(a)
         return
 
-    region: heap Region& = m.region
+    region: mutable heap Region& = m.region
     region.count <- m.count
     region.free_list <- null
 
@@ -1480,7 +1480,7 @@ def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable hea
 
         assert n >= 0
 
-        result: heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n.usize() + 1))
+        result: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n.usize() + 1))
         trusted Unsafe.RawExtern:
             _ = vsnprintf(arena_nullable_u8_from_heap(result), n.usize() + 1, format, args)
         return result

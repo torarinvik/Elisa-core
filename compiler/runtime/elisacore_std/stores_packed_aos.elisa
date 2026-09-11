@@ -29,7 +29,7 @@ const PACKED_AOS_CHUNK_RECORDS: usize = 256
 
 def ctx_aos_store_new(a: mutable Arena&, record_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        state: heap PackedAoSStore& = arena_alloc(a, size_of(PackedAoSStore)).cast[heap PackedAoSStore&]
+        state: mutable heap PackedAoSStore& = arena_alloc(a, size_of(PackedAoSStore)).cast[heap PackedAoSStore&]
         state.chunks <- zeroed
         state.count <- 0
         state.record_bytes <- record_bytes

@@ -92,13 +92,21 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				bindingType = cloned
 			}
 		}
-		if dstRef, ok := bindingType.(*RefType); ok {
-			if srcRef, ok := valueType.(*RefType); ok && srcRef.Mutable && !dstRef.Mutable && AssignableTo(bindingType, valueType) {
-				cloned := cloneRefType(dstRef)
-				cloned.Mutable = true
-				bindingType = cloned
-			}
-		}
+		// A DECLARED READ-ONLY REFERENCE STAYS READ-ONLY.
+		//
+		// There used to be a block here that copied the SOURCE's mutability onto
+		// the binding whenever the initializer happened to be a `mutable T&` --
+		// discarding the one thing the programmer wrote down. It arrived with
+		// "Make many APIs use mutable refs" as a migration convenience and was
+		// dormant while `new[r] x` produced a non-mutable ref. The moment
+		// allocations became mutable by construction (correctly: fresh storage is
+		// writable, and the binding is what narrows it) every
+		// `value: T& @r = new[r] ...` silently became writable and
+		// `cannot mutate through readonly ref` stopped firing on it.
+		//
+		// This path only ever runs when a type WAS written: with no declared type
+		// bindingType is already valueType, so there is nothing to widen. The
+		// `n.Mutable` promotion above remains -- there the programmer asked.
 		if specializedViewType, ok := concreteDArrayViewBindingType(bindingType, valueType); ok {
 			bindingType = specializedViewType
 		}

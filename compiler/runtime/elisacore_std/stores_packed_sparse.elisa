@@ -1,6 +1,6 @@
 def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        state: heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
+        state: mutable heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
         row_words: usize = (row_bytes + size_of(uintptr) - 1) / size_of(uintptr)
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
@@ -31,8 +31,8 @@ def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usiz
         return state.cast[heap void&]
 def ctx_packed_store_state_new_variant_sparse_with_side_words(a: mutable Arena&, row_bytes: usize, side_words: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        state_bits: heap void& = ctx_packed_store_state_new_variant_sparse(a, row_bytes)
-        state: heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
+        state_bits: mutable heap void& = ctx_packed_store_state_new_variant_sparse(a, row_bytes)
+        state: mutable heap PackedStoreState& = state_bits.cast[heap PackedStoreState&]
         state.side_words <- side_words
         return state_bits
 def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
@@ -40,7 +40,7 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
         store_rows_note()
         assert state_bits != null
 
-        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
         row_words: mutable usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
         row_words <- 1 if row_words == 0
         state.row_words <- row_words if row_words > state.row_words
@@ -99,7 +99,7 @@ def ctx_packed_store_read_variant_sparse_tag(state_bits: mutable void&, index: u
 def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
     can Abort.Panic:
         assert state_bits != null
-        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
         index_usize: usize = index.usize()
         assert index_usize < state.tags.count
         assert state.tags.items != null

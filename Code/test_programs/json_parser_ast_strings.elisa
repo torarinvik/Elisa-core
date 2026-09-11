@@ -27,7 +27,7 @@ def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_le
                 text[written.usize()] <- 0
                 return intern_small_string(&text[0], written.usize())
 
-            out: heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]
+            out: mutable heap u8& = alloc_perm((decoded_len + 1).i64()).cast[heap u8&]
             written: i64 = json_decode_string_into(source, source_offset, source_len, out.cast[u8&])
             if written < 0:
                 return intern_small_string("", 0)

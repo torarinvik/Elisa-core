@@ -356,14 +356,14 @@ static if ELISA_TARGET_OS_WINDOWS:
 
 def ctx_concurrency_alloc(size: usize) -> mutable heap void&:
 	can Memory.Allocate, Abort.Panic:
-		raw: heap void&? = malloc(size)
+		raw: mutable heap void&? = malloc(size)
 		panic("concurrency allocation failed") if raw == null
-		ptr: heap void& = raw.cast[heap void&]
+		ptr: mutable heap void& = raw
 		return ptr
 
 def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 	raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyBox[T])) can Memory.Allocate, Abort.Panic
-	box: heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
+	box: mutable heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
 
@@ -391,7 +391,7 @@ def mutex_unlock(g: MutexGuard[Held]):
 		handle: void&? = g.handle
 		_ = move g
 		panic("mutex_unlock on empty guard") if handle == null
-		status: int = ctx_platform_mutex_unlock(handle.cast[void&])
+		status: int = ctx_platform_mutex_unlock(handle)
 		panic("mutex unlock failed") if status != 0
 
 def condvar() -> CondVar:
@@ -410,7 +410,7 @@ def cond_wait(cv: mutable CondVar&, g: MutexGuard[Held]) -> MutexGuard[Held]:
 		mutex_handle: void&? = g.handle
 		panic("cond_wait on uninitialized condvar") if cond_handle == null
 		panic("cond_wait with empty mutex guard") if mutex_handle == null
-		status: int = ctx_platform_cond_wait(cond_handle.cast[void&], mutex_handle.cast[void&])
+		status: int = ctx_platform_cond_wait(cond_handle, mutex_handle)
 		panic("cond wait failed") if status != 0
 		return move g
 
@@ -618,7 +618,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 					ctx_pool_unlock(mu)
 					# run the type-erased work entry outside the lock
 					entry_bits: void& = head.entry
-					arg_bits: void& = head.arg
+					arg_bits: mutable void& = head.arg
 					trusted Unsafe.IndirectCall:
 						_ = entry_bits.call_as[fn(mutable void&) -> void&](arg_bits)
 					# publish completion and wake any awaiter
@@ -638,7 +638,7 @@ def ctx_pool_worker_main(arg: void&?) -> void&?:
 def ctx_pool_push_worker(state: mutable heap ConcurrencyPoolState&, whandle: uintptr):
 	can Memory.Allocate, Abort.Panic:
 		nraw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
-		node: heap ConcurrencyRawTaskNode& = nraw.cast[heap ConcurrencyRawTaskNode&]
+		node: mutable heap ConcurrencyRawTaskNode& = nraw.cast[heap ConcurrencyRawTaskNode&]
 		node.handle <- whandle
 		node.next <- null if state.workers == null else state.workers.cast[heap ConcurrencyRawTaskNode&]
 		state.workers <- node.cast[void&]
@@ -746,7 +746,7 @@ def pool_submit_raw(pool: mutable ThreadPool&, entry: void&, arg: void&?) -> Tas
 		panic("pool_submit with null arg") if arg == null
 		state: mutable heap ConcurrencyPoolState& = pool.handle.cast[mutable heap ConcurrencyPoolState&]
 		raw: heap void& = ctx_concurrency_alloc(size_of(PoolTaskRecord))
-		rec: heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
+		rec: mutable heap PoolTaskRecord& = raw.cast[heap PoolTaskRecord&]
 		rec.next <- null
 		rec.pool <- state.cast[void&]
 		# entry/arg are caller-provided pointers stored into a heap task record the
@@ -805,7 +805,7 @@ def task_group_add_raw(group: mutable TaskGroup&, task: Task[void&?, Pending]):
 		handle: uintptr = task.handle
 		_ = move task
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyRawTaskNode))
-		node: heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
+		node: mutable heap ConcurrencyRawTaskNode& = raw.cast[heap ConcurrencyRawTaskNode&]
 		node.handle <- handle
 		node.next <- null if group.handle == null else group.handle.cast[heap ConcurrencyRawTaskNode&]
 		group.handle <- node.cast[void&]
@@ -832,8 +832,8 @@ def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
 def ctx_concurrency_work1_release(state_bits: mutable void&?):
 	can Memory.Release, Atomics.Load, Atomics.CompareExchange:
 		return if state_bits == null
-		live_bits: void& = state_bits.cast[void&]
-		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
+		live_bits: mutable void& = state_bits
+		state: mutable heap ConcurrencyWorkStart1& = live_bits.cast[mutable heap ConcurrencyWorkStart1&]
 		remaining: i64 = ctx_concurrency_ref_release(&state.refs)
 		if remaining == 0:
 			free(state.arg_bits.cast[heap void&])
@@ -846,7 +846,7 @@ def ctx_concurrency_work1_new[A, R, permission P](fn: fn(A) -> R can[P], arg: A)
 		result_seed: R = zeroed
 		result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyWorkStart1))
-		state: heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
+		state: mutable heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
 		state.fn_bits <- fn.cast[uintptr]
 		state.arg_bits <- arg_box.cast[void&]
 		state.result_bits <- result_box.cast[void&]
@@ -858,7 +858,7 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 		state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
 		fn: fn(A) -> R can[P] = state.fn_bits.cast[fn(A) -> R can[P]]
 		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
-		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
+		result_box: mutable heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
 		result_box.value <- fn(arg_box.value)
 		ctx_concurrency_work1_release(state.cast[mutable void&])
 		return state.cast[void&]
@@ -906,7 +906,7 @@ def ctx_task_group_push_state(group: mutable TaskGroup&, state_bits: void&?):
 	can Memory.Allocate, Abort.Panic:
 		return if state_bits == null
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyTaskGroupNode))
-		node: heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
+		node: mutable heap ConcurrencyTaskGroupNode& = raw.cast[heap ConcurrencyTaskGroupNode&]
 		node.next <- null if group.cleanup == null else group.cleanup.cast[heap ConcurrencyTaskGroupNode&]
 		# state_bits is a caller-provided pointer recorded in a heap cleanup node;
 		# its lifetime is the caller's contract, unverifiable by the type system.
@@ -948,7 +948,7 @@ def join[R](thread: Thread[R, Joinable]) -> R:
 
 def detach[R](thread: Thread[R, Joinable]):
 	can Thread.Detach, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
-		state_bits: void&? = thread.state
+		state_bits: mutable void&? = thread.state
 		raw: Thread[void&?, Joinable] = ctx_thread_to_raw(move thread)
 		detach_raw(move raw)
 		ctx_concurrency_work1_release(state_bits)

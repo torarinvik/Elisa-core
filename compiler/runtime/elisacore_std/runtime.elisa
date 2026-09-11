@@ -28,16 +28,16 @@ def uint_to_string_scratch(value: u64) -> heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%llu", value)
         panic("uint_to_string_scratch: snprintf failed") if len < 0
-        out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
-        snprintf(out.cast[u8&?], len.usize() + 1, "%llu", value)
+        out: mutable heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
+        snprintf(out.cast[mutable u8&?], len.usize() + 1, "%llu", value)
         return out
 
 def float_to_string_scratch(value: f64) -> heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:
         len: int = snprintf(null, 0, "%g", value)
         panic("float_to_string_scratch: snprintf failed") if len < 0
-        out: heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
-        snprintf(out.cast[u8&?], len.usize() + 1, "%g", value)
+        out: mutable heap u8& = alloc_scratch((len + 1).i64()).cast[heap u8&]
+        snprintf(out.cast[mutable u8&?], len.usize() + 1, "%g", value)
         return out
 
 # ------------------------------------------------------------

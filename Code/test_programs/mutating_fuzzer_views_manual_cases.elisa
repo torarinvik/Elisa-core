@@ -42,7 +42,7 @@ def mutate_32_explicit_list_view_temp() -> i32:
 
 
 def mutate_251_manual_pair_value() -> int error[MemoryError, DiskError, NetError]:
-    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- FuzzPair(251, 252)
     total: int = try mutate_203_checked_any_pair((&live.pair).cast[FuzzPair&])
     handle: mutable heap HeapPairNode&? = live
@@ -51,8 +51,8 @@ def mutate_251_manual_pair_value() -> int error[MemoryError, DiskError, NetError
 
 
 def mutate_252_manual_two_pair_chain() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- FuzzPair(252, 253)
     second_live.pair <- FuzzPair(254, 255)
     first_live.next <- second_live
@@ -63,9 +63,9 @@ def mutate_252_manual_two_pair_chain() -> int error[MemoryError, LogicError, Dis
 
 
 def mutate_253_manual_three_pair_chain() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    third_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    third_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- FuzzPair(253, 254)
     second_live.pair <- FuzzPair(255, 256)
     third_live.pair <- FuzzPair(257, 258)
@@ -102,8 +102,8 @@ def mutate_256_manual_nullable_release_cycle() -> int error[MemoryError]:
 
 
 def mutate_257_manual_pair_chain_from_globals() -> int error[MemoryError, LogicError, DiskError, NetError]:
-    first_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
-    second_live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    first_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    second_live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     first_live.pair <- root_pair
     second_live.pair <- pair_table[2]
     first_live.next <- second_live
@@ -114,7 +114,7 @@ def mutate_257_manual_pair_chain_from_globals() -> int error[MemoryError, LogicE
 
 
 def mutate_258_manual_reborrow_pair_field() -> int error[MemoryError, DiskError, NetError]:
-    live: heap HeapPairNode& = try mutate_201_require_heap_pair_node()
+    live: mutable heap HeapPairNode& = try mutate_201_require_heap_pair_node()
     live.pair <- FuzzPair(258, 259)
     pair_ref: FuzzPair& = (&live.pair).cast[FuzzPair&]
     total: int = try mutate_203_checked_any_pair(pair_ref)

@@ -25,7 +25,7 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
             text[left_len + right_len] <- 0
             return intern_small_string(&text[0], left_len + right_len).cast[u8&]
 
-        out: u8& = alloc_perm((left_len + right_len + 1).i64()).cast[u8&]
+        out: mutable u8& = alloc_perm((left_len + right_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
         out[left_len + right_len] <- 0
@@ -51,7 +51,7 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
             text[left_len + right_len] <- 0
             return intern_small_string(&text[0], left_len + right_len).cast[u8&]
 
-        out: u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[u8&]
+        out: mutable u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
         out[left_len + right_len] <- 0
@@ -194,7 +194,7 @@ def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
 
         intern_small_string(src + lo, out_len).cast[u8&] return if out_len <= 8
 
-        out: u8& = alloc_perm((out_len + 1).i64()).cast[u8&]
+        out: mutable u8& = alloc_perm((out_len + 1).i64()).cast[u8&]
         memcpy(out.cast[mutable void&], (src + lo).cast[void&], out_len)
         out[out_len] <- 0
         register_perm_string_len(out, out_len)
@@ -282,7 +282,7 @@ def string_view_copy(view: sview) -> heap u8&:
 
         intern_small_string(view.data, view.len.usize()) return if view.len <= 8
 
-        out: heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]
+        out: mutable heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]
         memcpy(out.cast[mutable void&], view.data.cast[void&], view.len.usize())
         out[view.len.usize()] <- 0
         register_perm_string_len(out.cast[u8&], view.len.usize())

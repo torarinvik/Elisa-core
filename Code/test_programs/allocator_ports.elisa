@@ -38,8 +38,8 @@ def memory_pool_smoke() -> void:
 
             memory_pool_add_capacity(&pool, 2)
 
-            first: heap PoolPair& = memory_pool_create(&pool)
-            second: heap PoolPair& = memory_pool_create(&pool)
+            first: mutable heap PoolPair& = memory_pool_create(&pool)
+            second: mutable heap PoolPair& = memory_pool_create(&pool)
             first.left <- 11
             first.right <- 12
             second.left <- 13

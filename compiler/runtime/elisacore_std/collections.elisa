@@ -1120,7 +1120,7 @@ def arena_dict_clear[K, T](m: mutable dict[K, T]&):
         return
 
     assert m.items != null
-    items: DictBucket[K, T]& = m.items
+    items: mutable DictBucket[K, T]& = m.items
     arena_dict_zero_buckets(items, m.capacity)
     m.count <- 0
     m.used <- 0

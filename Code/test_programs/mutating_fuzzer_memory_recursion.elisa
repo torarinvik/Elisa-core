@@ -9,7 +9,7 @@ def mutate_152_release_heap_node(node: mutable heap HeapNode&?):
 
 
 def mutate_153_make_heap_node_value() -> int error[MemoryError]:
-    live: heap HeapNode& = try mutate_151_require_heap_node()
+    live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     live.value <- 153
     value: int = live.value
     node: mutable heap HeapNode&? = live
@@ -96,7 +96,7 @@ def mutate_166_static_ptr_bits(text: static u8&) -> uintptr:
 
 
 def mutate_167_use_recursive_heap_sum() -> int error[MemoryError]:
-    live: heap HeapNode& = try mutate_151_require_heap_node()
+    live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     live.value <- 167
     value: int = mutate_157_recursive_heap_sum(2, live)
     node: mutable heap HeapNode&? = live
@@ -105,8 +105,8 @@ def mutate_167_use_recursive_heap_sum() -> int error[MemoryError]:
 
 
 def mutate_168_allocate_two_nodes_sum() -> int error[MemoryError]:
-    left_live: heap HeapNode& = try mutate_151_require_heap_node()
-    right_live: heap HeapNode& = try mutate_151_require_heap_node()
+    left_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
+    right_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     left_live.value <- 168
     right_live.value <- 169
     total: int = left_live.value + right_live.value
@@ -119,7 +119,7 @@ def mutate_168_allocate_two_nodes_sum() -> int error[MemoryError]:
 
 def mutate_169_stack_heap_mix() -> int error[MemoryError, DiskError, NetError]:
     local: FuzzPair = FuzzPair(17, 18)
-    live: heap HeapNode& = try mutate_151_require_heap_node()
+    live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     live.value <- 19
     total: int = (try checked_pair(&local)) + live.value
     node: mutable heap HeapNode&? = live
@@ -144,7 +144,7 @@ def mutate_172_recursive_heap_logic(depth: int, node: heap HeapNode&) -> int err
 
 
 def mutate_173_use_recursive_heap_logic() -> int error[MemoryError, LogicError]:
-    live: heap HeapNode& = try mutate_151_require_heap_node()
+    live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     live.value <- 173
     total: int = try mutate_172_recursive_heap_logic(2, live)
     node: mutable heap HeapNode&? = live
@@ -189,8 +189,8 @@ def mutate_178_recursive_free_chain(node: mutable heap HeapNode&?) -> void error
 
 
 def mutate_179_build_two_node_chain_sum() -> int error[MemoryError, LogicError]:
-    left_live: heap HeapNode& = try mutate_151_require_heap_node()
-    right_live: heap HeapNode& = try mutate_151_require_heap_node()
+    left_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
+    right_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     left_live.value <- 179
     right_live.value <- 180
     left_live.next <- right_live
@@ -201,9 +201,9 @@ def mutate_179_build_two_node_chain_sum() -> int error[MemoryError, LogicError]:
 
 
 def mutate_180_build_three_node_chain_sum() -> int error[MemoryError, LogicError]:
-    first_live: heap HeapNode& = try mutate_151_require_heap_node()
-    second_live: heap HeapNode& = try mutate_151_require_heap_node()
-    third_live: heap HeapNode& = try mutate_151_require_heap_node()
+    first_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
+    second_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
+    third_live: mutable heap HeapNode& = try mutate_151_require_heap_node()
     first_live.value <- 181
     second_live.value <- 182
     third_live.value <- 183
