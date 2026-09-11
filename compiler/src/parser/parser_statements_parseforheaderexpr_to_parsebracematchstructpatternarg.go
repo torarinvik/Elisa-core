@@ -1274,10 +1274,10 @@ func (p *Parser) parseOptionalMatchArmGuard() ast.Expr {
 	return guard
 }
 func (p *Parser) parseTopLevelMatchPatterns() []ast.MatchPattern {
-	patterns := []ast.MatchPattern{p.parseMatchPatternNoOr()}
+	patterns := []ast.MatchPattern{p.parseMatchPatternNoPipe()}
 	for p.peek() == lexer.TOKEN_PIPE {
 		p.advance()
-		patterns = append(patterns, p.parseMatchPatternNoOr())
+		patterns = append(patterns, p.parseMatchPatternNoPipe())
 	}
 	return patterns
 }
@@ -1286,18 +1286,31 @@ func (p *Parser) parseMatchPattern() ast.MatchPattern {
 }
 func (p *Parser) parseNestedOrMatchPattern() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
-	if p.peek() != lexer.TOKEN_PIPE {
+	if p.peek() != lexer.TOKEN_PIPE && p.peek() != lexer.TOKEN_OR {
 		return pattern
 	}
 	options := []ast.MatchPattern{pattern}
-	for p.match(lexer.TOKEN_PIPE) {
+	for p.peek() == lexer.TOKEN_PIPE || p.peek() == lexer.TOKEN_OR {
+		p.advance()
 		options = append(options, p.parseNestedMatchPattern())
 	}
 	orPattern := &ast.MatchOrPattern{Position: pattern.Pos(), Options: options}
 	return orPattern
 }
-func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
+
+// parseMatchPatternNoPipe parses one top-level arm while leaving `|` available
+// to parseTopLevelMatchArmAlternatives, which fans pipe-separated arms out into
+// sibling arms. The word `or` is an in-pattern alternative and must therefore be
+// consumed here, just as it is for nested payload patterns.
+func (p *Parser) parseMatchPatternNoPipe() ast.MatchPattern {
 	pattern := p.parseNestedMatchPattern()
+	if p.peek() == lexer.TOKEN_OR {
+		options := []ast.MatchPattern{pattern}
+		for p.match(lexer.TOKEN_OR) {
+			options = append(options, p.parseNestedMatchPattern())
+		}
+		pattern = &ast.MatchOrPattern{Position: pattern.Pos(), Options: options}
+	}
 	// docs/77 §2 category arm with binder: `Statement s:` — two bare identifiers. Only the
 	// top-level arm position accepts the binder; nested payload patterns stay single-ident.
 	if bind, ok := pattern.(*ast.MatchBindPattern); ok && bind != nil && bind.Binder == "" &&
@@ -1312,7 +1325,7 @@ func (p *Parser) parseMatchPatternNoOr() ast.MatchPattern {
 		pattern = &ast.MatchTuplePattern{Position: pattern.Pos(), Elems: elems}
 	}
 	switch pattern.(type) {
-	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchRangePattern, *ast.MatchBindPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern:
+	case *ast.MatchWildcardPattern, *ast.MatchStringLiteralPattern, *ast.MatchLiteralPattern, *ast.MatchRangePattern, *ast.MatchBindPattern, *ast.MatchVariantPattern, *ast.MatchStructPattern, *ast.MatchTuplePattern, *ast.MatchListPattern, *ast.MatchOrPattern:
 		return pattern
 	default:
 		p.errorf("top-level match arm must use Enum.Variant(...), Struct(...), a literal, a range, a binding, a tuple pattern, a list pattern, or _")

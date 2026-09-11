@@ -43,6 +43,36 @@ def g(e: E) -> i64:
 	}
 }
 
+// `or` is a pattern alternative, not a boolean expression, when it appears in
+// a match arm. Stage0 must parse the same grouped literal form accepted by the
+// self-hosted parser so source files do not need a compiler-generation-specific
+// spelling.
+func TestParseMatchArmOrPattern(t *testing.T) {
+	src := `def classify(kind: sview) -> i64:
+    match kind:
+        "unary" or "move":
+            return 1
+        _:
+            return 0
+`
+	file, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	matchStmt := fn.Body[0].(*ast.MatchStmt)
+	orPattern, ok := matchStmt.Arms[0].Pattern.(*ast.MatchOrPattern)
+	if !ok || len(orPattern.Options) != 2 {
+		t.Fatalf("expected two-option MatchOrPattern, got %#v", matchStmt.Arms[0].Pattern)
+	}
+	for index, want := range []string{"unary", "move"} {
+		literal, ok := orPattern.Options[index].(*ast.MatchStringLiteralPattern)
+		if !ok || literal.Value != want {
+			t.Fatalf("option %d = %#v, want string literal %q", index, orPattern.Options[index], want)
+		}
+	}
+}
+
 // A leading `case` in a match arm gets one targeted diagnostic and is skipped, so the
 // pattern and body still parse (no cascade errors into the arm body).
 func TestParseMatchArmCaseKeywordDiagnosed(t *testing.T) {
