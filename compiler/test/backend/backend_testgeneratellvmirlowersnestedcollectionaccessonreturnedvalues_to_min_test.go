@@ -56,6 +56,43 @@ def read_array_view_index() -> i32:
 		t.Fatalf("expected darray slice syntax to build a view before slicing, got:\n%s", output)
 	}
 }
+
+func TestGenerateLLVMIRKeepsIndexedAggregateFieldReadsOutOfLoopStackGrowth(t *testing.T) {
+	src := `struct Entry:
+	value: i64
+
+struct DynArray[T]:
+	items: mutable T&?
+	count: mutable usize
+	capacity: mutable usize
+
+def sum_entries(entries: darray[Entry]&) -> i64:
+	total: mutable i64 = 0
+	for index in 0..<entries.count |index, entries, total|:
+		total <- total + entries[index].value
+	return total
+`
+	result := parseAndAnalyze(t, "backend_indexed_aggregate_field_loop.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+
+	body := functionIR(output, "sum_entries")
+	if body == "" {
+		t.Fatalf("expected to find sum_entries body, got:\n%s", output)
+	}
+	if strings.Contains(body, "alloca %Entry") {
+		t.Fatalf("indexed aggregate field reads must not materialize an Entry on the loop stack, got:\n%s", body)
+	}
+	if strings.Contains(body, "alloca %Entry, i64 1") {
+		t.Fatalf("indexed aggregate field reads must not emit a dynamic per-iteration Entry alloca, got:\n%s", body)
+	}
+	if !strings.Contains(body, "getelementptr inbounds %Entry, ptr") {
+		t.Fatalf("expected the indexed Entry field read to use the element address directly, got:\n%s", body)
+	}
+}
+
 func TestGenerateLLVMIRLowersArrayLiteralAndInferredLocalViaFixedArrayLowering(t *testing.T) {
 	src := `def head_of_middle() -> int:
 	values = [1, 2, 3, 4]
