@@ -613,6 +613,15 @@ func (a *Analyzer) analyzeListLitExprWithExpected(expr *ast.ListLitExpr, expecte
 		return expectedArray
 	}
 	if useExpectedDArray {
+		// A darray literal allocates, so it needs a region. dict and set literals have always
+		// checked this in the analyzer; darray did not, so the only thing that caught it was
+		// the backend's emitListLitExpr -- which reports through fmt.Errorf with NO source
+		// position. `take([1, 2, 3])` therefore produced a bare "darray literal requires an
+		// active in <arena>: scope" with no file, line or column, for the most common
+		// container in the language. Same precondition as the dict site below.
+		if a.constInitDepth == 0 && !a.regionAvailableForContainer(expectedDArray) && a.currentAllocExpr == nil {
+			a.errorf(expr.Pos(), "%s", NoContainerRegionMessage("darray literal"))
+		}
 		a.exprTypes[expr] = expectedDArray
 		return expectedDArray
 	}
@@ -645,7 +654,7 @@ func (a *Analyzer) analyzeListComprehensionExprWithExpected(expr *ast.ListCompre
 			a.errorf(expr.Owner.Pos(), "comprehension owner must be an Arena or mutable Arena&, got %s", ownerType)
 		}
 	} else if a.activeContainerRegionName() == "" && !regionAvailable {
-		a.errorf(expr.Pos(), "comprehension requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoContainerRegionMessage("comprehension"))
 	}
 	var itemType Type
 	loopScope := NewScope(a.currentScope)

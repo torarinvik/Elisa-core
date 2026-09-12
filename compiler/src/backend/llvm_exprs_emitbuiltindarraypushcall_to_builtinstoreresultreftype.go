@@ -119,7 +119,7 @@ func (s *functionState) emitBuiltinDArrayPushCall(expr *ast.CallExpr) (C.LLVMVal
 	// helper pushes through a borrow whose region differs from the ambient one.
 	owner, ok := s.darrayGrowthOwner(expr, fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("darray push requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("darray push"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.push.owner.arena")
@@ -301,7 +301,7 @@ func (s *functionState) emitBuiltinDArrayExtendCall(expr *ast.CallExpr) (C.LLVMV
 	}
 	owner, ok := s.darrayGrowthOwner(expr, fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("darray extend requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("darray extend"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.extend.owner.arena")
@@ -508,7 +508,7 @@ func (s *functionState) emitBuiltinDArrayReserveCall(expr *ast.CallExpr) (C.LLVM
 		if s.decl != nil {
 			fnName = s.decl.Name
 		}
-		return nil, nil, true, fmt.Errorf("darray reserve requires an active in <arena>: scope (in function %q, expr at %v)", fnName, expr.Pos())
+		return nil, nil, true, fmt.Errorf("%s (in function %q, expr at %v)", semantic.NoGrowthRegionMessage("darray reserve"), fnName, expr.Pos())
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.reserve.owner.arena")
@@ -552,7 +552,7 @@ func (s *functionState) emitBuiltinDArrayResizeCall(expr *ast.CallExpr) (C.LLVMV
 	}
 	owner, ok := s.darrayGrowthOwner(expr, fieldExpr.Object, darrayType)
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("darray resize requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("darray resize"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.resize.owner.arena")

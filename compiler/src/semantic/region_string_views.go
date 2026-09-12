@@ -88,7 +88,7 @@ func (a *Analyzer) analyzeBuiltinDarrayCstrCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(fieldExpr.Object.Pos(), "darray cstr requires a mutable darray receiver (it NUL-terminates in place)")
 	}
 	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) {
-		a.errorf(expr.Pos(), "darray cstr requires an active in <arena>: scope to NUL-terminate")
+		a.errorf(expr.Pos(), "%s", NoCstrCopyRegionMessage())
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "cstr")
 	resultType := &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr", Region: darrayType.Region}

@@ -247,14 +247,14 @@ func (s *functionState) emitListLitExpr(expr *ast.ListLitExpr, expected semantic
 		}
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
+		return nil, nil, fmt.Errorf("%s", semantic.NoContainerRegionMessage("darray literal"))
 	}
 	arenaRef, err := s.treeOwnerArenaRefValue(owner, "darray.literal.owner.arena")
 	if err != nil {
 		return nil, nil, err
 	}
 	if arenaRef == nil {
-		return nil, nil, fmt.Errorf("darray literal requires an active in <arena>: scope")
+		return nil, nil, fmt.Errorf("%s", semantic.NoContainerRegionMessage("darray literal"))
 	}
 	llvmType, err := s.g.lowerType(darrayType)
 	if err != nil {

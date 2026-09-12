@@ -514,7 +514,7 @@ func functionBodyNeedsAutoRegion(stmts []ast.Stmt) bool {
 	// if/match expression branch, or a bare block binding carries its statements inside
 	// an ExprBlock EXPRESSION, which the statement walk below never reaches — so a
 	// container built inside one (`seen: darray[T] = []` in a value-loop body) was left
-	// with no ambient region at all ("push requires an active in <arena>: scope").
+	// with no ambient region at all ("push has no region to grow into", NoGrowthRegionMessage).
 	// Statement-position loop headers desugar to IfStmt/WhileStmt and are walked
 	// directly; this covers the value forms. Over-wrap (a block nested inside its own
 	// region scope) is a harmless lazy no-op region, same as bodyContainsAutoAlloc.

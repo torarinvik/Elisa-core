@@ -98,7 +98,7 @@ func (s *functionState) emitBuiltinStorePushCall(expr *ast.CallExpr) (C.LLVMValu
 		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("store push requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("store push"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "store.push.owner.arena")
@@ -187,7 +187,7 @@ func (s *functionState) emitBuiltinStoreReserveCall(expr *ast.CallExpr) (C.LLVMV
 		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("store reserve requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("store reserve"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "store.reserve.owner.arena")
@@ -570,7 +570,7 @@ func (s *functionState) emitBuiltinDictEntryInsertCall(expr *ast.CallExpr) (C.LL
 		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("dict entry insert requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("dict entry insert"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict.entry.insert.owner.arena")
@@ -690,7 +690,7 @@ func (s *functionState) emitBuiltinDictRegionMutationCall(expr *ast.CallExpr) (C
 		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("dict %s requires an active in <arena>: scope", method)
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage(fmt.Sprintf("dict %s", method)))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict."+method+".owner.arena")
@@ -785,7 +785,7 @@ func (s *functionState) emitBuiltinSetRegionMutationCall(expr *ast.CallExpr) (C.
 		owner, ok, _ = s.permGrowthOwner(expr)
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("set %s requires an active in <arena>: scope", method)
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage(fmt.Sprintf("set %s", method)))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "set."+method+".owner.arena")

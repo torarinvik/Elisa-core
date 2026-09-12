@@ -89,7 +89,7 @@ func (a *Analyzer) analyzeQueryExpr(expr *ast.QueryExpr, expected Type) Type {
 		}
 	case ast.QueryExprEach:
 		if expr.Owner == nil && a.staticContextDepth == 0 && a.activeContainerRegionName() == "" && !(useExpectedDArray && a.regionAvailableForContainer(expectedDArray)) {
-			a.errorf(expr.Pos(), "each query expression requires an active in <arena>: scope")
+			a.errorf(expr.Pos(), "%s", NoContainerRegionMessage("each query expression"))
 		}
 		projectionType := info.ItemType
 		var expectedElem Type
@@ -254,7 +254,7 @@ func (a *Analyzer) analyzeDictLiteralExpr(expr *ast.ListLitExpr, expected Type) 
 		a.validateConstDictLiteralKeys(expr, dictType)
 	}
 	if a.constInitDepth == 0 && !a.regionAvailableForContainer(dictType) && a.currentAllocExpr == nil {
-		a.errorf(expr.Pos(), "dict literal requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoContainerRegionMessage("dict literal"))
 	}
 	a.recordAnalyzedExprType(expr, dictType)
 	return dictType
@@ -336,7 +336,7 @@ func (a *Analyzer) analyzeSetLiteralExpr(expr *ast.ListLitExpr, expected Type) T
 		return invalidType
 	}
 	if !a.regionAvailableForContainer(setType) && a.currentAllocExpr == nil {
-		a.errorf(expr.Pos(), "set literal requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoContainerRegionMessage("set literal"))
 	}
 	a.recordAnalyzedExprType(expr, setType)
 	return setType

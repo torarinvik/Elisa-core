@@ -704,7 +704,7 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 					// IndexExpr as well as FieldExpr: `param.f[i].push(..)` is a path rooted at
 					// the param exactly as `param.f.push(..)` is, and the comment above already
 					// promised that shape. Matching only FieldExpr silently failed it — the
-					// growth fell through to "requires an active in <arena>: scope", which reads
+					// growth fell through to the "has no region to grow into" diagnostic, which reads
 					// as "annotate this" rather than "the compiler missed a case it claims".
 					// rootIdentExpr already walks both, so only this guard was narrow. A bare
 					// `param.push(..)` still does NOT match (it is neither) and stays with
@@ -744,7 +744,7 @@ func paramFieldContainerIsGrown(stmts []ast.Stmt, name string) bool {
 
 // paramContainerIsGrown reports whether the body contains a growth-method call (push/extend/…)
 // whose receiver is the named parameter — `param.push(...)`. A false negative only forgoes the
-// ergonomic rewrite (the old "requires an active in <arena>: scope" error still fires, which is
+// ergonomic rewrite (the "has no region to grow into" error still fires, which is
 // safe); a false positive only threads an unused region param. Scans structurally via reflection,
 // mirroring bodyCallsStoreNeedingOutsideRegion.
 func paramContainerIsGrown(stmts []ast.Stmt, name string) bool {

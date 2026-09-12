@@ -93,7 +93,7 @@ func (s *functionState) emitDictLiteralExpr(expr *ast.ListLitExpr, dictType *sem
 		owner, ok = s.lookupTreeAllocOwner()
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, fmt.Errorf("dict literal requires an active in <arena>: scope")
+		return nil, nil, fmt.Errorf("%s", semantic.NoContainerRegionMessage("dict literal"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dictlit.owner.arena")
@@ -138,7 +138,7 @@ func (s *functionState) emitSetLiteralExpr(expr *ast.ListLitExpr, setType *seman
 		owner, ok = s.lookupTreeAllocOwner()
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, fmt.Errorf("set literal requires an active in <arena>: scope")
+		return nil, nil, fmt.Errorf("%s", semantic.NoContainerRegionMessage("set literal"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "setlit.owner.arena")

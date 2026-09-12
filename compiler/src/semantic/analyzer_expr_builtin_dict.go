@@ -234,7 +234,7 @@ func (a *Analyzer) rewriteBuiltinDictMethodCall(expr *ast.CallExpr) builtinDictM
 		if a.regionAvailableForContainer(dictType) || a.currentAllocExpr != nil || a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
 			return builtinDictMethodRewriteNone
 		}
-		a.errorf(expr.Pos(), "dict %s requires an active in <arena>: scope", method)
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage(fmt.Sprintf("dict %s", method)))
 		return builtinDictMethodRewriteInvalid
 	}
 	rewrittenArgs := make([]ast.Expr, 0, len(expr.Args)+2)
@@ -423,7 +423,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
 	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "dict entry insert requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("dict entry insert"))
 	}
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {
@@ -548,7 +548,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
 	}
 	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(receiverType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "dict entry get_or_insert requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("dict entry get_or_insert"))
 	}
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {

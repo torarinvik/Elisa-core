@@ -99,7 +99,7 @@ func (s *functionState) emitBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) 
 		owner, ok = s.lookupTreeAllocOwner()
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return nil, nil, true, fmt.Errorf("dict entry get_or_insert requires an active in <arena>: scope")
+		return nil, nil, true, fmt.Errorf("%s", semantic.NoGrowthRegionMessage("dict entry get_or_insert"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, "dict.entry.get_or_insert.owner.arena")

@@ -253,7 +253,7 @@ func (a *Analyzer) analyzeBuiltinDarrayPushCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(fieldExpr.Object.Pos(), "darray push requires a mutable darray receiver")
 	}
 	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "darray push requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("darray push"))
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "push")
 	// `buf.push(0)` NUL-terminates the buffer — remembered so a later `(&buf[0]).cast[cstr]`
@@ -435,7 +435,7 @@ func (a *Analyzer) analyzeBuiltinDarrayExtendCall(expr *ast.CallExpr) (Type, boo
 		a.errorf(fieldExpr.Object.Pos(), "darray extend requires a mutable darray receiver")
 	}
 	if a.staticContextDepth == 0 && a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "darray extend requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("darray extend"))
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "extend")
 	var expectedSource Type
@@ -545,7 +545,7 @@ func (a *Analyzer) analyzeBuiltinDarrayReserveCall(expr *ast.CallExpr) (Type, bo
 		a.errorf(fieldExpr.Object.Pos(), "darray reserve requires a mutable darray receiver")
 	}
 	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "darray reserve requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("darray reserve"))
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "reserve")
 	usizeType := a.namedTypes["usize"]
@@ -624,7 +624,7 @@ func (a *Analyzer) analyzeBuiltinDarrayResizeCall(expr *ast.CallExpr) (Type, boo
 		a.errorf(fieldExpr.Object.Pos(), "darray resize requires a mutable darray receiver")
 	}
 	if a.currentAllocExpr == nil && !a.regionAvailableForContainer(darrayType) && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "darray resize requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("darray resize"))
 	}
 	// resize can shrink (dropping the tail) and, when growing, exposes zero-filled slots as live
 	// elements — both unsound for must-consume element types. Reject affine-element resize.
@@ -781,7 +781,7 @@ func (a *Analyzer) analyzeBuiltinStorePushCall(expr *ast.CallExpr) (Type, bool) 
 		a.errorf(fieldExpr.Object.Pos(), "store push requires a mutable store receiver")
 	}
 	if a.currentAllocExpr == nil && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "store push requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("store push"))
 	}
 	if len(expr.Args) != len(storeType.StoreFieldOrder) {
 		for _, arg := range expr.Args {
@@ -824,7 +824,7 @@ func (a *Analyzer) analyzeBuiltinStoreReserveCall(expr *ast.CallExpr) (Type, boo
 		a.errorf(fieldExpr.Object.Pos(), "store reserve requires a mutable store receiver")
 	}
 	if a.currentAllocExpr == nil && !a.growthReceiverIsProgramLifetime(expr, fieldExpr.Object) {
-		a.errorf(expr.Pos(), "store reserve requires an active in <arena>: scope")
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage("store reserve"))
 	}
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {

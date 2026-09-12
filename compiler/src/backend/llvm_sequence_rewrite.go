@@ -116,7 +116,7 @@ func (s *functionState) emitSequenceRewriteAppend(outPtr C.LLVMValueRef, outType
 		owner, ok = s.lookupTreeAllocOwner()
 	}
 	if !ok || (owner.arenaRef == nil && owner.arenaRefPtr == nil) {
-		return fmt.Errorf("sequence rewrite requires an active in <arena>: scope")
+		return fmt.Errorf("%s", semantic.NoContainerRegionMessage("sequence rewrite"))
 	}
 	if owner.arenaRef == nil {
 		arenaRef, err := s.treeOwnerArenaRefValue(owner, name+".owner.arena")

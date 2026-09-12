@@ -125,7 +125,7 @@ func (a *Analyzer) rewriteBuiltinSetMethodCall(expr *ast.CallExpr) builtinDictMe
 		if a.regionAvailableForContainer(setType) || a.currentAllocExpr != nil {
 			return builtinDictMethodRewriteNone
 		}
-		a.errorf(expr.Pos(), "set %s requires an active in <arena>: scope", method)
+		a.errorf(expr.Pos(), "%s", NoGrowthRegionMessage(fmt.Sprintf("set %s", method)))
 		return builtinDictMethodRewriteInvalid
 	}
 	rewrittenArgs := make([]ast.Expr, 0, len(expr.Args)+1)
