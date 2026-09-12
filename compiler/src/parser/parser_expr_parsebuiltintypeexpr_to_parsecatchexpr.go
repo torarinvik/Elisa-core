@@ -609,18 +609,18 @@ func (p *Parser) peekWhereViewPatternFilter() bool {
 	if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
 		return forWhereIdentLooksLikePatternType(p.cur().Text)
 	}
-	if next != lexer.TOKEN_DOT {
+	if next != lexer.TOKEN_DOT && next != lexer.TOKEN_SCOPE {
 		return false
 	}
 	index := p.pos + 1
-	for index+1 < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_DOT && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+	for index+1 < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_DOT || p.tokens[index].Kind == lexer.TOKEN_SCOPE) && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
 		index += 2
 	}
 	if index >= len(p.tokens) || !forWhereIdentLooksLikePatternType(p.cur().Text) {
 		return false
 	}
-	if index >= len(p.tokens) {
-		return true
+	if !p.whereChainLooksLikePattern(p.pos, index) {
+		return false
 	}
 	switch p.tokens[index].Kind {
 	case lexer.TOKEN_LPAREN, lexer.TOKEN_COLON, lexer.TOKEN_RPAREN, lexer.TOKEN_RBRACKET, lexer.TOKEN_COMMA, lexer.TOKEN_NEWLINE, lexer.TOKEN_EOF:
@@ -940,9 +940,12 @@ func (p *Parser) peekQualifiedVariantTargetWithPayload() bool {
 	if p.peek() != lexer.TOKEN_IDENT {
 		return false
 	}
+	// `M::Enum.Variant(...)`: the module steps are `::`, the variant step `.`; both
+	// separators are accepted here so a module-qualified payload target parses as the
+	// variant test it is (it used to fall through to a parse error).
 	i := p.pos
 	sawDot := false
-	for i+1 < len(p.tokens) && p.tokens[i+1].Kind == lexer.TOKEN_DOT {
+	for i+1 < len(p.tokens) && (p.tokens[i+1].Kind == lexer.TOKEN_DOT || p.tokens[i+1].Kind == lexer.TOKEN_SCOPE) {
 		if i+2 >= len(p.tokens) || p.tokens[i+2].Kind != lexer.TOKEN_IDENT {
 			return false
 		}
@@ -953,10 +956,9 @@ func (p *Parser) peekQualifiedVariantTargetWithPayload() bool {
 }
 func (p *Parser) parseQualifiedVariantTarget() (string, string, lexer.Pos) {
 	pos := p.cur().Pos
-	parts := []string{p.expect(lexer.TOKEN_IDENT).Text}
-	for p.match(lexer.TOKEN_DOT) {
-		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
-	}
+	// `M::Enum.Variant(...)`: module segments join with `::`, the variant with `.`; a
+	// `.` before the last separator is a mis-spelled module path (parseVariantPathName).
+	parts := p.parseVariantPathName(pos, p.expect(lexer.TOKEN_IDENT).Text)
 	if len(parts) < 2 {
 		return "", "", pos
 	}

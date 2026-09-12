@@ -57,7 +57,7 @@ func writeDeclReference(b *strings.Builder, decl ast.Decl, headingLevel int, nam
 			}
 		})
 	case *ast.UsingDecl:
-		writeSimpleReferenceSection(b, headingPrefix, "Using", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
+		writeSimpleReferenceSection(b, headingPrefix, "Using", qualifyDocName(namespace, ast.ModulePathSpelling(n.Name)), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ConstDecl:
 		writeSimpleReferenceSection(b, headingPrefix, "Constant", qualifyDocName(namespace, n.Name), declarationHeadline(unparse.FormatDecl(n)), nil)
 	case *ast.ConstEnumDecl:
@@ -224,11 +224,13 @@ func declarationHeadline(text string) string {
 	return firstLine(trimmed)
 }
 
+// qualifyDocName spells a nested declaration's full name the way source does: `::`
+// walks the namespace (`.` reaches a value member and never appears in a module path).
 func qualifyDocName(namespace string, name string) string {
 	if namespace == "" {
 		return name
 	}
-	return namespace + "." + name
+	return namespace + "::" + name
 }
 
 func minHeading(level int) int {

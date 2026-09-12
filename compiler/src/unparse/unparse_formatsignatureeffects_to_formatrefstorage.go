@@ -182,7 +182,11 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 		for _, arg := range n.Args {
 			parts = append(parts, formatTypeExpr(arg))
 		}
-		result := n.Name + "[" + strings.Join(parts, ", ") + "]"
+		name := n.Name
+		if n.Spelling != "" {
+			name = n.Spelling // the source separators, like NamedType.Spelling
+		}
+		result := name + "[" + strings.Join(parts, ", ") + "]"
 		if n.Region != "" {
 			result += " @" + n.Region
 		}

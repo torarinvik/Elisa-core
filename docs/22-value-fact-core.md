@@ -215,7 +215,7 @@ implementation to become stringly typed internally.
 ### Packed enum construction
 
 ```elisacore
-return new[alloc] Pascal.Expr.Binary(span: left.span + right.span, left: left, right: right)
+return new[alloc] Pascal::Expr.Binary(span: left.span + right.span, left: left, right: right)
 ```
 
 Fact view:
@@ -223,9 +223,9 @@ Fact view:
 ```text
 require active enum store/allocator
 require Memory.Allocate when the selected store backend allocates
-produce Pascal.Expr handle:
+produce Pascal::Expr handle:
     Representation = packed enum handle
-    StoreDeps = active Pascal.Expr.Store[Local]
+    StoreDeps = active Pascal::Expr.Store[Local]
     common.span = left.span + right.span
 ```
 

@@ -83,7 +83,7 @@ func (a *Analyzer) resolveNamedVariantWitnessType(named *ast.NamedType) (Type, b
 			return invalidType, true
 		}
 		if !tt.Packed {
-			a.errorf(named.Pos(), "bare variant type %q requires a packed enum or tree category; ordinary enum variants are not first-class types", named.Name)
+			a.errorf(named.Pos(), "bare variant type %q requires a packed enum or tree category; ordinary enum variants are not first-class types", named.SourceSpelling())
 			return invalidType, true
 		}
 		return variant.PackedViewType(tt), true

@@ -138,7 +138,7 @@ func (p *Parser) looksLikeLetDestructureStmt() bool {
 		return true
 	case lexer.TOKEN_IDENT:
 		i := p.pos + 2
-		for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+		for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
 			i += 2
 		}
 		return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE
@@ -1380,14 +1380,12 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	}
 	// A `::` or `.` after the first segment introduces a qualified variant path:
 	// `Color.Red`, `M::Color.Red` (module-qualified). `::` namespaces the module
-	// while `.` selects the variant; both join into the canonical dotted name.
-	if !p.matchQualifiedNameSeparator() {
+	// while `.` selects the variant; both join into the canonical dotted name. A
+	// `.` anywhere but last (`M.Color.Red`) is a mis-spelled module path and is rejected.
+	if p.peek() != lexer.TOKEN_DOT && p.peek() != lexer.TOKEN_SCOPE {
 		return &ast.MatchBindPattern{Position: pos, Name: parts[0]}
 	}
-	parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
-	for p.matchQualifiedNameSeparator() {
-		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
-	}
+	parts = p.parseVariantPathName(pos, parts[0])
 	name := strings.Join(parts[:len(parts)-1], ".")
 	variant := parts[len(parts)-1]
 	var args []ast.MatchPatternArg

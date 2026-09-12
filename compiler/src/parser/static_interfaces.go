@@ -10,7 +10,7 @@ func (p *Parser) peekQualifiedDeclNameFollowedBy(text string) bool {
 		return false
 	}
 	i := p.pos + 1
-	for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
 		i += 2
 	}
 	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_IDENT && p.tokens[i].Text == text

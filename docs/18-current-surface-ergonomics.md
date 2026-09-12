@@ -14,11 +14,11 @@ Unlike several of the earlier files here, this is not a forward-looking proposal
 Variant `is` tests can destructure named payloads directly. Named payload patterns in `is` tests may be partial, so a condition can inspect or bind only the fields it needs.
 
 ```elisa
-def is_nil_left(node: Lua.Expr) -> bool:
-    return node is Lua.Expr.Binary(left: Lua.Expr.Nil)
+def is_nil_left(node: Lua::Expr) -> bool:
+    return node is Lua::Expr.Binary(left: Lua::Expr.Nil)
 
-def right_span(node: Lua.Expr) -> i64:
-    if node is Lua.Expr.Binary(right: rhs):
+def right_span(node: Lua::Expr) -> i64:
+    if node is Lua::Expr.Binary(right: rhs):
         return rhs.span
     return 0
 ```
@@ -26,8 +26,8 @@ def right_span(node: Lua.Expr) -> i64:
 When several payload fields are needed, bind a variant projection alias with `as`. The alias has the exact variant-view type inside the truthy branch, so ordinary field access reads the variant payload without repeating each binding in the condition.
 
 ```elisa
-def binary_score(node: Lua.Expr) -> i64:
-    if node is Lua.Expr.Binary as binary:
+def binary_score(node: Lua::Expr) -> i64:
+    if node is Lua::Expr.Binary as binary:
         return binary.left.span + binary.right.span
     return 0
 ```
@@ -96,14 +96,14 @@ def is_scalar(value: Expr) -> bool:
 For longer variant families, wrap the alternatives in parentheses and put one alternative per line. This is the preferred shape for long declaration-family or AST-kind classifiers.
 
 ```elisa
-def has_routine_body(decl: Pascal.Decl) -> bool:
+def has_routine_body(decl: Pascal::Decl) -> bool:
     return decl is (
-        Pascal.Decl.ProcedureDecl
-        | Pascal.Decl.ProcedureQualifiedDecl
-        | Pascal.Decl.ProcedureGenericDecl
-        | Pascal.Decl.FunctionDecl
-        | Pascal.Decl.FunctionQualifiedDecl
-        | Pascal.Decl.FunctionGenericDecl
+        Pascal::Decl.ProcedureDecl
+        | Pascal::Decl.ProcedureQualifiedDecl
+        | Pascal::Decl.ProcedureGenericDecl
+        | Pascal::Decl.FunctionDecl
+        | Pascal::Decl.FunctionQualifiedDecl
+        | Pascal::Decl.FunctionGenericDecl
     )
 ```
 
@@ -320,7 +320,7 @@ store proof should scope a block or a set of pattern arms.
 When a successful refinement needs to survive as a first-class value, packed
 enums and trees use exact view types. Packed enums spell the refined witness as
 `packedview[Enum.Variant]`. Trees use the bare exact member type, such as
-`Lua.Expr.Binary`; the older `treeview[Lua.Expr.Binary]` spelling has been
+`Lua::Expr.Binary`; the older `treeview[Lua::Expr.Binary]` spelling has been
 removed.
 
 ```elisa
@@ -351,11 +351,11 @@ def read_view(view_node: packedview[Expr.Int]) -> int:
 ```
 
 ```elisa
-def score_binary(view_node: Lua.Expr.Binary) -> i64:
+def score_binary(view_node: Lua::Expr.Binary) -> i64:
     return view_node.left.span + view_node.right.span + view_node.span
 
-def child_span(node: Lua.Expr) -> i64:
-    if node is Lua.Expr.Binary:
+def child_span(node: Lua::Expr) -> i64:
+    if node is Lua::Expr.Binary:
         return score_binary(node)
     return node.span
 ```
@@ -363,8 +363,8 @@ def child_span(node: Lua.Expr) -> i64:
 Current rules:
 
 - `packedview[Enum.Variant]` is the first-class exact packed-variant type after a successful packed refinement
-- exact tree variants use the bare concrete member type such as `Lua.Expr.Binary`
-- `treeview[Lua.Expr.Binary]` has been removed; write the bare concrete member type
+- exact tree variants use the bare concrete member type such as `Lua::Expr.Binary`
+- `treeview[Lua::Expr.Binary]` has been removed; write the bare concrete member type
 - these exact refined types can appear in parameters, returns, and local bindings
 - `if value as Expr.Variant(payload...)` supports both named and unnamed payload destructuring
 - exact `packedview[...]` values may be re-matched with the same `if value as Pattern:` surface
@@ -672,16 +672,16 @@ Current rules:
 Use `expect let Pattern = value` when a test or helper wants to assert a shape and bind its payloads. It is the declarative form of the old `if value is Pattern(...): ... else: assert false` pyramid.
 
 ```elisa
-def infix_op(expr: Perl.Expr) -> PerlInfixOp:
+def infix_op(expr: Perl::Expr) -> PerlInfixOp:
     can Abort.Panic:
-        expect let Perl.Expr.Infix(op, _, _) = expr
+        expect let Perl::Expr.Infix(op, _, _) = expr
         return op
 ```
 
 The older `expect value as Pattern` spelling remains valid. The `expect let` spelling is often easier to scan when the important thing is the expected shape first and the source value second.
 
 ```elisa
-expect let Pascal.Decl.TypeDecl(_, PascalType.Type.Name(type_name_id)) = block.decls[0]
+expect let Pascal::Decl.TypeDecl(_, PascalType.Type.Name(type_name_id)) = block.decls[0]
 assert type_name_id != NAME_TABLE_INVALID_ID
 ```
 
@@ -689,14 +689,14 @@ Tests can also match whole sequence and tree/struct shapes directly. This keeps 
 
 ```elisa
 expect block.stmts as [
-    Pascal.Stmt.Assign(_, _),
-    Pascal.Stmt.IfStmt(_, _, _),
+    Pascal::Stmt.Assign(_, _),
+    Pascal::Stmt.IfStmt(_, _, _),
 ]
 
-expect ast.root as Pascal.Decl.Program(_, _, {
+expect ast.root as Pascal::Decl.Program(_, _, {
     stmts: [
-        Pascal.Stmt.Assign(_, _),
-        Pascal.Stmt.IfStmt(_, _, _),
+        Pascal::Stmt.Assign(_, _),
+        Pascal::Stmt.IfStmt(_, _, _),
     ],
 })
 ```
@@ -707,8 +707,8 @@ List patterns are exact by default. A final `...` makes the pattern a prefix che
 
 ```elisa
 expect block.stmts as [
-    Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.NEW, _),
-    Pascal.Stmt.StandardRoutine(^PascalStandardRoutineKind.DISPOSE, _),
+    Pascal::Stmt.StandardRoutine(^PascalStandardRoutineKind.NEW, _),
+    Pascal::Stmt.StandardRoutine(^PascalStandardRoutineKind.DISPOSE, _),
     ...,
 ]
 ```
@@ -1050,7 +1050,7 @@ params.push(param)
 ```
 
 ```elisa
-decls: darray[Pascal.Decl] @owner = []
+decls: darray[Pascal::Decl] @owner = []
 decls.push(decl)
 
 for decl in decls.view():
@@ -1355,9 +1355,9 @@ grammar PascalStmtGrammar over Token using ParserState:
     recovery StatementRecovery:
         message ParseMessageKey.ExpectedStatement
         until .SEMICOLON, .END, token(TokenKind.EOF)
-        fallback zeroed as Pascal.Stmt
+        fallback zeroed as Pascal::Stmt
 
-    statement() -> Pascal.Stmt recover StatementRecovery:
+    statement() -> Pascal::Stmt recover StatementRecovery:
         stmt = statement_core() recover StatementRecovery
         return stmt
 ```
@@ -1395,7 +1395,7 @@ grammar PascalStmtGrammar over Token using ParserState:
         message ParseMessageKey.ExpectedStatement
         until StatementOrFileSync
 
-    block() -> darray[Pascal.Stmt]:
+    block() -> darray[Pascal::Stmt]:
         statements = separated statement() by .SEMICOLON until(StatementOrFileSync)
         return statements
 ```
@@ -1414,7 +1414,7 @@ grammar PascalStmtGrammar over Token using ParserState:
         StatementStart
         END
 
-    block() -> darray[Pascal.Stmt]:
+    block() -> darray[Pascal::Stmt]:
         lookahead(StatementStart)
         statements = separated statement() by .END until(StatementOrEnd)
         return statements
@@ -1423,10 +1423,10 @@ grammar PascalStmtGrammar over Token using ParserState:
 The same `first(...)` form also works directly in grammar-term position when you want a one-off predictive probe without introducing a named token set first.
 
 ```elisa
-block() -> Pascal.Stmt:
+block() -> Pascal::Stmt:
     lookahead(first(statement))
     statements = separated statement() by .END until(StatementOrEnd)
-    return zeroed as Pascal.Stmt
+    return zeroed as Pascal::Stmt
 ```
 
 Shared helper grammars can define common sync fragments once and importing grammars can compose them into local sets or use them directly in lookahead choices.
@@ -1444,9 +1444,9 @@ grammar PascalExprGrammar over Token using ParserState uses PascalListGrammar:
         RPAREN
         FileEndSync
 
-    atom() -> Pascal.Expr:
+    atom() -> Pascal::Expr:
         lookahead(.LPAREN | FileEndSync)
-        return zeroed as Pascal.Expr
+        return zeroed as Pascal::Expr
 ```
 
 Current rules:
@@ -1521,7 +1521,7 @@ grammar PascalTypeDeclGrammar over Token using ParserState:
 
     grammar alias enum_member_names = required(.IDENT, ParseMessageKey.ExpectedDeclName) |> separated_by(stop: EnumEndSync)
 
-    enum_type_decl(name: Token) -> Pascal.Decl:
+    enum_type_decl(name: Token) -> Pascal::Decl:
         .LPAREN
         members = enum_member_names
         close = required(.RPAREN, ParseMessageKey.ExpectedRightParen)
@@ -1555,7 +1555,7 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
         RPAREN
         token(TokenKind.EOF)
 
-    args() -> darray[Pascal.Expr]:
+    args() -> darray[Pascal::Expr]:
         values = separated_by(item: expression(), stop: RParenSync)
         return values
 ```
@@ -1564,7 +1564,7 @@ The same call can be written as a compile-time grammar pipeline when the first a
 
 ```elisa
 grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
-    args() -> darray[Pascal.Expr]:
+    args() -> darray[Pascal::Expr]:
         values = expression() |> separated_by(stop: RParenSync)
         return values
 ```
@@ -1584,7 +1584,7 @@ grammar PascalArgsGrammar over Token using ParserState uses PascalListGrammar:
     grammar alias expr_items(stop: tokenset, sep: grammar = .COMMA):
         expression() |> separated_by(stop: stop, sep: sep)
 
-    args() -> darray[Pascal.Expr]:
+    args() -> darray[Pascal::Expr]:
         values = expr_items(stop: RParenSync)
         return values
 ```
@@ -1597,7 +1597,7 @@ grammar RecoveryGrammar over Token using ParserState:
         item recover(message, until(stop), fallback)
 
 grammar PascalStmtGrammar over Token using ParserState uses RecoveryGrammar:
-    condition_or_invalid() -> Pascal.Expr:
+    condition_or_invalid() -> Pascal::Expr:
         node <- recovered(
             item: condition(),
             message: expr(ParseMessageKey.ExpectedConditionExpression),
@@ -2103,8 +2103,8 @@ enum-variant helpers, and use `new[owner] Enum.Variant(...)` when the operation
 allocates a fresh packed value.
 
 ```elisa
-def make_binary(alloc: mutable Arena&, left: Lua.Expr, right: Lua.Expr) -> Lua.Expr:
-    return new[alloc] Lua.Expr.Binary(span: left.span + right.span, left: left, right: right)
+def make_binary(alloc: mutable Arena&, left: Lua::Expr, right: Lua::Expr) -> Lua::Expr:
+    return new[alloc] Lua::Expr.Binary(span: left.span + right.span, left: left, right: right)
 ```
 
 Current rules:
@@ -2130,9 +2130,9 @@ enum LuaExpr:
     BinarySub(left: LuaExpr, right: LuaExpr)
     BinaryDiv(left: LuaExpr, right: LuaExpr)
 
-def classify(node: Lua.Expr) -> i64:
+def classify(node: Lua::Expr) -> i64:
     match node:
-        Lua.Expr.BinaryAdd(left: _, right: _):
+        Lua::Expr.BinaryAdd(left: _, right: _):
             return 1
         _:
             return 0
@@ -2144,13 +2144,13 @@ The tree-specific `visit value:` expression has been removed. Use ordinary
 state.
 
 ```elisa
-def score(node: Lua.Expr) -> i64:
+def score(node: Lua::Expr) -> i64:
     match node:
-        Lua.Expr.Nil(expr):
+        Lua::Expr.Nil(expr):
             expr.span
-        Lua.Expr.Int(expr):
+        Lua::Expr.Int(expr):
             expr.value
-        Lua.Expr.Binary(expr):
+        Lua::Expr.Binary(expr):
             expr.left.span + expr.right.span
 ```
 
@@ -2159,13 +2159,13 @@ def score(node: Lua.Expr) -> i64:
 Tree families can define computed field-like attributes with `attribute`.
 
 ```elisa
-attribute Lua.Expr.checksum -> i64:
-    Lua.Expr.Int(expr):
+attribute Lua::Expr.checksum -> i64:
+    Lua::Expr.Int(expr):
         return expr.value
-    Lua.Expr.Binary(expr, left, right):
+    Lua::Expr.Binary(expr, left, right):
         return left.checksum + right.checksum
 
-def checksum_of(node: Lua.Expr) -> i64:
+def checksum_of(node: Lua::Expr) -> i64:
     return node.checksum
 ```
 
@@ -2173,8 +2173,8 @@ Attributes may also be declared on a broader family root and may return an
 error union when computing the attribute can fail.
 
 ```elisa
-attribute Lua.Node.checksum -> i64 error[LuaFrontendError]:
-    Lua.Expr.Binary(node, left, right):
+attribute Lua::Node.checksum -> i64 error[LuaFrontendError]:
+    Lua::Expr.Binary(node, left, right):
         lua_binary_checksum(node.span, left.checksum, right.checksum)
     _:
         0
@@ -2183,22 +2183,22 @@ attribute Lua.Node.checksum -> i64 error[LuaFrontendError]:
 Projected attribute reads work on child sequences too:
 
 ```elisa
-attribute Lua.Expr.node_count -> usize:
-    Lua.Expr.Int(_):
+attribute Lua::Expr.node_count -> usize:
+    Lua::Expr.Int(_):
         return 1
-    Lua.Expr.Binary(expr, left, right):
+    Lua::Expr.Binary(expr, left, right):
         total: mutable usize = 1
         for child_count in children.node_count:
             total <- total + child_count
         return total
 
-attribute Lua.Expr.is_leaf -> bool:
-    Lua.Expr.Int(_):
+attribute Lua::Expr.is_leaf -> bool:
+    Lua::Expr.Int(_):
         return true
-    Lua.Expr.Binary(_):
+    Lua::Expr.Binary(_):
         return false
 
-def all_children_leaf(node: Lua.Expr) -> bool:
+def all_children_leaf(node: Lua::Expr) -> bool:
     return all(children(node).is_leaf)
 ```
 
@@ -2321,18 +2321,18 @@ grammar PascalExprGrammar over Token using ParserState:
             op = .STAR | .SLASH | .DIV | .MOD | .AND right = atom() -> make_binary_expr(left, op, right)
         additive(left = multiplicative()):
             op = .PLUS | .MINUS | .OR right = multiplicative() -> make_binary_expr(left, op, right)
-    expression() -> Pascal.Expr:
+    expression() -> Pascal::Expr:
         result = infix(ExprTable)
         return result
-    name_atom() -> Pascal.Expr:
+    name_atom() -> Pascal::Expr:
         seq:
             .IDENT(token)
             expr(make_name_expr(alloc, token))
-    integer_atom() -> Pascal.Expr:
+    integer_atom() -> Pascal::Expr:
         seq:
             .INTEGER(token)
             expr(make_integer_expr(alloc, token))
-    string_atom() -> Pascal.Expr:
+    string_atom() -> Pascal::Expr:
         seq:
             .STRING(token)
             expr(make_string_expr(alloc, token))
@@ -2398,13 +2398,13 @@ grammar SMLExprGrammar with SMLGrammarEnv:
         expression() |> recovered(message: expr(ExpectedExpression), stop: stop, fallback: expr(invalid_expr_at(state.current_token().span)))
 
 extend grammar PerlExprGrammar:
-    postfix_expr() -> Perl.Expr:
+    postfix_expr() -> Perl::Expr:
         node <- postfix(left = primary_expr()):
             .ARROW:
                 member = member_tail()
                 -> make_perl_member_expr(left, member.name_token, member.close_token)
 
-    expression() -> Perl.Expr:
+    expression() -> Perl::Expr:
         node <- precedence(left = term()):
             op = .PLUS:
                 right = term()
@@ -2415,7 +2415,7 @@ extend grammar PerlExprGrammar:
 Inside grammar sequence result positions, `+` is the canonical way to compose list-producing grammar values. Prefer it over tiny helper functions whose only job is to allocate, append the left list, append the right list, and return the merged result.
 
 ```elisa
-const_prefixed_decl_sections() -> darray[Pascal.Decl]:
+const_prefixed_decl_sections() -> darray[Pascal::Decl]:
     node <- seq:
         const_decls = const_decl_section()
         type_decls = optional_type_decl_section()
@@ -2429,11 +2429,11 @@ This is grammar DSL list composition, not a promise that general-purpose `darray
 When branching on parser state, snapshot cursor-dependent values before multiple guarded branches if any branch could consume input. This keeps alternatives from accidentally observing a later cursor position.
 
 ```elisa
-declarations() -> darray[Pascal.Decl]:
+declarations() -> darray[Pascal::Decl]:
     kind = expr(state.current_token().kind)
-    const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), empty[Pascal.Decl])
-    type_decls = when(kind == TokenKind.TYPE, type_prefixed_decl_sections(), empty[Pascal.Decl])
-    var_decls = when(kind == TokenKind.VAR, variable_decl_section(), empty[Pascal.Decl])
+    const_decls = when(kind == TokenKind.CONST, const_prefixed_decl_sections(), empty[Pascal::Decl])
+    type_decls = when(kind == TokenKind.TYPE, type_prefixed_decl_sections(), empty[Pascal::Decl])
+    var_decls = when(kind == TokenKind.VAR, variable_decl_section(), empty[Pascal::Decl])
     node <- const_decls + type_decls + var_decls
     return node
 ```
@@ -2444,10 +2444,10 @@ Channel synthesis is useful for parser result shapes that want several tracked f
 grammar PascalAssignStmtGrammar over Token using ParserState:
     cursor state
     channel name_id: NameId
-    channel value: Pascal.Expr
+    channel value: Pascal::Expr
     channel span: Span = $start.span + $end.span
 
-    assignment_spec() -> (name_id: NameId, value: Pascal.Expr, span: Span):
+    assignment_spec() -> (name_id: NameId, value: Pascal::Expr, span: Span):
         .IDENT(name_token)
         lookahead(.ASSIGN)
         cut
@@ -2483,17 +2483,17 @@ Singleton terms and list comprehensions cover the next common parser-helper shap
 grammar PascalFrontend over Token using ParserState:
     cursor state
 
-    const_decl_group() -> darray[Pascal.Decl]:
+    const_decl_group() -> darray[Pascal::Decl]:
         spec = const_decl_spec()
-        node <- singleton[Pascal.Decl](build_const_decl(spec.name_token, spec.value))
+        node <- singleton[Pascal::Decl](build_const_decl(spec.name_token, spec.value))
         return node
 
-    variable_decl_group() -> darray[Pascal.Decl]:
+    variable_decl_group() -> darray[Pascal::Decl]:
         header = variable_decl_header()
         node <- when(
             header.type_token.kind == TokenKind.IDENT,
             [
-                new[alloc] Pascal.Decl.VarDecl(
+                new[alloc] Pascal::Decl.VarDecl(
                     span: name_token.span + header.type_token.span,
                     name_id: name_token.lexeme_key,
                     type_name_id: header.type_token.lexeme_key
@@ -2501,7 +2501,7 @@ grammar PascalFrontend over Token using ParserState:
                 for name_token in header.names
                 if name_token.kind == TokenKind.IDENT
             ],
-            empty[Pascal.Decl]
+            empty[Pascal::Decl]
         )
         return node
 ```
@@ -2554,11 +2554,11 @@ token .RPAREN ")"
 Grammar productions are ordinary named parser functions whose bodies contain grammar terms plus normal expressions.
 
 ```elisa
-statement() -> Pascal.Stmt recover(ParseMessageKey.ExpectedStatement, until(.SEMICOLON, .END, token(TokenKind.EOF))):
+statement() -> Pascal::Stmt recover(ParseMessageKey.ExpectedStatement, until(.SEMICOLON, .END, token(TokenKind.EOF))):
     node <- statement_core()
     return node
 
-assignment() -> Pascal.Stmt:
+assignment() -> Pascal::Stmt:
     .IDENT(name_token)
     lookahead(.ASSIGN)
     cut
@@ -2676,7 +2676,7 @@ infix table ExprTable(additive):
     left additive(left = multiplicative()):
         op = .PLUS | .MINUS -> make_binary_expr(alloc, left, op, right)
 
-expression() -> Pascal.Expr:
+expression() -> Pascal::Expr:
     result = infix(ExprTable)
     return result
 ```
@@ -2717,7 +2717,7 @@ grammar Arithmetic over Token using ParserState:
 Suffix and postfix are related loop surfaces for expression tails and statement-like continuations:
 
 ```elisa
-condition() -> Pascal.Expr:
+condition() -> Pascal::Expr:
     node <- suffix(left = expression()):
         op = .EQ | .NOTEQ right = expression() -> make_binary_expr(alloc, left, op, right)
     return node
@@ -2760,16 +2760,16 @@ for {left, right: value} in items where left != 0:
 for token in tokens where token.kind == TokenKind.IDENT:
     names.push(token.NameId())
 
-for decl in block.decls where Pascal.Decl.LabelDecl(labels):
+for decl in block.decls where Pascal::Decl.LabelDecl(labels):
     validate_labels(labels)
 
-for decl in block.decls where decl is Pascal.Decl.LabelDecl(labels):
+for decl in block.decls where decl is Pascal::Decl.LabelDecl(labels):
     validate_labels(labels)
 
-for decl in block.decls where Pascal.Decl.LabelDecl:
+for decl in block.decls where Pascal::Decl.LabelDecl:
     validate_label_decl(decl)
 
-for decl in block.decls where Pascal.Decl.LabelDecl(labels) for label in labels:
+for decl in block.decls where Pascal::Decl.LabelDecl(labels) for label in labels:
     validate_label(label)
 ```
 
@@ -2919,12 +2919,12 @@ struct Pair:
     items: darray[u32]
     root: LuaBlock
 
-def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua.Block) -> Pair:
+def clone_pair(owner: mutable Arena&, source_items: view[u32], block: Lua::Block) -> Pair:
     can Abort.Panic, Memory.Allocate:
         in owner:
             return Pair{
                 items: clone[darray[u32]](source_items),
-                root: clone[Lua.Block](block),
+                root: clone[Lua::Block](block),
             }
 ```
 
@@ -3095,28 +3095,28 @@ matches an exact tree member and receives folded child results rather than raw
 child handles.
 
 ```elisa
-def score(node: Lua.Expr) -> i64:
-    return fold node as Lua.Node into i64:
-        Lua.Expr.Nil(expr, children):
+def score(node: Lua::Expr) -> i64:
+    return fold node as Lua::Node into i64:
+        Lua::Expr.Nil(expr, children):
             expr.span + children.len.i64()
-        Lua.Expr.Int(expr, children):
+        Lua::Expr.Int(expr, children):
             expr.value + children.len.i64()
-        Lua.Expr.Call(expr, callee, args: arg_values):
+        Lua::Expr.Call(expr, callee, args: arg_values):
             callee + arg_values.len.i64() + expr.span
-        Lua.Expr.Binary(expr, left, right):
+        Lua::Expr.Binary(expr, left, right):
             left + right + expr.span
 ```
 
 Optional and sequence child fields preserve their shape in the folded bindings:
 
 ```elisa
-def score(node: Lua.Stmt) -> i64:
-    return fold node as Lua.Node into i64:
-        Lua.Block(block, children):
+def score(node: Lua::Stmt) -> i64:
+    return fold node as Lua::Node into i64:
+        Lua::Block(block, children):
             children.len.i64() + block.span
-        Lua.Stmt.IfStmt(stmt, condition, then_block, elseifs: elseif_values, else_block):
+        Lua::Stmt.IfStmt(stmt, condition, then_block, elseifs: elseif_values, else_block):
             optional_i64_value(else_block) + condition + then_block + elseif_values.len.i64() + stmt.span
-        Lua.Stmt.NumericFor(stmt, start, limit, step, body):
+        Lua::Stmt.NumericFor(stmt, start, limit, step, body):
             optional_i64_value(step) + start + limit + body + stmt.name_index.i64()
 ```
 
@@ -3143,10 +3143,10 @@ def simplify(node: Expr) -> Expr:
             Expr.Add(expr, left, right):
                 default
 
-def simplify_binary(node: Lua.Expr) -> Lua.Expr:
+def simplify_binary(node: Lua::Expr) -> Lua::Expr:
     in perm:
-        return rewrite node as Lua.Expr default:
-            Lua.Expr.Binary(expr, left, right):
+        return rewrite node as Lua::Expr default:
+            Lua::Expr.Binary(expr, left, right):
                 default{span = expr.span, left, right}
 ```
 
@@ -3158,7 +3158,7 @@ Current rules:
 - named child bindings such as `left` and `right` are the already-rewritten child results
 - inside an exact rewrite arm, bare `default` rebuilds the current exact member using the already rewritten child results
 - `default{field = value, other}` rebuilds the current exact member while overriding selected fields or reusing same-named bindings
-- use a family root such as `Lua.Node` or `ATPLSyntax.Node` when a category has heterogeneous structural children such as expressions, statements, and blocks
+- use a family root such as `Lua::Node` or `ATPLSyntax.Node` when a category has heterogeneous structural children such as expressions, statements, and blocks
 - `default` and `default{...}` are only allowed inside exact tree rewrite arms
 - `rewrite` is contextual, so an ordinary function or local named `rewrite` still parses normally in call position such as `rewrite(value)`
 

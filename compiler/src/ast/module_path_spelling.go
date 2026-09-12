@@ -15,3 +15,15 @@ import "strings"
 func ModulePathSpelling(name string) string {
 	return strings.ReplaceAll(name, ".", "::")
 }
+
+// SourceSpelling is the type name as the user wrote it: the recorded Spelling when the
+// parser saw real separators, else the (single-segment or synthesized) Name.
+func (n *NamedType) SourceSpelling() string {
+	if n == nil {
+		return ""
+	}
+	if n.Spelling != "" {
+		return n.Spelling
+	}
+	return n.Name
+}

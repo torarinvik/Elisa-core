@@ -74,10 +74,10 @@ When a call needs implicit parameters and no active implicit scope supplies them
 bundle AllocCtx implicit:
     alloc: mutable Arena&
 
-def make_name_expr(token: Token) with AllocCtx -> Pascal.Expr:
-    return new[alloc] Pascal.Expr.Name(span: token.span, name_id: token.lexeme_key)
+def make_name_expr(token: Token) with AllocCtx -> Pascal::Expr:
+    return new[alloc] Pascal::Expr.Name(span: token.span, name_id: token.lexeme_key)
 
-def generated_parser_step(alloc: mutable Arena&, token: Token) -> Pascal.Expr:
+def generated_parser_step(alloc: mutable Arena&, token: Token) -> Pascal::Expr:
     return make_name_expr(token)
 ```
 
@@ -102,14 +102,14 @@ The language should use ordinary construction over those contracts:
 
 ```elisacore
 span: Span = left.span + right.span
-return new[alloc] Pascal.Expr.Binary(span: span, left: left, right: right)
+return new[alloc] Pascal::Expr.Binary(span: span, left: left, right: right)
 ```
 
 With a visible `SpanLike` impl for `Span`, that lowers to static-interface dispatch. The low-level equivalent remains available:
 
 ```elisacore
 span: Span = combine_span(left.span, right.span)
-return new[alloc] Pascal.Expr.Binary(span: span, left: left, right: right)
+return new[alloc] Pascal::Expr.Binary(span: span, left: left, right: right)
 ```
 
 ## Recommended parser style

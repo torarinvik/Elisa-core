@@ -38,9 +38,15 @@ type runtimeObjectCacheArtifact struct {
 	object string
 }
 
-// compilerSourceStampOnce memoizes the digest of all compiler .go sources. The compiler
-// binary cannot change mid-process, so this is computed once and reused for the cache key
-// (a codegen change rebuilds the binary -> different stamp -> stale objects invalidated).
+// compilerSourceStampOnce memoizes the digest of the RUNNING COMPILER BINARY. The binary
+// cannot change mid-process, so this is computed once and reused for the cache keys (a
+// codegen change rebuilds the binary -> different stamp -> stale objects invalidated).
+//
+// It used to digest the compiler's .go sources on disk (located through runtime.Caller),
+// which identifies the source TREE, not the compiler: two binaries built from different
+// sources but run against the same tree shared one key, so an older binary could publish
+// an object that a newer binary then served as its own. Hashing the executable is the
+// only stamp that cannot drift from the code actually producing the object.
 var (
 	compilerSourceStampOnce  sync.Once
 	compilerSourceStampValue string
@@ -49,13 +55,19 @@ var (
 
 func compilerSourceStamp() (string, error) {
 	compilerSourceStampOnce.Do(func() {
-		root, err := compilerSourceRootForCache()
+		exe, err := os.Executable()
 		if err != nil {
 			compilerSourceStampErr = err
 			return
 		}
+		file, err := os.Open(exe)
+		if err != nil {
+			compilerSourceStampErr = err
+			return
+		}
+		defer file.Close()
 		hash := sha256.New()
-		if err := testRunnerCacheHashGoFilesUnder(hash, root); err != nil {
+		if _, err := io.Copy(hash, file); err != nil {
 			compilerSourceStampErr = err
 			return
 		}

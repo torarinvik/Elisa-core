@@ -16,8 +16,9 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 	if ident, isIdent := expr.Object.(*ast.Ident); isIdent && ident != nil && ident.Name != "" && expr.Field != "" {
 		if !a.identNameResolvesAsValue(ident.Name) {
 			qualified := joinQualifiedName(ident.Name, expr.Field)
-			if _, found := a.globalScope.Lookup(qualified); found {
-				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s (`.` accesses value members, `::` accesses namespaces)", ident.Name, ident.Name, expr.Field)
+			_, found := a.globalScope.Lookup(qualified)
+			if found || a.nameIsModulePath(ident.Name) {
+				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s (`.` accesses value members, `::` accesses namespaces)", ast.ModulePathSpelling(ident.Name), ast.ModulePathSpelling(ident.Name), expr.Field)
 				return invalidType
 			}
 		}

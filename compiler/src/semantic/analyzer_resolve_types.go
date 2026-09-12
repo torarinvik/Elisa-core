@@ -20,6 +20,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		a.validateConstantWhereRefinementPredicate(n)
 		return base
 	case *ast.NamedType:
+		if a.rejectDotModulePath(n.Pos(), n.Spelling) {
+			return invalidType
+		}
 		switch n.Name {
 		case "cstr":
 			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
@@ -208,6 +211,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		return &RefType{Elem: elemType, State: RefStateNonNull, Storage: RefStorageAny}
 	case *ast.GenericType:
+		if a.rejectDotModulePath(n.Pos(), n.Spelling) {
+			return invalidType
+		}
 		if shaped, ok := a.resolveDynamicShapeType(n); ok {
 			return shaped
 		}

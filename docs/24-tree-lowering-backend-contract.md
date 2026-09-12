@@ -50,10 +50,10 @@ This note documents the current LLVM backend contract for Elisa `tree` values. I
 - Use `@layout(aos)` when the hot path repeatedly visits a small recursive neighborhood and wants payload fields together.
 - Use `@layout(soa)` when the hot path scans one or two scalar fields across many rows, especially after `freeze(move store)`.
 - Use explicit `@layout(per_variant_rows)` only for compatibility code that passes tree handles through APIs without carrying a store value yet.
-- Avoid accidental root materialization: keep category handles such as `Lua.Expr` category-local in locals, parameters, fields, and helper returns. Convert to the root family type only when the source type or expected type is the root tree value itself.
+- Avoid accidental root materialization: keep category handles such as `Lua::Expr` category-local in locals, parameters, fields, and helper returns. Convert to the root family type only when the source type or expected type is the root tree value itself.
 - A dense root row is useful for mixed root dispatch and `children(root)`, but category-local algorithms should stay on category-local handles so they only touch the category `{tags, payloads}` table pair.
 - Migrating a legacy tree means updating the public container type that owns root handles to also own the matching generated tree store. For example, a parser AST result should store both the root handle and the tree store that owns that row.
-- The Pascal AST is still explicitly pinned to `per_variant_rows` because `Ast` currently contains only `{root, names}`. Removing that annotation requires changing `Ast`, parser entrypoints, semantic entrypoints, and backends to thread `Pascal.Store[...]` and `PascalType.Store[...]` explicitly.
+- The Pascal AST is still explicitly pinned to `per_variant_rows` because `Ast` currently contains only `{root, names}`. Removing that annotation requires changing `Ast`, parser entrypoints, semantic entrypoints, and backends to thread `Pascal::Store[...]` and `PascalType.Store[...]` explicitly.
 
 ## Runtime Coverage Expectations
 

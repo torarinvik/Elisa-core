@@ -178,13 +178,14 @@ func writeCommonTestRunnerCacheInputs(hash hash.Hash, easmModules []*easm.Module
 	} else {
 		return err
 	}
-	compilerRoot, err := compilerSourceRootForCache()
+	// The compiler's identity is the RUNNING BINARY (see compilerSourceStamp), not the
+	// .go files on disk: keyed on the tree, a runner built by one binary was served to
+	// another built from different sources.
+	stamp, err := compilerSourceStamp()
 	if err != nil {
 		return err
 	}
-	if err := testRunnerCacheHashGoFilesUnder(hash, compilerRoot); err != nil {
-		return err
-	}
+	testRunnerCacheWriteString(hash, "compiler="+stamp)
 	return nil
 }
 

@@ -20,7 +20,7 @@ def symbol_index(symbol_id: SymbolId) -> usize:
     return (!symbol_id - 1).usize()
 ```
 
-Use module-local aliases for short names. The full names remain inspectable as `Pascal.Semantic.SymbolId` and `Pascal.Semantic.ScopeId` (symbol names join namespaces with a dot; the source spelling is always `::`), while code inside the module can use the concise forms.
+Use module-local aliases for short names. The full names remain inspectable as `Pascal::Semantic::SymbolId` and `Pascal::Semantic::ScopeId`, while code inside the module can use the concise forms. `::` is the only module-path separator, in every position: a type annotation, a generic bound, an `impl` or protocol parent, a `using` or `from ... import` source, and a match or destructure pattern. `.` reaches a value member or an enum variant, never a module, so `Pascal.Semantic::SymbolId` or `x: Pascal::Semantic.SymbolId` is an error (`"Pascal::Semantic" is a namespace; write Pascal::Semantic::SymbolId`). Internally the compiler keys symbols on the dotted form (`Pascal.Semantic.SymbolId`); that spelling never appears in source.
 
 ```elisa
 module SML:
@@ -32,7 +32,7 @@ module Perl:
     type NameId = id[Name]
 ```
 
-These two `NameId` aliases do not collide because their canonical names are `SML.NameId` and `Perl.NameId`.
+These two `NameId` aliases do not collide because their canonical names are `SML::NameId` and `Perl::NameId`.
 
 Use `using` when a file intentionally works in one module's vocabulary:
 

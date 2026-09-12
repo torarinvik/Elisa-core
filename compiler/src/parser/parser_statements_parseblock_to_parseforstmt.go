@@ -805,6 +805,7 @@ func (p *Parser) looksLikeForStmtAt(pos int) bool {
 	}
 	return false
 }
+
 // parseIterBindMode parses the loop-binding intent: `for x in ...` reads (the compiler
 // binds by reference under the hood when beneficial or required — see the affine
 // auto-borrow in analyzeIterForStmt), `for mutable x in ...` mutates elements in place,
@@ -1317,9 +1318,9 @@ func (p *Parser) peekForWherePatternFilter() bool {
 		if next == lexer.TOKEN_LPAREN || next == lexer.TOKEN_LBRACE {
 			return forWhereIdentLooksLikePatternType(p.cur().Text)
 		}
-		if next == lexer.TOKEN_DOT {
+		if next == lexer.TOKEN_DOT || next == lexer.TOKEN_SCOPE {
 			index := p.pos + 1
-			for index+1 < len(p.tokens) && p.tokens[index].Kind == lexer.TOKEN_DOT && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
+			for index+1 < len(p.tokens) && (p.tokens[index].Kind == lexer.TOKEN_DOT || p.tokens[index].Kind == lexer.TOKEN_SCOPE) && p.tokens[index+1].Kind == lexer.TOKEN_IDENT {
 				index += 2
 			}
 			if index >= len(p.tokens) {
@@ -1327,7 +1328,9 @@ func (p *Parser) peekForWherePatternFilter() bool {
 			}
 			switch p.tokens[index].Kind {
 			case lexer.TOKEN_LPAREN, lexer.TOKEN_LBRACE:
-				return true
+				// `M::Enum.Variant(...)` / `M::Point(...)` are patterns; a pure `::` chain
+				// ending in a lowercase name (`Lexer::text_or_empty(...)`) is a CALL.
+				return p.whereChainLooksLikePattern(p.pos, index)
 			case lexer.TOKEN_COLON:
 				return forWhereIdentLooksLikePatternType(p.cur().Text)
 			case lexer.TOKEN_IDENT:
@@ -1345,6 +1348,23 @@ func (p *Parser) peekForWherePatternFilter() bool {
 func (p *Parser) isForWherePredicateShorthand(expr ast.Expr) bool {
 	_, ok := expr.(*ast.Ident)
 	return ok
+}
+
+// whereChainLooksLikePattern: the qualified chain tokens[start..end) (identifiers joined
+// by `.` / `::`) names a pattern when some step is a `.` (a variant selector) or its last
+// segment is capitalised (a struct/variant name); otherwise it is a module-qualified call.
+func (p *Parser) whereChainLooksLikePattern(start int, end int) bool {
+	hasDot := false
+	last := ""
+	for i := start; i < end; i++ {
+		switch p.tokens[i].Kind {
+		case lexer.TOKEN_DOT:
+			hasDot = true
+		case lexer.TOKEN_IDENT:
+			last = p.tokens[i].Text
+		}
+	}
+	return hasDot || forWhereIdentLooksLikePatternType(last)
 }
 
 func forWhereIdentLooksLikePatternType(name string) bool {

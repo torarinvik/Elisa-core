@@ -673,16 +673,18 @@ func isRefCastTarget(t ast.TypeExpr) bool {
 	}
 }
 func formatStructLiteralTypeName(name string, typeArgs []ast.TypeExpr) string {
-	// Same boundary problem as formatTypeExpr's NamedType arm: this name may carry a
-	// module path, a type and a variant, so its dots are left alone.
+	// A struct literal's type name is a module path plus a struct: the parser only
+	// accepts `::` in it (`Pack.Item{...}` does not parse), so every dot in the
+	// flattened key came from `::`.
+	spelled := ast.ModulePathSpelling(name)
 	if len(typeArgs) == 0 {
-		return name
+		return spelled
 	}
 	parts := make([]string, 0, len(typeArgs))
 	for _, arg := range typeArgs {
 		parts = append(parts, formatTypeExpr(arg))
 	}
-	return name + "[" + strings.Join(parts, ", ") + "]"
+	return spelled + "[" + strings.Join(parts, ", ") + "]"
 }
 func formatNamedExprField(name string, value ast.Expr, separator string) string {
 	if name == "" {
@@ -895,12 +897,12 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 			if n.TypeName == "" {
 				return "{" + strings.Join(parts, ", ") + "}"
 			}
-			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
+			return ast.ModulePathSpelling(n.TypeName) + "{" + strings.Join(parts, ", ") + "}"
 		}
 		if len(parts) == 0 {
-			return n.TypeName + "()"
+			return ast.ModulePathSpelling(n.TypeName) + "()"
 		}
-		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
+		return ast.ModulePathSpelling(n.TypeName) + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.MatchVariantPattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -910,7 +912,8 @@ func formatMatchPattern(pattern ast.MatchPattern) string {
 				parts = append(parts, formatMatchPattern(arg.Pattern))
 			}
 		}
-		line := n.EnumName + "." + n.Variant
+		// The enum is reached through a module path (`::`), the variant with `.`.
+		line := ast.ModulePathSpelling(n.EnumName) + "." + n.Variant
 		if len(parts) != 0 {
 			line += "(" + strings.Join(parts, ", ") + ")"
 		}

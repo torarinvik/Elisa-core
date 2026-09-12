@@ -262,6 +262,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		result = a.analyzeEnumColumnExpr(n)
 		return
 	case *ast.FieldExpr:
+		if a.rejectDotModulePathExpr(n) {
+			result = invalidType
+			return
+		}
 		if interfaceMethodType, ok := a.resolveInterfaceMethodExprType(n); ok {
 			result = interfaceMethodType
 			return
@@ -928,7 +932,6 @@ func (a *Analyzer) analyzeRecoveryReturn(recovery *ast.RecoveryClause) {
 	}
 	a.consumeAffineValueExpr(recovery.Value, expectedReturn, "return")
 }
-
 
 // narrowedOptionalDeclaredType returns the declared optional type of a place that an
 // assignment narrowed to its payload. See Scope.narrowedOptionals.

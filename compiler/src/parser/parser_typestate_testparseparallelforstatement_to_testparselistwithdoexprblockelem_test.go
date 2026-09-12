@@ -126,6 +126,7 @@ func TestParseIterableForStatementWithRefDestructuring(t *testing.T) {
 		t.Fatalf("expected iterable source ident, got %T", iterStmt.Source)
 	}
 }
+
 // The `mutable ref` / `ref` binder spellings have been removed: copy-vs-ref on an
 // immutable binding is the compiler's decision (affine read-only iteration
 // auto-borrows), and `mutable` alone is the mutate-in-place spelling. Both removed
@@ -501,7 +502,7 @@ func TestParseIterableForStatementWithInlineCallWhereFilter(t *testing.T) {
 }
 
 func TestParseIterableForStatementKeepsQualifiedVariantWherePattern(t *testing.T) {
-	file, errs := parseSourceFile(t, "def walk(decls: darray[Pascal.Decl]) -> void:\n    for decl in decls where Pascal.Decl.VarDecl(var_name_id, type_expr, _):\n        pass\n")
+	file, errs := parseSourceFile(t, "def walk(decls: darray[Pascal::Decl]) -> void:\n    for decl in decls where Pascal::Decl.VarDecl(var_name_id, type_expr, _):\n        pass\n")
 	if len(errs) != 0 {
 		t.Fatalf("unexpected parser errors: %v", errs)
 	}
@@ -748,6 +749,7 @@ func TestParseDoExprBlock(t *testing.T) {
 		t.Fatalf("expected formatter to preserve do expression block syntax, got:\n%s", formatted)
 	}
 }
+
 // docs/119 §4: a block-bodied `match` (or `if`) as the final statement of an
 // expression block is now the block's value — it maps onto MatchExpr — rather than
 // the old "block requires a final expression" error.
@@ -892,5 +894,32 @@ func TestParseListWithDoExprBlockElem(t *testing.T) {
 	}
 	if _, ok := list.Elems[0].(*ast.ExprBlock); !ok {
 		t.Fatalf("expected first list elem to be do block, got %T", list.Elems[0])
+	}
+}
+
+// `::` is the only module-path separator. A `.` where a module path is required is a
+// parse error in every declaration/pattern position, reported at the head identifier
+// with the corrected spelling; the chain is still consumed so nothing cascades.
+func TestParseRejectsDotAsModuleSeparatorInDeclarationPositions(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"generic bound", "def g[T: Pack.Show](x: int) -> int:\n    return x\n", "write `Pack::Show`"},
+		{"using path", "using Pack.Sub\n", "write `Pack::Sub`"},
+		{"from import", "from Pack.Sub import f\n", "write `Pack::Sub`"},
+		{"enum parent", "enum Child is M2.Base:\n    C\n", "write `M2::Base`"},
+		{"match variant path", "def f(k: int) -> int:\n    match k:\n        Pack.Kind.A:\n            return 1\n        _:\n            return 0\n", "write `Pack::Kind.A`"},
+		{"let destructure", "def f() -> int:\n    let Pack.Item{v} = it\n    return v\n", "write `Pack::Item`"},
+	}
+	for _, tc := range cases {
+		_, errs := parseSourceFile(t, tc.src)
+		if len(errs) != 1 {
+			t.Fatalf("%s: expected exactly one parse error, got %v", tc.name, errs)
+		}
+		if !strings.Contains(errs[0], "module paths are separated by `::`, not `.`; "+tc.want) {
+			t.Fatalf("%s: unexpected diagnostic: %s", tc.name, errs[0])
+		}
 	}
 }

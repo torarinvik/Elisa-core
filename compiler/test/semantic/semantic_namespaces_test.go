@@ -30,7 +30,7 @@ func TestAnalyzeAcceptsNamespaceAndUsingForTypesAndFunctions(t *testing.T) {
 using math
 
 def run() -> int:
-	box: math.Box = make_box(7)
+	box: math::Box = make_box(7)
 	return read(box)
 `
 	result, errs := parseAndAnalyze(t, "namespace_using_ok.elisa", src)
@@ -75,5 +75,24 @@ def run() -> int:
 	all := strings.Join(errs, "\n")
 	if !strings.Contains(all, semantic.UndefinedIdentifierMessage("inc")) {
 		t.Fatalf("expected undefined identifier diagnostic, got:\n%s", all)
+	}
+}
+
+// A module walked with `.` in TYPE position (`math.Box`) is rejected with the same
+// namespace hint the value position gets; `::` is the only module separator.
+func TestAnalyzeRejectsDotModulePathInTypePosition(t *testing.T) {
+	src := `module math:
+	struct Box:
+		value: int
+
+def run(box: math.Box) -> int:
+	return box.value
+`
+	_, errs := parseAndAnalyze(t, "namespace_dot_type.elisa", src)
+	if len(errs) != 1 {
+		t.Fatalf("expected exactly one error, got %v", errs)
+	}
+	if !strings.Contains(errs[0], "\"math\" is a namespace; write math::Box (`.` accesses value members, `::` accesses namespaces)") {
+		t.Fatalf("unexpected diagnostic: %s", errs[0])
 	}
 }

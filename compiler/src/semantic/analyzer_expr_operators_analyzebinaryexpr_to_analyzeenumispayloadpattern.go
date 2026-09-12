@@ -743,6 +743,9 @@ func (a *Analyzer) analyzeIsExpr(expr *ast.BinaryExpr) Type {
 	left := a.analyzeExpr(expr.Left)
 	targets := flattenIsTargetExprs(expr.Right)
 	for _, target := range targets {
+		if a.rejectDotModulePathIsTarget(target) {
+			continue
+		}
 		if enumType, variant, ok := a.resolveEnumVariantIsTarget(target); ok {
 			if _, _, ok := resolveMatchableEnumType(left); !ok {
 				a.errorf(expr.Left.Pos(), "is requires an enum value for variant tests, got %s", left)
@@ -995,7 +998,6 @@ func plainStructValueType(t Type) *StructType {
 	}
 	return nil
 }
-
 
 // comparesNarrowedOptionalAgainstNull reports whether one side of an equality is `null`
 // and the other is a place whose DECLARED type is optional but which an assignment

@@ -404,7 +404,7 @@ Mixed child categories need an explicit widening cast on the source value so the
 result sequence has one common item type:
 
 ```elisa
-for child in children(stmt.cast[Lua.Node]):
+for child in children(stmt.cast[Lua::Node]):
     total <- total + child.kind.i64()
 ```
 
@@ -412,17 +412,17 @@ The `children(...)` carrier also keeps the widened source node available through
 `.node` when code needs to recover that exact root value explicitly.
 
 ```elisa
-def root_of(stmt: Lua.Stmt) -> Lua.Node:
-    return children(stmt.cast[Lua.Node]).node
+def root_of(stmt: Lua::Stmt) -> Lua::Node:
+    return children(stmt.cast[Lua::Node]).node
 ```
 
 Current rules:
 
 - `children(node)` requires at least one structural child edge
 - all structural child payloads must have the same item type unless the source is explicitly widened first
-- `children(stmt.cast[Lua.Node])` is the canonical mixed-child form when a statement can own expressions, blocks, and sibling statements
-- `children(expr).node` returns the source node value carried by that child view; this is most relevant after an explicit widening cast such as `children(stmt.cast[Lua.Node]).node`
-- legacy override syntax such as `children(stmt to Lua.Node)` has been removed; use an explicit cast like `children(stmt.cast[Lua.Node])`
+- `children(stmt.cast[Lua::Node])` is the canonical mixed-child form when a statement can own expressions, blocks, and sibling statements
+- `children(expr).node` returns the source node value carried by that child view; this is most relevant after an explicit widening cast such as `children(stmt.cast[Lua::Node]).node`
+- legacy override syntax such as `children(stmt to Lua::Node)` has been removed; use an explicit cast like `children(stmt.cast[Lua::Node])`
 - incompatible overrides are rejected rather than silently dropping non-matching children
 - explicit `link` payloads are not part of `children(...)`
 

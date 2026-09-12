@@ -417,11 +417,8 @@ func (p *Parser) parseMoveBindPattern() ast.MoveBindPattern {
 	}
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	if p.match(lexer.TOKEN_DOT) {
-		parts := []string{name, p.expect(lexer.TOKEN_IDENT).Text}
-		for p.match(lexer.TOKEN_DOT) {
-			parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
-		}
+	if p.peek() == lexer.TOKEN_DOT || p.peek() == lexer.TOKEN_SCOPE {
+		parts := p.parseVariantPathName(pos, name)
 		name = strings.Join(parts[:len(parts)-1], ".")
 		variant := parts[len(parts)-1]
 		args := make([]ast.MatchPatternArg, 0)
@@ -463,7 +460,7 @@ func (p *Parser) peekQualifiedStructDestructurePattern() bool {
 		return false
 	}
 	i := p.pos + 1
-	for i+1 < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_DOT && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
 		i += 2
 	}
 	return i < len(p.tokens) && p.tokens[i].Kind == lexer.TOKEN_LBRACE

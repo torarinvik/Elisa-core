@@ -1262,6 +1262,7 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 	// Accumulate the SOURCE spelling alongside the dot-joined key: `::` and `.` mean
 	// different things and the key cannot represent the difference.
 	spelling := name
+	parts := 1
 	for {
 		separator := ""
 		if p.peek() == lexer.TOKEN_SCOPE {
@@ -1275,9 +1276,12 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 		segment := p.expect(lexer.TOKEN_IDENT).Text
 		name += "." + segment
 		spelling += separator + segment
+		parts++
 	}
+	// Always recorded for a multi-segment name: an empty Spelling means "not parsed from
+	// source separators" (a synthesized node), and the analyzer must not guess for those.
 	named := &ast.NamedType{Position: pos, Name: name}
-	if spelling != name {
+	if parts > 1 {
 		named.Spelling = spelling
 	}
 	var typ ast.TypeExpr = named
@@ -1328,7 +1332,11 @@ func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label stri
 					}
 				}
 				p.expect(lexer.TOKEN_RBRACKET)
-				typ = &ast.GenericType{Position: pos, Name: name, Args: args}
+				generic := &ast.GenericType{Position: pos, Name: name, Args: args}
+				if parts > 1 {
+					generic.Spelling = spelling
+				}
+				typ = generic
 			}
 		}
 	}

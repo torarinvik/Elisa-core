@@ -508,6 +508,7 @@ F GenericType 1 Args
 F GenericType 2 Name
 F GenericType 3 Position
 F GenericType 4 Region
+F GenericType 5 Spelling
 
 T 75 GenericValueArgTypeExpr
 F GenericValueArgTypeExpr 1 Position

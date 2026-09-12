@@ -85,7 +85,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok && fieldExpr != nil && !fieldExpr.Safe {
 		if recvIdent, ok := fieldExpr.Object.(*ast.Ident); ok && recvIdent != nil && fieldExpr.Field != "" && !a.identNameResolvesAsValue(recvIdent.Name) {
 			if _, found := a.globalScope.Lookup(joinQualifiedName(recvIdent.Name, fieldExpr.Field)); found {
-				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s(...) (`.` accesses value members, `::` accesses namespaces)", recvIdent.Name, recvIdent.Name, fieldExpr.Field)
+				a.errorf(expr.Pos(), "%q is a namespace; write %s::%s(...) (`.` accesses value members, `::` accesses namespaces)", ast.ModulePathSpelling(recvIdent.Name), ast.ModulePathSpelling(recvIdent.Name), fieldExpr.Field)
 				return invalidType
 			}
 		}

@@ -485,6 +485,8 @@ type RefStorageLiteralTypeExpr struct {
 type GenericType struct {
 	Position lexer.Pos
 	Name     string
+	// Spelling is the name as written, with its real separators; see NamedType.Spelling.
+	Spelling string
 	Args     []TypeExpr
 	// Region is the `@r` allocation-region suffix on a generic-type use site
 	// (`Box[i64] @r`, docs/68 §5), mirroring BuiltinTypeExpr.Region for containers.

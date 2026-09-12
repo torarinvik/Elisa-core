@@ -38,12 +38,62 @@ func (p *Parser) parseModulePathName() string {
 	return name
 }
 
+// parseQualifiedDeclName parses a qualified TYPE-LIKE name in a declaration position:
+// a generic bound, an `impl` interface, a protocol base, a `from` import source, a
+// `let Type{...}` destructure target. None of these can name an enum variant, so every
+// separator in the chain is a module-path separator and must be `::`; a `.` is rejected
+// the way `module A.B:` is, and the chain is still consumed so the declaration parses.
 func (p *Parser) parseQualifiedDeclName() string {
+	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	for p.matchQualifiedNameSeparator() {
+	dotted := false
+	for {
+		if p.peek() == lexer.TOKEN_DOT {
+			dotted = true
+		} else if p.peek() != lexer.TOKEN_SCOPE {
+			break
+		}
+		p.advance()
 		name += "." + p.expect(lexer.TOKEN_IDENT).Text
 	}
+	if dotted {
+		p.errorAt(pos, "module paths are separated by `::`, not `.`; write `%s`", ast.ModulePathSpelling(name))
+	}
 	return name
+}
+
+// parseVariantPathName parses a qualified ENUM.Variant path in a pattern: `Kind.A`,
+// `Pack::Kind.A`. The last separator selects the variant and may be `.`; every
+// separator before it walks a module and must be `::`. The whole chain is consumed
+// either way. Returns the flattened dotted key and the raw separator list.
+func (p *Parser) parseVariantPathName(pos lexer.Pos, first string) []string {
+	parts := []string{first}
+	separators := []string{}
+	for {
+		if p.peek() == lexer.TOKEN_DOT {
+			separators = append(separators, ".")
+		} else if p.peek() == lexer.TOKEN_SCOPE {
+			separators = append(separators, "::")
+		} else {
+			break
+		}
+		p.advance()
+		parts = append(parts, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	for i := 0; i+1 < len(separators); i++ {
+		if separators[i] == "." {
+			corrected := parts[0]
+			for j, sep := range separators {
+				if j+1 < len(separators) {
+					sep = "::"
+				}
+				corrected += sep + parts[j+1]
+			}
+			p.errorAt(pos, "module paths are separated by `::`, not `.`; write `%s`", corrected)
+			break
+		}
+	}
+	return parts
 }
 
 func (p *Parser) matchQualifiedNameSeparator() bool {
@@ -73,6 +123,7 @@ func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	decls := p.parseDeclBlock()
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true}
 }
+
 // parseExtendDecl parses `extend Foo:` — a block that adds members to an
 // already-declared `module Foo:`. It shares the module body grammar (including
 // `public:`/`private:` sections); the semantic analyzer verifies the target
@@ -118,15 +169,28 @@ func (p *Parser) parseConstModuleMemberDecl() *ast.ConstDecl {
 	p.expectNewlineAfterValueExpr(value)
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
+
 // parseUsingDecl parses the three `using` forms. A multi-segment qualified name
 // (`using Foo::bar`) is selective — the final segment is the member; an `as` suffix
 // (`using Foo as F`) makes a module-qualifier alias. A bare single name is wildcard.
 func (p *Parser) parseUsingDecl() *ast.UsingDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("using")
+	// A `using` path walks modules (its last segment may be a member): `::` only.
+	namePos := p.cur().Pos
 	segments := []string{p.expect(lexer.TOKEN_IDENT).Text}
-	for p.matchQualifiedNameSeparator() {
+	dotted := false
+	for {
+		if p.peek() == lexer.TOKEN_DOT {
+			dotted = true
+		} else if p.peek() != lexer.TOKEN_SCOPE {
+			break
+		}
+		p.advance()
 		segments = append(segments, p.expect(lexer.TOKEN_IDENT).Text)
+	}
+	if dotted {
+		p.errorAt(namePos, "module paths are separated by `::`, not `.`; write `%s`", strings.Join(segments, "::"))
 	}
 	if p.match(lexer.TOKEN_AS) {
 		alias := p.expect(lexer.TOKEN_IDENT).Text
@@ -171,10 +235,7 @@ func (p *Parser) parseEnumDeclRest(pos lexer.Pos, packed bool, annotations []ast
 	parent := ""
 	if p.peek() == lexer.TOKEN_IS {
 		p.advance()
-		parent = p.expect(lexer.TOKEN_IDENT).Text
-		for p.matchQualifiedNameSeparator() {
-			parent += "." + p.expect(lexer.TOKEN_IDENT).Text
-		}
+		parent = p.parseQualifiedDeclName()
 	}
 	layout, layoutSet, sparse, indexWidth := p.parseEnumLayoutSuffix()
 	p.expect(lexer.TOKEN_COLON)
@@ -426,6 +487,7 @@ func (p *Parser) parseConstDecl() *ast.ConstDecl {
 
 	return &ast.ConstDecl{Position: pos, Name: name, Type: typ, Value: value}
 }
+
 // looksLikeLayoutDecl distinguishes a guest-memory overlay `layout Name [size N]:` declaration
 // (docs/107) from the struct/enum layout-mode prefix that shares the `layout` keyword
 // (`layout soa struct …`, `layout(...) enum …`, docs/01). The overlay form reaches a `:` directly
@@ -575,6 +637,7 @@ func (p *Parser) parseGlobalDecl() *ast.GlobalDecl {
 
 	return &ast.GlobalDecl{Position: pos, Mutable: mutable, Name: name, Type: typ, Value: value}
 }
+
 // layoutClauseOptions is the parsed content of the canonical parenthesized
 // `layout(...)` clause — one grammar shared by struct, enum, and guest-overlay
 // declarations. Callers validate which options make sense in their context.

@@ -601,10 +601,16 @@ type Analyzer struct {
 	currentUsings               []string
 	importAliases               map[string]string
 	moduleAliases               map[string]string
-	resolvedTypeNames           map[ast.TypeExpr]string
-	resolvedValueNames          map[*ast.Ident]string
-	currentImplicitScopes       []map[string]ast.Expr
-	semanticLimitDiagnostics    map[string]bool
+	// declaredModules is every `module` path (dot-flattened key) seen by
+	// validateModuleExtensions; rejectDotModulePath consults it.
+	declaredModules map[string]bool
+	// reportedDotModulePaths dedupes rejectDotModulePathExpr across re-analysis.
+	reportedDotModulePaths   map[*ast.FieldExpr]bool
+	reportedDotModuleTypes   map[string]bool
+	resolvedTypeNames        map[ast.TypeExpr]string
+	resolvedValueNames       map[*ast.Ident]string
+	currentImplicitScopes    []map[string]ast.Expr
+	semanticLimitDiagnostics map[string]bool
 }
 
 type castHookSignature struct {

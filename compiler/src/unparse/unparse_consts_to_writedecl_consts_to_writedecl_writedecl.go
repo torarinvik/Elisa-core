@@ -50,7 +50,17 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 			f.writeDecl(level+1, nested)
 		}
 	case *ast.UsingDecl:
-		f.writeLine(level, "using "+n.Name)
+		// Module paths print with `::`; a selective import keeps its member, an alias its `as`.
+		line := "using " + ast.ModulePathSpelling(n.Name)
+		if n.Member != "" {
+			line += "::" + n.Member
+		}
+		if n.Alias != "" {
+			line += " as " + n.Alias
+		}
+		f.writeLine(level, line)
+	case *ast.ImportDecl:
+		f.writeLine(level, "from "+ast.ModulePathSpelling(n.Module)+" import "+strings.Join(n.Names, ", "))
 	case *ast.ConstDecl:
 		line := "const " + n.Name
 		if n.Type != nil {
@@ -137,7 +147,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		header += "enum " + n.Name
 		if n.Parent != "" {
-			header += " is " + n.Parent // sealed refinement (docs/77)
+			header += " is " + ast.ModulePathSpelling(n.Parent) // sealed refinement (docs/77)
 		}
 		if n.LayoutSet {
 			opts := make([]string, 0, 3)
@@ -433,7 +443,11 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		header := keyword + " " + n.Name + formatGenericParams(n.GenericParams, nil, nil, nil) + ":"
 		if !n.IsEffect && len(n.Bases) != 0 {
-			header = "protocol " + n.Name + " is " + strings.Join(n.Bases, ", ") + ":"
+			bases := make([]string, 0, len(n.Bases))
+			for _, base := range n.Bases {
+				bases = append(bases, ast.ModulePathSpelling(base))
+			}
+			header = "protocol " + n.Name + " is " + strings.Join(bases, ", ") + ":"
 		}
 		f.writeLine(level, header)
 		for _, member := range n.Members {
@@ -492,7 +506,7 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.IsExtension() {
 			header = "impl" + implParams + " " + formatTypeExpr(n.ForType) + ":"
 		} else {
-			header = "impl" + implParams + " " + n.InterfaceName + " for " + formatTypeExpr(n.ForType) + ":"
+			header = "impl" + implParams + " " + ast.ModulePathSpelling(n.InterfaceName) + " for " + formatTypeExpr(n.ForType) + ":"
 		}
 		f.writeLine(level, header)
 		for _, member := range n.Members {

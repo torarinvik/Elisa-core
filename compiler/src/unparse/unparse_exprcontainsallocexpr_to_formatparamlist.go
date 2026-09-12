@@ -499,7 +499,7 @@ func formatGenericParams(genericParams []ast.GenericParam, typeParams []string, 
 				parts = append(parts, "permission "+param.Name)
 			default:
 				if param.InterfaceBound != "" {
-					parts = append(parts, param.Name+": "+param.InterfaceBound)
+					parts = append(parts, param.Name+": "+ast.ModulePathSpelling(param.InterfaceBound))
 				} else {
 					parts = append(parts, param.Name)
 				}

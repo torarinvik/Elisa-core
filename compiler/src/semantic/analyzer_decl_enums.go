@@ -1,8 +1,8 @@
 package semantic
 
 import (
-	"strings"
 	"elisacore/src/ast"
+	"strings"
 )
 
 // resolveEnumParent wires the `enum Child is Parent:` sealed-refinement relation (docs/77). The
@@ -312,7 +312,9 @@ func (a *Analyzer) populateEnumVariants(decls []scopedDecl) {
 							tailIndex = payloadIndex
 						}
 					}
-					if !enumDecl.Packed && SameType(payloadType, enumType) {
+					// SameType is lenient toward the invalid type, so an unresolved payload type
+					// (already reported as unknown) must not read as self-containment.
+					if !enumDecl.Packed && payloadType != invalidType && SameType(payloadType, enumType) {
 						a.errorf(payloadDecl.Type.Pos(), "enum %q variant %q cannot contain %q by value; use a reference type instead", enumDecl.Name, variantDecl.Name, enumDecl.Name)
 					}
 					payload = append(payload, payloadType)

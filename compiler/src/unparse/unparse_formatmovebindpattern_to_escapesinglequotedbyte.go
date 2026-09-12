@@ -31,9 +31,9 @@ func formatMoveBindPattern(pattern ast.MoveBindPattern) string {
 			if n.TypeName == "" {
 				return "{" + strings.Join(parts, ", ") + "}"
 			}
-			return n.TypeName + "{" + strings.Join(parts, ", ") + "}"
+			return ast.ModulePathSpelling(n.TypeName) + "{" + strings.Join(parts, ", ") + "}"
 		}
-		return n.TypeName + "(" + strings.Join(parts, ", ") + ")"
+		return ast.ModulePathSpelling(n.TypeName) + "(" + strings.Join(parts, ", ") + ")"
 	case *ast.MoveBindTuplePattern:
 		parts := make([]string, 0, len(n.Args))
 		for _, arg := range n.Args {
@@ -58,7 +58,7 @@ func formatMoveBindVariantPattern(pattern *ast.MoveBindVariantPattern) string {
 			parts = append(parts, formatMatchPattern(arg.Pattern))
 		}
 	}
-	line := pattern.EnumName + "." + pattern.Variant
+	line := ast.ModulePathSpelling(pattern.EnumName) + "." + pattern.Variant
 	if len(parts) != 0 {
 		line += "(" + strings.Join(parts, ", ") + ")"
 	}

@@ -77,6 +77,9 @@ func (a *Analyzer) flattenScopedDecls(decls []ast.Decl, namespace string, inheri
 // the merge semantics (extend members already flatten into Foo's namespace).
 func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 	declared := map[string]lexer.Pos{}
+	if a.declaredModules == nil {
+		a.declaredModules = map[string]bool{}
+	}
 	type extendSite struct {
 		name string
 		pos  lexer.Pos
@@ -97,6 +100,7 @@ func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 				} else {
 					declared[full] = n.Position
 				}
+				a.declaredModules[full] = true
 				walk(n.Decls, full)
 			}
 		}
