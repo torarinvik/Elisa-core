@@ -984,9 +984,27 @@ func (p *Parser) parseErrorSetExpr() *ast.ErrorSetExpr {
 	p.expect(lexer.TOKEN_RBRACKET)
 	return &ast.ErrorSetExpr{Position: pos, Tags: tags, HasEllipsis: hasEllipsis}
 }
+
+// parseErrorSetQualifiedSetName parses an error-set name that may be MODULE-QUALIFIED
+// (`Mod::Sub::Set`) and returns it in the analyzer's internal dotted spelling
+// (`Mod.Sub.Set`) — the same form joinQualifiedName produces when the declaration is
+// registered, so the existing lookup finds it with no further translation. A bare `Set`
+// is returned unchanged, so unqualified references keep their current behaviour.
+//
+// Before this, `error[...]` was the one type position in the language whose grammar took a
+// bare identifier only: `error[M::MyErr]` failed at the parser with "expected ], got ::",
+// which made an error set declared inside a module unnameable from outside it.
+func (p *Parser) parseErrorSetQualifiedSetName() string {
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	for p.match(lexer.TOKEN_SCOPE) {
+		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	}
+	return name
+}
+
 func (p *Parser) parseErrorSetItem() ast.ErrorTagExpr {
 	pos := p.cur().Pos
-	setName := p.expect(lexer.TOKEN_IDENT).Text
+	setName := p.parseErrorSetQualifiedSetName()
 	tag := ""
 	if p.match(lexer.TOKEN_DOT) {
 		if p.peek() == lexer.TOKEN_STAR {
@@ -1007,10 +1025,10 @@ func (p *Parser) parseErrorSetItemGroup() []ast.ErrorTagExpr {
 	// resolves as a whole family if Name is a declared set, otherwise as a single
 	// variant searched across all error sets.
 	if p.match(lexer.TOKEN_STAR) {
-		setName := p.expect(lexer.TOKEN_IDENT).Text
+		setName := p.parseErrorSetQualifiedSetName()
 		return []ast.ErrorTagExpr{{Position: pos, SetName: setName, Tag: "", Family: true}}
 	}
-	setName := p.expect(lexer.TOKEN_IDENT).Text
+	setName := p.parseErrorSetQualifiedSetName()
 	if p.match(lexer.TOKEN_LBRACE) {
 		var tags []ast.ErrorTagExpr
 		for p.peek() != lexer.TOKEN_RBRACE && p.peek() != lexer.TOKEN_EOF {
