@@ -430,6 +430,16 @@ type NamedType struct {
 	Position lexer.Pos
 	Name     string
 	Region   string
+	// Spelling is the name AS WRITTEN, with its real separators (`Pack::Item`). Name
+	// flattens every separator to "." because it is the analyzer's symbol key, which
+	// loses the one distinction the language cares about: `::` walks a namespace and `.`
+	// reaches a member, so "Alpha.Result.Ok" could have been written `Alpha::Result.Ok`,
+	// `Alpha::Result::Ok` or `Alpha.Result.Ok` and nothing downstream could tell.
+	//
+	// Empty when the name is a single segment or the two agree. Anything that reproduces
+	// SOURCE (the formatter, the interface writer) must prefer this; anything that looks a
+	// name up must keep using Name.
+	Spelling string
 }
 type RefState int
 

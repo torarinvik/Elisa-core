@@ -93,7 +93,7 @@ func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 				if n.Extend {
 					extends = append(extends, extendSite{name: full, pos: n.Position})
 				} else if prev, ok := declared[full]; ok {
-					a.errorf(n.Position, "module %q is already declared (at %s); use `extend %s:` to add to it", full, prev, full)
+					a.errorf(n.Position, "module %q is already declared (at %s); use `extend %s:` to add to it", ast.ModulePathSpelling(full), prev, ast.ModulePathSpelling(full))
 				} else {
 					declared[full] = n.Position
 				}
@@ -104,7 +104,7 @@ func (a *Analyzer) validateModuleExtensions(decls []ast.Decl) {
 	walk(decls, "")
 	for _, e := range extends {
 		if _, ok := declared[e.name]; !ok {
-			a.errorf(e.pos, "no module %q to extend; declare it with `module %s:` first (if this file is a fragment of a multi-file module, compile from the module root instead of this file alone)", e.name, e.name)
+			a.errorf(e.pos, "no module %q to extend; declare it with `module %s:` first (if this file is a fragment of a multi-file module, compile from the module root instead of this file alone)", ast.ModulePathSpelling(e.name), ast.ModulePathSpelling(e.name))
 		}
 	}
 }

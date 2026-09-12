@@ -7,6 +7,37 @@ import (
 	"strings"
 )
 
+// parseModulePathName parses the name of a `module` / `extend` / `const module`
+// declaration. A module path is spelled with `::` and nothing else.
+//
+// The dotted form used to parse here silently. It is not the language's namespace
+// separator (`.` accesses a value member), and accepting it split the ecosystem: a
+// `module A.B:` declaration registered a namespace that no `A::B::f()` use site names,
+// which on the self-hosted compiler produced a module that was declared and then
+// unreachable. Rejecting it is the fix -- normalising would keep two spellings alive for
+// one concept.
+//
+// The whole chain is still CONSUMED after the error so the declaration body parses
+// normally and the user sees this one diagnostic rather than a cascade.
+func (p *Parser) parseModulePathName() string {
+	pos := p.cur().Pos
+	name := p.expect(lexer.TOKEN_IDENT).Text
+	dotted := false
+	for {
+		if p.peek() == lexer.TOKEN_DOT {
+			dotted = true
+		} else if p.peek() != lexer.TOKEN_SCOPE {
+			break
+		}
+		p.advance()
+		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	}
+	if dotted {
+		p.errorAt(pos, "module paths are separated by `::`, not `.`; write `%s`", ast.ModulePathSpelling(name))
+	}
+	return name
+}
+
 func (p *Parser) parseQualifiedDeclName() string {
 	name := p.expect(lexer.TOKEN_IDENT).Text
 	for p.matchQualifiedNameSeparator() {
@@ -36,7 +67,7 @@ func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
 func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("module")
-	name := p.parseQualifiedDeclName()
+	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	decls := p.parseDeclBlock()
@@ -49,7 +80,7 @@ func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 func (p *Parser) parseExtendDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("extend")
-	name := p.parseQualifiedDeclName()
+	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	decls := p.parseDeclBlock()
@@ -59,7 +90,7 @@ func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_CONST)
 	p.expectIdentText("module")
-	name := p.parseQualifiedDeclName()
+	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)

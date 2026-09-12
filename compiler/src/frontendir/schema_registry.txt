@@ -1282,6 +1282,7 @@ T 194 NamedType
 F NamedType 1 Name
 F NamedType 2 Position
 F NamedType 3 Region
+F NamedType 4 Spelling
 
 T 195 NamespaceDecl
 F NamespaceDecl 1 Const

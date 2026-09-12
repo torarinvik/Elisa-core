@@ -132,6 +132,13 @@ func formatTypeExpr(typ ast.TypeExpr) string {
 	}
 	switch n := typ.(type) {
 	case *ast.NamedType:
+		// The SOURCE spelling when the parser recorded one. Converting every dot in Name
+		// instead is wrong: that string flattens `::` and `.` together, so it printed
+		// `Button::Push` for a source `Button.Push` (an enum variant, legitimately a dot).
+		// The parser knows which separator it consumed; the unparser must not guess.
+		if n.Spelling != "" {
+			return n.Spelling
+		}
 		return n.Name
 	case *ast.RefType:
 		// Storage classes (heap/static/stack) stay as prefixes; region provenance

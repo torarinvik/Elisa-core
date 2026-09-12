@@ -5,7 +5,7 @@ This note captures the current house style for dense table handles.
 The important rule is: use `id[T]` for integer-backed handles whose raw storage should not be accidentally mixed with other handles.
 
 ```elisa
-module Pascal.Semantic:
+module Pascal::Semantic:
     extern Symbol
     extern Scope
 
@@ -20,7 +20,7 @@ def symbol_index(symbol_id: SymbolId) -> usize:
     return (!symbol_id - 1).usize()
 ```
 
-Use module-local aliases for short names. The full names remain inspectable as `Pascal.Semantic.SymbolId` and `Pascal.Semantic.ScopeId`, while code inside the module can use the concise forms.
+Use module-local aliases for short names. The full names remain inspectable as `Pascal.Semantic.SymbolId` and `Pascal.Semantic.ScopeId` (symbol names join namespaces with a dot; the source spelling is always `::`), while code inside the module can use the concise forms.
 
 ```elisa
 module SML:

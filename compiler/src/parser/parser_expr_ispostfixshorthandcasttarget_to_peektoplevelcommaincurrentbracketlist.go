@@ -1259,10 +1259,28 @@ func canApplyAggregateState(typ ast.TypeExpr) bool {
 func (p *Parser) parseBaseType(storage ast.RefStorage, explicit bool, label string, region string) ast.TypeExpr {
 	pos := p.cur().Pos
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	for p.matchQualifiedNameSeparator() {
-		name += "." + p.expect(lexer.TOKEN_IDENT).Text
+	// Accumulate the SOURCE spelling alongside the dot-joined key: `::` and `.` mean
+	// different things and the key cannot represent the difference.
+	spelling := name
+	for {
+		separator := ""
+		if p.peek() == lexer.TOKEN_SCOPE {
+			separator = "::"
+		} else if p.peek() == lexer.TOKEN_DOT {
+			separator = "."
+		} else {
+			break
+		}
+		p.advance()
+		segment := p.expect(lexer.TOKEN_IDENT).Text
+		name += "." + segment
+		spelling += separator + segment
 	}
-	var typ ast.TypeExpr = &ast.NamedType{Position: pos, Name: name}
+	named := &ast.NamedType{Position: pos, Name: name}
+	if spelling != name {
+		named.Spelling = spelling
+	}
+	var typ ast.TypeExpr = named
 
 	if canApplyAggregateState(typ) {
 		if states, ok := p.peekAggregateStateBracketList(); ok {

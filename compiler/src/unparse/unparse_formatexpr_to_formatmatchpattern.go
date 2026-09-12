@@ -22,7 +22,11 @@ func formatExpr(expr ast.Expr) string {
 	}
 	switch n := expr.(type) {
 	case *ast.Ident:
-		return n.Name
+		// A dot inside an Ident NAME can only have come from a `::` chain: in expression
+		// position `.` is member access and parses to a FieldExpr, never into the name.
+		// So `Outer::Inner::helper` arrives here as "Outer.Inner.helper" and has to be
+		// spelled back out, or the formatter emits a call to an undefined identifier.
+		return ast.ModulePathSpelling(n.Name)
 	case *ast.IntLit:
 		if n.Suffix != "" {
 			return n.Value + n.Suffix
@@ -669,6 +673,8 @@ func isRefCastTarget(t ast.TypeExpr) bool {
 	}
 }
 func formatStructLiteralTypeName(name string, typeArgs []ast.TypeExpr) string {
+	// Same boundary problem as formatTypeExpr's NamedType arm: this name may carry a
+	// module path, a type and a variant, so its dots are left alone.
 	if len(typeArgs) == 0 {
 		return name
 	}

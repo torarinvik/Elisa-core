@@ -109,7 +109,10 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		if len(decls) == 0 {
 			return nil
 		}
-		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls, Module: n.Module, Const: n.Const}
+		// Extend is CARRIED: dropping it turned every `extend Foo:` block in the source into a
+		// second `module Foo:` in the generated interface, which the analyzer then rejects as a
+		// redeclaration -- an .elisai the compiler could not read back.
+		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls, Module: n.Module, Const: n.Const, Extend: n.Extend}
 	case *ast.StaticIfDecl:
 		elifs := make([]ast.StaticElifDecl, 0, len(n.Elifs))
 		for _, elif := range n.Elifs {

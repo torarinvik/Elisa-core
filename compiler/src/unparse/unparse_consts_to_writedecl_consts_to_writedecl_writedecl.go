@@ -29,7 +29,14 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		if n.Const && n.Module {
 			keyword = "const module"
 		}
-		f.writeLine(level, keyword+" "+n.Name+":")
+		// An `extend Foo:` block printed as `module Foo:` is a SECOND declaration of Foo,
+		// which the analyzer rejects ("module %q is already declared") -- the formatter was
+		// rewriting a valid file into one neither compiler accepts.
+		if n.Extend {
+			keyword = "extend"
+		}
+		// Namespaces are joined with "." internally; `::` is the only spelling that parses.
+		f.writeLine(level, keyword+" "+ast.ModulePathSpelling(n.Name)+":")
 		for i, nested := range n.Decls {
 			if i > 0 && !(n.Const && n.Module) {
 				f.blankLine()
