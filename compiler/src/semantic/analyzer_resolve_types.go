@@ -65,7 +65,10 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		if qualified, owner, ok := a.inaccessiblePrivateName(n.Name); ok {
 			a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
 		} else {
-			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+			// The name AS WRITTEN: the internal key flattens every `::` to a `.`, so a
+			// qualified type was quoted back in a spelling the user never typed (and
+			// which no longer parses).
+			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.SourceSpelling()))
 		}
 		return invalidType
 	case *ast.StateSetTypeExpr:
@@ -237,7 +240,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			if qualified, owner, privateHit := a.inaccessiblePrivateName(lookupName); privateHit {
 				a.errorf(n.Pos(), "%s", PrivateNameMessage(qualified, owner))
 			} else {
-				a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.Name))
+				a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.SourceSpelling()))
 			}
 			return invalidType
 		}

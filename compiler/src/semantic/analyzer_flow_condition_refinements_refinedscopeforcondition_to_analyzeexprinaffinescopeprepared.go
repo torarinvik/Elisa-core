@@ -463,6 +463,35 @@ func (a *Analyzer) applyPostIfFallthroughRefinement(stmt *ast.IfStmt) {
 		a.recordSMTAssertFact(smtFactExprForCondition(stmt.Cond, true))
 	}
 }
+// MatchPatternIsIrrefutable reports whether a pattern matches every value of its
+// scrutinee's type: `_`, or a struct pattern whose every field either binds or is itself
+// irrefutable. A struct has exactly one shape, so destructuring it always succeeds; a
+// field carrying a LITERAL is a test and makes the arm refutable. At the TOP level a bare
+// name is not counted — it may name an enum variant or a constant rather than bind.
+func MatchPatternIsIrrefutable(pattern ast.MatchPattern) bool {
+	switch p := pattern.(type) {
+	case *ast.MatchWildcardPattern:
+		return true
+	case *ast.MatchStructPattern:
+		if p == nil {
+			return false
+		}
+		for _, arg := range p.Args {
+			if arg.Pattern == nil {
+				continue
+			}
+			if _, ok := arg.Pattern.(*ast.MatchBindPattern); ok {
+				continue
+			}
+			if !MatchPatternIsIrrefutable(arg.Pattern) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
 func blockDefinitelyExits(stmts []ast.Stmt) bool {
 	if len(stmts) == 0 {
 		return false
@@ -492,11 +521,11 @@ func stmtDefinitelyExits(stmt ast.Stmt) bool {
 		}
 		hasWildcard := false
 		for _, arm := range n.Arms {
-			if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
-				// docs/122 §5.1: a guarded catch-all can fail, so the match may fall through.
-				if arm.Guard == nil {
-					hasWildcard = true
-				}
+			// docs/122 §5.1: a guarded catch-all can fail, so the match may fall through.
+			// An irrefutable struct pattern (`Item{v}:` — every field a binding or `_`)
+			// always matches its struct scrutinee, exactly like `_`.
+			if arm.Guard == nil && MatchPatternIsIrrefutable(arm.Pattern) {
+				hasWildcard = true
 			}
 			if !blockDefinitelyExits(arm.Body) {
 				return false

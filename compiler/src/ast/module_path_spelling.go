@@ -18,6 +18,17 @@ func ModulePathSpelling(name string) string {
 
 // SourceSpelling is the type name as the user wrote it: the recorded Spelling when the
 // parser saw real separators, else the (single-segment or synthesized) Name.
+// SourceSpelling is the GenericType head as written, `::` separators included.
+func (n *GenericType) SourceSpelling() string {
+	if n == nil {
+		return ""
+	}
+	if n.Spelling != "" {
+		return n.Spelling
+	}
+	return n.Name
+}
+
 func (n *NamedType) SourceSpelling() string {
 	if n == nil {
 		return ""

@@ -67,6 +67,14 @@ func (p *Parser) parseQualifiedDeclName() string {
 // separator before it walks a module and must be `::`. The whole chain is consumed
 // either way. Returns the flattened dotted key and the raw separator list.
 func (p *Parser) parseVariantPathName(pos lexer.Pos, first string) []string {
+	parts, _ := p.parseVariantPathNameWithSeparators(pos, first)
+	return parts
+}
+
+// parseVariantPathNameWithSeparators is parseVariantPathName that also hands back
+// the separator list, so a caller can tell an all-`::` TYPE path (`Pack::Item`, a
+// struct pattern when followed by `{`/`(`) from an enum VARIANT path (`Pack::Kind.A`).
+func (p *Parser) parseVariantPathNameWithSeparators(pos lexer.Pos, first string) ([]string, []string) {
 	parts := []string{first}
 	separators := []string{}
 	for {
@@ -93,7 +101,7 @@ func (p *Parser) parseVariantPathName(pos lexer.Pos, first string) []string {
 			break
 		}
 	}
-	return parts
+	return parts, separators
 }
 
 func (p *Parser) matchQualifiedNameSeparator() bool {

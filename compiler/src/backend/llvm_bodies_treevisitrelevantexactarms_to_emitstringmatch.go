@@ -12,6 +12,7 @@ import "C"
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/semantic"
 )
 
 func matchHasWildcard(arms []ast.MatchArm) bool {
@@ -20,7 +21,10 @@ func matchHasWildcard(arms []ast.MatchArm) bool {
 			// A guarded arm may fail at runtime; it cannot count toward exhaustiveness.
 			continue
 		}
-		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok {
+		// `_`, or an irrefutable struct pattern (`Item{v}:` — every field a binding or
+		// `_`), which matches every value of its struct scrutinee. The analyzer's
+		// fall-through rule uses the same predicate.
+		if semantic.MatchPatternIsIrrefutable(arm.Pattern) {
 			return true
 		}
 	}

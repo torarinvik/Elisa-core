@@ -1385,7 +1385,31 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	if p.peek() != lexer.TOKEN_DOT && p.peek() != lexer.TOKEN_SCOPE {
 		return &ast.MatchBindPattern{Position: pos, Name: parts[0]}
 	}
-	parts = p.parseVariantPathName(pos, parts[0])
+	// A qualified path followed by `{` is a STRUCT pattern -- no enum-variant spelling is
+	// braced -- so every separator in it walks a module and must be `::`. Reported with
+	// the same sentence and span the `let` destructure position already uses for the
+	// identical spelling. The head ident is already consumed, so the chain is finished
+	// here rather than through parseQualifiedDeclName, which starts at the head.
+	if p.peekQualifiedPathTailBefore(lexer.TOKEN_LBRACE) {
+		name := parts[0]
+		dotted := false
+		for p.peek() == lexer.TOKEN_DOT || p.peek() == lexer.TOKEN_SCOPE {
+			dotted = dotted || p.peek() == lexer.TOKEN_DOT
+			p.advance()
+			name += "." + p.expect(lexer.TOKEN_IDENT).Text
+		}
+		if dotted {
+			p.errorAt(pos, "module paths are separated by `::`, not `.`; write `%s`", ast.ModulePathSpelling(name))
+		}
+		return p.parseMatchStructPatternAfterName(pos, name)
+	}
+	parts, separators := p.parseVariantPathNameWithSeparators(pos, parts[0])
+	// A path walked ONLY by `::` names a TYPE, never a variant (a variant is always
+	// reached by a final `.`), so `Pack::Item(v: v)` is the parenthesized spelling of the
+	// same module-qualified struct pattern.
+	if !containsSeparator(separators, ".") && p.peek() == lexer.TOKEN_LPAREN {
+		return p.parseMatchStructPatternAfterName(pos, strings.Join(parts, "."))
+	}
 	name := strings.Join(parts[:len(parts)-1], ".")
 	variant := parts[len(parts)-1]
 	var args []ast.MatchPatternArg
@@ -1408,6 +1432,26 @@ func (p *Parser) parseNestedMatchPattern() ast.MatchPattern {
 	variantPat.Rest = detachTrailingRestArg(&variantPat.Args)
 	variantPat.As = p.parseOptionalPatternAsBinding()
 	return variantPat
+}
+
+// peekQualifiedStructDestructurePattern's counterpart for a cursor sitting ON the
+// separator after an already-consumed head ident: the rest of the `(.|::) IDENT` chain is
+// followed by `stop`.
+func (p *Parser) peekQualifiedPathTailBefore(stop lexer.TokenKind) bool {
+	i := p.pos
+	for i+1 < len(p.tokens) && (p.tokens[i].Kind == lexer.TOKEN_DOT || p.tokens[i].Kind == lexer.TOKEN_SCOPE) && p.tokens[i+1].Kind == lexer.TOKEN_IDENT {
+		i += 2
+	}
+	return i > p.pos && i < len(p.tokens) && p.tokens[i].Kind == stop
+}
+
+func containsSeparator(separators []string, wanted string) bool {
+	for _, separator := range separators {
+		if separator == wanted {
+			return true
+		}
+	}
+	return false
 }
 
 // detachTrailingRestArg implements docs/122 §5.7 for named-args patterns: a final bare

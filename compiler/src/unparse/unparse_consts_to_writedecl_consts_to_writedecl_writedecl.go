@@ -37,17 +37,36 @@ func (f *formatter) writeDecl(level int, decl ast.Decl) {
 		}
 		// Namespaces are joined with "." internally; `::` is the only spelling that parses.
 		f.writeLine(level, keyword+" "+ast.ModulePathSpelling(n.Name)+":")
+		// Members carrying an explicit visibility print under a `public:` / `private:`
+		// section (one section per run of equally-marked members, its members one level
+		// deeper); unmarked members print bare. Dropping the sections silently changed
+		// every private member into a public one.
+		section := ""
 		for i, nested := range n.Decls {
+			memberVisibility := ""
+			if f.visibility != nil {
+				memberVisibility = f.visibility[nested]
+			}
 			if i > 0 && !(n.Const && n.Module) {
 				f.blankLine()
 			}
+			memberLevel := level + 1
+			if memberVisibility != section {
+				section = memberVisibility
+				if section != "" {
+					f.writeLine(level+1, section+":")
+				}
+			}
+			if section != "" {
+				memberLevel = level + 2
+			}
 			if n.Const && n.Module {
 				if constant, ok := nested.(*ast.ConstDecl); ok {
-					f.writeConstModuleMember(level+1, constant)
+					f.writeConstModuleMember(memberLevel, constant)
 					continue
 				}
 			}
-			f.writeDecl(level+1, nested)
+			f.writeDecl(memberLevel, nested)
 		}
 	case *ast.UsingDecl:
 		// Module paths print with `::`; a selective import keeps its member, an alias its `as`.

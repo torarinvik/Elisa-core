@@ -11,7 +11,7 @@ func FormatFile(file *ast.File) string {
 	if file == nil {
 		return ""
 	}
-	var f formatter
+	f := formatter{visibility: file.DeclVisibility}
 	for i, decl := range file.Decls {
 		if i > 0 {
 			f.blankLine()
@@ -69,6 +69,9 @@ func formatPostfixShorthandCastTarget(typ ast.TypeExpr) (string, bool) {
 
 type formatter struct {
 	builder strings.Builder
+	// visibility is the parsed file's explicit `public`/`private` marks per declaration
+	// (a `public:`/`private:` section or prefix). Nil when formatting a lone declaration.
+	visibility map[ast.Decl]string
 }
 
 func (f *formatter) blankLine() {

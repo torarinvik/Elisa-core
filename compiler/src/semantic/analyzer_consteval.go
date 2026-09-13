@@ -2487,14 +2487,36 @@ func (a *Analyzer) errorf(pos lexer.Pos, format string, args ...interface{}) {
 	if a.suppressDiagnostics {
 		return
 	}
-	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityError, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
+	a.appendDiagnostic(Diagnostic{Pos: pos, Severity: DiagnosticSeverityError, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
 }
 
 func (a *Analyzer) warnf(pos lexer.Pos, format string, args ...interface{}) {
 	if a.suppressDiagnostics {
 		return
 	}
-	a.diagnostics = append(a.diagnostics, Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
+	a.appendDiagnostic(Diagnostic{Pos: pos, Severity: DiagnosticSeverityWarning, Message: fmt.Sprintf(format, formatDiagnosticArgs(args)...)})
+}
+
+// appendDiagnostic records a diagnostic once: a parameter type is resolved when the
+// signature is collected AND when the body is analyzed, so an `unknown type` on it used
+// to print twice at the same span. The same position, severity and text carry no new
+// information the second time.
+func (a *Analyzer) appendDiagnostic(diagnostic Diagnostic) {
+	key := diagnosticIdentity{Pos: diagnostic.Pos, Severity: diagnostic.Severity, Message: diagnostic.Message}
+	if a.reportedDiagnostics == nil {
+		a.reportedDiagnostics = map[diagnosticIdentity]bool{}
+	}
+	if a.reportedDiagnostics[key] {
+		return
+	}
+	a.reportedDiagnostics[key] = true
+	a.diagnostics = append(a.diagnostics, diagnostic)
+}
+
+type diagnosticIdentity struct {
+	Pos      lexer.Pos
+	Severity DiagnosticSeverity
+	Message  string
 }
 
 // warnOncef emits a warning at most once per position+message, for checks that

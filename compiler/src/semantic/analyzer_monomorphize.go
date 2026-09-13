@@ -53,6 +53,11 @@ func (r *Result) SpecializedExprTypes(fn *ast.FuncDecl, typeArgs []Type) map[ast
 	a.exprTypes = saved
 	r.ExprTypes = saved
 	if len(a.diagnostics) > savedDiagnostics {
+		// The speculative pass's diagnostics are discarded; forget them in the
+		// once-only set too, or a real report of the same text would be swallowed later.
+		for _, discarded := range a.diagnostics[savedDiagnostics:] {
+			delete(a.reportedDiagnostics, diagnosticIdentity{Pos: discarded.Pos, Severity: discarded.Severity, Message: discarded.Message})
+		}
 		a.diagnostics = a.diagnostics[:savedDiagnostics]
 	}
 	if len(overlay) == 0 {

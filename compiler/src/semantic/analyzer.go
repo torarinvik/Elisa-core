@@ -246,6 +246,7 @@ type Analyzer struct {
 	symbolFacts           map[*Symbol]OptimizationFacts
 	funcDeclSymbols       map[*ast.FuncDecl]*Symbol
 	declVisibility        map[ast.Decl]string
+	reportedDiagnostics   map[diagnosticIdentity]bool
 	privateTypeNames      map[string]bool
 	castHooksByName       map[string]map[castHookSignature]*Symbol
 	initHooksByName       map[string]map[initHookSignature]*Symbol
