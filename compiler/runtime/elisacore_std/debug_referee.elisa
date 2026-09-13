@@ -78,20 +78,20 @@ const ELISA_TRACE_CAP: usize = 256
 # on language builtins; snprintf+write resolve against libc at final link without
 # pulling in the rest of the runtime. (write(2,...) is portable; the `stderr` global is
 # not a stable cross-platform symbol, e.g. it is __stderrp on macOS.)
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
-extern write(fd: int, buf: void&, count: usize) -> isize can[Console]
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> i32 can[Console.Format]
+extern write(fd: i32, buf: void&, count: usize) -> isize can[Console]
 # Keep the libc declaration canonical across the standard library and the LLVM-C
 # backend.  `getenv` takes a NUL-terminated C string; declaring the same symbol as
 # `u8&` as well created an ambiguous global binding in a self-hosted compiler after
 # include flattening, so gen2 selected the byte-reference overload for every cstr call.
 extern getenv(name: cstr) -> u8&?
-extern signal(sig: int, handler: void&?) -> void&?
+extern signal(sig: i32, handler: void&?) -> void&?
 # `raise` is a reserved keyword in Elisa, so re-raise via kill(getpid(), sig).
-extern getpid() -> int
-extern kill(pid: int, sig: int) -> int
+extern getpid() -> i32
+extern kill(pid: i32, sig: i32) -> i32
 # sigaction with SA_SIGINFO gives the handler the siginfo_t, which carries the faulting
 # address (si_addr) -- so the dump can report WHERE the fault touched memory.
-extern sigaction(sig: int, act: void&, oldact: void&?) -> int
+extern sigaction(sig: i32, act: void&, oldact: void&?) -> i32
 
 # Common signal numbers (consistent across macOS/Linux for these four).
 const ELISA_SIG_ILL: int = 4
@@ -195,7 +195,7 @@ def elisa_trace_count() -> u64:
 # SA_SIGINFO handler: (int sig, siginfo_t *info, void *uctx). Reads si_addr from info,
 # prints the faulting address + signal, dumps the recent trace, then restores the default
 # disposition and re-raises so the original crash still happens.
-def elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void:
+def elisa_trace_fault_handler(sig: i32, info: uintptr, uctx: uintptr) -> void:
     si_addr: mutable uintptr = 0
     if info != 0:
         p: uintptr = info + ELISA_SIGINFO_ADDR_OFFSET_DARWIN.uintptr()

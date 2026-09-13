@@ -705,7 +705,7 @@ func (s *functionState) emitDArrayResizeZeroFillTail(darrayPtr C.LLVMValueRef, d
 
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetValueType := s.g.result.NamedTypes["int"]
+	memsetValueType := s.g.result.NamedTypes["i32"]
 	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, usizeType}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
 	if err != nil {

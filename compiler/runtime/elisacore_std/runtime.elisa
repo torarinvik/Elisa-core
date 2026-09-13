@@ -143,7 +143,7 @@ def rt_puts(value: u8&?) -> int:
 # Console printing
 # ------------------------------------------------------------
 
-const enum FileDescriptor of int:
+const enum FileDescriptor of i32:
     Input = 0
     Output = 1
     Error = 2

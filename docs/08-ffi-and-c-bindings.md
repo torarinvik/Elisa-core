@@ -58,7 +58,7 @@ for that target.
 
 ```elisa
 static if ELISA_TARGET_OS_POSIX:
-    extern pthread_mutex_lock(mutex: void&) -> int can[Sync.Lock]
+    extern pthread_mutex_lock(mutex: void&) -> i32 can[Sync.Lock]
 
 static elif ELISA_TARGET_OS_WINDOWS:
     @callconv(winapi)
@@ -153,7 +153,7 @@ Use `...` at the end of an `extern` parameter list for C varargs such as
 
 ```elisa
 @c_abi(c)
-extern snprintf(buf: mutable u8&?, size: usize, fmt: u8&, ...) -> int can[Console.Format]
+extern snprintf(buf: mutable u8&?, size: usize, fmt: u8&, ...) -> i32 can[Console.Format]
 ```
 
 Arguments after the declared fixed parameters are lowered with the C default
@@ -176,7 +176,7 @@ Use `extern name: Type` for symbols exported as data rather than functions.
 
 ```elisa
 @link_name(errno)
-extern c_errno: int
+extern c_errno: i32
 ```
 
 Extern variables should be rare. Prefer accessor functions when the native API
@@ -558,11 +558,16 @@ native build uses.
 
 ## Type Mapping Guidelines
 
+Elisa `int` is signed and pointer-sized, like `isize`: 64 bits on 64-bit targets
+and 32 bits on wasm32. It is not C `int`, which is 32 bits on the supported ABIs.
+Use `i32` for C `int` arguments, returns, callback parameters, and struct fields;
+use `i64` when an Elisa value must remain 64-bit across targets.
+
 Recommended C mappings:
 
 | C concept | Elisa spelling |
 | --- | --- |
-| `int` | `int` when host ABI-sized, otherwise prefer fixed width |
+| `int` | `i32` on supported 32-bit and 64-bit C ABIs |
 | `int32_t` | `i32` |
 | `uint32_t` | `u32` |
 | `int64_t` | `i64` |

@@ -15,13 +15,18 @@
 # ------------------------------------------------------------
 
 extern fopen(path: u8&, mode: u8&) -> mutable heap void&? can[Blocking.IO, Memory.Allocate]
-extern fclose(stream: heap void&) -> int can[Blocking.IO, Memory.Release]
+extern fclose(stream: heap void&) -> i32 can[Blocking.IO, Memory.Release]
 extern fread(buffer: mutable void&, size: usize, count: usize, stream: void&) -> usize can[Blocking.IO]
 extern fwrite(buffer: void&, size: usize, count: usize, stream: void&) -> usize can[Blocking.IO]
-extern fseek(stream: void&, offset: i64, whence: int) -> int can[Blocking.IO]
-extern ftell(stream: void&) -> i64 can[Blocking.IO]
-extern ferror(stream: void&) -> int
-extern unlink(path: u8&) -> int can[Blocking.IO]
+# C long is 32-bit on Windows and pointer-sized on the supported POSIX ABIs.
+static if ELISA_TARGET_OS_WINDOWS:
+    extern fseek(stream: void&, offset: i32, whence: i32) -> i32 can[Blocking.IO]
+    extern ftell(stream: void&) -> i32 can[Blocking.IO]
+static else:
+    extern fseek(stream: void&, offset: isize, whence: i32) -> i32 can[Blocking.IO]
+    extern ftell(stream: void&) -> isize can[Blocking.IO]
+extern ferror(stream: void&) -> i32
+extern unlink(path: u8&) -> i32 can[Blocking.IO]
 
 const FILEIO_SEEK_SET: int = 0
 const FILEIO_SEEK_END: int = 2

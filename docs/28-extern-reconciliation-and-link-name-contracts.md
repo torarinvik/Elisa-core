@@ -53,14 +53,14 @@ def bridge(value: u32) -> i32:
 Identical duplicate extern declarations coalesce without error:
 
 ```elisa
-extern puts(text: u8&) -> int
-extern puts(text: u8&) -> int
+extern puts(text: u8&) -> i32
+extern puts(text: u8&) -> i32
 ```
 
 Conflicting duplicate extern declarations are rejected:
 
 ```elisa
-extern puts(text: u8&) -> int
+extern puts(text: u8&) -> i32
 extern puts(text: u8&) -> u64
 ```
 

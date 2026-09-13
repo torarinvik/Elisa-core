@@ -735,7 +735,7 @@ Current rules:
 String literals coerce contextually into the common string carrier forms, so call sites and local declarations no longer need explicit casts just to satisfy `u8&`, `cstr`, or `sview`.
 
 ```elisa
-extern puts(text: u8&) -> int
+extern puts(text: u8&) -> i32
 extern take_cstr(text: cstr) -> void
 extern take_view(text: sview) -> void
 

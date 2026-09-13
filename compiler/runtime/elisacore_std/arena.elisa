@@ -131,7 +131,7 @@ struct ArenaMark:
 extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 extern free(ptr: heap void&) can[Memory.Release]
 # Used by the region cache to restore fresh-mmap zeroing when parking a region.
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 # Used by arena_realloc's relocation copy.
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 
@@ -147,9 +147,9 @@ static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
 
     # uintptr-typed to exactly match the declaration the emulator (guest_exec/tls) uses,
     # so the two declarations dedup to one instead of conflicting as "duplicate mmap".
-    extern mmap(addr: uintptr, length: usize, prot: int, flags: int, fd: int, offset: i64) -> uintptr
+    extern mmap(addr: uintptr, length: usize, prot: i32, flags: i32, fd: i32, offset: i64) -> uintptr
 
-    extern munmap(addr: heap void&, length: usize) -> int
+    extern munmap(addr: heap void&, length: usize) -> i32
 
     # MAP_FAILED is the macro ((void*)-1), NOT a libc function. Compute it instead of
     # declaring a (nonexistent) extern function, which would crash when called.
@@ -167,16 +167,16 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
         process: void&,
         address: mutable heap void&?,
         size: usize,
-        alloc_type: int,
-        protect: int
+        alloc_type: u32,
+        protect: u32
     ) -> mutable heap void&?
 
     extern VirtualFreeEx(
         process: void&,
         address: heap void&,
         size: usize,
-        free_type: int
-    ) -> bool
+        free_type: u32
+    ) -> i32
 
     # Commit granularity for the lazy reserve_commit/fixed path: pages are committed 64 KiB at a
     # time (a multiple of the 4 KiB page size and equal to the reservation allocation granularity),
@@ -758,13 +758,13 @@ def free_region(r: heap Region&):
                 assert ret == 0
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
-            ok: bool = VirtualFreeEx(
+            ok: i32 = VirtualFreeEx(
                 GetCurrentProcess(),
                 arena_heap_void_from_region(r),
                 0,
                 MEM_RELEASE
             )
-            assert ok
+            assert ok != 0
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             trusted Unsafe.RawExtern:
@@ -1467,7 +1467,7 @@ extern vsnprintf(
     buffer_size: usize,
     format: u8&,
     args: va_list
-) -> int
+) -> i32
 
 def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable heap u8&:
     can Memory.Allocate, Console.Format, Abort.Panic:

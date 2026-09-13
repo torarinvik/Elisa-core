@@ -159,7 +159,7 @@ Extern declarations and ABI-facing functions accept explicit annotation metadata
 
 ```elisa
 @link_name(native_puts)
-extern puts(text: u8&) -> int
+extern puts(text: u8&) -> i32
 
 @intrinsic(llvm.ctpop.i64)
 extern popcount64(value: u64) -> u64

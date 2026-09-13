@@ -110,21 +110,21 @@ static if ELISA_TARGET_OS_POSIX:
 	@c_opaque(pthread.h, pthread_cond_t)
 	extern PthreadCondT
 
-	extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> int can[Thread.Spawn]
-	extern pthread_join(thread: uintptr, retval: mutable void&?) -> int can[Thread.Join]
-	extern pthread_detach(thread: uintptr) -> int can[Thread.Detach]
-	extern sched_yield() -> int can[Thread.Yield]
-	extern usleep(usec: u32) -> int can[Thread.Sleep]
+	extern pthread_create(thread: mutable uintptr&, attr: void&?, start_routine: void&, arg: void&?) -> i32 can[Thread.Spawn]
+	extern pthread_join(thread: uintptr, retval: mutable void&?) -> i32 can[Thread.Join]
+	extern pthread_detach(thread: uintptr) -> i32 can[Thread.Detach]
+	extern sched_yield() -> i32 can[Thread.Yield]
+	extern usleep(usec: u32) -> i32 can[Thread.Sleep]
 
-	extern pthread_mutex_init(mutex: mutable PthreadMutexT&, attr: void&?) -> int can[Memory.Allocate]
-	extern pthread_mutex_destroy(mutex: mutable PthreadMutexT&) -> int can[Memory.Release]
-	extern pthread_mutex_lock(mutex: void&) -> int can[Sync.Lock]
-	extern pthread_mutex_unlock(mutex: void&) -> int can[Sync.Unlock]
-	extern pthread_cond_init(cond: mutable PthreadCondT&, attr: void&?) -> int can[Memory.Allocate]
-	extern pthread_cond_destroy(cond: mutable PthreadCondT&) -> int can[Memory.Release]
-	extern pthread_cond_wait(cond: void&, mutex: void&) -> int can[Sync.Wait]
-	extern pthread_cond_signal(cond: void&) -> int can[Sync.Notify]
-	extern pthread_cond_broadcast(cond: void&) -> int can[Sync.Notify]
+	extern pthread_mutex_init(mutex: mutable PthreadMutexT&, attr: void&?) -> i32 can[Memory.Allocate]
+	extern pthread_mutex_destroy(mutex: mutable PthreadMutexT&) -> i32 can[Memory.Release]
+	extern pthread_mutex_lock(mutex: void&) -> i32 can[Sync.Lock]
+	extern pthread_mutex_unlock(mutex: void&) -> i32 can[Sync.Unlock]
+	extern pthread_cond_init(cond: mutable PthreadCondT&, attr: void&?) -> i32 can[Memory.Allocate]
+	extern pthread_cond_destroy(cond: mutable PthreadCondT&) -> i32 can[Memory.Release]
+	extern pthread_cond_wait(cond: void&, mutex: void&) -> i32 can[Sync.Wait]
+	extern pthread_cond_signal(cond: void&) -> i32 can[Sync.Notify]
+	extern pthread_cond_broadcast(cond: void&) -> i32 can[Sync.Notify]
 
 	def mutex_init(out: mutable Mutex&) -> void:
 		can Memory.Allocate, Memory.Release:
@@ -194,16 +194,16 @@ static if ELISA_TARGET_OS_POSIX:
 		can Sync.Notify:
 			return pthread_cond_broadcast(cond)
 
-	def ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int:
+	def ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> i32:
 		can Thread.Spawn:
 			return pthread_create(thread, null, entry, arg)
 
-	def ctx_thread_join(thread: uintptr) -> int:
+	def ctx_thread_join(thread: uintptr) -> i32:
 		can Thread.Join:
 			ret: mutable void&? = null
 			return pthread_join(thread, (&ret).cast[mutable void&?])
 
-	def ctx_thread_detach(thread: uintptr) -> int:
+	def ctx_thread_detach(thread: uintptr) -> i32:
 		can Thread.Detach:
 			return pthread_detach(thread)
 
@@ -326,9 +326,9 @@ static elif ELISA_TARGET_OS_WINDOWS:
 # ------------------------------------------------------------
 
 static if ELISA_TARGET_OS_WINDOWS:
-	extern ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> int can[Thread.Spawn]
-	extern ctx_thread_join(thread: uintptr) -> int can[Thread.Join]
-	extern ctx_thread_detach(thread: uintptr) -> int can[Thread.Detach]
+	extern ctx_thread_create(thread: mutable uintptr&, entry: void&, arg: void&?) -> i32 can[Thread.Spawn]
+	extern ctx_thread_join(thread: uintptr) -> i32 can[Thread.Join]
+	extern ctx_thread_detach(thread: uintptr) -> i32 can[Thread.Detach]
 extern elisa_native_callback_ptr(name: u8&) -> void&?
 extern elisa_native_callback_call_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32
 extern elisa_native_callback_call_i32_voidp(name: u8&, arg: void&?, fallback: i32) -> i32
@@ -337,7 +337,7 @@ extern elisa_native_callback_call_isize_voidp(name: u8&, arg: void&?, fallback: 
 extern elisa_native_callback_spawn_join_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> u32 can[Thread.Spawn, Thread.Join]
 extern elisa_native_callback_context_new_u32_voidp(name: u8&, arg: void&?, fallback: u32) -> mutable heap void&? can[Memory.Allocate]
 extern elisa_native_callback_context_entry_u32_voidp() -> void&?
-extern elisa_native_callback_context_start_u32_voidp(ctx: mutable heap void&?, thread: mutable uintptr&) -> int can[Thread.Spawn]
+extern elisa_native_callback_context_start_u32_voidp(ctx: mutable heap void&?, thread: mutable uintptr&) -> i32 can[Thread.Spawn]
 extern elisa_native_callback_context_join_u32_voidp(handle: uintptr, ctx: mutable heap void&?, fallback: u32) -> u32 can[Thread.Join]
 extern elisa_native_callback_context_spawn_join_u32_voidp(ctx: mutable heap void&?, fallback: u32) -> u32 can[Thread.Spawn, Thread.Join]
 extern elisa_native_callback_context_result_u32(ctx: mutable heap void&?, fallback: u32) -> u32
@@ -1148,10 +1148,10 @@ def atomic_fetch_sub_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
 # ------------------------------------------------------------
 
 static if ELISA_TARGET_OS_MACOS:
-	extern sysctlbyname(name: u8&, oldp: void&?, oldlenp: mutable usize&, newp: void&?, newlen: usize) -> int
+	extern sysctlbyname(name: u8&, oldp: void&?, oldlenp: mutable usize&, newp: void&?, newlen: usize) -> i32
 
 	def perf_cores() -> i64:
-		val: mutable int = 0
+		val: mutable i32 = 0
 		sz: mutable usize = 4
 		key_p: u8& = "hw.perflevel0.physicalcpu"
 		val.i64() return if sysctlbyname(key_p, (&val).cast[void&?], &sz, null, 0) == 0 and val > 0
@@ -1162,7 +1162,7 @@ static if ELISA_TARGET_OS_MACOS:
 		return 1
 
 static elif ELISA_TARGET_OS_LINUX:
-	extern sysconf(name: int) -> isize
+	extern sysconf(name: i32) -> isize
 
 	def perf_cores() -> i64:
 		n: isize = sysconf(84)  # _SC_NPROCESSORS_ONLN
@@ -1171,7 +1171,7 @@ static elif ELISA_TARGET_OS_LINUX:
 		return 1
 
 static elif ELISA_TARGET_OS_FREEBSD:
-	extern sysconf(name: int) -> isize
+	extern sysconf(name: i32) -> isize
 
 	def perf_cores() -> i64:
 		n: isize = sysconf(58)  # _SC_NPROCESSORS_ONLN on FreeBSD

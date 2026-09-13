@@ -47,3 +47,55 @@ def kernel() -> usize:
 		t.Fatalf("expected POD-element resize to skip the zero-fill fast path, got:\n%s", output)
 	}
 }
+
+// libc memset takes C int, not pointer-sized Elisa int. A source declaration
+// must agree with the synthesized call used to initialize a grown container.
+func TestGenerateLLVMIRResizeMemsetMatchesCIntDeclaration(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_memset_c_int.elisa", `
+extern memset(dest: mutable void&, value: i32, count: usize) -> mutable void&
+def kernel() -> usize:
+ xs: mutable darray[view[u8]] = []
+ _ = xs.resize(8.usize())
+ return xs.count
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "@memset(ptr") || !strings.Contains(output, "i32 0") {
+		t.Fatalf("missing C-int memset call:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRStringMemcmpMatchesCIntDeclaration(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_memcmp_c_int.elisa", `
+extern memcmp(left: void&, right: void&, count: usize) -> i32
+def kernel(value: sview) -> bool:
+ return value == "long enough for memcmp"
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "call i32 @memcmp(") {
+		t.Fatalf("missing C-int memcmp call:\n%s", output)
+	}
+}
+
+func TestGenerateLLVMIRZeroedMemsetMatchesCIntDeclaration(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_zeroed_memset_c_int.elisa", `
+extern memset(dest: mutable void&, value: i32, count: usize) -> mutable void&
+struct Large:
+ a: i64[32]
+def kernel() -> Large:
+ value: Large = zeroed
+ return value
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(output, "@memset(ptr") || !strings.Contains(output, "i32 0") {
+		t.Fatalf("missing C-int zeroed memset call:\n%s", output)
+	}
+}

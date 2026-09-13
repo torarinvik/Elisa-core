@@ -9,6 +9,7 @@ import (
 )
 
 func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
+	a.lowerProtocolParameters(decls)
 	for _, scoped := range decls {
 		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
 			switch n := scoped.Decl.(type) {

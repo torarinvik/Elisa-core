@@ -68,7 +68,11 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			// The name AS WRITTEN: the internal key flattens every `::` to a `.`, so a
 			// qualified type was quoted back in a spelling the user never typed (and
 			// which no longer parses).
-			a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.SourceSpelling()))
+			if iface, _, ok := a.lookupVisibleStaticInterface(n.Name); ok && iface != nil {
+				a.errorf(n.Pos(), "protocol %q is a constraint, not a concrete value type; use it as a function parameter constraint or use a concrete implementing type", n.SourceSpelling())
+			} else {
+				a.errorf(n.Pos(), "%s", UnknownTypeMessage(n.SourceSpelling()))
+			}
 		}
 		return invalidType
 	case *ast.StateSetTypeExpr:

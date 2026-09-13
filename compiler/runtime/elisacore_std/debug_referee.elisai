@@ -87,19 +87,19 @@ extern debug_trace_events: DebugTraceEvent[DEBUG_TRACE_TAPE_CAP]
 
 const ELISA_TRACE_CAP: usize = 256
 
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> i32 can[Console.Format]
 
-extern write(fd: int, buf: void&, count: usize) -> isize can[Console]
+extern write(fd: i32, buf: void&, count: usize) -> isize can[Console]
 
 extern getenv(name: cstr) -> u8&?
 
-extern signal(sig: int, handler: void&?) -> void&?
+extern signal(sig: i32, handler: void&?) -> void&?
 
-extern getpid() -> int
+extern getpid() -> i32
 
-extern kill(pid: int, sig: int) -> int
+extern kill(pid: i32, sig: i32) -> i32
 
-extern sigaction(sig: int, act: void&, oldact: void&?) -> int
+extern sigaction(sig: i32, act: void&, oldact: void&?) -> i32
 
 const ELISA_SIG_ILL: int = 4
 
@@ -153,7 +153,7 @@ extern elisa_trace_record_value_id(name: cstr, line: u32, var_name: cstr, value:
 
 extern elisa_trace_count() -> u64
 
-extern elisa_trace_fault_handler(sig: int, info: uintptr, uctx: uintptr) -> void
+extern elisa_trace_fault_handler(sig: i32, info: uintptr, uctx: uintptr) -> void
 
 extern elisa_trace_install_one(sig: int) -> void
 

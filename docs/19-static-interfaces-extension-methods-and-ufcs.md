@@ -165,3 +165,9 @@ Current rules:
 - `expr?.(self.fn)` works with the same extension-method and UFCS rules as ordinary receiver calls; the unwrapped optional payload is placed into the argument slot selected by the rewritten call
 - successful type propagation yields an optional result, for example `i64?`
 - safe call and transform chaining only work when the underlying dispatch path is otherwise valid and follows the same conservative receiver-autoref rules as ordinary receiver calls
+
+## Protocol value parameter shorthand
+
+A function parameter `value: Painter` introduces an independently inferred type parameter constrained by `Painter`. It has the same static dispatch as `def draw[P: Painter](value: P)`. `P` names a type; `value` supplies the receiver instance. Reference and mutability qualifiers are preserved.
+
+Each shorthand parameter is independent: `def combine(a: Painter, b: Painter)` permits two implementing types. An explicit shared type parameter, `def combine[P: Painter](a: P, b: P)`, requires the same type. Protocols remain constraints, rather than boxed runtime values, and cannot stand alone as concrete field or return types. Receiverless protocol methods remain valid for type-level operations.

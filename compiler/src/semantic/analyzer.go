@@ -1029,6 +1029,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// docs/75 S2: rewrite zero-annotation grown container ref params into the explicit
 	// `[@r]`/`@r` form BEFORE FuncTypes are built, so callee-side region inference reuses
 	// the proven S1 region-param threading end-to-end.
+	a.lowerProtocolParameters(activeDecls)
 	a.inferRegionParamsForGrownContainerParams(activeDecls)
 	a.warnOnByValueGrownContainerParams(activeDecls)
 	a.collectValueSymbols(activeDecls)

@@ -329,7 +329,7 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetValueType := s.g.result.NamedTypes["int"]
+	memsetValueType := s.g.result.NamedTypes["i32"]
 	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
 	if err != nil {
@@ -504,7 +504,7 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	usizeType := s.g.result.NamedTypes["usize"]
-	intType := s.g.result.NamedTypes["int"]
+	intType := s.g.result.NamedTypes["i32"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{
 		Name:   "memcmp",

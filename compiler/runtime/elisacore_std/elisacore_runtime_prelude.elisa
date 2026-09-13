@@ -12,15 +12,15 @@ include "./stores.elisa"
 # ------------------------------------------------------------
 
 extern strlen(s: u8&) -> usize
-extern strcmp(lhs: u8&, rhs: u8&) -> int
+extern strcmp(lhs: u8&, rhs: u8&) -> i32
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 extern memmove(dest: mutable void&, src: void&, n: usize) -> mutable void&
-extern memcmp(lhs: void&, rhs: void&, n: usize) -> int
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
-extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> int can[Console.Format]
-extern puts(s: u8&) -> int can[Console.Write]
-extern fprintf(stream: void&, fmt: u8&, ...) -> int can[Console]
-extern exit(code: int) can[Abort.Exit]
+extern memcmp(lhs: void&, rhs: void&, n: usize) -> i32
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
+extern snprintf(buf: mutable u8&?, bufsize: usize, fmt: u8&, ...) -> i32 can[Console.Format]
+extern puts(s: u8&) -> i32 can[Console.Write]
+extern fprintf(stream: void&, fmt: u8&, ...) -> i32 can[Console]
+extern exit(code: i32) can[Abort.Exit]
 extern stderr: void&
 
 # ------------------------------------------------------------

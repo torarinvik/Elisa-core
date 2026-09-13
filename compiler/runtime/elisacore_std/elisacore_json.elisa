@@ -81,7 +81,7 @@
 # ------------------------------------------------------------
 
 extern strtod(nptr: u8&, endptr: u8&?) -> f64
-extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> int can[Console.Format]
+extern snprintf(buffer: u8&?, buffer_size: usize, format: static u8&, ...) -> i32 can[Console.Format]
 
 # ------------------------------------------------------------
 # Byte constants (the whole JSON alphabet)

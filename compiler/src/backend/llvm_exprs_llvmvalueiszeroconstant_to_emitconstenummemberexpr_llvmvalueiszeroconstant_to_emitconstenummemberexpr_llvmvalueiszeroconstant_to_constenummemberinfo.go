@@ -171,7 +171,7 @@ func (s *functionState) emitZeroMemset(ptr C.LLVMValueRef, sizeBytes uint64, nam
 	}
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetValueType := s.g.result.NamedTypes["int"]
+	memsetValueType := s.g.result.NamedTypes["i32"]
 	usizeType := s.g.result.NamedTypes["usize"]
 	if voidType == nil || memsetValueType == nil || usizeType == nil {
 		return fmt.Errorf("missing builtin types for memset lowering")
@@ -189,7 +189,7 @@ func (s *functionState) emitZeroMemset(ptr C.LLVMValueRef, sizeBytes uint64, nam
 	if err != nil {
 		return err
 	}
-	intLLVMType, err := s.g.lowerBuiltin("int")
+	intLLVMType, err := s.g.lowerBuiltin("i32")
 	if err != nil {
 		return err
 	}
