@@ -11,6 +11,10 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, valueType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelStringMatchPattern(option, valueType, branchScope, index, armCount)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -32,6 +36,7 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 		return false
 	}
 }
+
 // analyzeMatchRangePattern validates a docs/122 §5.2 range arm (`'a'..<'z'` /
 // `0..=127`): both bounds must be integer/char literals assignable to the scrutinee
 // type, analyzed against it so they lower at the scrutinee's width.
@@ -59,6 +64,10 @@ func (a *Analyzer) analyzeTopLevelIntegerMatchPattern(pattern ast.MatchPattern, 
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, valueType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelIntegerMatchPattern(option, valueType, branchScope, index, armCount)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -95,6 +104,10 @@ func (a *Analyzer) analyzeTopLevelStructMatchPattern(pattern ast.MatchPattern, v
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, valueType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelStructMatchPattern(option, valueType, valueExpr, branchScope, index, armCount)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -132,6 +145,10 @@ func (a *Analyzer) analyzeTopLevelTupleMatchPattern(pattern ast.MatchPattern, va
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, valueType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelTupleMatchPattern(option, valueType, valueExpr, branchScope, index, armCount)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -164,6 +181,10 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, valueType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelSequenceMatchPattern(option, valueType, valueExpr, branchScope, index, armCount)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")

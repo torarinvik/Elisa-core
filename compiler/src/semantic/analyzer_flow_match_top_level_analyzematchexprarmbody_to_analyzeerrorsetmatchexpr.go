@@ -49,6 +49,10 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, enumType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelMatchPattern(option, enumType, valueExpr, branchScope, index, armCount, covered)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -166,6 +170,10 @@ func (a *Analyzer) analyzeTopLevelConstEnumMatchPattern(pattern ast.MatchPattern
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, constEnumType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelConstEnumMatchPattern(option, constEnumType, branchScope, index, armCount, covered)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
@@ -202,6 +210,10 @@ func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern,
 	a.currentScope = scope
 	defer func() { a.currentScope = savedScope }()
 	switch p := pattern.(type) {
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrMatchPattern(p, errorSetType, scope, func(option ast.MatchPattern, branchScope *Scope) bool {
+			return a.analyzeTopLevelErrorSetMatchPattern(option, errorSetType, branchScope, index, armCount, covered)
+		})
 	case *ast.MatchWildcardPattern:
 		if index != armCount-1 {
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")

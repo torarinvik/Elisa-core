@@ -98,9 +98,11 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		if qualified := joinQualifiedName(namespaceOf[fn], fn.Name); qualified != fn.Name {
 			funcByName[qualified] = fn
 		}
-		// Functions that already manage regions explicitly are left alone: a hand-written `[@r]` owns
-		// the threading, and an `Arena&` param self-threads its allocator.
-		if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
+		// Explicit region parameters can compose with an independently inferred struct/container
+		// region, but most such functions need no extra scan. Keep the existing fast path for them
+		// unless a region-less by-ref parameter is visibly grown or forwarded to a region-requiring
+		// callee. An explicit Arena parameter already supplies the ambient allocator.
+		if funcHasArenaParam(fn) || (len(fn.RegionParams) != 0 && !a.needsAdditionalInferredRegion(fn, funcByName, permRoots)) {
 			explicit[fn] = true
 		}
 	}
@@ -150,6 +152,36 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			a.regionParamCalleeParamIndex[fn.Name][i] = true
 		}
 	}
+}
+
+func (a *Analyzer) needsAdditionalInferredRegion(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool) bool {
+	if a == nil || fn == nil || len(fn.Body) == 0 {
+		return false
+	}
+	hasCall := false
+	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
+		_, hasCall = expr.(*ast.CallExpr)
+		return hasCall
+	})
+	for _, param := range fn.Params {
+		if _, ok := regionlessRefContainer(param.Type); ok {
+			if paramContainerIsGrownNeedingRegion(fn.Body, param.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, param.Name) {
+				return true
+			}
+			if hasCall && a.paramForwardedToRegionRequiringCallee(fn.Body, param.Name, funcByName) {
+				return true
+			}
+		}
+		if _, ok := regionlessRefStruct(param.Type); ok {
+			if paramFieldContainerIsGrown(fn.Body, param.Name) {
+				return true
+			}
+			if hasCall && a.paramForwardedToRegionRequiringCallee(fn.Body, param.Name, funcByName) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl) bool {

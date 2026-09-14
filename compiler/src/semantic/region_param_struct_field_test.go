@@ -3,6 +3,8 @@ package semantic
 import (
 	"strings"
 	"testing"
+
+	"elisacore/src/ast"
 )
 
 // docs/91 S4: growing a container that is a FIELD of a region-param struct ref param
@@ -102,6 +104,69 @@ func TestS4Stage1ZeroAnnotationGrowthInferred(t *testing.T) {
 `).Errors()
 	if joined := strings.Join(errs, " | "); joined != "" {
 		t.Fatalf("zero-annotation struct-field growth must be accepted (region inferred), got: %s", joined)
+	}
+}
+
+// A hand-written region parameter for one input must not disable inference for an unrelated
+// struct field that the function grows. The two region lifetimes are independent and both must
+// be threaded through the function boundary.
+func TestExplicitRegionParameterComposesWithInferredStructRegion(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "explicit_plus_inferred_region.elisa", `struct Scratch:
+    values: mutable darray[u8]
+
+def route[@source](source: darray[u8]& @source, scratch: mutable Scratch&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        scratch.values.push(source[0])
+
+def caller[@source, @scratch](source: darray[u8]& @source, scratch: mutable Scratch& @scratch) -> void:
+    can Memory.Allocate, Abort.Panic:
+        route(source, scratch)
+	`)
+	if joined := strings.Join(result.Errors(), " | "); joined != "" {
+		t.Fatalf("explicit and inferred region parameters must compose independently, got: %s", joined)
+	}
+	routeSymbol, ok := result.GlobalScope.Lookup("route")
+	if !ok || routeSymbol == nil {
+		t.Fatal("route declaration was not added to the global scope")
+	}
+	route, ok := routeSymbol.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("route declaration has node type %T", routeSymbol.Node)
+	}
+	if len(route.RegionParams) != 2 || route.RegionParams[0] != "source" || route.RegionParams[1] != "__rg_scratch" {
+		t.Fatalf("expected independent explicit and inferred regions, got %v", route.RegionParams)
+	}
+}
+
+func TestExplicitRegionParameterComposesWithForwardedStructRegion(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "explicit_plus_forwarded_region.elisa", `struct Scratch:
+    values: mutable darray[u8]
+
+def append_into[@owner](scratch: mutable Scratch& @owner, value: u8) -> void:
+    can Memory.Allocate, Abort.Panic:
+        scratch.values.push(value)
+
+def forward[@source](source: darray[u8]& @source, scratch: mutable Scratch&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_into(scratch, source[0])
+
+def caller[@source, @target](source: darray[u8]& @source, scratch: mutable Scratch& @target) -> void:
+    can Memory.Allocate, Abort.Panic:
+        forward(source, scratch)
+`)
+	if joined := strings.Join(result.Errors(), " | "); joined != "" {
+		t.Fatalf("an explicit region must compose with a forwarded inferred struct region, got: %s", joined)
+	}
+	forwardSymbol, ok := result.GlobalScope.Lookup("forward")
+	if !ok || forwardSymbol == nil {
+		t.Fatal("forward declaration was not added to the global scope")
+	}
+	forward, ok := forwardSymbol.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("forward declaration has node type %T", forwardSymbol.Node)
+	}
+	if len(forward.RegionParams) != 2 || forward.RegionParams[0] != "source" || forward.RegionParams[1] != "__rg_scratch" {
+		t.Fatalf("expected explicit and forwarded regions to remain independent, got %v", forward.RegionParams)
 	}
 }
 
