@@ -105,6 +105,37 @@ func TestS4Stage1ZeroAnnotationGrowthInferred(t *testing.T) {
 	}
 }
 
+// An unrelated explicit lifetime must not suppress inference for another mutable struct
+// reference whose container field is grown. The two region parameters describe independent
+// owners: `input` is borrowed from the caller, while `mod.bits` is backed by the local Mod.
+func TestExplicitRegionParamDoesNotSuppressIndependentFieldGrowth(t *testing.T) {
+		source := "struct Mod:\n    bits: mutable darray[i64]\n" + `def fill[@input](input: darray[i64]& @input, mod: mutable Mod&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        mod.bits.push(input.count.i64())
+
+def caller[@input](input: darray[i64]& @input) -> i64:
+    can Memory.Allocate, Abort.Panic:
+        mod: mutable Mod = Mod{bits: []}
+        fill(input, mod)
+        return 0
+`
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "explicit_region_independent_growth.elisa", source).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("an explicit input lifetime must not suppress the independent struct-field growth lifetime, got: %s", errs)
+	}
+
+	unsafeSource := source + `
+def leak[@input](input: darray[i64]& @input, mod: mutable Mod&) -> view[i64]:
+    can Memory.Allocate, Abort.Panic:
+        mod.bits.push(input.count.i64())
+        return mod.bits[0:1]
+`
+	unsafeErrs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "explicit_region_independent_growth_escape.elisa", unsafeSource).Errors(), " | ")
+	if !strings.Contains(unsafeErrs, "region parameter") || strings.Contains(unsafeErrs, "no region to grow into") {
+		t.Fatalf("independent region inference must retain the region-less return escape rejection, got: %s", unsafeErrs)
+	}
+}
+
 // Stage 1 must NOT widen the safe surface: the inferred region param drives the SAME borrow-out
 // escape check as the explicit form, so a region-less view return over the inferred param is still
 // rejected (was a use-after-free; the escape coverage is independent of how the region arrived).

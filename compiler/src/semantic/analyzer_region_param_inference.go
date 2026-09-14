@@ -74,7 +74,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	// be rejected as a dangling write).
 	permRoots := collectProgramLifetimeRoots(decls)
 	funcByName := map[string]*ast.FuncDecl{}
-	explicit := map[*ast.FuncDecl]bool{}
+	arenaManaged := map[*ast.FuncDecl]bool{}
 	for _, fn := range cands {
 		if fn == nil {
 			continue
@@ -98,10 +98,11 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 		if qualified := joinQualifiedName(namespaceOf[fn], fn.Name); qualified != fn.Name {
 			funcByName[qualified] = fn
 		}
-		// Functions that already manage regions explicitly are left alone: a hand-written `[@r]` owns
-		// the threading, and an `Arena&` param self-threads its allocator.
-		if len(fn.RegionParams) != 0 || funcHasArenaParam(fn) {
-			explicit[fn] = true
+		// An Arena& parameter self-threads allocation and remains authoritative. Existing region
+		// parameters, however, describe only the parameters explicitly tied to them; they must not
+		// suppress inference for a separate region-less container/struct reference that is grown.
+		if funcHasArenaParam(fn) {
+			arenaManaged[fn] = true
 		}
 	}
 	// Fixpoint: making one function region-polymorphic turns it into a region-REQUIRING callee, so a
@@ -112,7 +113,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	for {
 		changed := false
 		for _, fn := range cands {
-			if fn == nil || explicit[fn] {
+			if fn == nil || arenaManaged[fn] {
 				continue
 			}
 			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes) {
