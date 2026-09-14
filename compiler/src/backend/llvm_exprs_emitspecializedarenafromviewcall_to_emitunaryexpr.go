@@ -329,7 +329,10 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
-	memsetValueType := s.g.result.NamedTypes["int"]
+	// libc declares memset's byte value as C int, which is i32 on every supported
+	// target. Elisa's `int` is i64, so using it here conflicts with the source-level
+	// extern signature and can make a Stage0 bootstrap fail with two LLVM prototypes.
+	memsetValueType := s.g.result.NamedTypes["i32"]
 	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
 	if err != nil {
