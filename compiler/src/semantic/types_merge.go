@@ -34,6 +34,14 @@ func MergeTypes(a, b Type) Type {
 			}
 		}
 	}
+	// `null` widens to the optional itself; comparing it against the payload
+	// (the rule below) wrongly rejected `match opt: … null / _: opt`.
+	if ao, ok := a.(*OptionalType); ok && IsNullType(b) {
+		return ao
+	}
+	if bo, ok := b.(*OptionalType); ok && IsNullType(a) {
+		return bo
+	}
 	if ao, ok := a.(*OptionalType); ok {
 		if bo, ok := b.(*OptionalType); ok {
 			merged := MergeTypes(ao.Value, bo.Value)

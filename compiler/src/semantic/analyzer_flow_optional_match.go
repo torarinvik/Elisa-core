@@ -119,6 +119,8 @@ func (a *Analyzer) analyzeOptionalMatchExpr(expr *ast.MatchExpr, optionalType *O
 	hasFallthrough := false
 	hasNull := false
 	hasPayloadWildcard := false
+	hasWildcard := false
+	hasPayloadCatchAll := false
 	for i, arm := range expr.Arms {
 		scope := NewScope(a.currentScope)
 		if isNullMatchPattern(arm.Pattern) {
@@ -133,7 +135,11 @@ func (a *Analyzer) analyzeOptionalMatchExpr(expr *ast.MatchExpr, optionalType *O
 				}
 				if arm.Guard == nil {
 					hasPayloadWildcard = true
+					hasWildcard = true
 				}
+			}
+			if _, ok := arm.Pattern.(*ast.MatchBindPattern); ok && arm.Guard == nil {
+				hasPayloadCatchAll = true
 			}
 			a.analyzeNestedMatchPattern(arm.Pattern, optionalType.Value, nil, scope)
 		}
@@ -165,7 +171,12 @@ func (a *Analyzer) analyzeOptionalMatchExpr(expr *ast.MatchExpr, optionalType *O
 		}
 		resultType = merged
 	}
-	if !hasNull || !hasPayloadWildcard {
+	// A value must exist on every path: `_` covers absence too (docs/122 §4), and
+	// null plus an unguarded binder covers both halves. Anything else is a hole.
+	if !hasWildcard && !(hasNull && (hasPayloadWildcard || hasPayloadCatchAll)) {
+		a.errorf(expr.Pos(), "non-exhaustive match expression over %s; add a null arm and a catch-all payload arm, or a final `_`", optionalType)
+	}
+	if !hasWildcard && (!hasNull || !hasPayloadWildcard) {
 		cloneBaseline()
 		if !hasFallthrough {
 			mergedAffine = baselineAffine

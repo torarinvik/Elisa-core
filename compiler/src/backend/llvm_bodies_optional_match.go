@@ -51,8 +51,18 @@ func optionalMatchHasNullArm(arms []ast.MatchArm) bool {
 	return false
 }
 
+// docs/122 §4: an unguarded `_` discharges coverage everywhere, absence included.
+func optionalMatchHasUnguardedWildcard(arms []ast.MatchArm) bool {
+	for _, arm := range arms {
+		if _, ok := arm.Pattern.(*ast.MatchWildcardPattern); ok && arm.Guard == nil {
+			return true
+		}
+	}
+	return false
+}
+
 func optionalMatchExhaustive(arms []ast.MatchArm) bool {
-	return optionalMatchHasNullArm(arms) && optionalMatchHasPayloadWildcard(arms)
+	return optionalMatchHasUnguardedWildcard(arms) || (optionalMatchHasNullArm(arms) && optionalMatchHasPayloadWildcard(arms))
 }
 
 func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *semantic.OptionalType) error {
@@ -82,7 +92,10 @@ func (s *functionState) emitOptionalMatch(stmt *ast.MatchStmt, optionalType *sem
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.next"))
 		}
-		if backendMatchPatternIsNull(arm.Pattern) {
+		if _, wildcard := arm.Pattern.(*ast.MatchWildcardPattern); wildcard {
+			// `_` matches absence too; only its guard may send control onward.
+			C.LLVMBuildBr(s.builder, bodyBB)
+		} else if backendMatchPatternIsNull(arm.Pattern) {
 			absentValue := C.LLVMBuildNot(s.builder, presentValue, cStringFree("match.optional.absent"))
 			C.LLVMBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
 		} else {
@@ -157,7 +170,10 @@ func (s *functionState) emitOptionalMatchExpr(expr *ast.MatchExpr, resultType se
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.optional.expr.next"))
 		}
-		if backendMatchPatternIsNull(arm.Pattern) {
+		if _, wildcard := arm.Pattern.(*ast.MatchWildcardPattern); wildcard {
+			// `_` matches absence too; only its guard may send control onward.
+			C.LLVMBuildBr(s.builder, bodyBB)
+		} else if backendMatchPatternIsNull(arm.Pattern) {
 			absentValue := C.LLVMBuildNot(s.builder, presentValue, cStringFree("match.optional.expr.absent"))
 			C.LLVMBuildCondBr(s.builder, absentValue, bodyBB, nextBB)
 		} else {

@@ -142,6 +142,14 @@ Checked today:
 An **unguarded** `_` wildcard discharges the exhaustiveness obligation everywhere; a
 guarded arm never does (§2.2).
 
+- **Optional scrutinees** — `_` matches absence as well as any payload, so
+  `match opt: b if cond: … / _: …` is total. Without `_`, a match *expression*
+  needs both a `null` arm and an unguarded binder arm:
+  `non-exhaustive match expression over Box?; add a null arm and a catch-all payload arm, or a final `_``.
+  A binder arm's guard runs only on a present payload. `null` and `Box?` arms
+  merge to `Box?`. (Before 2026-09-14 the backend read `_` as payload-only and a
+  null scrutinee fell through to an `undef` result.)
+
 ---
 
 ## 5. Wanted — not yet supported
