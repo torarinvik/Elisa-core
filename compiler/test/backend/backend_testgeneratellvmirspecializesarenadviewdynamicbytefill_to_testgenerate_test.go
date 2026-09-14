@@ -361,7 +361,7 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	if !strings.Contains(eqDiffExtentBody, "call i1 @arena_da_eq_exact") {
 		t.Fatalf("expected eq_diff_extent to keep helper fallback, got:\n%s", eqDiffExtentBody)
 	}
-	if strings.Contains(eqDiffExtentBody, "call i64 @memcmp(ptr noalias") {
+	if strings.Contains(eqDiffExtentBody, "@memcmp(") {
 		t.Fatalf("expected eq_diff_extent to avoid direct memcmp specialization, got:\n%s", eqDiffExtentBody)
 	}
 }
