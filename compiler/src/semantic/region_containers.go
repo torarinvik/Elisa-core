@@ -918,7 +918,9 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
 		return
 	}
-	// Whole-aggregate assignment to a plain local: propagate the source's taint.
+	// Whole-aggregate assignment to a plain local: propagate source taint and
+	// inspect fresh producers too. A struct literal assigned only in one branch
+	// is otherwise opaque after it is bound to the local.
 	if _, isIdent := stripParenExpr(target).(*ast.Ident); !isIdent {
 		return
 	}
@@ -935,7 +937,7 @@ func (a *Analyzer) recordStructInteriorRegionTaint(target, value ast.Expr, value
 	if !typeCarriesRegionStorage(valueType) || containerRegion(valueType) != "" {
 		return
 	}
-	if region := a.structInteriorTaintRegion(value); region != "" {
+	if region := a.valueInteriorRegion(value); region != "" {
 		a.currentStructInteriorRegionTaint[sym] = a.innerRegion(a.currentStructInteriorRegionTaint[sym], region)
 	}
 }

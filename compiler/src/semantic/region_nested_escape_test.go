@@ -165,6 +165,42 @@ def f() -> i64:
 	}
 }
 
+// A branch-only whole-aggregate assignment must preserve the interior region of a
+// fresh struct literal. Otherwise the returned struct's nested darray header loses
+// its only provenance marker at the branch join and silently points into a freed
+// region.
+func TestBranchAssignedFreshAggregateInteriorEscapeRejected(t *testing.T) {
+	bad := analyzeTreeTestSourceWithSemanticErrors(t, "branch_assigned_fresh_aggregate_escape.elisa", `struct BranchBox:
+    values: darray[i64]
+
+def leak_branch_tainted_box(copy_value: bool) -> BranchBox can[Memory.Allocate, Abort.Panic]:
+    region scratch(4096):
+        values: mutable darray[i64] = []
+        values.push(41)
+        box: mutable BranchBox = BranchBox{values: []}
+        if copy_value:
+            box <- BranchBox{values: values}
+        return box
+`)
+	if all := strings.Join(bad.Errors(), "\n"); !strings.Contains(all, `backed by scope-owned region "scratch" escapes via return`) {
+		t.Fatalf("expected branch-assigned struct literal to retain its interior region taint; got: %s", all)
+	}
+
+	good := analyzeTreeTestSourceWithSemanticErrors(t, "unchanged_fresh_aggregate_return.elisa", `struct BranchBox:
+    values: darray[i64]
+
+def return_unchanged_box() -> BranchBox can[Memory.Allocate, Abort.Panic]:
+    region scratch(4096):
+        values: mutable darray[i64] = []
+        values.push(41)
+        box: mutable BranchBox = BranchBox{values: []}
+        return box
+`)
+	if all := strings.Join(good.Errors(), "\n"); all != "" {
+		t.Fatalf("empty fresh aggregate has no interior region handle and must remain accepted; got: %s", all)
+	}
+}
+
 // SOUNDNESS (region-poly taint hole): a region-polymorphic call result is region-less by type but
 // lives in the AMBIENT region. Storing it into an interior field of a region-less struct built inside
 // `region a:`, then copying the struct out past the region's death, launders the dangling interior.
