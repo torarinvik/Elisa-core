@@ -13,7 +13,10 @@ import (
 	"elisacore/src/backend"
 )
 
-const s4NativeRunTimeout = 10 * time.Second
+// Runtime fixtures run alongside the package's parallel native-compile tests; 10s
+// was shorter than scheduler delays on a loaded worker. Keep the watchdog bounded,
+// but allow enough headroom to distinguish a hang from CPU contention.
+const s4NativeRunTimeout = 30 * time.Second
 
 // docs/91 S4 end-to-end: growing a container field of a region-param struct ref param, with the
 // caller's region threaded to the field growth, runs correctly; and the borrow-out use-after-free

@@ -109,7 +109,7 @@ func TestS4Stage1ZeroAnnotationGrowthInferred(t *testing.T) {
 // reference whose container field is grown. The two region parameters describe independent
 // owners: `input` is borrowed from the caller, while `mod.bits` is backed by the local Mod.
 func TestExplicitRegionParamDoesNotSuppressIndependentFieldGrowth(t *testing.T) {
-		source := "struct Mod:\n    bits: mutable darray[i64]\n" + `def fill[@input](input: darray[i64]& @input, mod: mutable Mod&) -> void:
+	source := "struct Mod:\n    bits: mutable darray[i64]\n" + `def fill[@input](input: darray[i64]& @input, mod: mutable Mod&) -> void:
     can Memory.Allocate, Abort.Panic:
         mod.bits.push(input.count.i64())
 
@@ -133,6 +133,47 @@ def leak[@input](input: darray[i64]& @input, mod: mutable Mod&) -> view[i64]:
 	unsafeErrs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "explicit_region_independent_growth_escape.elisa", unsafeSource).Errors(), " | ")
 	if !strings.Contains(unsafeErrs, "region parameter") || strings.Contains(unsafeErrs, "no region to grow into") {
 		t.Fatalf("independent region inference must retain the region-less return escape rejection, got: %s", unsafeErrs)
+	}
+}
+
+// A struct parameter must acquire a region when one of its fields is forwarded to a callee that
+// grows it. This is the indirect form of `param.field.push(..)`: the caller-owned field region
+// still has to cross each function boundary, and a borrow of that field must remain escape-checked.
+func TestStructFieldForwardingToRegionRequiringCallee(t *testing.T) {
+	source := "struct Workspace:\n    nodes: mutable darray[i64]\n    children: mutable darray[i64]\n" + `def append_both(nodes: mutable darray[i64]&, children: mutable darray[i64]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        nodes.push(1)
+        children.push(2)
+
+def append_tied[@r](nodes: mutable darray[i64]& @r, children: mutable darray[i64]& @r) -> void:
+    can Memory.Allocate, Abort.Panic:
+        nodes.push(3)
+        children.push(4)
+
+def forward(workspace: mutable Workspace&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_both(&workspace.nodes, &workspace.children)
+        append_tied(&workspace.nodes, &workspace.children)
+
+def caller() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        workspace: mutable Workspace = Workspace{nodes: [], children: []}
+        forward(workspace)
+        return 0
+`
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "struct_field_forward_region.elisa", source).Errors(), " | ")
+	if errs != "" {
+		t.Fatalf("forwarding struct fields into region-requiring callees must thread the containing struct's region, got: %s", errs)
+	}
+
+	unsafeSource := source + `def leak(workspace: mutable Workspace&) -> view[i64]:
+    can Memory.Allocate, Abort.Panic:
+        append_both(&workspace.nodes, &workspace.children)
+        return workspace.nodes[0:1]
+`
+	unsafeErrs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "struct_field_forward_region_escape.elisa", unsafeSource).Errors(), " | ")
+	if !strings.Contains(unsafeErrs, "region parameter") {
+		t.Fatalf("forwarding must not permit a region-less borrow of the field to escape, got: %s", unsafeErrs)
 	}
 }
 

@@ -13,7 +13,9 @@ import "testing"
 // (read-order-dependent aliasing, or a segfault). This is the stage1 self-hosted parser's
 // parse_one_param shape (function-parameter type annotations read back aliased).
 func TestPackedPayloadStructWrapOutParamSurvivesCallee(t *testing.T) {
-	t.Parallel()
+	// This full native compile/link fixture shares the 10s runtime watchdog with several other
+	// parallel compiler tests. Keep it in the serial phase so unrelated CPU contention cannot turn
+	// the safety regression into a flaky timeout.
 	status, out := s4CompileRun(t, `enum Node layout(handle: u32):
     Nothing
 

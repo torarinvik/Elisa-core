@@ -110,6 +110,10 @@ func (a *Analyzer) analyzeTopLevelMatchPattern(pattern ast.MatchPattern, enumTyp
 			a.analyzeNestedMatchPattern(arg.Pattern, variant.Payload[i], payloadExpr, scope)
 		}
 		return false
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelMatchPattern(option, enumType, valueExpr, alternativeScope, index, armCount, covered)
+		})
 	case *ast.MatchBindPattern:
 		// docs/77 §2 category arm: `Statement:` matches the sub-category's whole leaf range;
 		// `Statement s:` additionally binds the scrutinee at the narrowed type. Gated to
@@ -189,6 +193,10 @@ func (a *Analyzer) analyzeTopLevelConstEnumMatchPattern(pattern ast.MatchPattern
 			covered[p.Variant] = true
 		}
 		return false
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelConstEnumMatchPattern(option, constEnumType, alternativeScope, index, armCount, covered)
+		})
 	case *ast.MatchBindPattern:
 		a.errorf(p.Pos(), "top-level match arm must use %q members or _", constEnumType.Name)
 		return false
@@ -235,6 +243,10 @@ func (a *Analyzer) analyzeTopLevelErrorSetMatchPattern(pattern ast.MatchPattern,
 			a.analyzeNestedMatchPattern(arg.Pattern, payloadTypes[i], nil, scope)
 		}
 		return false
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelErrorSetMatchPattern(option, errorSetType, alternativeScope, index, armCount, covered)
+		})
 	case *ast.MatchBindPattern:
 		a.errorf(p.Pos(), "top-level match arm must use %q tags or _", errorSetType.Name)
 		return false

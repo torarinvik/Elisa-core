@@ -31,6 +31,104 @@ def score(expr: Expr) -> i64:
 	}
 }
 
+func TestAnalyzeTopLevelEnumOrPattern(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_top_level_enum_or_pattern.elisa", `enum Expr:
+    Index
+    IndexN
+    Other
+
+def score(expr: Expr) -> i64:
+    match expr:
+        Expr.Index or Expr.IndexN:
+            return 1
+        Expr.Other:
+            return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("binding-free enum alternatives must be analyzed and cover both variants, got %v", errs)
+	}
+}
+
+func TestAnalyzeTopLevelStringOrPattern(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_top_level_string_or_pattern.elisa", `def classify(value: sview) -> i64:
+    match value:
+        "left" or "right":
+            return 1
+        _:
+            return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("grouped string literals must be accepted by the bootstrap analyzer, got %v", errs)
+	}
+}
+
+func TestAnalyzeTopLevelIntegerOrPattern(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_top_level_integer_or_pattern.elisa", `def classify(value: i64) -> i64:
+    match value:
+        1 or 2:
+            return 1
+        _:
+            return 0
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("grouped integer literals must be accepted by the bootstrap analyzer, got %v", errs)
+	}
+}
+
+func TestAnalyzeTopLevelConstEnumOrPattern(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_top_level_const_enum_or_pattern.elisa", `const enum Mode of u8:
+    Read = 1
+    Write = 2
+
+def classify(value: Mode) -> i64:
+    match value:
+        Mode.Read or Mode.Write:
+            return 1
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("grouped const-enum members must be accepted and cover the enum, got %v", errs)
+	}
+}
+
+func TestTopLevelOrPatternDoesNotLeakAlternativeRefinement(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "or_pattern_refinement_isolated.elisa", `enum Root: pass
+enum Left is Root:
+    Leaf
+enum Right is Root:
+    Leaf
+
+def require_right(value: Right) -> i64:
+    return 1
+
+def use(value: Root) -> i64:
+    match value:
+        Left.Leaf or Right.Leaf:
+            return require_right(value)
+        _:
+            return 0
+`)
+	if errs := strings.Join(result.Errors(), "\n"); !strings.Contains(errs, "expects Right, got Root") {
+		t.Fatalf("one or-pattern alternative must not refine the shared body for every branch, got %v", result.Errors())
+	}
+}
+
+func TestAnalyzeTopLevelOrPatternRejectsBranchDependentBindings(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "ergonomics_top_level_or_pattern_bindings.elisa", `enum Token:
+    Left(value: i64)
+    Right(value: i64)
+
+def get(token: Token) -> i64:
+    match token:
+        Token.Left(value) or Token.Right(value):
+            return value
+        _:
+            return 0
+`)
+	if errs := strings.Join(result.Errors(), "\n"); !strings.Contains(errs, "top-level or-pattern alternatives that bind names are not supported") {
+		t.Fatalf("branch-dependent aliases must fail closed until their merge is modeled, got %v", result.Errors())
+	}
+}
+
 func TestAnalyzeStructFieldDefaultsFillMissingNamedFields(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "ergonomics_struct_field_defaults_named.elisa", `struct Accessors:
     read_name_id: i64? = null

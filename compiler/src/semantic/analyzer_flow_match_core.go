@@ -35,6 +35,112 @@ func matchArmCoverageSink(guard ast.Expr, covered map[string]bool) map[string]bo
 	return map[string]bool{}
 }
 
+// matchPatternHasNamedBindings is used where alternatives are analyzed independently. The
+// bootstrap analyzer currently cannot soundly merge alias/borrow facts from distinct top-level
+// alternatives, so those forms are rejected instead of inheriting facts from only the first
+// branch. Binding-free alternatives can be validated branch by branch without losing state.
+func matchPatternHasNamedBindings(pattern ast.MatchPattern) bool {
+	switch p := pattern.(type) {
+	case *ast.MatchBindPattern:
+		return p != nil && (p.Name != "" && p.Name != "_" || p.Binder != "")
+	case *ast.MatchRestPattern:
+		return p != nil && p.Name != ""
+	case *ast.MatchVariantPattern:
+		if p == nil {
+			return false
+		}
+		if p.As != "" {
+			return true
+		}
+		for _, arg := range p.Args {
+			if matchPatternHasNamedBindings(arg.Pattern) {
+				return true
+			}
+		}
+	case *ast.MatchStructPattern:
+		if p == nil {
+			return false
+		}
+		if p.As != "" {
+			return true
+		}
+		for _, arg := range p.Args {
+			if matchPatternHasNamedBindings(arg.Pattern) {
+				return true
+			}
+		}
+	case *ast.MatchTuplePattern:
+		if p != nil {
+			for _, elem := range p.Elems {
+				if matchPatternHasNamedBindings(elem) {
+					return true
+				}
+			}
+		}
+	case *ast.MatchListPattern:
+		if p != nil {
+			for _, elem := range p.Elems {
+				if matchPatternHasNamedBindings(elem) {
+					return true
+				}
+			}
+		}
+	case *ast.MatchOrPattern:
+		if p != nil {
+			for _, option := range p.Options {
+				if matchPatternHasNamedBindings(option) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// analyzeTopLevelOrPattern runs the ordinary top-level validator for every alternative so type,
+// constructor, and coverage checks are identical to writing separate arms. Alternatives get
+// isolated scopes because a refinement or packed-payload view from one branch is not valid for the
+// shared body on every other branch. Binding patterns stay rejected until their branch merge is
+// modeled explicitly.
+func (a *Analyzer) analyzeTopLevelOrPattern(pattern *ast.MatchOrPattern, analyze func(ast.MatchPattern, *Scope) bool) bool {
+	if pattern == nil {
+		return false
+	}
+	if len(pattern.Options) == 0 {
+		a.errorf(pattern.Pos(), "or-pattern requires at least one alternative")
+		return false
+	}
+	for _, option := range pattern.Options {
+		if matchPatternHasNamedBindings(option) {
+			a.errorf(pattern.Pos(), "top-level or-pattern alternatives that bind names are not supported")
+			return false
+		}
+	}
+	wildcard := false
+	baseScope := a.currentScope
+	packedViews := a.currentPackedVariantViews
+	for _, option := range pattern.Options {
+		if option == nil {
+			a.errorf(pattern.Pos(), "or-pattern alternative is missing")
+			continue
+		}
+		// Each alternative is only a possible reason for entering the shared body. Analyze it in
+		// an isolated child scope and discard branch-only refinements afterwards; otherwise the
+		// last option could lend its enum narrowing or packed-payload view to executions that
+		// matched an earlier option. Named bindings are rejected above until their branch merge is
+		// modeled explicitly.
+		analysisScope := NewScope(baseScope)
+		a.currentPackedVariantViews = packedViews
+		a.currentPackedVariantViews = a.clonePackedVariantViewBindings()
+		isWildcard := analyze(option, analysisScope)
+		a.currentPackedVariantViews = packedViews
+		if isWildcard {
+			wildcard = true
+		}
+	}
+	return wildcard
+}
+
 func (a *Analyzer) analyzeMatchStmt(stmt *ast.MatchStmt) {
 	valueType := a.analyzeExpr(stmt.Value)
 	enumType, _, ok := resolveMatchableEnumType(valueType)

@@ -419,6 +419,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryInsertCall(expr *ast.CallExpr) (Type, 
 		a.exprTypes[expr] = invalidType
 		return invalidType, true
 	}
+	a.checkContainerGrowthStoreEscape(fieldExpr.Object, "dict entry insert")
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry insert requires an entry created from a mutable dict receiver")
 	}
@@ -467,6 +468,7 @@ func (a *Analyzer) analyzeBuiltinDictRegionMutationCall(expr *ast.CallExpr) (Typ
 		a.exprTypes[expr] = invalidType
 		return invalidType, true
 	}
+	a.checkContainerGrowthStoreEscape(fieldExpr.Object, "dict "+method)
 	// Frictionless growth is allowed when the dict's region is available (`@r` typed region)
 	// OR there is an ambient `in <arena>:` / region scope to allocate from. The latter is the
 	// plain `dict = zeroed` inside a region scope — the direct parallel to darray push, which
@@ -544,6 +546,7 @@ func (a *Analyzer) analyzeBuiltinDictEntryGetOrInsertCall(expr *ast.CallExpr) (T
 		a.exprTypes[expr] = invalidType
 		return invalidType, true
 	}
+	a.checkContainerGrowthStoreEscape(fieldExpr.Object, "dict entry get_or_insert")
 	if !entryType.Mutable {
 		a.errorf(fieldExpr.Object.Pos(), "dict entry get_or_insert requires an entry created from a mutable dict receiver")
 	}

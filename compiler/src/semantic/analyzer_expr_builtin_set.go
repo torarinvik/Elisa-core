@@ -155,6 +155,7 @@ func (a *Analyzer) analyzeBuiltinSetRegionMutationCall(expr *ast.CallExpr) (Type
 		a.exprTypes[expr] = invalidType
 		return invalidType, true
 	}
+	a.checkContainerGrowthStoreEscape(fieldExpr.Object, "set "+method)
 	if !a.regionAvailableForContainer(setType) && a.currentAllocExpr == nil {
 		return nil, false
 	}

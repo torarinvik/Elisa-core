@@ -19,6 +19,9 @@ func (a *Analyzer) checkDarrayGrowthRegionEscape(receiver ast.Expr, op string) {
 	if a == nil || receiver == nil || a.staticContextDepth != 0 {
 		return
 	}
+	if a.checkContainerGrowthStoreEscape(receiver, "darray "+op) {
+		return
+	}
 	arenaName, ok := a.ambientArenaLocalValueName()
 	if !ok {
 		return
@@ -36,6 +39,92 @@ func (a *Analyzer) checkDarrayGrowthRegionEscape(receiver ast.Expr, op string) {
 			a.localArenaEscapeLocals = map[*Symbol]string{}
 		}
 		a.localArenaEscapeLocals[sym] = arenaName
+	}
+}
+
+// checkContainerGrowthStoreEscape rejects a growth that writes a longer-lived container's
+// replacement backing into a shorter or unrelated active allocation region. In particular,
+// region-polymorphic parameters must not be made to appear safe merely because an `in scratch:`
+// scope supplies some allocator: unless that allocator is the container's own region or has
+// program lifetime, the container would retain a pointer into storage that can disappear first.
+func (a *Analyzer) checkContainerGrowthStoreEscape(receiver ast.Expr, operation string) bool {
+	if a == nil || receiver == nil || a.currentAllocExpr == nil {
+		return false
+	}
+	storeRegion := storeRegionRootName(a.currentAllocExpr)
+	if storeRegion == "" || isSynthesizedAutoRegion(storeRegion) || !a.activeStoreIsLocalRegion(storeRegion) {
+		return false
+	}
+	receiverType := a.exprTypes[receiver]
+	if receiverType == nil {
+		receiverType = a.analyzeExpr(receiver)
+	}
+	containerRegion := containerOrEntryRegion(receiverType)
+	if storeRegion == containerRegion || (!a.containerReceiverStorageOutlivesFunction(receiver) && !a.regionOutlives(containerRegion, storeRegion)) {
+		return false
+	}
+	a.errorf(receiver.Pos(), "%s allocates into function-scoped region %q while growing non-local storage in region %q; this would leave the container pointing at freed memory", operation, storeRegion, containerRegion)
+	return true
+}
+
+func (a *Analyzer) activeStoreIsLocalRegion(name string) bool {
+	if a == nil || name == "" || a.currentScope == nil || a.lookupRegionParam(name) {
+		return false
+	}
+	sym, ok := a.currentScope.Lookup(name)
+	return ok && sym != nil && sym.Kind == SymbolRegion
+}
+
+func (a *Analyzer) containerReceiverStorageOutlivesFunction(expr ast.Expr) bool {
+	if a == nil || expr == nil {
+		return false
+	}
+	if _, global := a.globalStorageRoot(expr); global {
+		return true
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.containerReceiverStorageOutlivesFunction(n.Inner)
+	case *ast.AddrOfExpr:
+		return a.containerReceiverStorageOutlivesFunction(n.Operand)
+	case *ast.CastExpr:
+		return a.containerReceiverStorageOutlivesFunction(n.Operand)
+	case *ast.FieldExpr:
+		if a.exprObjectIsReference(n.Object) {
+			return true
+		}
+		return a.containerReceiverStorageOutlivesFunction(n.Object)
+	case *ast.IndexExpr:
+		if a.exprObjectIsReference(n.Object) {
+			return true
+		}
+		return a.containerReceiverStorageOutlivesFunction(n.Object)
+	case *ast.CallExpr:
+		if member, ok := n.Func.(*ast.FieldExpr); ok && member != nil {
+			// Interior views such as `dict.entry(key)` keep pointing into their receiver's
+			// backing. Follow that owner through the call instead of treating the temporary
+			// entry expression as function-local storage.
+			return a.containerReceiverStorageOutlivesFunction(member.Object)
+		}
+		return false
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return false
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym == nil {
+			return false
+		}
+		if sym.Kind == SymbolGlobal || sym.Kind == SymbolExternVar {
+			return true
+		}
+		if sym.Kind != SymbolLocal && sym.Kind != SymbolParam {
+			return false
+		}
+		_, isReference := sym.Type.(*RefType)
+		return isReference
+	default:
+		return false
 	}
 }
 

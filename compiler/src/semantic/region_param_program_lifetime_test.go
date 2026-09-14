@@ -57,7 +57,38 @@ def grow(out: mutable darray[i64]&, v: i64) -> void:
 def use(h: mutable Holder&) -> void:
     grow(&h.items, 7)
 `).Errors(), " | ")
-	if errs == "" {
-		t.Fatalf("growing a caller's container into a function-scoped arena is a dangling write and must still be rejected")
+	if !strings.Contains(errs, `allocates into function-scoped region "scratch"`) {
+		t.Fatalf("growing a caller's container in a function-scoped region must be rejected at the allocation site, got: %s", errs)
+	}
+}
+
+// An explicit nested store is shorter-lived even when the container itself is a local in an
+// enclosing region. This covers both a direct darray receiver and DictEntry returned from a
+// method call (whose backing region, not AST lvalue shape, determines the lifetime).
+func TestNestedStoreGrowthIntoOuterRegionContainerRejected(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "nested_store_outer_container.elisa", `global mutable shared_entries: dict[cstr, i64] = zeroed
+
+def build() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        region outer(8192):
+            items: mutable darray[i64] @outer = []
+            entries: mutable dict[cstr, i64] @outer = zeroed
+            region inner(4096):
+                in inner:
+                    items.push(1)
+                    entries.entry("key").insert(2)
+                    shared_entries.entry("global").insert(3)
+            return items[0]
+
+def build_regionless_local() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        items: mutable darray[i64] = []
+        region inner(4096):
+            in inner:
+                items.push(4)
+        return items[0]
+`).Errors(), "\n")
+	if strings.Count(errs, `function-scoped region "inner"`) < 4 {
+		t.Fatalf("growth in an inner region must not retarget outer, regionless-local, or global container backing (including DictEntry call receivers), got: %s", errs)
 	}
 }

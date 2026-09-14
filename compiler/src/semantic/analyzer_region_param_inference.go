@@ -7,6 +7,16 @@ import (
 	"elisacore/src/ast"
 )
 
+type regionForwardTarget struct {
+	callee *ast.FuncDecl
+	argPos int
+}
+
+type regionParamForwarding struct {
+	direct map[string][]regionForwardTarget
+	fields map[string][]regionForwardTarget
+}
+
 // containerGrowthMethods are the by-reference container operations that ALLOCATE into the
 // container's backing region. A call to one of these on a parameter is what forces that
 // parameter to carry a region: the push site needs an ambient arena, and across a function
@@ -105,6 +115,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			arenaManaged[fn] = true
 		}
 	}
+	forwardingByFunc := collectRegionParamForwarding(cands, funcByName)
 	// Fixpoint: making one function region-polymorphic turns it into a region-REQUIRING callee, so a
 	// caller that merely FORWARDS a container/struct ref param to it must itself become region-poly to
 	// thread the region through. Iterate until no function gains a new region param. Each per-function
@@ -116,7 +127,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			if fn == nil || arenaManaged[fn] {
 				continue
 			}
-			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes) {
+			if a.inferRegionParamsForGrownContainerParamsIn(fn, funcByName, permRoots, funcScopes, forwardingByFunc[fn]) {
 				changed = true
 			}
 		}
@@ -153,7 +164,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 	}
 }
 
-func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl) bool {
+func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, funcByName map[string]*ast.FuncDecl, permRoots map[string]bool, funcScopes map[*ast.FuncDecl]scopedDecl, forwarding regionParamForwarding) bool {
 	if fn == nil || len(fn.Body) == 0 {
 		return false
 	}
@@ -182,7 +193,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// A grown / literal-reassigned container ref param, OR one merely FORWARDED to a callee that
 			// requires a region there (so the region must thread through this function too).
 			grownWithRegionValue := a.containerParamGrownWithRegionValue(fn, p.Name, funcByName, funcScopes)
-			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) || grownWithRegionValue {
+			if paramContainerIsGrownNeedingRegion(fn.Body, p.Name, permRoots) || paramContainerReassignedFromLiteral(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) || grownWithRegionValue {
 				stamp = cstamp
 				if grownWithRegionValue && ambientGrownParam == "" && containerParamCount == 1 {
 					ambientGrownParam = p.Name
@@ -195,7 +206,7 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// field-region propagation pushes it onto the resolved field container, and the same
 			// return-escape checks that guard the explicit `[@r]` form cover every borrow-out vector
 			// regardless of how the region param was introduced — no new lifetime power.
-			if paramFieldContainerIsGrown(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+			if paramFieldContainerIsGrown(fn.Body, p.Name) || a.forwardTargetsRequireRegion(forwarding.fields[p.Name]) || a.forwardTargetsRequireRegion(forwarding.direct[p.Name]) {
 				stamp = sstamp
 			}
 		}
@@ -271,77 +282,136 @@ func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *
 	return a.typeIsRegionValued(resolved)
 }
 
-// paramForwardedToRegionRequiringCallee reports whether the body passes the named parameter (as a bare
-// identifier, `&param`, or a reborrow cast) as an argument to a resolved direct free-function/UFCS call
-// whose parameter at that position REQUIRES a region (its type carries one of the callee's region
-// params). Such a forward makes this function region-polymorphic over the param even though it never
-// grows it itself — the callee's region must be threaded in. Conservative: an unresolved/indirect
-// callee, or a non-region-requiring position, simply doesn't trigger (a false negative re-surfaces
-// as the existing "cannot infer region parameter" error, never an unsound accept).
-//
-// IMPORTANT: a PascalCase callee `Name(args)` parses as an *ast.StructLitExpr (constructor-or-call
-// ambiguity) at this pre-pass — name resolution only reclassifies it to a call later. So a free call
-// to a region-requiring function with an uppercase name (the bulk of the loader's call graph) is a
-// StructLitExpr here, not a CallExpr; both forms are handled below.
-func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
-	found := false
-	// checkCall tests whether passing `name` at some position of a call to `calleeName(args)` lands in a
-	// region-requiring callee parameter.
-	checkCall := func(calleeName string, args []ast.Expr) bool {
-		callee := funcByName[calleeName]
-		if callee == nil {
-			return false
+// collectRegionParamForwarding summarizes syntactic parameter-to-call forwarding once per
+// function. The inference fixpoint can revisit every function multiple times as callees gain
+// inferred region parameters, so reflect-walking the body in each pass made region-heavy inputs
+// scale with both AST size and fixpoint iterations.
+func collectRegionParamForwarding(cands []*ast.FuncDecl, funcByName map[string]*ast.FuncDecl) map[*ast.FuncDecl]regionParamForwarding {
+	byFunc := make(map[*ast.FuncDecl]regionParamForwarding, len(cands))
+	for _, fn := range cands {
+		if fn == nil || len(fn.Body) == 0 {
+			continue
 		}
-		params := a.expandedFuncDeclParams(callee)
-		rps := map[string]bool{}
-		for _, rp := range callee.RegionParams {
-			rps[rp] = true
+		forwarding := regionParamForwarding{
+			direct: map[string][]regionForwardTarget{},
+			fields: map[string][]regionForwardTarget{},
 		}
-		if len(rps) == 0 {
-			return false
-		}
-		for argPos, arg := range args {
-			if forwardsParamIdent(arg, name) && argPos < len(params) && typeExprCarriesRegionParam(params[argPos].Type, rps) {
-				return true
-			}
-		}
-		return false
-	}
-	var rec func(v reflect.Value)
-	rec = func(v reflect.Value) {
-		if found || !v.IsValid() || !v.CanInterface() {
-			return
-		}
-		switch v.Kind() {
-		case reflect.Pointer:
-			if v.IsNil() {
+		var rec func(reflect.Value)
+		rec = func(v reflect.Value) {
+			if !v.IsValid() || !v.CanInterface() {
 				return
 			}
-			if expr, ok := v.Interface().(ast.Expr); ok {
-				calleeName, args, isCall := ast.PrepassCallShape(expr)
-				if isCall && checkCall(calleeName, args) {
-					found = true
+			switch v.Kind() {
+			case reflect.Pointer:
+				if v.IsNil() {
 					return
 				}
-			}
-			rec(v.Elem())
-		case reflect.Interface:
-			if v.IsNil() {
-				return
-			}
-			rec(v.Elem())
-		case reflect.Struct:
-			for i := 0; i < v.NumField(); i++ {
-				rec(v.Field(i))
-			}
-		case reflect.Slice, reflect.Array:
-			for i := 0; i < v.Len(); i++ {
-				rec(v.Index(i))
+				if expr, ok := v.Interface().(ast.Expr); ok {
+					calleeName, args, isCall := ast.PrepassCallShape(expr)
+					callee := funcByName[calleeName]
+					if isCall && callee != nil {
+						for argPos, arg := range args {
+							name, isField, ok := regionForwardedParamPath(arg)
+							if !ok {
+								continue
+							}
+							target := regionForwardTarget{callee: callee, argPos: argPos}
+							if isField {
+								forwarding.fields[name] = append(forwarding.fields[name], target)
+							} else {
+								forwarding.direct[name] = append(forwarding.direct[name], target)
+							}
+						}
+					}
+				}
+				rec(v.Elem())
+			case reflect.Interface:
+				if !v.IsNil() {
+					rec(v.Elem())
+				}
+			case reflect.Struct:
+				for i := 0; i < v.NumField(); i++ {
+					rec(v.Field(i))
+				}
+			case reflect.Slice, reflect.Array:
+				for i := 0; i < v.Len(); i++ {
+					rec(v.Index(i))
+				}
 			}
 		}
+		rec(reflect.ValueOf(fn.Body))
+		byFunc[fn] = forwarding
 	}
-	rec(reflect.ValueOf(stmts))
-	return found
+	return byFunc
+}
+
+// regionForwardedParamPath recognizes either a bare parameter forwarded through address-of/casts,
+// or a field/index path rooted at one. A field path is kept separate so only struct parameters use
+// field forwarding to infer their enclosing reference region.
+func regionForwardedParamPath(arg ast.Expr) (name string, isField bool, ok bool) {
+	for {
+		switch e := unwrapParenForRegionPoly(arg).(type) {
+		case *ast.AddrOfExpr:
+			if e == nil {
+				return "", false, false
+			}
+			arg = e.Operand
+		case *ast.CastExpr:
+			if e == nil {
+				return "", false, false
+			}
+			arg = e.Operand
+		default:
+			goto inspectPath
+		}
+	}
+
+inspectPath:
+	current := unwrapParenForRegionPoly(arg)
+	for current != nil {
+		switch e := current.(type) {
+		case *ast.FieldExpr:
+			if e == nil {
+				return "", false, false
+			}
+			isField = true
+			current = unwrapParenForRegionPoly(e.Object)
+		case *ast.IndexExpr:
+			if e == nil {
+				return "", false, false
+			}
+			current = unwrapParenForRegionPoly(e.Object)
+		case *ast.Ident:
+			if e == nil || e.Name == "" {
+				return "", false, false
+			}
+			return e.Name, isField, true
+		default:
+			return "", false, false
+		}
+	}
+	return "", false, false
+}
+
+func (a *Analyzer) forwardTargetsRequireRegion(targets []regionForwardTarget) bool {
+	for _, target := range targets {
+		callee := target.callee
+		if callee == nil || target.argPos < 0 {
+			continue
+		}
+		params := a.expandedFuncDeclParams(callee)
+		if target.argPos >= len(params) {
+			continue
+		}
+		regionParams := make(map[string]bool, len(callee.RegionParams))
+		for _, rp := range callee.RegionParams {
+			regionParams[rp] = true
+		}
+		if len(regionParams) != 0 && typeExprCarriesRegionParam(params[target.argPos].Type, regionParams) {
+			return true
+		}
+	}
+	return false
 }
 
 // forwardsParamIdent reports whether an argument expression passes the parameter `name` through: a bare

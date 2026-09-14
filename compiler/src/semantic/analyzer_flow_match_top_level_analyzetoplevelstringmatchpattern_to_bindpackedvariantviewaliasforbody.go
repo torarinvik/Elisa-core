@@ -16,6 +16,10 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
 		}
 		return true
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelStringMatchPattern(option, valueType, alternativeScope, index, armCount)
+		})
 	case *ast.MatchStringLiteralPattern:
 		if !isStringMatchableType(valueType) {
 			a.errorf(p.Pos(), "match arm expects a string value, got %s", valueType)
@@ -32,6 +36,7 @@ func (a *Analyzer) analyzeTopLevelStringMatchPattern(pattern ast.MatchPattern, v
 		return false
 	}
 }
+
 // analyzeMatchRangePattern validates a docs/122 §5.2 range arm (`'a'..<'z'` /
 // `0..=127`): both bounds must be integer/char literals assignable to the scrutinee
 // type, analyzed against it so they lower at the scrutinee's width.
@@ -64,6 +69,10 @@ func (a *Analyzer) analyzeTopLevelIntegerMatchPattern(pattern ast.MatchPattern, 
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
 		}
 		return true
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelIntegerMatchPattern(option, valueType, alternativeScope, index, armCount)
+		})
 	case *ast.MatchLiteralPattern:
 		armType := a.analyzeValueExpr(p.Value, valueType)
 		if !IsIntegralType(StripAggregateStateType(armType)) {
@@ -100,6 +109,10 @@ func (a *Analyzer) analyzeTopLevelStructMatchPattern(pattern ast.MatchPattern, v
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
 		}
 		return true
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelStructMatchPattern(option, valueType, valueExpr, alternativeScope, index, armCount)
+		})
 	case *ast.MatchStructPattern:
 		fields, orderedArgs, ok := a.resolveMatchStructPattern(p, valueType)
 		if !ok {
@@ -137,6 +150,10 @@ func (a *Analyzer) analyzeTopLevelTupleMatchPattern(pattern ast.MatchPattern, va
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
 		}
 		return true
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelTupleMatchPattern(option, valueType, valueExpr, alternativeScope, index, armCount)
+		})
 	case *ast.MatchTuplePattern:
 		fields, ok := a.resolveMatchTuplePattern(p, valueType)
 		if !ok {
@@ -169,6 +186,10 @@ func (a *Analyzer) analyzeTopLevelSequenceMatchPattern(pattern ast.MatchPattern,
 			a.errorf(p.Pos(), "wildcard match arm must be the final arm")
 		}
 		return true
+	case *ast.MatchOrPattern:
+		return a.analyzeTopLevelOrPattern(p, func(option ast.MatchPattern, alternativeScope *Scope) bool {
+			return a.analyzeTopLevelSequenceMatchPattern(option, valueType, valueExpr, alternativeScope, index, armCount)
+		})
 	case *ast.MatchListPattern:
 		elemType, ok := SequenceMatchElementType(valueType)
 		if !ok {
