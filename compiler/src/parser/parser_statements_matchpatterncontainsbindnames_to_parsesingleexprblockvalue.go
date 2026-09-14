@@ -708,6 +708,9 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		p.expectNewlineAfterValueExpr(value)
 		// docs/120 §6 single-place: a branchy RHS whose every leaf threads the target
 		// (a mutating call rooted at it) or yields it unchanged erases to a statement-if.
+		if stmt, handled := desugarStateThreadBlock(expr, value); handled {
+			return p.takeStmtGuard(stmt)
+		}
 		if stmt, handled := p.desugarSingleThreadAssign(expr, value); handled {
 			return p.takeStmtGuard(stmt)
 		}
@@ -853,5 +856,8 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 		}
 	}
 	p.expectNewline()
+	if ident, direct := place.(*ast.Ident); direct && typeName == "" && p.exprBlockDepth > 0 {
+		return &ast.ExprStmt{Position: pos, Expr: &ast.ExprBlock{Position: pos, Stmts: body, Value: place, Captures: []string{ident.Name}}}
+	}
 	return &ast.IfStmt{Position: pos, Cond: &ast.BoolLit{Position: pos, Value: true}, Then: body}
 }
