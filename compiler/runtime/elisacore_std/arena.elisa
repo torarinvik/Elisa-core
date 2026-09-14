@@ -131,7 +131,7 @@ struct ArenaMark:
 extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 extern free(ptr: heap void&) can[Memory.Release]
 # Used by the region cache to restore fresh-mmap zeroing when parking a region.
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 # Used by arena_realloc's relocation copy.
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 

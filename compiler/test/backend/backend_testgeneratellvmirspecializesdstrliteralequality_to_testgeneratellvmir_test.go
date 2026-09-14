@@ -35,7 +35,7 @@ def direct_empty_literal(text: cstr[row]) -> bool:
 		if body == "" {
 			t.Fatalf("expected to find %s body, got:\n%s", name, output)
 		}
-		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("expected %s to contain %q, got:\n%s", name, want, body)
 			}
@@ -52,7 +52,7 @@ def direct_empty_literal(text: cstr[row]) -> bool:
 	if !strings.Contains(emptyBody, "call i64 @ctx_strlen(ptr") {
 		t.Fatalf("expected direct_empty_literal to contain ctx_strlen length check, got:\n%s", emptyBody)
 	}
-	for _, bad := range []string{"call i64 @ctx_streq", "call i64 @memcmp("} {
+	for _, bad := range []string{"call i64 @ctx_streq", "call i32 @memcmp("} {
 		if strings.Contains(emptyBody, bad) {
 			t.Fatalf("expected direct_empty_literal to avoid %q, got:\n%s", bad, emptyBody)
 		}
@@ -79,7 +79,7 @@ def direct_slice_literal(text: cstr[row]) -> bool:
 		if body == "" {
 			t.Fatalf("expected to find %s body, got:\n%s", name, output)
 		}
-		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+		for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 			if !strings.Contains(body, want) {
 				t.Fatalf("expected %s to contain %q, got:\n%s", name, want, body)
 			}
@@ -113,7 +113,7 @@ def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) ->
 	if sliceEqConstBody == "" {
 		t.Fatalf("expected to find slice_eq_const body, got:\n%s", output)
 	}
-	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 		if !strings.Contains(sliceEqConstBody, want) {
 			t.Fatalf("expected slice_eq_const to contain %q, got:\n%s", want, sliceEqConstBody)
 		}
@@ -165,7 +165,7 @@ def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cs
 	if slicesEqConstBody == "" {
 		t.Fatalf("expected to find slices_eq_const body, got:\n%s", output)
 	}
-	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 		if !strings.Contains(slicesEqConstBody, want) {
 			t.Fatalf("expected slices_eq_const to contain %q, got:\n%s", want, slicesEqConstBody)
 		}
@@ -246,8 +246,8 @@ def same_long(view: StringView) -> bool:
 	checks := []string{
 		"%StringView = type { ptr, i64 }",
 		"define i1 @same_long(%StringView",
-		"declare i64 @memcmp(ptr, ptr, i64)",
-		"call i64 @memcmp(ptr",
+		"declare i32 @memcmp(ptr, ptr, i64)",
+		"call i32 @memcmp(ptr",
 		"zext i1",
 	}
 	for _, check := range checks {

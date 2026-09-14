@@ -4,7 +4,7 @@
 
 include "./deque.elisa"
 
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 
 # Keep tiny AST/parser lists cheap. The arena allocator can reclaim non-tail
 # backing allocations, but avoiding oversized seed buffers still reduces cache

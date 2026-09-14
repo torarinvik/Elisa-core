@@ -56,7 +56,7 @@ def grow(out: mutable darray[i64]&, v: i64) -> void:
             out.push(v)
 def use(h: mutable Holder&) -> void:
     grow(&h.items, 7)
-`).Errors(), " | ")
+	`).Errors(), " | ")
 	if errs == "" {
 		t.Fatalf("growing a caller's container into a function-scoped arena is a dangling write and must still be rejected")
 	}

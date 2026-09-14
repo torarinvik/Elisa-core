@@ -453,7 +453,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	}
 
 	checks := []string{
-		"declare i64 @memcmp(ptr, ptr, i64)",
+		"declare i32 @memcmp(ptr, ptr, i64)",
 		"declare i64 @ctx_strlen(ptr)",
 	}
 	for _, check := range checks {
@@ -466,7 +466,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	if sameShapeBody == "" {
 		t.Fatalf("expected to find same_shape_text body, got:\n%s", output)
 	}
-	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 		if !strings.Contains(sameShapeBody, want) {
 			t.Fatalf("expected same_shape_text to contain %q, got:\n%s", want, sameShapeBody)
 		}
@@ -479,7 +479,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	if sameBoundsBody == "" {
 		t.Fatalf("expected to find same_bounds_view body, got:\n%s", output)
 	}
-	if !strings.Contains(sameBoundsBody, "call i64 @memcmp(ptr") {
+	if !strings.Contains(sameBoundsBody, "call i32 @memcmp(ptr") {
 		t.Fatalf("expected same_bounds_view to use memcmp fast path, got:\n%s", sameBoundsBody)
 	}
 	if strings.Contains(sameBoundsBody, "call i64 @ctx_string_views_eq") {
@@ -490,7 +490,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	if disjointBoundsBody == "" {
 		t.Fatalf("expected to find fresh_disjoint_raw_views body, got:\n%s", output)
 	}
-	if !strings.Contains(disjointBoundsBody, "call i64 @memcmp(ptr noalias") {
+	if !strings.Contains(disjointBoundsBody, "call i32 @memcmp(ptr noalias") {
 		t.Fatalf("expected fresh_disjoint_raw_views to mark memcmp operands noalias, got:\n%s", disjointBoundsBody)
 	}
 
@@ -498,7 +498,7 @@ def different_bounds_view(left: cstr[row], right: cstr[col]) -> bool:
 	if splitBoundsBody == "" {
 		t.Fatalf("expected to find split_disjoint_views body, got:\n%s", output)
 	}
-	if !strings.Contains(splitBoundsBody, "call i64 @memcmp(ptr noalias") {
+	if !strings.Contains(splitBoundsBody, "call i32 @memcmp(ptr noalias") {
 		t.Fatalf("expected split_disjoint_views to use disjoint memcmp fast path, got:\n%s", splitBoundsBody)
 	}
 	if strings.Contains(splitBoundsBody, "call i64 @ctx_string_views_eq") {
@@ -552,7 +552,7 @@ def direct_different_bounds_view(left: cstr[row], right: cstr[row]) -> bool:
 	if directTextBody == "" {
 		t.Fatalf("expected to find direct_same_shape_text body, got:\n%s", output)
 	}
-	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i64 @memcmp(ptr"} {
+	for _, want := range []string{"call i64 @ctx_strlen(ptr", "call i32 @memcmp(ptr"} {
 		if !strings.Contains(directTextBody, want) {
 			t.Fatalf("expected direct_same_shape_text to contain %q, got:\n%s", want, directTextBody)
 		}
@@ -565,7 +565,7 @@ def direct_different_bounds_view(left: cstr[row], right: cstr[row]) -> bool:
 	if directViewTextBody == "" {
 		t.Fatalf("expected to find direct_same_bounds_view_text body, got:\n%s", output)
 	}
-	if !strings.Contains(directViewTextBody, "call i64 @memcmp(ptr") {
+	if !strings.Contains(directViewTextBody, "call i32 @memcmp(ptr") {
 		t.Fatalf("expected direct_same_bounds_view_text to use memcmp fast path, got:\n%s", directViewTextBody)
 	}
 	if strings.Contains(directViewTextBody, "call i64 @ctx_string_view_eq") {
@@ -576,7 +576,7 @@ def direct_different_bounds_view(left: cstr[row], right: cstr[row]) -> bool:
 	if directSplitViewsBody == "" {
 		t.Fatalf("expected to find direct_split_disjoint_views body, got:\n%s", output)
 	}
-	if !strings.Contains(directSplitViewsBody, "call i64 @memcmp(ptr noalias") {
+	if !strings.Contains(directSplitViewsBody, "call i32 @memcmp(ptr noalias") {
 		t.Fatalf("expected direct_split_disjoint_views to use disjoint memcmp fast path, got:\n%s", directSplitViewsBody)
 	}
 	if strings.Contains(directSplitViewsBody, "call i64 @ctx_string_views_eq") {

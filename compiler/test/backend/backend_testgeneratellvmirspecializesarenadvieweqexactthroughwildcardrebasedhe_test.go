@@ -412,8 +412,8 @@ def same_long(view: StringView) -> bool:
 	checks := []string{
 		"define i1 @same_short(%StringView",
 		"define i1 @same_long(%StringView",
-		"declare i64 @memcmp(ptr, ptr, i64)",
-		"call i64 @memcmp(ptr",
+		"declare i32 @memcmp(ptr, ptr, i64)",
+		"call i32 @memcmp(ptr",
 		"load i8, ptr",
 	}
 	for _, check := range checks {

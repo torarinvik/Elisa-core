@@ -111,7 +111,7 @@ extern malloc(size: usize) -> mutable heap void&? can[Memory.Allocate]
 
 extern free(ptr: heap void&) can[Memory.Release]
 
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 
 extern memcpy(dest: mutable void&, src: void&, n: usize) -> mutable void&
 
@@ -279,7 +279,7 @@ extern arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
 extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
-extern memset(dest: mutable void&, val: int, n: usize) -> mutable void&
+extern memset(dest: mutable void&, val: i32, n: usize) -> mutable void&
 
 const ARENA_DA_INIT_CAP: usize = 8
 

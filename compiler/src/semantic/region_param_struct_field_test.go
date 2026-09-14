@@ -185,9 +185,18 @@ def append_from_member(workspace: mutable Workspace&) -> void:
     can Memory.Allocate, Abort.Panic:
         append_one(&workspace.values, 1)
 
+def append_with_other_region[@r](values: mutable darray[i64]& @r, workspace: mutable Workspace&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_one(&workspace.values, 2)
+        values.push(3)
+
 def caller[@r](workspace: mutable Workspace& @r) -> void:
     can Memory.Allocate, Abort.Panic:
         append_from_member(workspace)
+
+def caller_with_distinct_regions[@values, @workspace](values: mutable darray[i64]& @values, workspace: mutable Workspace& @workspace) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_with_other_region(values, workspace)
 `)
 	if joined := strings.Join(result.Errors(), " | "); joined != "" {
 		t.Fatalf("forwarding a mutable container field must infer its enclosing region, got: %s", joined)
@@ -202,6 +211,17 @@ def caller[@r](workspace: mutable Workspace& @r) -> void:
 	}
 	if len(fn.RegionParams) != 1 || fn.RegionParams[0] != "__rg_workspace" {
 		t.Fatalf("expected the struct parameter's inferred region, got %v", fn.RegionParams)
+	}
+	otherSymbol, ok := result.GlobalScope.Lookup("append_with_other_region")
+	if !ok || otherSymbol == nil {
+		t.Fatal("append_with_other_region declaration was not added to the global scope")
+	}
+	otherFn, ok := otherSymbol.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("append_with_other_region declaration has node type %T", otherSymbol.Node)
+	}
+	if len(otherFn.RegionParams) != 2 || otherFn.RegionParams[0] != "r" || otherFn.RegionParams[1] != "__rg_workspace" {
+		t.Fatalf("expected explicit and projected-field regions to remain independent, got %v", otherFn.RegionParams)
 	}
 }
 
