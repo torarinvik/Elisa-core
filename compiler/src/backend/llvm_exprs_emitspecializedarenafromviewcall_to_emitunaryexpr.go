@@ -507,7 +507,9 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	usizeType := s.g.result.NamedTypes["usize"]
-	intType := s.g.result.NamedTypes["int"]
+	// libc's memcmp returns C int (i32); Elisa's `int` is 64-bit and conflicts
+	// with the standard-library extern on ABI-correct Stage1 sources.
+	intType := s.g.result.NamedTypes["i32"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{
 		Name:   "memcmp",
