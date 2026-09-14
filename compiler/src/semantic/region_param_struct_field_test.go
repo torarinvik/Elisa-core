@@ -170,6 +170,41 @@ def caller[@source, @target](source: darray[u8]& @source, scratch: mutable Scrat
 	}
 }
 
+// Forwarding a growable field through a helper must infer the enclosing struct's region just like
+// growing that field directly. Otherwise the callee's hidden region argument cannot be derived from
+// `&workspace.values`, although the caller owns the lifetime-bearing struct reference.
+func TestRegionPolyProjectedStructFieldForwardingInferred(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "projected_struct_field_forward.elisa", `struct Workspace:
+    values: mutable darray[i64]
+
+def append_one(values: mutable darray[i64]&, value: i64) -> void:
+    can Memory.Allocate, Abort.Panic:
+        values.push(value)
+
+def append_from_member(workspace: mutable Workspace&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_one(&workspace.values, 1)
+
+def caller[@r](workspace: mutable Workspace& @r) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_from_member(workspace)
+`)
+	if joined := strings.Join(result.Errors(), " | "); joined != "" {
+		t.Fatalf("forwarding a mutable container field must infer its enclosing region, got: %s", joined)
+	}
+	symbol, ok := result.GlobalScope.Lookup("append_from_member")
+	if !ok || symbol == nil {
+		t.Fatal("append_from_member declaration was not added to the global scope")
+	}
+	fn, ok := symbol.Node.(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("append_from_member declaration has node type %T", symbol.Node)
+	}
+	if len(fn.RegionParams) != 1 || fn.RegionParams[0] != "__rg_workspace" {
+		t.Fatalf("expected the struct parameter's inferred region, got %v", fn.RegionParams)
+	}
+}
+
 // Stage 1 must NOT widen the safe surface: the inferred region param drives the SAME borrow-out
 // escape check as the explicit form, so a region-less view return over the inferred param is still
 // rejected (was a use-after-free; the escape coverage is independent of how the region arrived).

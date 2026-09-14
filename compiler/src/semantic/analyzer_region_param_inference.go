@@ -226,7 +226,9 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParamsIn(fn *ast.FuncDecl, 
 			// field-region propagation pushes it onto the resolved field container, and the same
 			// return-escape checks that guard the explicit `[@r]` form cover every borrow-out vector
 			// regardless of how the region param was introduced — no new lifetime power.
-			if paramFieldContainerIsGrown(fn.Body, p.Name) || a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
+			if paramFieldContainerIsGrown(fn.Body, p.Name) ||
+				a.paramForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) ||
+				a.paramProjectionForwardedToRegionRequiringCallee(fn.Body, p.Name, funcByName) {
 				stamp = sstamp
 			}
 		}
@@ -315,6 +317,18 @@ func (a *Analyzer) calleeReturnTypeIsRegionValued(qualifiedName string, callee *
 // to a region-requiring function with an uppercase name (the bulk of the loader's call graph) is a
 // StructLitExpr here, not a CallExpr; both forms are handled below.
 func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
+	return a.paramForwardedToRegionRequiringCalleeBy(stmts, name, funcByName, forwardsParamIdent)
+}
+
+// paramProjectionForwardedToRegionRequiringCallee handles a struct parameter whose field (or a
+// nested field/index projection) is forwarded to a region-polymorphic callee. The containing struct
+// must carry the same inferred region so analyzeFieldExpr can propagate it to the projected
+// container and the ordinary call-site region binding can verify the actual lifetime.
+func (a *Analyzer) paramProjectionForwardedToRegionRequiringCallee(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl) bool {
+	return a.paramForwardedToRegionRequiringCalleeBy(stmts, name, funcByName, forwardsParamProjection)
+}
+
+func (a *Analyzer) paramForwardedToRegionRequiringCalleeBy(stmts []ast.Stmt, name string, funcByName map[string]*ast.FuncDecl, forwards func(ast.Expr, string) bool) bool {
 	found := false
 	// checkCall tests whether passing `name` at some position of a call to `calleeName(args)` lands in a
 	// region-requiring callee parameter.
@@ -332,7 +346,7 @@ func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name 
 			return false
 		}
 		for argPos, arg := range args {
-			if forwardsParamIdent(arg, name) && argPos < len(params) && typeExprCarriesRegionParam(params[argPos].Type, rps) {
+			if forwards(arg, name) && argPos < len(params) && typeExprCarriesRegionParam(params[argPos].Type, rps) {
 				return true
 			}
 		}
@@ -373,6 +387,55 @@ func (a *Analyzer) paramForwardedToRegionRequiringCallee(stmts []ast.Stmt, name 
 	}
 	rec(reflect.ValueOf(stmts))
 	return found
+}
+
+// forwardsParamProjection reports whether an argument forwards a projected value rooted at a
+// parameter: e.g. `&workspace.values`, `workspace.inner.items`, or `(&workspace.inner).cast[T&]`.
+// It is used only for struct parameters; the inferred region is still checked at the real call site.
+func forwardsParamProjection(arg ast.Expr, name string) bool {
+	for {
+		switch e := unwrapParenForRegionPoly(arg).(type) {
+		case *ast.AddrOfExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		case *ast.CastExpr:
+			if e == nil {
+				return false
+			}
+			arg = e.Operand
+		default:
+			root, projected := regionPolyProjectionRoot(arg)
+			return projected && root == name
+		}
+	}
+}
+
+func regionPolyProjectionRoot(expr ast.Expr) (string, bool) {
+	projected := false
+	for {
+		switch e := unwrapParenForRegionPoly(expr).(type) {
+		case *ast.FieldExpr:
+			if e == nil {
+				return "", false
+			}
+			projected = true
+			expr = e.Object
+		case *ast.IndexExpr:
+			if e == nil {
+				return "", false
+			}
+			expr = e.Object
+		case *ast.Ident:
+			if e == nil {
+				return "", false
+			}
+			return e.Name, projected
+		default:
+			return "", false
+		}
+	}
 }
 
 // forwardsParamIdent reports whether an argument expression passes the parameter `name` through: a bare
