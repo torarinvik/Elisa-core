@@ -147,6 +147,10 @@ func (c *permissionEffectCollector) collectStmt(stmt ast.Stmt) {
 			c.addRefs(unsafeAliasRefs(n.Position))
 		}
 	case *ast.AugAssignStmt:
+		if n.CollectionAppend != nil {
+			c.collectExpr(n.CollectionAppend)
+			return
+		}
 		c.collectWriteTarget(n.Target, true)
 		c.collectExpr(n.Value)
 	case *ast.AsRefAssignStmt:

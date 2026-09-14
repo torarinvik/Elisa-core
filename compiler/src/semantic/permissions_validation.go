@@ -218,6 +218,10 @@ func (a *Analyzer) validatePermissionStmt(stmt ast.Stmt, granted map[string]bool
 			a.warnOnMissingLocalGrant(n.Pos(), "mutable alias", unsafeAliasRefs(n.Position), granted)
 		}
 	case *ast.AugAssignStmt:
+		if n.CollectionAppend != nil {
+			a.validatePermissionExpr(n.CollectionAppend, granted)
+			return
+		}
 		a.validatePermissionWriteTarget(n.Target, true, granted)
 		a.validatePermissionExpr(n.Value, granted)
 	case *ast.AsRefAssignStmt:

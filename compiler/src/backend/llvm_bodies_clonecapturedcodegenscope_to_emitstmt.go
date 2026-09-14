@@ -1743,6 +1743,10 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 		s.invalidatePackedReadCaches()
 		return nil
 	case *ast.AugAssignStmt:
+		if n.CollectionAppend != nil {
+			_, _, err := s.emitExpr(n.CollectionAppend, nil)
+			return err
+		}
 		ptr, targetType, err := s.emitAddress(n.Target)
 		if err != nil {
 			return err

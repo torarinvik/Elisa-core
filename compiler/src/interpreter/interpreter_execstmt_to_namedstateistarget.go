@@ -67,6 +67,10 @@ func (i *Interpreter) execStmtCore(frame *frame, stmt ast.Stmt) (controlSignal, 
 		}
 		return controlSignal{}, nil
 	case *ast.AugAssignStmt:
+		if n.CollectionAppend != nil {
+			_, err := i.evalExpr(frame, n.CollectionAppend)
+			return controlSignal{}, err
+		}
 		slot, err := i.resolveSlot(frame, n.Target)
 		if err != nil {
 			return controlSignal{}, annotateRuntimeError(n.Pos(), err)

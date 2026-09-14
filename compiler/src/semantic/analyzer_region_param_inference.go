@@ -115,6 +115,12 @@ func (a *Analyzer) inferRegionParamsForGrownContainerParams(decls []scopedDecl) 
 			arenaManaged[fn] = true
 		}
 	}
+	for _, fn := range cands {
+		scoped := funcScopes[fn]
+		a.withResolutionContext(scoped.Namespace, scoped.Usings, func() {
+			a.prepareCollectionAppends(fn)
+		})
+	}
 	forwardingByFunc := collectRegionParamForwarding(cands, funcByName)
 	// Fixpoint: making one function region-polymorphic turns it into a region-REQUIRING callee, so a
 	// caller that merely FORWARDS a container/struct ref param to it must itself become region-poly to

@@ -83,6 +83,7 @@ F AugAssignStmt 1 Op
 F AugAssignStmt 2 Position
 F AugAssignStmt 3 Target
 F AugAssignStmt 4 Value
+F AugAssignStmt 5 CollectionAppend
 
 T 15 BinaryExpr
 F BinaryExpr 1 Left

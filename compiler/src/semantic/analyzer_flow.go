@@ -2,6 +2,7 @@ package semantic
 
 import (
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"fmt"
 )
 
@@ -607,9 +608,21 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				a.recordFunctionPermissionRefs(unsafeMutableGlobalRefs(n.Target.Pos()))
 			}
 		}
-		valueType := a.analyzeExpr(n.Value)
-		if !IsNumericType(targetType) || !IsNumericType(valueType) {
-			a.errorf(n.Pos(), "augmented assignment requires numeric operands")
+		if array, _, ok := builtinDArrayPushReceiverType(targetType); ok && n.Op == lexer.TOKEN_PLUSEQ {
+			if n.CollectionAppend == nil {
+				n.CollectionAppend = collectionAppendCall(n)
+			}
+			a.analyzeExpr(n.CollectionAppend)
+			valueType := a.exprTypes[n.Value]
+			if !AssignableTo(array.Elem, valueType) {
+				a.errorf(n.Pos(), "darray += requires one element of type %s, got %s; use extend for multiple elements", array.Elem, valueType)
+			}
+		} else {
+			n.CollectionAppend = nil
+			valueType := a.analyzeExpr(n.Value)
+			if !IsNumericType(targetType) || !IsNumericType(valueType) {
+				a.errorf(n.Pos(), "augmented assignment requires numeric operands")
+			}
 		}
 		a.recordNamedStateAugAssignTarget(n.Target)
 		a.invalidatePredFactsForTarget(n.Target)

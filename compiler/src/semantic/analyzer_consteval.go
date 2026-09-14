@@ -869,6 +869,11 @@ func (a *Analyzer) evalStaticStmtBlock(stmts []ast.Stmt, allowReturn bool) (Cons
 				return ConstValue{}, false, false
 			}
 			a.setConstEvalValue(n.Name, value)
+		case *ast.AugAssignStmt:
+			if n.CollectionAppend == nil || !a.evalStaticExprStmt(n.CollectionAppend) {
+				a.errorf(n.Pos(), "static augmented assignment must be a compile-time collection append")
+				return ConstValue{}, false, false
+			}
 		case *ast.AssignStmt:
 			ident, ok := n.Target.(*ast.Ident)
 			if !ok {
@@ -1705,6 +1710,9 @@ func (a *Analyzer) walkStaticStmt(stmt ast.Stmt, visitExpr func(ast.Expr) bool) 
 	case *ast.AssignStmt:
 		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.AugAssignStmt:
+		if n.CollectionAppend != nil {
+			return a.walkStaticExpr(n.CollectionAppend, visitExpr)
+		}
 		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)
 	case *ast.AsRefAssignStmt:
 		return a.walkStaticExpr(n.Target, visitExpr) || a.walkStaticExpr(n.Value, visitExpr)

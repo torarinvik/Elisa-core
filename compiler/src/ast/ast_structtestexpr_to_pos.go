@@ -351,10 +351,12 @@ type AssignStmt struct {
 	ArgManifest bool
 }
 type AugAssignStmt struct {
-	Position lexer.Pos
-	Op       lexer.TokenKind
-	Target   Expr
-	Value    Expr
+	// CollectionAppend is the checked single-element push lowering for darray +=.
+	CollectionAppend *CallExpr
+	Position         lexer.Pos
+	Op               lexer.TokenKind
+	Target           Expr
+	Value            Expr
 }
 type AsRefAssignStmt struct {
 	Position lexer.Pos

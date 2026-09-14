@@ -840,7 +840,8 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 		}
 		fieldTok := p.expect(lexer.TOKEN_IDENT)
 		var value ast.Expr
-		if p.peek() == lexer.TOKEN_LARROW {
+		op := p.peek()
+		if op == lexer.TOKEN_LARROW || op == lexer.TOKEN_PLUSEQ {
 			p.advance()
 			// Not the tuple form: a comma ends the field, it does not extend
 			// the value (`{ kind <- 7, x <- 1.5 }`).
@@ -850,7 +851,12 @@ func (p *Parser) parseWithFieldsStmt(pos lexer.Pos, place ast.Expr) ast.Stmt {
 			// local of the same name.
 			value = &ast.Ident{Position: fieldTok.Pos, Name: fieldTok.Text}
 		}
-		body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: &ast.FieldExpr{Position: fieldTok.Pos, Object: target, Field: fieldTok.Text}, Value: value})
+		field := &ast.FieldExpr{Position: fieldTok.Pos, Object: target, Field: fieldTok.Text}
+		if op == lexer.TOKEN_PLUSEQ {
+			body = append(body, &ast.AugAssignStmt{Position: fieldTok.Pos, Target: field, Op: op, Value: value})
+		} else {
+			body = append(body, &ast.AssignStmt{Position: fieldTok.Pos, Target: field, Value: value})
+		}
 		if p.peek() == lexer.TOKEN_COMMA {
 			p.advance()
 		}
