@@ -195,24 +195,40 @@ unchanged across the boundary.
   `extern`. Estimated by count: ~1755 parameters across iplug2 and shadps4, all
   in binding files.
 
-### 3.2 Foreign resources with linear release (closes H2)
+### 3.2 Foreign resources: `extern resource` + `__drop__` (closes H2)
+
+Doc 126 already defines the destructor protocol: declaring `__drop__` on a type
+makes it affine (move-only), and the compiler runs it on every exit edge of the
+owning scope, including `try` propagation. A foreign resource is exactly that,
+with the body being the native release call:
 
 ```elisa
-extern resource Adsr:
-    release elisa_iplug2_adsr_destroy      # void (*)(Adsr*)
+extern resource Adsr
 
-extern adsr_create(name: cstr, sustain: bool) -> Adsr        # owned result
-extern adsr_process(envelope: mutable Adsr&, level: f64) -> f64
+def __drop__(self: consume Adsr) -> void:
+    elisa_iplug2_adsr_destroy(self)
+
+extern elisa_iplug2_adsr_create(name: cstr, sustain: bool) -> Adsr?     # owned result
+extern elisa_iplug2_adsr_destroy(envelope: consume Adsr) -> void
+extern elisa_iplug2_adsr_process(envelope: mutable Adsr&, level: f64) -> f64
 ```
 
-Semantics, all built from machinery the language has:
+Rules:
 
-- `Adsr` (bare) is an **owner** of storage class `foreign`; a function returning
-  it returns ownership; dropping it calls `release`; passing it by value is a
-  `move`. This is the same linear discipline as `Thread[u32, Joinable]`.
-- `Adsr&` / `mutable Adsr&` are ordinary borrows, so use-after-release is the
-  existing stale-ref error and double release is the existing use-after-move
-  error.
+- `extern resource X` is an opaque handle type (like `extern X` today) whose
+  bare spelling `X` is an **owner** of storage class `foreign`. Declaring it
+  **requires** a `__drop__` in the same module; a missing one is a hard error
+  (D2 in §3.7). A plain `extern X` stays a non-owning handle for APIs where
+  ownership lives elsewhere, and cannot be returned from a `-> X` extern
+  that is not `@trusted` (D3).
+- `X?` from a constructor is the ordinary optional; `else raise` is the
+  idiomatic unwrap. `X&` / `mutable X&` are ordinary borrows, so use after
+  drop is the existing stale-ref error and a second consuming call is the
+  existing use-after-move error.
+- An extern parameter `consume X` transfers ownership to C and suppresses the
+  scope-exit drop (doc 126's move rule). `__drop__` is normally the only such
+  call; a second consuming extern (`SDL_FreeSurface` next to a `__drop__` that
+  also frees) is allowed but each value can reach only one of them.
 - State machines beyond live/dead use doc 111 typestate: `Socket[Open]`,
   `Socket[Closed]`; the `T[?]` spelling and its lowering already exist in both
   compilers (the call-site state check is a known stage1 gap and must be closed
@@ -267,7 +283,7 @@ Once views cross, `requires` gains its vocabulary for free:
 ```elisa
 extern subscribe(callback: fn(Listener&, f32) -> void, context: Listener&)
     -> Subscription
-    retains context until release(result)
+    retains context until drop(result)
     callbacks callback on thread(worker)
 ```
 
@@ -277,7 +293,7 @@ extern subscribe(callback: fn(Listener&, f32) -> void, context: Listener&)
   disappear from user code.
 - `retains X until E` extends the borrow of `X` to the lifetime of `E`, which
   the existing outlives check then enforces: `Listener` storage that dies before
-  the `Subscription` is released is the ordinary "borrow outlives storage"
+  the `Subscription` is dropped is the ordinary "borrow outlives storage"
   error, now reported at the boundary.
 - `callbacks … on thread(worker)` feeds the sendability check (doc 09; the
   generic-instantiation residual in doc 26 applies here too and should close
@@ -302,6 +318,34 @@ its obligation kind (handle, owned, view, bounds, retention, callback), and its
 tag. `-strict-externs` fails on any `untyped` row. This is the report an
 engine team reviews before shipping a binding family.
 
+### 3.7 The guarantees, stated as diagnostics
+
+Changing the spellings is not the point; the point is what the compiler now
+refuses, and how clearly it says why. Each guarantee below is a diagnostic
+both compilers must emit byte-identically (the parity rule), with a
+differential fixture that must be rejected and a runtime fixture that must
+pass. Wording follows the house style of the existing extern messages.
+
+| id | guarantee | message (`error:` prefix, `file:line:col` as today) |
+|---|---|---|
+| D1 | no untyped handles at the boundary | `extern "adsr_process" parameter "envelope" is an untyped pointer (mutable void&?); declare an opaque handle with `extern resource` or `extern Name`, or mark the extern @trusted("reason")` |
+| D2 | every resource has a destructor | `extern resource "SdlTexture" declares no `__drop__`; add `def __drop__(self: consume SdlTexture)` in this module so the native handle is released on every exit path` |
+| D3 | ownership of a return is declared | `extern "SDL_CreateTexture" returns non-owning handle "SdlTexture" from a constructor; return `SdlTexture` (owned) or `SdlTexture&` (borrowed from a parameter via @borrows_return)` |
+| D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
+| D5 | pointer parameters carry bounds | `extern "read" parameter "buf" is a pointer with no bounds; use `mutable view[u8]`, bind a length with @bounds(buf: count), or mark the extern @trusted("reason")` |
+| D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf: count) from buf.count; remove the explicit argument` |
+| D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
+| D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.count) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
+| D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
+| D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
+| D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
+| D12 | `@trusted` is the only entry point for trust | `extern "memcpy" has a contract that covers none of its pointer parameters ("dest", "src"); under -strict-externs every pointer parameter must be a typed handle, a bounded view, a @bounds target, or the extern must be @trusted("reason")` |
+
+What this buys the engine team: `-strict-externs` on a binding family either
+passes, or every failure names the extern, the parameter, and the one-line
+fix. The unsafe audit (§3.6) lists every `@trusted` reason and every D8
+runtime check, and nothing else is trusted anywhere.
+
 ## 4. Order of work and what each step buys
 
 1. **Doc 08 mapping table + `-strict-externs` `void&?` rule** (§3.1). One
@@ -324,7 +368,197 @@ fixture that stage0 and stage1 must reject identically, a runtime fixture that
 must produce the same bytes, and the existing `-emit unsafe` corpus probe kept
 at EXTRA = 0.
 
-## 5. Non-goals
+## 5. Worked examples from the projects, before and after
+
+Every "before" is copied from a project as it is today.
+
+**wolf3d window / renderer / texture** (`port/wolf_sdl.elisa:1706`), three
+SDL objects sharing one type, none ever destroyed:
+
+```elisa
+win: void& = SDL_CreateWindow("Elisa Wolfenstein 3D".cast[u8&], 0x2FFF0000, 0x2FFF0000, 640, 480, 0x2004)
+ren: void& = SDL_CreateRenderer(win, -1, 0x6)
+tex: void& = SDL_CreateTexture(ren, 0x16161804, 1, VIEWWIDTH, SCREENHEIGHT)
+```
+
+```elisa
+error VideoError:
+    NoWindow
+    NoRenderer
+    NoTexture
+
+extern resource SdlWindow
+extern resource SdlRenderer
+extern resource SdlTexture
+def __drop__(self: consume SdlWindow) -> void:   SDL_DestroyWindow(self)
+def __drop__(self: consume SdlRenderer) -> void: SDL_DestroyRenderer(self)
+def __drop__(self: consume SdlTexture) -> void:  SDL_DestroyTexture(self)
+
+extern SDL_CreateWindow(title: cstr, x: i32, y: i32, w: i32, h: i32, flags: u32) -> SdlWindow?
+extern SDL_CreateRenderer(window: SdlWindow&, index: i32, flags: u32) -> SdlRenderer?
+extern SDL_CreateTexture(renderer: SdlRenderer&, format: u32, access: i32, w: i32, h: i32) -> SdlTexture?
+
+win: SdlWindow = SDL_CreateWindow("Elisa Wolfenstein 3D", CENTERED, CENTERED, 640, 480, ALLOW_HIGHDPI) else raise VideoError.NoWindow
+ren: SdlRenderer = SDL_CreateRenderer(win, -1, ACCELERATED | PRESENTVSYNC) else raise VideoError.NoRenderer
+tex: SdlTexture = SDL_CreateTexture(ren, RGB888, STREAMING, VIEWWIDTH, SCREENHEIGHT) else raise VideoError.NoTexture
+```
+
+Passing `ren` where a texture is expected is a type error; scope exit drops
+the three in reverse order; a manual `SDL_DestroyRenderer(ren)` followed by a
+use is D4.
+
+**wolf3d palette** (`cpp-bridge/elisa_wolf3d_main.elisa:155`), pointer and
+count typed by hand:
+
+```elisa
+_ = wolf3d_sdl_set_palette_colors(palette, (&game_palette_bytes[0]).cast[mutable u8&], 0, 256)
+```
+
+```elisa
+extern wolf3d_sdl_set_palette_colors(palette: mutable SdlPalette&, colors: view[SdlColor], first: i32) -> i32
+    requires first >= 0 and first.usize() + colors.count <= palette.count
+
+_ = wolf3d_sdl_set_palette_colors(palette, game_palette, 0)
+```
+
+For a prototype we do not own: `@bounds(colors: ncolors)` on the original
+SDL declaration, and D6 forbids typing `ncolors` by hand.
+
+**elisa-ui Android text** (`ui_android_controls.elisa:214`), the manual
+bounds dance repeated in every text extern:
+
+```elisa
+safe: sview = UiCore::bounded_text(text)
+return if safe.len <= 0 or safe.data == null
+elisa_android_controls_set_text(handle, safe.data[0], safe.len.usize())
+```
+
+```elisa
+extern elisa_android_controls_set_text(handle: AndroidControl&, text: sview) -> void
+elisa_android_controls_set_text(handle, UiCore::bounded_text(text))
+```
+
+**stage1 LLVM verifier message** (`src/driver/elisac.elisa:450`), a cast for
+the out-pointer and a dispose on each exit path:
+
+```elisa
+verification_message: mutable cstr = zeroed
+verification_pointer: void& = (&verification_message).cast[void&] can Unsafe.PointerCast
+verification_failed: i32 = LLVMVerifyModule(module_handle, LLVM_VERIFY_RETURN_STATUS_ACTION, verification_pointer)
+if verification_failed != 0:
+    ...
+    LLVMDisposeMessage(verification_message)
+    return 2
+LLVMDisposeMessage(verification_message)
+```
+
+```elisa
+extern resource LlvmMessage
+def __drop__(self: consume LlvmMessage) -> void:
+    LLVMDisposeMessage(self)
+
+extern LLVMVerifyModule(m: LLVMModuleRef, action: i32, out message: LlvmMessage?) -> i32
+
+verdict: Verification =
+    match LLVMVerifyModule(module_handle, LLVM_VERIFY_RETURN_STATUS_ACTION, out message):
+        0: Verification.Ok
+        _: Verification.Invalid(message else "")
+```
+
+**stage1 host CPU strings** (`codegen_target_machine.elisa:148`), one
+variable that is sometimes a literal and sometimes LLVM-owned:
+
+```elisa
+cpu: mutable cstr = ""
+if host_tuned:
+    cpu <- LLVMGetHostCPUName()
+machine: LLVMTargetMachineRef = LLVMCreateTargetMachine(target, triple, cpu, features, 0, 0, 0)
+LLVMDisposeMessage(cpu) if host_tuned
+```
+
+```elisa
+extern LLVMGetHostCPUName() -> LlvmMessage
+host_cpu: LlvmMessage? = LLVMGetHostCPUName() if host_tuned else null
+machine: LLVMTargetMachineRef = LLVMCreateTargetMachine(target, triple, host_cpu else "", features, 0, 0, 0)
+```
+
+An owned `LlvmMessage` lends itself as a `cstr` borrow; a literal is a
+`static cstr`. The "dispose only if we allocated" condition has nowhere to
+exist.
+
+**stage1 `getenv` / `getcwd`** (`src/driver/project_paths.elisa:70`), three
+casts, a double lookup, and a repeated buffer size:
+
+```elisa
+key: cstr = (&name[0.usize()]).cast[cstr] can Unsafe.PointerCast
+if project_getenv(key) is real:
+    exported: cstr = project_getenv(key).cast[cstr] can Unsafe.PointerCast
+    bytes_extend_cstr(&logical, exported)
+buffer: mutable darray[u8] = []
+buffer.resize(4096)
+target: void& = (&buffer[0.usize()]).cast[void&] can Unsafe.PointerCast
+_ = project_getcwd(target, 4096.usize())
+```
+
+```elisa
+@link_name("getenv")
+extern project_getenv(name: cstr) -> static cstr?          # borrowed from environ
+@link_name("getcwd")
+extern project_getcwd(buffer: mutable view[u8]) -> cstr?
+    ensure result == null or result.len < buffer.count     # D8: checked, not assumed
+
+if project_getenv("PWD") is exported:
+    bytes_extend_cstr(&logical, exported)
+buffer: mutable darray[u8] = zeroed(4096)
+_ = project_getcwd(buffer)
+```
+
+**iplug2 web view callbacks** (`bindings/iplug2_preset_controls.elisa:5`),
+untyped `user` pointer cast back in every callback body:
+
+```elisa
+type WebViewMessageCallback = fn(mutable void&?, cstr) -> void
+extern elisa_iplug2_web_view_set_callbacks(view: mutable void&?, user: mutable void&?,
+    ready: WebViewReadyCallback?, message: WebViewMessageCallback?, ...)
+```
+
+```elisa
+extern resource WebView
+def __drop__(self: consume WebView) -> void:
+    elisa_iplug2_web_view_destroy(self)
+
+extern elisa_iplug2_web_view_set_callbacks[S](view: mutable WebView&, context: S&,
+        ready: fn(S&) -> void?,
+        message: fn(S&, sview) -> void?)
+    retains context until drop(view)
+    callbacks ready, message on thread(main)
+
+def on_message(state: PluginState&, text: sview) -> void:
+    state.log(text)
+
+elisa_iplug2_web_view_set_callbacks(view, plugin_state, null, on_message)
+```
+
+The one cast lives in the generated trampoline. A `PluginState` that dies
+before the view is D10, reported at this line.
+
+**shadps4 memcpy** (`core/guest_exec.elisa:277`), a length related to
+neither pointer:
+
+```elisa
+_ = ge_raw_memcpy(dst.cast[mutable void&], src, n)
+```
+
+```elisa
+@link_name(memcpy)
+extern ge_raw_memcpy(dest: mutable view[u8], src: view[u8]) -> void
+    requires dest.count >= src.count
+    requires disjoint(dest, src)
+
+ge_raw_memcpy(dst_bytes, src_bytes)
+```
+
+## 6. Non-goals
 
 - Parsing C headers into declarations. Facades are Elisa-owned; declaring them
   twice is cheap and keeps the contract in Elisa.
