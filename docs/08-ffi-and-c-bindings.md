@@ -653,6 +653,38 @@ Only bind public C struct fields when:
 For FFmpeg specifically, many structs are large and version-sensitive. Prefer
 public accessor functions and opaque pointers where possible.
 
+## Bounded Buffers
+
+A C function that takes a buffer takes a pointer and a length. Declare the
+parameter as a bounded view and the compiler passes both (docs/127 §3.3):
+
+```elisa
+@callconv(c)
+extern scale_samples(samples: mutable view[f32], gain: f32) -> void
+# C: void scale_samples(float *samples, size_t count, float gain);
+```
+
+A `view[T]` / `mutable view[T]` parameter of a `@callconv(c)` extern lowers to
+two C parameters in place, pointer then `size_t`. An extern without an explicit
+C calling convention keeps Elisa's own view representation, because it may be
+an Elisa function in another unit.
+
+For a prototype you do not control, bind the length to the pointer with
+`@bounds(pointer, length)` pairs; callers then pass one view and the compiler
+supplies the length in the position the prototype declares:
+
+```elisa
+@callconv(c)
+@bounds(buf, count)
+extern read(fd: i32, buf: mutable u8&, count: usize) -> isize
+
+got: isize = read(fd, buffer)        # buffer: mutable view[u8]
+```
+
+The pointer parameter must be a non-optional reference, the length an integer,
+and a `requires`/`ensure` on the extern refers to `buf.count`, never to the
+removed length parameter.
+
 ## Raw Extern Safety
 
 `-strict-externs` enforces the extern pointer discipline (docs/127 §3.7):
