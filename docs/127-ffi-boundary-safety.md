@@ -350,6 +350,15 @@ runtime check, and nothing else is trusted anywhere.
 
 ## 4. Order of work and what each step buys
 
+Status 2026-09-15: **step 2 landed** in both compilers: a `view[T]` parameter of
+a `@callconv(c)` extern lowers to (pointer, length) in place, and
+`@bounds(ptr, len)` binds a legacy prototype's pair into one view with the C
+order preserved (stage0 `fec94067`, `cd5a3ea8`; gate
+`test/parity/extern_view_split_smoke.sh`: declarations byte-identical, two
+runtime fixtures through libc `strnlen`, seven byte-identical rejections
+including D6). D5 (unbounded pointer parameters) is not yet enforced; D12 still
+treats a bare `T&` as covered when named by a contract.
+
 Status 2026-09-15: **step 1 landed** in both compilers (stage0 `4ea78cf2`,
 stage1 `c520364f`), gated by `test/parity/extern_discipline_smoke.sh` (nine
 cases, byte-identical stderr). Landing it also exposed and fixed two unrelated
