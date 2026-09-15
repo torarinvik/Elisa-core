@@ -995,13 +995,13 @@ func TestMachineYieldForm(t *testing.T) {
 	if fn == nil {
 		t.Fatal("host function missing")
 	}
-	es, ok := fn.Body[0].(*ast.ExprStmt)
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
 	if !ok {
-		t.Fatalf("yield form should produce ExprStmt, got %T", fn.Body[0])
+		t.Fatalf("yield form should produce ReturnStmt, got %T", fn.Body[0])
 	}
-	block, ok := es.Expr.(*ast.ExprBlock)
+	block, ok := ret.Value.(*ast.ExprBlock)
 	if !ok {
-		t.Fatalf("yield form should wrap in ExprBlock, got %T", es.Expr)
+		t.Fatalf("yield form should wrap in ExprBlock, got %T", ret.Value)
 	}
 	if v, ok := block.Value.(*ast.Ident); !ok || v.Name != "total" {
 		t.Fatalf("ExprBlock value = %#v, want Ident(total)", block.Value)

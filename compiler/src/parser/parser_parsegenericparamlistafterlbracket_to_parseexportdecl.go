@@ -398,6 +398,7 @@ func (p *Parser) parseFuncDeclRest(pos lexer.Pos, annotations []ast.Annotation, 
 	// clauses: `-> T requires ...` is ambiguous with the region-prefix type grammar (`<region> T&`),
 	// where `T requires` reads as region label `T` + type `requires`.
 	requires, requireProofs, ensures2, ensureProofs, decreases, decreasesWild, uses, body := liftLeadingContracts(body)
+	body = normalizeFunctionTailReturns(body, retType)
 	if !isStatic {
 		// Static functions are evaluated at compile time and have no runtime region; never
 		// wrap them in an auto region (it would break static darray construction).
