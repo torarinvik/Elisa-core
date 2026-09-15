@@ -334,7 +334,7 @@ pass. Wording follows the house style of the existing extern messages.
 | D2 | every resource has a destructor | `extern resource "SdlTexture" declares no `__drop__`; add `def __drop__(self: consume SdlTexture)` in this module so the native handle is released on every exit path` |
 | D3 | ownership of a return is declared | `extern "SDL_CreateTexture" returns non-owning handle "SdlTexture" from a constructor; return `SdlTexture` (owned) or `SdlTexture&` (borrowed from a parameter via @borrows_return)` |
 | D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
-| D5 | pointer parameters carry bounds | `extern "read" parameter "buf" is a pointer with no bounds; use `mutable view[u8]`, bind a length with @bounds(buf, count), or mark the extern @trusted("reason")` |
+| D5 | pointer parameters carry bounds | `extern function "read" parameter "buf" is a pointer with no bounds; declare it as mutable view[u8], bind a length with @bounds(buf, <length>), or mark the extern @trusted("reason")` (LANDED in both compilers: fires for a scalar reference beside an integer parameter; a struct reference is one object and a lone scalar reference is an out-parameter, so neither fires) |
 | D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.count; remove the explicit argument` |
 | D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
 | D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.count) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
@@ -356,8 +356,8 @@ a `@callconv(c)` extern lowers to (pointer, length) in place, and
 order preserved (stage0 `fec94067`, `cd5a3ea8`; gate
 `test/parity/extern_view_split_smoke.sh`: declarations byte-identical, two
 runtime fixtures through libc `strnlen`, seven byte-identical rejections
-including D6). D5 (unbounded pointer parameters) is not yet enforced; D12 still
-treats a bare `T&` as covered when named by a contract.
+including D6). D5 landed the same day (stage0 `analyzer_extern_pointer_discipline.go`,
+gate `extern_discipline_smoke.sh`, fourteen cases).
 
 Status 2026-09-15: **step 1 landed** in both compilers (stage0 `4ea78cf2`,
 stage1 `c520364f`), gated by `test/parity/extern_discipline_smoke.sh` (nine

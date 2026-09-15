@@ -29,6 +29,25 @@ func (a *Analyzer) checkExternPointerDiscipline(fn *ast.ExternFuncDecl, fnType *
 			a.errorf(param.Position, "extern function %q parameter %q is an untyped pointer (%s); declare an opaque handle with `extern Name` and use it instead of void, or mark the extern @trusted(\"reason\")", fn.Name, param.Name, fnType.Params[i])
 		}
 	}
+	// D5: a reference to a SCALAR element (`u8&`, `mutable f32&`) beside an integer parameter is
+	// the classic (pointer, length) pair with the two kept strangers: the type bounds nothing.
+	// A reference to a struct is one object and a lone scalar reference is an out-parameter, so
+	// neither fires. `@bounds` removes the length and turns the pointer into a view, which is
+	// the fix the message names.
+	if fnHasUnboundIntegerParam(fnType) {
+		for i, param := range fn.Params {
+			if i >= len(fnType.Params) {
+				break
+			}
+			if elem, mutable, ok := unboundedScalarRefParam(fnType.Params[i]); ok {
+				viewSpelling := "view[" + elem + "]"
+				if mutable {
+					viewSpelling = "mutable " + viewSpelling
+				}
+				a.errorf(param.Position, "extern function %q parameter %q is a pointer with no bounds; declare it as %s, bind a length with @bounds(%s, <length>), or mark the extern @trusted(\"reason\")", fn.Name, param.Name, viewSpelling, param.Name)
+			}
+		}
+	}
 	if fnType.Return != nil && isUntypedPointerType(fnType.Return) {
 		a.errorf(fn.Pos(), "extern function %q returns an untyped pointer (%s); declare an opaque handle with `extern Name` and return it instead of void, or mark the extern @trusted(\"reason\")", fn.Name, fnType.Return)
 	}
@@ -75,6 +94,58 @@ func isExternPointerParamType(t Type) bool {
 	case *DStrType:
 		// `cstr`: an unbounded NUL-terminated pointer.
 		return true
+	}
+	return false
+}
+
+
+// unboundedScalarRefParam reports a `T&` / `mutable T&` (optionally nullable) whose referent is a
+// scalar builtin: the shape C uses for a buffer whose length travels separately.
+func unboundedScalarRefParam(t semantic_Type) (string, bool, bool) {
+	if opt, ok := t.(*OptionalType); ok {
+		t = opt.Value
+	}
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil {
+		return "", false, false
+	}
+	elem, ok := ref.Elem.(*BuiltinType)
+	if !ok || elem == nil || !isScalarBuiltinName(elem.Name) {
+		return "", false, false
+	}
+	return elem.Name, ref.Mutable, true
+}
+
+type semantic_Type = Type
+
+func isScalarBuiltinName(name string) bool {
+	switch name {
+	case "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "f32", "f64", "int", "uint", "usize", "isize", "uintptr", "bool", "char":
+		return true
+	}
+	return false
+}
+
+func isIntegerBuiltinName(name string) bool {
+	switch name {
+	case "i8", "i16", "i32", "i64", "u8", "u16", "u32", "u64", "int", "uint", "usize", "isize", "uintptr":
+		return true
+	}
+	return false
+}
+
+// fnHasUnboundIntegerParam reports an integer-typed explicit parameter (one `@bounds` did not
+// already consume; consumed lengths are gone from Params).
+func fnHasUnboundIntegerParam(fn *FuncType) bool {
+	for _, p := range fn.Params {
+		switch t := p.(type) {
+		case *BuiltinType:
+			if isIntegerBuiltinName(t.Name) {
+				return true
+			}
+		case *BitIntType:
+			return true
+		}
 	}
 	return false
 }

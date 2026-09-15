@@ -84,3 +84,29 @@ func TestPointerDisciplineOffByDefault(t *testing.T) {
 		t.Fatalf("pointer discipline must be off without -strict-externs, got: %v", errs)
 	}
 }
+
+
+// D5: a scalar reference beside an integer parameter is a pointer with no bounds.
+func TestStrictExternsRejectsUnboundedScalarRef(t *testing.T) {
+	src := `extern read(fd: i32, buf: mutable u8&, count: usize) -> isize requires buf != null`
+	errs := strictExternErrors(t, "ext_d5.elisa", src)
+	want := `extern function "read" parameter "buf" is a pointer with no bounds; declare it as mutable view[u8], bind a length with @bounds(buf, <length>), or mark the extern @trusted("reason")`
+	if !strings.Contains(errs, want) {
+		t.Fatalf("expected D5, got: %v", errs)
+	}
+}
+
+// Not D5: a struct reference is one object; a lone scalar reference is an out-parameter;
+// a @bounds pair has become a view.
+func TestStrictExternsAcceptsBoundedShapes(t *testing.T) {
+	for _, tc := range []struct{ name, src string }{
+		{"struct_ref", "struct Rect layout(c):\n    w: i32\n\nextern area(r: Rect&, scale: i32) -> i32 requires r != null"},
+		{"out_param", "extern get_len(out: mutable i64&) -> void requires out != null"},
+		{"bounds", "@callconv(c)\n@bounds(buf, count)\nextern read(fd: i32, buf: mutable u8&, count: usize) -> isize requires buf.count > 0"},
+	} {
+		errs := strictExternErrors(t, "ext_d5_"+tc.name+".elisa", tc.src)
+		if strings.Contains(errs, "no bounds") {
+			t.Fatalf("%s must not trigger D5, got: %v", tc.name, errs)
+		}
+	}
+}
