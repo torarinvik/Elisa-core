@@ -689,7 +689,18 @@ func typesComparableForEquality(left Type, right Type) bool {
 	if IsNumericType(left) && IsNumericType(right) {
 		return true
 	}
-	return AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isRefLike(right)) || (IsNullType(right) && isRefLike(left))
+	return AssignableTo(left, right) || AssignableTo(right, left) || refsComparableIgnoringMutability(left, right) || (IsNullType(left) && isNullComparablePointer(right)) || (IsNullType(right) && isNullComparablePointer(left))
+}
+
+func isNullComparablePointer(t Type) bool {
+	if isRefLike(t) {
+		return true
+	}
+	// `cstr` crosses the native boundary as a nullable pointer even though its
+	// semantic carrier is DStrType. Contracts commonly spell that obligation as
+	// `text != null`, and the backend already lowers it as pointer identity.
+	str, ok := t.(*DStrType)
+	return ok && str.SurfaceName == "cstr"
 }
 
 // IsAggregateValueEqualityUnsupported reports aggregates that have no value-equality

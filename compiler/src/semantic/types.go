@@ -653,6 +653,13 @@ type FuncType struct {
 	// length go (docs/127 §3.3 legacy form). Nil means "explicit params in order, each split
 	// view adjacent" (the native form). See semantic.CParamPart and backend/llvm_extern_view_abi.go.
 	CParamPlan []CParamPart
+	// ExternEnsureValues / ExternRequires are a native extern's boundary clauses, kept for the
+	// backend: an extern `ensure` is CHECKED at every call site in checked builds (docs/127 D8),
+	// not merely assumed, unless the extern is @trusted — a lying library then stops at the
+	// boundary instead of turning safe code into undefined behaviour downstream.
+	ExternEnsureValues []ast.Expr
+	ExternRequires     []ast.Expr
+	TrustedExtern      bool
 	// BoundsLengthNames are the length parameters `@bounds` removed, for the call-site
 	// message when a caller still passes one.
 	BoundsLengthNames []string

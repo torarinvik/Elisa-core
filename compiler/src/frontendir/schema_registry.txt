@@ -1623,6 +1623,7 @@ F StructDecl 15 ReprC
 F StructDecl 16 StateParamCount
 F StructDecl 17 TerminalStateCases
 F StructDecl 18 TypeParams
+F StructDecl 19 Resource
 
 T 255 StructLitExpr
 F StructLitExpr 1 ArgNames

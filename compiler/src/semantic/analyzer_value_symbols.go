@@ -223,6 +223,10 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				boundsPlan, boundsLengths := a.applyExternBoundsRewrite(n)
 				fnType := a.funcTypeFromExternDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Params, n.ReturnType, n.Variadic)
 				fnType.CParamPlan = boundsPlan
+				fnType.ExternEnsureValues = append([]ast.Expr(nil), n.EnsureValues...)
+				fnType.ExternRequires = append([]ast.Expr(nil), n.Requires...)
+				fnType.TrustedExtern = externHasTrustedAnnotation(n)
+				a.analyzeExternBoundaryClauses(n, fnType)
 				fnType.BoundsLengthNames = boundsLengths
 				a.applyExternFuncAnnotations(n, fnType)
 				a.checkExternBoundsCallConv(n, fnType)

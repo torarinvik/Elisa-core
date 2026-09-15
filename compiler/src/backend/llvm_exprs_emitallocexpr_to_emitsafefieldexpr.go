@@ -620,6 +620,18 @@ func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMV
 	return phi, resultType, true, nil
 }
 func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
+	elisaArgs := append([]C.LLVMValueRef(nil), args...)
+	value, valueType, err := s.emitResolvedCallInner(callee, funcType, direct, args, regionArenaArgs)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := s.emitExternEnsureChecks(funcType, elisaArgs, value, valueType); err != nil {
+		return nil, nil, err
+	}
+	return value, valueType, nil
+}
+
+func (s *functionState) emitResolvedCallInner(callee C.LLVMValueRef, funcType *semantic.FuncType, direct bool, args []C.LLVMValueRef, regionArenaArgs []C.LLVMValueRef) (C.LLVMValueRef, semantic.Type, error) {
 	if funcType == nil {
 		return nil, nil, fmt.Errorf("call target does not have a function type")
 	}
