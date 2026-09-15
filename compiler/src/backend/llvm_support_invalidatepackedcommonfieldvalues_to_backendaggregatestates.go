@@ -213,6 +213,11 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 		}
 		return C.LLVMConstInt(llvmType, raw, 0), s.g.result.NamedTypes["bool"], nil
 	case semantic.ConstString:
+		// Preserve a declared view's aggregate ABI when materializing a named
+		// constant. A raw pointer is only the representation of a C string.
+		if actual != nil && isStringViewCarrierType(actual) {
+			return s.emitStringLiteral(&ast.StringLit{Value: value.String}, actual)
+		}
 		name := cString("cstr")
 		defer C.free(unsafe.Pointer(name))
 		text := cString(value.String)
