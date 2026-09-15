@@ -574,8 +574,8 @@ Recommended C mappings:
 | `uint64_t` | `u64` |
 | `size_t` | `usize` |
 | `ssize_t` | `isize` |
-| pointer / opaque handle | `void&?` |
-| non-null opaque pointer | `void&` |
+| opaque handle | `extern Name` then `Name?` / `Name&` / `mutable Name&`; `void&?` only for genuinely untyped C APIs, and then `@trusted("reason")` under `-strict-externs` |
+| non-null opaque handle | `Name&` |
 | nullable typed pointer | `T&?` |
 | mutable out pointer | `mutable T&` or `mutable T&?&` depending on shape |
 | C string input | `i8&?` or `u8&?` according to API convention |
@@ -654,6 +654,22 @@ For FFmpeg specifically, many structs are large and version-sensitive. Prefer
 public accessor functions and opaque pointers where possible.
 
 ## Raw Extern Safety
+
+`-strict-externs` enforces the extern pointer discipline (docs/127 §3.7):
+
+- every extern carries a `requires`/`ensure` contract or a `@trusted("reason")`;
+- a `void&` / `void&?` parameter or return is rejected as an untyped pointer;
+  declare the handle with `extern Name` instead;
+- a contract that names none of the extern's pointer parameters (refs other
+  than opaque handles, and `cstr`) is rejected: presence is not coverage.
+
+```elisa
+extern Adsr
+extern adsr_process(envelope: mutable Adsr&, level: f64) -> f64 requires level >= 0.0
+
+@trusted("libc abort: never returns; no caller obligations")
+extern abort() -> void
+```
 
 Raw extern calls cross out of Elisa's safety model. Treat them as a narrow,
 audited boundary.

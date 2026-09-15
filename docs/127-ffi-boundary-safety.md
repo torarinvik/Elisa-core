@@ -328,7 +328,7 @@ pass. Wording follows the house style of the existing extern messages.
 
 | id | guarantee | message (`error:` prefix, `file:line:col` as today) |
 |---|---|---|
-| D1 | no untyped handles at the boundary | `extern "adsr_process" parameter "envelope" is an untyped pointer (mutable void&?); declare an opaque handle with `extern resource` or `extern Name`, or mark the extern @trusted("reason")` |
+| D1 | no untyped handles at the boundary | `extern function "adsr_process" parameter "envelope" is an untyped pointer (mutable void&?); declare an opaque handle with `extern Name` and use it instead of void, or mark the extern @trusted("reason")` (LANDED in both compilers; the return form reads `returns an untyped pointer (…)`) |
 | D2 | every resource has a destructor | `extern resource "SdlTexture" declares no `__drop__`; add `def __drop__(self: consume SdlTexture)` in this module so the native handle is released on every exit path` |
 | D3 | ownership of a return is declared | `extern "SDL_CreateTexture" returns non-owning handle "SdlTexture" from a constructor; return `SdlTexture` (owned) or `SdlTexture&` (borrowed from a parameter via @borrows_return)` |
 | D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
@@ -339,7 +339,7 @@ pass. Wording follows the house style of the existing extern messages.
 | D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
 | D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
 | D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
-| D12 | `@trusted` is the only entry point for trust | `extern "memcpy" has a contract that covers none of its pointer parameters ("dest", "src"); under -strict-externs every pointer parameter must be a typed handle, a bounded view, a @bounds target, or the extern must be @trusted("reason")` |
+| D12 | `@trusted` is the only entry point for trust | `extern function "memcpy" has a contract that covers none of its pointer parameters (`dest`, `src`); under -strict-externs every pointer parameter must be named by the contract, be an opaque handle, or the extern must be @trusted("reason")` (LANDED in both compilers; will widen to bounded views and @bounds targets with step 2) |
 
 What this buys the engine team: `-strict-externs` on a binding family either
 passes, or every failure names the extern, the parameter, and the one-line
