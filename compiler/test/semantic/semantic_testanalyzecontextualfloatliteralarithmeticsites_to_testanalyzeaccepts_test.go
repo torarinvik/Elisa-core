@@ -392,6 +392,28 @@ def contextual_unary() -> i32:
 	requireExprTypeString(t, result, unaryExpr, "i32")
 	requireExprTypeString(t, result, unaryExpr.Operand, "i32")
 }
+
+func TestAnalyzeContextualWideIntegerComparisonLiteral(t *testing.T) {
+	src := `struct Run:
+    value: mutable i64
+
+def below_i64_limit(run: mutable Run&) -> bool:
+    return run.value < 9223372036854775806
+`
+	result, errs := parseAndAnalyze(t, "contextual_wide_integer_comparison.elisa", src)
+	requireNoErrors(t, errs)
+	fn := requireFuncDecl(t, result, "below_i64_limit")
+	returned, ok := contextualFuncStmt(fn, 0).(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected comparison return, got %T", contextualFuncStmt(fn, 0))
+	}
+	comparison, ok := returned.Value.(*ast.BinaryExpr)
+	if !ok {
+		t.Fatalf("expected binary comparison, got %T", returned.Value)
+	}
+	requireExprTypeString(t, result, comparison.Right, "i64")
+}
+
 func TestAnalyzeExplicitIntLiteralSuffixOverridesUsizeContext(t *testing.T) {
 	src := `def ok() -> usize:
 	which: usize = 1i32

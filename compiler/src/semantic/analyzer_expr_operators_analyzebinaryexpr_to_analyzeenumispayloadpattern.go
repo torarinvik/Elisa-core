@@ -16,6 +16,8 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	}
 	leftShorthand, leftIsShorthand := contextualShorthandExpr(expr.Left)
 	rightShorthand, rightIsShorthand := contextualShorthandExpr(expr.Right)
+	leftIntegerLiteral := isUnsuffixedIntegerValueExpr(expr.Left)
+	rightIntegerLiteral := isUnsuffixedIntegerValueExpr(expr.Right)
 	var left Type
 	var right Type
 	switch {
@@ -25,6 +27,20 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 	case rightIsShorthand && !leftIsShorthand:
 		left = a.analyzeExpr(expr.Left)
 		right = a.analyzeValueExpr(expr.Right, left)
+	case isNumericComparisonOperator(expr.Op) && leftIntegerLiteral && !rightIntegerLiteral:
+		right = a.analyzeExpr(expr.Right)
+		if expected := valueContextOperandType(right); IsIntegralStorageType(expected) {
+			left = a.analyzeValueExpr(expr.Left, expected)
+		} else {
+			left = a.analyzeExpr(expr.Left)
+		}
+	case isNumericComparisonOperator(expr.Op) && rightIntegerLiteral && !leftIntegerLiteral:
+		left = a.analyzeExpr(expr.Left)
+		if expected := valueContextOperandType(left); IsIntegralStorageType(expected) {
+			right = a.analyzeValueExpr(expr.Right, expected)
+		} else {
+			right = a.analyzeExpr(expr.Right)
+		}
 	default:
 		if leftIsShorthand && leftShorthand != nil {
 			left = a.analyzeShorthandMemberExpr(leftShorthand, nil)
@@ -195,6 +211,31 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		return CommonNumericType(left, right)
 	default:
 		return invalidType
+	}
+}
+
+func isNumericComparisonOperator(op lexer.TokenKind) bool {
+	switch op {
+	case lexer.TOKEN_EQEQ, lexer.TOKEN_BANGEQ,
+		lexer.TOKEN_LT, lexer.TOKEN_GT, lexer.TOKEN_LTEQ, lexer.TOKEN_GTEQ:
+		return true
+	default:
+		return false
+	}
+}
+
+// isUnsuffixedIntegerValueExpr identifies integer literals that can take their
+// comparison operand's type. An explicit numeric suffix remains authoritative.
+func isUnsuffixedIntegerValueExpr(expr ast.Expr) bool {
+	switch n := expr.(type) {
+	case *ast.IntLit:
+		return n.Suffix == ""
+	case *ast.ParenExpr:
+		return isUnsuffixedIntegerValueExpr(n.Inner)
+	case *ast.UnaryExpr:
+		return n.Op == lexer.TOKEN_MINUS && isUnsuffixedIntegerValueExpr(n.Operand)
+	default:
+		return false
 	}
 }
 

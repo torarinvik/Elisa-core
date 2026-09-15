@@ -124,6 +124,15 @@ func (s *functionState) storeValue(ptr C.LLVMValueRef, value C.LLVMValueRef, typ
 			}
 		}
 	}
+	valueType := C.LLVMTypeOf(value)
+	if C.LLVMGetTypeKind(valueType) == C.LLVMVoidTypeKind {
+		return fmt.Errorf("storeValue %q: cannot store an LLVM void value as semantic type %s", name, typ)
+	}
+	ptrType := C.LLVMTypeOf(ptr)
+	if C.LLVMGetTypeKind(ptrType) != C.LLVMPointerTypeKind {
+		ptrText := disposeLLVMMessage(C.LLVMPrintTypeToString(ptrType), "<unknown>")
+		return fmt.Errorf("storeValue %q: destination has non-pointer LLVM type %s (semantic type %s)", name, ptrText, typ)
+	}
 	store := C.LLVMBuildStore(s.builder, value, ptr)
 	s.tagDarrayElementAccess(store, ptr)
 	return nil
