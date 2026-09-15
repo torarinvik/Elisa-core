@@ -660,8 +660,9 @@ public accessor functions and opaque pointers where possible.
 - every extern carries a `requires`/`ensure` contract or a `@trusted("reason")`;
 - a `void&` / `void&?` parameter or return is rejected as an untyped pointer;
   declare the handle with `extern Name` instead;
-- a contract that names none of the extern's pointer parameters (refs other
-  than opaque handles, and `cstr`) is rejected: presence is not coverage.
+- every pointer parameter (a ref other than an opaque handle, or `cstr`) must
+  be named by a `requires`/`ensure` clause; each uncovered one is reported at
+  the parameter. Presence is not coverage.
 
 ```elisa
 extern Adsr

@@ -120,9 +120,10 @@ on `read`) a lying library turns safe Elisa code into UB with no runtime stop.
 RLBox's lesson (below) is that data *coming from* the library is tainted until
 validated.
 
-**H7. Presence is not coverage.** `-strict-externs` accepts
+**H7. Presence is not coverage.** `-strict-externs` accepted
 `extern memcpy(dst: mutable void&, src: void&, n: usize) requires n > 0`. The
-contract is present and says nothing about the two pointers.
+contract was present and said nothing about the two pointers. (Closed by D1 and
+D12, 2026-09-15.)
 
 **H8. Attribution.** `-emit unsafe` reports `RawExtern` per function. The
 engineer reading the audit cannot see *which* obligation is undischarged.
@@ -339,7 +340,7 @@ pass. Wording follows the house style of the existing extern messages.
 | D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
 | D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
 | D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
-| D12 | `@trusted` is the only entry point for trust | `extern function "memcpy" has a contract that covers none of its pointer parameters (`dest`, `src`); under -strict-externs every pointer parameter must be named by the contract, be an opaque handle, or the extern must be @trusted("reason")` (LANDED in both compilers; will widen to bounded views and @bounds targets with step 2) |
+| D12 | `@trusted` is the only entry point for trust | `extern function "memcpy" pointer parameter "dest" is not covered by its contract; under -strict-externs every pointer parameter must be named by a `requires`/`ensure` clause, be an opaque handle, or the extern must be @trusted("reason")` (LANDED in both compilers, one per uncovered parameter at the parameter; will widen to bounded views and @bounds targets with step 2) |
 
 What this buys the engine team: `-strict-externs` on a binding family either
 passes, or every failure names the extern, the parameter, and the one-line

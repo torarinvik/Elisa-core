@@ -12,10 +12,10 @@ import (
 //     pointer: any handle passes for any other, and no contract can name what it points at. The
 //     extern must instead use an opaque handle (`extern Name`) or be `@trusted("reason")`.
 //
-// D12: an extern that carries a contract, but whose contract mentions NONE of its pointer
-//     parameters, has documented nothing about the memory it touches. Presence is not coverage:
-//     `extern memcpy(dst: mutable void&, src: void&, n: usize) requires n > 0` must not pass the
-//     gate. A pointer parameter is any ref, optional ref, or `cstr`; opaque handles and bounded
+// D12: an extern that carries a contract must name EVERY pointer parameter in it; a pointer the
+//     contract never mentions has nothing documented about the memory it hands over. Presence is
+//     not coverage: `extern memcpy(dst: mutable u8&, src: u8&, n: usize) requires n > 0` must not
+//     pass the gate, and it is reported once per uncovered parameter, at the parameter. A pointer parameter is any ref, optional ref, or `cstr`; opaque handles and bounded
 //     views are typed on their own and do not count as uncovered.
 func (a *Analyzer) checkExternPointerDiscipline(fn *ast.ExternFuncDecl, fnType *FuncType) {
 	if a == nil || fn == nil || fnType == nil || !a.requireExternContracts || externHasTrustedAnnotation(fn) {
@@ -36,15 +36,6 @@ func (a *Analyzer) checkExternPointerDiscipline(fn *ast.ExternFuncDecl, fnType *
 	if !hasContract {
 		return
 	}
-	var pointerParams []string
-	for i, param := range fn.Params {
-		if i < len(fnType.Params) && isExternPointerParamType(fnType.Params[i]) {
-			pointerParams = append(pointerParams, param.Name)
-		}
-	}
-	if len(pointerParams) == 0 {
-		return
-	}
 	mentioned := map[string]bool{}
 	scanValueUsedIdents(reflect.ValueOf(fn.Requires), mentioned)
 	scanValueUsedIdents(reflect.ValueOf(fn.EnsureValues), mentioned)
@@ -54,12 +45,11 @@ func (a *Analyzer) checkExternPointerDiscipline(fn *ast.ExternFuncDecl, fnType *
 			mentioned[clause.Target.Root] = true
 		}
 	}
-	for _, name := range pointerParams {
-		if mentioned[name] {
-			return
+	for i, param := range fn.Params {
+		if i < len(fnType.Params) && isExternPointerParamType(fnType.Params[i]) && !mentioned[param.Name] {
+			a.errorf(param.Position, "extern function %q pointer parameter %q is not covered by its contract; under -strict-externs every pointer parameter must be named by a `requires`/`ensure` clause, be an opaque handle, or the extern must be @trusted(\"reason\")", fn.Name, param.Name)
 		}
 	}
-	a.errorf(fn.Pos(), "extern function %q has a contract that covers none of its pointer parameters (%s); under -strict-externs every pointer parameter must be named by the contract, be an opaque handle, or the extern must be @trusted(\"reason\")", fn.Name, quoteJoin(pointerParams))
 }
 
 // isUntypedPointerType reports a `void&`, `mutable void&`, or their optional forms.

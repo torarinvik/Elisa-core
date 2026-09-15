@@ -38,7 +38,7 @@ func TestStrictExternsAcceptsOpaqueHandle(t *testing.T) {
 	src := `extern Adsr
 extern adsr_process(envelope: mutable Adsr&, level: f64) -> f64 requires level >= 0.0`
 	errs := strictExternErrors(t, "ext_d1_handle.elisa", src)
-	if strings.Contains(errs, "untyped pointer") || strings.Contains(errs, "covers none") {
+	if strings.Contains(errs, "untyped pointer") || strings.Contains(errs, "not covered") {
 		t.Fatalf("an opaque handle must satisfy the pointer discipline, got: %v", errs)
 	}
 }
@@ -57,17 +57,21 @@ extern set_user(handle: mutable void&?) -> void`
 func TestStrictExternsRejectsContractCoveringNoPointer(t *testing.T) {
 	src := `extern memcpy(dest: mutable u8&, src: u8&, n: usize) -> void requires n > 0`
 	errs := strictExternErrors(t, "ext_d12.elisa", src)
-	want := `extern function "memcpy" has a contract that covers none of its pointer parameters (` + "`dest`, `src`" + `); under -strict-externs every pointer parameter must be named by the contract, be an opaque handle, or the extern must be @trusted("reason")`
-	if !strings.Contains(errs, want) {
-		t.Fatalf("expected D12, got: %v", errs)
+	for _, want := range []string{
+		`extern function "memcpy" pointer parameter "dest" is not covered by its contract; under -strict-externs every pointer parameter must be named by a ` + "`requires`/`ensure`" + ` clause, be an opaque handle, or the extern must be @trusted("reason")`,
+		`extern function "memcpy" pointer parameter "src" is not covered by its contract`,
+	} {
+		if !strings.Contains(errs, want) {
+			t.Fatalf("expected D12 per uncovered parameter, got: %v", errs)
+		}
 	}
 }
 
-// Naming one pointer parameter in `requires` satisfies D12. `cstr` counts as a pointer.
+// Naming every pointer parameter satisfies D12. `cstr` counts as a pointer.
 func TestStrictExternsAcceptsContractNamingPointer(t *testing.T) {
 	src := `extern strnlen(text: cstr, cap: usize) -> usize requires text != null ensure result <= cap`
 	errs := strictExternErrors(t, "ext_d12_ok.elisa", src)
-	if strings.Contains(errs, "covers none") {
+	if strings.Contains(errs, "not covered") {
 		t.Fatalf("a contract naming a pointer parameter must satisfy D12, got: %v", errs)
 	}
 }
