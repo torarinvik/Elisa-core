@@ -389,7 +389,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	}
 	explicitParamCount := funcTypeExplicitParamCount(ft)
 	if !ft.Variadic && len(orderedArgs) != explicitParamCount {
-		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))
+		a.errorf(expr.Pos(), "function %q expects %d arguments, got %d%s", ft.Name, explicitParamCount, len(orderedArgs), boundsLengthHint(ft))
 	}
 	if ft.Variadic && len(orderedArgs) < explicitParamCount {
 		a.errorf(expr.Pos(), "variadic function %q expects at least %d arguments, got %d", ft.Name, explicitParamCount, len(orderedArgs))

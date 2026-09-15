@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 	"strconv"
 
 	"elisacore/src/ast"
@@ -97,7 +98,7 @@ func (a *Analyzer) resolveFunctionCallArgs(expr *ast.CallExpr, ft *FuncType) ([]
 				continue
 			}
 			if nextPositional >= explicitParamCount {
-				a.errorf(arg.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+				a.errorf(arg.Pos(), "function %q expects %d arguments, got %d%s", ft.Name, explicitParamCount, len(expr.Args), boundsLengthHint(ft))
 				a.analyzeExpr(arg)
 				ok = false
 				continue
@@ -197,7 +198,7 @@ func (a *Analyzer) fillMissingDefaultCallArgs(expr *ast.CallExpr, ft *FuncType, 
 		}
 		if preferGenericMissing {
 			if !reportedGenericMissing {
-				a.errorf(expr.Pos(), "function %q expects %d arguments, got %d", ft.Name, explicitParamCount, len(expr.Args))
+				a.errorf(expr.Pos(), "function %q expects %d arguments, got %d%s", ft.Name, explicitParamCount, len(expr.Args), boundsLengthHint(ft))
 				reportedGenericMissing = true
 			}
 		} else if i < len(ft.ExplicitParamNames) && ft.ExplicitParamNames[i] != "" {
@@ -736,4 +737,18 @@ func (a *Analyzer) funcParamAllowsImplicitSink(funcExpr ast.Expr, fnType *FuncTy
 		a.inferFuncSinkParamsForExpr(funcExpr, fnType)
 	}
 	return fnType.SinkParamsKnown && index < len(fnType.SinkParams) && fnType.SinkParams[index]
+}
+
+
+// boundsLengthHint completes an arity message for a `@bounds` extern (docs/127 D6): the
+// caller most likely still passes the length the annotation now supplies.
+func boundsLengthHint(ft *FuncType) string {
+	if ft == nil || len(ft.BoundsLengthNames) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(ft.BoundsLengthNames))
+	for _, n := range ft.BoundsLengthNames {
+		names = append(names, "\""+n+"\"")
+	}
+	return "; the length parameter " + strings.Join(names, ", ") + " is supplied by @bounds from the view's count, so remove the explicit argument"
 }

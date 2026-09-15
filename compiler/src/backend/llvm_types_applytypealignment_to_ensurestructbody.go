@@ -116,20 +116,45 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	if sretReturn {
 		params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 	}
-	for _, param := range fn.Params {
+	// A C-ABI extern's C parameter order may differ from its semantic one: each `view[T]`
+	// is (ptr, len), placed adjacently or where `@bounds` says (llvm_extern_view_abi.go).
+	if parts := externCParts(fn); parts != nil {
+		lengthType, err := g.lowerBuiltin("usize")
+		if err != nil {
+			return nil, err
+		}
+		for _, part := range parts {
+			switch part.Part {
+			case semantic.CParamViewPtr:
+				params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			case semantic.CParamViewLen:
+				params = append(params, lengthType)
+			default:
+				param := fn.Params[part.Param]
+				if _, ok := externNicheOptionalPayload(fn, param); ok {
+					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					continue
+				}
+				if g.aggregateIsMemoryClassABI(param, cabi) {
+					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					continue
+				}
+				paramType, err := g.lowerType(param)
+				if err != nil {
+					return nil, err
+				}
+				params = append(params, paramType)
+			}
+		}
+	}
+	for i, param := range fn.Params {
+		if externCParts(fn) != nil {
+			_ = i
+			break
+		}
 		if _, ok := externNicheOptionalPayload(fn, param); ok {
 			// `T?` at a C boundary is the bare nullable pointer; see externOptionalABI.
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
-			continue
-		}
-		if _, ok := externSplitView(fn, param); ok {
-			// `view[T]` at a C boundary is two parameters, pointer then length; see
-			// llvm_extern_view_abi.go.
-			lengthType, err := g.lowerBuiltin("usize")
-			if err != nil {
-				return nil, err
-			}
-			params = append(params, C.LLVMPointerTypeInContext(g.context, 0), lengthType)
 			continue
 		}
 		if g.aggregateIsMemoryClassABI(param, cabi) {

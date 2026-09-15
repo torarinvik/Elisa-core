@@ -25,6 +25,7 @@ import (
 // an Elisa function in another unit, which must keep the aggregate ABI.
 
 // externSplitView reports whether parameter type t of function fn crosses as (ptr, len).
+// A `@bounds` plan makes the view's parts explicit, so the plan owns the split then.
 func externSplitView(fn *semantic.FuncType, t semantic.Type) (*semantic.ViewType, bool) {
 	if fn == nil || !fn.IsNativeExtern || !funcTypeIsCABI(fn) {
 		return nil, false
@@ -36,57 +37,86 @@ func externSplitView(fn *semantic.FuncType, t semantic.Type) (*semantic.ViewType
 	return view, true
 }
 
-// funcTypeSplitsViews reports whether any parameter of fn is split, so callers that index
-// LLVM parameters by semantic position can take the shifted layout into account.
-func funcTypeSplitsViews(fn *semantic.FuncType) bool {
+// externCParts is the C parameter order of fn: FuncType.CParamPlan when `@bounds` set one,
+// else the explicit params in order with each split view as adjacent (ptr, len). Nil when
+// nothing about fn differs from the plain one-LLVM-param-per-semantic-param lowering.
+func externCParts(fn *semantic.FuncType) []semantic.CParamPart {
 	if fn == nil {
-		return false
+		return nil
 	}
-	for _, p := range fn.Params {
+	if len(fn.CParamPlan) > 0 {
+		return fn.CParamPlan
+	}
+	var parts []semantic.CParamPart
+	split := false
+	for i, p := range fn.Params {
 		if _, ok := externSplitView(fn, p); ok {
-			return true
+			split = true
+			parts = append(parts, semantic.CParamPart{Param: i, Part: semantic.CParamViewPtr}, semantic.CParamPart{Param: i, Part: semantic.CParamViewLen})
+			continue
 		}
+		parts = append(parts, semantic.CParamPart{Param: i, Part: semantic.CParamWhole})
 	}
-	return false
+	if !split {
+		return nil
+	}
+	return parts
+}
+
+// funcTypeSplitsViews reports whether fn's C parameter order differs from its semantic one.
+func funcTypeSplitsViews(fn *semantic.FuncType) bool {
+	return externCParts(fn) != nil
 }
 
 // externViewLLVMParamPos maps a semantic explicit-parameter index to its LLVM parameter
-// index (relative to the explicit-parameter base), accounting for every split view before it.
+// index (relative to the explicit-parameter base): the position of that parameter's whole
+// value, or of its pointer for a split view.
 func externViewLLVMParamPos(fn *semantic.FuncType, semanticIndex int) int {
-	pos := semanticIndex
-	for i := 0; i < semanticIndex && i < len(fn.Params); i++ {
-		if _, ok := externSplitView(fn, fn.Params[i]); ok {
-			pos++
+	parts := externCParts(fn)
+	if parts == nil {
+		return semanticIndex
+	}
+	for pos, part := range parts {
+		if part.Param == semanticIndex && part.Part != semantic.CParamViewLen {
+			return pos
 		}
 	}
-	return pos
+	return semanticIndex
 }
 
-// convertExternViewArgs splits each view argument of a C-ABI extern call into its pointer
-// and length, and remaps the byval index map to the expanded positions. Returns the caller's
-// slices unchanged when nothing splits.
+// convertExternViewArgs reorders and splits the explicit arguments of a C-ABI extern call
+// into its C parameter order, and remaps the byval index map to the new positions. Returns
+// the caller's slices unchanged when the order is the identity.
 func (s *functionState) convertExternViewArgs(fn *semantic.FuncType, args []C.LLVMValueRef, byval map[int]C.LLVMTypeRef) ([]C.LLVMValueRef, map[int]C.LLVMTypeRef) {
-	if !funcTypeSplitsViews(fn) {
+	parts := externCParts(fn)
+	if parts == nil {
 		return args, byval
 	}
-	out := make([]C.LLVMValueRef, 0, len(args)+len(fn.Params))
+	out := make([]C.LLVMValueRef, 0, len(parts)+len(args))
 	var remapped map[int]C.LLVMTypeRef
-	for i, arg := range args {
-		if ty, ok := byval[i]; ok {
-			if remapped == nil {
-				remapped = map[int]C.LLVMTypeRef{}
-			}
-			remapped[len(out)] = ty
+	for _, part := range parts {
+		if part.Param >= len(args) {
+			continue
 		}
-		if i < len(fn.Params) {
-			if _, ok := externSplitView(fn, fn.Params[i]); ok {
-				ptr := C.LLVMBuildExtractValue(s.builder, arg, 0, cStringFree("extern.view.ptr"))
-				length := C.LLVMBuildExtractValue(s.builder, arg, 1, cStringFree("extern.view.len"))
-				out = append(out, ptr, length)
-				continue
+		arg := args[part.Param]
+		switch part.Part {
+		case semantic.CParamViewPtr:
+			out = append(out, C.LLVMBuildExtractValue(s.builder, arg, 0, cStringFree("extern.view.ptr")))
+		case semantic.CParamViewLen:
+			out = append(out, C.LLVMBuildExtractValue(s.builder, arg, 1, cStringFree("extern.view.len")))
+		default:
+			if ty, ok := byval[part.Param]; ok {
+				if remapped == nil {
+					remapped = map[int]C.LLVMTypeRef{}
+				}
+				remapped[len(out)] = ty
 			}
+			out = append(out, arg)
 		}
-		out = append(out, arg)
+	}
+	// Variadic tail (arguments beyond the explicit params) follows in order.
+	for i := len(fn.Params); i < len(args); i++ {
+		out = append(out, args[i])
 	}
 	return out, remapped
 }

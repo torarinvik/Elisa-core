@@ -249,10 +249,11 @@ extern scale_samples(samples: mutable view[f32], gain: f32) -> void
 ```
 
 **Legacy form.** For prototypes that already exist, bind the length parameter
-to the pointer parameter and let the compiler synthesize the bounded surface:
+to the pointer parameter (pairs: pointer, length) and let the compiler synthesize
+the bounded surface:
 
 ```elisa
-@bounds(buf: count)
+@bounds(buf, count)
 extern read(fd: i32, buf: mutable u8&, count: usize) -> isize
 ```
 
@@ -333,8 +334,8 @@ pass. Wording follows the house style of the existing extern messages.
 | D2 | every resource has a destructor | `extern resource "SdlTexture" declares no `__drop__`; add `def __drop__(self: consume SdlTexture)` in this module so the native handle is released on every exit path` |
 | D3 | ownership of a return is declared | `extern "SDL_CreateTexture" returns non-owning handle "SdlTexture" from a constructor; return `SdlTexture` (owned) or `SdlTexture&` (borrowed from a parameter via @borrows_return)` |
 | D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
-| D5 | pointer parameters carry bounds | `extern "read" parameter "buf" is a pointer with no bounds; use `mutable view[u8]`, bind a length with @bounds(buf: count), or mark the extern @trusted("reason")` |
-| D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf: count) from buf.count; remove the explicit argument` |
+| D5 | pointer parameters carry bounds | `extern "read" parameter "buf" is a pointer with no bounds; use `mutable view[u8]`, bind a length with @bounds(buf, count), or mark the extern @trusted("reason")` |
+| D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.count; remove the explicit argument` |
 | D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
 | D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.count) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
 | D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
@@ -429,7 +430,7 @@ extern wolf3d_sdl_set_palette_colors(palette: mutable SdlPalette&, colors: view[
 _ = wolf3d_sdl_set_palette_colors(palette, game_palette, 0)
 ```
 
-For a prototype we do not own: `@bounds(colors: ncolors)` on the original
+For a prototype we do not own: `@bounds(colors, ncolors)` on the original
 SDL declaration, and D6 forbids typing `ncolors` by hand.
 
 **elisa-ui Android text** (`ui_android_controls.elisa:214`), the manual

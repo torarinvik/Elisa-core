@@ -39,7 +39,7 @@ func removedAnnotationMigration(name string) (string, bool) {
 
 func isSupportedExternFunctionAnnotation(name string) bool {
 	switch name {
-	case "borrows_return", "link_name", "intrinsic", "wasm_import_module", "callconv", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted":
+	case "borrows_return", "link_name", "intrinsic", "wasm_import_module", "callconv", "internal", "blocking", "nonblocking", "segment_transition", "reentrant_safe", "deprecated", "trusted", "bounds":
 		return true
 	default:
 		return false

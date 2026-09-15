@@ -220,8 +220,12 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				})
 			case *ast.ExternFuncDecl:
 				qualifiedName := joinQualifiedName(scoped.Namespace, n.Name)
+				boundsPlan, boundsLengths := a.applyExternBoundsRewrite(n)
 				fnType := a.funcTypeFromExternDecl(qualifiedName, n.TypeParams, n.GenericParams, n.RegionParams, n.PermissionParams, n.Permissions, n.Ensures, n.Requires, n.EnsureValues, n.Params, n.ReturnType, n.Variadic)
+				fnType.CParamPlan = boundsPlan
+				fnType.BoundsLengthNames = boundsLengths
 				a.applyExternFuncAnnotations(n, fnType)
+				a.checkExternBoundsCallConv(n, fnType)
 				a.checkExternContractDiscipline(n)
 				a.checkExternPointerDiscipline(n, fnType)
 				a.checkExternOptionalABI(n, fnType)

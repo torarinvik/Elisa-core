@@ -585,6 +585,21 @@ type RefinementEnsure struct {
 	Args []ast.Expr
 }
 
+// CParamPart is one C parameter of a C-ABI extern: which Elisa explicit parameter it comes
+// from and which part of it (the whole value, or the pointer / length of a split view).
+type CParamPart struct {
+	Param int
+	Part  CParamPartKind
+}
+
+type CParamPartKind int
+
+const (
+	CParamWhole CParamPartKind = iota
+	CParamViewPtr
+	CParamViewLen
+)
+
 type FuncSegmentTransition int
 
 const (
@@ -630,6 +645,15 @@ type FuncType struct {
 	HasTemperatureMode          bool
 	CallConv                    string
 	IsNativeExtern              bool // a non-generic `extern`: the callee may be native C, so the signature is an ABI boundary (see extern_optional_abi.go)
+	// CParamPlan, when non-nil, is the C parameter order of a C-ABI extern whose Elisa-facing
+	// parameter list differs from the native prototype: `@bounds(buf, count)` turns `buf: T&`
+	// into `buf: view[T]` and removes `count`, and the plan says where the view's pointer and
+	// length go (docs/127 §3.3 legacy form). Nil means "explicit params in order, each split
+	// view adjacent" (the native form). See semantic.CParamPart and backend/llvm_extern_view_abi.go.
+	CParamPlan []CParamPart
+	// BoundsLengthNames are the length parameters `@bounds` removed, for the call-site
+	// message when a caller still passes one.
+	BoundsLengthNames []string
 	IntrinsicName               string
 	GuardEffects                []FuncGuardEffect
 	BoundaryPointerParamIndices []int
