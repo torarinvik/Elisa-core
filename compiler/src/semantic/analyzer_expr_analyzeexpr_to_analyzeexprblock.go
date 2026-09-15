@@ -27,7 +27,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && !(sym.Private && !a.canAccessPrivateName(n.Name)) {
-				result = promoteWritableRefType(sym.Type, sym.Mutable)
+				result = promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
 				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
 					if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
@@ -90,18 +90,18 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				}
 				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 					if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
-						result = promoteWritableRefType(fnType, sym.Mutable)
+						result = promoteWritableRefType(fnType, sym.Mutable && !sym.BindingMutabilityExplicit)
 						return
 					}
 				}
 				if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
-					result = promoteWritableRefType(specializedType, sym.Mutable)
+					result = promoteWritableRefType(specializedType, sym.Mutable && !sym.BindingMutabilityExplicit)
 				}
 				if t, ok := a.lookupRefinedExprType(n); ok {
 					if specializedType, ok := a.specializeCallbackCarryingType(t, result); ok {
-						result = promoteWritableRefType(specializedType, sym.Mutable)
+						result = promoteWritableRefType(specializedType, sym.Mutable && !sym.BindingMutabilityExplicit)
 					} else {
-						result = promoteWritableRefType(t, sym.Mutable)
+						result = promoteWritableRefType(t, sym.Mutable && !sym.BindingMutabilityExplicit)
 					}
 					return
 				}
@@ -120,7 +120,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name {
 				a.resolvedValueNames[n] = canonical
 			}
-			result = promoteWritableRefType(sym.Type, sym.Mutable)
+			result = promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
 			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 				a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
 				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
@@ -129,7 +129,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 				if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
-					result = promoteWritableRefType(fnType, sym.Mutable)
+					result = promoteWritableRefType(fnType, sym.Mutable && !sym.BindingMutabilityExplicit)
 					return
 				}
 			}

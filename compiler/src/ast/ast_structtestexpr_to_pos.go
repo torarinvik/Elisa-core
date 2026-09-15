@@ -366,9 +366,14 @@ type VarDeclStmt struct {
 	Position lexer.Pos
 	Name     string
 	Mutable  bool
-	Type     TypeExpr
-	Value    Expr
-	Owner    Expr
+	// BindingExplicit distinguishes `mutable name: T` / `const name: T` from the
+	// legacy `name: mutable T` spelling. In the explicit form the prefix controls
+	// whether the local slot can be rebound, while `mutable` inside T controls
+	// write-through capability of a reference value.
+	BindingExplicit bool
+	Type            TypeExpr
+	Value           Expr
+	Owner           Expr
 	// Ghost marks a verification-only local (`ghost x: T = expr`). It exists solely to give the
 	// prover a value to reason about (usable in requires/ensure/invariant/assert) and is fully
 	// ERASED from codegen. SOUNDNESS: no real variable/return/field/effect may depend on a ghost

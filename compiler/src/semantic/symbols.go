@@ -424,7 +424,11 @@ type Symbol struct {
 	AliasOf    *Symbol
 	ParamIndex int
 	Mutable    bool
-	Private    bool
+	// BindingMutabilityExplicit means the local's binding qualifier was written
+	// separately from its type (`mutable p: T&` / `const p: mutable T&`). A
+	// mutable binding must not thereby gain write-through capability.
+	BindingMutabilityExplicit bool
+	Private                   bool
 	// Ghost marks a verification-only local introduced by `ghost x: T = expr`. It may be read in
 	// contracts (requires/ensure/invariant/assert) but NEVER by real runtime code, and no real
 	// value may be assigned from it. Enforced in analyzer_ghost.go; the decl is erased in codegen.
@@ -442,9 +446,9 @@ func symbolAliasRoot(sym *Symbol) *Symbol {
 }
 
 type Scope struct {
-	Parent                  *Scope
-	Symbols                 map[string]*Symbol
-	Refinements             map[string]Type
+	Parent      *Scope
+	Symbols     map[string]*Symbol
+	Refinements map[string]Type
 	// narrowedOptionals records, for a place whose refinement narrowed `T?` down to `T`
 	// (recordAssignmentRefinement, after `x <- 5`), the DECLARED optional type. The
 	// narrowing is a useful fact -- `x` reads as a plain T afterwards -- but it must not

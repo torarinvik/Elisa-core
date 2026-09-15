@@ -523,6 +523,20 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		return tupleStmt
 	}
 
+	// An explicit local binding qualifier is independent of the declared type:
+	// `mutable p: T&` makes the local pointer slot rebindable, while `const p:
+	// mutable T&` keeps the slot fixed but permits writes through the reference.
+	// Keep the historical `name: mutable T` spelling unchanged below.
+	bindingExplicit := false
+	bindingMutable := false
+	if (p.peek() == lexer.TOKEN_MUTABLE || p.peek() == lexer.TOKEN_CONST) &&
+		p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT && p.tokens[p.pos+2].Kind == lexer.TOKEN_COLON {
+		bindingMutable = p.peek() == lexer.TOKEN_MUTABLE
+		p.advance()
+		pos = p.cur().Pos
+		bindingExplicit = true
+	}
+
 	// Variable declaration: name: [mutable] Type [= value]
 	// But NOT name:mutable (no space) which would be field:Type
 	if p.peek() == lexer.TOKEN_IDENT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
@@ -543,8 +557,8 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			p.advance()
 			p.advance()
 
-			mutable := false
-			if p.match(lexer.TOKEN_MUTABLE) {
+			mutable := bindingMutable
+			if !bindingExplicit && p.match(lexer.TOKEN_MUTABLE) {
 				mutable = true
 			}
 
@@ -578,7 +592,7 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 			}
 			p.expectNewlineAfterValueExpr(value)
 			value = desugarDStrStringLiteralInit(typ, value)
-			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, Type: typ, Value: value, Owner: owner}
+			return &ast.VarDeclStmt{Position: pos, Name: name, Mutable: mutable, BindingExplicit: bindingExplicit, Type: typ, Value: value, Owner: owner}
 		}
 	}
 

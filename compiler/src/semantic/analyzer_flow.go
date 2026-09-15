@@ -40,7 +40,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// mutate this", which for a view is write-through (exactly as it means push for a `mutable
 			// darray`). A read-only view keeps `v: view[T]`. AssignableTo still forbids backing a
 			// mutable view with a read-only (immutable-source) slice.
-			if n.Mutable {
+			if n.Mutable && !n.BindingExplicit {
 				if view, ok := declType.(*ViewType); ok && !view.Mutable {
 					cloned := *view
 					cloned.Mutable = true
@@ -85,7 +85,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// the reference rather than as an attempted replacement of the reference
 		// itself.  This mirrors the existing mutable-view promotion above and is
 		// required for explicit writable-reference locals in stage0.
-		if n.Mutable {
+		if n.Mutable && !n.BindingExplicit {
 			if ref, ok := bindingType.(*RefType); ok && ref != nil && !ref.Mutable {
 				cloned := cloneRefType(ref)
 				cloned.Mutable = true
@@ -119,7 +119,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// `in <region>:` scope carries that region in its type; escape checks and
 		// codegen arena routing consult it (see REGION_CONTAINERS_DESIGN.md).
 		bindingType = a.stampContainerRegion(bindingType)
-		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, Ghost: n.Ghost}
+		sym := &Symbol{Name: n.Name, Kind: SymbolLocal, Type: bindingType, Node: n, Mutable: n.Mutable, BindingMutabilityExplicit: n.BindingExplicit, Ghost: n.Ghost}
 		a.defineLocal(sym, n.Pos())
 		// A freshly-constructed struct local whose container fields are backed by the ambient
 		// region gets that region recorded, so a call site can thread it into a callee's
