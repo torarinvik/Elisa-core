@@ -88,8 +88,14 @@ func (a *Analyzer) rejectDotModulePath(pos lexer.Pos, spelling string) bool {
 	if offending == "" {
 		return false
 	}
-	a.reportedDotModuleTypes[reportKey] = true
-	a.errorf(pos, "%q is a namespace; write %s (`.` accesses value members, `::` accesses namespaces)", offending, corrected)
+	// Speculative inference passes suppress diagnostics but must not consume the
+	// once-only marker. The same type is resolved again by the real signature/body
+	// pass; marking it here would make that pass silently skip the user-facing error
+	// and could leave an invalid type for the backend.
+	if !a.suppressDiagnostics {
+		a.reportedDotModuleTypes[reportKey] = true
+		a.errorf(pos, "%q is a namespace; write %s (`.` accesses value members, `::` accesses namespaces)", offending, corrected)
+	}
 	return true
 }
 
@@ -137,8 +143,10 @@ func (a *Analyzer) rejectDotModulePathExpr(expr *ast.FieldExpr) bool {
 			if a.reportedDotModulePaths[link] {
 				return true
 			}
-			a.reportedDotModulePaths[link] = true
-			a.errorf(link.Pos(), "%q is a namespace; write %s::%s (`.` accesses value members, `::` accesses namespaces)", ast.ModulePathSpelling(key), ast.ModulePathSpelling(key), link.Field)
+			if !a.suppressDiagnostics {
+				a.reportedDotModulePaths[link] = true
+				a.errorf(link.Pos(), "%q is a namespace; write %s::%s (`.` accesses value members, `::` accesses namespaces)", ast.ModulePathSpelling(key), ast.ModulePathSpelling(key), link.Field)
+			}
 			return true
 		}
 		key += "." + link.Field
