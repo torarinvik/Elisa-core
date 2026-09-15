@@ -1722,6 +1722,7 @@ F VarDeclStmt 4 Owner
 F VarDeclStmt 5 Position
 F VarDeclStmt 6 Type
 F VarDeclStmt 7 Value
+F VarDeclStmt 8 BindingExplicit
 
 T 272 VariantTestExpr
 F VariantTestExpr 1 Pattern
