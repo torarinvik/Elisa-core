@@ -27,11 +27,13 @@ const DEBUG_REFEREE_REASON_NEAR_NULL: int = 2
 const DEBUG_REFEREE_REASON_NON_CANONICAL_X86_64: int = 3
 
 const DEBUG_REFEREE_NEAR_NULL_LIMIT: uintptr = 0x10000
-const DEBUG_REFEREE_POISON_GENERIC: uintptr = 0x0000800000000000
-const DEBUG_REFEREE_POISON_GOT: uintptr = 0x0000800000000001
-const DEBUG_REFEREE_POISON_TLS: uintptr = 0x0000800000000002
-const DEBUG_REFEREE_POISON_TCB: uintptr = 0x0000800000000003
-const DEBUG_REFEREE_POISON_DTV: uintptr = 0x0000800000000004
+# These are x86-64 address-space sentinels, not pointer-width values. Keeping
+# them as u64 avoids an out-of-range uintptr constant on 32-bit targets.
+const DEBUG_REFEREE_POISON_GENERIC: u64 = 0x0000800000000000
+const DEBUG_REFEREE_POISON_GOT: u64 = 0x0000800000000001
+const DEBUG_REFEREE_POISON_TLS: u64 = 0x0000800000000002
+const DEBUG_REFEREE_POISON_TCB: u64 = 0x0000800000000003
+const DEBUG_REFEREE_POISON_DTV: u64 = 0x0000800000000004
 
 struct DebugRefereeEvent:
     sequence: mutable u64
@@ -291,19 +293,24 @@ def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
     return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
-    true return if value == DEBUG_REFEREE_POISON_GENERIC
-    true return if value == DEBUG_REFEREE_POISON_GOT
-    true return if value == DEBUG_REFEREE_POISON_TLS
-    true return if value == DEBUG_REFEREE_POISON_TCB
-    true return if value == DEBUG_REFEREE_POISON_DTV
+    # Compare at a width that can represent the x86-64 sentinels. On a 32-bit
+    # target the widened pointer cannot equal any of them, as intended.
+    true return if value.u64() == DEBUG_REFEREE_POISON_GENERIC
+    true return if value.u64() == DEBUG_REFEREE_POISON_GOT
+    true return if value.u64() == DEBUG_REFEREE_POISON_TLS
+    true return if value.u64() == DEBUG_REFEREE_POISON_TCB
+    true return if value.u64() == DEBUG_REFEREE_POISON_DTV
     return false
 
 def debug_referee_is_near_null(value: uintptr) -> bool:
     return value != 0 and value < DEBUG_REFEREE_NEAR_NULL_LIMIT
 
 def debug_referee_is_noncanonical_x86_64(value: uintptr) -> bool:
-    high: uintptr = value >> 48
-    sign: uintptr = (value >> 47) & 1
+    # The original address is pointer-width. Widen before shifting so 32-bit
+    # builds never issue a shift by more than the operand width.
+    wide: u64 = value.u64()
+    high: u64 = wide >> 48
+    sign: u64 = (wide >> 47) & 1
     high != 0 return if sign == 0
     return high != 0xffff
 
