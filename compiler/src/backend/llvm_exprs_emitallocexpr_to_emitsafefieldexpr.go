@@ -642,6 +642,9 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	if err != nil {
 		return nil, nil, err
 	}
+	// A `view[T]` crossing to C splits into (ptr, len) in place; byval indices move with
+	// it. Done last so every earlier per-argument conversion still sees one arg per param.
+	args, byvalTypes = s.convertExternViewArgs(funcType, args, byvalTypes)
 	// Region-parameterized containers: append the hidden Arena& args (one per
 	// region param) after the explicit/implicit args, matching the param order
 	// in lowerFunctionType. Empty for non-region-param functions.

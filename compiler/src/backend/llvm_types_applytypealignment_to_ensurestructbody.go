@@ -122,6 +122,16 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 			continue
 		}
+		if _, ok := externSplitView(fn, param); ok {
+			// `view[T]` at a C boundary is two parameters, pointer then length; see
+			// llvm_extern_view_abi.go.
+			lengthType, err := g.lowerBuiltin("usize")
+			if err != nil {
+				return nil, err
+			}
+			params = append(params, C.LLVMPointerTypeInContext(g.context, 0), lengthType)
+			continue
+		}
 		if g.aggregateIsMemoryClassABI(param, cabi) {
 			// Memory-class params are passed by pointer (byval / indirect).
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))

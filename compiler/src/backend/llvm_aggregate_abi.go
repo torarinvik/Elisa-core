@@ -212,7 +212,7 @@ func (g *llvmGenerator) applyAggregateAbiAttrs(fn C.LLVMValueRef, fnType *semant
 		if err != nil {
 			continue
 		}
-		g.addFuncByvalAttr(fn, base+i, ty)
+		g.addFuncByvalAttr(fn, base+externViewLLVMParamPos(fnType, i), ty)
 	}
 }
 
@@ -321,7 +321,7 @@ func (g *llvmGenerator) applyMutableRefNoaliasAttrs(fn C.LLVMValueRef, fnType *s
 		if !pointeeEligibleForNoalias(rt.Elem) {
 			continue
 		}
-		g.addFuncEnumAttr(fn, base+i, "noalias")
+		g.addFuncEnumAttr(fn, base+externViewLLVMParamPos(fnType, i), "noalias")
 	}
 }
 
