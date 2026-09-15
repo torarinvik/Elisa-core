@@ -235,10 +235,11 @@ func (a *Analyzer) collectionValueRoot(expr ast.Expr) *Symbol {
 }
 
 // ambientArenaLocalValueName returns the name of the active allocation arena
-// when it is a function-local `Arena` value (the transient case). It returns
-// false for a global Arena, an Arena& reference local/parameter (which points at
-// a longer-lived arena), or any non-trivial owner expression — i.e. cases that
-// are persistent or that we cannot prove transient, to avoid false positives.
+// when it is transient: a function-local `Arena` value or a scoped `region`
+// owner. It returns false for a global Arena, an Arena& reference local/parameter
+// (which points at a longer-lived arena), or any non-trivial owner expression —
+// i.e. cases that are persistent or that we cannot prove transient, to avoid
+// false positives.
 func (a *Analyzer) ambientArenaLocalValueName() (string, bool) {
 	if a.currentAllocExpr == nil {
 		return "", false
@@ -249,6 +250,18 @@ func (a *Analyzer) ambientArenaLocalValueName() (string, bool) {
 	}
 	sym, ok := a.currentScope.Lookup(ident.Name)
 	if !ok || sym == nil {
+		return "", false
+	}
+	// A `region NAME(...):` owner is always freed at the end of its lexical block.
+	// Treat it like a local Arena value so mutations of caller-owned containers
+	// inside `in NAME:` are rejected before their backing can dangle on block exit.
+	if sym.Kind == SymbolRegion {
+		region, isRegion := sym.Node.(*ast.RegionStmt)
+		if isRegion && region != nil && (region.UserAuto || !isSynthesizedAutoRegion(region.Name)) {
+			return ident.Name, true
+		}
+		// A compiler-generated auto-region is eligible for region-return adoption; treating it as an
+		// ordinary local Arena here would reject valid local builders that return their result.
 		return "", false
 	}
 	sym = symbolAliasRoot(sym)
@@ -289,8 +302,13 @@ func (a *Analyzer) lvalueStorageOutlivesFunction(expr ast.Expr) bool {
 		}
 		sym = symbolAliasRoot(sym)
 		switch sym.Kind {
-		case SymbolGlobal, SymbolParam:
+		case SymbolGlobal:
 			return true
+		case SymbolParam:
+			// By-value parameters are callee-local copies (notably a darray header). Only a
+			// reference parameter points at storage whose lifetime can exceed this function.
+			_, isRef := sym.Type.(*RefType)
+			return isRef
 		case SymbolLocal:
 			_, isRef := sym.Type.(*RefType)
 			return isRef

@@ -154,14 +154,18 @@ func (a *Analyzer) typeCastNodesInExpr(expr ast.Expr) {
 	}
 }
 
-// collectSelfRecursiveCalls returns every direct call `fn.Name(...)` syntactically inside fn's body.
-// Direct-by-name only (mirrors resolveDirectCallFuncDecl's conservatism): an indirect or method call
-// is not recognized as recursion, so it never gets a (false) termination obligation.
+// collectSelfRecursiveCalls returns every direct call whose resolved declaration is fn.
+// Comparing declaration identity, rather than source spelling, also handles module-local functions
+// whose calls are bare identifiers but whose declaration names are qualified during flattening.
+// Indirect and method calls remain outside this direct-recursion check.
 func (a *Analyzer) collectSelfRecursiveCalls(fn *ast.FuncDecl) []*ast.CallExpr {
+	if fn == nil {
+		return nil
+	}
 	var calls []*ast.CallExpr
 	a.walkStaticStmts(fn.Body, func(expr ast.Expr) bool {
 		if call, ok := expr.(*ast.CallExpr); ok && call != nil {
-			if ident, ok := call.Func.(*ast.Ident); ok && ident != nil && ident.Name == fn.Name {
+			if decl, ok := a.resolveDirectCallFuncDecl(call); ok && decl == fn {
 				calls = append(calls, call)
 			}
 		}

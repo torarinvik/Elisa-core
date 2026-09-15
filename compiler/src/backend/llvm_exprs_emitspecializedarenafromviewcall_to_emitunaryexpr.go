@@ -329,6 +329,9 @@ func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.
 	C.LLVMPositionBuilderAtEnd(s.builder, fillBB)
 	voidType := s.g.result.NamedTypes["void"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
+	// libc declares memset's byte value as C int, which is i32 on every supported
+	// target. Elisa's `int` is i64, so using it here conflicts with the source-level
+	// extern signature and can make a Stage0 bootstrap fail with two LLVM prototypes.
 	memsetValueType := s.g.result.NamedTypes["i32"]
 	memsetType := &semantic.FuncType{Name: "memset", Params: []semantic.Type{voidRefType, memsetValueType, s.g.result.NamedTypes["usize"]}, Return: voidRefType}
 	memsetCallee, err := s.g.ensureFunctionDeclared("memset", memsetType)
@@ -504,6 +507,8 @@ func (s *functionState) emitMemcmpEqual(left C.LLVMValueRef, right C.LLVMValueRe
 func (s *functionState) emitMemcmpEqualValue(left C.LLVMValueRef, right C.LLVMValueRef, lengthValue C.LLVMValueRef, callName string, noAliasArgs bool) (C.LLVMValueRef, error) {
 	voidType := s.g.result.NamedTypes["void"]
 	usizeType := s.g.result.NamedTypes["usize"]
+	// libc's memcmp returns C int (i32); Elisa's `int` is 64-bit and conflicts
+	// with the standard-library extern on ABI-correct Stage1 sources.
 	intType := s.g.result.NamedTypes["i32"]
 	voidRefType := &semantic.RefType{Elem: voidType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, ExplicitStorage: true}
 	helperType := &semantic.FuncType{

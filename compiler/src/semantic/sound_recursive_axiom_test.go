@@ -43,6 +43,31 @@ def caller(n: i64) -> i64:
 	}
 }
 
+func TestModuleLocalSelfRecursionUsesResolvedDeclaration(t *testing.T) {
+	src := `
+module Counts:
+    def sum_to(n: i64) -> i64:
+        requires n >= 0
+        ensure result >= 0
+        decreases n
+        if n == 0:
+            return 0
+        return sum_to(n - 1) + 1
+
+def caller(n: i64) -> i64:
+    requires n >= 0
+    ensure result >= 0
+    return Counts::sum_to(n)
+`
+	r := analyzeContractStrict(t, "module_local_recursive.elisa", src)
+	if errs := r.Errors(); len(errs) != 0 {
+		t.Fatalf("module-local self recursion should be checked as direct recursion, got: %v", errs)
+	}
+	if !proofReportContainsSubject(r.ProofReport, "termination of sum_to (direct numeric)") {
+		t.Fatalf("expected direct numeric termination certificate, got: %+v", r.ProofReport)
+	}
+}
+
 func TestRecursiveAffineBoundsThroughInduction(t *testing.T) {
 	src := `
 def add_const(n: i64) -> i64:

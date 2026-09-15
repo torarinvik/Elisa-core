@@ -188,7 +188,7 @@ def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	}
 }
 func TestGenerateOptimizedLLVMObjectFileSupportsArenaDViewByteFillWithRuntimeMemsetDecl(t *testing.T) {
-	src := `extern memset(dest: void&, val: int, n: usize) -> void&
+	src := `extern memset(dest: void&, val: i32, n: usize) -> void&
 
 struct DynArray[T]:
 	items: mutable T&?
@@ -220,8 +220,8 @@ def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
 	}
-	if !strings.Contains(output, "declare ptr @memset(ptr, i64, i64)") {
-		t.Fatalf("expected runtime memset declaration to lower to an int-sized second argument, got:\n%s", output)
+	if !strings.Contains(output, "declare ptr @memset(ptr, i32, i64)") {
+		t.Fatalf("expected libc memset declaration to use the C int/i32 ABI, got:\n%s", output)
 	}
 	fillBody := functionIR(output, "fill_runtime_byte")
 	if fillBody == "" {
