@@ -432,6 +432,8 @@ type StructType struct {
 	DerivedStateMap    map[string]*StructDerivedState
 	Fields             map[string]Field
 	Affine             bool
+	// Resource: synthesized from `extern resource Name` (docs/127 §3.2); see ast.StructDecl.Resource.
+	Resource bool
 	// Droppable: `affine` (use-at-most-once, may be dropped) vs `linear`
 	// (use-exactly-once, must-consume). Only meaningful when Affine is true;
 	// defaults false so a propagation gap is over-strict (linear), never unsound.

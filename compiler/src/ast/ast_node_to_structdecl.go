@@ -639,6 +639,10 @@ type StructDecl struct {
 	TerminalStateCases []string
 	DerivedStates      []DerivedStateDecl
 	Affine             bool
+	// Resource marks a struct synthesized from `extern resource Name` (docs/127 §3.2): its
+	// single `__handle` field is the native handle, it must declare `__drop__`, and the
+	// extern boundary passes the handle itself in place of the struct.
+	Resource bool
 	// Droppable distinguishes `affine` (use-at-most-once, may be dropped) from
 	// `linear` (use-exactly-once, must be consumed). Only meaningful when
 	// Affine is true; defaults false so a plain `linear` type is must-consume.

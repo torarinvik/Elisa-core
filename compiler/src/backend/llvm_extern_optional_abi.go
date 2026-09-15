@@ -77,6 +77,15 @@ func (s *functionState) emitExternOptionalFromNiche(ptr C.LLVMValueRef, optional
 	present := C.LLVMBuildICmp(s.builder, C.LLVMIntNE, ptr, C.LLVMConstNull(ptrType), cStringFree("extern.opt.present"))
 	result := C.LLVMGetUndef(optionalType)
 	result = C.LLVMBuildInsertValue(s.builder, result, present, 0, cStringFree("extern.opt.tag"))
-	result = C.LLVMBuildInsertValue(s.builder, result, ptr, 1, cStringFree("extern.opt.val"))
+	payload := ptr
+	if opt, ok := optional.(*semantic.OptionalType); ok && semantic.IsResourceStructType(opt.Value) {
+		// The payload is the resource STRUCT; wrap the handle (llvm_extern_resource_abi.go).
+		wrapped, err := s.emitResourceFromHandle(ptr, opt.Value)
+		if err != nil {
+			return nil, err
+		}
+		payload = wrapped
+	}
+	result = C.LLVMBuildInsertValue(s.builder, result, payload, 1, cStringFree("extern.opt.val"))
 	return result, nil
 }

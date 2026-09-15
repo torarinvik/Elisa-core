@@ -1037,6 +1037,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 	// Must run after value symbols (each hook needs its resolved FuncType) and before
 	// any body analysis, so the induced move-only discipline governs every use.
 	a.collectDropHooks(activeDecls)
+	a.checkResourceDrops()
 	a.rejectDropTypedGlobals(activeDecls)
 	a.validateAliasRefinements()
 	a.collectStaticImpls(activeDecls)

@@ -634,6 +634,7 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 	// Optional arguments to an extern cross as the bare nullable pointer the C callee
 	// declares; see externOptionalABI. Done before convertByvalArgs so the optional is
 	// already a pointer by the time aggregate classification runs.
+	args = s.convertExternResourceArgs(funcType, args)
 	args = s.convertExternOptionalArgs(funcType, args)
 	// Convert any memory-class aggregate arguments into byval pointers
 	// (memcpy-filled stack temporaries) so they match the lowered pointer
@@ -737,6 +738,13 @@ func (s *functionState) emitResolvedCall(callee C.LLVMValueRef, funcType *semant
 			return nil, nil, err
 		}
 		return optionalValue, funcType.Return, nil
+	}
+	if externReturnsResource(funcType) {
+		wrapped, err := s.emitResourceFromHandle(call, funcType.Return)
+		if err != nil {
+			return nil, nil, err
+		}
+		return wrapped, funcType.Return, nil
 	}
 	return call, funcType.Return, nil
 }

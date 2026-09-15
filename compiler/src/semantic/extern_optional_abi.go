@@ -70,6 +70,9 @@ func NullNichePointerPayload(t Type) bool {
 		// An `extern T` handle is a C pointer to an undescribed type; the C convention
 		// is that a valid handle is never NULL.
 		return true
+	case *StructType:
+		// An `extern resource` struct IS its handle at the boundary (docs/127 §3.2).
+		return tt != nil && tt.Resource
 	case *FuncType:
 		// A function pointer; no valid function has address NULL.
 		return true

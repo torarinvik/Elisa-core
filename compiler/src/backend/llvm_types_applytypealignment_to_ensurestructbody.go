@@ -94,6 +94,10 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 	if nicheOptionalReturn {
 		returnType = C.LLVMPointerTypeInContext(g.context, 0)
 	}
+	// An `extern resource` crosses as its bare handle (llvm_extern_resource_abi.go).
+	if externReturnsResource(fn) {
+		returnType = C.LLVMPointerTypeInContext(g.context, 0)
+	}
 	// Large aggregate returns are returned via an sret out-pointer (return void),
 	// mirroring the error-union out-param mechanism. (Error-union returns already
 	// carry their value via an out-pointer, so they are mutually exclusive.)
@@ -135,6 +139,10 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 					continue
 				}
+				if _, ok := externResourceParam(fn, param); ok {
+					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+					continue
+				}
 				if g.aggregateIsMemoryClassABI(param, cabi) {
 					params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 					continue
@@ -154,6 +162,10 @@ func (g *llvmGenerator) lowerFunctionTypeInternal(fn *semantic.FuncType, entrySt
 		}
 		if _, ok := externNicheOptionalPayload(fn, param); ok {
 			// `T?` at a C boundary is the bare nullable pointer; see externOptionalABI.
+			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
+			continue
+		}
+		if _, ok := externResourceParam(fn, param); ok {
 			params = append(params, C.LLVMPointerTypeInContext(g.context, 0))
 			continue
 		}

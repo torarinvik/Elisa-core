@@ -40,6 +40,11 @@ func isBorrowableAffineOwnerType(t Type) bool {
 	if directProtocolLeakKind(t) == "linear value" {
 		return true
 	}
+	// An `extern resource` (docs/127 §3.2) is borrowable: `f(r: Name&)` lends the handle
+	// without consuming it, and the scope-exit `__drop__` still releases it.
+	if st, ok := t.(*StructType); ok && st != nil && st.Resource {
+		return true
+	}
 	return isBuiltinProtocolOwnerType(t, "ThreadPool") || isBuiltinProtocolOwnerType(t, "TaskGroup")
 }
 

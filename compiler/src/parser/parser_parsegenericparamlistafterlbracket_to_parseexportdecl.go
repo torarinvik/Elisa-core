@@ -554,6 +554,20 @@ func (p *Parser) parseExternDecl() ast.Decl {
 func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) ast.Decl {
 	pos := p.cur().Pos
 	p.expect(lexer.TOKEN_EXTERN)
+	// `extern resource Name` (docs/127 §3.2): an opaque native handle that Elisa OWNS.
+	// Desugars to the handle type `Name__native` plus a one-field struct `Name` wrapping it,
+	// so the existing affine/`__drop__` machinery gives moves, scope-exit release and
+	// use-after-release for free; the extern boundary passes the handle in place of the
+	// struct (backend/llvm_extern_resource_abi.go). The struct lands at file scope via
+	// pendingDecls, like the protocol and machine sugars.
+	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "resource" && p.peekAt(1) == lexer.TOKEN_IDENT {
+		p.advance()
+		name := p.expect(lexer.TOKEN_IDENT).Text
+		p.expectNewline()
+		handleName := name + "__native"
+		p.pendingDecls = append(p.pendingDecls, &ast.StructDecl{Position: pos, Name: name, Resource: true, Fields: []ast.FieldDecl{{Position: pos, Name: "__handle", Type: &ast.NamedType{Position: pos, Name: handleName, Spelling: handleName}}}})
+		return &ast.ExternTypeDecl{Position: pos, Annotations: append([]ast.Annotation(nil), annotations...), Name: handleName}
+	}
 	name := p.expect(lexer.TOKEN_IDENT).Text
 
 	// extern TypeName  (opaque type - no parens, no colon)

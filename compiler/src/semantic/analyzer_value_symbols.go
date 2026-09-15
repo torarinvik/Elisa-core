@@ -226,6 +226,7 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 				fnType.BoundsLengthNames = boundsLengths
 				a.applyExternFuncAnnotations(n, fnType)
 				a.checkExternBoundsCallConv(n, fnType)
+				a.checkExternResourceSignature(n, fnType)
 				a.checkExternContractDiscipline(n)
 				a.checkExternPointerDiscipline(n, fnType)
 				a.checkExternOptionalABI(n, fnType)
