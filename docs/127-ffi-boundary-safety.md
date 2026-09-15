@@ -349,6 +349,13 @@ runtime check, and nothing else is trusted anywhere.
 
 ## 4. Order of work and what each step buys
 
+Status 2026-09-15: **step 1 landed** in both compilers (stage0 `4ea78cf2`,
+stage1 `c520364f`), gated by `test/parity/extern_discipline_smoke.sh` (nine
+cases, byte-identical stderr). Landing it also exposed and fixed two unrelated
+stage1 gaps that blocked self-hosting: modules declared once per `static if`
+branch (`static_if_module_smoke.sh`) and nested-module const reads
+(`nested_module_const.elisa`, stage1 `07dfa7a9`).
+
 1. **Doc 08 mapping table + `-strict-externs` `void&?` rule** (§3.1). One
    analyzer rule in each compiler, one doc edit. Catches H1 immediately in
    every project that turns the gate on.
