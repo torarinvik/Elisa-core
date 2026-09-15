@@ -23,6 +23,9 @@ func normalizeFunctionTailReturns(body []ast.Stmt, returnType ast.TypeExpr) []as
 }
 
 func functionReturnTypeIsVoid(returnType ast.TypeExpr) bool {
+	if returnType == nil {
+		return true
+	}
 	named, ok := returnType.(*ast.NamedType)
 	return ok && named.Name == "void"
 }

@@ -62,3 +62,16 @@ func TestParseVoidFunctionDoesNotConvertTail(t *testing.T) {
 		t.Fatalf("expected void tail to remain ExprStmt, got %T", fn.Body[0])
 	}
 }
+
+func TestParseUnannotatedFunctionDoesNotConvertTail(t *testing.T) {
+	file, errs := parseSourceFile(t, `def note():
+    1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	if _, ok := fn.Body[0].(*ast.ExprStmt); !ok {
+		t.Fatalf("expected unannotated tail to remain ExprStmt, got %T", fn.Body[0])
+	}
+}
