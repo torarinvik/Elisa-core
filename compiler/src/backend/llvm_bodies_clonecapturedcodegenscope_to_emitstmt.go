@@ -349,7 +349,7 @@ func backendTypeCarriesRegionStorageRec(t semantic.Type, seen map[semantic.Type]
 	}
 	seen[t] = true
 	switch tt := t.(type) {
-	case *semantic.DArrayType, *semantic.DictType, *semantic.SetType, *semantic.DStrType, *semantic.SViewType, *semantic.ViewType:
+	case *semantic.DArrayType, *semantic.DictType, *semantic.SetType, *semantic.CStrType, *semantic.SViewType, *semantic.ViewType:
 		return true
 	case *semantic.RefType:
 		return tt != nil && backendTypeCarriesRegionStorageRec(tt.Elem, seen)

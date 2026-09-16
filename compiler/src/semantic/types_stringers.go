@@ -33,7 +33,7 @@ func (*DArrayType) isType()            {}
 func (*ViewType) isType()              {}
 func (*StoreRowsViewType) isType()     {}
 func (*StoreRowViewType) isType()      {}
-func (*DStrType) isType()              {}
+func (*CStrType) isType()              {}
 func (*DictType) isType()              {}
 func (*SetType) isType()               {}
 func (*DictEntryType) isType()         {}
@@ -546,7 +546,7 @@ func (t *StoreRowViewType) String() string {
 	}
 	return t.Store.String() + ".row"
 }
-func (t *DStrType) String() string {
+func (t *CStrType) String() string {
 	if isWildcardShape(t.Shape) {
 		return "cstr"
 	}

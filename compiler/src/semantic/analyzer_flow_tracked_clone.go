@@ -169,7 +169,7 @@ func (a *Analyzer) cloneTrackedValueTypeWithSeenDepth(t Type, seen map[Type]Type
 			return invalidType
 		}
 		return &cloned
-	case *DStrType:
+	case *CStrType:
 		cloned := *tt
 		seen[t] = &cloned
 		return &cloned

@@ -38,7 +38,7 @@ func collectShapeParamsInType(t Type, out map[string]bool) {
 		collectShapeParamsInType(n.Elem, out)
 	case *ViewType:
 		collectShapeParamsInType(n.Elem, out)
-	case *DStrType:
+	case *CStrType:
 		if param, ok := n.Shape.(*ShapeParam); ok {
 			out[param.Name] = true
 		}
@@ -222,7 +222,7 @@ func collectFreshShapesInto(t Type, seen map[int]bool, out *[]*FreshShape) {
 		collectFreshShapesInto(n.Elem, seen, out)
 	case *ViewType:
 		collectFreshShapesInto(n.Elem, seen, out)
-	case *DStrType:
+	case *CStrType:
 		if fresh, ok := n.Shape.(*FreshShape); ok && !seen[fresh.ID] {
 			seen[fresh.ID] = true
 			*out = append(*out, fresh)

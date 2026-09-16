@@ -253,7 +253,7 @@ type ViewType struct {
 	// by slicing a region-backed `darray[T] @r` (or another region-carrying view)
 	// inherits r, so the escape checker proves the borrowed window cannot outlive
 	// r — the same guarantee SViewType.Region gives string views. Inert in
-	// SameType/AssignableTo, like DArrayType/DictType/DStrType/SViewType.Region.
+	// SameType/AssignableTo, like DArrayType/DictType/CStrType/SViewType.Region.
 	Region string
 }
 
@@ -265,7 +265,7 @@ type StoreRowViewType struct {
 	Store *StructType
 }
 
-type DStrType struct {
+type CStrType struct {
 	Shape       Shape
 	SurfaceName string
 	// Region is the allocation region a `cstr @r` points into (region-
@@ -302,7 +302,7 @@ type SViewType struct {
 	// Region is the allocation region an `sview @r` points into. An sview
 	// produced from `darray[u8] @r` via `.sview()` carries r so the escape
 	// checker proves the bounded {data,len} view cannot outlive r. Inert in
-	// SameType/AssignableTo (Phase 1), like DArrayType/DictType/DStrType.Region.
+	// SameType/AssignableTo (Phase 1), like DArrayType/DictType/CStrType.Region.
 	Region string
 }
 

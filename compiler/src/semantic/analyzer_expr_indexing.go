@@ -167,7 +167,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 		return finish(storeType.Enum)
 	}
-	if _, ok := objType.(*DStrType); ok {
+	if _, ok := objType.(*CStrType); ok {
 		return finish(a.namedTypes["char"])
 	}
 	if isStringViewType(objType) {
@@ -205,7 +205,7 @@ func (a *Analyzer) analyzeIndexExpr(expr *ast.IndexExpr) Type {
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			return finish(storeType.Enum)
 		}
-		if _, ok := ref.Elem.(*DStrType); ok {
+		if _, ok := ref.Elem.(*CStrType); ok {
 			return finish(a.namedTypes["char"])
 		}
 		if isStringViewType(ref.Elem) {
@@ -488,7 +488,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 	if storeType, ok := objType.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 		return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 	}
-	if cstr, ok := objType.(*DStrType); ok {
+	if cstr, ok := objType.(*CStrType); ok {
 		_ = cstr
 		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 	}
@@ -518,7 +518,7 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 		}
-		if _, ok := ref.Elem.(*DStrType); ok {
+		if _, ok := ref.Elem.(*CStrType); ok {
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
 		}
 		if isStringViewType(ref.Elem) {

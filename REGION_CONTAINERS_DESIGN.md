@@ -60,7 +60,7 @@ larger, still-unbuilt body of this design.
   the single most important fact: we are re-pointing an existing wire, not
   inventing one.
 - **Containers lack a region.** `DArrayType{Elem, Shape, SurfaceName}` — no
-  `Region`. `DStrType`, `DictType`, `ViewType` likewise. This is the gap.
+  `Region`. `CStrType`, `DictType`, `ViewType` likewise. This is the gap.
 - **`DArrayBuilder` already stores `owner: Arena&`** — i.e. option (2), the
   runtime-field approach. We are deliberately *not* generalizing that; we fold
   its capability into plain `darray` via the type-level region instead.
@@ -154,7 +154,7 @@ that `@r` values can't outlive `r`. Everything else is inferred/threaded.
 
 ### 1. Region as an associated parameter on containers
 Add `Region string` (+ a `RegionParam string` for polymorphism, mirroring
-`StateParam`/`StorageParam`) to `DArrayType`, `DStrType`, `DictType`,
+`StateParam`/`StorageParam`) to `DArrayType`, `CStrType`, `DictType`,
 `ViewType`, `DArrayViewType`, store types.
 - Surface stays `darray[T]` (region inferred). Explicit form `darray[T] @ r`
   only at boundaries that need it.

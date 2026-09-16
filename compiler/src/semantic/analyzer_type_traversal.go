@@ -204,7 +204,7 @@ func (a *Analyzer) typeCanContainRegionRefs(t Type, seen map[string]bool) bool {
 		return a.typeCanContainRegionRefs(tt.Value, seen)
 	case *ViewType:
 		return true
-	case *DStrType:
+	case *CStrType:
 		return true
 	case *SViewType:
 		return true

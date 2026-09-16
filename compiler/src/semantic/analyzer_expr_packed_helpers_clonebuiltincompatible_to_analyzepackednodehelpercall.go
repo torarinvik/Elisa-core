@@ -20,7 +20,7 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 	}
 	seen[key] = true
 	switch tt := target.(type) {
-	case *BuiltinType, *ConstEnumType, *ErrorSetType, *NullType, *DStrType, *SViewType:
+	case *BuiltinType, *ConstEnumType, *ErrorSetType, *NullType, *CStrType, *SViewType:
 		// An sview is a borrowed (ptr, len) into someone else's storage. Cloning
 		// it copies only the view header — the result still borrows the same
 		// bytes. It does NOT become an owner: persisting bytes into a region is

@@ -449,7 +449,7 @@ func isCABICompatibleType(t Type) bool {
 		return isCABICompatibleType(tt.Storage)
 	case *RefType:
 		return true
-	case *DStrType:
+	case *CStrType:
 		// cstr is represented as a raw immutable byte pointer at the C/LLVM
 		// boundary, so it is valid in exported structs and function-pointer
 		// signatures just like a reference.

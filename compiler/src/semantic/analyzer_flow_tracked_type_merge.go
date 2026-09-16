@@ -202,8 +202,8 @@ func (a *Analyzer) mergeTrackedValueTypesWithSeen(left Type, right Type, seen ma
 		merged.State = state
 		seen[pair] = &merged
 		return &merged, true
-	case *DStrType:
-		rt, ok := right.(*DStrType)
+	case *CStrType:
+		rt, ok := right.(*CStrType)
 		if !ok || lt.SurfaceName != rt.SurfaceName {
 			return nil, false
 		}

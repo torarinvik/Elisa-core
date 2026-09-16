@@ -49,7 +49,7 @@ func (s *functionState) emitSequenceCountValueFromPatternValue(actualValue C.LLV
 		default:
 			return nil, fmt.Errorf("count pattern length is not implemented for %s", actualType.String())
 		}
-	case *semantic.DStrType, *semantic.SViewType:
+	case *semantic.CStrType, *semantic.SViewType:
 		if originExpr == nil {
 			return nil, fmt.Errorf("count pattern length requires an origin expression for %s", actualType.String())
 		}

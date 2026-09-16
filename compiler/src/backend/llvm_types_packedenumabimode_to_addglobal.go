@@ -161,7 +161,7 @@ func (g *llvmGenerator) noteType(t semantic.Type) error {
 	defer delete(g.noteTypeInProgress, key)
 	var err error
 	switch tt := t.(type) {
-	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.DStrType, *semantic.ErrorSetType:
+	case *semantic.InvalidType, *semantic.NeverType, *semantic.NullType, *semantic.BuiltinType, *semantic.TypeParamType, *semantic.CStrType, *semantic.ErrorSetType:
 		err = nil
 	case *semantic.AssociatedTypeProjection:
 		resolved, resolveErr := g.resolveAssociatedTypeProjection(tt)

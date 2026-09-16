@@ -185,7 +185,7 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 		return s.emitIterLoopDictCapacity(sourceAlloca, sourceType, sourceName)
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
-	case *semantic.DStrType:
+	case *semantic.CStrType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
 			return nil, err
@@ -281,7 +281,7 @@ func (s *functionState) emitIterLoopCount(sourceExpr ast.Expr, sourceAlloca C.LL
 			return s.emitIterLoopDictCapacity(sourceAlloca, sourceType, sourceName)
 		case *semantic.StoreRowsViewType:
 			return s.emitStoreRowsCount(sourceAlloca, sourceType, sourceName)
-		case *semantic.DStrType:
+		case *semantic.CStrType:
 			lenValue, err := s.emitRuntimeStringLengthValue(sourceValue, tt.Elem, s.g.result.NamedTypes["i64"], sourceName+".iter.len")
 			if err != nil {
 				return nil, err
@@ -462,7 +462,7 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 		return s.emitIterLoopDictEntryValue(sourceAlloca, sourceType, indexValue, sourceName)
 	case *semantic.StoreRowsViewType:
 		return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
-	case *semantic.DStrType, *semantic.SViewType:
+	case *semantic.CStrType, *semantic.SViewType:
 		sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.source")
 		if err != nil {
 			return nil, nil, err
@@ -510,7 +510,7 @@ func (s *functionState) emitIterLoopElementValue(sourceExpr ast.Expr, sourceAllo
 			return s.emitIterLoopDictEntryValue(sourceAlloca, sourceType, indexValue, sourceName)
 		case *semantic.StoreRowsViewType:
 			return s.emitStoreRowItemValue(sourceAlloca, sourceType, indexValue, sourceName)
-		case *semantic.DStrType, *semantic.SViewType:
+		case *semantic.CStrType, *semantic.SViewType:
 			sourceValue, err := s.loadValue(sourceAlloca, sourceType, sourceName+".iter.ref")
 			if err != nil {
 				return nil, nil, err

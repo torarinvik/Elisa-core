@@ -670,7 +670,7 @@ func (s *functionState) emitConstDictIndexExpr(expr *ast.IndexExpr) (C.LLVMValue
 }
 
 func backendConstDictKeyFingerprint(keyType semantic.Type, value semantic.ConstValue) (string, bool) {
-	if _, ok := semantic.StripAggregateStateType(keyType).(*semantic.DStrType); ok {
+	if _, ok := semantic.StripAggregateStateType(keyType).(*semantic.CStrType); ok {
 		if value.Kind != semantic.ConstString {
 			return "", false
 		}

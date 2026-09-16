@@ -414,7 +414,7 @@ func formatCDecl(t semantic.Type, name string, result *semantic.Result) (string,
 			return base, nil
 		}
 		return base + " " + name, nil
-	case *semantic.DStrType:
+	case *semantic.CStrType:
 		// Elisa's cstr is an immutable NUL-terminated byte pointer at the LLVM/C
 		// ABI boundary.  It is a distinct semantic type (rather than a RefType),
 		// so function-pointer fields must handle it explicitly just like exported

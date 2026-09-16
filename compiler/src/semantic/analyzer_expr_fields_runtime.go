@@ -216,7 +216,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 			return "read-only view index result", true
 		}
 	}
-	if _, ok := t.(*DStrType); ok {
+	if _, ok := t.(*CStrType); ok {
 		return "string index", true
 	}
 	if isStringViewType(t) {
@@ -243,7 +243,7 @@ func valueOnlyIndexKind(t Type) (string, bool) {
 			return "read-only view index result", true
 		}
 	}
-	if _, ok := ref.Elem.(*DStrType); ok {
+	if _, ok := ref.Elem.(*CStrType); ok {
 		return "string index", true
 	}
 	if isStringViewType(ref.Elem) {
@@ -278,14 +278,14 @@ func cstrSyntheticField(t Type, fieldName string) (Field, bool) {
 	if fieldName != "len" {
 		return Field{}, false
 	}
-	if _, ok := t.(*DStrType); ok {
+	if _, ok := t.(*CStrType); ok {
 		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 	}
 	ref, ok := t.(*RefType)
 	if !ok {
 		return Field{}, false
 	}
-	if _, ok := ref.Elem.(*DStrType); ok {
+	if _, ok := ref.Elem.(*CStrType); ok {
 		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 	}
 	// A string literal has type RefType{Elem: u8, Static}. Allow `.len` on it so
@@ -345,7 +345,7 @@ type runtimeStringKind int
 
 const (
 	runtimeStringNone runtimeStringKind = iota
-	runtimeStringDStr
+	runtimeStringCStr
 	runtimeStringView
 	runtimeStringRaw
 )
@@ -366,8 +366,8 @@ func runtimeStringKindOf(t Type) runtimeStringKind {
 	if t == nil {
 		return runtimeStringNone
 	}
-	if _, ok := t.(*DStrType); ok {
-		return runtimeStringDStr
+	if _, ok := t.(*CStrType); ok {
+		return runtimeStringCStr
 	}
 	if isStringViewType(t) {
 		return runtimeStringView

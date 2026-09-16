@@ -168,7 +168,7 @@ func staticDictCapacity(count int) int {
 }
 
 func staticDictKeyHash(keyType semantic.Type, value semantic.ConstValue, wordBits int) (uint64, string, error) {
-	if _, ok := semantic.StripAggregateStateType(keyType).(*semantic.DStrType); ok {
+	if _, ok := semantic.StripAggregateStateType(keyType).(*semantic.CStrType); ok {
 		if value.Kind != semantic.ConstString {
 			return 0, "", fmt.Errorf("const dict cstr key must be a string literal")
 		}

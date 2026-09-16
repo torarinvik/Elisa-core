@@ -1475,7 +1475,7 @@ func isUintptrType(t semantic.Type) bool {
 }
 func isPointerLikeType(t semantic.Type) bool {
 	switch t.(type) {
-	case *semantic.RefType, *semantic.NullType, *semantic.DStrType, *semantic.FuncType:
+	case *semantic.RefType, *semantic.NullType, *semantic.CStrType, *semantic.FuncType:
 		return true
 	default:
 		return false

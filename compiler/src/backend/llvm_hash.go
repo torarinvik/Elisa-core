@@ -38,7 +38,7 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	}
 
 	// cstr key: hash the string content.
-	if _, isCstr := semantic.StripAggregateStateType(argType).(*semantic.DStrType); isCstr {
+	if _, isCstr := semantic.StripAggregateStateType(argType).(*semantic.CStrType); isCstr {
 		callee, fnType, err := s.ensureRuntimeFunction("ctx_hash_cstr", nil)
 		if err != nil {
 			return nil, nil, true, err

@@ -22,7 +22,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":
-			return &semantic.DStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr"}, nil
+			return &semantic.CStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr"}, nil
 		case "sview":
 			return &semantic.SViewType{}, nil
 		case "dstr":
@@ -539,7 +539,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
-		return &semantic.DStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}, nil
+		return &semantic.CStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}, nil
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))

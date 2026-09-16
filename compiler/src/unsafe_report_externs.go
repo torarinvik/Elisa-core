@@ -258,7 +258,7 @@ func externObligationKind(t semantic.Type, isBoundsPointer bool) string {
 			}
 		}
 		return externObligationPointer
-	case *semantic.DStrType:
+	case *semantic.CStrType:
 		// `cstr`: an unbounded NUL-terminated pointer.
 		return externObligationPointer
 	case *semantic.BuiltinType:
@@ -432,4 +432,3 @@ func collectExternContractIdents(expr ast.Expr, out map[string]bool) {
 		}
 	}
 }
-

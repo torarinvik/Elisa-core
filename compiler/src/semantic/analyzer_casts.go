@@ -151,7 +151,7 @@ func isStorageTagType(t Type) bool {
 
 func isPointerLikeCastType(t Type) bool {
 	switch t.(type) {
-	case *RefType, *DStrType, *FuncType:
+	case *RefType, *CStrType, *FuncType:
 		return true
 	default:
 		return false

@@ -129,7 +129,7 @@ func (a *Analyzer) hostABILayoutForType(t Type, seen map[string]bool) (hostABILa
 			return hostABILayout{}, false
 		}
 		return hostABILayout{Size: elem.Size * int(tt.ConstSize), Align: elem.Align}, true
-	case *DStrType:
+	case *CStrType:
 		return hostPointerLayout(), true
 	case *SViewType:
 		st, ok := a.namedTypes["StringView"].(*StructType)

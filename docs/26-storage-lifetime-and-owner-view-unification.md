@@ -173,8 +173,14 @@ Validates Axis A on the simpler half before touching strings or lifetimes.
 - Introduce `dstr` (owned dynamic string ≡ `darray[u8]` + nul/length invariant)
   and `sstr` ≡ `u8[N]`.
 - `copy[sview]` → `sstr`; `clone[sview]` → `dstr`.
-- Reclassify `DStrType`: today it is surfaced everywhere as `cstr` (a borrow), so
-  repoint the *name* `cstr` at the unbounded borrow and free `dstr` for the owner.
+- **DONE.** `cstr` is the unbounded borrow; `dstr` is the owner (a `DArrayType`
+  with `SurfaceName: "dstr"`). The surface half landed earlier; the Go type behind
+  `cstr` was renamed `DStrType` -> `CStrType` on 2026-09-16. Until then the single
+  token `DStr` meant *cstr* in `runtimeStringKindOf` and *dstr* in `isDStrType` --
+  in the same package. The helpers that genuinely mean surface `dstr`
+  (`isDStrType`, `rewriteDStrStringLiteral`, `desugarDStrReturnLiterals`,
+  `typeExprIsRegionlessDStr`) keep their names; only the seven that meant `cstr`
+  moved.
 
 ### Step 3 — lifetime on the borrow + the outlives-storage check
 
@@ -195,8 +201,12 @@ Step 3 is where the real safety lands; steps 1–2 are derisking groundwork.
 3. `copy` → fixed-size stack owner, static-size-only (error-to-`clone`).
    `clone` → dynamic region owner, requires active region.
 4. Cloning/copying a view yields the **owner**, never a view.
-5. `dstr` immutable owned snapshot first; growable (push/append, carrying a
-   region handle like `darray`) is a later extension.
+5. ~~`dstr` immutable owned snapshot first; growable (push/append, carrying a
+   region handle like `darray`) is a later extension.~~ **Superseded 2026-09-16.**
+   The two roles are now two types, not one type in two phases: `dstr` is the
+   growable owner (it is already `darray[u8]`), and the immutable
+   fixed-length-once-created snapshot becomes `astr`, whose bytes are owned by a
+   region rather than borrowed from a `dstr`. See the string-family decision.
 
 ## Regions make refcounting opt-out, not default
 

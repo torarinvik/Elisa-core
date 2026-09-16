@@ -478,7 +478,7 @@ func indexableTypeRequiresBoundsProof(t Type) bool {
 		return true
 	}
 	switch stripRefForBounds(t).(type) {
-	case *ArrayType, *DArrayType, *ViewType, *DStrType, *SViewType:
+	case *ArrayType, *DArrayType, *ViewType, *CStrType, *SViewType:
 		return true
 	}
 	return false
@@ -503,7 +503,7 @@ func indexableUpperBoundString(obj ast.Expr, objType Type) string {
 		}
 	case *DArrayType:
 		return base + ".count"
-	case *ViewType, *DStrType, *SViewType:
+	case *ViewType, *CStrType, *SViewType:
 		return base + ".len"
 	}
 	return ""

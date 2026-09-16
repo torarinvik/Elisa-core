@@ -93,7 +93,7 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 				ln = C.LLVMBuildIntCast2(s.builder, ln, usizeLLVM, 0, cStringFree("fstr.dstr.count.usize"))
 			}
 			parts = append(parts, fstrPart{ptr: ptr, len: ln})
-		case *semantic.DStrType:
+		case *semantic.CStrType:
 			// cstr: NUL-terminated pointer; length via the whitelisted ctx_strlen.
 			value, _, err := s.emitExpr(arg, argType)
 			if err != nil {

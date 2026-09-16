@@ -282,7 +282,7 @@ func (a *Analyzer) validateConstDictLiteralKeys(expr *ast.ListLitExpr, dictType 
 }
 
 func constDictKeyFingerprint(keyType Type, value ConstValue) (string, bool) {
-	if _, ok := StripAggregateStateType(keyType).(*DStrType); ok {
+	if _, ok := StripAggregateStateType(keyType).(*CStrType); ok {
 		if value.Kind != ConstString {
 			return "", false
 		}

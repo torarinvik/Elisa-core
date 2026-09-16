@@ -605,7 +605,7 @@ func darrayElemNeedsZeroInit(t semantic.Type, seen map[semantic.Type]bool) bool 
 	switch tt := t.(type) {
 	case *semantic.RefType, *semantic.PackedEnumStoreType,
 		*semantic.DArrayType, *semantic.DictType, *semantic.SetType,
-		*semantic.ViewType, *semantic.SViewType, *semantic.DStrType,
+		*semantic.ViewType, *semantic.SViewType, *semantic.CStrType,
 		*semantic.PackedVariantViewType:
 		return true
 	case *semantic.OptionalType:

@@ -173,7 +173,7 @@ func contextualStringLiteralType(expected Type) (Type, bool) {
 	if expected == nil {
 		return nil, false
 	}
-	if _, ok := expected.(*DStrType); ok {
+	if _, ok := expected.(*CStrType); ok {
 		return expected, true
 	}
 	if isStringViewType(expected) {

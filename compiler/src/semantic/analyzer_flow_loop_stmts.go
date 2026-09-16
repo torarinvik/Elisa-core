@@ -377,7 +377,7 @@ func (a *Analyzer) resolveIterLoopSourceInfo(sourceExpr ast.Expr, sourceType Typ
 		return iterLoopSourceInfo{ItemType: tt.Elem, AllowRef: true, AllowMutableRef: tt.Mutable && !readOnly}, true
 	case *StoreRowsViewType:
 		return iterLoopSourceInfo{ItemType: &StoreRowViewType{Store: tt.Store}}, true
-	case *DStrType:
+	case *CStrType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
 	case *SViewType:
 		return iterLoopSourceInfo{ItemType: a.namedTypes["char"]}, true
@@ -937,7 +937,7 @@ func parallelForItemType(t Type) (Type, bool) {
 		if itemType, ok := ChunksExactViewItemType(tt); ok {
 			return itemType, true
 		}
-	case *SViewType, *DStrType:
+	case *SViewType, *CStrType:
 		return builtinCharType(), true
 	}
 	return nil, false

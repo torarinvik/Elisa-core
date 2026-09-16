@@ -131,7 +131,7 @@ func (a *Analyzer) recordUnsafeBufferReinterpret(cast *ast.CastExpr) {
 
 // isUnboundedStringRefType reports whether a type is an unbounded C-string
 // reference: a `static u8&` (static-storage byte reference used as a string) or
-// a `cstr`/`DStr` borrowed string.
+// a `cstr`/`CStr` borrowed string.
 func isUnboundedStringRefType(t Type) bool {
 	switch tt := t.(type) {
 	case *RefType:
@@ -140,7 +140,7 @@ func isUnboundedStringRefType(t Type) bool {
 		}
 		b, ok := tt.Elem.(*BuiltinType)
 		return ok && b != nil && b.Name == "u8" && tt.Storage == RefStorageStatic
-	case *DStrType:
+	case *CStrType:
 		return true
 	}
 	return false
@@ -178,7 +178,7 @@ func typeWiderThanByte(t Type) bool {
 			// u16/i16/u32/i32/f32/u64/i64/f64/usize/isize/uintptr/int, etc.
 			return true
 		}
-	case *StructType, *ArrayType, *TupleType, *RefType, *DStrType, *DArrayType, *ViewType:
+	case *StructType, *ArrayType, *TupleType, *RefType, *CStrType, *DArrayType, *ViewType:
 		return true
 	}
 	return false

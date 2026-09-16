@@ -286,7 +286,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 	}
 	if helperName == "ctx_streq" {
 		if literalText, ok := s.staticCStringLiteral(secondExpr); ok {
-			cmp, err := s.emitDStrStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
+			cmp, err := s.emitCStrStaticLiteralEqual(firstExpr, firstType, secondExpr, literalText)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -296,7 +296,7 @@ func (s *functionState) emitRuntimeStringCompareExpr(expr *ast.BinaryExpr, helpe
 			return cmp, s.g.result.NamedTypes["bool"], nil
 		}
 		if literalText, ok := s.staticCStringLiteral(firstExpr); ok {
-			cmp, err := s.emitDStrStaticLiteralEqual(secondExpr, secondType, firstExpr, literalText)
+			cmp, err := s.emitCStrStaticLiteralEqual(secondExpr, secondType, firstExpr, literalText)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -477,7 +477,7 @@ func (s *functionState) emitRuntimeStringCompareOperand(expr ast.Expr, exprType 
 		data := C.LLVMBuildExtractValue(s.builder, value, 0, cStringFree("streq.view.data"))
 		length := C.LLVMBuildExtractValue(s.builder, value, 1, cStringFree("streq.view.len"))
 		return data, length, lenType, kind, nil
-	case runtimeStringCompareDStr:
+	case runtimeStringCompareCStr:
 		lenType := s.g.result.NamedTypes["i64"]
 		length, err := s.emitRuntimeStringLengthValue(value, exprType, lenType, "streq.len")
 		if err != nil {
@@ -589,7 +589,7 @@ func (s *functionState) emitMinInt64Value(left C.LLVMValueRef, right C.LLVMValue
 	return phi
 }
 func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exprType semantic.Type, start int64, end int64, namePrefix string) (C.LLVMValueRef, C.LLVMValueRef, error) {
-	if classifyRuntimeStringCompareKind(exprType) != runtimeStringCompareDStr {
+	if classifyRuntimeStringCompareKind(exprType) != runtimeStringCompareCStr {
 		return nil, nil, fmt.Errorf("constant string slice specialization requires cstr operand")
 	}
 	stringValue, _, err := s.emitExpr(expr, exprType)
@@ -630,14 +630,14 @@ func (s *functionState) emitConstantClampedStringSliceOperand(expr ast.Expr, exp
 	}
 	return sliceData, sliceLen, nil
 }
-func (s *functionState) constantDStrSliceCall(expr ast.Expr) (ast.Expr, semantic.Type, int64, int64, bool) {
+func (s *functionState) constantCStrSliceCall(expr ast.Expr) (ast.Expr, semantic.Type, int64, int64, bool) {
 	switch n := expr.(type) {
 	case *ast.ParenExpr:
-		return s.constantDStrSliceCall(n.Inner)
+		return s.constantCStrSliceCall(n.Inner)
 	case *ast.CastExpr:
-		return s.constantDStrSliceCall(n.Operand)
+		return s.constantCStrSliceCall(n.Operand)
 	case *ast.CanExpr:
-		return s.constantDStrSliceCall(n.Expr)
+		return s.constantCStrSliceCall(n.Expr)
 	case *ast.CallExpr:
 		ident, ok := n.Func.(*ast.Ident)
 		if !ok || ident.Name != "ctx_string_slice" || len(n.Args) != 3 {
@@ -645,7 +645,7 @@ func (s *functionState) constantDStrSliceCall(expr ast.Expr) (ast.Expr, semantic
 		}
 		baseExpr := n.Args[0]
 		baseType := s.exprType(baseExpr)
-		if classifyRuntimeStringCompareKind(baseType) != runtimeStringCompareDStr {
+		if classifyRuntimeStringCompareKind(baseType) != runtimeStringCompareCStr {
 			return nil, nil, 0, 0, false
 		}
 		start, ok := s.staticIntLiteral(n.Args[1])

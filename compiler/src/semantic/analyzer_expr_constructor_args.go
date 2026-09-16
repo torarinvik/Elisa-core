@@ -176,7 +176,7 @@ func (a *Analyzer) collectRuntimeBridgeBindings(pattern, actual Type, bindings m
 			return true
 		}
 		return true
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeCStrU8Ref:
 		return true
 	default:
 		return false
@@ -305,8 +305,8 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectTypeBindings(p.Elem, act.Elem, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 		}
-	case *DStrType:
-		if act, ok := actual.(*DStrType); ok {
+	case *CStrType:
+		if act, ok := actual.(*CStrType); ok {
 			a.collectRegionBinding(p.Region, act.Region, regionBindings, regionParams)
 			a.collectShapeBinding(p.Shape, act.Shape, shapeBindings)
 		}

@@ -76,7 +76,7 @@ func containerRegion(t Type) string {
 				return ""
 			}
 			return tt.Region
-		case *DStrType:
+		case *CStrType:
 			if tt == nil {
 				return ""
 			}
@@ -231,7 +231,7 @@ func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
 	}
 	seen[t] = true
 	switch tt := t.(type) {
-	case *DArrayType, *DictType, *SetType, *DStrType, *SViewType, *ViewType:
+	case *DArrayType, *DictType, *SetType, *CStrType, *SViewType, *ViewType:
 		return true
 	case *RefType:
 		if tt == nil {
@@ -1413,7 +1413,7 @@ func containerOrEntryRegion(t Type) string {
 				return ""
 			}
 			return tt.Dict.Region
-		case *DStrType:
+		case *CStrType:
 			if tt == nil {
 				return ""
 			}

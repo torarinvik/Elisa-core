@@ -83,10 +83,10 @@ func astTypeExprForBuiltinMethodRewrite(pos lexer.Pos, typ Type) ast.TypeExpr {
 			elem = &ast.MutableType{Position: pos, Elem: elem}
 		}
 		return refToTypeExprWithStorage(elem, t.State != RefStateNonNull, ast.RefStorage(t.Storage))
-	case *DStrType:
+	case *CStrType:
 		if isWildcardShape(t.Shape) {
 			// A wildcard-shape cstr must round-trip through the bare-NamedType
-			// path (resolveType: NamedType "cstr" -> wildcard DStrType). Emitting
+			// path (resolveType: NamedType "cstr" -> wildcard CStrType). Emitting
 			// a BuiltinTypeExpr{Name:"cstr"} instead would re-hit the arity check
 			// ("cstr expects 1 argument"), breaking method rewrites like `d.get`
 			// on a `dict[cstr, V]` (wildcard key).
@@ -254,7 +254,7 @@ func dictCstrKeyAcceptsSView(dictType *DictType, keyType Type) bool {
 	if dictType == nil {
 		return false
 	}
-	if _, ok := StripAggregateStateType(dictType.Key).(*DStrType); !ok {
+	if _, ok := StripAggregateStateType(dictType.Key).(*CStrType); !ok {
 		return false
 	}
 	return isStringViewType(keyType)

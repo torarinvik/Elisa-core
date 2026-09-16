@@ -91,7 +91,7 @@ func (a *Analyzer) analyzeBuiltinDarrayCstrCall(expr *ast.CallExpr) (Type, bool)
 		a.errorf(expr.Pos(), "%s", NoCstrCopyRegionMessage())
 	}
 	a.checkDarrayGrowthRegionEscape(fieldExpr.Object, "cstr")
-	resultType := &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr", Region: darrayType.Region}
+	resultType := &CStrType{Shape: &WildcardShape{}, SurfaceName: "cstr", Region: darrayType.Region}
 	a.exprTypes[expr.Func] = &FuncType{Name: "darray.cstr", Params: []Type{receiverType}, Return: resultType}
 	a.exprTypes[expr] = resultType
 	a.invalidateStorageViewsForSource(fieldExpr.Object, storageViewMutationReason(fieldExpr.Object, "darray cstr"))

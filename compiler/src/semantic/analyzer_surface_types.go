@@ -191,7 +191,7 @@ func (a *Analyzer) resolveBuiltinSurfaceType(expr *ast.BuiltinTypeExpr) Type {
 			a.errorf(expr.Pos(), "cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 			return invalidType
 		}
-		return &DStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}
+		return &CStrType{Shape: a.resolveShapeExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			a.errorf(expr.Pos(), "view expects 1 type argument, got %d", len(expr.TypeArgs))
@@ -267,7 +267,7 @@ func (a *Analyzer) resolveSetType(elemExpr ast.TypeExpr, surfaceName string, reg
 func dictRuntimeBackedKeyType(keyType Type) bool {
 	stripped := StripAggregateStateType(keyType)
 	switch stripped.(type) {
-	case *DStrType, *TypeParamType, *ConstEnumType:
+	case *CStrType, *TypeParamType, *ConstEnumType:
 		return true
 	}
 	return IsIntegralType(stripped) || IsBoolType(stripped)

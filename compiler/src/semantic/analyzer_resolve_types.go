@@ -25,7 +25,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		}
 		switch n.Name {
 		case "cstr":
-			return &DStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
+			return &CStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
 		case "sview":
 			return &SViewType{}
 		case "dstr":

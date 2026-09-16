@@ -132,7 +132,7 @@ func (a *Analyzer) sliceFullSpanField(expr ast.Expr) string {
 		return "count"
 	case *ViewType:
 		return "len"
-	case *DStrType, *SViewType:
+	case *CStrType, *SViewType:
 		return "len"
 	case *StructType:
 		if tt != nil {

@@ -299,7 +299,7 @@ func (g *llvmGenerator) lowerType(t semantic.Type) (C.LLVMTypeRef, error) {
 		storePtrType := C.LLVMPointerTypeInContext(g.context, 0)
 		fields := []C.LLVMTypeRef{storePtrType, usizeType}
 		return C.LLVMStructTypeInContext(g.context, llvmTypeSlicePtr(fields), C.unsigned(len(fields)), 0), nil
-	case *semantic.DStrType:
+	case *semantic.CStrType:
 		return C.LLVMPointerTypeInContext(g.context, 0), nil
 	case *semantic.DictType:
 		base, ok := g.result.NamedTypes["DynDict"]

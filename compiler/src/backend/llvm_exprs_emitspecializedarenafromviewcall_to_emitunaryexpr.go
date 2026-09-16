@@ -408,8 +408,8 @@ func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, view
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	return phi, nil
 }
-func (s *functionState) emitDStrStaticLiteralEqual(textExpr ast.Expr, textType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
-	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareDStr {
+func (s *functionState) emitCStrStaticLiteralEqual(textExpr ast.Expr, textType semantic.Type, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
+	if classifyRuntimeStringCompareKind(textType) != runtimeStringCompareCStr {
 		return nil, fmt.Errorf("cstr literal specialization requires cstr operand")
 	}
 	lenType := s.g.result.NamedTypes["i64"]
@@ -418,7 +418,7 @@ func (s *functionState) emitDStrStaticLiteralEqual(textExpr ast.Expr, textType s
 		textLen  C.LLVMValueRef
 		err      error
 	)
-	if baseExpr, baseType, start, end, ok := s.constantDStrSliceCall(textExpr); ok {
+	if baseExpr, baseType, start, end, ok := s.constantCStrSliceCall(textExpr); ok {
 		textData, textLen, err = s.emitConstantClampedStringSliceOperand(baseExpr, baseType, start, end, "cstrlit.slice")
 		if err != nil {
 			return nil, err

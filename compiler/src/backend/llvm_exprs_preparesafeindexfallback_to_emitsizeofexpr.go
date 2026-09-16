@@ -319,7 +319,7 @@ func (s *functionState) emitStaticStringIndexExpr(expr *ast.IndexExpr) (C.LLVMVa
 	return C.LLVMBuildZExt(s.builder, loaded, llvmResultType, cStringFree("stridx.zext")), resultType, nil
 }
 func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) {
-	if _, ok := t.(*semantic.DStrType); ok {
+	if _, ok := t.(*semantic.CStrType); ok {
 		return "ctx_string_index", t, true
 	}
 	if _, ok := t.(*semantic.SViewType); ok {
@@ -335,7 +335,7 @@ func runtimeStringIndexedOperand(t semantic.Type) (string, semantic.Type, bool) 
 	if ref.State != semantic.RefStateNonNull {
 		return "", nil, false
 	}
-	if _, ok := ref.Elem.(*semantic.DStrType); ok {
+	if _, ok := ref.Elem.(*semantic.CStrType); ok {
 		return "ctx_string_index", ref.Elem, true
 	}
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
@@ -356,7 +356,7 @@ func cstrSyntheticFieldType(t semantic.Type, fieldName string) (semantic.Type, b
 	return &semantic.BuiltinType{Name: "i64"}, true
 }
 func cstrFieldOperandType(t semantic.Type) (semantic.Type, bool) {
-	if _, ok := t.(*semantic.DStrType); ok {
+	if _, ok := t.(*semantic.CStrType); ok {
 		return t, true
 	}
 	ref, ok := t.(*semantic.RefType)
@@ -366,7 +366,7 @@ func cstrFieldOperandType(t semantic.Type) (semantic.Type, bool) {
 	if ref.State != semantic.RefStateNonNull {
 		return nil, false
 	}
-	if _, ok := ref.Elem.(*semantic.DStrType); ok {
+	if _, ok := ref.Elem.(*semantic.CStrType); ok {
 		return ref.Elem, true
 	}
 	return nil, false
@@ -399,7 +399,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 			indexType:   usizeType,
 		}, true
 	}
-	if _, ok := objectType.(*semantic.DStrType); ok {
+	if _, ok := objectType.(*semantic.CStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_string_view", operandType: objectType, resultType: resultType, indexType: i64Type}, true
 	}
 	if _, ok := objectType.(*semantic.SViewType); ok {
@@ -415,7 +415,7 @@ func runtimeSliceOperandInfo(objectType semantic.Type, resultType semantic.Type)
 	if view, ok := ref.Elem.(*semantic.ViewType); ok {
 		return runtimeSliceInfo{helperName: "arena_da_view_slice", operandType: ref.Elem, resultType: &semantic.ViewType{Elem: view.Elem, SurfaceName: "view"}, indexType: usizeType}, true
 	}
-	if _, ok := ref.Elem.(*semantic.DStrType); ok {
+	if _, ok := ref.Elem.(*semantic.CStrType); ok {
 		return runtimeSliceInfo{helperName: "ctx_string_view", operandType: ref.Elem, resultType: resultType, indexType: i64Type}, true
 	}
 	if _, ok := ref.Elem.(*semantic.SViewType); ok {
@@ -469,7 +469,7 @@ type runtimeStringCompareKind int
 
 const (
 	runtimeStringCompareNone runtimeStringCompareKind = iota
-	runtimeStringCompareDStr
+	runtimeStringCompareCStr
 	runtimeStringCompareView
 	runtimeStringCompareRaw
 )
@@ -478,8 +478,8 @@ func classifyRuntimeStringCompareKind(t semantic.Type) runtimeStringCompareKind 
 	if t == nil {
 		return runtimeStringCompareNone
 	}
-	if _, ok := t.(*semantic.DStrType); ok {
-		return runtimeStringCompareDStr
+	if _, ok := t.(*semantic.CStrType); ok {
+		return runtimeStringCompareCStr
 	}
 	if _, ok := t.(*semantic.SViewType); ok {
 		return runtimeStringCompareView

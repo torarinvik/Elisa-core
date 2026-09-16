@@ -495,7 +495,7 @@ func SequenceMatchElementType(actual Type) (Type, bool) {
 		return t.Elem, true
 	case *ViewType:
 		return t.Elem, true
-	case *DStrType:
+	case *CStrType:
 		return builtinCharType(), true
 	case *RefType:
 		if t.State != RefStateNonNull {

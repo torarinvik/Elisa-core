@@ -183,8 +183,8 @@ func SameType(a, b Type) bool {
 	case *StoreRowViewType:
 		tb, ok := b.(*StoreRowViewType)
 		return ok && SameType(ta.Store, tb.Store)
-	case *DStrType:
-		tb, ok := b.(*DStrType)
+	case *CStrType:
+		tb, ok := b.(*CStrType)
 		return ok && SameShape(ta.Shape, tb.Shape)
 	case *DictType:
 		tb, ok := b.(*DictType)

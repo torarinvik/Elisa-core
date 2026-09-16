@@ -91,7 +91,7 @@ func isExternPointerParamType(t Type) bool {
 	case *RefType:
 		_, opaque := typ.Elem.(*OpaqueType)
 		return !opaque
-	case *DStrType:
+	case *CStrType:
 		// `cstr`: an unbounded NUL-terminated pointer.
 		return true
 	}

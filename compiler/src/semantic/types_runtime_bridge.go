@@ -22,7 +22,7 @@ const (
 	runtimeBridgeNone runtimeBridgeKind = iota
 	runtimeBridgeDArrayDynArray
 	runtimeBridgeDArrayViewDynArrayView
-	runtimeBridgeDStrU8Ref
+	runtimeBridgeCStrU8Ref
 	runtimeBridgeDictDynDict
 	runtimeBridgeSViewStringView
 )
@@ -33,7 +33,7 @@ type runtimeBridgeMatch struct {
 	DArrayView   *ViewType
 	DynArray     *GenericInstanceType
 	DynArrayView *StructType
-	DStr         *DStrType
+	CStr         *CStrType
 	Dict         *DictType
 	DynDict      *GenericInstanceType
 	U8Ref        *RefType
@@ -99,14 +99,14 @@ func classifyRuntimeBridge(a, b Type) (runtimeBridgeMatch, bool) {
 			return runtimeBridgeMatch{Kind: runtimeBridgeDArrayViewDynArrayView, DArrayView: dav, DynArrayView: dynArrayView}, true
 		}
 	}
-	if cstr, ok := a.(*DStrType); ok {
+	if cstr, ok := a.(*CStrType); ok {
 		if u8Ref, ok := u8RuntimeRef(b); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: cstr, U8Ref: u8Ref}, true
+			return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: cstr, U8Ref: u8Ref}, true
 		}
 	}
-	if cstr, ok := b.(*DStrType); ok {
+	if cstr, ok := b.(*CStrType); ok {
 		if u8Ref, ok := u8RuntimeRef(a); ok {
-			return runtimeBridgeMatch{Kind: runtimeBridgeDStrU8Ref, DStr: cstr, U8Ref: u8Ref}, true
+			return runtimeBridgeMatch{Kind: runtimeBridgeCStrU8Ref, CStr: cstr, U8Ref: u8Ref}, true
 		}
 	}
 	if dict, ok := a.(*DictType); ok {
@@ -159,7 +159,7 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
 	case runtimeBridgeDictDynDict:
 		return SameType(bridge.Dict.Key, bridge.DynDict.Args[0]) && SameType(bridge.Dict.Value, bridge.DynDict.Args[1])
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeCStrU8Ref, runtimeBridgeSViewStringView:
 		return true
 	default:
 		return false
@@ -188,7 +188,7 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 			return matchTypePattern(patternDynDict.Args[0], bridge.Dict.Key) && matchTypePattern(patternDynDict.Args[1], bridge.Dict.Value)
 		}
 		return false
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeDStrU8Ref, runtimeBridgeSViewStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeCStrU8Ref, runtimeBridgeSViewStringView:
 		return true
 	default:
 		return false

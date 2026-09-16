@@ -129,7 +129,7 @@ func diagnosticTypeString(t Type) string {
 			return "<invalid-store-row>"
 		}
 		return diagnosticTypeString(tt.Store) + ".row"
-	case *DStrType:
+	case *CStrType:
 		if tt == nil {
 			return "<invalid-cstr>"
 		}

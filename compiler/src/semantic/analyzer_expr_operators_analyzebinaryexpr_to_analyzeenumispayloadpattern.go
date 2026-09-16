@@ -697,9 +697,9 @@ func isNullComparablePointer(t Type) bool {
 		return true
 	}
 	// `cstr` crosses the native boundary as a nullable pointer even though its
-	// semantic carrier is DStrType. Contracts commonly spell that obligation as
+	// semantic carrier is CStrType. Contracts commonly spell that obligation as
 	// `text != null`, and the backend already lowers it as pointer identity.
-	str, ok := t.(*DStrType)
+	str, ok := t.(*CStrType)
 	return ok && str.SurfaceName == "cstr"
 }
 

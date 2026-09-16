@@ -43,7 +43,7 @@ func optimizationFactsForType(t Type) OptimizationFacts {
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentViewBounds, Begin: tt.Begin, End: tt.End}
 		}
 		return facts
-	case *DStrType:
+	case *CStrType:
 		facts := OptimizationFacts{ReadOnly: true, Contiguous: true, UnitStride: true}
 		if !isWildcardShape(tt.Shape) {
 			facts.Extent = &OptimizationExtent{Kind: OptimizationExtentShape, Shape: tt.Shape}

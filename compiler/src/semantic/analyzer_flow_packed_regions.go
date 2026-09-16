@@ -128,7 +128,7 @@ func (a *Analyzer) recordRegionRefBinding(sym *Symbol, value ast.Expr) {
 }
 
 // containerRegionDependency derives a region dependency from a binding's declared
-// container type (DArrayType/DictType/DStrType/SViewType all carry a `.Region`).
+// container type (DArrayType/DictType/CStrType/SViewType all carry a `.Region`).
 // Returns false for non-container types, region params not resolvable to a concrete
 // live region, or an already-destroyed region.
 func (a *Analyzer) containerRegionDependency(typ Type) (regionRefState, bool) {
@@ -151,7 +151,7 @@ func containerTypeRegion(typ Type) string {
 		return t.Region
 	case *SetType:
 		return t.Region
-	case *DStrType:
+	case *CStrType:
 		return t.Region
 	case *SViewType:
 		return t.Region
@@ -168,7 +168,7 @@ func containerTypeRegion(typ Type) string {
 // resolved on a separate path; this gates the builtin/scalar case (`i32 @r` is rejected).
 func typeCanCarryRegion(typ Type) bool {
 	switch StripAggregateStateType(typ).(type) {
-	case *DArrayType, *DictType, *SetType, *DStrType, *SViewType, *ViewType, *GenericInstanceType, *RefType:
+	case *DArrayType, *DictType, *SetType, *CStrType, *SViewType, *ViewType, *GenericInstanceType, *RefType:
 		return true
 	}
 	return false
@@ -209,7 +209,7 @@ func stampContainerRegion(t Type, region string) (Type, bool) {
 		clone := *c
 		clone.Region = region
 		return &clone, true
-	case *DStrType:
+	case *CStrType:
 		if c.Region != "" {
 			return t, false
 		}

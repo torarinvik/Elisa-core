@@ -84,7 +84,7 @@ func (s *functionState) emitBuiltinDArrayCstrCall(expr *ast.CallExpr) (C.LLVMVal
 	if !ok || fieldExpr == nil || fieldExpr.Field != "as_cstr" || fieldExpr.Object == nil {
 		return nil, nil, false, nil
 	}
-	resultType, ok := s.exprType(expr).(*semantic.DStrType)
+	resultType, ok := s.exprType(expr).(*semantic.CStrType)
 	if !ok || resultType == nil {
 		return nil, nil, false, nil
 	}

@@ -193,7 +193,7 @@ func appendTypeIDKey(b *strings.Builder, t Type, active map[Type]int, nextCycleI
 		if !appendTypeIDKey(b, tt.Store, active, nextCycleID) {
 			return false
 		}
-	case *DStrType:
+	case *CStrType:
 		appendKeyTag(b, "cstr")
 		if !appendShapeIDKey(b, tt.Shape) {
 			return false

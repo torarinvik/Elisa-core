@@ -77,7 +77,7 @@ func (a *Analyzer) analyzeEnumerateHelperCall(expr *ast.CallExpr) Type {
 
 func proofCarryingViewType(t Type) bool {
 	switch t.(type) {
-	case *ViewType, *DStrType, *SViewType:
+	case *ViewType, *CStrType, *SViewType:
 		return true
 	default:
 		return false

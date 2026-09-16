@@ -84,7 +84,7 @@ func typeHasInvalidZeroValue(t Type) bool {
 		return tt != nil && tt.State == RefStateNonNull
 	case *IDType:
 		return true
-	case *DStrType:
+	case *CStrType:
 		// A non-optional borrowed string is a pointer; zeroed is a null cstr.
 		return true
 	}

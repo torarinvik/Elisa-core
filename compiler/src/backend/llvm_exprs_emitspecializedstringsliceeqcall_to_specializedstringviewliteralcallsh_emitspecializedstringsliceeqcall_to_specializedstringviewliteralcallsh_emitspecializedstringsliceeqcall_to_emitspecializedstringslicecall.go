@@ -91,7 +91,7 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	}
 	leftExpr := expr.Args[0]
 	leftType := s.exprType(leftExpr)
-	if classifyRuntimeStringCompareKind(leftType) != runtimeStringCompareDStr {
+	if classifyRuntimeStringCompareKind(leftType) != runtimeStringCompareCStr {
 		return nil, nil, false, nil
 	}
 	start, ok := s.staticIntLiteral(expr.Args[1])
@@ -104,7 +104,7 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	}
 	rightExpr := expr.Args[3]
 	rightType := s.exprType(rightExpr)
-	if classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareDStr {
+	if classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareCStr {
 		return nil, nil, false, nil
 	}
 	intType := s.g.result.NamedTypes["int"]
@@ -120,7 +120,7 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	if err != nil {
 		return nil, nil, true, err
 	}
-	if rightKind != runtimeStringCompareDStr || rightLen == nil || rightLenType == nil {
+	if rightKind != runtimeStringCompareCStr || rightLen == nil || rightLenType == nil {
 		return nil, nil, false, nil
 	}
 	rightLenI64, err := s.coerceValue(rightLen, rightLenType, s.g.result.NamedTypes["i64"])
@@ -189,7 +189,7 @@ func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C
 	rightEndExpr := expr.Args[5]
 	leftType := s.exprType(leftExpr)
 	rightType := s.exprType(rightExpr)
-	if classifyRuntimeStringCompareKind(leftType) != runtimeStringCompareDStr || classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareDStr {
+	if classifyRuntimeStringCompareKind(leftType) != runtimeStringCompareCStr || classifyRuntimeStringCompareKind(rightType) != runtimeStringCompareCStr {
 		return nil, nil, false, nil
 	}
 	leftStart, ok := s.staticIntLiteral(leftStartExpr)
@@ -286,7 +286,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 	rightType := s.exprType(rightExpr)
 	if ident.Name == "ctx_streq" {
 		if literalText, ok := s.staticCStringLiteral(rightExpr); ok {
-			cmp, err := s.emitDStrStaticLiteralEqual(leftExpr, leftType, rightExpr, literalText)
+			cmp, err := s.emitCStrStaticLiteralEqual(leftExpr, leftType, rightExpr, literalText)
 			if err != nil {
 				return nil, nil, true, err
 			}
@@ -298,7 +298,7 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 			return C.LLVMBuildZExt(s.builder, cmp, intLLVMType, cStringFree("cstrlit.direct.int")), intType, true, nil
 		}
 		if literalText, ok := s.staticCStringLiteral(leftExpr); ok {
-			cmp, err := s.emitDStrStaticLiteralEqual(rightExpr, rightType, leftExpr, literalText)
+			cmp, err := s.emitCStrStaticLiteralEqual(rightExpr, rightType, leftExpr, literalText)
 			if err != nil {
 				return nil, nil, true, err
 			}
@@ -423,7 +423,7 @@ func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LL
 	resultType := s.exprType(expr)
 	inputExpr := expr.Args[0]
 	inputType := s.exprType(inputExpr)
-	if _, ok := inputType.(*semantic.DStrType); !ok {
+	if _, ok := inputType.(*semantic.CStrType); !ok {
 		return nil, nil, false, nil
 	}
 	if s.g.result.ExprsHaveSameExtent(expr, inputExpr) {
