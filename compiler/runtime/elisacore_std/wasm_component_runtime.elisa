@@ -13,6 +13,17 @@ extern wasm_memory_size(memory_index: u32) -> u32
 @intrinsic("llvm.trap")
 extern wasm_trap() -> void
 
+# Component modules cannot import the native runtime's memcmp-backed string
+# helper. Match the compiler-emitted sview equality symbol locally, keeping the
+# comparison counted, malformed-length-safe and entirely freestanding.
+def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
+    return 0 if lhs.len < 0 or rhs.len < 0 or lhs.len != rhs.len
+    equal: mutable bool = true
+    trusted Unsafe.UncheckedIndex:
+        for index in 0..<lhs.len.usize():
+            equal <- false if lhs.data[index] != rhs.data[index]
+    return 1 if equal else 0
+
 global mutable wasm_component_heap_cursor: u32 = 1048576
 global mutable wasm_component_free_chunk: u32 = 0
 
