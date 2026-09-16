@@ -275,7 +275,16 @@ Once views cross, `requires` gains its vocabulary for free:
   measurable next to a native call.
 - Returned enums are constructed through a validator, never reinterpreted:
   `DeviceState.from_c(raw) -> DeviceState error[ForeignEnum]`. Elisa's
-  error-union surface (doc 65) is the natural carrier.
+  error-union surface (doc 65) is the natural carrier. The mirror is declared
+  `extern enum DeviceState of i32:` (the `extern resource` grammar family), and
+  the validator is SYNTHESIZED from the member list — a hand-written range check
+  is wrong for a sparse enum (`27, 32, 65` admits `33`), and the compiler owns
+  the member list. A C enum that is genuinely open-ended is declared `@open`
+  instead: nothing to validate, and `match` must carry a default arm. Either way
+  the exhaustiveness Elisa already enforces becomes TRUE at the boundary —
+  before D9 it was enforced on a premise nothing established, and the same
+  program returned 12 from stage0, trapped in stage1, and produced a third
+  answer at -O2.
 - Returned lengths that describe returned pointers are declared together:
   `-> view[u8]` under §3.3 (pointer then length as two C return channels, or an
   out-parameter bound with `@bounds`).
@@ -338,7 +347,7 @@ pass. Wording follows the house style of the existing extern messages.
 | D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.len; remove the explicit argument` |
 | D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
 | D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.len) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
-| D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
+| D9 | foreign enum values are validated | `cannot reinterpret a C value as extern enum "DeviceState": it is not known to be one of its members; construct it through DeviceState.from_c(...) so out-of-range values are rejected` (LANDED in both compilers; the `@open` form reads `non-exhaustive match over @open extern enum "SdlEvent"; a C value outside its member list is possible, so a final _ arm is required`) |
 | D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
 | D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
 | D12 | `@trusted` is the only entry point for trust | `extern function "memcpy" pointer parameter "dest" is not covered by its contract; under -strict-externs every pointer parameter must be named by a `requires`/`ensure` clause, be an opaque handle, or the extern must be @trusted("reason")` (LANDED in both compilers, one per uncovered parameter at the parameter; will widen to bounded views and @bounds targets with step 2) |

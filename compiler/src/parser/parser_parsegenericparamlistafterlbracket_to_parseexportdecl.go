@@ -561,6 +561,11 @@ func (p *Parser) parseExternDeclWithAnnotations(annotations []ast.Annotation) as
 	// use-after-release for free; the extern boundary passes the handle in place of the
 	// struct (backend/llvm_extern_resource_abi.go). The struct lands at file scope via
 	// pendingDecls, like the protocol and machine sugars.
+	// `extern enum Name of T:` (docs/127 D9) — a C enum's member list, whose values must be
+	// validated on the way in so `match` exhaustiveness is sound. See parser_extern_enum.go.
+	if p.peek() == lexer.TOKEN_ENUM {
+		return p.parseExternEnumDecl(pos, annotations)
+	}
 	if p.peek() == lexer.TOKEN_IDENT && p.cur().Text == "resource" && p.peekAt(1) == lexer.TOKEN_IDENT {
 		p.advance()
 		name := p.expect(lexer.TOKEN_IDENT).Text

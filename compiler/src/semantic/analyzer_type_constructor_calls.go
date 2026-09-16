@@ -31,6 +31,9 @@ func (a *Analyzer) analyzeTypeConstructorCall(expr *ast.CallExpr) (Type, bool) {
 		}
 		return targetType, true
 	}
+	if a.rejectForeignEnumReinterpret(expr.Pos(), sourceType, targetType) {
+		return targetType, true
+	}
 	if !a.validCast(sourceType, targetType) {
 		a.errorf(expr.Pos(), "invalid cast from %s to %s", sourceType, targetType)
 	}

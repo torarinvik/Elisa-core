@@ -72,6 +72,13 @@ type ConstEnumDecl struct {
 	Name     string
 	Storage  TypeExpr
 	Members  []ConstEnumMemberDecl
+	// Foreign marks an `extern enum` (docs/127 D9): the member list mirrors a C enum, so a
+	// value arriving from C is NOT known to be one of the members. Reinterpreting a raw
+	// integer as one is rejected; `Name.from_c(raw)` validates instead.
+	Foreign bool
+	// Open marks `@open extern enum`: the C API may add members this list has not caught up
+	// with, so there is nothing to validate and `match` must carry a default arm instead.
+	Open bool
 }
 type ConstEnumMemberDecl struct {
 	Position lexer.Pos
@@ -665,3 +672,9 @@ func IsOldCall(c *CallExpr) bool {
 	id, ok := c.Func.(*Ident)
 	return ok && id != nil && id.Name == "old"
 }
+
+// ForeignEnumValidatorName is the internal name of the validator the parser synthesizes for a
+// closed `extern enum` (docs/127 D9). The analyzer maps the surface spelling `Name.from_c`
+// onto it, and exempts its body from the ban on reinterpreting a raw integer as that enum.
+// It lives here so the analyzer need not depend on the parser.
+func ForeignEnumValidatorName(enumName string) string { return enumName + "__from_c" }

@@ -555,6 +555,10 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				return
 			}
 		}
+		if a.rejectForeignEnumReinterpret(n.Pos(), src, dst) {
+			result = dst
+			return
+		}
 		if n.Origin == ast.CastExprOriginExplicitCast && a.isValueConversion(src, dst) {
 			// `.cast[T]` is the canonical reinterpret/bitcast; numeric/enum value conversions go
 			// through a constructor (`T(x)` / `x.T()`).

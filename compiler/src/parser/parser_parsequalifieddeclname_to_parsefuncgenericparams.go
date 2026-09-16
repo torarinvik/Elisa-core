@@ -603,6 +603,13 @@ func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
 	if p.matchIdentText("of") {
 		storage = p.parseTypeExpr()
 	}
+	members := p.parseConstEnumMemberBlock()
+	return &ast.ConstEnumDecl{Position: pos, Name: name, Storage: storage, Members: members}
+}
+
+// parseConstEnumMemberBlock parses the `:` NEWLINE INDENT members DEDENT block shared by
+// `const enum` and `extern enum` (docs/127 D9).
+func (p *Parser) parseConstEnumMemberBlock() []ast.ConstEnumMemberDecl {
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
 	p.expect(lexer.TOKEN_INDENT)
@@ -616,8 +623,7 @@ func (p *Parser) parseConstEnumDecl() *ast.ConstEnumDecl {
 		members = append(members, p.parseConstEnumMemberDecl())
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-
-	return &ast.ConstEnumDecl{Position: pos, Name: name, Storage: storage, Members: members}
+	return members
 }
 func (p *Parser) parseConstEnumMemberDecl() ast.ConstEnumMemberDecl {
 	pos := p.cur().Pos

@@ -81,6 +81,12 @@ func (a *Analyzer) matchCoversAllVariants(variantBase Type, covered map[string]b
 	if hasWildcard {
 		return true
 	}
+	// docs/127 D9: an `@open extern enum` lists only the members the header knew about, so
+	// spelling every one of them is NOT coverage — the C side may send a value this list has
+	// not caught up with. Only the default arm above closes it.
+	if openEnum, ok := variantBase.(*ConstEnumType); ok && openEnum.IsOpenForeign() {
+		return false
+	}
 	switch tt := variantBase.(type) {
 	case *EnumType:
 		if tt == nil {
@@ -131,6 +137,13 @@ func strconvQuote(s string) string {
 	return "\"" + s + "\""
 }
 func (a *Analyzer) reportNonExhaustiveMatch(pos lexer.Pos, variantBase Type, covered map[string]bool, hasWildcard bool) {
+	// docs/127 D9: an `@open extern enum` names only the members the header knew about, so
+	// spelling every one of them is NOT exhaustive — the C side may send another. The default
+	// arm is the obligation, and it is required even when the member list is fully covered.
+	if openEnum, ok := variantBase.(*ConstEnumType); ok && openEnum.IsOpenForeign() && !hasWildcard {
+		a.errorf(pos, "non-exhaustive match over @open extern enum %q; a C value outside its member list is possible, so a final _ arm is required", unqualifiedName(openEnum.Name))
+		return
+	}
 	if hasWildcard {
 		return
 	}

@@ -41,6 +41,9 @@ type Parser struct {
 	// to a state-bearing struct PLUS one free function per transition). ParseFile drains this buffer
 	// after each parseDecl so the synthesized decls land flat at file scope.
 	pendingDecls []ast.Decl
+	// foreignEnumErrorSetEmitted records that this file already carries the synthesized
+	// `error ForeignEnum` set, so several `extern enum` declarations share one (docs/127 D9).
+	foreignEnumErrorSetEmitted bool
 	// pendingStateDecls collects function-local `state Foo` / `state Bar(baz: T)` declarations
 	// (docs/125 §5 local-state sugar) until a `start Foo:` consumes them: the `start` synthesizes
 	// an enum from the accumulated states, hoists it to pendingDecls, and lowers to

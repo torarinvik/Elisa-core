@@ -56,6 +56,10 @@ func (a *Analyzer) maybeEmitDirectCallDeprecation(expr *ast.CallExpr) {
 }
 
 func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type) Type {
+	// docs/127 D9: `Name.from_c(raw)` names the synthesized validator of an `extern enum`.
+	// Rewrite before dispatch — Elisa has no static methods, so the callee would otherwise
+	// resolve as const-enum member access.
+	a.rewriteForeignEnumValidatorCallee(expr)
 	defer a.invalidateSMTAssertFactsForCall(expr)
 	// A mutating BUILTIN collection method (`xs.clear()`, `d.put(...)`, `s.add(...)`) is modeled with a
 	// VALUE receiver, not a `T&` ref, so it slips past the ref-arg fact invalidation below — leaving a
