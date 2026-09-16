@@ -40,21 +40,6 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		if _, ok := objType.(*ArrayType); ok {
 			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
 		}
-		if _, ok := objType.(*ViewType); ok {
-			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
-		}
-		// Native extern signatures may bridge surface `view[T]` to the runtime
-		// DynArrayView carrier before their boundary clauses are analyzed. Preserve
-		// the surface `.count` property across that bridge; codegen lowers it to the
-		// carrier's length slot.
-		if view, ok := objType.(*StructType); ok && view.Name == "DynArrayView" {
-			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
-		}
-		if view, ok := objType.(*GenericInstanceType); ok {
-			if base, ok := view.Base.(*StructType); ok && base.Name == "DynArrayView" {
-				return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
-			}
-		}
 		if storeType, _, ok := builtinStoreReceiverType(objType); ok && storeType != nil && storeType.StoreDecl != nil && storeType.StoreDecl.Soa {
 			return Field{Name: fieldName, Type: builtinUsizeType(), Mutable: false}, true
 		}

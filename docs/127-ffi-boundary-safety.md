@@ -257,14 +257,14 @@ the bounded surface:
 extern read(fd: i32, buf: mutable u8&, count: usize) -> isize
 ```
 
-Callers then pass a `mutable view[u8]`; `count` is filled from `.count` and
-cannot be supplied by hand. This is Checked C's bounds-safe interface. A
+Callers then pass a `mutable view[u8]`; `count` is filled from the view's
+`.len` and cannot be supplied by hand. This is Checked C's bounds-safe interface. A
 `@bounds`-less pointer-plus-integer extern becomes a `-strict-externs` error
 (H7 becomes decidable: every pointer parameter must be a typed handle, a
 bounded view, a `@bounds` target, or `@trusted`).
 
 Once views cross, `requires` gains its vocabulary for free:
-`requires out.count >= n`, `requires a.count == b.count`. Overlap
+`requires out.len >= n`, `requires a.len == b.len`. Overlap
 (`noalias`) uses the provenance facts doc 11 already tracks internally.
 
 ### 3.4 Inbound data is tainted until validated (closes H6)
@@ -335,9 +335,9 @@ pass. Wording follows the house style of the existing extern messages.
 | D3 | ownership of a return is declared | `extern "SDL_CreateTexture" returns non-owning handle "SdlTexture" from a constructor; return `SdlTexture` (owned) or `SdlTexture&` (borrowed from a parameter via @borrows_return)` |
 | D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
 | D5 | pointer parameters carry bounds | `extern function "read" parameter "buf" is a pointer with no bounds; declare it as mutable view[u8], bind a length with @bounds(buf, <length>), or mark the extern @trusted("reason")` (LANDED in both compilers: fires for a scalar reference beside an integer parameter; a struct reference is one object and a lone scalar reference is an out-parameter, so neither fires) |
-| D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.count; remove the explicit argument` |
+| D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.len; remove the explicit argument` |
 | D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
-| D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.count) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
+| D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.len) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
 | D9 | foreign enum values are validated | `extern "device_state" returns i32 used as DeviceState; construct it through DeviceState.from_c(...) so out-of-range values are rejected` |
 | D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
 | D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
@@ -434,7 +434,7 @@ _ = wolf3d_sdl_set_palette_colors(palette, (&game_palette_bytes[0]).cast[mutable
 
 ```elisa
 extern wolf3d_sdl_set_palette_colors(palette: mutable SdlPalette&, colors: view[SdlColor], first: i32) -> i32
-    requires first >= 0 and first.usize() + colors.count <= palette.count
+    requires first >= 0 and first.usize() + colors.len <= palette.ncolors.usize()
 
 _ = wolf3d_sdl_set_palette_colors(palette, game_palette, 0)
 ```
@@ -523,7 +523,7 @@ _ = project_getcwd(target, 4096.usize())
 extern project_getenv(name: cstr) -> static cstr?          # borrowed from environ
 @link_name("getcwd")
 extern project_getcwd(buffer: mutable view[u8]) -> cstr?
-    ensure result == null or result.len < buffer.count     # D8: checked, not assumed
+    ensure result == null or result.len < buffer.len       # D8: checked, not assumed
 
 if project_getenv("PWD") is exported:
     bytes_extend_cstr(&logical, exported)
@@ -570,7 +570,7 @@ _ = ge_raw_memcpy(dst.cast[mutable void&], src, n)
 ```elisa
 @link_name(memcpy)
 extern ge_raw_memcpy(dest: mutable view[u8], src: view[u8]) -> void
-    requires dest.count >= src.count
+    requires dest.len >= src.len
     requires disjoint(dest, src)
 
 ge_raw_memcpy(dst_bytes, src_bytes)
