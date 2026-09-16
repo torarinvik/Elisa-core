@@ -1184,16 +1184,6 @@ def arena_free(a: mutable Arena&):
             0.usize()
         )
 
-        arena_profile_allocation_event(
-            ELISA_PROFILE_ALLOCATION_REGION_FREE,
-            0.uintptr(),
-            0.usize(),
-            0.uintptr(),
-            0.usize(),
-            a.cast[uintptr],
-            0.usize()
-        )
-
         trusted Unsafe.AssumeProgress:
             while r != null:
                 r0: mutable heap Region& = r
