@@ -41,10 +41,16 @@ const (
 func (p *Parser) parseExternEnumDecl(pos lexer.Pos, annotations []ast.Annotation) ast.Decl {
 	p.expect(lexer.TOKEN_ENUM)
 	name := p.expect(lexer.TOKEN_IDENT).Text
-	// C's enum type is compatible with int, so i32 is the default when `of` is omitted.
-	var storage ast.TypeExpr = &ast.NamedType{Position: pos, Name: "i32"}
+	// The storage type is REQUIRED. C's enum type is only "compatible with int", and the width
+	// a given header settles on is the whole reason this declaration exists; defaulting it would
+	// put a silent guess on an ABI boundary, and would be one more default to keep identical
+	// between the two compilers. Say it.
+	var storage ast.TypeExpr
 	if p.matchIdentText("of") {
 		storage = p.parseTypeExpr()
+	} else {
+		p.errorAt(pos, "extern enum %q must declare its C storage type; add `of i32` (or the width the header uses) so the ABI is explicit", name)
+		storage = &ast.NamedType{Position: pos, Name: "i32"}
 	}
 	members := p.parseConstEnumMemberBlock()
 	open := false

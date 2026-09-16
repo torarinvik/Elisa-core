@@ -201,6 +201,8 @@ F ConstEnumDecl 1 Members
 F ConstEnumDecl 2 Name
 F ConstEnumDecl 3 Position
 F ConstEnumDecl 4 Storage
+F ConstEnumDecl 5 Foreign
+F ConstEnumDecl 6 Open
 
 T 33 ConstEnumMemberDecl
 F ConstEnumMemberDecl 1 Name
