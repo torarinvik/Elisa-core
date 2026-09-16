@@ -63,7 +63,7 @@ func (a *Analyzer) checkContainerGrowthStoreEscape(receiver ast.Expr, operation 
 	if storeRegion == containerRegion || (!a.containerReceiverStorageOutlivesFunction(receiver) && !a.regionOutlives(containerRegion, storeRegion)) {
 		return false
 	}
-	a.errorf(receiver.Pos(), "%s allocates into function-scoped region %q while growing non-local storage in region %q; this would leave the container pointing at freed memory", operation, storeRegion, containerRegion)
+	a.errorf(receiver.Pos(), "%s allocates into function-scoped region %q while growing non-local storage in region %q; this would leave the container pointing at freed memory", operation, storeRegion, regionDisplayName(containerRegion))
 	return true
 }
 

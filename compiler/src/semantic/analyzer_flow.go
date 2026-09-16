@@ -752,7 +752,33 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				// threaded from the caller (the hidden `__region_auto` Arena& param), so the result
 				// outlives the call — no escape. Suppress the error. Explicitly-named local regions
 				// are never region-polymorphic and still error.
-				if !regionPoly {
+				//
+				// That last sentence is the rule, and the suppression used to break it. `regionPoly`
+				// is a property of the FUNCTION; the region being returned here is a property of THIS
+				// return. A function earns the region-polymorphic flag from any `__auto_*` return, and
+				// once it had the flag EVERY escaping return went quiet — including one that depends on
+				// an explicitly-named `region scratch(...):`, whose storage is freed at block exit no
+				// matter what the caller threads. `return box.values` from inside an `if`, with a plain
+				// `return []` on the other path, compiled clean and handed the caller freed memory:
+				// the empty-literal return set the flag, and the field return rode its suppression out.
+				// Returning `values` directly only looked fine because a second, name-based check
+				// caught it — reach through one field and nothing was left. Suppress only when the
+				// region is one the CALLER owns.
+				//
+				// Caller-owned means one of two things, and NEITHER is a region this function
+				// frees: a declared `@r` region param (`lookupRegionParam` — note that
+				// `lookupRegionState` is NOT the test, it resolves a region param too), or the
+				// synthesized `__auto_*` region, which docs/75 threads in through the hidden
+				// `__region_auto` Arena&. Anything else that is a LIVE region owned by a scope of
+				// ours — a `region NAME(...):` block, or a region taken over by `return move` —
+				// is freed before the caller can read the result, and returning it dangles.
+				escapesLocalRegionBlock := false
+				if !a.lookupRegionParam(region.Name) && !isSynthesizedAutoRegion(region.Name) {
+					if sym, state := a.lookupRegionState(region.Name); sym != nil && !state.Destroyed && state.DeclScope != nil {
+						escapesLocalRegionBlock = true
+					}
+				}
+				if !regionPoly || escapesLocalRegionBlock {
 					if _, isRef := valueType.(*RefType); isRef {
 						a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
 					} else {

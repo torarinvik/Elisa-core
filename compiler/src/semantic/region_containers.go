@@ -212,7 +212,7 @@ func (a *Analyzer) checkRegionAggregateReturnEscape(value ast.Expr, valueType Ty
 		}
 		region = taint
 	}
-	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", region, region)
+	a.errorf(value.Pos(), "value backed by scope-owned region %q escapes via return; the region is freed at block exit, leaving its containers/stores dangling. Build it into a caller-owned region instead — take a region param (`def f[@r] ... @r`) or an `Arena&` the caller owns, rather than a local `region %s(...):` block", regionDisplayName(region), regionDisplayName(region))
 }
 
 // typeCarriesRegionStorage reports whether a value of type t can transitively hold
@@ -481,6 +481,22 @@ func isSynthesizedAutoRegion(name string) bool {
 	return len(name) > len(prefix) && name[:len(prefix)] == prefix
 }
 
+// regionDisplayName is the name a region is allowed to APPEAR UNDER in a user-facing
+// diagnostic. A compiler-synthesized auto region has no name the programmer wrote, and
+// synthesizedAutoRegionName builds it from the declaration's BUFFER OFFSET -- so printing
+// it raw made the message depend on how long the source file's PATH is: the identical
+// program compiled from a different directory produced `region "__auto_129"` instead of
+// `region "__auto_140"`. A diagnostic that changes with the containing directory cannot be
+// asserted by any test and tells the reader nothing, so the inferred region reports under a
+// fixed placeholder that no identifier can collide with. Every region the programmer named
+// renders exactly as before.
+func regionDisplayName(name string) string {
+	if isSynthesizedAutoRegion(name) {
+		return "<inferred>"
+	}
+	return name
+}
+
 // regionLifetimeOrdinal returns a region's position in the outlives-lattice: a
 // LOWER ordinal means a longer-lived region. Region params are caller-owned and
 // outlive every local region (ordinal 0). Local regions get their declaration
@@ -618,7 +634,7 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType,
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
 }
 
@@ -680,7 +696,7 @@ func (a *Analyzer) checkNestedRegionElementStoreEscape(argExpr ast.Expr, contain
 		}
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+		a.errorf(argExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
 }
 
@@ -816,7 +832,7 @@ func (a *Analyzer) checkNestedRegionBulkStoreEscape(sourceExpr, receiverExpr ast
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+		a.errorf(sourceExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
 }
 
@@ -988,7 +1004,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 			if tj == storeTargetGlobal {
 				// The callee stores the argument into program-lifetime storage (a global/perm
 				// container, or relayed there) — that outlives every local region unconditionally.
-				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", srcRegion, srcRegion)
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into program-lifetime storage, which outlives the region; region %q is freed first, leaving a dangling reference. Build the value into a program-lifetime region (e.g. `perm`) before passing it", regionDisplayName(srcRegion), regionDisplayName(srcRegion))
 				continue
 			}
 			if tj < 0 || tj >= len(orderedArgs) {
@@ -1001,7 +1017,7 @@ func (a *Analyzer) checkInterprocStoreEscape(call *ast.CallExpr, orderedArgs []a
 				continue
 			}
 			if a.regionOutlives(targetRegion, srcRegion) {
-				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", srcRegion, targetRegion, srcRegion, targetRegion)
+				a.errorf(arg.Pos(), "value in region %q is stored by the callee into a longer-lived argument in region %q; region %q is freed first, leaving a dangling reference. Build the value into region %q (or a region that outlives it) before passing it", regionDisplayName(srcRegion), regionDisplayName(targetRegion), regionDisplayName(srcRegion), regionDisplayName(targetRegion))
 			}
 		}
 	}
@@ -1106,7 +1122,7 @@ func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targ
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, valueRegion, targetRegion, targetRegion)
+		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
 }
 
@@ -1136,7 +1152,7 @@ func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRe
 	if !scopeStrictlyEncloses(targetScope, state.DeclScope) {
 		return
 	}
-	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", valueRegion, root.Name, valueRegion, valueRegion, root.Name)
+	a.errorf(targetExpr.Pos(), "value in region %q is stored into %q, which outlives the region; region %q is freed first, leaving a dangling reference. Copy the value out of region %q (or declare %q inside the region block) instead", regionDisplayName(valueRegion), root.Name, regionDisplayName(valueRegion), regionDisplayName(valueRegion), root.Name)
 }
 
 // isFreshContainerProducer reports whether an expression CONSTRUCTS a fresh value whose interior may
@@ -1259,7 +1275,7 @@ func (a *Analyzer) checkInteriorRegionAgainstTarget(targetExpr ast.Expr, targetR
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
-		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", valueRegion, targetRegion, via, valueRegion, targetRegion, targetRegion)
+		a.errorf(valueExpr.Pos(), "value in region %q is stored into longer-lived region %q via a %s; region %q is freed first, leaving a dangling element. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), via, regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
 }
 
