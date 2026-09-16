@@ -429,7 +429,14 @@ func runLoadedProgramWithOptions(options cliOptions, program *loadedProgram, std
 		// IR was emitted with the HOST triple and layout while `-emit obj` for the same
 		// flags correctly produced a foreign object. Every other emit path here already
 		// threads options.targetTriple.
-		output, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, false, false)
+		//
+		// …and it dropped `-g` and `-ftrace` the same way, for the same reason: the two
+		// trailing arguments were hardcoded false while `-emit obj` threaded both. So the
+		// flags were accepted, reported no error, and produced IR with no !DISubprogram and
+		// no trace hooks — which is worse than rejecting them. stage1 honours both here, so
+		// this was also a two-compiler divergence (measured: stage1 2 DISubprogram / 6
+		// DILocation on the same input where stage0 emitted none).
+		output, perfWarnings, err := backend.GenerateLLVMIRWithWarnings(result, effectiveOptimizationLevel(options), options.packedProfile, options.targetTriple, options.debugInfo, options.recordTrace)
 		if err != nil {
 			fmt.Fprintf(stderr, "error: %s\n", err)
 			return 1
