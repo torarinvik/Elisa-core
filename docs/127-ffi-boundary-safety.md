@@ -345,12 +345,28 @@ pass. Wording follows the house style of the existing extern messages.
 | D4 | no use after native release | `"tex" was consumed by "SDL_DestroyTexture" at 41:5 and is used again here; the native object is already released` (the existing use-after-move message, with the consuming extern named) |
 | D5 | pointer parameters carry bounds | `extern function "read" parameter "buf" is a pointer with no bounds; declare it as mutable view[u8], bind a length with @bounds(buf, <length>), or mark the extern @trusted("reason")` (LANDED in both compilers: fires for a scalar reference beside an integer parameter; a struct reference is one object and a lone scalar reference is an out-parameter, so neither fires) |
 | D6 | a bound length is never hand-typed | `argument "count" of "read" is supplied by @bounds(buf, count) from buf.len; remove the explicit argument` |
-| D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` |
+| D7 | a view crossing to C is contiguous and sized | `cannot pass "s" to C-ABI extern "take_view": view[f32] over a strided/packed source has no (pointer, length) form; copy it first` (HOLDS TODAY BY CONSTRUCTION, no check written: see the note below) |
 | D8 | inbound facts that guard memory are checked | `ensure on extern "getcwd" guards memory (result.len < buffer.len) and is not assumed; a runtime check is emitted, or mark the extern @trusted("reason") to assume it` (a note, not an error, so the audit can list it) |
 | D9 | foreign enum values are validated | `cannot reinterpret a C value as extern enum "DeviceState": it is not known to be one of its members; construct it through DeviceState.from_c(...) so out-of-range values are rejected` (LANDED in both compilers; the `@open` form reads `non-exhaustive match over @open extern enum "SdlEvent"; a C value outside its member list is possible, so a final _ arm is required`) |
 | D10 | retained borrows outlive their retainer | `"plugin_state" is retained by "web_view_set_callbacks" until drop("view") but its storage ends at 88:1, before "view" is dropped at 102:1` (the existing outlives-storage message, extended with the retention edge) |
 | D11 | callback thread matches sendability | `callback "on_message" runs on thread(worker) but its context "PluginState" is not sendable; add Unsafe.ThreadShare or make the context sendable` |
 | D12 | `@trusted` is the only entry point for trust | `extern function "memcpy" pointer parameter "dest" is not covered by its contract; under -strict-externs every pointer parameter must be named by a `requires`/`ensure` clause, be an opaque handle, or the extern must be @trusted("reason")` (LANDED in both compilers, one per uncovered parameter at the parameter; will widen to bounded views and @bounds targets with step 2) |
+
+**D7, measured 2026-09-16.** No reachable source produces a non-contiguous
+`view[T]`. The strided form the message describes is the index-SOA packed tail
+(`backend/llvm_packed_store_ops...loadTailView`: "columns are strided by the
+machine word"), and that ABI mode cannot be selected: the CLI never sets an
+explicit mode, `@packed_profile` maps only to `variant-sparse` and
+`dense-fixed`, and `layout(soa)` on a packed enum falls through to the
+canonical mode. Run through C, a `tail f32` payload answers correctly under
+every reachable profile (default, canonical, retained_reads, build_heavy: all
+1+2+3 = 6), because each stores the tail as a real `%DynArrayView`. A check
+written now could never fire, so it could never be gated, and a gate that
+cannot fail is how a guarantee rots into a label. The reachable hazard in the
+same family is pinned instead, in `extern_view_split_smoke.sh`: the C plan must
+refuse to split an argument that is not the (pointer, length) aggregate it
+assumes. Write the D7 check when index-SOA becomes selectable, and it will have
+a fixture the same day.
 
 What this buys the engine team: `-strict-externs` on a binding family either
 passes, or every failure names the extern, the parameter, and the one-line
