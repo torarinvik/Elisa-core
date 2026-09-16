@@ -114,6 +114,7 @@ func generateUnsafeReportFromSummary(summary unsafeSummary) string {
 			fmt.Fprintf(&out, "  %s: %s\n", use.Function, strings.Join(use.Permissions, ", "))
 		}
 	}
+	writeExternObligationReport(&out, summary.Externs)
 	return out.String()
 }
 
@@ -185,6 +186,8 @@ type unsafeSummary struct {
 	TrustedTotal      int
 	TrustedCounts     map[string]int
 	TrustedUses       []unsafeTrustedSummary
+	// Externs: docs/127 §3.6, one obligation row per extern parameter and return.
+	Externs []externObligationSummary
 }
 
 type boundaryInvariant struct {
@@ -217,6 +220,7 @@ func collectUnsafeSummary(result *semantic.Result) unsafeSummary {
 	if result == nil || result.GlobalScope == nil {
 		return summary
 	}
+	summary.Externs = collectExternObligations(result)
 	summary.TrustedUses = collectTrustedUnsafeUses(result)
 	for _, use := range summary.TrustedUses {
 		for _, permission := range use.Permissions {
