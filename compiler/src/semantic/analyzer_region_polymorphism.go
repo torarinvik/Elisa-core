@@ -432,6 +432,35 @@ func (a *Analyzer) functionReturnsRegionAllocatedValue(fn *ast.FuncDecl) bool {
 					}
 				}
 			}
+		case *ast.CallExpr:
+			// An INLINE (non-packed) enum constructor whose payload carries region-allocated
+			// data — `return Box.Full(tag, items)`, items a region-fed local. The value enum
+			// embeds its payload, so the returned value holds the container's header while the
+			// backing lives in this function's inferred region: exactly the struct-literal case
+			// below it, and it must thread + adopt the caller's region the same way.
+			//
+			// Without this the auto region was freed at `ret` and the caller read the payload's
+			// buffer after free — a SILENT wrong answer in safe code, not a crash: the darray
+			// header is copied out by value so `.count` reads correctly and every ELEMENT reads
+			// as zero. The struct spelling of the identical function (`return Box{tag: tag,
+			// items: items}`) was already classified and worked, which is what makes this a bug
+			// rather than a policy. Packed enums are excluded: a packed constructor is a handle
+			// into a store, already covered by regionBackedEnumConstructor above.
+			if retCarriesRegionStorage && a.callIsInlineEnumConstructor(e) {
+				for _, arg := range e.Args {
+					if arg == nil {
+						continue
+					}
+					if regiony(arg) {
+						return true
+					}
+					if fe, ok := unwrapParenForRegionPoly(arg).(*ast.FieldExpr); ok {
+						if root := rootIdentExpr(fe); root != nil && regionLocals[root.Name] {
+							return true
+						}
+					}
+				}
+			}
 		case *ast.ListLitExpr:
 			// A region-less container literal allocates into the inferred region — even an
 			// empty `[]` seed that gets pushed into (the build-local-return shape).
@@ -1002,6 +1031,26 @@ func (a *Analyzer) regionBackedEnumConstructor(call *ast.CallExpr) (*EnumType, b
 		return nil, false
 	}
 	return enumType, true
+}
+
+// callIsInlineEnumConstructor reports whether a call is a variant constructor of an INLINE
+// (non-packed) enum — `Box.Full(...)`. Packed enums are excluded: their constructors are handle
+// allocations into a store and are classified by regionBackedEnumConstructor instead. Used by the
+// region-polymorphism classifier, where an inline enum's payload embeds its arguments and so
+// carries their region the way a struct literal's fields do.
+func (a *Analyzer) callIsInlineEnumConstructor(call *ast.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	fieldExpr, ok := call.Func.(*ast.FieldExpr)
+	if !ok {
+		return false
+	}
+	enumType, variant, ok := a.enumConstructorInfoFromFieldExpr(fieldExpr)
+	if !ok || enumType == nil || variant == nil {
+		return false
+	}
+	return !enumType.Packed && !enumType.Root().Packed
 }
 
 func unwrapParenForRegionPoly(value ast.Expr) ast.Expr {
