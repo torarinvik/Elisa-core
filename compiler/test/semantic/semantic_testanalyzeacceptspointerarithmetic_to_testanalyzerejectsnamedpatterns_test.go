@@ -221,21 +221,20 @@ def bad(thread: Thread[i64, Pending]) -> i64:
 		t.Fatalf("expected protocol-state mismatch diagnostic, got:\n%s", all)
 	}
 }
-func TestAnalyzeRejectsReferencesToUserDeclaredAffineStruct(t *testing.T) {
+// A user-declared affine struct is a borrowable owner, like a `linear struct`; the
+// misuse rules (copy/move out, use after the owner moves) live in
+// src/semantic/affine_borrow_test.go.
+func TestAnalyzeAcceptsReferencesToUserDeclaredAffineStruct(t *testing.T) {
 	src := `affine struct Handle:
 	raw: mutable uintptr
 
-def bad(handle: Handle) -> void:
+def borrow_it(handle: Handle) -> void:
 	borrow: Handle& = &handle
 	_ = borrow
 `
-	_, errs := parseAndAnalyze(t, "user_affine_ref_reject.elisa", src)
-	if len(errs) == 0 {
-		t.Fatal("expected semantic error, got none")
-	}
-	all := strings.Join(errs, "\n")
-	if !strings.Contains(all, "cannot take address of linear value") {
-		t.Fatalf("expected user-affine address diagnostic, got:\n%s", all)
+	_, errs := parseAndAnalyze(t, "user_affine_ref_accept.elisa", src)
+	if len(errs) != 0 {
+		t.Fatalf("expected a borrow of a user-affine value to be accepted, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 func TestAnalyzeRejectsGlobalUserDeclaredAffineStruct(t *testing.T) {

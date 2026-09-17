@@ -40,12 +40,34 @@ func isBorrowableAffineOwnerType(t Type) bool {
 	if directProtocolLeakKind(t) == "linear value" {
 		return true
 	}
+	// A user-declared `affine struct` (or a struct whose `__drop__` induces
+	// affinity) is borrowable for the same reason, with one obligation fewer: a
+	// borrow neither copies nor consumes the value, and it may still be dropped.
+	// The same borrowed-owner analysis rejects a borrow used after its owner moves.
+	// A `Pooled[T]` handle stays unborrowable (docs/69): release recycles its slot,
+	// and the raw-interior-alias check only sees `ptr` read directly off the owner,
+	// so a pointer read through a borrow would dangle undetected.
+	if isUserDroppableAffineStructType(t) && !isRegionPoolHandleType(t) {
+		return true
+	}
 	// An `extern resource` (docs/127 §3.2) is borrowable: `f(r: Name&)` lends the handle
 	// without consuming it, and the scope-exit `__drop__` still releases it.
 	if st, ok := t.(*StructType); ok && st != nil && st.Resource {
 		return true
 	}
 	return isBuiltinProtocolOwnerType(t, "ThreadPool") || isBuiltinProtocolOwnerType(t, "TaskGroup")
+}
+
+func isUserDroppableAffineStructType(t Type) bool {
+	switch tt := t.(type) {
+	case *StructType:
+		return tt != nil && tt.Affine && !tt.Builtin && tt.Droppable
+	case *GenericInstanceType:
+		base, ok := tt.Base.(*StructType)
+		return ok && base != nil && base.Affine && !base.Builtin && base.Droppable
+	default:
+		return false
+	}
 }
 
 func affineHandleKind(t Type) string {

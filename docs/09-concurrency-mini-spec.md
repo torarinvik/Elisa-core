@@ -694,6 +694,17 @@ def bad(arg: Holder&) -> void:   # reject
 alias: Holder& = &holder         # reject
 ```
 
+Relaxed since the first slice for **borrowable owners**: a `linear struct` or
+`affine struct` value (including a struct made affine by its `__drop__`), an
+`extern resource`, `ThreadPool` and `TaskGroup`. A borrow of an owner neither
+copies nor consumes it; the borrowed-owner analysis rejects copying or moving
+the value out through the reference, returning a reference to function-local
+storage, and any use of the borrow (directly, through a returned reference, or
+through a struct field) after the owner is moved. Still rejected: references to
+the builtin handles (`Thread`, `Task`, `MutexGuard`), to `Pooled[T]` (release
+recycles the slot; see docs/69), and to a plain struct that merely contains an
+affine field.
+
 ### 2. No affine global storage
 
 If `T` contains affine values structurally, reject:
