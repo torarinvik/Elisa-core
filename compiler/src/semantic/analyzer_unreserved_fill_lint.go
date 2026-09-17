@@ -159,8 +159,8 @@ func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) 
 	}
 	target := ""
 	var perIteration ast.Expr
-	growthCounts := collectGrowthTargetCounts(loop.Body)
-	for name, growth := range growthCounts {
+	growthCounts, growthOrder := collectGrowthTargetCounts(loop.Body)
+	for _, name := range growthOrder {
 		if !a.growthTargetIsDArray(loop.Body, name) {
 			continue
 		}
@@ -168,7 +168,7 @@ func (a *Analyzer) flagUnreservedCountingFill(prev ast.Stmt, loop *ast.ForStmt) 
 			return
 		}
 		target = name
-		perIteration = growth
+		perIteration = growthCounts[name]
 	}
 	if target == "" {
 		return

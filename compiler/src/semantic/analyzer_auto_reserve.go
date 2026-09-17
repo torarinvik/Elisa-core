@@ -41,8 +41,9 @@ func (a *Analyzer) maybeAutoReserveIterFill(stmt *ast.IterForStmt, sourceType Ty
 		sourceName = srcIdent.Name
 	}
 	preReserves := []ast.Stmt{}
-	provenGrowth := collectGrowthTargetCounts(stmt.Body)
-	for name, growth := range provenGrowth {
+	provenGrowth, growthOrder := collectGrowthTargetCounts(stmt.Body)
+	for _, name := range growthOrder {
+		growth := provenGrowth[name]
 		if sourceName != "" && name == sourceName {
 			continue
 		}
@@ -116,7 +117,9 @@ func (a *Analyzer) maybeAutoReserveCountingFill(stmt *ast.ForStmt) {
 		return
 	}
 	preReserves := []ast.Stmt{}
-	for name, growth := range collectGrowthTargetCounts(stmt.Body) {
+	provenGrowth, growthOrder := collectGrowthTargetCounts(stmt.Body)
+	for _, name := range growthOrder {
+		growth := provenGrowth[name]
 		sym, ok := a.currentScope.Lookup(name)
 		if !ok || !isDArrayTypeMaybeRef(sym.Type) {
 			continue
@@ -244,10 +247,25 @@ func isDArrayTypeMaybeRef(t Type) bool {
 }
 
 // collectGrowthTargetCounts returns syntactically known per-iteration growth for each receiver
-// named by `name.push(...)` or `name.extend(...)` calls in body.
-func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
+// named by `name.push(...)` or `name.extend(...)` calls in body, and those receivers' names in the
+// order the body first grows them.
+//
+// A caller that emits something per receiver must walk the ORDERED names, not range over the map.
+// Go randomizes map iteration, and ranging over it emitted a loop's synthesized `reserve`
+// statements in a different order from one compile to the next: the same source built different
+// IR, so no two builds of a program were byte-comparable.
+func collectGrowthTargetCounts(body []ast.Stmt) (map[string]ast.Expr, []string) {
 	counts := map[string]ast.Expr{}
+	order := []string{}
+	listed := map[string]bool{}
 	disqualified := map[string]bool{}
+	grow := func(name string, growth ast.Expr, pos lexer.Pos) {
+		if !listed[name] {
+			listed[name] = true
+			order = append(order, name)
+		}
+		counts[name] = semanticAddReserveExpr(counts[name], growth, pos)
+	}
 	var walk func(v reflect.Value, loopDepth int)
 	walk = func(v reflect.Value, loopDepth int) {
 		if !v.IsValid() || !v.CanInterface() {
@@ -269,7 +287,7 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
 						if disqualified[recv.Name] {
 							return
 						}
-						counts[recv.Name] = semanticAddReserveExpr(counts[recv.Name], semanticIntReserveExpr(semanticGrowthCallElementCount(field.Field, call), call.Pos()), call.Pos())
+						grow(recv.Name, semanticIntReserveExpr(semanticGrowthCallElementCount(field.Field, call), call.Pos()), call.Pos())
 						return
 					}
 				}
@@ -277,12 +295,12 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
 			if node, ok := v.Interface().(ast.Node); ok && isLoopStmtNode(node) {
 				if loop, ok := node.(*ast.ForStmt); ok && loopDepth == 0 {
 					if bound, ok := semanticCountingLoopBoundExpr(loop); ok {
-						inner := collectGrowthTargetCounts(loop.Body)
-						for name, innerGrowth := range inner {
+						inner, innerOrder := collectGrowthTargetCounts(loop.Body)
+						for _, name := range innerOrder {
 							if disqualified[name] {
 								continue
 							}
-							counts[name] = semanticAddReserveExpr(counts[name], semanticMultiplyReserveExpr(bound, innerGrowth, loop.Position), loop.Position)
+							grow(name, semanticMultiplyReserveExpr(bound, inner[name], loop.Position), loop.Position)
 						}
 						return
 					}
@@ -302,7 +320,15 @@ func collectGrowthTargetCounts(body []ast.Stmt) map[string]ast.Expr {
 		}
 	}
 	walk(reflect.ValueOf(body), 0)
-	return counts
+	// A receiver grown inside a nested non-counting loop after it was first counted is dropped
+	// from counts; keep only the survivors, still in first-grown order.
+	names := make([]string, 0, len(counts))
+	for _, name := range order {
+		if _, ok := counts[name]; ok {
+			names = append(names, name)
+		}
+	}
+	return counts, names
 }
 
 func collectGrowthTargetNames(body []ast.Stmt) map[string]bool {
