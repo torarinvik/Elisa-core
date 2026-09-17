@@ -80,6 +80,42 @@ import (
 	"fmt"
 )
 
+// emitConstStringLenExpr lowers `.len` on a compile-time string — the only `.len` a `u8&` receiver
+// has (the analyzer's constStringLenField rejects every receiver that does not const-evaluate to a
+// string) — to its byte length. A `u8&` carries no length, so nothing is computed at runtime.
+func (s *functionState) emitConstStringLenExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
+	if expr == nil || expr.Field != "len" {
+		return nil, nil, false, nil
+	}
+	ref, ok := s.exprType(expr.Object).(*semantic.RefType)
+	if !ok || ref == nil {
+		return nil, nil, false, nil
+	}
+	if elem, ok := ref.Elem.(*semantic.BuiltinType); !ok || elem == nil || elem.Name != "u8" {
+		return nil, nil, false, nil
+	}
+	value, ok := s.evalConstExpr(expr)
+	if !ok || value.Kind != semantic.ConstInt {
+		return nil, nil, false, nil
+	}
+	lenType := &semantic.BuiltinType{Name: "i64"}
+	llvmValue, err := s.g.constValueAsLLVM(value, lenType)
+	return llvmValue, lenType, true, err
+}
+
+// nameIsRuntimeBinding reports whether a bare name resolves to a binding in the function's scope
+// chain rather than to a compile-time value; a const generic argument in typeMap is compile-time.
+// The constant evaluator must not read a const through such a binding (semantic.nameIsRuntimeBinding).
+func (s *functionState) nameIsRuntimeBinding(name string) bool {
+	if bound, ok := s.typeMap[name]; ok {
+		if _, isConst := bound.(*semantic.ConstValueType); isConst {
+			return false
+		}
+	}
+	_, ok := s.lookupBinding(name)
+	return ok
+}
+
 func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if value, fieldType, handled, err := s.emitStaticInterfaceMethodExpr(expr); handled {
 		return value, fieldType, err
@@ -94,6 +130,9 @@ func (s *functionState) emitFieldExpr(expr *ast.FieldExpr) (C.LLVMValueRef, sema
 	}
 	if fieldType, ok := cstrSyntheticFieldType(s.exprType(expr.Object), expr.Field); ok {
 		return s.emitRuntimeStringLenExpr(expr.Object, fieldType)
+	}
+	if value, fieldType, handled, err := s.emitConstStringLenExpr(expr); handled {
+		return value, fieldType, err
 	}
 	if value, fieldType, handled, err := s.emitBitGroupMemberExpr(expr); handled {
 		return value, fieldType, err

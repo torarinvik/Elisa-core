@@ -62,7 +62,11 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 			return field.Type
 		}
 	}
-	if field, ok := cstrSyntheticField(objType, expr.Field); ok {
+	field, ok := cstrSyntheticField(objType, expr.Field)
+	if !ok {
+		field, ok = a.constStringLenField(expr, objType)
+	}
+	if ok {
 		field.Type = a.specializeProjectedFunctionFieldType(expr, field.Type)
 		a.reportInvalidRegionUse(expr, field.Type)
 		if state, ok := a.lookupAffineValueState(expr); ok && a.containsAffineHandleValues(field.Type, map[string]bool{}) {
@@ -71,7 +75,7 @@ func (a *Analyzer) analyzeFieldExpr(expr *ast.FieldExpr) Type {
 		a.reportBorrowedOwnerRefUseAfterConsume(expr, field.Type)
 		return field.Type
 	}
-	field, ok := a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
+	field, ok = a.lookupFieldWithDiagnostics(objType, expr.Field, expr.Pos(), false)
 	if ok {
 		if field.Ghost {
 			a.ghostReadSeen = true

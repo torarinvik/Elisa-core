@@ -251,7 +251,59 @@ func (s *functionState) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 		}
 		return semantic.CastConstValue(operand, targetType)
 	}
-	return evalConstExprWithLookup(expr, s.g.constValue, s.g.evalStaticFunctionCall)
+	return evalConstExprWithLookup(expr, s.scopedConstValue, s.evalStaticFunctionCall, s.constExprType)
+}
+
+// scopedConstValue is the const lookup for an expression inside this function: a name (or the
+// root of a dotted name) bound in the function's scope chain shadows every const of that name,
+// and the generator's const table knows nothing of those bindings.
+func (s *functionState) scopedConstValue(name string) (semantic.ConstValue, bool) {
+	if !strings.HasPrefix(name, "$consteval.") {
+		root := name
+		if idx := strings.Index(root, "."); idx > 0 {
+			root = root[:idx]
+		}
+		if s.nameIsRuntimeBinding(root) {
+			return semantic.ConstValue{}, false
+		}
+	}
+	return s.g.constValue(name)
+}
+
+// evalStaticFunctionCall evaluates a static call made from this function; its ARGUMENTS are
+// expressions of this function, so they are evaluated in its scope.
+func (s *functionState) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
+	if expr == nil {
+		return semantic.ConstValue{}, false
+	}
+	if ident, ok := expr.Func.(*ast.Ident); ok && s.nameIsRuntimeBinding(ident.Name) {
+		return semantic.ConstValue{}, false
+	}
+	return s.g.evalStaticFunctionCallWith(expr, s.evalConstExpr)
+}
+
+// constExprType is a subexpression's static type for a type-dependent fold: the analyzed type, or
+// for a bare const name its declared type.
+func (s *functionState) constExprType(expr ast.Expr) semantic.Type {
+	if t := s.exprType(expr); t != nil {
+		return t
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		if n != nil {
+			return s.constExprType(n.Inner)
+		}
+	case *ast.StringLit:
+		return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}}
+	case *ast.Ident:
+		if n == nil || s.nameIsRuntimeBinding(n.Name) {
+			return nil
+		}
+		if sym, _, ok := s.lookupVisibleGlobalSymbol(n.Name); ok && sym != nil && sym.Kind == semantic.SymbolConst {
+			return sym.Type
+		}
+	}
+	return nil
 }
 func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool) {
 	if unwrapExpr, ok := expr.(*ast.UnwrapElseExpr); ok {
@@ -274,7 +326,30 @@ func (g *llvmGenerator) evalConstExpr(expr ast.Expr) (semantic.ConstValue, bool)
 		}
 		return semantic.CastConstValue(operand, targetType)
 	}
-	return evalConstExprWithLookup(expr, g.constValue, g.evalStaticFunctionCall)
+	return evalConstExprWithLookup(expr, g.constValue, g.evalStaticFunctionCall, g.constExprType)
+}
+
+// constExprType is a subexpression's static type for a type-dependent fold: the analyzed type, or
+// for a bare global const its declared type.
+func (g *llvmGenerator) constExprType(expr ast.Expr) semantic.Type {
+	if t := g.exprType(expr); t != nil {
+		return t
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		if n != nil {
+			return g.constExprType(n.Inner)
+		}
+	case *ast.StringLit:
+		return &semantic.RefType{Elem: &semantic.BuiltinType{Name: "u8"}}
+	case *ast.Ident:
+		if n != nil && g.result != nil && g.result.GlobalScope != nil {
+			if sym, ok := g.result.GlobalScope.Lookup(n.Name); ok && sym != nil && sym.Kind == semantic.SymbolConst {
+				return sym.Type
+			}
+		}
+	}
+	return nil
 }
 
 func (s *functionState) evalConstUnwrapElseExpr(expr *ast.UnwrapElseExpr) (semantic.ConstValue, bool) {
@@ -377,7 +452,9 @@ func backendConstRecoveryClauseForExpr(recovery *ast.RecoveryClause, fallback as
 	return &ast.RecoveryClause{Position: pos, Kind: ast.RecoveryValue, Value: fallback}
 }
 
-func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
+// typeOf supplies a subexpression's static type where a fold depends on it (a cstr's `.len` is
+// strlen); it may return nil, which only refuses the folds that need a type.
+func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool), typeOf func(ast.Expr) semantic.Type) (semantic.ConstValue, bool) {
 	switch n := expr.(type) {
 	case *ast.IntLit:
 		// Use the semantic parser so unsigned-typed literals with the top bit set
@@ -417,7 +494,7 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return semantic.ConstValue{}, false
 	case *ast.FieldExpr:
-		if value, ok := evalBackendConstAggregateFieldExpr(n, lookup, call); ok {
+		if value, ok := evalBackendConstAggregateFieldExpr(n, lookup, call, typeOf); ok {
 			return value, true
 		}
 		ident, ok := n.Object.(*ast.Ident)
@@ -426,13 +503,13 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return lookup(ident.Name + "." + n.Field)
 	case *ast.ParenExpr:
-		return evalConstExprWithLookup(n.Inner, lookup, call)
+		return evalConstExprWithLookup(n.Inner, lookup, call, typeOf)
 	case *ast.CastExpr:
-		return evalConstExprWithLookup(n.Operand, lookup, call)
+		return evalConstExprWithLookup(n.Operand, lookup, call, typeOf)
 	case *ast.MoveExpr:
-		return evalConstExprWithLookup(n.Operand, lookup, call)
+		return evalConstExprWithLookup(n.Operand, lookup, call, typeOf)
 	case *ast.UnaryExpr:
-		operand, ok := evalConstExprWithLookup(n.Operand, lookup, call)
+		operand, ok := evalConstExprWithLookup(n.Operand, lookup, call, typeOf)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -460,11 +537,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return semantic.ConstValue{}, false
 		}
 	case *ast.BinaryExpr:
-		left, ok := evalConstExprWithLookup(n.Left, lookup, call)
+		left, ok := evalConstExprWithLookup(n.Left, lookup, call, typeOf)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
-		right, ok := evalConstExprWithLookup(n.Right, lookup, call)
+		right, ok := evalConstExprWithLookup(n.Right, lookup, call, typeOf)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -523,16 +600,16 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			return semantic.ConstValue{}, false
 		}
 	case *ast.TernaryExpr:
-		condValue, ok := evalConstExprWithLookup(n.Cond, lookup, call)
+		condValue, ok := evalConstExprWithLookup(n.Cond, lookup, call, typeOf)
 		if !ok || condValue.Kind != semantic.ConstBool {
 			return semantic.ConstValue{}, false
 		}
 		if condValue.Bool {
-			return evalConstExprWithLookup(n.Value, lookup, call)
+			return evalConstExprWithLookup(n.Value, lookup, call, typeOf)
 		}
-		return evalConstExprWithLookup(n.Alt, lookup, call)
+		return evalConstExprWithLookup(n.Alt, lookup, call, typeOf)
 	case *ast.UnwrapElseExpr:
-		value, ok := evalConstExprWithLookup(n.Value, lookup, call)
+		value, ok := evalConstExprWithLookup(n.Value, lookup, call, typeOf)
 		if !ok || value.Kind != semantic.ConstOptional {
 			return semantic.ConstValue{}, false
 		}
@@ -546,12 +623,12 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
 			return semantic.ConstValue{}, false
 		}
-		return evalConstExprWithLookup(recovery.Value, lookup, call)
+		return evalConstExprWithLookup(recovery.Value, lookup, call, typeOf)
 	case *ast.GetExpr:
 		if idx, ok := n.Value.(*ast.IndexExpr); ok && idx.Fallback != nil {
-			return evalConstExprWithLookup(idx, lookup, call)
+			return evalConstExprWithLookup(idx, lookup, call, typeOf)
 		}
-		value, ok := evalConstExprWithLookup(n.Value, lookup, call)
+		value, ok := evalConstExprWithLookup(n.Value, lookup, call, typeOf)
 		if !ok || value.Kind != semantic.ConstOptional {
 			return semantic.ConstValue{}, false
 		}
@@ -565,11 +642,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		if recovery == nil || recovery.Kind != ast.RecoveryValue || recovery.Value == nil {
 			return semantic.ConstValue{}, false
 		}
-		return evalConstExprWithLookup(recovery.Value, lookup, call)
+		return evalConstExprWithLookup(recovery.Value, lookup, call, typeOf)
 	case *ast.TupleExpr:
 		elems := make([]semantic.ConstValue, 0, len(n.Elems))
 		for _, elem := range n.Elems {
-			value, ok := evalConstExprWithLookup(elem, lookup, call)
+			value, ok := evalConstExprWithLookup(elem, lookup, call, typeOf)
 			if !ok {
 				return semantic.ConstValue{}, false
 			}
@@ -585,7 +662,7 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			if i < len(n.Spreads) && n.Spreads[i] {
 				return semantic.ConstValue{}, false
 			}
-			value, ok := evalConstExprWithLookup(elem, lookup, call)
+			value, ok := evalConstExprWithLookup(elem, lookup, call, typeOf)
 			if !ok {
 				return semantic.ConstValue{}, false
 			}
@@ -613,7 +690,7 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			if fieldName == "" {
 				return semantic.ConstValue{}, false
 			}
-			value, ok := evalConstExprWithLookup(arg, lookup, call)
+			value, ok := evalConstExprWithLookup(arg, lookup, call, typeOf)
 			if !ok {
 				return semantic.ConstValue{}, false
 			}
@@ -621,11 +698,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 		}
 		return semantic.ConstValue{Kind: semantic.ConstRecord, Fields: fields}, true
 	case *ast.IndexExpr:
-		object, ok := evalConstExprWithLookup(n.Object, lookup, call)
+		object, ok := evalConstExprWithLookup(n.Object, lookup, call, typeOf)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
-		index, ok := evalConstExprWithLookup(n.Index, lookup, call)
+		index, ok := evalConstExprWithLookup(n.Index, lookup, call, typeOf)
 		if !ok || index.Kind != semantic.ConstInt {
 			return semantic.ConstValue{}, false
 		}
@@ -636,7 +713,7 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 			}
 		}
 		if n.Fallback != nil {
-			return evalConstExprWithLookup(n.Fallback, lookup, call)
+			return evalConstExprWithLookup(n.Fallback, lookup, call, typeOf)
 		}
 		return semantic.ConstValue{}, false
 	case *ast.CallExpr:
@@ -649,11 +726,11 @@ func evalConstExprWithLookup(expr ast.Expr, lookup func(string) (semantic.ConstV
 	}
 }
 
-func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
+func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string) (semantic.ConstValue, bool), call func(*ast.CallExpr) (semantic.ConstValue, bool), typeOf func(ast.Expr) semantic.Type) (semantic.ConstValue, bool) {
 	if expr == nil || expr.Object == nil {
 		return semantic.ConstValue{}, false
 	}
-	object, ok := evalConstExprWithLookup(expr.Object, lookup, call)
+	object, ok := evalConstExprWithLookup(expr.Object, lookup, call, typeOf)
 	if !ok {
 		return semantic.ConstValue{}, false
 	}
@@ -661,6 +738,19 @@ func evalBackendConstAggregateFieldExpr(expr *ast.FieldExpr, lookup func(string)
 	case "count":
 		if object.Kind == semantic.ConstList || object.Kind == semantic.ConstTuple {
 			return semantic.ConstValue{Kind: semantic.ConstInt, Int: int64(len(object.Elems))}, true
+		}
+	case "len":
+		// The analyzer's evalConstAggregateFieldExpr folds a compile-time string's `.len` to its
+		// byte length (strlen for a cstr receiver); this copy must agree, or the analyzer accepts
+		// `"abc".len` and the backend has no way to lower it.
+		if object.Kind == semantic.ConstString {
+			var receiverType semantic.Type
+			if typeOf != nil {
+				receiverType = typeOf(expr.Object)
+			}
+			if length, ok := semantic.ConstStringLen(object.String, receiverType); ok {
+				return semantic.ConstValue{Kind: semantic.ConstInt, Int: length}, true
+			}
 		}
 	default:
 		if value, ok := semantic.ConstReflectionRecordField(object, expr.Field); ok {
@@ -1074,10 +1164,17 @@ func lookupConstEvalValue(lookup func(string) (semantic.ConstValue, bool), name 
 }
 
 func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
+	return g.evalStaticFunctionCallWith(expr, g.evalConstExpr)
+}
+
+// evalStaticFunctionCallWith evaluates a static call whose argument expressions are evaluated by
+// evalArg -- the caller's own evaluator, which knows the caller's scope. The callee body is
+// evaluated in a fresh state that sees only its parameters and the globals.
+func (g *llvmGenerator) evalStaticFunctionCallWith(expr *ast.CallExpr, evalArg func(ast.Expr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	if expr == nil || g == nil || g.staticCallDepth >= semantic.StaticEvalCallDepthLimit {
 		return semantic.ConstValue{}, false
 	}
-	if value, ok := g.evalConstReflectionCall(expr); ok {
+	if value, ok := g.evalConstReflectionCallWith(expr, evalArg); ok {
 		return value, true
 	}
 	ident, ok := expr.Func.(*ast.Ident)
@@ -1105,7 +1202,7 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 	}
 	scope := make(map[string]semantic.ConstValue, len(decl.Params))
 	for i, arg := range args {
-		value, ok := g.evalConstExpr(arg)
+		value, ok := evalArg(arg)
 		if !ok {
 			return semantic.ConstValue{}, false
 		}
@@ -1127,12 +1224,16 @@ func (g *llvmGenerator) evalStaticFunctionCall(expr *ast.CallExpr) (semantic.Con
 }
 
 func (g *llvmGenerator) evalConstReflectionCall(expr *ast.CallExpr) (semantic.ConstValue, bool) {
+	return g.evalConstReflectionCallWith(expr, g.evalConstExpr)
+}
+
+func (g *llvmGenerator) evalConstReflectionCallWith(expr *ast.CallExpr, evalArg func(ast.Expr) (semantic.ConstValue, bool)) (semantic.ConstValue, bool) {
 	if expr == nil || g == nil || g.result == nil {
 		return semantic.ConstValue{}, false
 	}
 	if fieldExpr, ok := expr.Func.(*ast.FieldExpr); ok && fieldExpr != nil && fieldExpr.Field == "has_field" && len(expr.Args) == 1 && expr.NamedArgCount() == 0 {
-		object, objectOK := g.evalConstExpr(fieldExpr.Object)
-		fieldName, fieldOK := g.evalConstExpr(expr.Args[0])
+		object, objectOK := evalArg(fieldExpr.Object)
+		fieldName, fieldOK := evalArg(expr.Args[0])
 		if !objectOK || !fieldOK || fieldName.Kind != semantic.ConstString {
 			return semantic.ConstValue{}, false
 		}

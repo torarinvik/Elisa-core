@@ -223,6 +223,9 @@ func (a *Analyzer) genericValueArgConst(expr ast.TypeExpr) (ConstValue, bool) {
 				return concrete.Value, true
 			}
 		}
+		if a.nameIsRuntimeBinding(n.Name) {
+			return ConstValue{}, false
+		}
 		return a.lookupVisibleConst(n.Name)
 	default:
 		return ConstValue{}, false

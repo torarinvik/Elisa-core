@@ -334,11 +334,28 @@ func isStringViewCarrierType(t semantic.Type) bool {
 	return classifyRuntimeStringCompareKind(t) == runtimeStringCompareView
 }
 func (s *functionState) emitGlobalCStringLiteral(text string, name string) C.LLVMValueRef {
+	return s.emitGlobalStringBytes(text, name)
+}
+
+// emitGlobalStringBytes emits a private string constant holding EVERY byte of text plus a
+// terminating NUL, and returns its address. LLVMBuildGlobalStringPtr takes a C string, so a literal
+// with an embedded NUL (`"ab\0cd"`) was cut off at it: the global held `ab` while every length
+// derived from the literal — an sview's len, a folded `.len` — still said 5, and reading the tail
+// read past the end of the global. Otherwise the IR is exactly LLVMBuildGlobalStringPtr's: a
+// private unnamed_addr constant of align 1, whose address is the global itself.
+func (s *functionState) emitGlobalStringBytes(text string, name string) C.LLVMValueRef {
 	nameC := cString(name)
 	defer C.free(unsafe.Pointer(nameC))
-	textC := cString(text)
-	defer C.free(unsafe.Pointer(textC))
-	return C.LLVMBuildGlobalStringPtr(s.builder, textC, nameC)
+	data := C.CBytes(append([]byte(text), 0))
+	defer C.free(data)
+	initializer := C.LLVMConstStringInContext(s.g.context, (*C.char)(data), C.unsigned(len(text)), 0)
+	global := C.LLVMAddGlobal(s.g.module, C.LLVMTypeOf(initializer), nameC)
+	C.LLVMSetLinkage(global, C.LLVMPrivateLinkage)
+	C.LLVMSetGlobalConstant(global, 1)
+	C.LLVMSetUnnamedAddress(global, C.LLVMGlobalUnnamedAddr)
+	C.LLVMSetInitializer(global, initializer)
+	C.LLVMSetAlignment(global, 1)
+	return global
 }
 func (s *functionState) emitInternSmallStringCall(data C.LLVMValueRef, lenValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
 	u8Type := s.g.result.NamedTypes["u8"]

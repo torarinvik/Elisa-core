@@ -147,6 +147,11 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 		}
 		return ConstValue{Kind: ConstInt, Int: value}, true
 	case *ast.Ident:
+		// A parameter, local, loop or pattern binding shadows every const of its name, and the
+		// const tables below know nothing of function scopes (see nameIsRuntimeBinding).
+		if a.nameIsRuntimeBinding(n.Name) {
+			return ConstValue{}, false
+		}
 		if value, ok := a.lookupConstEvalValue(n.Name); ok {
 			return value, true
 		}
@@ -163,6 +168,10 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 			return value, true
 		}
 		if name, ok := constFieldExprName(n); ok {
+			// `p.limit` names the LOCAL p's field when p is a binding, not a const `p`'s.
+			if a.nameIsRuntimeBinding(constFieldExprRootName(name)) {
+				return ConstValue{}, false
+			}
 			if value, exists := a.constValues[name]; exists {
 				return value, true
 			}
@@ -390,6 +399,14 @@ func (a *Analyzer) evalConstExpr(expr ast.Expr) (ConstValue, bool) {
 	default:
 		return ConstValue{}, false
 	}
+}
+
+// constFieldExprRootName is the leading identifier of a dotted name built by constFieldExprName.
+func constFieldExprRootName(name string) string {
+	if idx := strings.Index(name, "."); idx > 0 {
+		return name[:idx]
+	}
+	return name
 }
 
 func constFieldExprName(expr ast.Expr) (string, bool) {
@@ -694,9 +711,12 @@ func (a *Analyzer) evalConstAggregateFieldExpr(expr *ast.FieldExpr) (ConstValue,
 	case "len":
 		// A string LITERAL has a compile-time-known byte length: `"abc".len == 3`.
 		// We deliberately restrict this to ConstString only — a non-literal string's
-		// length is opaque and must not be fabricated as a constant.
+		// length is opaque and must not be fabricated as a constant. A cstr receiver's
+		// `.len` is strlen, which differs on an embedded NUL (ConstStringLen).
 		if object.Kind == ConstString {
-			return ConstValue{Kind: ConstInt, Int: int64(len(object.String))}, true
+			if length, ok := ConstStringLen(object.String, a.constLenReceiverType(expr.Object)); ok {
+				return ConstValue{Kind: ConstInt, Int: length}, true
+			}
 		}
 	default:
 		if value, ok := ConstReflectionRecordField(object, expr.Field); ok {
@@ -798,7 +818,7 @@ func (a *Analyzer) evalStaticFunctionCall(expr *ast.CallExpr) (ConstValue, bool)
 		return ConstValue{}, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)
-	if !ok {
+	if !ok || a.nameIsRuntimeBinding(ident.Name) {
 		return ConstValue{}, false
 	}
 	sym, _, ok := a.lookupVisibleGlobal(ident.Name)

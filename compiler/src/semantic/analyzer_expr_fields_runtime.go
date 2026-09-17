@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"elisacore/src/ast"
 	"elisacore/src/lexer"
 )
 
@@ -288,13 +289,31 @@ func cstrSyntheticField(t Type, fieldName string) (Field, bool) {
 	if _, ok := ref.Elem.(*CStrType); ok {
 		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 	}
-	// A string literal has type RefType{Elem: u8, Static}. Allow `.len` on it so
-	// `"abc".len` type-checks — the const-eval layer resolves this to an integer
-	// constant, and the prover then discharges length bounds at the const tier.
-	if u8Ref, ok := ref.Elem.(*BuiltinType); ok && u8Ref.Name == "u8" {
-		return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
-	}
 	return Field{}, false
+}
+
+// constStringLenField types `.len` on a string whose bytes are known at compile time — a string
+// literal, or a const bound to one — as its i64 byte length. A string literal has type
+// RefType{Elem: u8, Static}, but that type alone proves nothing: a `u8&` parameter, a byte buffer
+// and a nullable `u8&?` share it and carry no length at all. Accepting `.len` on the TYPE let all
+// of them type-check, and the backend then had nothing to lower. So the receiver must const-evaluate
+// to a string; the const-eval layer folds it, and the backend emits that constant. A receiver that
+// names a binding shadowing a const does not const-evaluate (nameIsRuntimeBinding), so it is refused.
+func (a *Analyzer) constStringLenField(expr *ast.FieldExpr, objType Type) (Field, bool) {
+	if expr == nil || expr.Field != "len" {
+		return Field{}, false
+	}
+	ref, ok := objType.(*RefType)
+	if !ok || ref == nil {
+		return Field{}, false
+	}
+	if elem, ok := ref.Elem.(*BuiltinType); !ok || elem == nil || elem.Name != "u8" {
+		return Field{}, false
+	}
+	if value, ok := a.evalConstAggregateFieldExpr(expr); !ok || value.Kind != ConstInt {
+		return Field{}, false
+	}
+	return Field{Name: "len", Type: builtinI64Type(), Mutable: false}, true
 }
 
 func dictEntrySyntheticField(t Type, fieldName string) (Field, bool) {

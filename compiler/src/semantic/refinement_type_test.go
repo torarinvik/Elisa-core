@@ -2,7 +2,10 @@
 
 package semantic
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 // A refinement type erases to its base: `n: i64 is Positive` is an i64 inside the function
 // (docs/85 Stage 1c-1 — parse + represent erased + validate the predicate).
@@ -1979,6 +1982,121 @@ def f(s: cstr) -> i64 is AtLeast3:
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "strlit_len_opaque.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
 	if len(result.Errors()) == 0 {
 		t.Fatal("a parameter string's length is opaque — prover must NOT assume it satisfies AtLeast3 (should error under -strict)")
+	}
+}
+
+// SOUNDNESS-NEGATIVE: `.len` is a compile-time string's byte length, not a property of the type
+// `u8&`. A parameter, a byte buffer and a nullable ref share that type and carry no length at all;
+// the rule used to accept `.len` on every one of them, and the backend then failed with a
+// location-less "field access requires a struct type, got u8". Each must be rejected, located.
+func TestU8RefLenRequiresCompileTimeString(t *testing.T) {
+	cases := []struct {
+		name string
+		src  string
+		want string
+	}{
+		{"param", "def f(p: u8&) -> i64:\n    return p.len\n", "field access requires struct type, got u8"},
+		{"mutable_buffer", "def f(p: mutable u8&) -> i64:\n    return p.len\n", "field access requires struct type, got u8"},
+		{"local", "def f() -> i64:\n    s: u8& = \"abc\"\n    return s.len\n", "field access requires struct type, got u8"},
+		{"nullable", "def f(p: u8&?) -> i64:\n    return p.len\n", "field access requires proven non-null reference, got u8&?"},
+		// A binding that SHADOWS a const is a runtime value. The const evaluator reads only the
+		// global table, so without the scope check these folded the global's length -- 5 and 3
+		// whatever the argument held.
+		{"ternary_branch_shadows_const", "const A = \"hello\"\nconst B = \"hi\"\n\ndef f(A: u8&) -> i64:\n    return (A if true else B).len\n", "field access requires struct type, got u8"},
+		{"ternary_local_shadows_const", "const A = \"hello\"\n\ndef f() -> i64:\n    A: u8& = \"xyz\"\n    return (A if true else \"zz\").len\n", "field access requires struct type, got u8"},
+		{"ternary_condition_shadows_const", "const FLAG = true\n\ndef f(FLAG: bool) -> i64:\n    return (\"abc\" if FLAG else \"de\").len\n", "field access requires struct type, got u8"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "u8ref_len_"+tc.name+".elisa", tc.src, AnalyzeOptions{})
+			found := false
+			for _, err := range result.Errors() {
+				if strings.Contains(err, tc.want) {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("`.len` on a %s `u8&` has no length to read; want %q, got: %v", tc.name, tc.want, result.Errors())
+			}
+		})
+	}
+}
+
+// POSITIVE: a const bound to a string literal folds like the literal itself.
+func TestConstStringLenFolds(t *testing.T) {
+	src := `
+law AtLeast5(self: i64) = self >= 5
+
+const GREETING = "hello"
+
+def f() -> i64 is AtLeast5:
+    return GREETING.len
+
+# A loop variable that shadowed the const is out of scope again after the loop.
+def g() -> i64 is AtLeast5:
+    for GREETING in 0..<3:
+        pass
+    return (GREETING if true else "x").len
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "const_string_len.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if len(result.Errors()) != 0 {
+		t.Fatalf("`GREETING.len` is 5, should prove AtLeast5 statically, got: %v", result.Errors())
+	}
+}
+
+// A binding that SHADOWS a const is a runtime value everywhere the constant evaluator is asked,
+// not only for `.len`: it read the global table, so each of these took the CONST's value.
+func TestConstEvalDoesNotReadConstThroughShadowingBinding(t *testing.T) {
+	cases := []struct {
+		name    string
+		src     string
+		want    string
+		wantNot string
+	}{
+		// Proven from N = 7 and compiled with NO runtime check: `f(0)` returned 0 from an AtLeast5 function.
+		{"refinement", "law AtLeast5(self: i64) = self >= 5\n\nconst N = 7\n\ndef f(N: i64) -> i64 is AtLeast5:\n    return N\n", "could not be proven statically", ""},
+		// Took the const's branch whatever the argument held.
+		{"static_if", "const FLAG = true\n\ndef f(FLAG: bool) -> i64:\n    static if FLAG:\n        return 1\n    return 0\n", "static if condition must be a compile-time bool", ""},
+		// A valid runtime index rejected as the const's out-of-range value.
+		{"constant_index", "const N = 70\n\ndef f(N: i64) -> i64:\n    xs: array[i64, 4] = [1, 2, 3, 4]\n    return xs[N]\n", "", "constant index"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "const_shadow_"+tc.name+".elisa", tc.src, AnalyzeOptions{EnforceStrictProofs: true})
+			found := tc.want == ""
+			for _, err := range result.Errors() {
+				if tc.want != "" && strings.Contains(err, tc.want) {
+					found = true
+				}
+				if tc.wantNot != "" && strings.Contains(err, tc.wantNot) {
+					t.Fatalf("a parameter shadowing a const is not that const; unexpected %q in: %v", tc.wantNot, result.Errors())
+				}
+			}
+			if !found {
+				t.Fatalf("a parameter shadowing a const is not that const; want %q, got: %v", tc.want, result.Errors())
+			}
+		})
+	}
+}
+
+// A cstr's `.len` is strlen, so it stops at an embedded NUL -- at compile time exactly as at run
+// time. The fold used the byte count (5) and proved facts the running program contradicted.
+func TestCStrConstLenIsStrlen(t *testing.T) {
+	src := `
+law Exactly2(self: i64) = self == 2
+
+const G: cstr = "ab\0cd"
+const N = G.len
+
+def f() -> i64 is Exactly2:
+    return N
+
+def g() -> i64 is Exactly2:
+    return G.len
+`
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "cstr_const_len_strlen.elisa", src, AnalyzeOptions{EnforceStrictProofs: true})
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("`.len` of cstr \"ab\\0cd\" is strlen = 2, should prove Exactly2, got: %v", errs)
 	}
 }
 

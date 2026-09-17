@@ -14,7 +14,6 @@ import (
 	"elisacore/src/semantic"
 	"fmt"
 	"strings"
-	"unsafe"
 )
 
 func (s *functionState) invalidatePackedCommonFieldValues(name string) {
@@ -218,11 +217,7 @@ func (s *functionState) emitConstValueWithType(value semantic.ConstValue, actual
 		if actual != nil && isStringViewCarrierType(actual) {
 			return s.emitStringLiteral(&ast.StringLit{Value: value.String}, actual)
 		}
-		name := cString("cstr")
-		defer C.free(unsafe.Pointer(name))
-		text := cString(value.String)
-		defer C.free(unsafe.Pointer(text))
-		return C.LLVMBuildGlobalStringPtr(s.builder, text, name), &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}, nil
+		return s.emitGlobalStringBytes(value.String, "cstr"), &semantic.RefType{Elem: s.g.result.NamedTypes["u8"], State: semantic.RefStateNonNull, Storage: semantic.RefStorageStatic, ExplicitStorage: true}, nil
 	default:
 		return nil, nil, fmt.Errorf("unsupported const kind %d", value.Kind)
 	}

@@ -80,7 +80,6 @@ import (
 	"elisacore/src/semantic"
 	"fmt"
 	"strconv"
-	"unsafe"
 )
 
 func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semantic.ErrorSetType) (C.LLVMValueRef, semantic.Type, error) {
@@ -1018,11 +1017,7 @@ func (s *functionState) emitFloatLiteral(expr *ast.FloatLit) (C.LLVMValueRef, se
 	return C.LLVMConstReal(llvmType, C.double(parsed)), t, nil
 }
 func (s *functionState) emitStringLiteral(expr *ast.StringLit, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	name := cString("str")
-	defer C.free(unsafe.Pointer(name))
-	text := cString(expr.Value)
-	defer C.free(unsafe.Pointer(text))
-	value := C.LLVMBuildGlobalStringPtr(s.builder, text, name)
+	value := s.emitGlobalStringBytes(expr.Value, "str")
 	resultType := s.exprType(expr)
 	if resultType == nil {
 		// Synthetic literal with no analyzed type (e.g. a backend-built contract-failure
