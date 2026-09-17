@@ -841,7 +841,22 @@ func (a *Analyzer) rewriteDefaultExactType(expr ast.Expr) (Type, bool) {
 	}
 }
 func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
-	if expr == nil || expr.Value == nil {
+	return a.analyzeExprBlockWithExpected(expr, nil)
+}
+
+// analyzeExprBlockWithExpected analyzes a value block whose destination type is known.
+// The tail is the block's value, so it is checked exactly as the same expression would
+// be in the destination's own position: `s: sview =` NEWLINE INDENT … `"lit"` adapts
+// the literal like `s: sview = "lit"` does, and a `null`/integer/float tail takes the
+// destination's optional/width. Without this, wrapping a valid initializer in a block
+// (the docs/119 §2 refactoring) turned it into a type error.
+func (a *Analyzer) analyzeExprBlockWithExpected(expr *ast.ExprBlock, expected Type) Type {
+	if expr == nil {
+		return invalidType
+	}
+	// A diverging branch block (docs/119 §4.1): no value, its last statement leaves.
+	diverging := expr.Value == nil
+	if diverging && (len(expr.Stmts) == 0 || !stmtDefinitelyExits(expr.Stmts[len(expr.Stmts)-1])) {
 		return invalidType
 	}
 	savedScope := a.currentScope
@@ -852,14 +867,31 @@ func (a *Analyzer) analyzeExprBlock(expr *ast.ExprBlock) Type {
 	// is pushed so the mutating-CALL half of E4 can consult it during body analysis.
 	allowed := a.checkValueBlockOuterMutation(expr)
 	a.valueBlockAllowed = append(a.valueBlockAllowed, allowed)
+	a.valueBlockLoopDepths = append(a.valueBlockLoopDepths, a.loopDepth)
 	var result Type
 	for _, stmt := range expr.Stmts {
 		a.analyzeStmt(stmt)
 	}
-	result = a.analyzeExpr(expr.Value)
+	if diverging {
+		result = neverType
+	} else if expected != nil {
+		result = a.analyzeValueExpr(expr.Value, expected)
+	} else {
+		result = a.analyzeExpr(expr.Value)
+	}
+	a.valueBlockLoopDepths = a.valueBlockLoopDepths[:len(a.valueBlockLoopDepths)-1]
 	a.valueBlockAllowed = a.valueBlockAllowed[:len(a.valueBlockAllowed)-1]
 	a.currentScope = savedScope
 	return result
+}
+
+// breakLeavesValueBlock reports whether a `break`/`continue` at the current loop depth
+// would jump out of the innermost value block (docs/119 §2.2 rule 3, E5): the block was
+// entered inside a loop and no loop has been opened within it since. A loop EXPRESSION
+// keeps its own `break`/`continue` legal because its loop statement sits inside the block.
+func (a *Analyzer) breakLeavesValueBlock() bool {
+	n := len(a.valueBlockLoopDepths)
+	return n > 0 && a.loopDepth > 0 && a.loopDepth == a.valueBlockLoopDepths[n-1]
 }
 
 func recoveryClauseForExpr(recovery *ast.RecoveryClause, fallback ast.Expr, pos lexer.Pos) *ast.RecoveryClause {

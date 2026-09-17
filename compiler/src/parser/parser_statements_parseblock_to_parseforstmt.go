@@ -312,6 +312,22 @@ func (p *Parser) parseStmt() ast.Stmt {
 	case lexer.TOKEN_BREAK:
 		pos := p.cur().Pos
 		p.advance()
+		if p.peek() != lexer.TOKEN_IF && p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF {
+			// docs/125 §6b: the value admits a postfix statement guard, so
+			// `break found if item == sought` is `if item == sought: break found`. It is the
+			// only spelling of a conditional value-break that survives -Wflow-strict's
+			// block-`if` ban; a ternary value still spells its `else`.
+			p.stmtGuardArmed = true
+			value := p.parseExpr()
+			p.stmtGuardArmed = false
+			p.expectNewlineAfterValueExpr(value)
+			if len(p.loopBreakTargets) == 0 || p.loopBreakTargets[len(p.loopBreakTargets)-1] == "" {
+				p.errorAt(pos, "`break value` needs a loop with a simple `-> accumulator` yield")
+				return p.takeStmtGuard(&ast.BreakStmt{Position: pos})
+			}
+			target := &ast.Ident{Position: pos, Name: p.loopBreakTargets[len(p.loopBreakTargets)-1]}
+			return p.takeStmtGuard(&ast.IfStmt{Position: pos, Cond: &ast.BoolLit{Position: pos, Value: true}, Then: []ast.Stmt{&ast.AssignStmt{Position: pos, Target: target, Value: value}, &ast.BreakStmt{Position: pos}}})
+		}
 		// Postfix guard: `break if <cond>` desugars to `if <cond>: break` (mirrors the
 		// postfix `return if` form). No new AST node — the loop lowering is unchanged.
 		if p.match(lexer.TOKEN_IF) {
@@ -1298,7 +1314,10 @@ func (p *Parser) parseForStmtBodyWithHeader() ([]ast.Stmt, *loopHeader) {
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	return p.parseBlock(), hdr
+	p.loopBreakTargets = append(p.loopBreakTargets, loopBreakTarget(hdr))
+	body := p.parseBlock()
+	p.loopBreakTargets = p.loopBreakTargets[:len(p.loopBreakTargets)-1]
+	return body, hdr
 }
 
 func (p *Parser) peekForWherePatternFilter() bool {

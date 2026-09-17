@@ -123,6 +123,13 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if matchExpr, ok := expr.(*ast.MatchExpr); ok && expected != nil {
 		return a.analyzeContextualMatchExpr(matchExpr, expected)
 	}
+	if block, ok := expr.(*ast.ExprBlock); ok && block != nil && expected != nil {
+		// docs/119 §2: the tail is the value, so it sees the destination type the same
+		// way a ternary branch or a match arm does.
+		result := a.analyzeExprBlockWithExpected(block, expected)
+		a.recordAnalyzedExprType(block, result)
+		return result
+	}
 	if mf, ok := expr.(*ast.MachineFromExpr); ok {
 		return a.analyzeMachineFromExpr(mf, expected)
 	}

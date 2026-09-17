@@ -253,7 +253,9 @@ scan:
 	}
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
+	p.loopBreakTargets = append(p.loopBreakTargets, loopBreakTarget(hdr))
 	body := p.parseBlock()
+	p.loopBreakTargets = p.loopBreakTargets[:len(p.loopBreakTargets)-1]
 	return p.wrapLoopHeader(hdr, &ast.WhileStmt{Position: pos, Hint: hint, Cond: cond, Body: body})
 }
 func (p *Parser) parseStaticStmt() ast.Stmt {

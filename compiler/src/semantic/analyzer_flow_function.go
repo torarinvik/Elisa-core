@@ -74,7 +74,33 @@ func (a *Analyzer) walkFlowFunctionStmts(stmts []ast.Stmt, inGrant bool, seenCha
 			a.walkFlowFunctionStmts(n.Body, inGrant, seenChain)
 		case *ast.CanStmt:
 			a.walkFlowFunctionStmts(n.Body, inGrant || refsGrantComplexFlow(n.Permissions), seenChain)
+		// A value block holds statements too. docs/119's loop expression is the main
+		// case: `return for x in xs |acc = 0| -> acc:` parses to an ExprBlock value, and
+		// its loop body is written code like any statement loop's. This walk never
+		// entered one, so a block `if` that fails a statement loop passed the same loop
+		// in value form.
+		case *ast.VarDeclStmt:
+			a.walkFlowFunctionValueBlock(n.Value, inGrant, seenChain)
+		case *ast.AssignStmt:
+			a.walkFlowFunctionValueBlock(n.Value, inGrant, seenChain)
+		case *ast.ReturnStmt:
+			a.walkFlowFunctionValueBlock(n.Value, inGrant, seenChain)
+		case *ast.ExprStmt:
+			a.walkFlowFunctionValueBlock(n.Expr, inGrant, seenChain)
 		}
+	}
+}
+
+// walkFlowFunctionValueBlock walks the statements of an ExprBlock value, and of the
+// block its tail value may itself be. Any other expression holds no statements.
+func (a *Analyzer) walkFlowFunctionValueBlock(expr ast.Expr, inGrant bool, seenChain map[*ast.IfStmt]bool) {
+	for {
+		block, ok := expr.(*ast.ExprBlock)
+		if !ok {
+			return
+		}
+		a.walkFlowFunctionStmts(block.Stmts, inGrant, seenChain)
+		expr = block.Value
 	}
 }
 

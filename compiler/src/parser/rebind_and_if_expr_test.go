@@ -85,3 +85,69 @@ func TestSignedReturnIfGuardStillParses(t *testing.T) {
 		t.Fatalf("unexpected parser errors for signed return guard: %v", errs)
 	}
 }
+
+// docs/119 §4.1: a diverging branch (`return`/`panic`/`break`/`continue` tail) unifies
+// with anything, so it is not an "`if`/`else` branch used as a value must end in an
+// expression" error. (`break`/`continue` are then E5 in the analyzer, not the parser.)
+func TestIfValueDivergingBranchParses(t *testing.T) {
+	for _, src := range []string{
+		"def f(n: i64) -> i64:\n    r: i64 =\n        if n > 0:\n            n\n        else:\n            return -1\n    return r\n",
+		"def f(n: i64) -> i64:\n    r: i64 =\n        if n > 0:\n            k: i64 = n\n            return k\n        elif n == 0:\n            0\n        else:\n            panic(\"neg\")\n    return r\n",
+		"def f(n: i64) -> i64:\n    r: i64 =\n        if n > 0:\n            n\n        else:\n            if n < -5:\n                return 1\n            else:\n                return 2\n    return r\n",
+	} {
+		_, errs, _ := parseSourceWithNotices(t, src)
+		if len(errs) != 0 {
+			t.Fatalf("unexpected parser errors for a diverging branch: %v\n%s", errs, src)
+		}
+	}
+}
+
+// docs/119 §1.6/§4.2: a statement `match` arm may put its body on the arm line
+// (`_: base`), exactly like an expression match arm.
+func TestStatementMatchArmSingleLineBody(t *testing.T) {
+	_, errs, _ := parseSourceWithNotices(t, "def f(n: i64) -> i64:\n    base: i64 = 1\n    v: i64 =\n        match n:\n            0: 7\n            _: base\n    return v\n")
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors for single-line statement match arms: %v", errs)
+	}
+}
+
+// docs/119 §5.2 rule 6 (E9) and §6.3: `rebind` and a `|capture|` header may not share a
+// construct, and a loop header names each accumulator or capture once.
+func TestRebindCaptureAndHeaderNameRules(t *testing.T) {
+	cases := []struct {
+		name, src, want string
+	}{
+		{"rebind_inline_loop_capture",
+			"def f(xs: darray[i64]) -> i64:\n    total: mutable i64 = 0\n    seen: mutable i64 = 0\n    rebind total = for x in xs |acc = 0, seen| -> acc:\n        seen <- seen + 1\n        acc <- acc + x\n    return total\n",
+			"may not appear on the same construct (docs/119 E9)"},
+		{"rebind_block_loop_capture",
+			"def f(xs: darray[i64]) -> i64:\n    total: mutable i64 = 0\n    seen: mutable i64 = 0\n    rebind total =\n        for x in xs |acc = 0, seen| -> acc:\n            seen <- seen + 1\n            acc <- acc + x\n    return total\n",
+			"may not appear on the same construct (docs/119 E9)"},
+		{"header_declares_and_captures",
+			"def f(xs: darray[i64]) -> i64:\n    total: mutable i64 = 0\n    r: i64 = for x in xs |total = 0, total| -> total:\n        total <- total + x\n    return r\n",
+			"loop header both declares and captures \"total\""},
+		{"header_captures_twice",
+			"def f(xs: darray[i64]) -> i64:\n    seen: mutable i64 = 0\n    r: i64 = for x in xs |acc = 0, seen, seen| -> acc:\n        seen <- seen + 1\n    return r\n",
+			"loop header captures \"seen\" twice"},
+	}
+	for _, tc := range cases {
+		_, errs, _ := parseSourceWithNotices(t, tc.src)
+		found := false
+		for _, e := range errs {
+			found = found || strings.Contains(e, tc.want)
+		}
+		if !found {
+			t.Fatalf("%s: expected %q, got: %v", tc.name, tc.want, errs)
+		}
+	}
+	// A capture on a loop AFTER leading statements is its own construct, and a rebind
+	// target that threads what a header would have captured is the sanctioned spelling.
+	for _, src := range []string{
+		"def f(xs: darray[i64]) -> i64:\n    total: mutable i64 = 0\n    seen: mutable i64 = 0\n    rebind total =\n        base = 1\n        for x in xs |acc = base, seen| -> acc:\n            seen <- seen + 1\n            acc <- acc + x\n    return total\n",
+		"def f(xs: darray[i64]) -> i64:\n    total: mutable i64 = 0\n    seen: mutable i64 = 0\n    rebind total, seen = for x in xs |acc = 0, n = seen| -> acc, n:\n        n <- n + 1\n        acc <- acc + x\n    return total + seen\n",
+	} {
+		if _, errs, _ := parseSourceWithNotices(t, src); len(errs) != 0 {
+			t.Fatalf("unexpected parser errors: %v\n%s", errs, src)
+		}
+	}
+}

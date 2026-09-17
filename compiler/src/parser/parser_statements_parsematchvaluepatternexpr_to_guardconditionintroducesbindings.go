@@ -265,6 +265,13 @@ func (p *Parser) parseReturn() ast.Stmt {
 		p.expectNewlineAfterValueExpr(cond)
 		return &ast.IfStmt{Position: pos, Cond: cond, Then: []ast.Stmt{&ast.ReturnStmt{Position: pos}}}
 	}
+	// docs/119 §2.1: `return` is one of the four sites (`=`, `<-`, `return`, an arm
+	// colon) where NEWLINE INDENT opens a block expression. A bare `return` never
+	// continues onto an indented line, so the claim is backward compatible.
+	if blockValue, ok := p.parseValueBlockRHS(pos); ok {
+		p.expectNewlineAfterValueExpr(blockValue)
+		return &ast.ReturnStmt{Position: pos, Value: blockValue}
+	}
 	var value ast.Expr
 	if p.peek() != lexer.TOKEN_NEWLINE && p.peek() != lexer.TOKEN_EOF && p.peek() != lexer.TOKEN_DEDENT {
 		// A postfix guard may be consumed by the expression parser while parsing
@@ -538,8 +545,11 @@ func (p *Parser) parseIf() ast.Stmt {
 	var elseBlock []ast.Stmt
 	if p.match(lexer.TOKEN_ELSE) {
 		p.expect(lexer.TOKEN_COLON)
-		p.expectNewline()
-		elseBlock = p.parseBlock()
+		// Same body grammar as `if COND:` / `elif COND:` — an indented block or one
+		// statement on the header line. docs/119 §2.3/§3.2 write value chains as
+		// `if c: "gold"` … `else: "bronze"`; only the `else` arm demanded a newline,
+		// so the spec's own examples failed to parse.
+		elseBlock = p.parseStmtBodyAfterColon()
 	}
 
 	return lowerIfClauses(clauses, elseBlock)

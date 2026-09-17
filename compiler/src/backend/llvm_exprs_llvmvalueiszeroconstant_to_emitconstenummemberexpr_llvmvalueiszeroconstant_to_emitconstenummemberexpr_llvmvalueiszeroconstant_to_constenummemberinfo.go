@@ -481,8 +481,11 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 	return value, actualType, nil
 }
 func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
-	if expr == nil || expr.Value == nil {
+	if expr == nil {
 		return nil, nil, fmt.Errorf("invalid expression block")
+	}
+	if expr.Value == nil {
+		return s.emitDivergingExprBlock(expr, expected)
 	}
 	savedPackedStores := s.packedStores
 	s.packedStores = s.clonePackedStores()
@@ -519,6 +522,35 @@ func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Typ
 		return nil, nil, err
 	}
 	return value, actualType, nil
+}
+// emitDivergingExprBlock emits a value-less branch block whose last statement leaves
+// (docs/119 §4.1: `else: return -1`). There is no value: the block ends terminated and
+// the enclosing ternary leaves this arm out of its phi.
+func (s *functionState) emitDivergingExprBlock(expr *ast.ExprBlock, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
+	savedPackedStores := s.packedStores
+	s.packedStores = s.clonePackedStores()
+	s.pushScope()
+	scope := s.scope
+	defer func() {
+		s.popScope()
+		s.packedStores = savedPackedStores
+	}()
+	for _, stmt := range expr.Stmts {
+		if s.currentBlockTerminated() {
+			s.discardScopeCleanups(scope)
+			return nil, nil, fmt.Errorf("expression block setup statements terminated control flow")
+		}
+		if err := s.emitStmt(stmt); err != nil {
+			s.discardScopeCleanups(scope)
+			return nil, nil, err
+		}
+	}
+	if !s.currentBlockTerminated() {
+		s.discardScopeCleanups(scope)
+		return nil, nil, fmt.Errorf("diverging expression block did not terminate control flow")
+	}
+	s.discardScopeCleanups(scope)
+	return nil, expected, nil
 }
 func (s *functionState) emitMoveExpr(expr *ast.MoveExpr, expected semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	return s.emitMovedValue(expr.Operand, expected)

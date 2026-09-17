@@ -108,8 +108,11 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 		s.scope = parentScope
 		return nil, nil, err
 	}
+	// An arm that already terminated (`raise`, or a diverging `else: return -1` branch —
+	// docs/119 §4.1) never reaches the merge, so it contributes no phi incoming.
 	thenEnd := C.LLVMGetInsertBlock(s.builder)
-	if C.LLVMGetBasicBlockTerminator(thenEnd) == nil {
+	thenReaches := C.LLVMGetBasicBlockTerminator(thenEnd) == nil
+	if thenReaches {
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 
@@ -121,7 +124,8 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 		return nil, nil, err
 	}
 	elseEnd := C.LLVMGetInsertBlock(s.builder)
-	if C.LLVMGetBasicBlockTerminator(elseEnd) == nil {
+	elseReaches := C.LLVMGetBasicBlockTerminator(elseEnd) == nil
+	if elseReaches {
 		C.LLVMBuildBr(s.builder, mergeBB)
 	}
 
@@ -135,13 +139,25 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	if isVoidType(resultType) {
 		return nil, resultType, nil
 	}
+	if !thenReaches && !elseReaches {
+		C.LLVMBuildUnreachable(s.builder)
+		return nil, resultType, nil
+	}
 	phiType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, err
 	}
 	phi := C.LLVMBuildPhi(s.builder, phiType, cStringFree("termp"))
-	values := []C.LLVMValueRef{leftValue, rightValue}
-	blocks := []C.LLVMBasicBlockRef{thenEnd, elseEnd}
+	values := []C.LLVMValueRef{}
+	blocks := []C.LLVMBasicBlockRef{}
+	if thenReaches {
+		values = append(values, leftValue)
+		blocks = append(blocks, thenEnd)
+	}
+	if elseReaches {
+		values = append(values, rightValue)
+		blocks = append(blocks, elseEnd)
+	}
 	C.LLVMAddIncoming(phi, llvmValueSlicePtr(values), llvmBlockSlicePtr(blocks), C.unsigned(len(values)))
 	_ = parentBlock
 	return phi, resultType, nil

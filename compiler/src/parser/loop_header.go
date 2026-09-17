@@ -23,6 +23,19 @@ type loopHeader struct {
 	yield    ast.Expr
 }
 
+func loopBreakTarget(hdr *loopHeader) string {
+	if hdr != nil {
+		if ident, ok := hdr.yield.(*ast.Ident); ok {
+			for _, decl := range hdr.decls {
+				if variable, ok := decl.(*ast.VarDeclStmt); ok && variable.Name == ident.Name {
+					return ident.Name
+				}
+			}
+		}
+	}
+	return ""
+}
+
 // loopHeaderDeclsAt reports whether tokens[i:] begins a loop-header. Two shapes are
 // accepted, both disambiguated from a bitwise `|` in the iterable/condition:
 //
@@ -114,6 +127,11 @@ func (p *Parser) parseLoopValueExpr(kind string) ast.Expr {
 func (p *Parser) parseLoopHeader() *loopHeader {
 	hdr := &loopHeader{pos: p.cur().Pos}
 	p.expect(lexer.TOKEN_PIPE)
+	// docs/119 §6.3: a header name is ONE accumulator or ONE capture. Declaring and
+	// capturing the same name is shadow ambiguity; capturing it twice is a duplicate.
+	// (Two accumulators of one name are the analyzer's existing duplicate-local error.)
+	declared := map[string]bool{}
+	captured := map[string]bool{}
 	for {
 		nameTok := p.expect(lexer.TOKEN_IDENT)
 		// Optional `: T` type annotation on an accumulator (`|n: u32 = 0|`) — for when
@@ -127,6 +145,12 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 				p.errorf("loop accumulator %q needs an initializer (write `%s: T = init`)", nameTok.Text, nameTok.Text)
 			}
 			// Bare name — a capture of an outer mutable (docs/119 §6).
+			if captured[nameTok.Text] {
+				p.errorAt(nameTok.Pos, "loop header captures %q twice (docs/119 §6.3)", nameTok.Text)
+			} else if declared[nameTok.Text] {
+				p.errorAt(nameTok.Pos, "loop header both declares and captures %q (docs/119 §6.3)", nameTok.Text)
+			}
+			captured[nameTok.Text] = true
 			hdr.captures = append(hdr.captures, nameTok.Text)
 			if !p.match(lexer.TOKEN_COMMA) {
 				break
@@ -155,6 +179,10 @@ func (p *Parser) parseLoopHeader() *loopHeader {
 			end++
 		}
 		init := p.parseForHeaderSlice(end, p.tokens[min(end, len(p.tokens)-1)].Pos)
+		if captured[nameTok.Text] {
+			p.errorAt(nameTok.Pos, "loop header both declares and captures %q (docs/119 §6.3)", nameTok.Text)
+		}
+		declared[nameTok.Text] = true
 		hdr.decls = append(hdr.decls, &ast.VarDeclStmt{Position: nameTok.Pos, Name: nameTok.Text, Mutable: true, Type: declType, Value: init})
 		if !p.match(lexer.TOKEN_COMMA) {
 			break

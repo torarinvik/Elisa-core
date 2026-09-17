@@ -1248,8 +1248,12 @@ func (p *Parser) parseMatchArm() []ast.MatchArm {
 	alternatives := p.parseTopLevelMatchArmAlternatives()
 	guard := p.parseOptionalMatchArmGuard()
 	p.expect(lexer.TOKEN_COLON)
-	p.expectNewline()
-	body := p.parseBlock()
+	// docs/119 §1.6/§4.2: one `match`. A statement arm takes the same colon body as an
+	// `if`/`else` branch — an indented block or a single statement on the arm line
+	// (`Expr.Ident(n, line): name <- n`). Requiring the block rejected the spec's own
+	// example, and made a block-tail `match` (§4) reject the inline arms a `x = match`
+	// accepts.
+	body := p.parseStmtBodyAfterColon()
 	arms := make([]ast.MatchArm, 0, len(alternatives))
 	for _, alt := range alternatives {
 		arms = append(arms, ast.MatchArm{Position: pos, Pattern: alt.pattern, Body: matchArmAlternativeBody(alt.withDecls, body), Guard: guard})

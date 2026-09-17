@@ -821,10 +821,14 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.BreakStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "break is only valid inside a loop")
+		} else if a.breakLeavesValueBlock() {
+			a.errorf(n.Pos(), "`break` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
 	case *ast.ContinueStmt:
 		if a.loopDepth == 0 {
 			a.errorf(n.Pos(), "continue is only valid inside a loop")
+		} else if a.breakLeavesValueBlock() {
+			a.errorf(n.Pos(), "`continue` may not jump out of a value block (docs/119 E5); a block ends only in its tail value — decide before the block, or make the loop a loop expression")
 		}
 	case *ast.IfStmt:
 		condType := a.analyzeCondExpr(n.Cond)

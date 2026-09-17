@@ -99,10 +99,19 @@ func (p *Parser) ifStmtToExpr(n *ast.IfStmt) (ast.Expr, bool) {
 // branchBlockToExpr turns one branch body (`if`/`elif`/`else` arm) into its value
 // expression: the branch's own tail statement recursively yields the value, and any
 // preceding statements ride an ExprBlock.
+//
+// docs/119 §4.1: a DIVERGING branch (`else: return -1`) unifies with anything, exactly
+// like a diverging match arm. It becomes a diverging ExprBlock — every statement kept,
+// Value nil — which the analyzer types as never and the ternary emitter leaves out of
+// its phi. `break`/`continue` are accepted here too so the analyzer reports the precise
+// E5 (a jump out of a value block) instead of a generic shape error.
 func (p *Parser) branchBlockToExpr(stmts []ast.Stmt) (ast.Expr, bool) {
 	if len(stmts) == 0 {
 		p.errorf("an `if`/`else` branch used as a value must end in an expression (docs/119 §4)")
 		return nil, false
+	}
+	if branchTailDiverges(stmts[len(stmts)-1]) {
+		return &ast.ExprBlock{Position: stmts[0].Pos(), Stmts: append([]ast.Stmt(nil), stmts...)}, true
 	}
 	value, ok := p.tailStmtToExpr(stmts[len(stmts)-1])
 	if !ok {
@@ -117,4 +126,14 @@ func (p *Parser) branchBlockToExpr(stmts []ast.Stmt) (ast.Expr, bool) {
 		Stmts:    append([]ast.Stmt(nil), stmts[:len(stmts)-1]...),
 		Value:    value,
 	}, true
+}
+
+// branchTailDiverges reports whether a branch's final statement leaves the branch
+// without producing a value (docs/119 §4.1 diverging arm).
+func branchTailDiverges(s ast.Stmt) bool {
+	switch s.(type) {
+	case *ast.ReturnStmt, *ast.PanicStmt, *ast.BreakStmt, *ast.ContinueStmt:
+		return true
+	}
+	return false
 }

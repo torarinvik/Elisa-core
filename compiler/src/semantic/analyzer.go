@@ -490,6 +490,10 @@ type Analyzer struct {
 	// (block-local bindings + licensed captures), used by the mutating-CALL half of E4
 	// (docs/119 §6.2). Empty ⇒ not inside a value block.
 	valueBlockAllowed []map[string]bool
+	// valueBlockLoopDepths is a stack of the loopDepth at each enclosing value block's entry
+	// (docs/119 E5). A `break`/`continue` whose loopDepth equals the innermost entry depth
+	// has no loop of its own inside the block, so it would jump out of the block.
+	valueBlockLoopDepths []int
 	// reassignTargets holds the root names on the left of the reassignment statement
 	// currently being analyzed (`p <- …` / `t, p <- …`). docs/120 §10 enforcement exempts
 	// a call that mutates an lmut place named here — the mutation IS reassigned, which is

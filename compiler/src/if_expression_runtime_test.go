@@ -75,3 +75,91 @@ func TestIfExpressions(t *testing.T) {
 	exit, stdout, stderr := runStressProgram(t, "if_expressions", ifExprBody)
 	assertAllPassed(t, exit, stdout, stderr, "if_expressions")
 }
+
+// docs/119 §4.1: diverging branches and arms (`return`, `raise`, `panic`) unify with any
+// value type and never reach the join. The ternary emitter used to add a phi incoming
+// from a terminated arm, so `n * 2 if n > 0 else raise E.X` failed LLVM verification.
+const ifExprDivergingBody = `
+error Bad:
+    Neg
+    Zero
+
+def if_else_return(n: i64) -> i64:
+    v: i64 =
+        if n > 0:
+            n * 2
+        else:
+            return -1
+    return v + 1
+
+def elif_return(n: i64) -> i64:
+    v: i64 =
+        k: i64 = n + 1
+        if k > 3:
+            k * 2
+        elif k == 0:
+            return 99
+        else:
+            k
+    return v
+
+def nested_all_diverge(n: i64) -> i64:
+    v: i64 =
+        if n > 10:
+            n
+        else:
+            if n < 0:
+                return 1
+            else:
+                return 2
+    return v
+
+def raise_tail(n: i64) -> i64 error[Bad]:
+    v: i64 =
+        if n > 0:
+            n * 2
+        else:
+            raise Bad.Neg
+    return v + 1
+
+def raise_match_arm(n: i64) -> i64 error[Bad]:
+    v: i64 =
+        match n:
+            0:
+                raise Bad.Zero
+            _:
+                n + 1
+    return v
+
+def raise_inline_else(n: i64) -> i64 error[Bad]:
+    v: i64 = n * 2 if n > 0 else raise Bad.Neg
+    return v + 1
+
+@test
+def diverging_branches() -> void:
+    can Abort.Panic:
+        if if_else_return(5) != 11 or if_else_return(-3) != -1:
+            panic("if_else_return")
+        if elif_return(5) != 12 or elif_return(-1) != 99 or elif_return(1) != 2:
+            panic("elif_return")
+        if nested_all_diverge(39) != 39 or nested_all_diverge(-5) != 1 or nested_all_diverge(5) != 2:
+            panic("nested_all_diverge")
+        a: i64 = try raise_tail(20) else 0
+        b: i64 = try raise_tail(-1) else 5
+        if a != 41 or b != 5:
+            panic("raise_tail")
+        c: i64 = try raise_match_arm(40) else 0
+        d: i64 = try raise_match_arm(0) else 6
+        if c != 41 or d != 6:
+            panic("raise_match_arm")
+        e: i64 = try raise_inline_else(20) else 0
+        f: i64 = try raise_inline_else(-1) else 8
+        if e != 41 or f != 8:
+            panic("raise_inline_else")
+`
+
+func TestIfExpressionDivergingBranches(t *testing.T) {
+	t.Parallel()
+	exit, stdout, stderr := runStressProgram(t, "if_expressions_diverging", ifExprDivergingBody)
+	assertAllPassed(t, exit, stdout, stderr, "diverging_branches")
+}

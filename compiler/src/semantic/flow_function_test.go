@@ -122,6 +122,70 @@ func TestStrictBlockIfComplexFlowGrant(t *testing.T) {
 	}
 }
 
+// A loop EXPRESSION's body is written code like a statement loop's (docs/119 §3). The ban
+// used to skip it entirely: the walk never entered an ExprBlock value, so moving a loop
+// into `return`/`x: T =`/`x <-`/tail position exempted every block `if` inside it.
+func TestStrictBlockIfInsideLoopExpressions(t *testing.T) {
+	src := `def returned(xs: darray[i64]) -> i64:
+    return for x in xs |total = 0| -> total:
+        if x > 3:
+            total <- x
+
+def declared(xs: darray[i64]) -> i64:
+    t: i64 = for x in xs |total = 0| -> total:
+        if x > 3:
+            total <- x
+    return t
+
+def assigned(xs: darray[i64]) -> i64:
+    t: mutable i64 = 0
+    t <- while t < 10 |i = 0| -> i:
+        if i > 3:
+            i <- i + 2
+        i <- i + 1
+    return t
+
+def tailed(xs: darray[i64]) -> i64:
+    for x in xs |total = 0| -> total:
+        if x > 3:
+            total <- x
+`
+	strict := flowStrict(t, "blockif_loop_expressions.elisa", src)
+	flagged := 0
+	for _, e := range strict.Errors() {
+		if strings.Contains(e, "block `if`") {
+			flagged++
+		}
+	}
+	if flagged != 4 {
+		t.Fatalf("expected one block-if error per loop expression (4), got %d:\n%v", flagged, strict.Errors())
+	}
+}
+
+// The sanctioned spellings inside a loop expression stay clean: a postfix-guarded value
+// break (`break v if c`, docs/125 §6b), a postfix-guarded update, and a granted block.
+func TestStrictBlockIfLoopExpressionGuardsStayClean(t *testing.T) {
+	src := `def contains(xs: darray[i64], sought: i64) -> bool:
+    return for x in xs |hit = false| -> hit:
+        break true if x == sought
+
+def largest(xs: darray[i64]) -> i64:
+    best: i64 = for x in xs |top = 0| -> top:
+        top <- x if x > top
+    return best
+
+def granted(xs: darray[i64]) -> i64:
+    return for x in xs |total = 0| -> total:
+        can ComplexFlow:
+            if x > 3:
+                total <- x
+`
+	strict := flowStrict(t, "blockif_loop_expression_guards.elisa", src)
+	if all := strings.Join(strict.Errors(), "\n"); strings.Contains(all, "block `if`") {
+		t.Fatalf("guarded loop-expression bodies must stay clean, got:\n%v", strict.Errors())
+	}
+}
+
 // docs/125 §6b legitimate-guard exemption (ratified 2026-07-14): a block `if` whose branch
 // BINDS a local and is straight-line (no elif, no nested if/match) is a conditional
 // computation, not a hidden decision tree — exempt. But a binding-free block, an if/elif

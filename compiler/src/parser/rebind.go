@@ -69,6 +69,13 @@ func (p *Parser) parseRebindStmt() ast.Stmt {
 	}
 	p.expectNewlineAfterValueExpr(value)
 
+	// docs/119 §5.2 rule 6 (E9): `rebind` and a `|capture|` header may not sit on the same
+	// construct — the RHS loop expression or captured block itself. Mixing the two threading
+	// spellings is the corner the design rejects; a captured name becomes a rebind target.
+	if capture := rebindConstructCapture(value); capture != "" {
+		p.errorAt(pos, "`rebind` and a `|capture|` header may not appear on the same construct (docs/119 E9); make %q a rebind target instead", capture)
+	}
+
 	// docs/120 §3: a bare target that names an argument (or UFCS receiver) root of a
 	// direct-call RHS claims that argument's declared lmut thread — `rebind ch, lexer =
 	// lexer.advance_char()`. The thread is in-place (the callee's lmut slot was erased,
@@ -113,6 +120,26 @@ func (p *Parser) parseRebindStmt() ast.Stmt {
 	}
 
 	return &ast.TupleBindStmt{Position: pos, Names: tempNames, Declare: true, Value: value}
+}
+
+// rebindConstructCapture names the first `|capture|` on the construct a rebind's RHS IS:
+// the loop expression or captured block itself, seen through block-RHS wrappers that carry
+// no statements of their own (`rebind x =` NEWLINE INDENT `for … |c| -> v:`). A capture on a
+// loop nested after leading statements belongs to a different construct. "" when none.
+func rebindConstructCapture(value ast.Expr) string {
+	for {
+		block, ok := value.(*ast.ExprBlock)
+		if !ok {
+			return ""
+		}
+		if len(block.Captures) > 0 {
+			return block.Captures[0]
+		}
+		if len(block.Stmts) > 0 {
+			return ""
+		}
+		value = block.Value
+	}
 }
 
 // rebindTargetStmt builds the statement that lands a rebind slot into its target:
