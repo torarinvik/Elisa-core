@@ -220,6 +220,21 @@ func (p *Parser) parseDeclBlock() []ast.Decl {
 			p.markDeclVisibility(decl, "")
 			decls = append(decls, decl)
 		}
+		// A sugar that expands to MORE than one declaration (`extern resource`, the
+		// `protocol` typestate, a `machine`'s synthesized enum) buffers the extras here.
+		// ParseFile used to be the only drain, so inside a module body the extras were
+		// hoisted to FILE scope while the declaration they belong to stayed in the module:
+		// `extern resource R` put the handle type `R__native` in the module and the struct
+		// `R` at the root, which left the struct's own field type unresolvable and told
+		// `__drop__` that R's defining module was <root>. They belong in the block that
+		// declared them.
+		if len(p.pendingDecls) > 0 {
+			for _, pending := range p.pendingDecls {
+				p.markDeclVisibility(pending, "")
+				decls = append(decls, pending)
+			}
+			p.pendingDecls = nil
+		}
 	}
 	p.expect(lexer.TOKEN_DEDENT)
 	return decls
