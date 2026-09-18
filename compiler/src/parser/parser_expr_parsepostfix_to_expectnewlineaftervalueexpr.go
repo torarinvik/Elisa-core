@@ -151,6 +151,18 @@ func (p *Parser) parsePostfix() ast.Expr {
 			expr = &ast.FieldExpr{Position: pos, Object: expr, Field: field}
 
 		case lexer.TOKEN_ARROW:
+			// A multi-line block expression (catch/match arms, an indented value block)
+			// ends on a DEDENT. An `->` directly after that boundary opens the NEXT
+			// statement — a machine arm's `-> State` transition — and is not a cast of
+			// the block. Claiming it here SWALLOWED the transition: the arm then reported
+			// the removed `expr -> T` cast plus a spurious "arm makes no decision", for
+			// source the arm law itself accepts (and which parses once any plain statement
+			// sits in between). Same boundary rule the postfix ternary `if` already uses.
+			// Safe by construction: `expr -> T` is a REMOVED form that only ever produces
+			// an error here, so declining it cannot change any accepted program.
+			if p.prevTokenIsDedent() {
+				return expr
+			}
 			pos := p.cur().Pos
 			p.advance()
 			target := p.parseTypeExpr()

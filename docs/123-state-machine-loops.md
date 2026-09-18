@@ -293,6 +293,28 @@ These are the construct's identity — each is a hard compile error inside `mach
            -> Expr(1)        #   split into `Text, '{':` and `Text, _:` arms
        -> Text
    ```
+
+   A **postfix guard** counts — `total <- total + 1 if c == '{'` desugars to an `if`. So
+   does a loop written with a capture header: `for x in xs |acc|:` is a loop *expression*,
+   but it is still a loop.
+
+   **Error handling is not branching.** `catch`, `try` and `get … else` are EXPRESSIONS, so
+   they are straight-line statements here and stay legal — including a statement-position
+   `catch f():`, which the parser reads as an expression statement. To discriminate on an
+   outcome, catch it to a VALUE and put the discrimination in the next arm's HEADER:
+   ```
+   Run, 0:
+       value: i64 = catch load():   # ✓ an expression — no branch
+           loaded:
+               loaded
+           Load.Failed:
+               0 - 1
+       status <- value
+       -> Run
+   Run, _ if status < 0:            # ✓ the discrimination, in the arm header
+       break
+   ```
+
 2. **Arm without a decision.** Every arm ends in exactly one of `->` / `return` /
    `break`, in tail position.
    ```

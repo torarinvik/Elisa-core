@@ -298,6 +298,39 @@ func TestMachineGuardCallCapturesDrivenRoot(t *testing.T) {
 	}
 }
 
+// A multi-line `catch` block ends on a DEDENT, and the `-> State` on the next line is the
+// arm's transition — not a cast of the catch expression. parsePostfix used to claim that
+// arrow, which reported the removed `expr -> T` cast and then "arm makes no decision" for
+// an arm that is legal under docs/123 §5 (error handling is an EXPRESSION, not branching).
+func TestMachineTransitionAfterCatchBlock(t *testing.T) {
+	src := `error LoadError:
+    Failed
+
+def load(fail: bool) -> i64 error[LoadError]:
+    raise LoadError.Failed if fail
+    7
+
+def run(total: mutable i64) -> i64:
+    machine over total while total < 7:
+        state Run
+        start Run
+        Run, _:
+            catch load(false):
+                loaded:
+                    total <- total + loaded
+                    true
+                error failure:
+                    total <- total + 90
+                    true
+            -> Run
+    return total
+`
+	_, errs := parseSourceFile(t, src)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parse errors for a transition after a catch block: %v", errs)
+	}
+}
+
 func TestMachineRefusalBranchInArm(t *testing.T) {
 	src := machineSrc(`    machine over lexer.current_char():
         state Text
