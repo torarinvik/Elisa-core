@@ -291,11 +291,20 @@ func (a *Analyzer) abstractParamBorrowedOwnerRefState(t Type, baseKey affineValu
 	if _, ok := borrowableOwnerRefElemType(t); ok {
 		return borrowedOwnerRefState{HasDirect: true, Direct: baseKey}, true
 	}
+	// `seen` guards the current PATH, not the whole walk: it exists to stop a
+	// recursive type (`struct Node: next: Node`) from descending forever, and it is
+	// released on the way back up. Leaving the mark set made the memo leak across
+	// SIBLINGS — two fields of the same type (`names: darray[sview]` beside
+	// `origins: darray[sview]`) raced for it, and whichever the map handed us second
+	// got the truncated answer. Since `StructType.Fields` is a map, which field lost
+	// differed run to run, so a function's borrow/return summary was nondeterministic
+	// AND, for the loser, wrongly said the result borrows nothing.
 	key := t.String()
 	if seen[key] {
 		return borrowedOwnerRefState{}, false
 	}
 	seen[key] = true
+	defer delete(seen, key)
 	state := borrowedOwnerRefState{}
 	switch tt := t.(type) {
 	case *OptionalType:
@@ -405,11 +414,14 @@ func (a *Analyzer) abstractParamRegionRefState(t Type, paramIndex int, seen map[
 	if t == nil || !a.typeCanContainRegionRefs(t, map[string]bool{}) {
 		return regionRefState{}, false
 	}
+	// Path-scoped, exactly as in abstractParamBorrowedOwnerRefState above: release the
+	// mark on the way out so sibling fields of the same type each get the full answer.
 	key := t.String()
 	if seen[key] {
 		return regionRefStateFromParamDependency(paramIndex), true
 	}
 	seen[key] = true
+	defer delete(seen, key)
 	state := regionRefStateFromParamDependency(paramIndex)
 	switch tt := t.(type) {
 	case *OptionalType:
