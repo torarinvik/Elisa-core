@@ -62,3 +62,40 @@ func TestFormatKeepsVisibilitySections(t *testing.T) {
 		t.Fatalf("reformatted source no longer hides `hidden`: %v", result.Diagnostics)
 	}
 }
+
+// The same sections inside a `const module`. The unparser already printed a namespace's
+// visibility sections; until the parser read them here, a const module could not carry
+// one at all.
+func TestFormatKeepsConstModuleVisibilitySections(t *testing.T) {
+	src := "module Geo:\n" +
+		"    private:\n" +
+		"        const module Scalar:\n" +
+		"            public:\n" +
+		"                ZERO: i64 = 0\n" +
+		"            private:\n" +
+		"                HIDDEN: i64 = 9\n"
+
+	formatted := unparse.FormatFile(parseForFormat(t, src))
+	for _, want := range []string{"const module Scalar:\n", "public:\n", "ZERO: i64 = 0\n", "private:\n", "HIDDEN: i64 = 9\n"} {
+		if !strings.Contains(formatted, want) {
+			t.Fatalf("formatted output lost %q:\n%s", want, formatted)
+		}
+	}
+	if again := unparse.FormatFile(parseForFormat(t, formatted)); again != formatted {
+		t.Fatalf("formatting is not idempotent:\nfirst:\n%s\nsecond:\n%s", formatted, again)
+	}
+
+	// The privacy the formatter prints is the privacy the analyzer enforces: the public
+	// member reaches the parent module, the private one does not reach outside.
+	probe := formatted + "\ndef main() -> i64:\n    return Geo::Scalar::HIDDEN\n"
+	result := semantic.Analyze(parseForFormat(t, probe))
+	private := false
+	for _, diagnostic := range result.Diagnostics {
+		if strings.Contains(diagnostic.Message, "is private to module") {
+			private = true
+		}
+	}
+	if !private {
+		t.Fatalf("expected the reformatted const module to keep HIDDEN private, diagnostics: %v", result.Diagnostics)
+	}
+}

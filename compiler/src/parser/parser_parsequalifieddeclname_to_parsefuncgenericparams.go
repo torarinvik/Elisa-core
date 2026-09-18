@@ -152,18 +152,50 @@ func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
 	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	p.expect(lexer.TOKEN_INDENT)
+	decls := p.parseConstModuleBlock()
+	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Const: true}
+}
 
+// parseConstModuleBlock reads a const module's indented body. Its members are consts,
+// and `public:` / `private:` sections mark them exactly as they do in an ordinary
+// module block (parseDeclBlock): the mark is recorded per member, and an explicit mark
+// beats the enclosing module's default. That is what lets a const module sitting in a
+// `private:` section publish some of its constants -- without it, every member was
+// private to the const module itself and even the PARENT module could not read them
+// (`canAccessPrivateName` grants the owner namespace and its descendants, not ancestors).
+// Both section layouts parse, the indented form and the flat `public:`-then-siblings form.
+func (p *Parser) parseConstModuleBlock() []ast.Decl {
+	p.expect(lexer.TOKEN_INDENT)
 	decls := make([]ast.Decl, 0, p.estimateIndentedItemCount())
+	savedVisibility := p.currentVisibility
+	defer func() { p.currentVisibility = savedVisibility }()
 	for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
 		p.skipNewlines()
 		if p.peek() == lexer.TOKEN_DEDENT {
 			break
 		}
-		decls = append(decls, p.parseConstModuleMemberDecl())
+		if (p.peekIdentText("public") || p.peekIdentText("private")) && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON {
+			visibility := p.cur().Text
+			p.advance()
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			p.skipNewlines()
+			if p.peek() == lexer.TOKEN_INDENT {
+				sectionVisibility := p.currentVisibility
+				p.currentVisibility = visibility
+				decls = append(decls, p.parseConstModuleBlock()...)
+				p.currentVisibility = sectionVisibility
+				continue
+			}
+			p.currentVisibility = visibility
+			continue
+		}
+		member := p.parseConstModuleMemberDecl()
+		p.markDeclVisibility(member, "")
+		decls = append(decls, member)
 	}
 	p.expect(lexer.TOKEN_DEDENT)
-	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Const: true}
+	return decls
 }
 func (p *Parser) parseConstModuleMemberDecl() *ast.ConstDecl {
 	pos := p.cur().Pos

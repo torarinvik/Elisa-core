@@ -85,6 +85,93 @@ def module_visibility_runtime_test() -> void:
 	}
 }
 
+// A `const module` takes `public:` / `private:` sections like any other module block.
+// Without them every member was private to the const module itself, so even the PARENT
+// module could not read one -- `canAccessPrivateName` grants the owner namespace and its
+// descendants, never its ancestors -- and a `private:` grouping of shared constants was
+// unusable.
+func TestRunCLIConstModuleVisibilitySections(t *testing.T) {
+	t.Parallel()
+	if _, err := exec.LookPath("clang"); err != nil {
+		t.Skip("clang not available")
+	}
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_module_visibility_fixture.elisa")
+	src := `module Geo:
+    private:
+        const module Scalar:
+            public:
+                ZERO: i64 = 0
+                ONE: i64 = 1
+            private:
+                HIDDEN: i64 = 9
+
+    public:
+        def zero() -> i64:
+            return Scalar::ZERO
+
+        def one() -> i64:
+            return Scalar::ONE
+
+@test
+def const_module_visibility_test() -> void:
+    can Abort.Panic:
+        if Geo::zero() != 0:
+            panic("public const-module member unreadable from the parent module")
+        if Geo::one() != 1:
+            panic("second public const-module member wrong")
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write const module visibility fixture: %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "test", fixturePath}, &stdout, &stderr)
+	if exitCode != 0 {
+		t.Fatalf("expected const module visibility runtime test to succeed, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+	for _, check := range []string{
+		"[       OK ] const_module_visibility_test",
+		"passed=1",
+	} {
+		if !strings.Contains(stdout.String(), check) {
+			t.Fatalf("expected output to contain %q, got:\n%s", check, stdout.String())
+		}
+	}
+}
+
+// The `private:` section of a const module still hides its members from outside, and the
+// diagnostic names the const module as the owner.
+func TestRunCLIConstModulePrivateMemberDiagnostic(t *testing.T) {
+	t.Parallel()
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "const_module_private_diag_fixture.elisa")
+	src := `module Geo:
+    const module Scalar:
+        public:
+            ZERO: i64 = 0
+        private:
+            HIDDEN: i64 = 9
+
+def main() -> i64:
+    return Geo::Scalar::HIDDEN
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr)
+	if exitCode == 0 {
+		t.Fatalf("expected private const-module access to fail, stdout:\n%s", stdout.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "\"Geo.Scalar.HIDDEN\" is private to module \"Geo.Scalar\"") {
+		t.Fatalf("expected privacy diagnostic, got:\n%s", combined)
+	}
+}
+
 // The private member of a private module stays inaccessible from outside even
 // when a sibling public section exists, and the diagnostic names the privacy.
 func TestRunCLIPrivateModuleMemberDiagnostic(t *testing.T) {
