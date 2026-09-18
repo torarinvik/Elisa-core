@@ -137,8 +137,18 @@ func (a *Analyzer) flattenScopedDeclsWithVisibility(decls []ast.Decl, namespace 
 			out = append(out, a.flattenScopedDeclsWithVisibility(a.activeDeclBranch(n), namespace, effectiveUsings, inheritedPrivate)...)
 		case *ast.NamespaceDecl:
 			childNamespace := joinQualifiedName(namespace, n.Name)
-			childPrivate := a.declIsPrivate(n, inheritedPrivate)
-			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, childPrivate)...)
+			// A private module hides the MODULE, not its members: its body starts at the
+			// default (public) and the name itself is gated instead. Pushing the mark into
+			// the body made every member private TO THE MODULE, which locked the parent out
+			// of its own nested module (`canAccessPrivateName` grants the owning namespace
+			// and its descendants, never its ancestors).
+			if a.declIsPrivate(n, false) {
+				if a.privateModules == nil {
+					a.privateModules = map[string]bool{}
+				}
+				a.privateModules[childNamespace] = true
+			}
+			out = append(out, a.flattenScopedDeclsWithVisibility(n.Decls, childNamespace, effectiveUsings, false)...)
 		case *ast.UsingDecl:
 			continue
 		case *ast.ImportDecl:
@@ -269,7 +279,7 @@ func (a *Analyzer) reportUsingAmbiguity(name string, pos lexer.Pos) bool {
 			continue
 		}
 		if sym, ok := a.globalScope.Lookup(cand); ok && sym != nil {
-			if sym.Private && !a.canAccessPrivateName(cand) {
+			if !a.globalNameIsVisible(sym, cand) {
 				continue
 			}
 			seen[cand] = true
@@ -329,6 +339,9 @@ func (a *Analyzer) lookupVisibleType(name string) (Type, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if t, ok := a.namedTypes[candidate]; ok {
 			if a.privateTypeNames[candidate] && !a.canAccessPrivateName(candidate) {
+				continue
+			}
+			if a.privateModuleOnPath(candidate) != "" {
 				continue
 			}
 			return t, candidate, true
@@ -420,7 +433,7 @@ func (a *Analyzer) enclosingNamespaceMember(name string) (*Symbol, string, bool)
 	if !ok || sym == nil {
 		return nil, "", false
 	}
-	if sym.Private && !a.canAccessPrivateName(qualified) {
+	if !a.globalNameIsVisible(sym, qualified) {
 		return nil, "", false
 	}
 	return sym, qualified, true
@@ -429,7 +442,7 @@ func (a *Analyzer) enclosingNamespaceMember(name string) (*Symbol, string, bool)
 func (a *Analyzer) lookupVisibleGlobal(name string) (*Symbol, string, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
 		if sym, ok := a.globalScope.Lookup(candidate); ok {
-			if sym != nil && sym.Private && !a.canAccessPrivateName(candidate) {
+			if sym != nil && !a.globalNameIsVisible(sym, candidate) {
 				continue
 			}
 			return sym, candidate, true
@@ -443,6 +456,37 @@ func privateOwnerNamespace(name string) string {
 		return name[:idx]
 	}
 	return ""
+}
+
+// privateModuleOnPath returns the INNERMOST module along `qualified`'s path that is
+// declared private and out of reach from the current namespace, or "" when the whole
+// path is visible. Module visibility gates everything underneath it: `public` grants a
+// member exactly the reach of the module that declares it, never more. A module
+// private at file scope has no enclosing module to be private to, so it gates nothing.
+func (a *Analyzer) privateModuleOnPath(qualified string) string {
+	if a == nil || len(a.privateModules) == 0 {
+		return ""
+	}
+	blocked := ""
+	for index := 0; index < len(qualified); index++ {
+		if qualified[index] != '.' {
+			continue
+		}
+		prefix := qualified[:index]
+		if a.privateModules[prefix] && !a.canAccessPrivateName(prefix) {
+			blocked = prefix
+		}
+	}
+	return blocked
+}
+
+// globalNameIsVisible reports whether a name reached at `qualified` may be referenced
+// from the current namespace: its own `private:` mark AND every module on its path.
+func (a *Analyzer) globalNameIsVisible(sym *Symbol, qualified string) bool {
+	if sym != nil && sym.Private && !a.canAccessPrivateName(qualified) {
+		return false
+	}
+	return a.privateModuleOnPath(qualified) == ""
 }
 
 func (a *Analyzer) canAccessPrivateName(name string) bool {
@@ -503,6 +547,16 @@ func (a *Analyzer) inaccessiblePrivateName(name string) (string, string, bool) {
 		return "", "", false
 	}
 	for _, candidate := range a.visibleNameCandidates(name) {
+		// A private module on the path hides the name wholesale, however public the name
+		// itself is: report the MODULE, since that is what the caller has to be let into.
+		if blocked := a.privateModuleOnPath(candidate); blocked != "" {
+			if _, ok := a.namedTypes[candidate]; ok {
+				return blocked, privateOwnerNamespace(blocked), true
+			}
+			if _, ok := a.globalScope.Lookup(candidate); ok {
+				return blocked, privateOwnerNamespace(blocked), true
+			}
+		}
 		if a.canAccessPrivateName(candidate) {
 			continue
 		}
@@ -518,7 +572,10 @@ func (a *Analyzer) inaccessiblePrivateName(name string) (string, string, bool) {
 
 func (a *Analyzer) lookupVisibleConst(name string) (ConstValue, bool) {
 	for _, candidate := range a.visibleNameCandidates(name) {
-		if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil && sym.Private && !a.canAccessPrivateName(candidate) {
+		if sym, ok := a.globalScope.Lookup(candidate); ok && sym != nil && !a.globalNameIsVisible(sym, candidate) {
+			continue
+		}
+		if a.privateModuleOnPath(candidate) != "" {
 			continue
 		}
 		if value, ok := a.constValues[candidate]; ok {

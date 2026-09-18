@@ -355,24 +355,57 @@ def run() -> i32:
 	}
 }
 
+// `private module` hides the MODULE from everything outside its parent; the members
+// inside keep their own (default public) visibility, so the parent can still use them.
 func TestPrivateModuleMemberVisibleInsideModuleOnly(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_module_member.elisa", `
-private module Secret:
-    def hidden() -> i32:
-        return 7
+module Api:
+    private module Secret:
+        def hidden() -> i32:
+            return 7
 
     def inside() -> i32:
-        return hidden()
+        return Secret::hidden()
 
 def outside() -> i32:
-    return Secret::hidden()
+    return Api::Secret::hidden()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "\"Secret.hidden\" is private to module \"Secret\"") {
-		t.Fatalf("expected private module member to be hidden from outside, got:\n%s", all)
+	if !strings.Contains(all, "\"Api.Secret\" is private to module \"Api\"") {
+		t.Fatalf("expected private module to be hidden from outside its parent, got:\n%s", all)
 	}
-	if _, ok := result.GlobalScope.Lookup("Secret.hidden"); !ok {
-		t.Fatal("expected private symbol to still be collected under its qualified name")
+	if strings.Contains(all, "Api.Secret.hidden\" is private") {
+		t.Fatalf("expected the parent's own use of the private module to be allowed, got:\n%s", all)
+	}
+	if _, ok := result.GlobalScope.Lookup("Api.Secret.hidden"); !ok {
+		t.Fatal("expected the member to still be collected under its qualified name")
+	}
+}
+
+// A module private at FILE scope has no enclosing module to be private to, so it gates
+// nothing within the compilation unit -- the same rule F# and Rust apply to a private
+// module at the crate/namespace root. Mark the members themselves to hide them.
+func TestTopLevelPrivateModuleGatesNothing(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "top_level_private_module.elisa", `
+private module Secret:
+    def open() -> i32:
+        return 7
+
+    private def shut() -> i32:
+        return 9
+
+def outside() -> i32:
+    return Secret::open()
+
+def peek() -> i32:
+    return Secret::shut()
+`)
+	all := strings.Join(result.Errors(), "\n")
+	if strings.Contains(all, "Secret.open") {
+		t.Fatalf("expected a file-scope private module to gate nothing, got:\n%s", all)
+	}
+	if !strings.Contains(all, "\"Secret.shut\" is private to module \"Secret\"") {
+		t.Fatalf("expected the explicitly private member to stay hidden, got:\n%s", all)
 	}
 }
 
@@ -425,29 +458,33 @@ def outside() -> i32:
 // indented-block section form is exercised here (the flat-label form above).
 func TestPublicSectionInsidePrivateModuleReExports(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "public_in_private_module.elisa", `
-private module Foo:
-    public:
-        def pubfn() -> i32:
-            return secret() + 1
+module Host:
+    private module Foo:
+        public:
+            def pubfn() -> i32:
+                return secret() + 1
 
-    def secret() -> i32:
-        return 41
+        def secret() -> i32:
+            return 41
+
+    def inside() -> i32:
+        return Foo::pubfn() + Foo::secret()
 
 def outside() -> i32:
-    return Foo::pubfn() + Foo::secret()
+    return Host::Foo::pubfn()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "\"Foo.secret\" is private to module \"Foo\"") {
-		t.Fatalf("expected unmarked member of private module to stay private, got:\n%s", all)
+	if !strings.Contains(all, "\"Host.Foo\" is private to module \"Host\"") {
+		t.Fatalf("expected a public member of a private module to stay behind the module, got:\n%s", all)
 	}
-	if strings.Contains(all, "Foo.pubfn") {
-		t.Fatalf("expected public-section member of private module to be accessible, got:\n%s", all)
+	if strings.Contains(all, "Host.Foo.pubfn\" is private") || strings.Contains(all, "Host.Foo.secret\" is private") {
+		t.Fatalf("expected the parent to reach both members of its private module, got:\n%s", all)
 	}
-	if sym, ok := result.GlobalScope.Lookup("Foo.pubfn"); !ok || sym.Private {
-		t.Fatalf("expected Foo.pubfn to be public, got %#v", sym)
+	if sym, ok := result.GlobalScope.Lookup("Host.Foo.pubfn"); !ok || sym.Private {
+		t.Fatalf("expected Host.Foo.pubfn to be public, got %#v", sym)
 	}
-	if sym, ok := result.GlobalScope.Lookup("Foo.secret"); !ok || !sym.Private {
-		t.Fatalf("expected Foo.secret to be private, got %#v", sym)
+	if sym, ok := result.GlobalScope.Lookup("Host.Foo.secret"); !ok || sym.Private {
+		t.Fatalf("expected Host.Foo.secret to be public within its module, got %#v", sym)
 	}
 }
 
@@ -479,24 +516,28 @@ def outside() -> i32:
 // as private (not "unknown type") when referenced from outside.
 func TestPrivateModuleTypeDiagnostic(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "private_module_type.elisa", `
-private module Vault:
-    struct Key:
-        id: i32
+module Vault:
+    private module Inner:
+        struct Key:
+            id: i32
 
-    public:
-        def check() -> i32:
-            k: Key = Key(7)
-            return k.id
+        public:
+            def check() -> i32:
+                k: Key = Key{id: 7}
+                return k.id
+
+    def inside() -> i32:
+        return Inner::check()
 
 def outside() -> i32:
-    k: Vault::Key = Vault::Key{id: 1}
-    return Vault::check()
+    k: Vault::Inner::Key = Vault::Inner::Key{id: 1}
+    return Vault::Inner::check()
 `)
 	all := strings.Join(result.Errors(), "\n")
-	if !strings.Contains(all, "\"Vault.Key\" is private to module \"Vault\"") {
-		t.Fatalf("expected private type diagnostic, got:\n%s", all)
+	if !strings.Contains(all, "\"Vault.Inner\" is private to module \"Vault\"") {
+		t.Fatalf("expected private module diagnostic for the type behind it, got:\n%s", all)
 	}
-	if strings.Contains(all, "Vault.check") {
-		t.Fatalf("expected Vault.check to be accessible, got:\n%s", all)
+	if strings.Contains(all, "Vault.Inner.check\" is private") {
+		t.Fatalf("expected Vault.Inner.check to be reachable from its parent, got:\n%s", all)
 	}
 }

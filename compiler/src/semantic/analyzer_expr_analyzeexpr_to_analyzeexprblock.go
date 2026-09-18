@@ -26,7 +26,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// lookup (which also filters it) and reports an undefined name when
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
-			if sym, ok := a.currentScope.Lookup(n.Name); ok && !(sym.Private && !a.canAccessPrivateName(n.Name)) {
+			if sym, ok := a.currentScope.Lookup(n.Name); ok && a.globalNameIsVisible(sym, n.Name) {
 				result = promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
 				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))

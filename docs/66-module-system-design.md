@@ -298,8 +298,45 @@ mechanism (axis 3 above). Three equivalent spellings, all enforced cross-namespa
 - **Indented section block**: `private:` / `public:` followed by an indented decl block
   applies only to that block; the surrounding default resumes after it.
 
-`private module Foo:` flips the module's member default to private. An EXPLICIT
-`public` mark (prefix or section) overrides the enclosing module default, so a
-`public:` section inside a `private module` re-exports those members. Unmarked decls
-inherit the module default. (Parser records only explicit marks in `DeclVisibility`;
-`declIsPrivate` gives explicit marks precedence over the inherited default.)
+### Visibility is RELATIVE (revised 2026-09-18)
+
+`public` does not mean "public to the world" — it means **as visible as the module that
+declares it**, the way F# and Rust define it. Two rules follow, and together they replace
+the old "a `private module` makes its members private" default:
+
+1. **A mark applies to the declaration it is written on, and stops there.** A `private:`
+   section or a `private` prefix that covers a nested `module` / `const module` marks
+   THAT MODULE, not the members inside it. A module body starts again at its own default
+   (public), because the section belongs to the module that wrote it, not to the one it
+   wraps (`Parser.parseModuleBody` resets `currentVisibility` at the boundary).
+2. **A qualified access checks every module on the path**, not just the leaf
+   (`privateModuleOnPath`). `Outer::Hidden::helper` needs `Outer.Hidden` to be reachable
+   as well as `helper`, so a public member of a private module stays behind the module.
+   When a module blocks the path, the diagnostic names the MODULE — that is the door the
+   caller has to be let through, and reporting the member behind it as well would be two
+   errors for one cause.
+
+Reachability itself is unchanged: `canAccessPrivateName` grants the owning namespace and
+its DESCENDANTS, never its ancestors. What changed is what gets marked. The old rule
+pushed the mark inward, which made every constant of a nested `const module` private to
+that const module — so even the parent that declared it could not read one:
+
+```elisa
+module MazeGame:
+    private const module Tune:        # Tune is private to MazeGame ...
+        START_LIVES: i64 = 3          # ... and its members are public WITHIN Tune
+
+    def lives() -> i64:
+        return Tune::START_LIVES      # fine: MazeGame can see Tune
+
+def main() -> i64:
+    return MazeGame::Tune::START_LIVES   # refused: "MazeGame.Tune" is private to "MazeGame"
+```
+
+A module private at FILE scope has no enclosing module to be private to, so it gates
+nothing inside the compilation unit — the same answer F# and Rust give at the namespace
+or crate root. Mark the members themselves to hide them.
+
+(The parser records only EXPLICIT marks in `DeclVisibility`; `declIsPrivate` gives an
+explicit mark precedence over the enclosing default, which is what lets a `public:`
+section inside a `private module` publish a member as far as the module itself reaches.)

@@ -172,20 +172,25 @@ def main() -> i64:
 	}
 }
 
-// The private member of a private module stays inaccessible from outside even
-// when a sibling public section exists, and the diagnostic names the privacy.
+// A `private module` hides the module itself from everything outside its parent. Its
+// members keep their own visibility, so a public one is reachable exactly as far as the
+// module is -- and the diagnostic names the MODULE, which is the boundary to get past.
 func TestRunCLIPrivateModuleMemberDiagnostic(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
 	fixturePath := filepath.Join(fixtureDir, "module_private_diag_fixture.elisa")
-	src := `private module Vault:
-    public:
-        def check() -> i64:
-            return KEY
-    const KEY: i64 = 41
+	src := `module Host:
+    private module Vault:
+        public:
+            def check() -> i64:
+                return KEY
+        const KEY: i64 = 41
+
+    def inside() -> i64:
+        return Vault::check() + Vault::KEY
 
 def main() -> i64:
-    return Vault::KEY
+    return Host::Vault::KEY
 `
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
 		t.Fatalf("failed to write fixture: %v", err)
@@ -197,7 +202,60 @@ def main() -> i64:
 		t.Fatalf("expected private access to fail, stdout:\n%s", stdout.String())
 	}
 	combined := stdout.String() + stderr.String()
-	if !strings.Contains(combined, "\"Vault.KEY\" is private to module \"Vault\"") {
+	if !strings.Contains(combined, "\"Host.Vault\" is private to module \"Host\"") {
 		t.Fatalf("expected privacy diagnostic, got:\n%s", combined)
+	}
+	if strings.Contains(combined, "Host.Vault.KEY\" is private") {
+		t.Fatalf("expected the parent to read into its own private module, got:\n%s", combined)
+	}
+}
+
+// Visibility is RELATIVE (docs/128): a `private:` section marks the nested module it
+// wraps, not that module's members, so the parent can read its own private const module.
+// Before this rule the section reached inside and made every constant private to the
+// const module itself -- unreadable even by the module that declared it.
+func TestRunCLIPrivateConstModuleReadableByParent(t *testing.T) {
+	t.Parallel()
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "private_const_module_parent.elisa")
+	src := `module MazeGame:
+    private const module Tune:
+        START_LIVES: i64 = 3
+        FOG_RADIUS: i64 = 4
+
+    def lives() -> i64:
+        return Tune::START_LIVES + Tune::FOG_RADIUS
+
+def main() -> i64:
+    return MazeGame::lives()
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "semantic", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected the parent to read its private const module, stdout:\n%s\nstderr:\n%s", stdout.String(), stderr.String())
+	}
+
+	outsidePath := filepath.Join(fixtureDir, "private_const_module_outside.elisa")
+	outside := `module MazeGame:
+    private const module Tune:
+        START_LIVES: i64 = 3
+
+def main() -> i64:
+    return MazeGame::Tune::START_LIVES
+`
+	if err := os.WriteFile(outsidePath, []byte(outside), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if exitCode := runCLI([]string{"-emit", "semantic", outsidePath}, &stdout, &stderr); exitCode == 0 {
+		t.Fatalf("expected a private const module to stay closed from outside, stdout:\n%s", stdout.String())
+	}
+	combined := stdout.String() + stderr.String()
+	if !strings.Contains(combined, "\"MazeGame.Tune\" is private to module \"MazeGame\"") {
+		t.Fatalf("expected the diagnostic to name the private module, got:\n%s", combined)
 	}
 }

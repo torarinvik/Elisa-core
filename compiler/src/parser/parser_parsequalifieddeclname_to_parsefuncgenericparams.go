@@ -122,13 +122,25 @@ func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
 	}
 	return name
 }
+// parseModuleBody reads a module's own body block. A `public:` / `private:` section
+// belongs to the module that WROTE it and stops at the module boundary: the section
+// marks a nested `module` / `const module` declaration itself, and that nested body
+// starts again at its own default. Visibility is relative -- `public` inside a
+// private module means "as visible as this module", never more.
+func (p *Parser) parseModuleBody(parseBlock func() []ast.Decl) []ast.Decl {
+	savedVisibility := p.currentVisibility
+	p.currentVisibility = ""
+	defer func() { p.currentVisibility = savedVisibility }()
+	return parseBlock()
+}
+
 func (p *Parser) parseNamespaceDecl() *ast.NamespaceDecl {
 	pos := p.cur().Pos
 	p.expectIdentText("module")
 	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	decls := p.parseDeclBlock()
+	decls := p.parseModuleBody(p.parseDeclBlock)
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true}
 }
 
@@ -142,7 +154,7 @@ func (p *Parser) parseExtendDecl() *ast.NamespaceDecl {
 	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	decls := p.parseDeclBlock()
+	decls := p.parseModuleBody(p.parseDeclBlock)
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Extend: true}
 }
 func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
@@ -152,7 +164,7 @@ func (p *Parser) parseConstModuleDecl() *ast.NamespaceDecl {
 	name := p.parseModulePathName()
 	p.expect(lexer.TOKEN_COLON)
 	p.expectNewline()
-	decls := p.parseConstModuleBlock()
+	decls := p.parseModuleBody(p.parseConstModuleBlock)
 	return &ast.NamespaceDecl{Position: pos, Name: name, Decls: decls, Module: true, Const: true}
 }
 

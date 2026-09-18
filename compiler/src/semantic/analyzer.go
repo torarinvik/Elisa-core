@@ -248,6 +248,7 @@ type Analyzer struct {
 	declVisibility        map[ast.Decl]string
 	reportedDiagnostics   map[diagnosticIdentity]bool
 	privateTypeNames      map[string]bool
+	privateModules        map[string]bool
 	castHooksByName       map[string]map[castHookSignature]*Symbol
 	initHooksByName       map[string]map[initHookSignature]*Symbol
 	// dropHooks maps a qualified struct type name to its `__drop__` destructor
@@ -935,6 +936,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		funcDeclSymbols:                   make(map[*ast.FuncDecl]*Symbol, funcDeclCapacity),
 		declVisibility:                    activeFile.DeclVisibility,
 		privateTypeNames:                  map[string]bool{},
+		privateModules:                    map[string]bool{},
 		functionAnalyses:                  make(map[*ast.FuncDecl]*FunctionAnalysis, funcDeclCapacity),
 		enforceUnsafePermissions:          options.EnforceUnsafePermissions,
 		enforceGlobalPermissions:          options.EnforceGlobalPermissions,

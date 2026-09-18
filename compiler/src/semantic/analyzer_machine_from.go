@@ -698,7 +698,7 @@ func (a *Analyzer) machineFromStaticExprType(expr ast.Expr) Type {
 			return nil
 		}
 		sym, ok := a.currentScope.Lookup(n.Name)
-		if !ok || sym == nil || (sym.Private && !a.canAccessPrivateName(n.Name)) {
+		if !ok || sym == nil || !a.globalNameIsVisible(sym, n.Name) {
 			return nil
 		}
 		return promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)

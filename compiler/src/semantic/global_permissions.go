@@ -43,7 +43,7 @@ func (a *Analyzer) globalStorageSymbolForIdent(name string) (*Symbol, bool) {
 	}
 	if a.currentScope != nil {
 		if sym, ok := a.currentScope.Lookup(name); ok {
-			if isGlobalStorageSymbol(sym) && !(sym.Private && !a.canAccessPrivateName(name)) {
+			if isGlobalStorageSymbol(sym) && a.globalNameIsVisible(sym, name) {
 				return sym, true
 			}
 			return nil, false
