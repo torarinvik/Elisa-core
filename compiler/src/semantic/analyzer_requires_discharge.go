@@ -4,6 +4,7 @@ import (
 	"elisacore/src/ast"
 	"elisacore/src/lexer"
 	"elisacore/src/unparse"
+	"strings"
 )
 
 // RequiresReportEntry aggregates static-discharge outcomes for one (function, requires-clause) pair
@@ -143,6 +144,7 @@ func (a *Analyzer) checkCalleeRequires(call *ast.CallExpr, declName string, requ
 		}
 		subst[param.Name] = args[i]
 	}
+	a.qualifyCalleeClauseConsts(call, requires, subst)
 	subject := "precondition of " + declName
 	for _, req := range requires {
 		if req == nil {
@@ -667,4 +669,81 @@ func scaleAffineForm(f affineForm, k int64) affineForm {
 		out.addTerm(name, v*k)
 	}
 	return out
+}
+
+// qualifyCalleeClauseConsts rewrites a callee's own module constants into the spelling the
+// CALLER can see, so a cross-module precondition can actually be discharged.
+//
+// A clause is written in the callee's namespace: `requires last >= ID_MIN` inside
+// `module Ids`. Substituting the argument gives the goal `cursor >= ID_MIN`, which is then
+// proven against the caller's facts -- and those facts name the same constant
+// `Ids::ID_MIN`, because that is how the caller had to spell it. The two terms never
+// unified, so a guard that literally IS the precondition proved nothing and every
+// cross-module call with a `requires` fell back to a runtime check plus a lint. Within one
+// module the spellings happen to agree, which is why this only ever showed up across a
+// module boundary.
+//
+// Only a name the caller cannot already resolve is rewritten, and only to a constant that
+// really exists in the callee's namespace: a caller-visible name keeps its own meaning.
+func (a *Analyzer) qualifyCalleeClauseConsts(call *ast.CallExpr, clauses []ast.Expr, subst map[string]ast.Expr) {
+	if a == nil || call == nil || len(clauses) == 0 || subst == nil {
+		return
+	}
+	ft, ok := a.callFuncType(call)
+	if !ok || ft == nil {
+		return
+	}
+	dot := strings.LastIndex(ft.Name, ".")
+	if dot <= 0 {
+		return
+	}
+	namespace := ft.Name[:dot]
+	for _, clause := range clauses {
+		collectClauseIdents(clause, func(ident *ast.Ident) {
+			if ident == nil || ident.Name == "" || subst[ident.Name] != nil {
+				return
+			}
+			if _, ok := a.lookupConstEvalValue(ident.Name); ok {
+				return
+			}
+			if _, ok := a.lookupVisibleConst(ident.Name); ok {
+				return
+			}
+			qualified := namespace + "." + ident.Name
+			if _, ok := a.constValues[qualified]; !ok {
+				return
+			}
+			subst[ident.Name] = &ast.Ident{Position: ident.Position, Name: qualified}
+		})
+	}
+}
+
+// collectClauseIdents visits the bare identifiers of a precondition clause. It covers the
+// expression forms the bounded-linear prover accepts; anything else it does not descend
+// into simply keeps the status quo, since the prover declines on those forms anyway.
+func collectClauseIdents(expr ast.Expr, visit func(*ast.Ident)) {
+	switch n := expr.(type) {
+	case nil:
+		return
+	case *ast.Ident:
+		visit(n)
+	case *ast.ParenExpr:
+		collectClauseIdents(n.Inner, visit)
+	case *ast.UnaryExpr:
+		collectClauseIdents(n.Operand, visit)
+	case *ast.BinaryExpr:
+		collectClauseIdents(n.Left, visit)
+		collectClauseIdents(n.Right, visit)
+	case *ast.CastExpr:
+		collectClauseIdents(n.Operand, visit)
+	case *ast.FieldExpr:
+		collectClauseIdents(n.Object, visit)
+	case *ast.IndexExpr:
+		collectClauseIdents(n.Object, visit)
+		collectClauseIdents(n.Index, visit)
+	case *ast.CallExpr:
+		for _, arg := range n.Args {
+			collectClauseIdents(arg, visit)
+		}
+	}
 }

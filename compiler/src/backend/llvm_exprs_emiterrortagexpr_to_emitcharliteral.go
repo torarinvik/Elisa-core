@@ -86,16 +86,15 @@ func (s *functionState) emitErrorTagExpr(expr *ast.FieldExpr, errorType *semanti
 	if errorType == nil {
 		return nil, nil, fmt.Errorf("missing error set for tag expression")
 	}
-	ident, ok := expr.Object.(*ast.Ident)
-	if !ok {
+	if _, ok := expr.Object.(*ast.Ident); !ok {
 		return nil, nil, fmt.Errorf("missing error set qualifier for tag expression")
 	}
-	code, ok := errorType.TagCodeFor(ident.Name, expr.Field)
+	code, ok := errorType.TagCodeFor(errorType.Name, expr.Field)
 	if !ok {
 		return nil, nil, fmt.Errorf("unknown error tag %s.%s", errorType.Name, expr.Field)
 	}
 	if errorType.HasPayloads() {
-		value, err := s.buildErrorSetValue(errorType, semantic.QualifyErrorTag(ident.Name, expr.Field), nil)
+		value, err := s.buildErrorSetValue(errorType, semantic.QualifyErrorTag(errorType.Name, expr.Field), nil)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -22,10 +22,11 @@ func (a *Analyzer) errorExprTagName(expr ast.Expr) (string, bool) {
 		return "", false
 	}
 	errSet, ok := base.(*ErrorSetType)
-	if !ok || !errSet.HasQualifiedTag(ident.Name, fieldExpr.Field) {
+	if !ok || !errSet.HasQualifiedTag(errSet.Name, fieldExpr.Field) {
 		return "", false
 	}
-	return QualifyErrorTag(ident.Name, fieldExpr.Field), true
+	a.noteErrorSetQualifier(ident, errSet)
+	return QualifyErrorTag(errSet.Name, fieldExpr.Field), true
 }
 
 func (a *Analyzer) errorConstructorCall(expr *ast.CallExpr) (*ErrorSetType, string, []Type, bool) {
@@ -45,7 +46,8 @@ func (a *Analyzer) errorConstructorCall(expr *ast.CallExpr) (*ErrorSetType, stri
 	if !ok {
 		return nil, "", nil, false
 	}
-	qualifiedTag := QualifyErrorTag(ident.Name, fieldExpr.Field)
+	a.noteErrorSetQualifier(ident, errSet)
+	qualifiedTag := QualifyErrorTag(errSet.Name, fieldExpr.Field)
 	if !errSet.HasTag(qualifiedTag) {
 		a.errorf(expr.Pos(), "error set %q has no tag %q", ErrorSetDiagnosticName(errSet), fieldExpr.Field)
 		return errSet, qualifiedTag, nil, true
@@ -66,11 +68,30 @@ func (a *Analyzer) errorTagType(expr *ast.FieldExpr) (Type, bool) {
 	if !ok {
 		return nil, false
 	}
-	if !errSet.HasQualifiedTag(ident.Name, expr.Field) {
+	if !errSet.HasQualifiedTag(errSet.Name, expr.Field) {
 		a.errorf(expr.Pos(), "error set %q has no tag %q", ErrorSetDiagnosticName(errSet), expr.Field)
 		return invalidType, true
 	}
+	a.noteErrorSetQualifier(ident, errSet)
 	return errSet, true
+}
+
+// noteErrorSetQualifier records the resolved error set behind the qualifier the author
+// WROTE. `raise EntityIdError.MaxId` inside `module EntityId` names a set registered as
+// `EntityId.EntityIdError`, and its tags are registered under that same qualified name --
+// so a tag key built from the spelled `EntityIdError` matched nothing and the set was
+// reported to have no tag it plainly declares. The analyzer resolves the set through the
+// namespace candidates; the BACKEND looks the qualifier up in a flat NamedTypes map, so it
+// needs the canonical name recorded here (docs/66: the analyzer records the resolved
+// target on the node).
+func (a *Analyzer) noteErrorSetQualifier(ident *ast.Ident, errSet *ErrorSetType) {
+	if a == nil || ident == nil || errSet == nil || a.resolvedValueNames == nil {
+		return
+	}
+	if errSet.Name == "" || errSet.Name == ident.Name {
+		return
+	}
+	a.resolvedValueNames[ident] = errSet.Name
 }
 func (a *Analyzer) packedEnumTagExprType(expr *ast.FieldExpr) (Type, bool) {
 	ident, ok := expr.Object.(*ast.Ident)

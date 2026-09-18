@@ -716,15 +716,30 @@ func (s *functionState) errorTagInfo(expr *ast.FieldExpr) (*semantic.ErrorSetTyp
 	if !ok {
 		return nil, "", false
 	}
-	base, ok := s.g.result.NamedTypes[ident.Name]
+	base, ok := s.g.result.NamedTypes[s.errorSetQualifierName(ident)]
 	if !ok {
 		return nil, "", false
 	}
 	errorType, ok := base.(*semantic.ErrorSetType)
-	if !ok || !errorType.HasQualifiedTag(ident.Name, expr.Field) {
+	if !ok || !errorType.HasQualifiedTag(errorType.Name, expr.Field) {
 		return nil, "", false
 	}
-	return errorType, semantic.QualifyErrorTag(ident.Name, expr.Field), true
+	return errorType, semantic.QualifyErrorTag(errorType.Name, expr.Field), true
+}
+
+// errorSetQualifierName is the canonical name of the error set an author spelled
+// unqualified. NamedTypes is keyed by the QUALIFIED name, so `EntityIdError` written
+// inside `module EntityId` finds nothing; the analyzer records what it resolved to.
+func (s *functionState) errorSetQualifierName(ident *ast.Ident) string {
+	if ident == nil {
+		return ""
+	}
+	if s != nil && s.g != nil && s.g.result != nil && s.g.result.ResolvedValueNames != nil {
+		if canonical, ok := s.g.result.ResolvedValueNames[ident]; ok && canonical != "" {
+			return canonical
+		}
+	}
+	return ident.Name
 }
 func (s *functionState) constEnumMemberInfo(expr *ast.FieldExpr) (*semantic.ConstEnumType, *semantic.ConstEnumMember, bool) {
 	constEnumType, _, member, ok := s.constEnumMemberInfoForExpr(expr)
