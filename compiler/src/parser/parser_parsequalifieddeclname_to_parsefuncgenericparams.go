@@ -962,7 +962,7 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 			p.expectNewline()
 			continue
 		}
-		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "private" || p.cur().Text == "public") {
+		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "private" || p.cur().Text == "public") && p.pos+2 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_COLON && p.tokens[p.pos+2].Kind == lexer.TOKEN_NEWLINE {
 			private := p.advance().Text == "private"
 			p.expect(lexer.TOKEN_COLON)
 			p.expectNewline()

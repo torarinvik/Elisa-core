@@ -462,6 +462,7 @@ func (a *Analyzer) analyzeRecordUpdateExprWithTreeOwnerRequirement(expr *ast.Rec
 	ok = true
 	for i := range expr.Args {
 		name := expr.ArgName(i)
+		a.checkPrivateFieldOfType(resolvedBaseType, name, expr.Args[i].Pos())
 		index, exists := fieldIndexes[name]
 		if !exists {
 			a.errorf(expr.Args[i].Pos(), "record update has no field %q", name)
