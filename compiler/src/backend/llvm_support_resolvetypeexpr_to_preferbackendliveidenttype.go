@@ -31,6 +31,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
 		}
+		if s.g != nil && s.g.result != nil {
+			if bound, ok := s.g.result.ContextualTypeBindings[n]; ok {
+				return substituteType(bound, s.typeMap, s.g.result.StaticImpls), nil
+			}
+		}
 		// Prefer the analyzer's recorded resolution (handles namespace / using /
 		// import qualification that the bare-name lookup below cannot see).
 		if s.g != nil && s.g.result != nil && s.g.result.ResolvedTypeNames != nil {

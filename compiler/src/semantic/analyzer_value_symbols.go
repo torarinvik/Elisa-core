@@ -154,34 +154,36 @@ func (a *Analyzer) collectValueSymbols(decls []scopedDecl) {
 						return
 					}
 					if n.IsExtension() {
-						for _, member := range n.Members {
-							switch fnDecl := member.(type) {
-							case *ast.FuncDecl:
-								visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
-								qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
-								a.applyDeclaredReturnRegion(fnDecl, fnType)
-								linkName, _ := functionLinkNameFromAnnotations(fnDecl.Annotations)
-								sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
-								a.functionTypes[qualifiedName] = fnType
-								a.funcDeclSymbols[fnDecl] = sym
-								a.funcDeclUsings[fnDecl] = append([]string(nil), a.currentUsings...)
-								a.defineGlobal(sym, fnDecl.Pos())
-								a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
-							case *ast.ExternFuncDecl:
-								visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
-								qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
-								fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
-								a.applyExternFuncAnnotations(fnDecl, fnType)
-								a.markRawExternFuncType(fnDecl, fnType)
-								linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
-								a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
-								sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
-								a.functionTypes[qualifiedName] = fnType
-								a.defineGlobal(sym, fnDecl.Pos())
-								a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
+						a.withInterfaceAssocTypes(map[string]Type{staticInterfaceSelfName: receiver}, func() {
+							for _, member := range n.Members {
+								switch fnDecl := member.(type) {
+								case *ast.FuncDecl:
+									visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
+									qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
+									fnType := a.funcTypeFromDeclWithFrame(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Changes, fnDecl.Fulfills, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic, false)
+									a.applyDeclaredReturnRegion(fnDecl, fnType)
+									linkName, _ := functionLinkNameFromAnnotations(fnDecl.Annotations)
+									sym := &Symbol{Name: qualifiedName, Kind: SymbolFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
+									a.functionTypes[qualifiedName] = fnType
+									a.funcDeclSymbols[fnDecl] = sym
+									a.funcDeclUsings[fnDecl] = append([]string(nil), a.currentUsings...)
+									a.defineGlobal(sym, fnDecl.Pos())
+									a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
+								case *ast.ExternFuncDecl:
+									visibleName := joinQualifiedName(scoped.Namespace, fnDecl.Name)
+									qualifiedName := ExtensionMethodSymbolName(visibleName, receiver, fnDecl.Name)
+									fnType := a.funcTypeFromExternDecl(qualifiedName, fnDecl.TypeParams, fnDecl.GenericParams, fnDecl.RegionParams, fnDecl.PermissionParams, fnDecl.Permissions, fnDecl.Ensures, fnDecl.Requires, fnDecl.EnsureValues, fnDecl.Params, fnDecl.ReturnType, fnDecl.Variadic)
+									a.applyExternFuncAnnotations(fnDecl, fnType)
+									a.markRawExternFuncType(fnDecl, fnType)
+									linkName, _ := externLinkNameFromAnnotations(fnDecl.Annotations)
+									a.validateExternLinkNameSignature(qualifiedName, linkName, fnType, fnDecl.Pos())
+									sym := &Symbol{Name: qualifiedName, Kind: SymbolExternFunc, Type: fnType, Node: fnDecl, LinkName: linkName, Mutable: false}
+									a.functionTypes[qualifiedName] = fnType
+									a.defineGlobal(sym, fnDecl.Pos())
+									a.registerExtensionMethod(visibleName, receiver, sym, fnDecl, fnType)
+								}
 							}
-						}
+						})
 						return
 					}
 					_, interfaceName, ok := a.lookupVisibleStaticInterface(n.InterfaceName)

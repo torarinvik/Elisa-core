@@ -39,6 +39,9 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			return t
 		}
 		if t, ok := a.lookupInterfaceAssocType(n.Name); ok {
+			if a.contextualTypeBindings != nil {
+				a.contextualTypeBindings[n] = t
+			}
 			return t
 		}
 		if t, canonical, ok := a.lookupVisibleType(n.Name); ok {

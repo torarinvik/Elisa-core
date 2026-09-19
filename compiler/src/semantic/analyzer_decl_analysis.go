@@ -93,10 +93,8 @@ func (a *Analyzer) analyzeDecls(decls []scopedDecl) {
 				// mirroring the symbol-collection pass and the protocol decl.
 				a.withGenericParams(n.GenericParams, nil, func() {
 					var selfBindings map[string]Type
-					if !n.IsExtension() {
-						if receiver := a.resolveType(n.ForType); receiver != nil && !IsInvalidType(receiver) {
-							selfBindings = map[string]Type{staticInterfaceSelfName: receiver}
-						}
+					if receiver := a.resolveType(n.ForType); receiver != nil && !IsInvalidType(receiver) {
+						selfBindings = map[string]Type{staticInterfaceSelfName: receiver}
 					}
 					a.withInterfaceAssocTypes(selfBindings, func() {
 						for _, member := range n.Members {

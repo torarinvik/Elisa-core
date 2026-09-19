@@ -614,6 +614,7 @@ type Analyzer struct {
 	reportedDotModulePaths   map[*ast.FieldExpr]bool
 	reportedDotModuleTypes   map[string]bool
 	resolvedTypeNames        map[ast.TypeExpr]string
+	contextualTypeBindings   map[ast.TypeExpr]Type
 	resolvedValueNames       map[*ast.Ident]string
 	currentImplicitScopes    []map[string]ast.Expr
 	semanticLimitDiagnostics map[string]bool
@@ -918,6 +919,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		postfixShorthandCalls:             make(map[*ast.CastExpr]*ast.CallExpr),
 		regionStacks:                      make(map[*ast.RegionStmt]RegionStackAssignment),
 		resolvedTypeNames:                 make(map[ast.TypeExpr]string),
+		contextualTypeBindings:            make(map[ast.TypeExpr]Type),
 		resolvedValueNames:                make(map[*ast.Ident]string),
 		exprDenseNodeKeys:                 make(map[ast.Expr]DenseNodeKeyInfo, denseNodeCapacity),
 		exprNodeTables:                    make(map[ast.Expr]NodeTableInfo, denseNodeCapacity),
@@ -1116,6 +1118,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		DeathTimeCohorts:        a.deathTimeCohorts,
 		DeathTimeEscapeStats:    a.deathEscapeStats,
 		ResolvedTypeNames:       a.resolvedTypeNames,
+		ContextualTypeBindings:  a.contextualTypeBindings,
 		ResolvedValueNames:      a.resolvedValueNames,
 		DenseNodeKeys:           a.exprDenseNodeKeys,
 		NodeTables:              a.exprNodeTables,

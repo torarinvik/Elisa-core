@@ -62,13 +62,16 @@ type Result struct {
 	DeathTimeCohorts     map[string][]DeathTimeCohort
 	DeathTimeEscapeStats map[string]DeathTimeEscapeStats
 	ResolvedTypeNames    map[ast.TypeExpr]string
-	ResolvedValueNames   map[*ast.Ident]string
-	DenseNodeKeys        map[ast.Expr]DenseNodeKeyInfo
-	NodeTables           map[ast.Expr]NodeTableInfo
-	PackedLowering       PackedLoweringMetadata
-	ParallelFor          map[*ast.ParallelForStmt]*ParallelForInfo
-	CallArgDisjoint      map[*ast.CallExpr]*CallArgDisjointInfo
-	FuncDisjointParams   map[*ast.FuncDecl]*FuncDisjointParamInfo
+	// ContextualTypeBindings preserves scoped receiver/associated-type resolution
+	// for code generation. These names must never become global nominal types.
+	ContextualTypeBindings map[ast.TypeExpr]Type
+	ResolvedValueNames     map[*ast.Ident]string
+	DenseNodeKeys          map[ast.Expr]DenseNodeKeyInfo
+	NodeTables             map[ast.Expr]NodeTableInfo
+	PackedLowering         PackedLoweringMetadata
+	ParallelFor            map[*ast.ParallelForStmt]*ParallelForInfo
+	CallArgDisjoint        map[*ast.CallExpr]*CallArgDisjointInfo
+	FuncDisjointParams     map[*ast.FuncDecl]*FuncDisjointParamInfo
 	// LawIsCalls desugars a `subject is Law` predicate application (docs/85 §2: `is` = UFCS
 	// first-arg binding) into the synthetic call `Law(subject)`. Analysis type-checks the call and
 	// records it here; codegen emits the call for the `is` expression. Bare-law (no bracket args)

@@ -9,6 +9,35 @@ import (
 	"elisacore/src/semantic"
 )
 
+func TestGenerateLLVMIRPreservesImplLocalSelf(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "impl_local_self.elisa", `
+protocol Identity:
+    def identity(self: Self) -> Self
+struct Small:
+    value: i64
+struct Large:
+    first: i64
+    second: i64
+impl Identity for Small:
+    def identity(self: Self) -> Self:
+        copy: Self = self
+        return copy
+impl Identity for Large:
+    def identity(self: Self) -> Self:
+        copy: Self = self
+        return copy
+impl Small:
+    def copied(self: Self) -> Self:
+        copy: Self = self
+        return copy
+def entry() -> i64:
+    return 0
+`)
+	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
+		t.Fatalf("local Self must retain its own implementation's receiver: %v", err)
+	}
+}
+
 func TestGenerateLLVMIRLowersStaticInterfaceMethodDispatch(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "static_interface_dispatch.elisa", `
 struct AstNode:
