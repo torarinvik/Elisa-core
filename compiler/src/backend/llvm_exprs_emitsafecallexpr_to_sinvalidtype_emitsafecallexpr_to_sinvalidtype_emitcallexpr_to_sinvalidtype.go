@@ -84,6 +84,12 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if err := s.emitCallArgRefinementChecks(expr); err != nil {
 		return nil, nil, err
 	}
+	if value, actualType, handled, err := s.emitVaArgCall(expr); handled {
+		return value, actualType, err
+	}
+	if value, actualType, handled, err := s.emitVaCopyCall(expr); handled {
+		return value, actualType, err
+	}
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
