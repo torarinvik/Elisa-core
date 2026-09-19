@@ -124,6 +124,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.checkPrivateStructField(t, fieldName, pos)
 		return field, true
 	case *GenericInstanceType:
 		baseStruct, ok := t.Base.(*StructType)
@@ -140,6 +141,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 			}
 			return Field{}, false
 		}
+		a.checkPrivateStructField(baseStruct, fieldName, pos)
 		bindings := genericBindingsForStructInstance(baseStruct, t.Args)
 		regionBindings := regionBindingsForStructInstance(baseStruct, t.Args)
 		field.Type = a.substituteType(field.Type, bindings, nil, regionBindings, nil)

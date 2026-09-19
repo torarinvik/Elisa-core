@@ -143,6 +143,7 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 			if fieldName == "" {
 				fieldName = arg.Name
 			}
+			a.checkPrivateFieldOfType(actual, fieldName, arg.Position)
 			field, exists := fieldIndexes[fieldName]
 			if !exists {
 				typeName := pattern.TypeName
@@ -169,6 +170,9 @@ func (a *Analyzer) resolveMoveBindStructPattern(pattern *ast.MoveBindStructPatte
 	limit := len(pattern.Args)
 	if len(fields) < limit {
 		limit = len(fields)
+	}
+	for _, field := range fields[:limit] {
+		a.checkPrivateFieldOfType(actual, field.Name, pattern.Pos())
 	}
 	return fields[:limit], true
 }
@@ -223,6 +227,7 @@ func (a *Analyzer) resolveMatchStructPattern(pattern *ast.MatchStructPattern, ac
 			a.errorf(arg.Position, "struct pattern fields must use named field matches")
 			continue
 		}
+		a.checkPrivateFieldOfType(actual, arg.Name, arg.Position)
 		index, ok := fieldIndexes[arg.Name]
 		if !ok {
 			a.errorf(arg.Position, "struct %q has no field %q", pattern.TypeName, arg.Name)

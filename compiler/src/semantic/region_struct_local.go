@@ -31,9 +31,21 @@ func peelToStructType(t Type) (*StructType, bool) {
 // container/view field — the fields that an ambient region would back at construction and that
 // a callee could grow through a struct-ref region param.
 func structHasRegionlessContainerField(st *StructType) bool {
+	return structHasRegionlessContainerFieldSeen(st, map[*StructType]bool{})
+}
+
+// structHasRegionlessContainerFieldSeen also descends through plain nested structs. A local
+// outer aggregate owns the backing storage of an inline nested aggregate, so a projected path
+// such as `workspace.scratch.values` must be able to thread the outer local's region just like
+// the one-level `workspace.values` form. The seen set keeps recursive type graphs fail-closed.
+func structHasRegionlessContainerFieldSeen(st *StructType, seen map[*StructType]bool) bool {
 	if st == nil {
 		return false
 	}
+	if seen[st] {
+		return false
+	}
+	seen[st] = true
 	for _, f := range st.Fields {
 		switch ft := f.Type.(type) {
 		case *DArrayType:
@@ -46,6 +58,10 @@ func structHasRegionlessContainerField(st *StructType) bool {
 			}
 		case *SetType:
 			if ft != nil && ft.Region == "" {
+				return true
+			}
+		case *StructType:
+			if structHasRegionlessContainerFieldSeen(ft, seen) {
 				return true
 			}
 		}

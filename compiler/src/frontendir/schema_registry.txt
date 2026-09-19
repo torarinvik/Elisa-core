@@ -408,6 +408,7 @@ F FieldDecl 6 Mutable
 F FieldDecl 7 Name
 F FieldDecl 8 Position
 F FieldDecl 9 Type
+F FieldDecl 10 Private
 
 T 65 FieldExpr
 F FieldExpr 1 Field

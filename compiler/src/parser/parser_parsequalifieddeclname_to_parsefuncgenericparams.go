@@ -122,6 +122,7 @@ func (p *Parser) parseQualifiedIdentNameAfterFirst(first string) string {
 	}
 	return name
 }
+
 // parseModuleBody reads a module's own body block. A `public:` / `private:` section
 // belongs to the module that WROTE it and stops at the module boundary: the section
 // marks a nested `module` / `const module` declaration itself, and that nested body
@@ -959,6 +960,23 @@ func (p *Parser) parseStructDeclWithLeadingLayout(annotations []ast.Annotation, 
 			p.advance()
 			invariants = append(invariants, p.parseExpr())
 			p.expectNewline()
+			continue
+		}
+		if p.peek() == lexer.TOKEN_IDENT && (p.cur().Text == "private" || p.cur().Text == "public") {
+			private := p.advance().Text == "private"
+			p.expect(lexer.TOKEN_COLON)
+			p.expectNewline()
+			p.expect(lexer.TOKEN_INDENT)
+			for p.peek() != lexer.TOKEN_DEDENT && p.peek() != lexer.TOKEN_EOF {
+				p.skipNewlines()
+				if p.peek() == lexer.TOKEN_DEDENT {
+					break
+				}
+				field := p.parseFieldDecl()
+				field.Private = private
+				fields = append(fields, field)
+			}
+			p.expect(lexer.TOKEN_DEDENT)
 			continue
 		}
 		fields = append(fields, p.parseFieldDecl())

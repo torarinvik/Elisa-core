@@ -34,6 +34,7 @@ type DerivedStateDecl struct {
 	Condition Expr
 }
 type FieldDecl struct {
+	Private     bool // Visible only within the declaring module and its descendants.
 	Position    lexer.Pos
 	Annotations []Annotation
 	Name        string

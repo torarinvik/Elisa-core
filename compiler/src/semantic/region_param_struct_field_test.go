@@ -297,6 +297,36 @@ def caller_with_distinct_regions[@values, @workspace](values: mutable darray[i64
 	}
 }
 
+// Nested projected fields must preserve the local outer struct's ambient region when a
+// scratch container is forwarded to a region-requiring helper. This is the shape used by
+// proof-side reusable validation workspaces; rejecting it forces sound callers to allocate
+// a fresh workspace for every proposition.
+func TestRegionPolyNestedLocalStructFieldForwardingInferred(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "nested_local_struct_field_forward.elisa", `struct Scratch:
+    values: mutable darray[i64]
+
+struct Workspace:
+    scratch: Scratch
+
+def append_one(values: mutable darray[i64]&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        values.push(1)
+
+def forward(workspace: mutable Workspace&) -> void:
+    can Memory.Allocate, Abort.Panic:
+        append_one(&workspace.scratch.values)
+
+def caller() -> i64:
+    can Memory.Allocate, Abort.Panic:
+        workspace: mutable Workspace = Workspace{scratch: Scratch{values: []}}
+        forward(workspace)
+        return workspace.scratch.values.count.i64()
+`)
+	if joined := strings.Join(result.Errors(), " | "); joined != "" {
+		t.Fatalf("nested local struct field forwarding must infer the enclosing region, got: %s", joined)
+	}
+}
+
 // Stage 1 must NOT widen the safe surface: the inferred region param drives the SAME borrow-out
 // escape check as the explicit form, so a region-less view return over the inferred param is still
 // rejected (was a use-after-free; the escape coverage is independent of how the region arrived).

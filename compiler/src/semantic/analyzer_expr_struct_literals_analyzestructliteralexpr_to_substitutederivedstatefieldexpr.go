@@ -66,6 +66,13 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		a.errorf(expr.Pos(), "positional construction %s(...) is not allowed; use the brace form %s{...} for default field initialization, or define a constructor `def %s(...) -> %s`", expr.Name, expr.Name, expr.Name, base.Name)
 		return targetType
 	}
+	// A brace literal constructs the representation, including omitted/default fields.
+	// Require access to every private field even for empty or spread-only literals.
+	if base.Decl != nil {
+		for _, field := range base.Decl.Fields {
+			a.checkPrivateStructField(base, field.Name, expr.Pos())
+		}
+	}
 	for i, spreadExpr := range expr.Spreads {
 		spread, actual := a.analyzeCallLikeValueExpr(spreadExpr, targetType)
 		expr.Spreads[i] = spread
