@@ -75,3 +75,21 @@ func TestParseUnannotatedFunctionDoesNotConvertTail(t *testing.T) {
 		t.Fatalf("expected unannotated tail to remain ExprStmt, got %T", fn.Body[0])
 	}
 }
+
+func TestParseTupleFunctionTailAsReturn(t *testing.T) {
+	file, errs := parseSourceFile(t, `def pair(n: i64) -> (first: i64, second: i64):
+    n, n + 1
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	fn := file.Decls[0].(*ast.FuncDecl)
+	ret, ok := fn.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected tuple tail ReturnStmt, got %T", fn.Body[0])
+	}
+	tuple, ok := ret.Value.(*ast.TupleExpr)
+	if !ok || len(tuple.Elems) != 2 {
+		t.Fatalf("expected two-element tuple, got %#v", ret.Value)
+	}
+}

@@ -771,11 +771,18 @@ func (p *Parser) parseExprOrAssignStmt() ast.Stmt {
 		return p.takeStmtGuard(&ast.AsRefAssignStmt{Position: pos, Target: expr, AsKind: asKind, Value: value})
 	}
 
-	// docs/119 §2: inside an expression block a bare `a, b` line is a tuple
-	// expression statement (the block's tail tuple). Only inside expression
-	// blocks — everywhere else a top-level comma stays an error.
-	if p.exprBlockDepth > 0 && p.peek() == lexer.TOKEN_COMMA {
+	// A bare comma-list is a tuple expression, including in function tails.
+	// Tail normalization gives it the same return semantics as a scalar.
+	if p.peek() == lexer.TOKEN_COMMA {
+		comma := p.cur()
+		commaIndex := p.pos
 		tuple := p.parseTupleExprFromFirst(expr.Pos(), expr)
+		if p.exprBlockDepth == 0 && p.peek() != lexer.TOKEN_EOF && !(p.peek() == lexer.TOKEN_NEWLINE && p.pos+1 < len(p.tokens) && (p.tokens[p.pos+1].Kind == lexer.TOKEN_DEDENT || p.tokens[p.pos+1].Kind == lexer.TOKEN_EOF)) {
+			p.errorAt(comma.Pos, "unexpected token , in expression")
+			p.pos = commaIndex + 1
+			p.expectNewline()
+			return &ast.ExprStmt{Position: pos, Expr: expr}
+		}
 		p.expectNewlineAfterValueExpr(tuple)
 		return &ast.ExprStmt{Position: pos, Expr: tuple}
 	}
