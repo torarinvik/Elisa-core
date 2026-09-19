@@ -50,7 +50,14 @@ func (a *Analyzer) checkPrivateZeroedType(t Type, pos lexer.Pos, seen map[Type]b
 			a.checkPrivateZeroedType(field.Type, pos, seen)
 		}
 	case *GenericInstanceType:
-		a.checkPrivateZeroedType(value.Base, pos, seen)
+		if base, ok := value.Base.(*StructType); ok {
+			bindings := genericBindingsForStructInstance(base, value.Args)
+			regions := regionBindingsForStructInstance(base, value.Args)
+			for name, field := range base.Fields {
+				a.checkPrivateStructField(base, name, pos)
+				a.checkPrivateZeroedType(a.substituteType(field.Type, bindings, nil, regions, nil), pos, seen)
+			}
+		}
 	case *ArrayType:
 		a.checkPrivateZeroedType(value.Elem, pos, seen)
 	case *TupleType:
