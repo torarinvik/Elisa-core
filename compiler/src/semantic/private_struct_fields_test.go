@@ -29,6 +29,7 @@ func TestPrivateStructFields(t *testing.T) {
 		{"reference", "def get(h: Vault::Handle&) -> i64:\n    h.value\n", true},
 		{"write", "def set(h: mutable Vault::Handle&) -> void:\n    h.value <- 0\n", true},
 		{"literal", "def main() -> i64:\n    h = Vault::Handle{value: 0, tag: 1}\n    h.tag\n", true},
+		{"zeroed", "def main() -> i64:\n    h: Vault::Handle = zeroed\n    h.tag\n", true},
 		{"record_update", "def main() -> i64:\n    h = Vault::Handle()\n    changed = h{value = 0}\n    changed.tag\n", true},
 		{"pattern", "def main() -> i64:\n    h = Vault::Handle()\n    match h:\n        Vault::Handle{value: v}: v\n", true},
 		{"alias", "type Alias = Vault::Handle\ndef get(h: Alias&) -> i64:\n    h.value\n", true},

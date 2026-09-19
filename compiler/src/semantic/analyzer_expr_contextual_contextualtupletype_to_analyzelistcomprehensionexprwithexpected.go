@@ -63,6 +63,7 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 }
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if _, ok := expr.(*ast.ZeroedLit); ok && expected != nil {
+		a.checkPrivateZeroedType(expected, expr.Pos(), make(map[Type]bool))
 		if dictType, ok := StripAggregateStateType(expected).(*DictType); ok {
 			if !a.ensureRuntimeBackedDictSupported(expr.Pos(), dictType) {
 				a.recordAnalyzedExprType(expr, invalidType)
