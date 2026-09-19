@@ -1674,7 +1674,10 @@ func llvmFloatPredicate(op lexer.TokenKind) (C.LLVMRealPredicate, error) {
 	case lexer.TOKEN_EQEQ:
 		return C.LLVMRealOEQ, nil
 	case lexer.TOKEN_BANGEQ:
-		return C.LLVMRealONE, nil
+		// C/IEEE `!=` is unordered-not-equal: NaN != every value, including
+		// another NaN. LLVMRealONE is ordered-not-equal and incorrectly returns
+		// false for NaN.
+		return C.LLVMRealUNE, nil
 	case lexer.TOKEN_LT:
 		return C.LLVMRealOLT, nil
 	case lexer.TOKEN_GT:

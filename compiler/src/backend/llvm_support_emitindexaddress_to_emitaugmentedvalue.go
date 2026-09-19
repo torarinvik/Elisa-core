@@ -598,7 +598,9 @@ func (s *functionState) coerceValue(value C.LLVMValueRef, actual semantic.Type, 
 		}
 		zero := C.LLVMConstNull(actualLLVM)
 		if isFloatType(actual) {
-			return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealONE), value, zero, cStringFree("tobool")), nil
+			// C truthiness treats NaN as nonzero. Use unordered-not-equal so
+			// `if (nan)` remains true instead of using ordered-not-equal.
+			return C.LLVMBuildFCmp(s.builder, C.LLVMRealPredicate(C.LLVMRealUNE), value, zero, cStringFree("tobool")), nil
 		}
 		return C.LLVMBuildICmp(s.builder, C.LLVMIntPredicate(C.LLVMIntNE), value, zero, cStringFree("tobool")), nil
 	}
