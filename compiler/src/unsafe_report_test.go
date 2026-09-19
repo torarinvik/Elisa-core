@@ -99,6 +99,40 @@ def safe_wrapper(value: uintptr) -> heap u8&:
 	}
 }
 
+func TestUnsafeReportIncludesExternCalledFromMatchGuard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	fixturePath := filepath.Join(dir, "unsafe_match_guard.elisa")
+	src := `
+extern LLVMValueRef
+extern LLVMContextRef
+extern LLVMTypeRef
+extern LLVMTypeOf(value: LLVMValueRef) -> LLVMTypeRef
+extern LLVMInt1TypeInContext(ctx: LLVMContextRef) -> LLVMTypeRef
+
+def guarded(condition_value: LLVMValueRef?, ctx: LLVMContextRef) -> LLVMValueRef?:
+	validated: LLVMValueRef? =
+		match condition_value:
+			emitted_condition if LLVMTypeOf(emitted_condition) != LLVMInt1TypeInContext(ctx):
+				null
+			_:
+				condition_value
+	return validated
+`
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "unsafe", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("runCLI returned %d\nstderr:\n%s", exitCode, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "guarded: Unsafe.RawExtern") {
+		t.Fatalf("expected match-guard extern call in unsafe report, got:\n%s", stdout.String())
+	}
+}
+
 func TestUnsafeReportIncludesTrustedUsesInsideAutoRegion(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

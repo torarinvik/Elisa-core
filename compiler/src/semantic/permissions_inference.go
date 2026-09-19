@@ -423,6 +423,12 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Filter)
 		c.collectExpr(n.Projection)
 		c.collectExpr(n.Owner)
+	case *ast.ExprBlock:
+		// A value block is an executable expression. Its leading statements and
+		// tail value can contain calls/effects just like a function body; skipping
+		// it under-reports effects when a block is used as an initializer or return.
+		c.collectStmts(n.Stmts)
+		c.collectExpr(n.Value)
 	case *ast.ParenExpr:
 		c.collectExpr(n.Inner)
 	case *ast.RaiseExpr:
@@ -430,12 +436,30 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 	case *ast.TryExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Fallback)
+		if n.Recovery != nil {
+			c.collectExpr(n.Recovery.Value)
+			c.collectStmts(n.Recovery.Body)
+		}
 	case *ast.UnwrapElseExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Fallback)
+		if n.Recovery != nil {
+			c.collectExpr(n.Recovery.Value)
+			c.collectStmts(n.Recovery.Body)
+		}
 	case *ast.GetExpr:
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Fallback)
+		if n.Recovery != nil {
+			c.collectExpr(n.Recovery.Value)
+			c.collectStmts(n.Recovery.Body)
+		}
+	case *ast.CatchExpr:
+		c.collectExpr(n.Value)
+		c.collectStmts(n.Success.Body)
+		for _, arm := range n.Arms {
+			c.collectStmts(arm.Body)
+		}
 	case *ast.OptionalBindExpr:
 		c.collectExpr(n.Value)
 	case *ast.AllocExpr:
@@ -454,6 +478,10 @@ func (c *permissionEffectCollector) collectExpr(expr ast.Expr) {
 		c.collectExpr(n.Value)
 		c.collectExpr(n.Store)
 		for _, arm := range n.Arms {
+			// Match guards are executable expressions. Omitting them from permission
+			// inference under-reports effects (and call-graph capabilities) whenever
+			// a guard invokes an extern or another effectful function.
+			c.collectExpr(arm.Guard)
 			c.collectStmts(arm.Body)
 		}
 	case *ast.FoldExpr:
