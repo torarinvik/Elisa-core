@@ -292,7 +292,7 @@ failures as a separate diagnostic universe.
 ### Ensures
 
 ```elisacore
-def finish_ok(mutable job: ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void ensures job => Ready:
     job.status <- ParseJobStatus.Ready
 ```
 
@@ -310,9 +310,9 @@ success postconditions.
 ### Ref-call widening
 
 ```elisacore
-extern unknown_update(mutable player: Player[Alive]&) -> void
+extern unknown_update(player: mutable Player[Alive]&) -> void
 
-def use(mutable player: Player[Alive]&) -> void:
+def use(player: mutable Player[Alive]&) -> void:
     unknown_update(player)
 ```
 

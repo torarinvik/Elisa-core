@@ -9,6 +9,10 @@ import (
 	"testing"
 )
 
+// A C-string out-parameter is a reference to the caller's POINTER slot: `out: mutable cstr&`, and
+// the caller passes `&value`. The old spelling -- `out: mutable static u8&` with the caller casting
+// `(&value).cast[mutable static u8&]` -- stored an 8-byte pointer through a 1-byte reference, which
+// overflowed any genuine byte destination; it is now rejected ("cannot store a byte pointer").
 func TestRunCLIStaticStringRefOutParamRebindsCallerSlot(t *testing.T) {
 	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
@@ -22,7 +26,7 @@ func TestRunCLIStaticStringRefOutParamRebindsCallerSlot(t *testing.T) {
 	testInclude = filepath.ToSlash(testInclude)
 	src := fmt.Sprintf(`# include %q
 
-def set_out(out: mutable static u8&) -> void:
+def set_out(out: mutable cstr&) -> void:
 	out <- "D4yla3vx4tY"
 
 def make_static_ref() -> static u8&:
@@ -52,21 +56,21 @@ def cstr_eq(lhs: u8&?, rhs: u8&?) -> bool:
 		i <- i + 1
 	return lhs[i] == rhs[i]
 
-def set_out_from_call(out: mutable static u8&) -> void:
+def set_out_from_call(out: mutable cstr&) -> void:
 	out <- make_static_ref()
 
-def set_out_from_heap_slice(out: mutable static u8&) -> void:
+def set_out_from_heap_slice(out: mutable cstr&) -> void:
 	out <- copy_prefix("D4yla3vx4tY#libkernel", 11)
 
 @test
 def static_string_ref_out_param_rebinds_caller_slot() -> void:
 	can Abort.Panic:
 		value: mutable static u8& = ""
-		set_out((&value).cast[mutable static u8&])
+		set_out(&value)
 		assert_eq(value, "D4yla3vx4tY")
-		set_out_from_call((&value).cast[mutable static u8&])
+		set_out_from_call(&value)
 		assert_eq(value, "libkernel")
-		set_out_from_heap_slice((&value).cast[mutable static u8&])
+		set_out_from_heap_slice(&value)
 		assert_true(cstr_eq(value, "D4yla3vx4tY"))
 `, testInclude)
 	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {

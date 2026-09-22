@@ -31,7 +31,7 @@ def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable Pa
         return &variants.items[variants.count - 1]
 def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&, word_count: usize) -> u32:
     can Memory.Allocate, Abort.Panic:
-        variant_rows: PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
+        variant_rows: mutable PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
         rows: mutable darray[PackedStoreVariantRow]& = &variant_rows.rows
         if rows.count >= PACKED_STORE_MAX_INDEX:
             panic("packed store variant row index limit exceeded")

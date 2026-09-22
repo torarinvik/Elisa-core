@@ -436,6 +436,8 @@ func (a *Analyzer) collectLambdaCaptures(expr *ast.LambdaExpr) []lambdaCaptureBi
 		if fnType, ok := a.lookupCurrentFunctionValueType(sym); ok {
 			captureType = fnType
 		}
+		// The capture reads as its source does (a capture symbol never promotes on its own).
+		captureType = promoteWritableRefType(captureType, symbolPromotesWritableRef(sym))
 		bindings = append(bindings, lambdaCaptureBinding{name: name, typ: captureType, mutable: sym.Mutable})
 	}
 	return bindings

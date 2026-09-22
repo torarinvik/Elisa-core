@@ -61,6 +61,30 @@ func (a *Analyzer) analyzeSpecializeExpr(expr *ast.SpecializeExpr) Type {
 	specialized.GenericParams = nil
 	return specialized
 }
+
+// symbolPromotesWritableRef reports whether reading sym promotes its read-only reference type to a
+// writable one because the BINDING is `mutable`. A binding's `mutable` makes its slot rebindable;
+// writing through a reference is its type's capability (`mutable T&`). Only bindings whose type the
+// program does not state keep the promotion (a lock guard, an extern variable). A local's declaration
+// decides once (analyzer_flow.go), a capture carries its source's decision in its type, and a
+// parameter or global never promotes: each let a read-only referent be written, and passing "abc"
+// through `mutable p: u8&` to a writer faulted (SIGBUS).
+func symbolPromotesWritableRef(sym *Symbol) bool {
+	if sym == nil || !sym.Mutable || sym.BindingMutabilityExplicit {
+		return false
+	}
+	switch sym.Kind {
+	case SymbolParam, SymbolGlobal:
+		return false
+	case SymbolLocal:
+		switch sym.Node.(type) {
+		case *ast.VarDeclStmt, *ast.LambdaExpr:
+			return false
+		}
+	}
+	return true
+}
+
 func promoteWritableRefType(t Type, mutable bool) Type {
 	if !mutable {
 		return t

@@ -1649,6 +1649,39 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			}
 			return s.emitOptionalAssignStmt(n)
 		}
+		if n.WriteThrough {
+			// `x <- v` on a mutable scalar-reference binding: the analyzer typed the store as the
+			// REFERENT, so load the reference from x's slot and store v through it. The slot is
+			// not the destination (that path coerced v to a pointer and rebound x to it).
+			slotPtr, slotType, err := s.emitAddress(n.Target)
+			if err != nil {
+				return err
+			}
+			refType, ok := slotType.(*semantic.RefType)
+			if !ok || refType == nil {
+				return fmt.Errorf("write-through assignment at source line %d: target is %v, not a reference binding", n.Pos().Line, slotType)
+			}
+			refPtr, err := s.loadValue(slotPtr, refType, "ref.slot")
+			if err != nil {
+				return err
+			}
+			value, _, err := s.emitExpr(n.Value, refType.Elem)
+			if err != nil {
+				return err
+			}
+			if err := s.storeValue(refPtr, value, refType.Elem, "ref.assign"); err != nil {
+				return err
+			}
+			if s.g.trace != nil {
+				assignName := ""
+				if id, ok := n.Target.(*ast.Ident); ok {
+					assignName = id.Name
+				}
+				s.g.trace.recordValue(s, n.Pos().Line, assignName, value, refType.Elem)
+			}
+			s.invalidatePackedReadCaches()
+			return nil
+		}
 		if identTarget, ok := n.Target.(*ast.Ident); ok {
 			if binding, ok := s.lookupBinding(identTarget.Name); ok && !binding.mutable {
 				if refType, ok := binding.typ.(*semantic.RefType); ok {
@@ -1656,14 +1689,11 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 					if err != nil {
 						return err
 					}
+					// The analyzer types a store through an immutable reference binding as the
+					// REFERENT, auto-reading a reference RHS (`r <- s` copies *s). Storing the
+					// binding's own (pointer) type instead wrote s's ADDRESS into *r: a wrong value,
+					// and an 8-byte store past the end of a `u8`/`i32` referent.
 					storeType := refType.Elem
-					valueType := s.exprType(n.Value)
-					if _, valueIsRef := valueType.(*semantic.RefType); semantic.SameType(valueType, binding.typ) || valueIsRef {
-						storeType = binding.typ
-					}
-					if _, valueIsStringLiteral := n.Value.(*ast.StringLit); valueIsStringLiteral {
-						storeType = binding.typ
-					}
 					value, _, err := s.emitExpr(n.Value, storeType)
 					if err != nil {
 						return err

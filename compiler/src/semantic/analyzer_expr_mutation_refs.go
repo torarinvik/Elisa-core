@@ -22,55 +22,68 @@ func (a *Analyzer) enumConstructorMoveReason(enumName string, variant *EnumVaria
 }
 
 func containsTypeParam(t Type) bool {
+	return containsTypeParamSeen(t, nil)
+}
+
+// containsTypeParamSeen walks t, remembering the enums it has entered: a recursive enum
+// (`enum Expr: Add(Expr&, Expr&)`) reaches itself through its payloads.
+func containsTypeParamSeen(t Type, seen map[*EnumType]bool) bool {
 	switch n := t.(type) {
 	case nil:
 		return false
 	case *TypeParamType:
 		return true
 	case *IDType:
-		return containsTypeParam(n.Tag) || containsTypeParam(n.Storage)
+		return containsTypeParamSeen(n.Tag, seen) || containsTypeParamSeen(n.Storage, seen)
 	case *ErrorUnionType:
-		return containsTypeParam(n.Value)
+		return containsTypeParamSeen(n.Value, seen)
 	case *OptionalType:
-		return containsTypeParam(n.Value)
+		return containsTypeParamSeen(n.Value, seen)
 	case *RefType:
-		return containsTypeParam(n.Elem)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *ArrayType:
-		return containsTypeParam(n.Elem)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *DArrayType:
-		return containsTypeParam(n.Elem)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *ViewType:
-		return containsTypeParam(n.Elem)
+		return containsTypeParamSeen(n.Elem, seen)
 	case *TupleType:
 		for _, field := range n.Fields {
-			if containsTypeParam(field.Type) {
+			if containsTypeParamSeen(field.Type, seen) {
 				return true
 			}
 		}
 		return false
 	case *GenericInstanceType:
 		for _, arg := range n.Args {
-			if containsTypeParam(arg) {
+			if containsTypeParamSeen(arg, seen) {
 				return true
 			}
 		}
-		return containsTypeParam(n.Base)
+		return containsTypeParamSeen(n.Base, seen)
 	case *AggregateStateType:
-		return containsTypeParam(n.Base)
+		return containsTypeParamSeen(n.Base, seen)
 	case *FuncType:
 		if len(n.GenericParams) != 0 {
 			return true
 		}
 		for _, param := range n.Params {
-			if containsTypeParam(param) {
+			if containsTypeParamSeen(param, seen) {
 				return true
 			}
 		}
-		return containsTypeParam(n.Return)
+		return containsTypeParamSeen(n.Return, seen)
 	case *EnumType:
+		if seen[n] {
+			return false
+		}
+		if seen == nil {
+			seen = map[*EnumType]bool{}
+		}
+		seen[n] = true
 		for _, variant := range n.Variants {
 			for _, payload := range variant.Payload {
-				if containsTypeParam(payload) {
+				if containsTypeParamSeen(payload, seen) {
 					return true
 				}
 			}
@@ -106,6 +119,8 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 					a.reportReadonlyRefMutationNote(n.Pos(), n, sym.Type)
 					return invalidType
 				}
+				// `r <- v` / `r += v` store through the reference.
+				a.requireWriteThroughTarget(n, ref)
 				return ref.Elem
 			}
 			a.errorf(n.Pos(), "cannot assign to immutable %s %q", sym.Kind, sym.Name)
@@ -160,6 +175,108 @@ func (a *Analyzer) assignmentTargetType(expr ast.Expr) Type {
 		a.errorf(expr.Pos(), "invalid assignment target")
 		return invalidType
 	}
+}
+
+// currentRefType is what flow analysis proves about a reference binding right now: the
+// refined type while a proof (`if r != null:`, an early return on null) is in force, else the
+// declared type. A proof is a refinement, not a new symbol, so the symbol alone never shows it.
+func (a *Analyzer) currentRefType(ident *ast.Ident, declared *RefType) *RefType {
+	if refined, ok := a.lookupRefinedExprType(ident); ok {
+		if refinedRef, ok := refined.(*RefType); ok && refinedRef != nil {
+			return refinedRef
+		}
+	}
+	return declared
+}
+
+// requireWriteThroughTarget rejects a store through a reference that is not proven non-null:
+// an unproven `mutable T&?` has no referent to store into (a write through null: a segfault at
+// -O0, a trap at -O2), and inside `if r == null:` it is proven null.
+func (a *Analyzer) requireWriteThroughTarget(ident *ast.Ident, declared *RefType) {
+	if current := a.currentRefType(ident, declared); current.State != RefStateNonNull {
+		a.errorf(ident.Pos(), "assignment through reference requires proven non-null reference, got %s", current)
+	}
+}
+
+// legacyRefInitIsWritable reports whether a legacy `x: mutable T& = init` may become a writable
+// reference although init's type is read-only: init is what a `mutable T&` parameter would accept
+// (a writable place such as a mutable field or element -- never a binding that merely holds a
+// read-only ref), a conditional whose arms all are, `null`/`zeroed` (no referent to protect), or
+// an Unsafe pointer cast (`raw.cast[heap T&]` over an allocation's `void&`), which is itself the
+// trust point and could name `mutable T&` just as well. A plain coercion (`"abc".cast[u8&]`)
+// keeps its operand's read-only referent.
+func (a *Analyzer) legacyRefInitIsWritable(value ast.Expr) bool {
+	stripped := stripOptimizationParens(value)
+	switch v := stripped.(type) {
+	case nil:
+		return false
+	case *ast.NullLit, *ast.ZeroedLit:
+		return true
+	case *ast.TernaryExpr:
+		return a.legacyRefInitIsWritable(v.Value) && a.legacyRefInitIsWritable(v.Alt)
+	case *ast.CastExpr:
+		if v.Origin != ast.CastExprOriginIndirectCall && castRequiresUnsafePointerCast(a.exprTypes[v.Operand], a.exprTypes[v]) {
+			return true
+		}
+	case *ast.AddrOfExpr:
+		// `region r: a: mutable Arena& = &r` -- the scope OWNS r's arena, and allocating from it
+		// mutates it. `&r` types read-only only because the region binding cannot be reassigned.
+		if a.regionBindingIdent(v.Operand) {
+			return true
+		}
+	}
+	if ref, ok := a.exprTypes[stripped].(*RefType); ok && ref != nil && ref.Mutable {
+		return true
+	}
+	return !a.refBindingIdent(stripped) && (a.mutationPathWritable(stripped) || a.exprCanYieldWritableRef(stripped))
+}
+
+// regionBindingIdent reports whether expr names a `region NAME:` binding in scope.
+func (a *Analyzer) regionBindingIdent(expr ast.Expr) bool {
+	ident, ok := stripOptimizationParens(expr).(*ast.Ident)
+	if !ok || ident == nil || a.currentScope == nil {
+		return false
+	}
+	sym, found := a.currentScope.Lookup(ident.Name)
+	return found && sym != nil && sym.Kind == SymbolRegion
+}
+
+// refBindingIdent reports whether expr names a binding whose type is itself a reference. Such a
+// binding's write capability is its type's `mutable`, never the binding's own rebindability.
+func (a *Analyzer) refBindingIdent(expr ast.Expr) bool {
+	ident, ok := stripMutationTargetExpr(expr).(*ast.Ident)
+	if !ok || ident == nil {
+		return false
+	}
+	var (
+		sym   *Symbol
+		found bool
+	)
+	if a.currentScope != nil {
+		sym, found = a.currentScope.Lookup(ident.Name)
+	}
+	if !found {
+		if sym, _, found = a.lookupVisibleGlobal(ident.Name); !found {
+			return false
+		}
+	}
+	_, isRef := sym.Type.(*RefType)
+	return isRef
+}
+
+// isBytePointerValue reports a value that is a POINTER to bytes: a string literal, a `cstr`, or
+// any `u8&` (the language's C-string/byte-pointer type).
+func isBytePointerValue(value ast.Expr, valueType Type) bool {
+	if _, ok := stripOptimizationParens(value).(*ast.StringLit); ok {
+		return true
+	}
+	switch t := valueType.(type) {
+	case *CStrType:
+		return true
+	case *RefType:
+		return t != nil && isBytePointerArithmeticRef(t)
+	}
+	return false
 }
 
 // mutableScalarRefTarget recognizes a mutable scalar reference whose assignment
@@ -303,9 +420,11 @@ func mutableRefSuggestionString(t Type) (string, bool) {
 	if !ok || ref == nil {
 		return "", false
 	}
+	// The type printer puts the storage class first (`heap mutable T&`), which does not parse;
+	// a suggestion is spelled the way source writes a writable reference: `mutable heap T&`.
 	cloned := cloneRefType(ref)
-	cloned.Mutable = true
-	return cloned.String(), true
+	cloned.Mutable = false
+	return "mutable " + cloned.String(), true
 }
 
 func writableRefAssignableIgnoringMutability(expected Type, actual Type) bool {
@@ -351,8 +470,74 @@ func (a *Analyzer) writableRefSuggestionForExpr(expr ast.Expr) (string, bool) {
 	}
 }
 
+// rebindableReadOnlyRefRoot returns the binding at the root of a mutation path when that binding is
+// re-pointable (`mutable`) but its reference type is read-only: the case where the `mutable` the
+// program wrote does not grant the write it attempted. A path that passes through another reference
+// before reaching the root is not blamed on the root.
+func (a *Analyzer) rebindableReadOnlyRefRoot(expr ast.Expr) (*Symbol, string, bool) {
+	cur := stripMutationTargetExpr(expr)
+	for {
+		var object ast.Expr
+		switch n := cur.(type) {
+		case *ast.FieldExpr:
+			object = n.Object
+		case *ast.IndexExpr:
+			object = n.Object
+		case *ast.SliceExpr:
+			object = n.Object
+		case *ast.Ident:
+			var (
+				sym   *Symbol
+				found bool
+			)
+			if a.currentScope != nil {
+				sym, found = a.currentScope.Lookup(n.Name)
+			}
+			if !found {
+				if sym, _, found = a.lookupVisibleGlobal(n.Name); !found {
+					return nil, "", false
+				}
+			}
+			if sym == nil || !sym.Mutable {
+				return nil, "", false
+			}
+			if ref, isRef := sym.Type.(*RefType); !isRef || ref == nil || ref.Mutable {
+				return nil, "", false
+			}
+			return sym, n.Name, true
+		default:
+			return nil, "", false
+		}
+		cur = stripMutationTargetExpr(object)
+		if _, isIdent := cur.(*ast.Ident); !isIdent {
+			if _, isRef := a.exprTypes[cur].(*RefType); isRef {
+				return nil, "", false
+			}
+		}
+	}
+}
+
+// reportRebindableReadOnlyRefNote explains a rejected write (or writable-reference argument) whose
+// root is a rebindable binding of a read-only reference, and reports whether it did.
+func (a *Analyzer) reportRebindableReadOnlyRefNote(pos lexer.Pos, expr ast.Expr) bool {
+	sym, name, ok := a.rebindableReadOnlyRefRoot(expr)
+	if !ok {
+		return false
+	}
+	suggestion, _ := mutableRefSuggestionString(sym.Type)
+	if decl, isDecl := sym.Node.(*ast.VarDeclStmt); isDecl && sym.Kind == SymbolLocal && !decl.BindingExplicit && decl.Type != nil {
+		a.errorf(pos, "note: %q was initialized from a read-only reference, so its `mutable` makes it rebindable, not writable; initialize it from a writable reference (%s) to write through it", name, suggestion)
+		return true
+	}
+	a.errorf(pos, "note: `mutable` on %q lets it be re-pointed, not written through; declare its type %s to write through it", name, suggestion)
+	return true
+}
+
 func (a *Analyzer) reportReadonlyRefMutationNote(pos lexer.Pos, expr ast.Expr, t Type) {
 	if a == nil {
+		return
+	}
+	if a.reportRebindableReadOnlyRefNote(pos, expr) {
 		return
 	}
 	if suggestion, ok := mutableRefSuggestionString(t); ok {
@@ -396,6 +581,13 @@ func (a *Analyzer) refExprAllowsMutation(expr ast.Expr, ref *RefType) bool {
 			if sym, _, ok = a.lookupVisibleGlobal(n.Name); !ok {
 				return false
 			}
+		}
+		// A reference binding writes through only when its TYPE is `mutable T&` (checked
+		// above). A rebindable binding (`mutable x: T& = ro`, `mutable p: T&`) may be
+		// re-pointed, but treating that as write permission wrote through `ro`: into a string
+		// literal's static bytes (SIGBUS), or into an immutable local.
+		if _, isRef := sym.Type.(*RefType); isRef {
+			return false
 		}
 		return sym.Mutable
 	case *ast.FieldExpr:

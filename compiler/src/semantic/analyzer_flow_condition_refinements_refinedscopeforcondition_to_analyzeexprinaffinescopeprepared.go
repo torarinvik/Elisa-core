@@ -558,6 +558,14 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 	if !ok {
 		return
 	}
+	if declared, current, ok := a.writeThroughRefTarget(target, targetType); ok && current != declared {
+		// `r <- v` on a `mutable T&` binding stores THROUGH the reference: the pointer, and so its
+		// proven null state, is unchanged. Only what was known about the referent is stale.
+		// (With no refinement in force there is nothing to keep: the path below is unchanged.)
+		a.currentScope.Refinements[key] = cloneRefTypeWithState(declared, current.State)
+		a.currentScope.SetNarrowedOptional(key, nil)
+		return
+	}
 	refined := assignedRefinementType(targetType, valueType)
 	if refined == nil {
 		delete(a.currentScope.Refinements, key)
@@ -574,6 +582,39 @@ func (a *Analyzer) recordAssignmentRefinement(target ast.Expr, targetType Type, 
 	}
 	a.currentScope.SetNarrowedOptional(key, narrowedFrom)
 }
+
+// writeThroughRefTarget reports whether assigning to target writes through an immutable
+// `mutable T&` / `mutable T&?` binding (assignmentTargetType resolved it to the referent), and
+// returns the declared reference with its current flow-refined form.
+func (a *Analyzer) writeThroughRefTarget(target ast.Expr, targetType Type) (*RefType, *RefType, bool) {
+	for {
+		paren, ok := target.(*ast.ParenExpr)
+		if !ok {
+			break
+		}
+		target = paren.Inner
+	}
+	ident, ok := target.(*ast.Ident)
+	if !ok || a.currentScope == nil {
+		return nil, nil, false
+	}
+	sym, ok := a.currentScope.Lookup(ident.Name)
+	if !ok || sym == nil {
+		return nil, nil, false
+	}
+	declared, ok := sym.Type.(*RefType)
+	if !ok || declared == nil || !declared.Mutable {
+		return nil, nil, false
+	}
+	// A rebind (`x <- &w` on a mutable binding) is typed as the reference itself; a store
+	// through it is typed as the referent (an immutable binding always, a mutable binding when
+	// the RHS is a scalar).
+	if _, targetIsRef := targetType.(*RefType); targetIsRef && SameType(targetType, declared) {
+		return nil, nil, false
+	}
+	return declared, a.currentRefType(ident, declared), true
+}
+
 func assignedRefinementType(targetType Type, valueType Type) Type {
 	targetRef, ok := targetType.(*RefType)
 	if ok {

@@ -349,6 +349,12 @@ type AssignStmt struct {
 	// assign — the target is a manifest of what the call mutates. Set by the semantic pass;
 	// codegen/interpret emit only Value (the call).
 	ArgManifest bool
+	// WriteThrough marks `x <- v` on a MUTABLE scalar-reference binding (`x: mutable i64& = &v`)
+	// whose RHS is a scalar: it stores THROUGH the reference, and x keeps its referent. Set by
+	// the semantic pass (a reference RHS rebinds the slot instead). Codegen used to take the
+	// slot as the destination and coerce the scalar to a pointer: `x <- 5` rebound x to
+	// address 5, and the next read through x crashed.
+	WriteThrough bool
 }
 type AugAssignStmt struct {
 	// CollectionAppend is the checked single-element push lowering for darray +=.

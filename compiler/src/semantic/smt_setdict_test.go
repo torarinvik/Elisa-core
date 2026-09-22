@@ -51,19 +51,31 @@ def arena_dict_contains[K, T](m: dict[K, T]&, key: K) -> bool:
     return arena_dict_get(m, key) != null
 `
 
-// DICT MEMBERSHIP + POSITIVE-VALUE LOOKUP, REACHABLE FROM SOURCE. The surface language accesses
-// dicts via methods — `d.contains(k)` (membership) and `d.get(k)` (optional lookup) — which resolve
-// to `arena_dict_contains` / `arena_dict_get`. The SMT lowering maps them onto the dict model:
-// `d.contains(k)` -> `(select d_keys k)` and `d.get(k)` -> `(select d_vals k)`. So under a
-// `forall (key,v) in d: v > 0` hypothesis and a `requires d.contains(k)` membership guard, the goal
-// `d.get(k) > 0` discharges by instantiating the quantifier at the witnessed key. This is the
-// headline dict-modeling win made reachable from real Elisa syntax.
+// requireOnlyUnprovenDictAssert guards the dict DECLINE tests against passing vacuously: the source
+// must type-check, so "not SMT-proven" is the solver's verdict and not a side effect of a type
+// error. The only permitted diagnostic is the unproven `assert … by:` itself.
+func requireOnlyUnprovenDictAssert(t *testing.T, result *Result) {
+	t.Helper()
+	for _, err := range result.Errors() {
+		if !strings.Contains(err, "could not be proven") {
+			t.Fatalf("the decline test must type-check; got: %v", result.Errors())
+		}
+	}
+}
+
+// DICT MEMBERSHIP + POSITIVE-VALUE LOOKUP, REACHABLE FROM SOURCE. Membership is the method
+// `d.contains(k)` (resolving to `arena_dict_contains` -> `(select d_keys k)`). A lookup is a `T&?`
+// with no implicit value, so the goal unwraps it explicitly: `get d[k] else 0` is modeled exactly as
+// `(ite (select d_keys k) (select d_vals k) 0)`. Under a `forall (key,v) in d: v > 0` hypothesis and
+// a `requires d.contains(k)` membership guard, the goal `(get d[k] else 0) > 0` discharges by
+// instantiating the quantifier at the witnessed key. This is the headline dict-modeling win made
+// reachable from real Elisa syntax.
 func TestSMTProvesDictMembershipLookup(t *testing.T) {
 	src := dictSurfaceStubs + `
 def vals_pos(d: dict[i64, i64], k: i64) -> void:
     requires forall (key, v) in d: v > 0
     requires d.contains(k)
-    assert d.get(k) > 0 by:
+    assert (get d[k] else 0) > 0 by:
         pass
 `
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "smt_dict_lookup.elisa", src, AnalyzeOptions{EnforceStrictProofs: true, EnableSMT: true})
@@ -82,16 +94,17 @@ def vals_pos(d: dict[i64, i64], k: i64) -> void:
 }
 
 // SOUNDNESS: WITHOUT the `requires d.contains(k)` membership guard, `k` is not constrained to be a
-// key of `d`, so `d.get(k)` selects an arbitrary-but-total value the `forall` hypothesis does not
-// range over. The goal must NOT be SMT-proven (z3 finds a non-member k with a non-positive value).
+// key of `d`, so `get d[k] else 0` may take the fallback, which the `forall` hypothesis does not
+// range over. The goal must NOT be SMT-proven (z3 finds a non-member k, where the value is 0).
 func TestSMTDeclinesDictLookupWithoutMembership(t *testing.T) {
 	src := dictSurfaceStubs + `
 def vals_pos(d: dict[i64, i64], k: i64) -> void:
     requires forall (key, v) in d: v > 0
-    assert d.get(k) > 0 by:
+    assert (get d[k] else 0) > 0 by:
         pass
 `
 	result := analyzeWithSMT(t, "smt_dict_noguard.elisa", src)
+	requireOnlyUnprovenDictAssert(t, result)
 	for _, f := range result.ProofReport {
 		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
 			t.Fatalf("dict lookup without a membership guard must not be SMT-proven: %+v", result.ProofReport)
@@ -100,17 +113,18 @@ def vals_pos(d: dict[i64, i64], k: i64) -> void:
 }
 
 // SOUNDNESS: a FALSE claim about dict values must NOT be proven. `forall (key,v) in d: v > 0` and
-// `d.contains(k)` establish `d.get(k) > 0`, but NOT `d.get(k) > 1` (a member value could be exactly
+// `d.contains(k)` establish `(get d[k] else 0) > 0`, but NOT `> 1` (a member value could be exactly
 // 1). z3 finds the witness, so the assert stays a runtime check.
 func TestSMTDeclinesFalseDictClaim(t *testing.T) {
 	src := dictSurfaceStubs + `
 def vals_pos(d: dict[i64, i64], k: i64) -> void:
     requires forall (key, v) in d: v > 0
     requires d.contains(k)
-    assert d.get(k) > 1 by:
+    assert (get d[k] else 0) > 1 by:
         pass
 `
 	result := analyzeWithSMT(t, "smt_dict_false.elisa", src)
+	requireOnlyUnprovenDictAssert(t, result)
 	for _, f := range result.ProofReport {
 		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
 			t.Fatalf("false dict-value claim must not be SMT-proven: %+v", result.ProofReport)
@@ -119,18 +133,18 @@ def vals_pos(d: dict[i64, i64], k: i64) -> void:
 }
 
 // NON-INT VALUE DICT DECLINES (soundness/scope): a dict with a float VALUE is not modelable — the
-// value array is fixed to (Array <KSort> Int). The `d.get(k)` lookup term declines, so a value goal
-// cannot be SMT-proven; it is left to the runtime check, never fabricated. (Here z3 also genuinely
-// could not establish `d.get(k) > 0.0` even were it modeled — the point is the model declines.)
+// value array is fixed to (Array <KSort> Int). The `get d[k] else 0.0` lookup term declines, so a
+// value goal cannot be SMT-proven; it is left to the runtime check, never fabricated.
 func TestSMTDeclinesFloatValueDict(t *testing.T) {
 	src := dictSurfaceStubs + `
 def vals_pos(d: dict[i64, f64], k: i64) -> void:
     requires forall (key, v) in d: v > 0.0
     requires d.contains(k)
-    assert d.get(k) > 0.0 by:
+    assert (get d[k] else 0.0) > 0.0 by:
         pass
 `
 	result := analyzeWithSMT(t, "smt_dict_floatval.elisa", src)
+	requireOnlyUnprovenDictAssert(t, result)
 	for _, f := range result.ProofReport {
 		if f.Outcome == ProofProvenSMT && f.Subject == "assert by" {
 			t.Fatalf("a float-value dict must not be SMT-modeled: %+v", result.ProofReport)

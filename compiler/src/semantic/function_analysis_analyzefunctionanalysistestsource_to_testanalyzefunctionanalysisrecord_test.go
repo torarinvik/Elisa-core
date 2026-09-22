@@ -354,7 +354,7 @@ func TestAnalyzeFunctionAnalysisRecordsConsumeAndRecomputeTransforms(t *testing.
 
 extern join(thread: Thread[i64, Joinable]) -> i64 can[Thread.Join]
 
-def update(mutable player: Player[Alive]&, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join] ensures player => Alive | Dead:
+def update(player: mutable Player[Alive]&, thread: Thread[i64, Joinable]) -> i64 can[Thread.Join] ensures player => Alive | Dead:
 	player.health <- player.health + 1
 	return join(move thread)
 `)
@@ -510,7 +510,7 @@ func TestAnalyzeFunctionAnalysisRecordsAliasClassMutationTransforms(t *testing.T
 
 def alias_region_mutation(seed: i32) -> i32:
 	region scratch(1024)
-	first: RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
+	first: mutable RegionNode[scratch]& @scratch = new[scratch] RegionNode[scratch]{next: null, value: seed}
 	alias: mutable RegionNode[scratch]& @scratch = first
 	alias.value <- alias.value + 1
 	out: i32 = first.value

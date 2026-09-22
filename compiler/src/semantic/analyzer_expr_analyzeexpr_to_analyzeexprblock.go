@@ -27,7 +27,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			// accessed from outside its owning module. Locals/params are never
 			// Private, so this only affects qualified globals.
 			if sym, ok := a.currentScope.Lookup(n.Name); ok && a.globalNameIsVisible(sym, n.Name) {
-				result = promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
+				result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 				if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 					a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
 					if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
@@ -90,18 +90,18 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 				}
 				if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 					if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
-						result = promoteWritableRefType(fnType, sym.Mutable && !sym.BindingMutabilityExplicit)
+						result = promoteWritableRefType(fnType, symbolPromotesWritableRef(sym))
 						return
 					}
 				}
 				if specializedType, ok := a.lookupCurrentSpecializedValueType(sym); ok {
-					result = promoteWritableRefType(specializedType, sym.Mutable && !sym.BindingMutabilityExplicit)
+					result = promoteWritableRefType(specializedType, symbolPromotesWritableRef(sym))
 				}
 				if t, ok := a.lookupRefinedExprType(n); ok {
 					if specializedType, ok := a.specializeCallbackCarryingType(t, result); ok {
-						result = promoteWritableRefType(specializedType, sym.Mutable && !sym.BindingMutabilityExplicit)
+						result = promoteWritableRefType(specializedType, symbolPromotesWritableRef(sym))
 					} else {
-						result = promoteWritableRefType(t, sym.Mutable && !sym.BindingMutabilityExplicit)
+						result = promoteWritableRefType(t, symbolPromotesWritableRef(sym))
 					}
 					return
 				}
@@ -120,7 +120,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			if a.resolvedValueNames != nil && canonical != "" && canonical != n.Name {
 				a.resolvedValueNames[n] = canonical
 			}
-			result = promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
+			result = promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 			if a.suppressGlobalReadCheck == 0 && isGlobalStorageSymbol(sym) {
 				a.recordFunctionPermissionRefs(globalReadRefs(n.Position))
 				if a.enforceUnsafePermissions && sym.Kind == SymbolGlobal && sym.Mutable {
@@ -129,7 +129,7 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 			if valueExpr, ok := a.immutableValueExprForSymbol(sym); ok {
 				if fnType, ok := a.functionValueTypeForExpr(valueExpr); ok {
-					result = promoteWritableRefType(fnType, sym.Mutable && !sym.BindingMutabilityExplicit)
+					result = promoteWritableRefType(fnType, symbolPromotesWritableRef(sym))
 					return
 				}
 			}
@@ -556,6 +556,15 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 			}
 		}
 		if a.rejectForeignEnumReinterpret(n.Pos(), src, dst) {
+			result = dst
+			return
+		}
+		// The value-conversion forms (`r.i32()`, `as`, `to`) read a scalar reference's
+		// referent. A `T&?` has no referent until it is unwrapped, so reading it here was
+		// a load through a possibly-null pointer. `.cast[T]` (an address reinterpret) and
+		// `.uintptr()` (the address idiom) never read the referent and stay valid.
+		if n.Origin != ast.CastExprOriginExplicitCast && n.Origin != ast.CastExprOriginIndirectCall && nullableScalarRefValueConversion(src, dst) {
+			a.errorf(n.Pos(), "value conversion requires proven non-null reference, got %s", src)
 			result = dst
 			return
 		}

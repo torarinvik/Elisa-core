@@ -84,13 +84,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// the resolved reference type may still be read-only.  Promote the stored
 		// binding type so a later `slot <- value` is analyzed as a write through
 		// the reference rather than as an attempted replacement of the reference
-		// itself.  This mirrors the existing mutable-view promotion above and is
-		// required for explicit writable-reference locals in stage0.
+		// itself -- but only when the initializer is itself writable. The legacy
+		// spelling also means "rebindable" (`name: mutable static u8& = "zz"` is a
+		// re-pointable string), and promoting a read-only source made its referent
+		// writable: a string literal's static bytes (SIGBUS on the store), an
+		// immutable local, a `T&` parameter. Such a binding stays rebindable and
+		// read-only. (A desugared binding with no written type keeps the promotion,
+		// and so does an initializer a `mutable T&` parameter would accept: legacyRefInitIsWritable.)
 		if n.Mutable && !n.BindingExplicit {
 			if ref, ok := bindingType.(*RefType); ok && ref != nil && !ref.Mutable {
 				cloned := cloneRefType(ref)
 				cloned.Mutable = true
-				bindingType = cloned
+				if n.Type == nil || n.Value == nil || AssignableTo(cloned, valueType) || a.legacyRefInitIsWritable(n.Value) {
+					bindingType = cloned
+				}
 			}
 		}
 		// A DECLARED READ-ONLY REFERENCE STAYS READ-ONLY.
@@ -489,6 +496,20 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// so global reference slots do not get mistaken for scalar destinations.
 		if ref, ok := a.mutableScalarRefTarget(n.Target); ok && !isBorrowLikeType(valueType) && AssignableTo(ref.Elem, valueType) {
 			targetType = ref.Elem
+			n.WriteThrough = true
+			if ident, ok := stripOptimizationParens(n.Target).(*ast.Ident); ok {
+				a.requireWriteThroughTarget(ident, ref)
+			}
+		}
+		// A store through a byte reference (`r: mutable u8&`, `mutable static u8&`) takes ONE
+		// byte. From a byte pointer (a string literal, `cstr`, another `u8&`) that byte is the
+		// pointee's first -- never the pointer, which is what a C-string out-parameter means.
+		// Codegen used to store the 8-byte pointer instead: past the end of a real byte, and a
+		// silent one-byte store once it honours the type. Reject it and name both spellings.
+		if _, _, through := a.writeThroughRefTarget(n.Target, targetType); through || n.WriteThrough {
+			if isExtendU8Elem(targetType) && isBytePointerValue(n.Value, valueType) {
+				a.errorf(n.Pos(), "cannot store a byte pointer (%s) through a byte reference: `<-` stores one byte, not the pointer; declare a C-string out-parameter as `mutable cstr&`, or index the source to copy one byte", valueType)
+			}
 		}
 		// docs/120 §8 single-target arg-manifest `x <- x.method(…)`: a `<-` whose RHS is a
 		// void call that mutates x in place (x passed as its receiver/arg). Nothing to
@@ -509,6 +530,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		}
 		if !AssignableTo(targetType, valueType) {
 			a.errorf(n.Pos(), "cannot assign %s to %s", valueType, targetType)
+			// `x <- 5` on a rebindable read-only reference was meant as a write through it: say why
+			// the binding's `mutable` did not make it writable.
+			if ref, isRef := targetType.(*RefType); isRef && ref != nil && !ref.Mutable && AssignableTo(ref.Elem, valueType) {
+				a.reportRebindableReadOnlyRefNote(n.Pos(), n.Target)
+			}
 			a.reportShapeMismatchNotes(n.Pos(), targetType, valueType)
 		}
 		if !n.Optional {

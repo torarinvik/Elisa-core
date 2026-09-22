@@ -167,7 +167,10 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	result := a.analyzeExpr(expr)
 	if expectedRef, ok := expected.(*RefType); ok && expectedRef.Mutable {
 		if actualRef, ok := result.(*RefType); ok && !actualRef.Mutable {
-			if a.mutationPathWritable(expr) || a.exprCanYieldWritableRef(expr) {
+			// A reference binding's value keeps its declared capability: a rebindable
+			// read-only binding passed as a `mutable T&` argument let the callee write
+			// through a read-only referent.
+			if !a.refBindingIdent(expr) && (a.mutationPathWritable(expr) || a.exprCanYieldWritableRef(expr)) {
 				cloned := cloneRefType(actualRef)
 				cloned.Mutable = true
 				result = cloned
@@ -187,7 +190,12 @@ func contextualStringLiteralType(expected Type) (Type, bool) {
 	if isStringViewType(expected) {
 		return expected, true
 	}
-	if _, ok := u8RuntimeRef(expected); ok {
+	if ref, ok := u8RuntimeRef(expected); ok {
+		// A literal's bytes are read-only static data: it takes a byte-POINTER type in place,
+		// never a writable one. Typed as `mutable u8&`, a store through it faulted (SIGBUS).
+		if ref.Mutable {
+			return nil, false
+		}
 		return expected, true
 	}
 	return nil, false
@@ -247,6 +255,14 @@ func (a *Analyzer) analyzeCallLikeValueExpr(expr ast.Expr, expected Type) (ast.E
 	}
 	if !a.exprCanYieldAddressableValue(expr) || !AssignableTo(expectedRef.Elem, actual) {
 		return expr, actual
+	}
+	// A reference argument is passed as the reference it holds. Its address (the variable holding
+	// the pointer) only type-checked against a scalar `T&` through the referent auto-read, and is
+	// never the object meant.
+	if _, actualIsRef := actual.(*RefType); actualIsRef {
+		if _, elemIsRef := expectedRef.Elem.(*RefType); !elemIsRef {
+			return expr, actual
+		}
 	}
 	autoref := &ast.AddrOfExpr{Position: expr.Pos(), Operand: expr}
 	autorefType := a.analyzeExpr(autoref)

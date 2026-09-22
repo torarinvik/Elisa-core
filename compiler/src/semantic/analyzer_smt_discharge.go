@@ -2281,6 +2281,28 @@ func (tr *smtTranslator) termEnv(expr ast.Expr, env map[string]string) (string, 
 			return smtBitvectorRead(bv, dsign, dbits), true
 		}
 		return "", false
+	case *ast.GetExpr:
+		// `get d[k] else f` is the explicit, total unwrap of a dict lookup (the `else f` is consumed at
+		// the postfix `[k]` level): the stored value when k is a member, the fallback otherwise. Modeled
+		// exactly as an `ite` over the membership array, so it needs no separate `k in d` hypothesis to
+		// be sound. (A bare `d.get(k)` is a `T&?` and has no value to compare until unwrapped.)
+		idx, ok := stripOptimizationParens(n.Value).(*ast.IndexExpr)
+		if !ok || idx.Fallback == nil || n.Fallback != nil || n.Recovery != nil || idx.Index2 != nil {
+			return "", false
+		}
+		dsym, ksort, ok := tr.dictTermEnv(idx.Object, env)
+		if !ok {
+			return "", false
+		}
+		key, ok := tr.keyTermEnv(idx.Index, ksort, env)
+		if !ok {
+			return "", false
+		}
+		alt, ok := tr.termEnv(idx.Fallback, env)
+		if !ok {
+			return "", false
+		}
+		return "(ite (select " + dsym + "_keys " + key + ") (select " + dsym + "_vals " + key + ") " + alt + ")", true
 	case *ast.TernaryExpr:
 		cond, ok := tr.boolTerm(n.Cond, env)
 		if !ok {
