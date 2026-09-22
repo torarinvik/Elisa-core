@@ -537,7 +537,21 @@ func (s *functionState) emitCastExpr(expr *ast.CastExpr) (C.LLVMValueRef, semant
 	if _, ok := expr.Operand.(*ast.ZeroedLit); ok {
 		operandExpected = targetType
 	}
-	value, actualType, err := s.emitExpr(expr.Operand, operandExpected)
+	var (
+		value      C.LLVMValueRef
+		actualType semantic.Type
+		err        error
+	)
+	if addr := castOperandAddrOf(expr.Operand); addr != nil {
+		// `(&r).cast[T&]` is the reborrow idiom: it reinterprets the place r, and
+		// for a reference binding that is its referent, not r's slot -- although
+		// the analyzer types the `&r` as `T&&`. The loader's `(&self).cast[mutable
+		// T&]` depends on it, and so does every desugar that wraps `&x` in a cast
+		// (`wait all g` is `task_group_wait_all((&g).cast[mutable TaskGroup&])`).
+		value, actualType, err = s.emitPlaceAddrOfExpr(addr)
+	} else {
+		value, actualType, err = s.emitExpr(expr.Operand, operandExpected)
+	}
 	if err != nil {
 		return nil, nil, err
 	}
@@ -636,4 +650,17 @@ func (s *functionState) emitOffsetofExpr(expr *ast.OffsetofExpr) (C.LLVMValueRef
 		return nil, nil, err
 	}
 	return C.LLVMConstInt(usizeType, C.ulonglong(offset), 0), s.g.result.NamedTypes["usize"], nil
+}
+
+// castOperandAddrOf returns the `&x` a cast operand is, peeling parentheses.
+func castOperandAddrOf(operand ast.Expr) *ast.AddrOfExpr {
+	for {
+		paren, ok := operand.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			break
+		}
+		operand = paren.Inner
+	}
+	addr, _ := operand.(*ast.AddrOfExpr)
+	return addr
 }

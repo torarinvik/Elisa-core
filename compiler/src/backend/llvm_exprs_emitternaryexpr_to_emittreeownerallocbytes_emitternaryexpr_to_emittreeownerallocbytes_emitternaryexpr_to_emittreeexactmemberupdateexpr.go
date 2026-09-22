@@ -163,11 +163,77 @@ func (s *functionState) emitTernaryExpr(expr *ast.TernaryExpr) (C.LLVMValueRef, 
 	return phi, resultType, nil
 }
 func (s *functionState) emitAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, error) {
+	if slot, refType, ok := s.referenceBindingSlot(expr); ok {
+		return slot, &semantic.RefType{Elem: refType, State: semantic.RefStateNonNull}, nil
+	}
+	return s.emitPlaceAddrOfExpr(expr)
+}
+
+// emitPlaceAddrOfExpr lowers `&place` as the address of the place itself, reading
+// a reference binding as the place it refers to (as `r.field` does). A cast of
+// `&x` means exactly this; see emitCastExpr.
+func (s *functionState) emitPlaceAddrOfExpr(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, error) {
 	ptr, operandType, err := s.emitAddress(expr.Operand)
 	if err != nil {
 		return nil, nil, err
 	}
 	return ptr, &semantic.RefType{Elem: operandType, State: semantic.RefStateNonNull}, nil
+}
+
+// referenceBindingSlot handles `&r` where `r` is an immutable reference binding
+// (`r: T&`, `r: mutable T&`). The analyzer types that expression `T&&` -- a
+// reference to the reference -- and rejects it wherever a `T&` is expected, so
+// wherever it survives as a value the destination really is `T&&` (a `T&&`
+// parameter, a generic `T`, an inferred local) and the value must be the
+// address of r's own slot. emitAddress auto-dereferences a reference binding, which is
+// right for its other callers (`r.field`, `r[i]`, stores through `r`) but here
+// handed the callee the referent: `takes_rr(&counter)` then dereferenced the
+// Counter's first word as a pointer.
+//
+// The operand of a cast is not a value: `(&r).cast[T&]` is the reborrow
+// idiom, and emitCastExpr lowers it through emitPlaceAddrOfExpr instead. The
+// backend's own synthesized nodes (emitLockStmt's `(&mu).cast[Mutex&]`) are
+// casts too, and have no recorded type besides -- only the ANALYZER's type is
+// consulted here, since the fallback typing in functionState.exprType would
+// call any `&r` a `T&&`.
+func (s *functionState) referenceBindingSlot(expr *ast.AddrOfExpr) (C.LLVMValueRef, semantic.Type, bool) {
+	if expr == nil {
+		return nil, nil, false
+	}
+	operand := expr.Operand
+	for {
+		paren, ok := operand.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			break
+		}
+		operand = paren.Inner
+	}
+	ident, ok := operand.(*ast.Ident)
+	if !ok || ident == nil {
+		return nil, nil, false
+	}
+	binding, ok := s.lookupBinding(ident.Name)
+	// A mutable reference binding already yields its slot from emitAddress.
+	if !ok || binding.mutable {
+		return nil, nil, false
+	}
+	if _, ok := binding.typ.(*semantic.RefType); !ok {
+		return nil, nil, false
+	}
+	var analyzed semantic.Type
+	if specialized, ok := s.specializedExprTypes[expr]; ok && specialized != nil {
+		analyzed = specialized
+	} else {
+		analyzed = s.g.exprType(expr)
+	}
+	outer, ok := analyzed.(*semantic.RefType)
+	if !ok || outer == nil {
+		return nil, nil, false
+	}
+	if _, ok := outer.Elem.(*semantic.RefType); !ok {
+		return nil, nil, false
+	}
+	return binding.ptr, binding.typ, true
 }
 func (s *functionState) emitSpecializeExpr(expr *ast.SpecializeExpr) (C.LLVMValueRef, semantic.Type, error) {
 	if expr == nil || expr.Operand == nil {
