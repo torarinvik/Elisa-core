@@ -1070,21 +1070,33 @@ func (s *functionState) emitRegionExtraStacksWithAssignment(n *ast.RegionStmt, l
 		s.darrayStackTag[allocName] = fmt.Sprintf("%s#%d", n.Name, stackID)
 	}
 	// Phase B2: schedule each early-freeable own stack's arena to be freed right after the
-	// statement at its recorded offset.
+	// statement at its recorded offset. Stacks whose objects die after the SAME statement are
+	// all freed there (the analyzer counts them as one lifetime class), so the entry is a list,
+	// filled in stack-id order. A single slot kept whichever stack the StackEarlyFreeAfter map
+	// walk reached last: the choice changed from run to run, and the other stack waited for the
+	// region exit. This region's list replaces an enclosing region's entry for the same offset
+	// rather than joining it; the exit restores that entry, so the enclosing arenas still wait
+	// for the enclosing statement.
 	if s.earlyFreeByOffset == nil {
-		s.earlyFreeByOffset = map[int]C.LLVMValueRef{}
+		s.earlyFreeByOffset = map[int][]C.LLVMValueRef{}
 	}
 	type prevFree struct {
-		value C.LLVMValueRef
+		value []C.LLVMValueRef
 		had   bool
 	}
 	savedFree := map[int]prevFree{}
-	for k, off := range asn.StackEarlyFreeAfter {
-		if alloca, ok := allocaByStack[k]; ok {
+	for k := 1; k < asn.StackCount; k++ {
+		off, early := asn.StackEarlyFreeAfter[k]
+		alloca, allocated := allocaByStack[k]
+		if !early || !allocated {
+			continue
+		}
+		if _, saved := savedFree[off]; !saved {
 			v, had := s.earlyFreeByOffset[off]
 			savedFree[off] = prevFree{value: v, had: had}
-			s.earlyFreeByOffset[off] = alloca
+			s.earlyFreeByOffset[off] = nil
 		}
+		s.earlyFreeByOffset[off] = append(s.earlyFreeByOffset[off], alloca)
 	}
 	return func() {
 		for name, p := range saved {
@@ -1378,19 +1390,25 @@ func (s *functionState) emitStmt(stmt ast.Stmt) error {
 	return s.maybeEarlyFreeAfter(stmt)
 }
 
-// maybeEarlyFreeAfter frees an own-stack arena right after the top-level statement that ends its
-// object's life (Phase B2). Idempotent with the region-exit cleanup (arena_free nulls begin/end);
+// maybeEarlyFreeAfter frees the own-stack arenas whose objects' lives end with this top-level
+// statement (Phase B2). Idempotent with the region-exit cleanup (arena_free nulls begin/end);
 // fired once per statement and skipped if the block already terminated.
 func (s *functionState) maybeEarlyFreeAfter(stmt ast.Stmt) error {
 	if s.earlyFreeByOffset == nil || stmt == nil || s.currentBlockTerminated() {
 		return nil
 	}
-	arenaPtr, ok := s.earlyFreeByOffset[stmt.Pos().Offset]
+	arenaPtrs, ok := s.earlyFreeByOffset[stmt.Pos().Offset]
 	if !ok {
 		return nil
 	}
 	delete(s.earlyFreeByOffset, stmt.Pos().Offset)
-	return s.emitArenaFree(arenaPtr, s.g.result.NamedTypes["Arena"])
+	arenaType := s.g.result.NamedTypes["Arena"]
+	for _, arenaPtr := range arenaPtrs {
+		if err := s.emitArenaFree(arenaPtr, arenaType); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *functionState) emitStmtInner(stmt ast.Stmt) error {

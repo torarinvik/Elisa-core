@@ -118,10 +118,11 @@ type functionState struct {
 	// base arena while a grower reallocs in the parallel arena — a straddling realloc that trips
 	// `assert a.end != null` (task_00a7fdf3). Empty for ordinary code / empty-`[]` seeds.
 	currentDArraySinkTag string
-	// earlyFreeByOffset frees an own-stack arena early (Phase B2): the byte offset of a top-level
-	// statement -> the stack arena to free right after it (the object died and is not aliased).
-	// Populated at region entry, fired once and removed when the statement is emitted.
-	earlyFreeByOffset map[int]C.LLVMValueRef
+	// earlyFreeByOffset frees own-stack arenas early (Phase B2): the byte offset of a top-level
+	// statement -> the stack arenas to free right after it (their objects died and are not
+	// aliased), in stack-id order. Several stacks can die after the same statement. Populated at
+	// region entry, fired once and removed when the statement is emitted.
+	earlyFreeByOffset map[int][]C.LLVMValueRef
 	packedStores      map[string]packedStoreBinding
 	// regionPackedStores caches the IMPLICIT region-backed packed store per (region, enum root)
 	// (getOrCreateRegionPackedStore). Unlike packedStores it is NOT scope-cloned/restored:
