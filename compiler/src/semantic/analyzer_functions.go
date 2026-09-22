@@ -253,6 +253,7 @@ func (a *Analyzer) analyzeFuncWithTypeArgs(fn *ast.FuncDecl, typeArgs []Type) {
 	a.checkAwaitHotLoops(fn)
 	a.checkUnreservedCountingFills(fn)
 	a.checkPushLoopExtendable(fn)
+	a.checkDiscardedLoopValues(fn)
 	a.checkNarrowableHandleWidths(fn)
 	a.checkRegionLifetimes(fn)
 	if fnType != nil {
