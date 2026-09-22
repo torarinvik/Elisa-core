@@ -3247,7 +3247,7 @@ struct ParseJob[state Pending | Ready | Failed]:
         Ready when self.stage == 1
         Failed when self.stage == 2
 
-def finish_ok(mutable job: ParseJob[Pending]&) -> void ensures job => Ready:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void ensures job => Ready:
     job.stage <- 1
 
 struct HeapPairNode:

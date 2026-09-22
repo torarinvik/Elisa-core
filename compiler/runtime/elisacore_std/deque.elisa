@@ -206,6 +206,14 @@ def arena_deque_at[T](d: Deque[T]&, index: usize) -> T&:
         physical_index: usize = arena_deque_buffer_index(d, index)
         return &d.items[physical_index]
 
+def arena_deque_at_mut[T](d: mutable Deque[T]&, index: usize) -> mutable T&:
+    can Abort.Panic:
+        assert index < d.count
+        assert d.items != null
+
+        physical_index: usize = arena_deque_buffer_index(d, index)
+        return &d.items[physical_index]
+
 def arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool:
     can Abort.Panic:
         false return if d.count == 0 or d.items == null

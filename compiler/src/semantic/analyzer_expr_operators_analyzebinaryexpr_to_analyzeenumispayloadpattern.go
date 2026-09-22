@@ -137,6 +137,10 @@ func (a *Analyzer) analyzeBinaryExpr(expr *ast.BinaryExpr) Type {
 		}
 		return a.namedTypes["bool"]
 	case lexer.TOKEN_PLUS, lexer.TOKEN_MINUS:
+		if nullableScalarValueRef(left) || nullableScalarValueRef(right) {
+			a.errorf(expr.Pos(), "operator requires numeric operands")
+			return invalidType
+		}
 		left = scalarRefValueContextOperandType(left)
 		right = scalarRefValueContextOperandType(right)
 		if lref, ok := left.(*RefType); ok && IsIntegralStorageType(right) {
@@ -239,8 +243,11 @@ func isUnsuffixedIntegerValueExpr(expr ast.Expr) bool {
 	}
 }
 
+// valueContextOperandType reads a scalar reference operand as its referent value.
+// Only a PROVEN non-null reference has a value to read; a `T&?` stays a reference,
+// so the operator rejects it and the caller must unwrap it first.
 func valueContextOperandType(t Type) Type {
-	if ref, ok := t.(*RefType); ok && ref != nil {
+	if ref, ok := t.(*RefType); ok && ref != nil && ref.State == RefStateNonNull {
 		if IsNumericType(ref.Elem) || IsBoolType(ref.Elem) {
 			return ref.Elem
 		}
@@ -264,12 +271,24 @@ func integralOperatorOperandType(t Type) Type {
 // a silent wrong-result footgun. `u8&` refs are excluded: they are the genuine
 // C-string / byte-pointer case where `+ n` is intended pointer stepping.
 func scalarRefValueContextOperandType(t Type) Type {
-	if ref, ok := t.(*RefType); ok && ref != nil {
+	if ref, ok := t.(*RefType); ok && ref != nil && ref.State == RefStateNonNull {
 		if (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) && !isBytePointerArithmeticRef(ref) {
 			return ref.Elem
 		}
 	}
 	return t
+}
+
+// nullableScalarValueRef reports a numeric/bool reference that is not proven non-null
+// and is not a byte pointer. Such an operand used to be read as its value; now it has
+// no value until unwrapped, and it must not fall through to pointer arithmetic either
+// (that would silently change `r + 1` from value arithmetic to address stepping).
+func nullableScalarValueRef(t Type) bool {
+	ref, ok := t.(*RefType)
+	if !ok || ref == nil || ref.State == RefStateNonNull {
+		return false
+	}
+	return (IsNumericType(ref.Elem) || IsBoolType(ref.Elem)) && !isBytePointerArithmeticRef(ref)
 }
 
 func isBytePointerArithmeticRef(ref *RefType) bool {

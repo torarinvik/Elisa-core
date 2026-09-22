@@ -574,10 +574,12 @@ func parseIncludeDirective(line string) (string, bool) {
 	return "", false
 }
 func TestAnalyzeValidInlineProgram(t *testing.T) {
+	// The extern states the capability of the reference it returns: `box` writes through it, so it
+	// is `mutable Box&?`. A read-only `Box&?` would only make the `mutable` binding rebindable.
 	src := `struct Box:
     value: mutable int
 
-extern make_box() -> Box&?
+extern make_box() -> mutable Box&?
 
 def read_box() -> int:
 	box: mutable Box&? = make_box()

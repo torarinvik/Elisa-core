@@ -34,6 +34,11 @@ func (a *Analyzer) analyzeTypeConstructorCall(expr *ast.CallExpr) (Type, bool) {
 	if a.rejectForeignEnumReinterpret(expr.Pos(), sourceType, targetType) {
 		return targetType, true
 	}
+	// `i64(r)` reads the referent exactly like `r.i64()`; an unproven `T&?` has none.
+	if nullableScalarRefValueConversion(sourceType, targetType) {
+		a.errorf(expr.Pos(), "value conversion requires proven non-null reference, got %s", sourceType)
+		return targetType, true
+	}
 	if !a.validCast(sourceType, targetType) {
 		a.errorf(expr.Pos(), "invalid cast from %s to %s", sourceType, targetType)
 	}

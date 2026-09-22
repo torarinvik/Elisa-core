@@ -148,7 +148,11 @@ func AssignableTo(dst, src Type) bool {
 	if IsNumericType(dst) && IsNumericType(src) {
 		return true
 	}
-	if sr, ok := src.(*RefType); ok && sr != nil && (IsNumericType(sr.Elem) || IsBoolType(sr.Elem)) && SameType(dst, sr.Elem) {
+	// A scalar reference reads as its referent value only when it is PROVEN non-null.
+	// A `T&?` (a dict lookup `d[k]`, an optional parameter) has no value to read until
+	// it is unwrapped; accepting it here emitted a bare load through the possibly-null
+	// pointer (segfault at -O0, a garbage value at -O2).
+	if sr, ok := src.(*RefType); ok && sr != nil && sr.State == RefStateNonNull && (IsNumericType(sr.Elem) || IsBoolType(sr.Elem)) && SameType(dst, sr.Elem) {
 		return true
 	}
 	if IsNullType(src) {

@@ -30,8 +30,8 @@ extern snprintf(buffer: mutable u8&?, buffer_size: usize, format: static u8&, ..
 
 
 def require_heap_pair_node() -> mutable heap HeapPairNode& error[MemoryError]:
-    raw: heap HeapPairNode&? = alloc_heap_pair_node() can Memory.Allocate
-    node: heap HeapPairNode& = get raw else raise MemoryError.OutOfMemory
+    raw: mutable heap HeapPairNode&? = alloc_heap_pair_node() can Memory.Allocate
+    node: mutable heap HeapPairNode& = get raw else raise MemoryError.OutOfMemory
     return node
 
 

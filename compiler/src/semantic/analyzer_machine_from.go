@@ -701,7 +701,7 @@ func (a *Analyzer) machineFromStaticExprType(expr ast.Expr) Type {
 		if !ok || sym == nil || !a.globalNameIsVisible(sym, n.Name) {
 			return nil
 		}
-		return promoteWritableRefType(sym.Type, sym.Mutable && !sym.BindingMutabilityExplicit)
+		return promoteWritableRefType(sym.Type, symbolPromotesWritableRef(sym))
 	case *ast.FieldExpr:
 		if n == nil || n.Object == nil || n.Field == "" {
 			return nil

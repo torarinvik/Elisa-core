@@ -149,6 +149,24 @@ func isStorageTagType(t Type) bool {
 	}
 }
 
+// nullableScalarRefValueConversion reports a value conversion of a numeric/bool
+// reference that is not proven non-null to a numeric/bool target. The backend lowers
+// such a conversion as a load of the referent (except to uintptr, which keeps the
+// address bits), so it needs the same non-null proof as indexing or field access.
+func nullableScalarRefValueConversion(src, dst Type) bool {
+	ref, ok := src.(*RefType)
+	if !ok || ref == nil || ref.State == RefStateNonNull {
+		return false
+	}
+	if !IsNumericType(ref.Elem) && !IsBoolType(ref.Elem) {
+		return false
+	}
+	if builtin, ok := dst.(*BuiltinType); ok && builtin != nil && builtin.Name == "uintptr" {
+		return false
+	}
+	return IsNumericType(dst) || IsBoolType(dst)
+}
+
 func isPointerLikeCastType(t Type) bool {
 	switch t.(type) {
 	case *RefType, *CStrType, *FuncType:
@@ -250,13 +268,27 @@ func indexExprRequiresUnsafeUncheckedIndex(obj Type) bool {
 }
 
 func castRequiresUnsafePointerCast(src, dst Type) bool {
-	if IsInvalidType(src) || IsInvalidType(dst) || SameType(src, dst) || AssignableTo(dst, src) {
+	if IsInvalidType(src) || IsInvalidType(dst) || SameType(src, dst) {
 		return false
+	}
+	// AssignableTo lets a type parameter match anything (a `T&` accepts every ref), so between
+	// pointer types that mention one it cannot tell a coercion from a reinterpret: `p.cast[T&]`
+	// with `p: Node&` forges a `Box&` when T = Box. Only a cast that keeps the pointee is a
+	// coercion there; every other one reinterprets in some instantiation.
+	if isPointerLikeCastType(src) && isPointerLikeCastType(dst) && (containsTypeParam(src) || containsTypeParam(dst)) {
+		return !genericPointerCastKeepsPointee(src, dst)
+	}
+	// A bare type parameter can be instantiated with any type, pointers included, so a cast into
+	// one reinterprets in some instantiation: with T = Node&, `addr.cast[T]` forges a Node& from
+	// an integer and `null.cast[T]` a null one. A cast out of one forges a pointer the same way
+	// unless the target is a number, which at most discloses an address.
+	if _, ok := dst.(*TypeParamType); ok {
+		return true
 	}
 	if _, ok := src.(*TypeParamType); ok {
-		return false
+		return !IsNumericType(dst)
 	}
-	if _, ok := dst.(*TypeParamType); ok {
+	if AssignableTo(dst, src) {
 		return false
 	}
 	if IsNullType(src) {
@@ -275,6 +307,18 @@ func castRequiresUnsafePointerCast(src, dst Type) bool {
 		return true
 	}
 	return false
+}
+
+// genericPointerCastKeepsPointee reports whether a pointer cast between types that mention a
+// type parameter only changes the reference's qualifiers (mutability, state, storage, region)
+// in a way an assignment would, keeping the pointee type itself.
+func genericPointerCastKeepsPointee(src, dst Type) bool {
+	srcRef, srcOK := src.(*RefType)
+	dstRef, dstOK := dst.(*RefType)
+	if !srcOK || !dstOK || srcRef == nil || dstRef == nil {
+		return false
+	}
+	return SameType(srcRef.Elem, dstRef.Elem) && AssignableTo(dst, src)
 }
 
 func (a *Analyzer) castRequiresUnsafeGuestHostPointerCast(cast *ast.CastExpr, dst Type) bool {

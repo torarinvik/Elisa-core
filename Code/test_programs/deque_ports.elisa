@@ -39,7 +39,7 @@ def deque_basic_smoke() -> void:
         assert_eq(front_ref[0], 0)
         assert_eq(back_ref[0], 2)
 
-        middle: mutable i64& = arena_deque_at(&d, 1)
+        middle: mutable i64& = arena_deque_at_mut(&d, 1)
         middle[0] <- 7
         assert_deque_i64_value(&d, 1, 7)
 

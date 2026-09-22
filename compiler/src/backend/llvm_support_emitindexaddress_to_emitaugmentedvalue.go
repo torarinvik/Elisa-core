@@ -941,7 +941,7 @@ func (s *functionState) errorUnionZeroPayloadGlobal(payloadType semantic.Type) (
 	if err != nil {
 		return nil, err
 	}
-	name := "__elisa_errzero_" + llvmTypeSymbolName(payloadType)
+	name := "__elisa_errzero_" + llvmTypeSymbolName(errorUnionLayoutValue(payloadType))
 	nameC := C.CString(name)
 	defer C.free(unsafe.Pointer(nameC))
 	global := C.LLVMGetNamedGlobal(s.g.module, nameC)

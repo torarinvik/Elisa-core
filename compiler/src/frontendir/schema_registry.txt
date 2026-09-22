@@ -72,6 +72,7 @@ F AssignStmt 4 Optional
 F AssignStmt 5 Position
 F AssignStmt 6 Target
 F AssignStmt 7 Value
+F AssignStmt 8 WriteThrough
 
 T 13 AssociatedTypeDecl
 F AssociatedTypeDecl 1 DefaultType

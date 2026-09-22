@@ -23,7 +23,7 @@ def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable Pa
         return &variants.items[variants.count - 1]
 def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&) -> u32:
     can Memory.Allocate, Abort.Panic:
-        variant_rows: PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
+        variant_rows: mutable PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
         rows: mutable darray[uintptr]& = &variant_rows.rows
         slot: u32 = rows.count.u32()
         in a:

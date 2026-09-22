@@ -16,16 +16,16 @@ packed enum FactExpr:
 error FactCoreError:
     BadValue
 
-extern unknown_fact_update(mutable player: FactPlayer[Alive]&) -> void
+extern unknown_fact_update(player: mutable FactPlayer[Alive]&) -> void
 
 def fact_core_error_path(value: int) -> int error[FactCoreError]:
     if value < 0:
         raise FactCoreError.BadValue
     return value
 
-def fact_core_rules(mutable player: FactPlayer[Alive]&, owner: Arena) -> int ensures player => Alive | Dead:
+def fact_core_rules(player: mutable FactPlayer[Alive]&, owner: Arena) -> int ensures player => Alive | Dead:
     region scratch(1024)
-    first: FactNode& @scratch = new[scratch] FactNode{next: null, value: player.health}
+    first: mutable FactNode& @scratch = new[scratch] FactNode{next: null, value: player.health}
     alias: mutable FactNode& = first
     alias.value <- alias.value + 1
     store: FactExpr.Store[Local] = FactExpr.Store(owner)

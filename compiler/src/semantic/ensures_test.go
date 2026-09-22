@@ -18,13 +18,14 @@ func TestSemanticEnsuresNamedStateCallRecovery(t *testing.T) {
 def expect_ready(job: ParseJob[Ready]&) -> void:
 	pass
 
-def finish_ok(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
+def finish_ok(job: mutable ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
 	job.checksum <- 7
 	job.stage <- 1
 
-def use(job: ParseJob[Pending]&) -> void can[Abort]:
-	finish_ok(job)
-	expect_ready(job)
+def use() -> void can[Abort]:
+	job: mutable ParseJob = ParseJob{stage: 0, checksum: 0}
+	finish_ok(&job)
+	expect_ready(&job)
 `)
 	sym, ok := result.GlobalScope.Lookup("finish_ok")
 	if !ok {
@@ -59,7 +60,7 @@ func TestSemanticEnsuresRejectsWrongNamedStateProof(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def bad_finish(mutable job: ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
+def bad_finish(job: mutable ParseJob[Pending]&) -> void can[Abort] ensures job => Ready:
 	job.stage <- 2
 `)
 	errText := strings.Join(result.Errors(), "\n")
@@ -132,12 +133,13 @@ func TestSemanticEnsuresPreserveCallRecovery(t *testing.T) {
 def expect_alive(player: Player[Alive]&) -> void:
 	pass
 
-def bump_score(mutable player: Player[Alive]&) -> void can[Abort] ensures player => preserve:
+def bump_score(player: mutable Player[Alive]&) -> void can[Abort] ensures player => preserve:
 	player.score <- player.score + 1
 
-def use(player: Player[Alive]&) -> void can[Abort]:
-	bump_score(player)
-	expect_alive(player)
+def use() -> void can[Abort]:
+	player: mutable Player = Player{health: 1, score: 0}
+	bump_score(&player)
+	expect_alive(&player)
 `)
 	analysis, ok := result.FunctionAnalysisByName("bump_score")
 	if !ok || analysis == nil {
@@ -157,14 +159,14 @@ func TestSemanticEnsuresRejectsInvalidPreserveAfterRelevantMutation(t *testing.T
 		Alive when self.health > 0
 		Dead when self.health <= 0
 
-def bad_preserve(mutable player: Player[Alive]&) -> void can[Abort] ensures player => preserve:
+def bad_preserve(player: mutable Player[Alive]&) -> void can[Abort] ensures player => preserve:
 	player.health <- 0
 `)
 	errText := strings.Join(result.Errors(), "\n")
 	if !strings.Contains(errText, "cannot prove ensures player => preserve") {
 		t.Fatalf("expected preserve proof failure, got:\n%s", errText)
 	}
-	if !strings.Contains(errText, "current tracked facts are Player[Dead]&") {
+	if !strings.Contains(errText, "current tracked facts are mutable Player[Dead]&") {
 		t.Fatalf("expected preserve tracked-facts diagnostic, got:\n%s", errText)
 	}
 }
@@ -191,13 +193,13 @@ def expect_dead(player: Player[Dead]) -> void:
 def expect_null(node: heap HeapPairNode!) -> void:
 	pass
 
-def kill_team(mutable team: Team&) -> void can[Abort] ensures team.player => Dead:
+def kill_team(team: mutable Team&) -> void can[Abort] ensures team.player => Dead:
 	team.player.health <- 0
 
-def clear_slot(mutable team: Team&) -> void can[Abort] ensures team.slot => !:
+def clear_slot(team: mutable Team&) -> void can[Abort] ensures team.slot => !:
 	team.slot <- null
 
-def use(team: Team&) -> void can[Abort]:
+def use(team: mutable Team&) -> void can[Abort]:
 	kill_team(team)
 	expect_dead(team.player)
 	clear_slot(team)
@@ -245,7 +247,7 @@ def expect_ready(job: ParseJob[Ready]&) -> void:
 def expect_failed(job: ParseJob[Failed]&) -> void:
 	pass
 
-def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def finish(job: mutable ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		job.checksum <- 7
@@ -253,7 +255,7 @@ def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures
 	job.stage <- 2
 	return false
 
-def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Ready | Failed:
+def use(job: mutable ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Ready | Failed:
 	if finish(job, ok):
 		expect_ready(job)
 	else:
@@ -273,14 +275,14 @@ func TestSemanticConditionalEnsuresJoinOnPlainCall(t *testing.T) {
 def expect_done(job: ParseJob[Ready | Failed]&) -> void:
 	pass
 
-def finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def finish(job: mutable ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		return true
 	job.stage <- 2
 	return false
 
-def use(mutable job: ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Pending | Ready | Failed:
+def use(job: mutable ParseJob[Pending]&, ok: bool) -> void can[Abort] ensures job => Pending | Ready | Failed:
 	finish(job, ok)
 	expect_done(job)
 `)
@@ -301,14 +303,14 @@ def expect_alive(player: Player[Alive]&) -> void:
 def expect_dead(player: Player[Dead]&) -> void:
 	pass
 
-def maybe_update(mutable player: Player[Alive]&, ok: bool) -> bool can[Abort] ensures return true => player => preserve, return false => player => Dead:
+def maybe_update(player: mutable Player[Alive]&, ok: bool) -> bool can[Abort] ensures return true => player => preserve, return false => player => Dead:
 	if ok:
 		player.score <- player.score + 1
 		return true
 	player.health <- 0
 	return false
 
-def use(mutable player: Player[Alive]&, ok: bool) -> void can[Abort] ensures player => Alive | Dead:
+def use(player: mutable Player[Alive]&, ok: bool) -> void can[Abort] ensures player => Alive | Dead:
 	if maybe_update(player, ok):
 		expect_alive(player)
 	else:
@@ -325,7 +327,7 @@ func TestSemanticConditionalEnsuresRejectWrongReturnBranchProof(t *testing.T) {
 		Ready when self.stage == 1
 		Failed when self.stage == 2
 
-def bad_finish(mutable job: ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
+def bad_finish(job: mutable ParseJob[Pending]&, ok: bool) -> bool can[Abort] ensures return true => job => Ready, return false => job => Failed:
 	if ok:
 		job.stage <- 1
 		return false

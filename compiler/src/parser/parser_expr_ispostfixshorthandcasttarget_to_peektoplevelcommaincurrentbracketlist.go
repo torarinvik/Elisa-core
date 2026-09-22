@@ -75,6 +75,12 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 	}
 	if p.match(lexer.TOKEN_MUTABLE) {
 		elem := p.parseTypeExpr()
+		// `mutable T& error[E]`: the qualifier belongs to the success type. Wrapping the whole
+		// union dropped it, since only a reference or a view can be made mutable.
+		if union, ok := elem.(*ast.ErrorUnionTypeExpr); ok && union != nil && union.Value != nil {
+			union.Value = &ast.MutableType{Position: union.Value.Pos(), Elem: union.Value}
+			return union
+		}
 		return &ast.MutableType{Position: elem.Pos(), Elem: elem}
 	}
 	// `lmut T` — linear-mutable mode. Layout/codegen identical to `mutable T&`, so we

@@ -441,7 +441,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			}
 			if !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) {
 				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
-				a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
+				if !writableRefAssignableIgnoringMutability(expectedType, argType) || !a.reportRebindableReadOnlyRefNote(orderedArgs[i].Pos(), orderedArgs[i]) {
+					a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)
+				}
 				a.reportShapeMismatchNotes(orderedArgs[i].Pos(), expectedType, argType)
 			}
 			if !a.tryConsumeSinkCallArg(expr.Func, ft, i, orderedArgs[i], expectedType) {
