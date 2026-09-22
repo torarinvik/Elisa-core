@@ -90,6 +90,24 @@ func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, act
 			return err
 		}
 		return s.emitRangeMatchPatternTest(p, actualValue, actualType, successBB, failureBB)
+	case *ast.MatchOrPattern:
+		if len(p.Options) == 0 {
+			C.LLVMBuildBr(s.builder, failureBB)
+			return nil
+		}
+		for i, option := range p.Options {
+			nextFailureBB := failureBB
+			if i+1 < len(p.Options) {
+				nextFailureBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(fmt.Sprintf("match.or.next.%d", i)))
+			}
+			if err := s.emitStringMatchPatternTest(option, actualExpr, actualType, successBB, nextFailureBB); err != nil {
+				return err
+			}
+			if i+1 < len(p.Options) {
+				C.LLVMPositionBuilderAtEnd(s.builder, nextFailureBB)
+			}
+		}
+		return nil
 	default:
 		return fmt.Errorf("unsupported scalar match pattern %T", pattern)
 	}
@@ -280,6 +298,7 @@ func (s *functionState) prepareNonPackedEnumMatchTemp(enumValue C.LLVMValueRef, 
 	s.nonPackedEnumMatchTemps[enumValue] = ptr
 	return ptr, nil
 }
+
 // canonicalArmOwnerName resolves a variant pattern's enum name the way
 // resolveEnumArmVariant does and returns that enum's canonical name.
 func (s *functionState) canonicalArmOwnerName(enumType *semantic.EnumType, pattern *ast.MatchVariantPattern) string {

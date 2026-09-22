@@ -264,3 +264,23 @@ def score(expr: Expr) -> i64:
 		}
 	}
 }
+
+func TestGenerateLLVMIRLowersScalarStringOrPattern(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "backend_scalar_string_or_pattern.elisa", `
+def classify(value: sview) -> i64:
+    match value:
+        "open" or "close":
+            return 1
+        _:
+            return 0
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	for _, check := range []string{"match.or.next.0", "define i64 @classify("} {
+		if !strings.Contains(output, check) {
+			t.Fatalf("expected scalar string or-pattern IR to contain %q, got:\n%s", check, output)
+		}
+	}
+}
