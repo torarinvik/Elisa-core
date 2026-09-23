@@ -19,6 +19,7 @@ struct PackedStoreState:
     tail_region: mutable heap Region&?
     regions: mutable darray[heap Region&?]
     handles: mutable darray[uintptr]
+    row_word_counts: mutable darray[usize]
     indices: mutable darray[u32]
     tags: mutable darray[u32]
     variant_slots: mutable darray[u32]

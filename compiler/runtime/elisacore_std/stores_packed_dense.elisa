@@ -154,24 +154,37 @@ def ctx_packed_store_record_side_words_at(a: mutable Arena&, words: void&, state
             column[row_index] <- source_words[i]
 def ctx_packed_store_read_side_word(state_bits: mutable void&, index: u32, word_offset: usize) -> uintptr:
     can Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         index_usize: usize = index.usize()
-        assert index_usize < state.handles.count
-        assert word_offset < state.side_words
-        assert state.side_columns.items != null
+        if index_usize >= state.handles.count:
+            panic("packed store index out of bounds")
+        if index_usize >= state.side_column_capacity:
+            panic("packed store side column row out of bounds")
+        if word_offset >= state.side_words:
+            panic("packed store side word offset out of bounds")
+        if state.side_columns.items == null:
+            panic("packed store side column table is empty")
+        if word_offset >= state.side_columns.count:
+            panic("packed store side column index out of bounds")
 
         column_ptrs: uintptr& = state.side_columns.items
-        assert column_ptrs[word_offset] != 0.uintptr()
+        if column_ptrs[word_offset] == 0.uintptr():
+            panic("packed store side column is not initialized")
         column: uintptr& = column_ptrs[word_offset].cast[heap u8&].cast[uintptr&]
         return column[index_usize]
 def ctx_packed_store_word_handle_at(state_bits: mutable void&, index: usize) -> uintptr:
-    assert state_bits != null
-    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
-    assert state.handles.items != null
-    assert index < state.handles.count
-    handles: uintptr& = state.handles.items
-    return handles[index]
+    can Abort.Panic:
+        if state_bits == null:
+            panic("packed store state is null")
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        if index >= state.handles.count:
+            panic("packed store index out of bounds")
+        if state.handles.items == null:
+            panic("packed store handle table is empty")
+        handles: uintptr& = state.handles.items
+        return handles[index]
 def ctx_packed_store_tags_view[T](state_bits: mutable void&, start: usize, end: usize) -> view[T]:
     assert state_bits != null
     state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
@@ -292,27 +305,57 @@ def ctx_packed_store_read_tag(a: mutable Arena&, handle: uintptr, state_bits: mu
     row_tag: u32& = (data_base + offset_words * size_of(uintptr)).cast[u32&]
     return row_tag[0]
 def ctx_packed_store_read_index_tag(state_bits: mutable void&, index: u32) -> u32:
-    assert state_bits != null
-    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
-    index_usize: usize = index.usize()
-    assert index_usize < state.tags.count
-    assert state.tags.items != null
-    tags: u32& = state.tags.items
-    return tags[index_usize]
-def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: mutable void&, word_offset: usize) -> uintptr:
     can Abort.Panic:
-        assert handle != 0.uintptr()
+        if state_bits == null:
+            panic("packed store state is null")
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        if index_usize >= state.tags.count:
+            panic("packed store tag index out of bounds")
+        if state.tags.items == null:
+            panic("packed store tag table is empty")
+        tags: u32& = state.tags.items
+        return tags[index_usize]
+def packed_store_row_word_count_for_handle(state: PackedStoreState&, handle: uintptr) -> usize:
+    can Abort.Panic:
+        if state.handles.count != state.row_word_counts.count:
+            panic("packed store row extent table is inconsistent")
+        if state.handles.items == null:
+            panic("packed store handle table is empty")
+        if state.row_word_counts.items == null:
+            panic("packed store row extent table is empty")
+
+        handles: uintptr& = state.handles.items
+        row_word_counts: usize& = state.row_word_counts.items
+        for index in 0..<state.handles.count:
+            if handles[index] == handle:
+                return row_word_counts[index]
+
+        panic("packed store read handle is not registered")
+@internal
+def packed_store_read_word_with_extent(a: mutable Arena&, handle: uintptr, state_bits: mutable void&, word_offset: usize, row_word_count: usize) -> uintptr:
+    can Abort.Panic:
+        if handle == 0.uintptr():
+            panic("packed store read handle is null")
         panic("packed store read_word cannot read inline word handles") if handle & 1.uintptr() != 0.uintptr()
+        if state_bits == null:
+            panic("packed store read requires store metadata")
+        if word_offset >= row_word_count:
+            panic("packed store row word offset out of bounds")
 
         region_index: usize = (handle >> 32.uintptr()).usize()
         offset_words_plus_one: usize = ((handle & 0xffffffff.u64().uintptr()) >> 1.uintptr()).usize()
-        assert offset_words_plus_one > 0
+        if offset_words_plus_one == 0:
+            panic("packed store read handle has an invalid offset")
 
         if state_bits != null:
             state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
             if state.alloc_region != null and state.alloc_region_index == region_index:
                 offset_words: usize = offset_words_plus_one - 1
-                assert offset_words + word_offset < state.alloc_region.capacity
+                if offset_words >= state.alloc_region.capacity:
+                    panic("packed store row starts outside its allocation region")
+                if word_offset >= state.alloc_region.capacity - offset_words:
+                    panic("packed store row read exceeds its allocation region")
 
                 data_base: heap u8& = packed_store_region_data(state.alloc_region)
                 row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
@@ -320,7 +363,10 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
 
             if state.decode_region != null and state.decode_region_index == region_index:
                 offset_words: usize = offset_words_plus_one - 1
-                assert offset_words + word_offset < state.decode_region.capacity
+                if offset_words >= state.decode_region.capacity:
+                    panic("packed store row starts outside its decode region")
+                if word_offset >= state.decode_region.capacity - offset_words:
+                    panic("packed store row read exceeds its decode region")
 
                 data_base: heap u8& = packed_store_region_data(state.decode_region)
                 row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
@@ -329,7 +375,10 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
             indexed_region: heap Region&? = packed_store_lookup_region(state, region_index)
             if indexed_region != null:
                 offset_words: usize = offset_words_plus_one - 1
-                assert offset_words + word_offset < indexed_region.capacity
+                if offset_words >= indexed_region.capacity:
+                    panic("packed store row starts outside its indexed region")
+                if word_offset >= indexed_region.capacity - offset_words:
+                    panic("packed store row read exceeds its indexed region")
 
                 state.decode_region <- indexed_region
                 state.decode_region_index <- region_index
@@ -375,7 +424,10 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
 
                 if owner_cursor != null and owner_cursor.global_index == region_index:
                     offset_words: usize = offset_words_plus_one - 1
-                    assert offset_words + word_offset < owner_cursor.capacity
+                    if offset_words >= owner_cursor.capacity:
+                        panic("packed store row starts outside its owner region")
+                    if word_offset >= owner_cursor.capacity - offset_words:
+                        panic("packed store row read exceeds its owner region")
 
                     state.decode_region <- owner_cursor
                     state.decode_region_index <- region_index
@@ -389,9 +441,13 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
                 r <- r.next
                 i <- i + 1
 
-        assert r != null
+        if r == null:
+            panic("packed store read region not found")
         offset_words: usize = offset_words_plus_one - 1
-        assert offset_words + word_offset < r.capacity
+        if offset_words >= r.capacity:
+            panic("packed store row starts outside its region")
+        if word_offset >= r.capacity - offset_words:
+            panic("packed store row read exceeds its region")
 
         if state_bits != null:
             state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
@@ -401,20 +457,44 @@ def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: m
         data_base: heap u8& = packed_store_region_data(r)
         row_words: uintptr& = (data_base + offset_words * size_of(uintptr)).cast[uintptr&]
         return row_words[word_offset]
+def ctx_packed_store_read_word(a: mutable Arena&, handle: uintptr, state_bits: mutable void&, word_offset: usize) -> uintptr:
+    can Abort.Panic:
+        if state_bits == null:
+            panic("packed store read requires store metadata")
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        row_word_count: usize = packed_store_row_word_count_for_handle(state, handle)
+        return packed_store_read_word_with_extent(a, handle, state_bits, word_offset, row_word_count)
 @inline(always)
 def ctx_packed_store_read_index_word(a: mutable Arena&, index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
     can Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         index_usize: usize = index.usize()
-        assert index_usize < state.handles.count
+        if index_usize >= state.handles.count:
+            panic("packed store index out of bounds")
+        if index_usize >= state.row_word_counts.count:
+            panic("packed store row extent index out of bounds")
+        if state.row_word_counts.count != state.handles.count:
+            panic("packed store row extent table is inconsistent")
+        if state.row_word_counts.items == null:
+            panic("packed store row extent table is empty")
+        row_word_counts: usize& = state.row_word_counts.items
+        if word_offset >= row_word_counts[index_usize]:
+            panic("packed store row word offset out of bounds")
         if word_offset < state.prefix_words:
-            assert state.prefix_columns.items != null
+            if state.prefix_columns.items == null:
+                panic("packed store prefix column table is empty")
+            if index_usize >= state.prefix_column_capacity:
+                panic("packed store prefix column row out of bounds")
             columns: uintptr& = state.prefix_columns.items
-            assert word_offset < state.prefix_columns.count
-            assert columns[word_offset] != 0.uintptr()
+            if word_offset >= state.prefix_columns.count:
+                panic("packed store prefix column index out of bounds")
+            if columns[word_offset] == 0.uintptr():
+                panic("packed store prefix column is not initialized")
             column: uintptr& = columns[word_offset].cast[heap u8&].cast[uintptr&]
             return column[index_usize]
-        assert state.handles.items != null
+        if state.handles.items == null:
+            panic("packed store handle table is empty")
         handles: uintptr& = state.handles.items
-        return ctx_packed_store_read_word(a, handles[index_usize], state_bits, word_offset)
+        return packed_store_read_word_with_extent(a, handles[index_usize], state_bits, word_offset, row_word_counts[index_usize])

@@ -31,6 +31,8 @@ def packed_store_region_table(state: mutable PackedStoreState&) -> mutable darra
     return &state.regions
 def packed_store_index_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
     return &state.indices
+def packed_store_row_word_count_table(state: mutable PackedStoreState&) -> mutable darray[usize]&:
+    return &state.row_word_counts
 def packed_store_variant_slot_table(state: mutable PackedStoreState&) -> mutable darray[u32]&:
     return &state.variant_slots
 def packed_store_prefix_column_table(state: mutable PackedStoreState&) -> mutable darray[uintptr]&:
@@ -40,13 +42,14 @@ def packed_store_side_column_table(state: mutable PackedStoreState&) -> mutable 
 def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable PackedStoreState&, needed_rows: usize):
     can Memory.Allocate, Abort.Panic:
         handles: mutable darray[uintptr]& = packed_store_handle_table(state)
+        row_word_counts: mutable darray[usize]& = packed_store_row_word_count_table(state)
         # Hot-path short-circuit: this runs on EVERY node append, but the four metadata
         # columns grow in lockstep (all reserved to the same needed_rows), so a single
         # capacity check on `handles` settles whether ANY growth is needed; the prefix/side
         # columns track their own capacity. Once geometric growth has run a few times the
         # common case is "everything already fits" — return before the per-column accessor
         # and reserve/ensure calls, which (uninlined) otherwise dominate construction cost.
-        return if needed_rows <= handles.capacity and (state.prefix_words == 0 or needed_rows <= state.prefix_column_capacity) and (state.side_words == 0 or needed_rows <= state.side_column_capacity)
+        return if needed_rows <= handles.capacity and needed_rows <= row_word_counts.capacity and (state.prefix_words == 0 or needed_rows <= state.prefix_column_capacity) and (state.side_words == 0 or needed_rows <= state.side_column_capacity)
 
         indices: mutable darray[u32]& = packed_store_index_table(state)
         tags: mutable darray[u32]& = packed_store_tag_table(state)
@@ -54,6 +57,7 @@ def packed_store_ensure_metadata_capacity(a: mutable Arena&, state: mutable Pack
 
         in a:
             _ = handles.reserve(needed_rows)
+            _ = row_word_counts.reserve(needed_rows)
             _ = indices.reserve(needed_rows)
             _ = tags.reserve(needed_rows)
             _ = variant_slots.reserve(needed_rows)
@@ -153,7 +157,7 @@ def packed_store_lookup_region(state: mutable PackedStoreState&, global_index: u
 def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         state: mutable heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
-        row_words: usize = (row_bytes + size_of(uintptr) - 1) / size_of(uintptr)
+        row_words: usize = packed_store_row_word_count(row_bytes)
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
 
@@ -168,6 +172,7 @@ def ctx_packed_store_state_new(a: mutable Arena&, row_bytes: usize) -> mutable h
         state.tail_region <- null
         state.regions <- zeroed
         state.handles <- zeroed
+        state.row_word_counts <- zeroed
         state.indices <- zeroed
         state.tags <- zeroed
         state.variant_slots <- zeroed
@@ -247,7 +252,8 @@ def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintp
     can Memory.Allocate, Abort.Panic:
         store_rows_note()
         size: usize = state.row_words
-        assert size > 0
+        if size == 0:
+            panic("packed store cannot allocate an empty row")
 
         if state.alloc_region == null:
             capacity: mutable usize = state.preferred_region_capacity
@@ -292,12 +298,16 @@ def ctx_packed_store_alloc_fixed_result_slow(a: mutable Arena&, owner_tag: uintp
         packed_store_register_region(a, state, a.end, a.end_index)
 def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreAllocResult:
     can Memory.Allocate, Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
 
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
         owner_tag: uintptr = state_bits.cast[u8&].uintptr()
         size: usize = state.row_words
-        assert size > 0
+        if size == 0:
+            panic("packed store cannot allocate an empty row")
+        if state.handles.count >= PACKED_STORE_MAX_INDEX:
+            panic("packed store index limit exceeded")
 
         ctx_packed_store_alloc_fixed_result_slow(a, owner_tag, state) if state.alloc_region == null or state.alloc_region.count + size > state.alloc_region.capacity
 
@@ -322,15 +332,19 @@ def ctx_packed_store_alloc_fixed_result(a: mutable Arena&, state_bits: mutable v
 
         in a:
             state.handles.push(handle)
+            state.row_word_counts.push(size)
             state.indices.push(global_index)
         return PackedStoreAllocResult{row: ptr, handle: handle}
 def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&) -> PackedStoreAllocResult:
     can Memory.Allocate, Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
 
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
+        if state.handles.count >= PACKED_STORE_MAX_INDEX:
+            panic("packed store index limit exceeded")
         owner_tag: uintptr = state_bits.cast[u8&].uintptr()
-        size: usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
+        size: usize = packed_store_row_word_count(size_bytes)
 
         if size > state.row_words:
             state.row_words <- size
@@ -362,6 +376,7 @@ def ctx_packed_store_alloc_result(a: mutable Arena&, size_bytes: usize, state_bi
 
         in a:
             state.handles.push(handle)
+            state.row_word_counts.push(size)
             state.indices.push(global_index)
         return PackedStoreAllocResult{row: ptr, handle: handle}
 def ctx_packed_store_alloc_fixed_index_result(a: mutable Arena&, state_bits: mutable void&) -> PackedStoreIndexAllocResult:

@@ -18,6 +18,7 @@ def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usiz
         state.tail_region <- null
         state.regions <- zeroed
         state.handles <- zeroed
+        state.row_word_counts <- zeroed
         state.indices <- zeroed
         state.tags <- zeroed
         state.variant_slots <- zeroed
@@ -61,6 +62,7 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
 
         in a:
             state.handles.push(row.cast[u8&].uintptr())
+            state.row_word_counts.push(row_words)
             state.indices.push(global_index)
             state.tags.push(tag)
             state.variant_slots.push(slot)
