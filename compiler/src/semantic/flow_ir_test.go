@@ -1,6 +1,11 @@
 package semantic
 
 import (
+	goast "go/ast"
+	goparser "go/parser"
+	"go/token"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -82,5 +87,84 @@ func TestConstructCFGRejectsUnmappedStatementKinds(t *testing.T) {
 	err := VerifyCFG(cfg)
 	if err == nil || !strings.Contains(err.Error(), "unsupported statement") {
 		t.Fatalf("expected an unmapped statement to fail closed, got %v", err)
+	}
+}
+
+func TestEveryASTStatementKindHasCFGDisposition(t *testing.T) {
+	_, testFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("could not locate CFG test source")
+	}
+	astDir := filepath.Join(filepath.Dir(testFile), "..", "ast")
+	astFiles, err := filepath.Glob(filepath.Join(astDir, "*.go"))
+	if err != nil {
+		t.Fatalf("list AST source files: %v", err)
+	}
+	if len(astFiles) == 0 {
+		t.Fatalf("no AST source files found under %s", astDir)
+	}
+
+	statementKinds := map[string]bool{}
+	for _, filename := range astFiles {
+		file, err := goparser.ParseFile(token.NewFileSet(), filename, nil, 0)
+		if err != nil {
+			t.Fatalf("parse AST source %s: %v", filename, err)
+		}
+		for _, decl := range file.Decls {
+			method, ok := decl.(*goast.FuncDecl)
+			if !ok || method.Name.Name != "stmtTag" || method.Recv == nil || len(method.Recv.List) != 1 {
+				continue
+			}
+			receiver := method.Recv.List[0].Type
+			if pointer, ok := receiver.(*goast.StarExpr); ok {
+				receiver = pointer.X
+			}
+			if name, ok := receiver.(*goast.Ident); ok {
+				statementKinds[name.Name] = true
+			}
+		}
+	}
+	if len(statementKinds) == 0 {
+		t.Fatal("no sealed AST statement kinds found")
+	}
+
+	flowFile := filepath.Join(filepath.Dir(testFile), "flow_ir.go")
+	file, err := goparser.ParseFile(token.NewFileSet(), flowFile, nil, 0)
+	if err != nil {
+		t.Fatalf("parse CFG source %s: %v", flowFile, err)
+	}
+	mappedKinds := map[string]bool{}
+	for _, decl := range file.Decls {
+		function, ok := decl.(*goast.FuncDecl)
+		if !ok || function.Body == nil {
+			continue
+		}
+		switch function.Name.Name {
+		case "buildStmtList", "flowStmtTerminator", "flowStmtIsExplicitlyLinear":
+			goast.Inspect(function.Body, func(node goast.Node) bool {
+				clause, ok := node.(*goast.CaseClause)
+				if !ok {
+					return true
+				}
+				for _, expr := range clause.List {
+					star, ok := expr.(*goast.StarExpr)
+					if !ok {
+						continue
+					}
+					selector, ok := star.X.(*goast.SelectorExpr)
+					if !ok || selector.Sel.Name == "" {
+						continue
+					}
+					mappedKinds[selector.Sel.Name] = true
+				}
+				return true
+			})
+		}
+	}
+
+	for kind := range statementKinds {
+		if !mappedKinds[kind] {
+			t.Errorf("AST statement %s has no explicit CFG disposition", kind)
+		}
 	}
 }
