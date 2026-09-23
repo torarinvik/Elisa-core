@@ -88,6 +88,8 @@ func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 	case *ast.MatchStmt:
 		appendBasicFlowExprInstrs(block, n.Value)
 		appendBasicFlowExprInstrs(block, n.Store)
+	case ast.Expr:
+		appendBasicFlowExprInstrs(block, n)
 	}
 }
 

@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"fmt"
 	"strconv"
 
 	"elisacore/src/ast"
@@ -33,12 +34,39 @@ type FlowEdge struct {
 	Guard GuardFactSet
 }
 
+// CFGTerminatorKind records why a block has no more ordinary sequential code.
+// It distinguishes function exits from branches and loop transfers, and gives
+// the CFG verifier enough information to reject malformed successor lists.
+type CFGTerminatorKind string
+
+const (
+	CFGTerminatorUnset           CFGTerminatorKind = "unset"
+	CFGTerminatorFallthrough     CFGTerminatorKind = "fallthrough"
+	CFGTerminatorJump            CFGTerminatorKind = "jump"
+	CFGTerminatorBranch          CFGTerminatorKind = "branch"
+	CFGTerminatorLoopBranch      CFGTerminatorKind = "loop-branch"
+	CFGTerminatorMatch           CFGTerminatorKind = "match"
+	CFGTerminatorReturn          CFGTerminatorKind = "return"
+	CFGTerminatorErrorExit       CFGTerminatorKind = "error-exit"
+	CFGTerminatorPanic           CFGTerminatorKind = "panic"
+	CFGTerminatorStaticError     CFGTerminatorKind = "static-error"
+	CFGTerminatorBreak           CFGTerminatorKind = "break"
+	CFGTerminatorContinue        CFGTerminatorKind = "continue"
+	CFGTerminatorInvalidTransfer CFGTerminatorKind = "invalid-transfer"
+)
+
+type CFGTerminator struct {
+	Kind     CFGTerminatorKind
+	Position lexer.Pos
+}
+
 type CFGBlock struct {
 	ID             int
 	Nodes          []ast.Node
 	Instrs         []FlowInstr
 	FactTransforms []FactTransform
 	Edges          []FlowEdge
+	Terminator     CFGTerminator
 }
 
 type CFG struct {
@@ -49,8 +77,14 @@ type CFG struct {
 }
 
 type cfgBuilder struct {
-	cfg        *CFG
-	guardFacts func(ast.Expr, bool) GuardFactSet
+	cfg         *CFG
+	guardFacts  func(ast.Expr, bool) GuardFactSet
+	loopTargets []cfgLoopTargets
+}
+
+type cfgLoopTargets struct {
+	breakTarget    int
+	continueTarget int
 }
 
 func ConstructCFG(fn *ast.FuncDecl) *CFG {
@@ -70,8 +104,83 @@ func constructCFG(fn *ast.FuncDecl, guardFacts func(ast.Expr, bool) GuardFactSet
 	}
 	builder := &cfgBuilder{cfg: cfg, guardFacts: guardFacts}
 	exits := builder.buildStmtList([]int{cfg.Entry}, fn.Body)
+	for _, exit := range exits {
+		builder.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorFallthrough})
+	}
 	cfg.ExitBlocks = dedupeCFGBlockIDs(append(cfg.ExitBlocks, exits...))
 	return cfg
+}
+
+// VerifyCFG checks structural invariants required by semantic analyses. It is
+// independent of typing so it can also validate test-built graphs.
+func VerifyCFG(cfg *CFG) error {
+	if cfg == nil {
+		return fmt.Errorf("nil CFG")
+	}
+	if len(cfg.Blocks) == 0 {
+		return fmt.Errorf("CFG has no blocks")
+	}
+	if cfg.Entry < 0 || cfg.Entry >= len(cfg.Blocks) {
+		return fmt.Errorf("CFG entry %d is out of range", cfg.Entry)
+	}
+	exits := make(map[int]bool, len(cfg.ExitBlocks))
+	for _, id := range cfg.ExitBlocks {
+		if id < 0 || id >= len(cfg.Blocks) {
+			return fmt.Errorf("CFG exit block %d is out of range", id)
+		}
+		if exits[id] {
+			return fmt.Errorf("CFG exit block %d is repeated", id)
+		}
+		exits[id] = true
+	}
+	for i := range cfg.Blocks {
+		block := &cfg.Blocks[i]
+		if block.ID != i {
+			return fmt.Errorf("CFG block at index %d has id %d", i, block.ID)
+		}
+		for _, edge := range block.Edges {
+			if edge.To < 0 || edge.To >= len(cfg.Blocks) {
+				return fmt.Errorf("CFG block %d targets out-of-range block %d", block.ID, edge.To)
+			}
+		}
+		edges := len(block.Edges)
+		switch block.Terminator.Kind {
+		case CFGTerminatorFallthrough, CFGTerminatorReturn, CFGTerminatorErrorExit,
+			CFGTerminatorPanic, CFGTerminatorStaticError, CFGTerminatorInvalidTransfer:
+			if edges != 0 {
+				return fmt.Errorf("terminal CFG block %d has %d successors", block.ID, edges)
+			}
+			if !exits[block.ID] {
+				return fmt.Errorf("terminal CFG block %d is not listed as an exit", block.ID)
+			}
+		case CFGTerminatorJump, CFGTerminatorBreak, CFGTerminatorContinue:
+			if edges != 1 {
+				return fmt.Errorf("CFG block %d terminator %q needs one successor, got %d", block.ID, block.Terminator.Kind, edges)
+			}
+		case CFGTerminatorBranch, CFGTerminatorLoopBranch:
+			if edges != 2 {
+				return fmt.Errorf("CFG block %d terminator %q needs two successors, got %d", block.ID, block.Terminator.Kind, edges)
+			}
+		case CFGTerminatorMatch:
+			if edges == 0 {
+				return fmt.Errorf("CFG block %d match terminator has no successors", block.ID)
+			}
+		case CFGTerminatorUnset:
+			return fmt.Errorf("CFG block %d has no terminator", block.ID)
+		default:
+			return fmt.Errorf("CFG block %d has unknown terminator %q", block.ID, block.Terminator.Kind)
+		}
+	}
+	for id := range exits {
+		kind := cfg.Blocks[id].Terminator.Kind
+		switch kind {
+		case CFGTerminatorFallthrough, CFGTerminatorReturn, CFGTerminatorErrorExit,
+			CFGTerminatorPanic, CFGTerminatorStaticError, CFGTerminatorInvalidTransfer:
+		default:
+			return fmt.Errorf("CFG exit block %d has nonterminal terminator %q", id, kind)
+		}
+	}
+	return nil
 }
 
 func (b *cfgBuilder) conditionGuardFacts(cond ast.Expr, truthy bool) GuardFactSet {
@@ -95,11 +204,11 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 		case *ast.MatchStmt:
 			current = b.buildMatch(current, n)
 		case *ast.ForStmt:
-			current = b.buildLoopBody(current, n.Body)
+			current = b.buildLoopBody(current, n, n.Body)
 		case *ast.IterForStmt:
-			current = b.buildIterLoopBody(current, combineIterForFilters(n.WhereFilter, n.Filter), n.Body)
+			current = b.buildIterLoopBody(current, n, combineIterForFilters(n.WhereFilter, n.Filter), n.Body)
 		case *ast.ParallelForStmt:
-			current = b.buildLoopBody(current, n.Body)
+			current = b.buildLoopBody(current, n, n.Body)
 		case *ast.PoolStmt:
 			for _, exit := range current {
 				b.appendNode(exit, stmt)
@@ -125,11 +234,18 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 				b.appendNode(exit, stmt)
 			}
 			current = b.buildStmtList(current, n.Body)
+		case *ast.BreakStmt:
+			current = b.buildLoopTransfer(current, stmt, true)
+		case *ast.ContinueStmt:
+			current = b.buildLoopTransfer(current, stmt, false)
 		default:
 			for _, exit := range current {
 				b.appendNode(exit, stmt)
 			}
-			if flowStmtTerminates(stmt) {
+			if kind, ok := flowStmtTerminator(stmt); ok {
+				for _, exit := range current {
+					b.setTerminator(exit, CFGTerminator{Kind: kind, Position: stmt.Pos()})
+				}
 				b.cfg.ExitBlocks = append(b.cfg.ExitBlocks, current...)
 				current = nil
 			}
@@ -141,20 +257,24 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 func (b *cfgBuilder) buildIf(exits []int, stmt *ast.IfStmt) []int {
 	out := make([]int, 0, len(exits))
 	for _, exit := range exits {
-		out = append(out, b.buildConditional(exit, stmt.Cond, stmt.Then, stmt.Elifs, stmt.Else)...)
+		out = append(out, b.buildConditional(exit, stmt.Cond, stmt, stmt.Then, stmt.Elifs, stmt.Else)...)
 	}
 	return dedupeCFGBlockIDs(out)
 }
 
-func (b *cfgBuilder) buildConditional(from int, cond ast.Expr, thenBody []ast.Stmt, elifs []ast.ElifClause, elseBody []ast.Stmt) []int {
+func (b *cfgBuilder) buildConditional(from int, cond ast.Expr, conditionNode ast.Node, thenBody []ast.Stmt, elifs []ast.ElifClause, elseBody []ast.Stmt) []int {
+	b.appendNode(from, conditionNode)
 	thenEntry := b.newBlock()
 	elseEntry := b.newBlock()
 	b.addEdge(from, thenEntry, b.conditionGuardFacts(cond, true))
 	b.addEdge(from, elseEntry, b.conditionGuardFacts(cond, false))
+	b.setTerminator(from, CFGTerminator{Kind: CFGTerminatorBranch, Position: cond.Pos()})
 	thenExits := b.buildStmtList([]int{thenEntry}, thenBody)
 	var elseExits []int
 	if len(elifs) != 0 {
-		elseExits = b.buildConditional(elseEntry, elifs[0].Cond, elifs[0].Body, elifs[1:], elseBody)
+		elif := elifs[0]
+		elifNode := &ast.IfStmt{Position: elif.Position, Cond: elif.Cond}
+		elseExits = b.buildConditional(elseEntry, elif.Cond, elifNode, elif.Body, elifs[1:], elseBody)
 	} else {
 		elseExits = b.buildStmtList([]int{elseEntry}, elseBody)
 	}
@@ -166,54 +286,73 @@ func (b *cfgBuilder) buildWhile(exits []int, stmt *ast.WhileStmt) []int {
 	for _, exit := range exits {
 		condBlock := b.newBlock()
 		b.addEdge(exit, condBlock, GuardFactSet{})
+		b.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorJump, Position: stmt.Pos()})
+		b.appendNode(condBlock, stmt)
 		bodyEntry := b.newBlock()
 		afterBlock := b.newBlock()
 		b.addEdge(condBlock, bodyEntry, b.conditionGuardFacts(stmt.Cond, true))
 		b.addEdge(condBlock, afterBlock, b.conditionGuardFacts(stmt.Cond, false))
+		b.setTerminator(condBlock, CFGTerminator{Kind: CFGTerminatorBranch, Position: stmt.Cond.Pos()})
+		b.loopTargets = append(b.loopTargets, cfgLoopTargets{breakTarget: afterBlock, continueTarget: condBlock})
 		bodyExits := b.buildStmtList([]int{bodyEntry}, stmt.Body)
+		b.loopTargets = b.loopTargets[:len(b.loopTargets)-1]
 		for _, bodyExit := range bodyExits {
 			b.addEdge(bodyExit, condBlock, GuardFactSet{})
+			b.setTerminator(bodyExit, CFGTerminator{Kind: CFGTerminatorJump, Position: stmt.Pos()})
 		}
 		out = append(out, afterBlock)
 	}
 	return dedupeCFGBlockIDs(out)
 }
 
-func (b *cfgBuilder) buildLoopBody(exits []int, body []ast.Stmt) []int {
+func (b *cfgBuilder) buildLoopBody(exits []int, loopNode ast.Node, body []ast.Stmt) []int {
 	out := make([]int, 0, len(exits))
 	for _, exit := range exits {
-		loopEntry := b.newBlock()
-		afterBlock := b.newBlock()
-		b.addEdge(exit, loopEntry, GuardFactSet{})
-		b.addEdge(exit, afterBlock, GuardFactSet{})
-		bodyExits := b.buildStmtList([]int{loopEntry}, body)
-		for _, bodyExit := range bodyExits {
-			b.addEdge(bodyExit, loopEntry, GuardFactSet{})
-		}
-		out = append(out, afterBlock)
-	}
-	return dedupeCFGBlockIDs(out)
-}
-
-func (b *cfgBuilder) buildIterLoopBody(exits []int, filter ast.Expr, body []ast.Stmt) []int {
-	if filter == nil {
-		return b.buildLoopBody(exits, body)
-	}
-	out := make([]int, 0, len(exits))
-	for _, exit := range exits {
-		loopEntry := b.newBlock()
+		b.appendLoopHeaderNode(exit, loopNode)
 		bodyEntry := b.newBlock()
+		afterBlock := b.newBlock()
+		b.addEdge(exit, bodyEntry, GuardFactSet{})
+		b.addEdge(exit, afterBlock, GuardFactSet{})
+		b.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorLoopBranch, Position: loopNode.Pos()})
+		b.loopTargets = append(b.loopTargets, cfgLoopTargets{breakTarget: afterBlock, continueTarget: exit})
+		bodyExits := b.buildStmtList([]int{bodyEntry}, body)
+		b.loopTargets = b.loopTargets[:len(b.loopTargets)-1]
+		for _, bodyExit := range bodyExits {
+			b.addEdge(bodyExit, exit, GuardFactSet{})
+			b.setTerminator(bodyExit, CFGTerminator{Kind: CFGTerminatorJump, Position: loopNode.Pos()})
+		}
+		out = append(out, afterBlock)
+	}
+	return dedupeCFGBlockIDs(out)
+}
+
+func (b *cfgBuilder) buildIterLoopBody(exits []int, loopNode ast.Node, filter ast.Expr, body []ast.Stmt) []int {
+	if filter == nil {
+		return b.buildLoopBody(exits, loopNode, body)
+	}
+	out := make([]int, 0, len(exits))
+	for _, exit := range exits {
+		b.appendLoopHeaderNode(exit, loopNode)
+		bodyEntry := b.newBlock()
+		iterationEntry := b.newBlock()
 		skipBody := b.newBlock()
 		afterBlock := b.newBlock()
-		b.addEdge(exit, loopEntry, GuardFactSet{})
+		b.addEdge(exit, iterationEntry, GuardFactSet{})
 		b.addEdge(exit, afterBlock, GuardFactSet{})
-		b.addEdge(loopEntry, bodyEntry, b.conditionGuardFacts(filter, true))
-		b.addEdge(loopEntry, skipBody, b.conditionGuardFacts(filter, false))
+		b.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorLoopBranch, Position: loopNode.Pos()})
+		b.addEdge(iterationEntry, bodyEntry, b.conditionGuardFacts(filter, true))
+		b.addEdge(iterationEntry, skipBody, b.conditionGuardFacts(filter, false))
+		b.setTerminator(iterationEntry, CFGTerminator{Kind: CFGTerminatorBranch, Position: filter.Pos()})
+		b.appendNode(iterationEntry, &ast.IfStmt{Position: filter.Pos(), Cond: filter})
+		b.loopTargets = append(b.loopTargets, cfgLoopTargets{breakTarget: afterBlock, continueTarget: exit})
 		bodyExits := b.buildStmtList([]int{bodyEntry}, body)
+		b.loopTargets = b.loopTargets[:len(b.loopTargets)-1]
 		for _, bodyExit := range bodyExits {
-			b.addEdge(bodyExit, loopEntry, GuardFactSet{})
+			b.addEdge(bodyExit, exit, GuardFactSet{})
+			b.setTerminator(bodyExit, CFGTerminator{Kind: CFGTerminatorJump, Position: loopNode.Pos()})
 		}
-		b.addEdge(skipBody, loopEntry, GuardFactSet{})
+		b.addEdge(skipBody, exit, GuardFactSet{})
+		b.setTerminator(skipBody, CFGTerminator{Kind: CFGTerminatorJump, Position: filter.Pos()})
 		out = append(out, afterBlock)
 	}
 	return dedupeCFGBlockIDs(out)
@@ -232,6 +371,7 @@ func combineIterForFilters(whereFilter ast.Expr, filter ast.Expr) ast.Expr {
 func (b *cfgBuilder) buildMatch(exits []int, stmt *ast.MatchStmt) []int {
 	out := make([]int, 0, len(exits))
 	for _, exit := range exits {
+		b.appendNode(exit, stmt)
 		armExits := make([]int, 0, len(stmt.Arms))
 		for _, arm := range stmt.Arms {
 			armEntry := b.newBlock()
@@ -242,6 +382,7 @@ func (b *cfgBuilder) buildMatch(exits []int, stmt *ast.MatchStmt) []int {
 			out = append(out, exit)
 			continue
 		}
+		b.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorMatch, Position: stmt.Pos()})
 		out = append(out, b.joinConditionalExits(armExits, nil)...)
 	}
 	return dedupeCFGBlockIDs(out)
@@ -255,6 +396,7 @@ func (b *cfgBuilder) joinConditionalExits(left []int, right []int) []int {
 	joinBlock := b.newBlock()
 	for _, block := range joined {
 		b.addEdge(block, joinBlock, GuardFactSet{})
+		b.setTerminator(block, CFGTerminator{Kind: CFGTerminatorJump})
 	}
 	return []int{joinBlock}
 }
@@ -279,15 +421,62 @@ func (b *cfgBuilder) addEdge(from int, to int, guard GuardFactSet) {
 	b.cfg.Blocks[from].Edges = append(b.cfg.Blocks[from].Edges, FlowEdge{To: to, Guard: guard.Clone()})
 }
 
-func flowStmtTerminates(stmt ast.Stmt) bool {
+func (b *cfgBuilder) setTerminator(blockID int, terminator CFGTerminator) {
+	if b == nil || blockID < 0 || blockID >= len(b.cfg.Blocks) {
+		return
+	}
+	b.cfg.Blocks[blockID].Terminator = terminator
+}
+
+func (b *cfgBuilder) appendLoopHeaderNode(blockID int, loopNode ast.Node) {
+	if loop, ok := loopNode.(*ast.IterForStmt); ok {
+		// The iterable expression is evaluated once before iteration. Per-item
+		// filters are represented by their own branch block below.
+		b.appendNode(blockID, loop.Source)
+		return
+	}
+	b.appendNode(blockID, loopNode)
+}
+
+func (b *cfgBuilder) buildLoopTransfer(blocks []int, stmt ast.Stmt, isBreak bool) []int {
+	for _, block := range blocks {
+		b.appendNode(block, stmt)
+		if len(b.loopTargets) == 0 {
+			// The semantic checker diagnoses this source error. Keep the recovery
+			// CFG closed so no later statement is analyzed as reachable.
+			b.setTerminator(block, CFGTerminator{Kind: CFGTerminatorInvalidTransfer, Position: stmt.Pos()})
+			b.cfg.ExitBlocks = append(b.cfg.ExitBlocks, block)
+			continue
+		}
+		targets := b.loopTargets[len(b.loopTargets)-1]
+		target := targets.continueTarget
+		kind := CFGTerminatorContinue
+		if isBreak {
+			target = targets.breakTarget
+			kind = CFGTerminatorBreak
+		}
+		b.addEdge(block, target, GuardFactSet{})
+		b.setTerminator(block, CFGTerminator{Kind: kind, Position: stmt.Pos()})
+	}
+	return nil
+}
+
+func flowStmtTerminator(stmt ast.Stmt) (CFGTerminatorKind, bool) {
 	switch n := stmt.(type) {
-	case *ast.ReturnStmt, *ast.PanicStmt, *ast.StaticErrorStmt:
-		return true
+	case *ast.ReturnStmt:
+		return CFGTerminatorReturn, true
+	case *ast.PanicStmt:
+		return CFGTerminatorPanic, true
+	case *ast.StaticErrorStmt:
+		return CFGTerminatorStaticError, true
 	case *ast.ExprStmt:
 		_, ok := n.Expr.(*ast.RaiseExpr)
-		return ok
+		if ok {
+			return CFGTerminatorErrorExit, true
+		}
+		return CFGTerminatorUnset, false
 	default:
-		return false
+		return CFGTerminatorUnset, false
 	}
 }
 

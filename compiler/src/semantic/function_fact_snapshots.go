@@ -20,6 +20,12 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 		a.inferFuncSinkParams(fn, fnType)
 	}
 	cfg := a.constructCFG(fn)
+	if err := VerifyCFG(cfg); err != nil {
+		// Analyses over a malformed graph can silently lose safety facts. Reject
+		// the function rather than continuing with a partial CFG.
+		a.errorf(fn.Pos(), "internal safety CFG verification failed: %s", err)
+		return
+	}
 	configureCFGParamLocations(cfg, fnType)
 	populateBasicFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
