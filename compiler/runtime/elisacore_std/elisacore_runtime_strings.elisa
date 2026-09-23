@@ -226,7 +226,11 @@ def sview(value: u8&?, start: i64, end: i64) -> sview:
 
     hi <- lo if hi < lo
 
-    return StringView{data: src + lo, len: (hi - lo).i64()}
+    out_len: usize = hi - lo
+    signed_out_len: i64 = out_len.i64()
+    if signed_out_len < 0 or signed_out_len.usize() != out_len:
+        return StringView{data: src, len: 0}
+    return StringView{data: src + lo, len: signed_out_len}
 
 # Ergonomic cast: a raw C-string (u8&?) -> borrowed string view, so content
 # equality works directly (`bytes.sview() == "x86_64"`) instead of streq().
@@ -240,9 +244,17 @@ def __cast__(value: u8&?) -> sview:
     return sview(value, 0, -1)
 
 def string_view_len(view: sview) -> i64:
+    0 return if view.len < 0
+    view_len: usize = view.len.usize()
+    return 0 if view_len.i64() != view.len
     return view.len
 
 def string_view_slice(view: sview, start: i64, end: i64) -> sview:
+    empty: sview = StringView{data: view.data, len: 0}
+    return empty if view.len < 0
+    view_len: usize = view.len.usize()
+    return empty if view_len.i64() != view.len
+
     lo: mutable i64 = start if start > 0 else 0
     hi: mutable i64 = end if end >= 0 else view.len
 
@@ -259,31 +271,43 @@ def string_view_suffix(view: sview, start: i64) -> sview:
     return string_view_slice(view, start, view.len)
 
 def string_view_index(view: sview, index: i64) -> i64:
+    0 return if view.len < 0
+    view_len: usize = view.len.usize()
+    0 return if view_len.i64() != view.len
     0 return if index < 0 or index >= view.len
 
-    return view.data[index.usize()].i64()
+    index_usize: usize = index.usize()
+    0 return if index_usize.i64() != index
+    return view.data[index_usize].i64()
 
 def string_view_eq(view: sview, other: u8&?) -> int:
     rhs: u8& = other if other != null else ""
     rhs_len: usize = runtime_strlen(rhs)
 
-    0 return if view.len < 0 or view.len.usize() != rhs_len
+    0 return if view.len < 0
+    view_len: usize = view.len.usize()
+    0 return if view_len.i64() != view.len or view_len != rhs_len
     #1 return if view.len == 0
     #1 return if view.data == rhs
 
     1 return if view.len == 0 or view.data.cast[uintptr] == rhs.cast[uintptr]
 
-    return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view.len.usize()) == 0 else 0
+    return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view_len) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
-    if likely lhs.len != rhs.len:
+    0 return if lhs.len < 0 or rhs.len < 0
+    lhs_len: usize = lhs.len.usize()
+    rhs_len: usize = rhs.len.usize()
+    0 return if lhs_len.i64() != lhs.len or rhs_len.i64() != rhs.len
+
+    if likely lhs_len != rhs_len:
         return 0
 
     #1 return if lhs.len == 0
     #1 return if lhs.data == rhs.data
     1 return if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
     
-    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
+    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
 
 def string_view_copy(view: sview) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
@@ -309,7 +333,10 @@ def string_view_copy(view: sview) -> heap u8&:
 # ------------------------------------------------------------
 
 def sview_len(view: sview) -> usize:
-    return view.len.usize() if view.len > 0 else 0.usize()
+    0.usize() return if view.len <= 0
+    view_len: usize = view.len.usize()
+    return 0.usize() if view_len.i64() != view.len
+    return view_len
 
 def sview_is_empty(view: sview) -> bool:
     return view.len <= 0
@@ -322,15 +349,20 @@ def sview_eq(lhs: sview, rhs: sview) -> bool:
     return string_views_eq(lhs, rhs) == 1
 
 def sview_starts_with(view: sview, prefix: sview) -> bool:
+    false return if view.len < 0 or prefix.len < 0
     false return if prefix.len > view.len
     return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
 
 def sview_ends_with(view: sview, suffix: sview) -> bool:
+    false return if view.len < 0 or suffix.len < 0
     false return if suffix.len > view.len
     return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
 
 # Index of the first occurrence of `byte`, or -1 if absent.
 def sview_find_byte(view: sview, byte: u8) -> i64:
+    -1 return if view.len < 0
+    view_len: usize = view.len.usize()
+    -1 return if view_len.i64() != view.len
     i: mutable i64 = 0
     while i < view.len:
         i return if string_view_index(view, i) == byte.i64()
@@ -342,6 +374,7 @@ def sview_contains_byte(view: sview, byte: u8) -> bool:
 
 # Drop a trailing byte (e.g. a path separator) without copying.
 def sview_trim_trailing(view: sview, byte: u8) -> sview:
+    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
     hi: mutable i64 = view.len
     while hi > 0 and string_view_index(view, hi - 1) == byte.i64():
         hi <- hi - 1
@@ -349,6 +382,7 @@ def sview_trim_trailing(view: sview, byte: u8) -> sview:
 
 # The basename: the slice after the last `sep`, or the whole view if none.
 def sview_basename(view: sview, sep: u8) -> sview:
+    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
     i: mutable i64 = view.len
     while i > 0:
         string_view_suffix(view, i) return if string_view_index(view, i - 1) == sep.i64()
@@ -357,6 +391,7 @@ def sview_basename(view: sview, sep: u8) -> sview:
 
 # The dirname: the slice before the last `sep` (empty if none).
 def sview_dirname(view: sview, sep: u8) -> sview:
+    return string_view_slice(view, 0, 0) if sview_len(view).i64() != view.len
     i: mutable i64 = view.len
     while i > 0:
         string_view_prefix(view, i - 1) return if string_view_index(view, i - 1) == sep.i64()
@@ -375,16 +410,25 @@ def sview_dirname(view: sview, sep: u8) -> sview:
 def bytes_view(buf: darray[u8]) -> sview:
     n: usize = buf.count
     sview("", 0, 0) return if n == 0
+    signed_len: i64 = n.i64()
+    if signed_len < 0 or signed_len.usize() != n:
+        return sview("", 0, 0)
     trusted Unsafe.UncheckedIndex:
-        return StringView{data: &buf[0], len: n.i64()}
+        return StringView{data: &buf[0], len: signed_len}
 
 # FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
 # and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.
 def hash_sview(value: sview) -> u64:
     h: mutable u64 = 0xcbf29ce484222325
-    for ch in value:
+    return h if value.len <= 0
+    view_len: usize = value.len.usize()
+    return h if view_len.i64() != value.len
+    i: mutable usize = 0
+    while i < view_len:
+        ch: u8 = string_view_index(value, i.i64()).u8()
         h <- h ^ ch.u64()
         h <- h * 0x100000001b3
+        i <- i + 1
     return h
 
 # Last index of `byte` in `view`, or -1 if absent (the rfind companion to
