@@ -449,7 +449,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			// locally-constructed analogue of struct-param region threading).
 			argType = a.attachStructLocalArgRegion(orderedArgs[i], argType, ft.Params[i], regionParams)
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
-			a.collectArenaRegionBinding(ft.Params[i], orderedArgs[i], regionBindings, regionParams)
+			a.collectArenaRegionBinding(ft.Params[i], orderedArgs[i], bindings, regionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 			if specializedType, ok := a.specializeFunctionValueType(expectedType, argType); ok {
 				expectedType = specializedType
@@ -533,6 +533,9 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 	a.checkInterprocStoreEscape(expr, orderedArgs)
 	a.resolveImplicitCallArgs(expr, ft, bindings, shapeBindings, regionBindings, permissionBindings)
 	for _, name := range ft.RegionParams {
+		if _, typeBound := bindings[name]; typeBound {
+			continue
+		}
 		if _, ok := regionBindings[name]; !ok && a.lookupRegionParam(name) {
 			regionBindings[name] = name
 		}

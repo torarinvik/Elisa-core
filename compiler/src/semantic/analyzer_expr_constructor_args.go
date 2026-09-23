@@ -237,12 +237,58 @@ func (a *Analyzer) arenaRegionArgumentName(expr ast.Expr) string {
 // `arena: mutable Arena` passed to a formal `Arena& @r` determines which region
 // the callee's region-indexed result belongs to, even though the temporary
 // borrow of the Arena struct itself is regionless.
-func (a *Analyzer) collectArenaRegionBinding(pattern Type, expr ast.Expr, bindings map[string]string, regionParams map[string]bool) {
+func (a *Analyzer) collectArenaRegionBinding(pattern Type, expr ast.Expr, typeBindings map[string]Type, regionBindings map[string]string, regionParams map[string]bool) {
 	ref, ok := StripAggregateStateType(pattern).(*RefType)
 	if !ok || ref == nil || ref.Region == "" || !regionParams[ref.Region] || !IsArenaValueOrRefType(ref.Elem) {
 		return
 	}
-	a.collectRegionBinding(ref.Region, a.arenaRegionArgumentName(expr), bindings, regionParams)
+	actualRegion := a.arenaRegionArgumentName(expr)
+	if actualRegion == "" {
+		return
+	}
+	actualIsParam := a.lookupRegionParam(actualRegion)
+	if bound, alreadyTypeBound := typeBindings[ref.Region]; alreadyTypeBound {
+		boundRegion := ""
+		boundIsParam := false
+		switch region := bound.(type) {
+		case *RegionParamType:
+			boundRegion = region.Name
+			boundIsParam = true
+		case *RegionValueType:
+			boundRegion = region.Name
+		}
+		if boundRegion != actualRegion || boundIsParam != actualIsParam {
+			a.errorf(expr.Pos(), "region parameter %q is bound to %q by another argument, but the Arena selects %q", ref.Region, boundRegion, actualRegion)
+			return
+		}
+		if existing, alreadyRegionBound := regionBindings[ref.Region]; alreadyRegionBound && existing != actualRegion {
+			a.errorf(expr.Pos(), "region parameter %q is bound to %q by another argument, but the Arena selects %q", ref.Region, existing, actualRegion)
+			return
+		}
+		delete(regionBindings, ref.Region)
+		return
+	}
+	// Forwarding an Arena whose identity comes from the caller's own region
+	// parameter must preserve that binder. Storing only its spelling in
+	// regionBindings makes substituteType turn it into a concrete RegionValueType,
+	// which no longer matches a phantom region argument such as Handle[r].
+	// Concrete region owners still use regionBindings below.
+	if existing, alreadyRegionBound := regionBindings[ref.Region]; alreadyRegionBound {
+		if existing != actualRegion {
+			a.errorf(expr.Pos(), "region parameter %q is bound to %q by another argument, but the Arena selects %q", ref.Region, existing, actualRegion)
+			return
+		}
+		if actualIsParam {
+			typeBindings[ref.Region] = &RegionParamType{Name: actualRegion}
+			delete(regionBindings, ref.Region)
+		}
+		return
+	}
+	if actualIsParam {
+		typeBindings[ref.Region] = &RegionParamType{Name: actualRegion}
+		return
+	}
+	a.collectRegionBinding(ref.Region, actualRegion, regionBindings, regionParams)
 }
 
 func (a *Analyzer) collectPermissionBinding(name string, refs []ast.PermissionRef, permissionBindings map[string][]ast.PermissionRef) {

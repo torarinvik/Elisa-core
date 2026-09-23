@@ -311,6 +311,18 @@ func (s *functionState) resolveGenericArgForParam(expr ast.TypeExpr, param ast.G
 				}
 			}
 		}
+		// A polymorphic function body may contain a local annotation such as
+		// `result: ParseResult[r]`. Its region parameter is part of the active
+		// function signature, not a value binding and not necessarily a concrete
+		// monomorphization entry in typeMap. Preserve the binder so backend type
+		// resolution agrees with the semantic analyzer.
+		if s.fnType != nil {
+			for _, regionParam := range s.fnType.RegionParams {
+				if regionParam == named.Name {
+					return &semantic.RegionParamType{Name: named.Name}, nil
+				}
+			}
+		}
 		if binding, ok := s.lookupBinding(named.Name); ok && semantic.IsArenaValueOrRefType(binding.typ) {
 			return &semantic.RegionValueType{Name: named.Name}, nil
 		}
