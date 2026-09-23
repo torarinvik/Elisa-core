@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"strings"
 	"testing"
 
 	"elisacore/src/ast"
@@ -73,5 +74,13 @@ func TestVerifyCFGRejectsMalformedTerminatorSuccessors(t *testing.T) {
 	}
 	if err := VerifyCFG(cfg); err == nil {
 		t.Fatal("expected verifier to reject break terminator without a target edge")
+	}
+}
+
+func TestConstructCFGRejectsUnmappedStatementKinds(t *testing.T) {
+	cfg := ConstructCFG(&ast.FuncDecl{Body: []ast.Stmt{nil}})
+	err := VerifyCFG(cfg)
+	if err == nil || !strings.Contains(err.Error(), "unsupported statement") {
+		t.Fatalf("expected an unmapped statement to fail closed, got %v", err)
 	}
 }

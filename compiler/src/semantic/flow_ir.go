@@ -53,11 +53,13 @@ const (
 	CFGTerminatorBreak           CFGTerminatorKind = "break"
 	CFGTerminatorContinue        CFGTerminatorKind = "continue"
 	CFGTerminatorInvalidTransfer CFGTerminatorKind = "invalid-transfer"
+	CFGTerminatorUnsupported     CFGTerminatorKind = "unsupported"
 )
 
 type CFGTerminator struct {
 	Kind     CFGTerminatorKind
 	Position lexer.Pos
+	Reason   string
 }
 
 type CFGBlock struct {
@@ -167,6 +169,14 @@ func VerifyCFG(cfg *CFG) error {
 			}
 		case CFGTerminatorUnset:
 			return fmt.Errorf("CFG block %d has no terminator", block.ID)
+		case CFGTerminatorUnsupported:
+			if edges != 0 {
+				return fmt.Errorf("unsupported CFG block %d unexpectedly has successors", block.ID)
+			}
+			if !exits[block.ID] {
+				return fmt.Errorf("unsupported CFG block %d is not closed as an exit", block.ID)
+			}
+			return fmt.Errorf("CFG block %d contains unsupported statement %s", block.ID, block.Terminator.Reason)
 		default:
 			return fmt.Errorf("CFG block %d has unknown terminator %q", block.ID, block.Terminator.Kind)
 		}
@@ -203,6 +213,8 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 			current = b.buildWhile(current, n)
 		case *ast.MatchStmt:
 			current = b.buildMatch(current, n)
+		case *ast.StaticIfStmt:
+			current = b.buildStaticIf(current, n)
 		case *ast.ForStmt:
 			current = b.buildLoopBody(current, n, n.Body)
 		case *ast.IterForStmt:
@@ -234,6 +246,31 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 				b.appendNode(exit, stmt)
 			}
 			current = b.buildStmtList(current, n.Body)
+		case *ast.ScopeStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
+		case *ast.RegionStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
+		case *ast.CheckpointStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
+		case *ast.GroupedCheckpointStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
+		case *ast.StaticBlockStmt:
+			for _, exit := range current {
+				b.appendNode(exit, stmt)
+			}
+			current = b.buildStmtList(current, n.Body)
 		case *ast.BreakStmt:
 			current = b.buildLoopTransfer(current, stmt, true)
 		case *ast.ContinueStmt:
@@ -245,6 +282,12 @@ func (b *cfgBuilder) buildStmtList(exits []int, stmts []ast.Stmt) []int {
 			if kind, ok := flowStmtTerminator(stmt); ok {
 				for _, exit := range current {
 					b.setTerminator(exit, CFGTerminator{Kind: kind, Position: stmt.Pos()})
+				}
+				b.cfg.ExitBlocks = append(b.cfg.ExitBlocks, current...)
+				current = nil
+			} else if !flowStmtIsExplicitlyLinear(stmt) {
+				for _, exit := range current {
+					b.setTerminator(exit, CFGTerminator{Kind: CFGTerminatorUnsupported, Position: stmtPosition(stmt), Reason: fmt.Sprintf("%T", stmt)})
 				}
 				b.cfg.ExitBlocks = append(b.cfg.ExitBlocks, current...)
 				current = nil
@@ -260,6 +303,15 @@ func (b *cfgBuilder) buildIf(exits []int, stmt *ast.IfStmt) []int {
 		out = append(out, b.buildConditional(exit, stmt.Cond, stmt, stmt.Then, stmt.Elifs, stmt.Else)...)
 	}
 	return dedupeCFGBlockIDs(out)
+}
+
+func (b *cfgBuilder) buildStaticIf(exits []int, stmt *ast.StaticIfStmt) []int {
+	elifs := make([]ast.ElifClause, 0, len(stmt.Elifs))
+	for _, elif := range stmt.Elifs {
+		elifs = append(elifs, ast.ElifClause{Position: elif.Position, Cond: elif.Cond, Body: elif.Body})
+	}
+	lowered := &ast.IfStmt{Position: stmt.Position, Cond: stmt.Cond, Then: stmt.Then, Elifs: elifs, Else: stmt.Else}
+	return b.buildIf(exits, lowered)
 }
 
 func (b *cfgBuilder) buildConditional(from int, cond ast.Expr, conditionNode ast.Node, thenBody []ast.Stmt, elifs []ast.ElifClause, elseBody []ast.Stmt) []int {
@@ -477,6 +529,31 @@ func flowStmtTerminator(stmt ast.Stmt) (CFGTerminatorKind, bool) {
 		return CFGTerminatorUnset, false
 	default:
 		return CFGTerminatorUnset, false
+	}
+}
+
+func stmtPosition(stmt ast.Stmt) lexer.Pos {
+	if stmt == nil {
+		return lexer.Pos{}
+	}
+	return stmt.Pos()
+}
+
+// flowStmtIsExplicitlyLinear is the allowlist for statements whose execution
+// does not add control-flow edges. New AST statement kinds must be handled by
+// the CFG builder or deliberately added here; unknown kinds fail closed.
+func flowStmtIsExplicitlyLinear(stmt ast.Stmt) bool {
+	switch stmt.(type) {
+	case *ast.AssignStmt, *ast.AugAssignStmt, *ast.AsRefAssignStmt,
+		*ast.VarDeclStmt, *ast.LetDestructureStmt, *ast.TupleBindStmt, *ast.MoveBindStmt, *ast.ExprStmt,
+		*ast.PassStmt, *ast.SignalStmt, *ast.MachineCoverageStmt, *ast.ExpectPatternStmt,
+		*ast.StaticAssertStmt, *ast.AssertByStmt, *ast.ProofBlockStmt, *ast.AssertHoleStmt,
+		*ast.ProofUseStmt, *ast.ContractStmt, *ast.StaticAssertBlockStmt, *ast.DiscardStmt,
+		*ast.DestroyStmt, *ast.PromoteStmt, *ast.AdoptStmt, *ast.LeakStmt, *ast.MarkStmt,
+		*ast.RestoreStmt, *ast.RestoreCheckpointStmt, *ast.ResetStmt:
+		return true
+	default:
+		return false
 	}
 }
 
