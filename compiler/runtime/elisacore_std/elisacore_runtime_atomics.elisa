@@ -1,0 +1,167 @@
+# ============================================================
+# Elisa core Runtime - atomic storage and operations
+# Kept separate from thread/runtime APIs so allocator internals can use the
+# target's atomic lowering without importing the full concurrency runtime.
+# ============================================================
+
+struct atomic[T]:
+    value: mutable T
+
+struct AtomicCell[T]:
+    slot: mutable atomic[T]
+
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+# The arena's process-wide region cache and reclaimed-region hint are shared by
+# independent arenas. This statically zero-initialized atomic serializes their
+# metadata accesses before any runtime initializer or worker can run.
+global mutable __elisa_arena_cache_lock_cell: AtomicCell[i32] = zeroed
+
+# ------------------------------------------------------------
+# Generic atomic operations
+# ------------------------------------------------------------
+
+def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+    can Atomics.Load:
+        _ = order
+        return slot.value
+
+def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
+    can Atomics.Store:
+        _ = order
+        slot.value <- value
+
+def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
+    can Atomics.Exchange:
+        _ = order
+        old_value: T = slot.value
+        slot.value <- value
+        return old_value
+
+def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
+    can Atomics.CompareExchange:
+        _ = success
+        _ = failure
+        if slot.value == expected:
+            slot.value <- desired
+            return true
+        return false
+
+def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- old_value + value
+        return old_value
+
+def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- old_value - value
+        return old_value
+
+def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- old_value | value
+        return old_value
+
+def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- old_value & value
+        return old_value
+
+def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+    can Atomics.Rmw:
+        _ = order
+        old_value: i64 = slot.value
+        slot.value <- old_value ^ value
+        return old_value
+
+def fence(order: MemoryOrder):
+    can Atomics.Fence:
+        _ = order
+
+# ------------------------------------------------------------
+# AtomicCell protocol wrappers
+# ------------------------------------------------------------
+
+def atomic_cell[T](value: T) -> AtomicCell[T]:
+    out: AtomicCell[T] = zeroed
+    out.slot.value <- value
+    return out
+
+def atomic_load_relaxed[T](cell: AtomicCell[T]&) -> T:
+    can Atomics.Load:
+        return load(&cell.slot, MemoryOrder.Relaxed)
+
+def atomic_load_acquire[T](cell: AtomicCell[T]&) -> T:
+    can Atomics.Load:
+        return load(&cell.slot, MemoryOrder.Acquire)
+
+def atomic_store_relaxed[T](cell: mutable AtomicCell[T]&, value: T):
+    can Atomics.Store:
+        store(&cell.slot, value, MemoryOrder.Relaxed)
+
+def atomic_store_release[T](cell: mutable AtomicCell[T]&, value: T):
+    can Atomics.Store:
+        store(&cell.slot, value, MemoryOrder.Release)
+
+# These internal helpers are deliberately nonallocating and non-reentrant. POSIX
+# and Windows builds support worker threads and use LLVM atomic operations;
+# current WebAssembly execution is single-threaded, so those builds use no-ops.
+static if ELISA_TARGET_OS_POSIX:
+    @internal
+    def __elisa_arena_cache_lock_acquire():
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write, Atomics.Exchange]:
+            while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
+                pass
+
+    @internal
+    def __elisa_arena_cache_lock_release():
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write, Atomics.Store]:
+            atomic_store_release(&__elisa_arena_cache_lock_cell, 0)
+static elif ELISA_TARGET_OS_WINDOWS:
+    @internal
+    def __elisa_arena_cache_lock_acquire():
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write, Atomics.Exchange]:
+            while atomic_exchange_acqrel(&__elisa_arena_cache_lock_cell, 1) != 0:
+                pass
+
+    @internal
+    def __elisa_arena_cache_lock_release():
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write, Atomics.Store]:
+            atomic_store_release(&__elisa_arena_cache_lock_cell, 0)
+static else:
+    @internal
+    def __elisa_arena_cache_lock_acquire():
+        pass
+
+    @internal
+    def __elisa_arena_cache_lock_release():
+        pass
+
+def atomic_exchange_acqrel[T](cell: mutable AtomicCell[T]&, value: T) -> T:
+    can Atomics.Exchange:
+        return exchange(&cell.slot, value, MemoryOrder.AcqRel)
+
+def atomic_compare_exchange_acqrel[T](cell: mutable AtomicCell[T]&, expected: T, desired: T) -> bool:
+    can Atomics.CompareExchange:
+        return compare_exchange(&cell.slot, expected, desired, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+
+def atomic_fetch_add_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
+    can Atomics.Rmw:
+        return fetch_add(&cell.slot, value, MemoryOrder.AcqRel)
+
+def atomic_fetch_sub_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
+    can Atomics.Rmw:
+        return fetch_sub(&cell.slot, value, MemoryOrder.AcqRel)

@@ -3,6 +3,7 @@
 # ============================================================
 
 include "./profiler_hooks.elisa"
+include "./elisacore_runtime_atomics.elisa"
 
 const ARENA_BACKEND_LIBC_MALLOC = 0
 const ARENA_BACKEND_LINUX_MMAP = 1
@@ -341,19 +342,13 @@ def sfree[T](ptr: heap T&) -> heap T!:
 # REGION_CACHE_MAX_ENTRIES parked regions; new_region_with_owner probes that list and
 # reuses a region when its capacity suffices. free_region parks instead of unmapping
 # while the cache has room and the region is not oversized (so a giant block is never
-# pinned). Plain global, unsynchronized — the same posture as
-# perm_arena, which is likewise mutated on every permanent allocation; a thread-local
-# pool is the documented end state for ARENA_STRATEGY_SCRATCH and can subsume this.
-# Both cache fields live in ONE struct-typed global accessed through a reference —
-# the perm_arena pattern. stage0 attaches Unsafe.MutableGlobal to a function's
-# required effects on DIRECT scalar-global access (warning every ungranted caller
-# transitively: 113 across the runtime), while stage1 warns at the access site in
-# strict mode (4 diagnostics); struct-global-by-reference is the one shape both
-# analyzers accept silently, and it is what every existing runtime global uses.
+# pinned). Cache metadata and the cross-arena free-region hint are protected by the
+# runtime atomic lock below; the per-arena region chains remain under their arena
+# owner's synchronization contract.
 struct ArenaRegionCache:
     slot: mutable heap Region&?
-    # Number of parked mmap regions linked through slot. The field name is retained for
-    # the runtime interface layout; reclaimed-span lookup uses __elisa_free_hint below.
+    # Bounded retention budget shared by reclaimed spans and parked regions. Keep the
+    # historical field name because it is part of the runtime interface layout.
     reclaimed_spans: mutable usize
 
 global mutable __elisa_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
@@ -366,6 +361,135 @@ struct ArenaFreeHint:
     region: mutable heap Region&?
 
 global mutable __elisa_free_hint: ArenaFreeHint = ArenaFreeHint{owner: 0.uintptr(), region: null}
+
+@internal
+def arena_region_cache_take(capacity: usize, owner_tag: uintptr) -> mutable heap Region&?:
+    result: mutable heap Region&? = null
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+        reuse_previous: mutable heap Region&? = null
+        reuse_cursor: mutable heap Region&? = reuse_cache.slot
+        reuse_probes: mutable usize = REGION_CACHE_MAX_ENTRIES
+        while reuse_cursor != null and reuse_probes > 0:
+            reuse_probes <- reuse_probes - 1
+            cache_candidate: mutable heap Region&? = reuse_cursor
+            if cache_candidate is cached and cached.capacity >= capacity:
+                if reuse_previous is previous:
+                    previous.next <- cached.next
+                else:
+                    reuse_cache.slot <- cached.next
+                reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
+                cached.next <- null
+                cached.count <- 0
+                cached.owner_tag <- owner_tag
+                cached.owner_next <- null
+                cached.global_index <- 0
+                cached.committed <- 0
+                cached.free_list <- null
+                result <- cached
+                break
+            reuse_previous <- reuse_cursor
+            reuse_cursor <- reuse_cursor.next
+    __elisa_arena_cache_lock_release()
+    return result
+
+@internal
+def arena_free_hint_get(owner: uintptr) -> mutable heap Region&?:
+    result: mutable heap Region&? = null
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        hint: ArenaFreeHint& = &__elisa_free_hint
+        result <- hint.region if hint.owner == owner
+    __elisa_arena_cache_lock_release()
+    return result
+
+@internal
+def arena_free_hint_set(owner: uintptr, region: mutable heap Region&?):
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        hint: mutable ArenaFreeHint& = &__elisa_free_hint
+        hint.owner <- owner
+        hint.region <- region
+    __elisa_arena_cache_lock_release()
+
+@internal
+def arena_free_hint_update(owner: uintptr, region: mutable heap Region&?):
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        hint: mutable ArenaFreeHint& = &__elisa_free_hint
+        hint.region <- region if hint.owner == owner
+    __elisa_arena_cache_lock_release()
+
+@internal
+def arena_free_hint_clear(owner: uintptr):
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        hint: mutable ArenaFreeHint& = &__elisa_free_hint
+        if hint.owner == owner:
+            hint.owner <- 0.uintptr()
+            hint.region <- null
+    __elisa_arena_cache_lock_release()
+
+@internal
+def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: mutable heap Region&?):
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        hint: mutable ArenaFreeHint& = &__elisa_free_hint
+        if hint.owner == child and child_region != null:
+            hint.owner <- parent
+            hint.region <- child_region
+    __elisa_arena_cache_lock_release()
+
+@internal
+def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
+    __elisa_arena_cache_lock_acquire()
+    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+        cache: mutable ArenaRegionCache& = &__elisa_region_cache
+        # This count is used only as a bounded-retention budget. Saturating keeps
+        # an unbounded realloc workload from wrapping and reopening the cache.
+        if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
+            cache.reclaimed_spans <- cache.reclaimed_spans + 1
+        hint: mutable ArenaFreeHint& = &__elisa_free_hint
+        hint.owner <- owner
+        hint.region <- region
+    __elisa_arena_cache_lock_release()
+
+@internal
+def arena_region_cache_try_park(r: heap Region&) -> bool:
+    can Abort.Panic:
+        false return if r.capacity > REGION_CACHE_MAX_SLOTS
+        if r.count > r.capacity:
+            panic("arena cursor exceeds region capacity")
+
+        room: mutable bool = false
+        __elisa_arena_cache_lock_acquire()
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+            cache: ArenaRegionCache& = &__elisa_region_cache
+            room <- cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES
+        __elisa_arena_cache_lock_release()
+        false return if not room
+
+        # Zero before publishing the block in the shared list. The region is still
+        # exclusively owned by this release operation and this expensive work need
+        # not extend the critical section.
+        used_bytes: usize = arena_region_payload_bytes(r.count)
+        if used_bytes > 0:
+            trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
+                _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
+
+        parked_ok: mutable bool = false
+        __elisa_arena_cache_lock_acquire()
+        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+            cache: mutable ArenaRegionCache& = &__elisa_region_cache
+            if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
+                parked: mutable heap Region& = r.cast[mutable heap Region&]
+                parked.next <- cache.slot
+                cache.slot <- parked
+                cache.reclaimed_spans <- cache.reclaimed_spans + 1
+                parked_ok <- true
+        __elisa_arena_cache_lock_release()
+        return parked_ok
 
 # Largest region the cache will park, in SLOTS (uintptr-sized): 128Ki slots = 1 MiB of
 # payload on 64-bit. Scratch regions are far smaller; anything bigger is unmapped as
@@ -431,30 +555,9 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
         static if ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                reuse_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-                reuse_previous: mutable heap Region&? = null
-                reuse_cursor: mutable heap Region&? = reuse_cache.slot
-                reuse_probes: mutable usize = REGION_CACHE_MAX_ENTRIES
-                while reuse_cursor != null and reuse_probes > 0:
-                    reuse_probes <- reuse_probes - 1
-                    cache_candidate: mutable heap Region&? = reuse_cursor
-                    if cache_candidate is cached and cached.capacity >= capacity:
-                        if reuse_previous is previous:
-                            previous.next <- cached.next
-                        else:
-                            reuse_cache.slot <- cached.next
-                        reuse_cache.reclaimed_spans <- reuse_cache.reclaimed_spans - 1 if reuse_cache.reclaimed_spans > 0
-                        cached.next <- null
-                        cached.count <- 0
-                        cached.owner_tag <- owner_tag
-                        cached.owner_next <- null
-                        cached.global_index <- 0
-                        cached.committed <- 0
-                        cached.free_list <- null
-                        return cached
-                    reuse_previous <- reuse_cursor
-                    reuse_cursor <- reuse_cursor.next
+            cached_region: mutable heap Region&? = arena_region_cache_take(capacity, owner_tag)
+            if cached_region is cached:
+                return cached
         static else:
             pass
 
@@ -687,38 +790,30 @@ def arena_find_free_region(start: mutable heap Region&?) -> mutable heap Region&
 
 @internal
 def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes: usize) -> mutable heap void&?:
-    hinted: mutable heap Region&? = null
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        hint: ArenaFreeHint& = &__elisa_free_hint
-        return null if hint.owner != a.cast[uintptr] or hint.region == null
-        hinted <- hint.region
+    hinted: mutable heap Region&? = arena_free_hint_get(a.cast[uintptr])
+    return null if hinted == null
 
     # Probe the remembered region first. This is the usual reclaim/realloc path and
     # avoids scanning all earlier regions in a compiler-sized arena.
-    if hinted is hint_region:
-        if arena_take_free_block(hint_region, need_slots) is reclaimed:
-            next_hint: mutable heap Region&? = hint_region
-            next_hint <- arena_find_free_region(hint_region) if hint_region.free_list == null
-            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                hint_state: mutable ArenaFreeHint& = &__elisa_free_hint
-                hint_state.region <- next_hint
-            arena_profile_region_layout(a, hint_region)
-            arena_profile_allocation_event(
-                ELISA_PROFILE_ALLOCATION_ALLOC,
-                reclaimed.cast[uintptr],
-                size_bytes,
-                0.uintptr(),
-                0.usize(),
-                a.cast[uintptr],
-                hint_region.global_index
-            )
-            return reclaimed
+    if arena_take_free_block(hinted, need_slots) is reclaimed:
+        next_hint: mutable heap Region&? = hinted
+        next_hint <- arena_find_free_region(hinted) if hinted.free_list == null
+        arena_free_hint_update(a.cast[uintptr], next_hint)
+        arena_profile_region_layout(a, hinted)
+        arena_profile_allocation_event(
+            ELISA_PROFILE_ALLOCATION_ALLOC,
+            reclaimed.cast[uintptr],
+            size_bytes,
+            0.uintptr(),
+            0.usize(),
+            a.cast[uintptr],
+            hinted.global_index
+        )
+        return reclaimed
 
     # The hint can be stale after a reset/rewind or an unusual caller mutation. Clear it
     # before the fallback so an unsuccessful hint never suppresses a valid later region.
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        clear_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-        clear_hint.region <- null
+    arena_free_hint_update(a.cast[uintptr], null)
     cursor: mutable heap Region&? = a.begin
     while cursor != null:
         # Reclaimed spans are safe to reuse even in an adopted block: the owner tag
@@ -727,10 +822,7 @@ def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes
         if arena_take_free_block(cursor, need_slots) is reclaimed:
             next_hint: mutable heap Region&? = cursor
             next_hint <- arena_find_free_region(cursor) if cursor.free_list == null
-            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                hint_state: mutable ArenaFreeHint& = &__elisa_free_hint
-                hint_state.owner <- a.cast[uintptr]
-                hint_state.region <- next_hint
+            arena_free_hint_set(a.cast[uintptr], next_hint)
             arena_profile_region_layout(a, cursor)
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_ALLOC,
@@ -768,12 +860,7 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
                         block.slots <- old_slots
                         block.next <- cursor.free_list
                         cursor.free_list as & <- block
-                        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                            reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-                            reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
-                            reclaim_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-                            reclaim_hint.owner <- a.cast[uintptr]
-                            reclaim_hint.region <- cursor
+                        arena_cache_record_reclaim(a.cast[uintptr], cursor)
                         arena_profile_allocation_event(
                             ELISA_PROFILE_ALLOCATION_RECLAIM,
                             0.uintptr(),
@@ -793,38 +880,17 @@ def free_region(r: heap Region&):
                 free(arena_heap_void_from_region(r))
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
-            # Park instead of unmapping when the cache has room and the region is small
-            # enough to be worth keeping — see __elisa_region_cache above.
-            #
-            # The used span is ZEROED before parking. A fresh anonymous mmap is
-            # kernel-zeroed, and handing back a dirty recycled region broke that
-            # accidental-but-relied-upon contract (one corpus program changed its
-            # answer). r.count bounds everything ever bumped in this region, and
-            # free-listed spans live inside it, so zeroing [0, count) restores
-            # bit-for-bit fresh-region semantics at memset cost instead of
-            # munmap+mmap+page-fault cost.
-            trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                park_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-                # Once the bounded cache is warm, most teardown calls take the direct unmap
-                # path; keep that steady-state path as the fall-through branch.
-                if unlikely park_cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES and r.capacity <= REGION_CACHE_MAX_SLOTS:
-                    trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-                        if r.count > r.capacity:
-                            panic("arena cursor exceeds region capacity")
-                        used_bytes: usize = arena_region_payload_bytes(r.count)
-                        if used_bytes > 0:
-                            _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
-                        parked: mutable heap Region& = r.cast[mutable heap Region&]
-                        parked.next <- park_cache.slot
-                        park_cache.slot <- parked
-                        park_cache.reclaimed_spans <- park_cache.reclaimed_spans + 1
-                    return
-                size_bytes: usize = arena_region_total_bytes(r.capacity)
-                ret: mutable int = 0
-                trusted Unsafe.RawExtern:
-                    ret <- munmap(arena_heap_void_from_region(r), size_bytes)
-                if ret != 0:
-                    panic("arena region release failed")
+            # A fresh anonymous mmap is kernel-zeroed. Restore that invariant before
+            # publishing a parked region so a concurrent cache consumer never observes
+            # stale bytes from its former owner.
+            if arena_region_cache_try_park(r):
+                return
+            size_bytes: usize = arena_region_total_bytes(r.capacity)
+            ret: mutable int = 0
+            trusted Unsafe.RawExtern:
+                ret <- munmap(arena_heap_void_from_region(r), size_bytes)
+            if ret != 0:
+                panic("arena region release failed")
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             ok: i32 = VirtualFreeEx(
@@ -1187,11 +1253,7 @@ def arena_reset(a: mutable Arena&):
 
     a.end <- a.begin
     a.end_index <- 0
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        reset_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-        if reset_hint.owner == a.cast[uintptr]:
-            reset_hint.owner <- 0.uintptr()
-            reset_hint.region <- null
+    arena_free_hint_clear(a.cast[uintptr])
     arena_profile_allocation_event(
         ELISA_PROFILE_ALLOCATION_REGION_RESET,
         0.uintptr(),
@@ -1219,11 +1281,7 @@ def arena_rewind(a: mutable Arena&, m: ArenaMark):
             r <- r.next
 
     a.end as & <- region
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        rewind_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-        if rewind_hint.owner == a.cast[uintptr]:
-            rewind_hint.owner <- 0.uintptr()
-            rewind_hint.region <- null
+    arena_free_hint_clear(a.cast[uintptr])
 
     region_index: mutable usize = 0
     current: mutable heap Region&? = a.begin
@@ -1256,11 +1314,7 @@ def arena_free(a: mutable Arena&):
         a.begin as ! <- null
         a.end as ! <- null
         a.end_index <- 0
-        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-            free_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-            if free_hint.owner == a.cast[uintptr]:
-                free_hint.owner <- 0.uintptr()
-                free_hint.region <- null
+        arena_free_hint_clear(a.cast[uintptr])
 
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_REGION_FREE,
@@ -1293,10 +1347,7 @@ def arena_trim(a: mutable Arena&):
                     free_region_backend(r0, a.strategy)
 
         a.end.next as ! <- null
-        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-            trim_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-            if trim_hint.owner == a.cast[uintptr]:
-                trim_hint.region <- arena_find_free_region(a.begin)
+        arena_free_hint_update(a.cast[uintptr], arena_find_free_region(a.begin))
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_REGION_TRIM,
             0.uintptr(),
@@ -1317,10 +1368,7 @@ def arena_trim(a: mutable Arena&):
 def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
     return if child.begin == null
 
-    child_free_hint: mutable heap Region&? = null
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        adopt_hint: ArenaFreeHint& = &__elisa_free_hint
-        child_free_hint <- adopt_hint.region if adopt_hint.owner == child.cast[uintptr]
+    child_free_hint: mutable heap Region&? = arena_free_hint_get(child.cast[uintptr])
 
     c: mutable heap Region&? = child.begin
     trusted Unsafe.AssumeProgress:
@@ -1356,11 +1404,7 @@ def arena_adopt(parent: mutable Arena&, child: mutable Arena&):
     child.begin as ! <- null
     child.end as ! <- null
     child.end_index <- 0
-    trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        adopt_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-        if adopt_hint.owner == child.cast[uintptr] and child_free_hint != null:
-            adopt_hint.owner <- parent.cast[uintptr]
-            adopt_hint.region <- child_free_hint
+    arena_free_hint_transfer(child.cast[uintptr], parent.cast[uintptr], child_free_hint)
     arena_profile_allocation_event(
         ELISA_PROFILE_ALLOCATION_ARENA_ADOPT,
         0.uintptr(),

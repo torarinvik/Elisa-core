@@ -56,9 +56,9 @@ struct StringLenCacheEntry:
 	len: mutable usize
 
 struct StringView:
-	# Every view, including an empty one, carries a valid non-null backing pointer.
+	# Every view, including an empty one, has immutable valid backing and extent.
 	data: u8&
-	len: mutable i64
+	len: i64
 
 struct ProgressBudget:
 	remaining_steps: mutable i64

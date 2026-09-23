@@ -3,6 +3,8 @@
 # First slice: explicit runtime-facing surface, POSIX seam, generic atomics
 # ============================================================
 
+include "./elisacore_runtime_atomics.elisa"
+
 # ------------------------------------------------------------
 # Effect-family aliases: bundle the common concurrency permissions so callers
 # write `can Parallel:` instead of a nine-effect list. Fine-grained effects stay
@@ -41,12 +43,6 @@ struct MutexGuard[S]:
 
 struct CondVar:
 	handle: mutable void&?
-
-struct atomic[T]:
-	value: mutable T
-
-struct AtomicCell[T]:
-	slot: mutable atomic[T]
 
 struct ConcurrencyBox[T]:
 	value: mutable T
@@ -91,13 +87,6 @@ struct ConcurrencyPoolState:
 	qtail: mutable heap PoolTaskRecord&?
 	shutdown: mutable i64
 	workers: mutable void&?
-
-enum MemoryOrder:
-	Relaxed
-	Acquire
-	Release
-	AcqRel
-	SeqCst
 
 # ------------------------------------------------------------
 # Low-level platform seams
@@ -1023,120 +1012,6 @@ def task_group_wait_all(group: mutable TaskGroup&):
 	can Pool.WaitAll, Thread.Join, Memory.Release, Abort.Panic, Atomics.Load, Atomics.CompareExchange:
 		task_group_wait_all_raw(group)
 		ctx_task_group_release_all(group)
-
-# ------------------------------------------------------------
-# Generic atomic helpers
-# ------------------------------------------------------------
-
-def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
-	can Atomics.Load:
-		_ = order
-		return slot.value
-
-def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
-	can Atomics.Store:
-		_ = order
-		slot.value <- value
-
-def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
-	can Atomics.Exchange:
-		_ = order
-		old_value: T = slot.value
-		slot.value <- value
-		return old_value
-
-def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
-	can Atomics.CompareExchange:
-		_ = success
-		_ = failure
-		if slot.value == expected:
-			slot.value <- desired
-			return true
-		return false
-
-def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
-	can Atomics.Rmw:
-		_ = order
-		old_value: i64 = slot.value
-		slot.value <- old_value + value
-		return old_value
-
-def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
-	can Atomics.Rmw:
-		_ = order
-		old_value: i64 = slot.value
-		slot.value <- old_value - value
-		return old_value
-
-def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
-	can Atomics.Rmw:
-		_ = order
-		old_value: i64 = slot.value
-		slot.value <- old_value | value
-		return old_value
-
-def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
-	can Atomics.Rmw:
-		_ = order
-		old_value: i64 = slot.value
-		slot.value <- old_value & value
-		return old_value
-
-def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
-	can Atomics.Rmw:
-		_ = order
-		old_value: i64 = slot.value
-		slot.value <- old_value ^ value
-		return old_value
-
-def fence(order: MemoryOrder):
-	can Atomics.Fence:
-		_ = order
-
-# ------------------------------------------------------------
-# AtomicCell: proof-carrying atomic protocol wrapper
-#
-# Raw atomics remain the low-level runtime surface. User-facing strict code
-# should prefer a named wrapper like AtomicCell so the memory-ordering choices
-# live with the protocol instead of being repeated at every call site.
-# ------------------------------------------------------------
-
-def atomic_cell[T](value: T) -> AtomicCell[T]:
-	out: AtomicCell[T] = zeroed
-	out.slot.value <- value
-	return out
-
-def atomic_load_relaxed[T](cell: AtomicCell[T]&) -> T:
-	can Atomics.Load:
-		return load(&cell.slot, MemoryOrder.Relaxed)
-
-def atomic_load_acquire[T](cell: AtomicCell[T]&) -> T:
-	can Atomics.Load:
-		return load(&cell.slot, MemoryOrder.Acquire)
-
-def atomic_store_relaxed[T](cell: mutable AtomicCell[T]&, value: T):
-	can Atomics.Store:
-		store(&cell.slot, value, MemoryOrder.Relaxed)
-
-def atomic_store_release[T](cell: mutable AtomicCell[T]&, value: T):
-	can Atomics.Store:
-		store(&cell.slot, value, MemoryOrder.Release)
-
-def atomic_exchange_acqrel[T](cell: mutable AtomicCell[T]&, value: T) -> T:
-	can Atomics.Exchange:
-		return exchange(&cell.slot, value, MemoryOrder.AcqRel)
-
-def atomic_compare_exchange_acqrel[T](cell: mutable AtomicCell[T]&, expected: T, desired: T) -> bool:
-	can Atomics.CompareExchange:
-		return compare_exchange(&cell.slot, expected, desired, MemoryOrder.AcqRel, MemoryOrder.Acquire)
-
-def atomic_fetch_add_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
-	can Atomics.Rmw:
-		return fetch_add(&cell.slot, value, MemoryOrder.AcqRel)
-
-def atomic_fetch_sub_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64:
-	can Atomics.Rmw:
-		return fetch_sub(&cell.slot, value, MemoryOrder.AcqRel)
 
 # ------------------------------------------------------------
 # perf_cores: the default nursery worker count — number of performance cores.
