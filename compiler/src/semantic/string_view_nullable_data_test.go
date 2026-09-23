@@ -18,3 +18,12 @@ func TestStringViewCarrierRequiresNonNullData(t *testing.T) {
 		t.Fatal("StringView accepted nullable data; its backing pointer must always be valid")
 	}
 }
+
+func TestStringViewBackingCannotBeReassigned(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "elisacore_runtime_prelude.elisa", `def replace_backing(view: mutable StringView, data: u8&) -> void:
+    view.data <- data
+`)
+	if errs := result.Errors(); len(errs) == 0 {
+		t.Fatal("StringView.data is mutable; replacing the backing can invalidate existing views")
+	}
+}
