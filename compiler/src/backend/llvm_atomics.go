@@ -15,6 +15,8 @@ import (
 	"unsafe"
 )
 
+const atomicBoolStorageBits = 8
+
 func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	callName := callIdentName(expr)
 	if !isBackendAtomicRuntimeCall(callName) {
@@ -41,14 +43,25 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		return nil, nil, true, err
 	}
 	valuePtr := C.LLVMBuildStructGEP2(s.builder, atomicLLVMType, slotPtr, 0, cStringFree("atomic."+callName+".value.ptr"))
+	boolPayload := semantic.IsBoolType(payloadType)
+	storageLLVMType := payloadLLVMType
+	if boolPayload {
+		// LLVM's i1 occupies one byte in a normal struct, but atomic i1 is
+		// invalid IR: atomic accesses must have a byte-sized value type. Keep the
+		// source-level carrier unchanged and widen only at the atomic boundary.
+		storageLLVMType = C.LLVMIntTypeInContext(s.g.context, atomicBoolStorageBits)
+	}
 	switch callName {
 	case "load":
 		if len(expr.Args) != 2 {
 			return nil, nil, true, fmt.Errorf("load expects 2 arguments, got %d", len(expr.Args))
 		}
 		order := backendAtomicOrderingForExpr(expr.Args[1], backendAtomicOrderLoad)
-		load := C.LLVMBuildLoad2(s.builder, payloadLLVMType, valuePtr, cStringFree("atomic.load"))
+		load := C.LLVMBuildLoad2(s.builder, storageLLVMType, valuePtr, cStringFree("atomic.load"))
 		C.LLVMSetOrdering(load, order)
+		if boolPayload {
+			load = C.LLVMBuildTrunc(s.builder, load, payloadLLVMType, cStringFree("atomic.load.bool"))
+		}
 		return load, payloadType, true, nil
 	case "store":
 		if len(expr.Args) != 3 {
@@ -61,6 +74,9 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		value, err = s.coerceValue(value, s.exprType(expr.Args[1]), payloadType)
 		if err != nil {
 			return nil, nil, true, err
+		}
+		if boolPayload {
+			value = C.LLVMBuildZExt(s.builder, value, storageLLVMType, cStringFree("atomic.store.bool"))
 		}
 		order := backendAtomicOrderingForExpr(expr.Args[2], backendAtomicOrderStore)
 		store := C.LLVMBuildStore(s.builder, value, valuePtr)
@@ -78,8 +94,15 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		if err != nil {
 			return nil, nil, true, err
 		}
+		if boolPayload {
+			value = C.LLVMBuildZExt(s.builder, value, storageLLVMType, cStringFree("atomic.exchange.bool"))
+		}
 		order := backendAtomicOrderingForExpr(expr.Args[2], backendAtomicOrderReadModifyWrite)
-		return C.LLVMBuildAtomicRMW(s.builder, C.LLVMAtomicRMWBinOpXchg, valuePtr, value, order, 0), payloadType, true, nil
+		previous := C.LLVMBuildAtomicRMW(s.builder, C.LLVMAtomicRMWBinOpXchg, valuePtr, value, order, 0)
+		if boolPayload {
+			previous = C.LLVMBuildTrunc(s.builder, previous, payloadLLVMType, cStringFree("atomic.exchange.bool.result"))
+		}
+		return previous, payloadType, true, nil
 	case "compare_exchange":
 		if len(expr.Args) != 5 {
 			return nil, nil, true, fmt.Errorf("compare_exchange expects 5 arguments, got %d", len(expr.Args))
@@ -100,6 +123,10 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		if err != nil {
 			return nil, nil, true, err
 		}
+		if boolPayload {
+			expected = C.LLVMBuildZExt(s.builder, expected, storageLLVMType, cStringFree("atomic.cmpxchg.bool.expected"))
+			desired = C.LLVMBuildZExt(s.builder, desired, storageLLVMType, cStringFree("atomic.cmpxchg.bool.desired"))
+		}
 		successOrder := backendAtomicOrderingForExpr(expr.Args[3], backendAtomicOrderReadModifyWrite)
 		failureOrder := backendAtomicOrderingForExpr(expr.Args[4], backendAtomicOrderCompareFailure)
 		cmpxchg := C.LLVMBuildAtomicCmpXchg(s.builder, valuePtr, expected, desired, successOrder, failureOrder, 0)
@@ -115,6 +142,9 @@ func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRe
 		value, err = s.coerceValue(value, s.exprType(expr.Args[1]), payloadType)
 		if err != nil {
 			return nil, nil, true, err
+		}
+		if boolPayload {
+			return nil, nil, true, fmt.Errorf("boolean atomic read-modify-write is not supported")
 		}
 		order := backendAtomicOrderingForExpr(expr.Args[2], backendAtomicOrderReadModifyWrite)
 		return C.LLVMBuildAtomicRMW(s.builder, backendAtomicRMWOp(callName), valuePtr, value, order, 0), payloadType, true, nil
