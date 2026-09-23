@@ -184,7 +184,11 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
     const WIN_COMMIT_CHUNK: usize = 65536
 
     def win_commit_round_up(n: usize) -> usize:
-        return ((n + (WIN_COMMIT_CHUNK - 1)) / WIN_COMMIT_CHUNK) * WIN_COMMIT_CHUNK
+        can Abort.Panic:
+            remainder: usize = n % WIN_COMMIT_CHUNK
+            padding: usize = 0 if remainder == 0 else WIN_COMMIT_CHUNK - remainder
+            rounded: usize = arena_checked_add_usize(n, padding)
+            return (rounded / WIN_COMMIT_CHUNK) * WIN_COMMIT_CHUNK
 
 static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
     # The generated host facade owns the allocator and seeds it from wasm-ld's
@@ -369,10 +373,60 @@ global mutable __elisa_free_hint: ArenaFreeHint = ArenaFreeHint{owner: 0.uintptr
 const REGION_CACHE_MAX_SLOTS: usize = 131072
 const REGION_CACHE_MAX_ENTRIES: usize = 128
 
+@internal
+def arena_checked_add_usize(left: usize, right: usize) -> usize:
+    can Abort.Panic:
+        result: usize = left + right
+        if result < left:
+            panic("arena size addition overflow")
+        return result
+
+@internal
+def arena_checked_mul_usize(left: usize, right: usize) -> usize:
+    can Abort.Panic:
+        result: usize = left * right
+        if left != 0 and result / left != right:
+            panic("arena size multiplication overflow")
+        return result
+
+@internal
+def arena_region_payload_bytes(capacity_slots: usize) -> usize:
+    return arena_checked_mul_usize(capacity_slots, size_of(uintptr)) can Abort.Panic
+
+@internal
+def arena_region_total_bytes(capacity_slots: usize) -> usize:
+    return arena_checked_add_usize(size_of(Region), arena_region_payload_bytes(capacity_slots)) can Abort.Panic
+
+@internal
+def arena_size_bytes_to_slots(size_bytes: usize) -> usize:
+    can Abort.Panic:
+        word_bytes: usize = size_of(uintptr)
+        if word_bytes == 0:
+            panic("arena has zero-sized allocation words")
+
+        slots: mutable usize = size_bytes / word_bytes
+        if size_bytes % word_bytes != 0:
+            slots <- arena_checked_add_usize(slots, 1)
+        slots <- 1 if slots == 0
+
+        rounded_bytes: usize = slots * word_bytes
+        if slots != 0 and rounded_bytes / slots != word_bytes:
+            panic("arena allocation size overflow")
+        if rounded_bytes < size_bytes:
+            panic("arena allocation size overflow")
+        return slots
+
+@internal
+def arena_region_can_fit(r: Region&, requested_slots: usize) -> bool:
+    can Abort.Panic:
+        if r.count > r.capacity:
+            panic("arena cursor exceeds region capacity")
+        return requested_slots <= r.capacity - r.count
+
 
 def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
-        size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+        size_bytes: usize = arena_region_total_bytes(capacity)
 
         # Reuse the parked region when it is big enough — its own (possibly larger)
         # capacity is kept, exactly as if the caller had asked for that size.
@@ -408,7 +462,8 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
             raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 raw <- malloc(size_bytes)
-            assert raw != null
+            if raw == null:
+                panic("arena allocation failed")
             r: mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_LINUX_MMAP:
@@ -422,8 +477,8 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                     -1,
                     0
                 )
-            assert raw_addr != MAP_FAILED()
-            assert raw_addr != 0.uintptr()
+            if raw_addr == MAP_FAILED() or raw_addr == 0.uintptr():
+                panic("arena allocation failed")
             r: mutable heap Region& = arena_region_from_uintptr(raw_addr)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
@@ -436,15 +491,16 @@ def new_region_with_owner(capacity: usize, owner_tag: uintptr) -> mutable heap R
                     MEM_COMMIT | MEM_RESERVE,
                     PAGE_READWRITE
                 )
-            assert not inv_handle(raw)
-            assert raw != null
+            if inv_handle(raw) or raw == null:
+                panic("arena allocation failed")
             r: mutable heap Region& = arena_region_from_raw(raw)
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 raw <- malloc(size_bytes)
-            assert raw != null
+            if raw == null:
+                panic("arena allocation failed")
             r: mutable heap Region& = arena_region_from_raw(raw)
 
         static else:
@@ -468,11 +524,12 @@ def new_region(capacity: usize) -> mutable heap Region&:
 @internal
 def new_region_malloc(capacity: usize) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
-        size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+        size_bytes: usize = arena_region_total_bytes(capacity)
         raw: mutable heap void&? = null
         trusted Unsafe.RawExtern:
             raw <- malloc(size_bytes)
-        assert raw != null
+        if raw == null:
+            panic("arena allocation failed")
         r: mutable heap Region& = arena_region_from_raw(raw)
         r.next <- null
         r.count <- 0
@@ -494,7 +551,7 @@ def new_region_malloc(capacity: usize) -> mutable heap Region&:
 def new_region_reserve(capacity: usize) -> mutable heap Region&:
     can Memory.Allocate, Abort.Panic:
         static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
-            size_bytes: usize = size_of(Region) + size_of(uintptr) * capacity
+            size_bytes: usize = arena_region_total_bytes(capacity)
             raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 raw <- VirtualAllocEx(
@@ -504,10 +561,10 @@ def new_region_reserve(capacity: usize) -> mutable heap Region&:
                     MEM_RESERVE,
                     PAGE_READWRITE
                 )
-            assert not inv_handle(raw)
-            assert raw != null
+            if inv_handle(raw) or raw == null:
+                panic("arena reservation failed")
             # Commit an initial chunk covering the Region header before writing any field.
-            initial: usize = win_commit_round_up(size_of(Region) + size_of(uintptr))
+            initial: usize = win_commit_round_up(arena_region_total_bytes(1))
             commit_raw: mutable heap void&? = null
             trusted Unsafe.RawExtern:
                 commit_raw <- VirtualAllocEx(
@@ -517,7 +574,8 @@ def new_region_reserve(capacity: usize) -> mutable heap Region&:
                     MEM_COMMIT,
                     PAGE_READWRITE
                 )
-            assert not inv_handle(commit_raw)
+            if inv_handle(commit_raw) or commit_raw == null:
+                panic("arena initial page commit failed")
             r: mutable heap Region& = arena_region_from_raw(raw)
             r.next <- null
             r.count <- 0
@@ -541,7 +599,7 @@ def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
         static if ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             if needed_bytes > r.committed:
                 target: mutable usize = win_commit_round_up(needed_bytes)
-                full: usize = size_of(Region) + size_of(uintptr) * r.capacity
+                full: usize = arena_region_total_bytes(r.capacity)
                 target <- full if target > full
                 base: mutable heap void&? = arena_mutable_heap_void_from_region(r)
                 commit_raw: mutable heap void&? = null
@@ -553,7 +611,8 @@ def arena_region_ensure_committed(r: mutable heap Region&, needed_bytes: usize):
                         MEM_COMMIT,
                         PAGE_READWRITE
                     )
-                assert not inv_handle(commit_raw)
+                if inv_handle(commit_raw) or commit_raw == null:
+                    panic("arena page commit failed")
                 r.committed <- target
         static else:
             pass
@@ -594,6 +653,7 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
             if remainder >= header_slots:
                 split: mutable heap ArenaFreeBlock& = zeroed
                 trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+                    # need_slots comes from arena_size_bytes_to_slots, which checked this product.
                     split as & <- (block.cast[mutable heap u8&] + need_slots * size_of(uintptr)).cast[mutable heap ArenaFreeBlock&]
                 split.slots <- remainder
                 split.next <- current.next
@@ -687,38 +747,44 @@ def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes
 
 @internal
 def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
-    header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
-    return if old_slots < header_slots
+    can Abort.Panic:
+        header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
+        return if old_slots < header_slots
 
-    cursor: mutable heap Region&? = a.begin
-    while cursor != null:
-        trusted Unsafe.PointerCast:
-            base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
-            raw: uintptr = oldptr.cast[heap u8&].uintptr()
-            end_raw: uintptr = raw + (old_slots * size_of(uintptr)).uintptr()
-            limit: uintptr = base + (cursor.capacity * size_of(uintptr)).uintptr()
-            if raw >= base and end_raw <= limit:
-                block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
-                block.slots <- old_slots
-                block.next <- cursor.free_list
-                cursor.free_list as & <- block
-                trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-                    reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
-                    reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
-                    reclaim_hint: mutable ArenaFreeHint& = &__elisa_free_hint
-                    reclaim_hint.owner <- a.cast[uintptr]
-                    reclaim_hint.region <- cursor
-                arena_profile_allocation_event(
-                    ELISA_PROFILE_ALLOCATION_RECLAIM,
-                    0.uintptr(),
-                    0.usize(),
-                    oldptr.cast[uintptr],
-                    old_size,
-                    a.cast[uintptr],
-                    cursor.global_index
-                )
-                return
-        cursor <- cursor.next
+        cursor: mutable heap Region&? = a.begin
+        while cursor != null:
+            trusted Unsafe.PointerCast:
+                base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
+                raw: uintptr = oldptr.cast[heap u8&].uintptr()
+                if cursor.count > cursor.capacity:
+                    panic("arena cursor exceeds region capacity")
+                payload_bytes: usize = arena_region_payload_bytes(cursor.capacity)
+                used_bytes: usize = arena_region_payload_bytes(cursor.count)
+                allocation_bytes: usize = arena_region_payload_bytes(old_slots)
+                if raw >= base:
+                    offset_bytes: usize = (raw - base).usize()
+                    if offset_bytes % size_of(uintptr) == 0 and offset_bytes <= used_bytes and allocation_bytes <= used_bytes - offset_bytes and offset_bytes <= payload_bytes and allocation_bytes <= payload_bytes - offset_bytes:
+                        block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
+                        block.slots <- old_slots
+                        block.next <- cursor.free_list
+                        cursor.free_list as & <- block
+                        trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
+                            reclaim_cache: mutable ArenaRegionCache& = &__elisa_region_cache
+                            reclaim_cache.reclaimed_spans <- reclaim_cache.reclaimed_spans + 1
+                            reclaim_hint: mutable ArenaFreeHint& = &__elisa_free_hint
+                            reclaim_hint.owner <- a.cast[uintptr]
+                            reclaim_hint.region <- cursor
+                        arena_profile_allocation_event(
+                            ELISA_PROFILE_ALLOCATION_RECLAIM,
+                            0.uintptr(),
+                            0.usize(),
+                            oldptr.cast[uintptr],
+                            old_size,
+                            a.cast[uintptr],
+                            cursor.global_index
+                        )
+                        return
+            cursor <- cursor.next
 
 def free_region(r: heap Region&):
     can Memory.Release, Abort.Panic:
@@ -743,7 +809,9 @@ def free_region(r: heap Region&):
                 # path; keep that steady-state path as the fall-through branch.
                 if unlikely park_cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES and r.capacity <= REGION_CACHE_MAX_SLOTS:
                     trusted [Unsafe.PointerCast, Unsafe.RawExtern]:
-                        used_bytes: usize = r.count * size_of(uintptr)
+                        if r.count > r.capacity:
+                            panic("arena cursor exceeds region capacity")
+                        used_bytes: usize = arena_region_payload_bytes(r.count)
                         if used_bytes > 0:
                             _ = memset(arena_heap_u8_from_region_data(r).cast[mutable void&], 0, used_bytes)
                         parked: mutable heap Region& = r.cast[mutable heap Region&]
@@ -751,11 +819,12 @@ def free_region(r: heap Region&):
                         park_cache.slot <- parked
                         park_cache.reclaimed_spans <- park_cache.reclaimed_spans + 1
                     return
-                size_bytes: usize = size_of(Region) + size_of(uintptr) * r.capacity
+                size_bytes: usize = arena_region_total_bytes(r.capacity)
                 ret: mutable int = 0
                 trusted Unsafe.RawExtern:
                     ret <- munmap(arena_heap_void_from_region(r), size_bytes)
-                assert ret == 0
+                if ret != 0:
+                    panic("arena region release failed")
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC:
             ok: i32 = VirtualFreeEx(
@@ -764,7 +833,8 @@ def free_region(r: heap Region&):
                 0,
                 MEM_RELEASE
             )
-            assert ok != 0
+            if ok == 0:
+                panic("arena region release failed")
 
         static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
             trusted Unsafe.RawExtern:
@@ -789,8 +859,7 @@ def free_region_backend(r: heap Region&, strategy: int):
 
 def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
-        size: mutable usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
-        size <- 1 if size == 0
+        size: usize = arena_size_bytes_to_slots(size_bytes)
 
         if arena_take_free_block_chain(a, size, size_bytes) is reclaimed:
             return reclaimed
@@ -814,21 +883,22 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
                 arena_profile_allocation_event(
                     ELISA_PROFILE_ALLOCATION_REGION_CREATE,
                     a.end.cast[uintptr],
-                    a.end.capacity * size_of(uintptr),
+                    arena_region_payload_bytes(a.end.capacity),
                     0.uintptr(),
                     0.usize(),
                     a.cast[uintptr],
                     a.end_index
                 )
             assert a.end != null
-            panic("region overflow: reservation exhausted (reserve_commit/fixed)") if a.end.count + size > a.end.capacity
+            if not arena_region_can_fit(a.end, size):
+                panic("region overflow: reservation exhausted (reserve_commit/fixed)")
             data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
             arena_profile_region_layout(a, a.end) if a.end.count == 0
-            offset_bytes: usize = a.end.count * size_of(uintptr)
+            offset_bytes: usize = arena_region_payload_bytes(a.end.count)
             result: mutable heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
-            a.end.count <- a.end.count + size
+            a.end.count <- arena_checked_add_usize(a.end.count, size)
             # Windows: page-in the bytes this allocation now spans (no-op elsewhere).
-            arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+            arena_region_ensure_committed(a.end, arena_region_total_bytes(a.end.count))
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_ALLOC,
                 result.cast[uintptr],
@@ -853,7 +923,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_REGION_CREATE,
                 a.end.cast[uintptr],
-                a.end.capacity * size_of(uintptr),
+                arena_region_payload_bytes(a.end.capacity),
                 0.uintptr(),
                 0.usize(),
                 a.cast[uintptr],
@@ -863,11 +933,11 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
         assert a.end != null
 
         trusted Unsafe.AssumeProgress:
-            while (a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity) and a.end.next != null:
+            while (a.end.owner_tag != 0.uintptr() or not arena_region_can_fit(a.end, size)) and a.end.next != null:
                 a.end <- a.end.next
                 a.end_index <- a.end_index + 1
 
-        if a.end.owner_tag != 0.uintptr() or a.end.count + size > a.end.capacity:
+        if a.end.owner_tag != 0.uintptr() or not arena_region_can_fit(a.end, size):
             assert a.end.next == null
 
             capacity:mutable usize = ARENA_REGION_DEFAULT_CAPACITY
@@ -880,7 +950,7 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_REGION_CREATE,
                 a.end.cast[uintptr],
-                a.end.capacity * size_of(uintptr),
+                arena_region_payload_bytes(a.end.capacity),
                 0.uintptr(),
                 0.usize(),
                 a.cast[uintptr],
@@ -889,9 +959,9 @@ def arena_alloc(a: mutable Arena&, size_bytes: usize) -> mutable heap void&:
 
         data_base: heap u8& = arena_heap_u8_from_region_data(a.end)
         arena_profile_region_layout(a, a.end) if a.end.count == 0
-        offset_bytes: usize = a.end.count * size_of(uintptr)
+        offset_bytes: usize = arena_region_payload_bytes(a.end.count)
         result: mutable heap void& = arena_heap_void_from_data_base(data_base, offset_bytes)
-        a.end.count <- a.end.count + size
+        a.end.count <- arena_checked_add_usize(a.end.count, size)
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_ALLOC,
             result.cast[uintptr],
@@ -917,30 +987,45 @@ def arena_tail_offset_slots(data_base: heap u8&, ptr: void&) -> usize:
 # helper so arena_realloc can use the same proof for every strategy.
 @internal
 def arena_region_is_tail_allocation(r: heap Region&, ptr: void&, size_bytes: usize) -> bool:
-    trusted Unsafe.PointerCast:
-        base: uintptr = arena_heap_u8_from_region_data(r).uintptr()
-        raw: uintptr = ptr.cast[heap u8&].uintptr()
-        end_raw: uintptr = raw + size_bytes.uintptr()
-        limit: uintptr = base + (r.capacity * size_of(uintptr)).uintptr()
-        return raw >= base and end_raw <= limit and end_raw == base + (r.count * size_of(uintptr)).uintptr()
+    can Abort.Panic:
+        base: mutable uintptr = 0.uintptr()
+        raw: mutable uintptr = 0.uintptr()
+        trusted Unsafe.PointerCast:
+            base <- arena_heap_u8_from_region_data(r).uintptr()
+            raw <- ptr.cast[heap u8&].uintptr()
+        if raw < base:
+            return false
+        if r.count > r.capacity:
+            panic("arena cursor exceeds region capacity")
+        offset_bytes: usize = (raw - base).usize()
+        if offset_bytes % size_of(uintptr) != 0:
+            return false
+        capacity_bytes: usize = arena_region_payload_bytes(r.capacity)
+        used_bytes: usize = arena_region_payload_bytes(r.count)
+        if offset_bytes > capacity_bytes or size_bytes > capacity_bytes - offset_bytes:
+            return false
+        if offset_bytes > used_bytes:
+            return false
+        return size_bytes == used_bytes - offset_bytes
 
 def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         arena_heap_void_from_mutable(oldptr) return if newsz <= oldsz
 
-        old_slots: usize = (oldsz + size_of(uintptr) - 1) / size_of(uintptr)
-        new_slots: usize = (newsz + size_of(uintptr) - 1) / size_of(uintptr)
+        old_slots: usize = arena_size_bytes_to_slots(oldsz)
+        new_slots: usize = arena_size_bytes_to_slots(newsz)
         growth_slots: usize = new_slots - old_slots
+        allocation_bytes: usize = arena_region_payload_bytes(old_slots)
 
         # A darray grows by reallocating its most recent backing allocation in the
         # active arena. Reclaim that tail in place whenever the current block owns it;
         # otherwise the old block may be earlier in a chained arena and cannot move.
         # This is the general path, not just the stable reserve/fixed path, and avoids
         # retaining one dead backing allocation for every geometric growth step.
-        if a.end != null and arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
-            if growth_slots <= a.end.capacity - a.end.count:
-                a.end.count <- a.end.count + growth_slots
-                arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+        if a.end != null and arena_region_is_tail_allocation(a.end, oldptr, allocation_bytes):
+            if arena_region_can_fit(a.end, growth_slots):
+                a.end.count <- arena_checked_add_usize(a.end.count, growth_slots)
+                arena_region_ensure_committed(a.end, arena_region_total_bytes(a.end.count))
                 arena_profile_allocation_event(
                     ELISA_PROFILE_ALLOCATION_REALLOC_IN_PLACE,
                     oldptr.cast[uintptr],
@@ -960,12 +1045,13 @@ def arena_realloc(a: mutable Arena&, oldptr: mutable void&, oldsz: usize, newsz:
         # invalidate references the type system already proved stable.
         if a.strategy == ARENA_STRATEGY_RESERVE_COMMIT or a.strategy == ARENA_STRATEGY_FIXED:
             assert a.end != null
-            if arena_region_is_tail_allocation(a.end, oldptr, old_slots * size_of(uintptr)):
-                panic("region overflow: reservation exhausted (reserve_commit/fixed grow)") if growth_slots > a.end.capacity - a.end.count
+            if arena_region_is_tail_allocation(a.end, oldptr, allocation_bytes):
+                if not arena_region_can_fit(a.end, growth_slots):
+                    panic("region overflow: reservation exhausted (reserve_commit/fixed grow)")
                 # The successful tail case returns above; this branch is retained as
                 # an explicit invariant guard if the allocator representation changes.
-                a.end.count <- a.end.count + growth_slots
-                arena_region_ensure_committed(a.end, size_of(Region) + a.end.count * size_of(uintptr))
+                a.end.count <- arena_checked_add_usize(a.end.count, growth_slots)
+                arena_region_ensure_committed(a.end, arena_region_total_bytes(a.end.count))
                 arena_profile_allocation_event(
                     ELISA_PROFILE_ALLOCATION_REALLOC_IN_PLACE,
                     oldptr.cast[uintptr],
@@ -1066,12 +1152,14 @@ def arena_memeq(lhs: void&, rhs: void&, n: usize) -> bool:
     return true
 
 def arena_strdup(a: mutable Arena&, cstr: u8&) -> mutable heap u8&:
-    n: usize = arena_strlen(cstr)
-    dup: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n + 1)) can Memory.Allocate, Abort.Panic
-    arena_memcpy(arena_void_from_mutable_u8(dup), arena_void_from_u8(cstr), n)
-    trusted Unsafe.UncheckedIndex:
-        dup[n] <- 0
-    return dup
+    can Memory.Allocate, Abort.Panic:
+        n: usize = arena_strlen(cstr)
+        allocation_bytes: usize = arena_checked_add_usize(n, 1)
+        dup: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, allocation_bytes))
+        arena_memcpy(arena_void_from_mutable_u8(dup), arena_void_from_u8(cstr), n)
+        trusted Unsafe.UncheckedIndex:
+            dup[n] <- 0
+        return dup
 
 def arena_memdup(a: mutable Arena&, data: void&, size: usize) -> mutable heap void&:
     dup: mutable heap void& = arena_alloc(a, size) can Memory.Allocate, Abort.Panic
@@ -1380,14 +1468,15 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
         # to return.
         if chosen == null:
             capacity: mutable usize = COLLECTION_STACK_RESERVE_SLOTS
-            capacity <- needed_slots * 2 if capacity < needed_slots * 2
+            if needed_slots > capacity / 2:
+                capacity <- arena_checked_mul_usize(needed_slots, 2)
             fresh: mutable heap Region& = new_region_backend(capacity, a.strategy)
             fresh.owner_tag <- ARENA_OWNER_TAG_COLLECTION.uintptr()
             collection_stack_link(a, fresh)
             arena_profile_allocation_event(
                 ELISA_PROFILE_ALLOCATION_REGION_CREATE,
                 fresh.cast[uintptr],
-                fresh.capacity * size_of(uintptr),
+                arena_region_payload_bytes(fresh.capacity),
                 0.uintptr(),
                 0.usize(),
                 a.cast[uintptr],
@@ -1399,12 +1488,12 @@ def collection_stack_acquire(a: mutable Arena&, live_table: void&?, needed_slots
         claimed: mutable heap Region& = chosen
         claimed.count <- needed_slots
         claimed.free_list <- null
-        arena_region_ensure_committed(claimed, size_of(Region) + needed_slots * size_of(uintptr))
+        arena_region_ensure_committed(claimed, arena_region_total_bytes(needed_slots))
         arena_profile_region_layout(a, claimed)
         arena_profile_allocation_event(
             ELISA_PROFILE_ALLOCATION_ALLOC,
             collection_stack_table(claimed).cast[uintptr],
-            needed_slots * size_of(uintptr),
+            arena_region_payload_bytes(needed_slots),
             0.uintptr(),
             0.usize(),
             a.cast[uintptr],
@@ -1470,7 +1559,8 @@ def arena_vsprintf(a: mutable Arena&, format: u8&, args: va_list) -> mutable hea
 
         assert n >= 0
 
-        result: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, n.usize() + 1))
+        allocation_bytes: usize = arena_checked_add_usize(n.usize(), 1)
+        result: mutable heap u8& = arena_heap_u8_from_alloc(arena_alloc(a, allocation_bytes))
         trusted Unsafe.RawExtern:
-            _ = vsnprintf(arena_nullable_u8_from_heap(result), n.usize() + 1, format, args)
+            _ = vsnprintf(arena_nullable_u8_from_heap(result), allocation_bytes, format, args)
         return result
