@@ -342,28 +342,47 @@ func (a *Analyzer) validateAtomicRmwArg(callName string, arg ast.Expr, argType T
 	}
 }
 
-func (a *Analyzer) validateAtomicMemoryOrderArgs(callName string, args []ast.Expr) {
+func (a *Analyzer) validateAtomicMemoryOrderArgs(callName string, args []ast.Expr, params []Type, permissions []ast.PermissionRef) {
+	isMemoryOrderParameter := func(index int) bool {
+		if index < 0 || index >= len(params) {
+			return false
+		}
+		enumType, ok := params[index].(*EnumType)
+		return ok && enumType.Name == "MemoryOrder"
+	}
+	if callName == "fence" {
+		if !permissionRefsContainMember(permissions, "Atomics", "Fence") || !isMemoryOrderParameter(0) {
+			return
+		}
+	} else if isAtomicSlotCallName(callName) {
+		if len(params) == 0 {
+			return
+		}
+		if _, ok := atomicSlotPayloadType(params[0]); !ok {
+			return
+		}
+	}
 	switch callName {
 	case "load":
-		if len(args) >= 2 {
+		if len(args) >= 2 && isMemoryOrderParameter(1) {
 			a.validateAtomicMemoryOrder(args[1], callName, atomicOrderContextLoad)
 		}
 	case "store":
-		if len(args) >= 3 {
+		if len(args) >= 3 && isMemoryOrderParameter(2) {
 			a.validateAtomicMemoryOrder(args[2], callName, atomicOrderContextStore)
 		}
 	case "compare_exchange":
-		if len(args) >= 5 {
+		if len(args) >= 5 && isMemoryOrderParameter(3) && isMemoryOrderParameter(4) {
 			a.validateAtomicMemoryOrder(args[3], callName, atomicOrderContextReadModifyWrite)
 			a.validateAtomicMemoryOrder(args[4], callName, atomicOrderContextFailure)
 			a.validateCompareExchangeFailureOrdering(args[3], args[4])
 		}
 	case "exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
-		if len(args) >= 3 {
+		if len(args) >= 3 && isMemoryOrderParameter(2) {
 			a.validateAtomicMemoryOrder(args[2], callName, atomicOrderContextReadModifyWrite)
 		}
 	case "fence":
-		if len(args) >= 1 {
+		if len(args) >= 1 && isMemoryOrderParameter(0) {
 			a.validateAtomicMemoryOrder(args[0], callName, atomicOrderContextFence)
 		}
 	}

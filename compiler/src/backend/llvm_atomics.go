@@ -19,13 +19,17 @@ const atomicBoolStorageBits = 8
 
 func (s *functionState) emitAtomicRuntimeCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	callName := callIdentName(expr)
-	if !isBackendAtomicRuntimeCall(callName) {
+	if !isBackendAtomicRuntimeCall(callName) || len(expr.Args) != backendAtomicRuntimeArity(callName) {
 		return nil, nil, false, nil
 	}
-	if callName == "fence" {
-		if len(expr.Args) != 1 {
-			return nil, nil, true, fmt.Errorf("fence expects 1 argument, got %d", len(expr.Args))
+	orderIndexes := backendAtomicMemoryOrderArgumentIndexes(callName)
+	for _, index := range orderIndexes {
+		orderType, ok := s.exprType(expr.Args[index]).(*semantic.EnumType)
+		if !ok || orderType.Name != "MemoryOrder" {
+			return nil, nil, false, nil
 		}
+	}
+	if callName == "fence" {
 		name := C.CString("")
 		defer C.free(unsafe.Pointer(name))
 		C.LLVMBuildFence(s.builder, backendAtomicOrderingForExpr(expr.Args[0], backendAtomicOrderFence), 0, name)
@@ -172,6 +176,36 @@ func (s *functionState) emitAtomicSlotPtr(expr ast.Expr, name string) (C.LLVMVal
 		return nil, nil, nil, true, err
 	}
 	return slotPtr, instance.Args[0], atomicLLVMType, true, nil
+}
+
+func backendAtomicRuntimeArity(name string) int {
+	switch name {
+	case "load":
+		return 2
+	case "store", "exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
+		return 3
+	case "compare_exchange":
+		return 5
+	case "fence":
+		return 1
+	default:
+		return -1
+	}
+}
+
+func backendAtomicMemoryOrderArgumentIndexes(name string) []int {
+	switch name {
+	case "load":
+		return []int{1}
+	case "store", "exchange", "fetch_add", "fetch_sub", "fetch_or", "fetch_and", "fetch_xor":
+		return []int{2}
+	case "compare_exchange":
+		return []int{3, 4}
+	case "fence":
+		return []int{0}
+	default:
+		return nil
+	}
 }
 
 func isBackendAtomicRuntimeCall(name string) bool {

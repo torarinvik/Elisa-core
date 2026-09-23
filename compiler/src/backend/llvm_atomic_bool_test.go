@@ -55,3 +55,31 @@ def bool_atomic_probe(value: bool, expected: bool, desired: bool) -> bool can[At
 		}
 	}
 }
+
+func TestAtomicRuntimeHooksRespectUserFunctionShapes(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "elisacore_std/atomic_name_collision.elisa", `
+struct atomic[T]:
+    value: mutable T
+
+def store(slot: mutable atomic[i64]&, value: i64) -> void:
+    slot.value <- value
+
+def fence(value: i64) -> i64:
+    return value
+
+def main() -> i64:
+    cell: mutable atomic[i64] = zeroed
+    store(&cell, 40)
+    return fence(cell.value + 2)
+`)
+	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
+	if err != nil {
+		t.Fatalf("user-defined atomic-named helpers must keep their own signatures: %v", err)
+	}
+	if strings.Contains(output, "fence seq_cst") || strings.Contains(output, "atomicrmw") || strings.Contains(output, "cmpxchg") {
+		t.Fatalf("noncanonical user helpers were lowered as atomic intrinsics:\n%s", output)
+	}
+	if !strings.Contains(output, "call") {
+		t.Fatalf("expected ordinary calls to the user-defined helpers:\n%s", output)
+	}
+}
