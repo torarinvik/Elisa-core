@@ -27,8 +27,11 @@ extern elisa_profile_region_layout_v1(arena: uintptr, region: usize, header: uin
 # Geometry uses the runtime's actual data pointer, never an assumed header size.
 @internal
 def arena_profile_region_layout(a: Arena&, r: heap Region&) -> void:
-    if elisa_profile_region_layout_negotiate(ELISA_PROFILE_REGION_LAYOUT_ABI_V1) == ELISA_PROFILE_REGION_LAYOUT_ABI_V1:
-        elisa_profile_region_layout_v1(a.cast[uintptr], r.global_index, r.cast[uintptr], arena_heap_u8_from_region_data(r).uintptr(), r.capacity * size_of(uintptr))
+    match elisa_profile_region_layout_negotiate(ELISA_PROFILE_REGION_LAYOUT_ABI_V1):
+        1:
+            elisa_profile_region_layout_v1(a.cast[uintptr], r.global_index, r.cast[uintptr], arena_heap_u8_from_region_data(r).uintptr(), r.capacity * size_of(uintptr))
+        _:
+            pass
 
 extern elisa_profile_allocation_negotiate(requested_version: u32) -> u32
 
@@ -58,5 +61,8 @@ def arena_profile_allocation_event(
     kind: u32, address: uintptr, size: usize, old_address: uintptr,
     old_size: usize, arena: uintptr, region: usize
 ) -> void:
-    if elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1) == ELISA_PROFILE_ALLOCATION_ABI_V1:
-        elisa_profile_allocation_event_v1(kind, address, size, old_address, old_size, arena, region)
+    match elisa_profile_allocation_negotiate(ELISA_PROFILE_ALLOCATION_ABI_V1):
+        1:
+            elisa_profile_allocation_event_v1(kind, address, size, old_address, old_size, arena, region)
+        _:
+            pass

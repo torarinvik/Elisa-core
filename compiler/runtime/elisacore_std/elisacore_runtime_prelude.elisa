@@ -116,6 +116,32 @@ def progress_leave_recursion(budget: mutable ProgressBudget&):
 # Permanent / scratch arena allocation
 # ------------------------------------------------------------
 
+@internal
+def runtime_checked_add_usize(left: usize, right: usize) -> usize:
+	can Abort.Panic:
+		result: usize = left + right
+		if result < left:
+			panic("runtime size arithmetic overflow")
+		return result
+
+@internal
+def runtime_checked_usize_to_i64(value: usize) -> i64:
+	can Abort.Panic:
+		converted: i64 = value.i64()
+		if converted < 0 or converted.usize() != value:
+			panic("runtime allocation size exceeds allocator API range")
+		return converted
+
+@internal
+def runtime_checked_i64_to_usize(value: i64) -> usize:
+	can Abort.Panic:
+		if value < 0:
+			panic("negative runtime size")
+		converted: usize = value.usize()
+		if converted.i64() != value:
+			panic("runtime size exceeds target range")
+		return converted
+
 def alloc_perm(size: i64) -> mutable heap void&:
 	resolved: usize = size.usize() if size > 0 else 1
 	return arena_alloc(&perm_arena, resolved) can Memory.Allocate, Abort.Panic
@@ -215,7 +241,8 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 		# Experimental note:
 		# CTX_ENABLE_SMALL_STRING_CACHE_EXPERIMENT exists to host
 		# test-first cache experiments on dedicated branches.
-		out: mutable heap u8& = alloc_perm((len + 1).i64()).cast[heap u8&]
+		allocation_bytes: usize = runtime_checked_add_usize(len, 1)
+		out: mutable heap u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[heap u8&]
 		memcpy(out.cast[mutable void&], src.cast[void&], len) if len > 0
 		out[len] <- 0
 		register_perm_string_len(out.cast[u8&], len)
@@ -228,16 +255,19 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 	can Memory.Allocate, Console.Format, Abort.Panic:
 		len: int = snprintf(null, 0, "%lld", value)
+		panic("int_to_string_into: snprintf failed") if len < 0
+		string_len: usize = len.usize()
+		allocation_bytes: usize = runtime_checked_add_usize(string_len, 1)
 
-		if len > 0 and len <= 8:
+		if string_len > 0 and string_len <= 8:
 			text: u8[9]
-			snprintf(&text[0], len.usize() + 1, "%lld", value)
-			return intern_small_string(&text[0], len.usize())
+			snprintf(&text[0], allocation_bytes, "%lld", value)
+			return intern_small_string(&text[0], string_len)
 
-		out: mutable heap u8& = arena_alloc(arena, len.usize() + 1).cast[heap u8&]
-		snprintf(out.cast[mutable u8&?], len.usize() + 1, "%lld", value)
+		out: mutable heap u8& = arena_alloc(arena, allocation_bytes).cast[heap u8&]
+		snprintf(out.cast[mutable u8&?], allocation_bytes, "%lld", value)
 
-		register_perm_string_len(out.cast[u8&], len.usize()) if arena == &perm_arena
+		register_perm_string_len(out.cast[u8&], string_len) if arena == &perm_arena
 
 		return out
 

@@ -18,18 +18,21 @@ def concat2(lhs: u8&?, rhs: u8&?) -> u8&:
 
         left return if right_len == 0
 
-        if left_len + right_len <= 8:
+        result_len: usize = runtime_checked_add_usize(left_len, right_len)
+
+        if result_len <= 8:
             text: u8[9]
             memcpy((&text[0]).cast[mutable void&], left.cast[void&], left_len)
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
-            text[left_len + right_len] <- 0
-            return intern_small_string(&text[0], left_len + right_len).cast[u8&]
+            text[result_len] <- 0
+            return intern_small_string(&text[0], result_len).cast[u8&]
 
-        out: mutable u8& = alloc_perm((left_len + right_len + 1).i64()).cast[u8&]
+        allocation_bytes: usize = runtime_checked_add_usize(result_len, 1)
+        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
-        out[left_len + right_len] <- 0
-        register_perm_string_len(out, left_len + right_len)
+        out[result_len] <- 0
+        register_perm_string_len(out, result_len)
         return out
 
 def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
@@ -44,17 +47,20 @@ def concat2_scratch(lhs: u8&?, rhs: u8&?) -> u8&:
 
         left return if right_len == 0
 
-        if left_len + right_len <= 8:
+        result_len: usize = runtime_checked_add_usize(left_len, right_len)
+
+        if result_len <= 8:
             text: u8[9]
             memcpy((&text[0]).cast[mutable void&], left.cast[void&], left_len)
             memcpy((&text[0] + left_len).cast[mutable void&], right.cast[void&], right_len)
-            text[left_len + right_len] <- 0
-            return intern_small_string(&text[0], left_len + right_len).cast[u8&]
+            text[result_len] <- 0
+            return intern_small_string(&text[0], result_len).cast[u8&]
 
-        out: mutable u8& = alloc_scratch((left_len + right_len + 1).i64()).cast[u8&]
+        allocation_bytes: usize = runtime_checked_add_usize(result_len, 1)
+        out: mutable u8& = alloc_scratch(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&]
         memcpy(out.cast[mutable void&], left.cast[void&], left_len)
         memcpy((out + left_len).cast[mutable void&], right.cast[void&], right_len)
-        out[left_len + right_len] <- 0
+        out[result_len] <- 0
         return out
 
 # ------------------------------------------------------------
@@ -71,7 +77,7 @@ def ctx_fstr_alloc(total: usize) -> dstr:
     can Memory.Allocate, Abort.Panic:
         out: mutable dstr = zeroed
         out return if total == 0
-        buf: mutable u8& = alloc_perm(total.i64()).cast[mutable u8&]
+        buf: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(total)).cast[mutable u8&]
         out.items as & <- buf
         out.count <- 0
         out.capacity <- total
@@ -81,9 +87,11 @@ def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
     can Memory.Allocate, Abort.Panic:
         return if ptr == null or len == 0
         return if out.items == null
-        assert out.count + len <= out.capacity
+        new_count: usize = runtime_checked_add_usize(out.count, len)
+        if new_count > out.capacity:
+            panic("f-string append exceeds allocation")
         arena_memcpy(collections_mutable_void_from_items_at[u8](out.items, out.count), ptr.cast[void&], len)
-        out.count <- out.count + len
+        out.count <- new_count
 
 # ------------------------------------------------------------
 # String operations
@@ -194,7 +202,8 @@ def string_slice(value: u8&?, start: i64, end: i64) -> u8&:
 
         intern_small_string(src + lo, out_len).cast[u8&] return if out_len <= 8
 
-        out: mutable u8& = alloc_perm((out_len + 1).i64()).cast[u8&]
+        allocation_bytes: usize = runtime_checked_add_usize(out_len, 1)
+        out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&]
         memcpy(out.cast[mutable void&], (src + lo).cast[void&], out_len)
         out[out_len] <- 0
         register_perm_string_len(out, out_len)
@@ -280,12 +289,14 @@ def string_view_copy(view: sview) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         intern_small_string("", 0) return if view.len <= 0
 
-        intern_small_string(view.data, view.len.usize()) return if view.len <= 8
+        view_len: usize = runtime_checked_i64_to_usize(view.len)
+        intern_small_string(view.data, view_len) return if view_len <= 8
 
-        out: mutable heap u8& = alloc_perm((view.len + 1).usize()).cast[heap u8&]
-        memcpy(out.cast[mutable void&], view.data.cast[void&], view.len.usize())
-        out[view.len.usize()] <- 0
-        register_perm_string_len(out.cast[u8&], view.len.usize())
+        allocation_bytes: usize = runtime_checked_add_usize(view_len, 1)
+        out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&]
+        memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
+        out[view_len] <- 0
+        register_perm_string_len(out.cast[u8&], view_len)
         return out
 
 # ------------------------------------------------------------
