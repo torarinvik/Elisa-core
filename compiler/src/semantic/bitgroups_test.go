@@ -268,6 +268,21 @@ def build(owner: Arena) -> void:
 	}
 }
 
+func TestAnalyzeStructRegionOwnerAcceptsLocalArenaValueArgument(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_local_arena_value_arg.elisa", `struct Box[@owner]:
+	value: i64
+
+def build() -> i64:
+	can Memory.Allocate:
+		arena: mutable Arena = zeroed
+		box: Box[arena] = Box{value: 7}
+		return box.value
+`)
+	if len(result.Errors()) != 0 {
+		t.Fatalf("expected a local Arena value to be accepted as a region generic argument, got:\n%s", strings.Join(result.Errors(), "\n"))
+	}
+}
+
 func TestAnalyzeStructRegionOwnerWithTypeParams(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSource(t, "struct_region_owner_type_param.elisa", `struct Box[T, @owner]:
 	value: T

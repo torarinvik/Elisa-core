@@ -44,19 +44,41 @@ func (a *Analyzer) analyzeBlockInScope(stmts []ast.Stmt, scope *Scope) {
 
 func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scope) {
 	known := inferDArrayBuilderKnownTypes(scope)
+	// This prepass resolves explicit local types before the ordinary statement walk.
+	// Give it a private lexical scope and publish each preceding local there so a
+	// region generic such as `Box[arena]` can see an earlier `arena: mutable Arena`
+	// in the same nested block (`can:`, `region:`, etc.). Without this shadow scope,
+	// region lookup accidentally consulted only the block's parent and rejected a
+	// valid Arena owner—or could incorrectly fall through to a same-named outer one.
+	savedScope := a.currentScope
+	prepassScope := NewScope(scope)
+	a.currentScope = prepassScope
+	defer func() { a.currentScope = savedScope }()
+	definePrepassLocal := func(decl *ast.VarDeclStmt, typ Type) {
+		if decl == nil {
+			return
+		}
+		if typ == nil {
+			typ = invalidType
+		}
+		prepassScope.Define(&Symbol{Name: decl.Name, Kind: SymbolLocal, Type: typ, Node: decl, Mutable: decl.Mutable, BindingMutabilityExplicit: decl.BindingExplicit, Ghost: decl.Ghost})
+	}
 	for i, stmt := range stmts {
 		decl, ok := stmt.(*ast.VarDeclStmt)
 		if !ok || decl == nil {
 			continue
 		}
 		if decl.Type != nil {
-			known[decl.Name] = a.resolveType(decl.Type)
+			typ := a.resolveType(decl.Type)
+			known[decl.Name] = typ
+			definePrepassLocal(decl, typ)
 			continue
 		}
 		if !semanticListLiteralExpr(decl.Value) {
 			if typ := inferKnownDArrayBuilderExprType(decl.Value, known); typ != nil {
 				known[decl.Name] = typ
 			}
+			definePrepassLocal(decl, known[decl.Name])
 			continue
 		}
 		elem := inferDArrayBuilderElemTypeExpr(decl.Value)
@@ -97,6 +119,7 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 				}
 				a.ambiguousDArrayBuilders[decl] = true
 			}
+			definePrepassLocal(decl, known[decl.Name])
 			continue
 		}
 		decl.Mutable = true
@@ -108,7 +131,9 @@ func (a *Analyzer) inferUntypedDArrayBuilderLocals(stmts []ast.Stmt, scope *Scop
 				TypeArgs: []ast.TypeExpr{elem},
 			},
 		}
-		known[decl.Name] = a.resolveType(decl.Type)
+		typ := a.resolveType(decl.Type)
+		known[decl.Name] = typ
+		definePrepassLocal(decl, typ)
 	}
 }
 
