@@ -676,6 +676,13 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 // covers the global / process-lifetime target; this covers the local outer ->
 // inner case the lattice makes precise.
 func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, targetType, valueType Type) {
+	a.checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr, targetType, valueType, nil)
+}
+
+// checkNestedRegionStoreEscapeAtScope handles a destination whose declaration
+// scope is known before its binding becomes visible to name lookup. Assignment
+// sites pass nil and resolve their existing target binding normally.
+func (a *Analyzer) checkNestedRegionStoreEscapeAtScope(targetExpr, valueExpr ast.Expr, targetType, valueType Type, declarationScope *Scope) {
 	if a == nil || targetExpr == nil {
 		return
 	}
@@ -691,7 +698,11 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, 
 			sort.Strings(regions)
 			for _, valueRegion := range regions {
 				if targetRegion == "" {
-					a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+					if declarationScope != nil {
+						a.checkRegionlessTargetStoreEscapeInScope(targetExpr, valueRegion, declarationScope)
+					} else {
+						a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+					}
 					continue
 				}
 				if a.regionStoreEscapes(targetRegion, valueRegion) {
@@ -706,7 +717,11 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, 
 		// struct). The slot still dangles if its backing storage outlives the
 		// value's region block: a binding declared in a scope that strictly
 		// encloses the region's declaration scope survives the region's exit.
-		a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+		if declarationScope != nil {
+			a.checkRegionlessTargetStoreEscapeInScope(targetExpr, valueRegion, declarationScope)
+		} else {
+			a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
+		}
 		return
 	}
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
@@ -1239,6 +1254,20 @@ func (a *Analyzer) checkStructCopyInteriorRegionEscape(targetExpr ast.Expr, targ
 // excluded: their lifetimes are governed by the region-return/adoption
 // machinery, not the explicit-region lattice.
 func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRegion string) {
+	if a == nil || targetExpr == nil {
+		return
+	}
+	root := rootIdentExpr(targetExpr)
+	if root == nil {
+		return
+	}
+	a.checkRegionlessTargetStoreEscapeInScope(targetExpr, valueRegion, a.definingScope(root.Name))
+}
+
+func (a *Analyzer) checkRegionlessTargetStoreEscapeInScope(targetExpr ast.Expr, valueRegion string, targetScope *Scope) {
+	if a == nil || targetExpr == nil {
+		return
+	}
 	if isSynthesizedAutoRegion(valueRegion) {
 		return
 	}
@@ -1250,7 +1279,6 @@ func (a *Analyzer) checkRegionlessTargetStoreEscape(targetExpr ast.Expr, valueRe
 	if root == nil {
 		return
 	}
-	targetScope := a.definingScope(root.Name)
 	if targetScope == nil || targetScope == state.DeclScope {
 		return
 	}

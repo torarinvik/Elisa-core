@@ -1095,18 +1095,17 @@ func TestNarrowHandleWidthLint(t *testing.T) {
 	body := `
 def main() -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
-        region scratch(1048576)
-        last: mutable Tree = new[auto] Tree.Leaf(value: 0)
-        for i in 0..<100:
-            last <- new[auto] Tree.Leaf(value: i)
-        out: mutable i64 = 0
-        match last:
-            Tree.Leaf(value: v):
-                out <- v
-            _:
-                pass
-        destroy scratch
-        return out - 99
+        region scratch(1048576):
+            last: mutable Tree = new[auto] Tree.Leaf(value: 0)
+            for i in 0..<100:
+                last <- new[auto] Tree.Leaf(value: i)
+            out: mutable i64 = 0
+            match last:
+                Tree.Leaf(value: v):
+                    out <- v
+                _:
+                    pass
+            return out - 99
 `
 	wide := build("width_lint_wide.elisa", `
 enum Tree:

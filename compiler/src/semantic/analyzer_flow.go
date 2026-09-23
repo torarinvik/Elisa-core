@@ -71,7 +71,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// declared type names an outer region dangles once the inner region is
 			// freed (the var-decl analogue of the assignment/push check). Decided by
 			// the region outlives-lattice.
-			a.checkNestedRegionStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, declType, valueType)
+			// The binding being initialized is not yet available through name lookup.
+			// Use its actual declaration scope so an outer declaration with the same
+			// name cannot make this fresh local look like a longer-lived store target.
+			a.checkNestedRegionStoreEscapeAtScope(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, declType, valueType, a.currentScope)
 			a.checkFreshContainerStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, declType, n.Value)
 		} else if declType == nil {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
