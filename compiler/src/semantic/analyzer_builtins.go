@@ -146,7 +146,7 @@ func (a *Analyzer) registerBuiltinRuntimeStructs() {
 	})
 	a.registerBuiltinStructType("StringView", nil, false, []builtinFieldSpec{
 		{name: "data", typ: refTypeExpr("u8", false), mutable: false},
-		{name: "len", typ: namedTypeExpr("i64", false), mutable: true},
+		{name: "len", typ: namedTypeExpr("i64", false), mutable: false},
 	})
 	a.registerBuiltinStructType("DynArray", []string{"T"}, false, []builtinFieldSpec{
 		{name: "items", typ: refTypeParamExpr("T", true), mutable: true},
