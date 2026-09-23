@@ -245,8 +245,6 @@ def __cast__(value: u8&?) -> sview:
 
 def string_view_len(view: sview) -> i64:
     0 return if view.len < 0
-    if view.len > 0:
-        0 return if view.data == null
     view_len: usize = view.len.usize()
     return 0 if view_len.i64() != view.len
     return view.len
@@ -254,7 +252,6 @@ def string_view_len(view: sview) -> i64:
 def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     empty: sview = StringView{data: view.data, len: 0}
     return empty if view.len < 0
-    return empty if view.len > 0 and view.data == null
     return empty if view.len == 0
     view_len: usize = view.len.usize()
     return empty if view_len.i64() != view.len
@@ -266,8 +263,7 @@ def string_view_slice(view: sview, start: i64, end: i64) -> sview:
     hi <- view.len if hi > view.len
     hi <- lo if hi < lo
 
-    data: u8& = view.data if view.data != null else ""
-    return StringView{data: data + lo.usize(), len: hi - lo}
+    return StringView{data: view.data + lo.usize(), len: hi - lo}
 
 def string_view_prefix(view: sview, end: i64) -> sview:
     return string_view_slice(view, 0, end)
@@ -280,12 +276,10 @@ def string_view_index(view: sview, index: i64) -> i64:
     view_len: usize = view.len.usize()
     0 return if view_len.i64() != view.len
     0 return if index < 0 or index >= view.len
-    0 return if view.data == null
 
     index_usize: usize = index.usize()
     0 return if index_usize.i64() != index
-    data: u8& = view.data if view.data != null else ""
-    return data[index_usize].i64()
+    return view.data[index_usize].i64()
 
 def string_view_eq(view: sview, other: u8&?) -> int:
     rhs: u8& = other if other != null else ""
@@ -294,47 +288,36 @@ def string_view_eq(view: sview, other: u8&?) -> int:
     0 return if view.len < 0
     view_len: usize = view.len.usize()
     0 return if view_len.i64() != view.len or view_len != rhs_len
-    0 return if view_len > 0 and view.data == null
-    view_data: u8& = view.data if view.data != null else ""
     #1 return if view.len == 0
-    #1 return if view_data == rhs
+    #1 return if view.data == rhs
 
-    1 return if view.len == 0 or view_data.cast[uintptr] == rhs.cast[uintptr]
+    1 return if view.len == 0 or view.data.cast[uintptr] == rhs.cast[uintptr]
 
-    return 1 if memcmp(view_data.cast[void&], rhs.cast[void&], view_len) == 0 else 0
+    return 1 if memcmp(view.data.cast[void&], rhs.cast[void&], view_len) == 0 else 0
 
 def string_views_eq(lhs: sview, rhs: sview) -> int:
     0 return if lhs.len < 0 or rhs.len < 0
     lhs_len: usize = lhs.len.usize()
     rhs_len: usize = rhs.len.usize()
     0 return if lhs_len.i64() != lhs.len or rhs_len.i64() != rhs.len
-    0 return if lhs_len > 0 and lhs.data == null
-    0 return if rhs_len > 0 and rhs.data == null
-
     if likely lhs_len != rhs_len:
         return 0
 
-    lhs_data: u8& = lhs.data if lhs.data != null else ""
-    rhs_data: u8& = rhs.data if rhs.data != null else ""
     #1 return if lhs.len == 0
-    #1 return if lhs_data == rhs_data
-    1 return if lhs.len == 0 or lhs_data.cast[uintptr] == rhs_data.cast[uintptr]
+    #1 return if lhs.data == rhs.data
+    1 return if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
     
-    return 1 if memcmp(lhs_data.cast[void&], rhs_data.cast[void&], lhs_len) == 0 else 0
+    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs_len) == 0 else 0
 
 def string_view_copy(view: sview) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         intern_small_string("", 0) return if view.len <= 0
-        if view.data == null:
-            panic("invalid string view data")
-
-        view_data: u8& = view.data if view.data != null else ""
         view_len: usize = runtime_checked_i64_to_usize(view.len)
-        intern_small_string(view_data, view_len) return if view_len <= 8
+        intern_small_string(view.data, view_len) return if view_len <= 8
 
         allocation_bytes: usize = runtime_checked_add_usize(view_len, 1)
         out: mutable heap u8& = arena_alloc(&perm_arena, allocation_bytes).cast[heap u8&]
-        memcpy(out.cast[mutable void&], view_data.cast[void&], view_len)
+        memcpy(out.cast[mutable void&], view.data.cast[void&], view_len)
         out[view_len] <- 0
         register_perm_string_len(out.cast[u8&], view_len)
         return out
@@ -350,13 +333,12 @@ def string_view_copy(view: sview) -> heap u8&:
 
 def sview_len(view: sview) -> usize:
     0.usize() return if view.len <= 0
-    0.usize() return if view.data == null
     view_len: usize = view.len.usize()
     return 0.usize() if view_len.i64() != view.len
     return view_len
 
 def sview_is_empty(view: sview) -> bool:
-    return view.len <= 0 or view.data == null
+    return view.len <= 0
 
 # Bounds-safe byte read; returns 0 for an out-of-range index.
 def sview_at(view: sview, index: usize) -> u8:
@@ -367,27 +349,17 @@ def sview_eq(lhs: sview, rhs: sview) -> bool:
 
 def sview_starts_with(view: sview, prefix: sview) -> bool:
     false return if view.len < 0 or prefix.len < 0
-    if view.len > 0:
-        false return if view.data == null
-    if prefix.len > 0:
-        false return if prefix.data == null
     false return if prefix.len > view.len
     return string_views_eq(string_view_prefix(view, prefix.len), prefix) == 1
 
 def sview_ends_with(view: sview, suffix: sview) -> bool:
     false return if view.len < 0 or suffix.len < 0
-    if view.len > 0:
-        false return if view.data == null
-    if suffix.len > 0:
-        false return if suffix.data == null
     false return if suffix.len > view.len
     return string_views_eq(string_view_suffix(view, view.len - suffix.len), suffix) == 1
 
 # Index of the first occurrence of `byte`, or -1 if absent.
 def sview_find_byte(view: sview, byte: u8) -> i64:
     -1 return if view.len < 0
-    if view.len > 0:
-        -1 return if view.data == null
     view_len: usize = view.len.usize()
     -1 return if view_len.i64() != view.len
     i: mutable i64 = 0
@@ -449,7 +421,6 @@ def bytes_view(buf: darray[u8]) -> sview:
 def hash_sview(value: sview) -> u64:
     h: mutable u64 = 0xcbf29ce484222325
     return h if value.len <= 0
-    return h if value.data == null
     view_len: usize = value.len.usize()
     return h if view_len.i64() != value.len
     i: mutable usize = 0

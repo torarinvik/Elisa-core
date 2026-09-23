@@ -64,11 +64,10 @@ def name_table_hash_step(hash: u64, ch: char) -> u64:
 
 def name_text_hash(text: sview, policy: NameCasePolicy) -> u64:
     hash: mutable u64 = 1469598103934665603
-    return hash if text.len <= 0 or text.data == null
-    data: u8& = text.data if text.data != null else ""
+    return hash if text.len <= 0
     index: mutable i64 = 0
     while index < text.len:
-        ch: mutable char = data[index.usize()].char()
+        ch: mutable char = text.data[index.usize()].char()
         ch <- name_ascii_lower(ch) if policy == NameCasePolicy.AsciiCaseInsensitive
         hash <- name_table_hash_step(hash, ch)
         index <- index + 1
@@ -77,13 +76,11 @@ def name_text_hash(text: sview, policy: NameCasePolicy) -> u64:
 
 def name_text_eq(left: sview, right: sview, policy: NameCasePolicy) -> bool:
     false return if left.len != right.len
-    false return if left.len > 0 and (left.data == null or right.data == null)
-    left_data: u8& = left.data if left.data != null else ""
-    right_data: u8& = right.data if right.data != null else ""
+    false return if left.len < 0 or right.len < 0
     index: mutable i64 = 0
     while index < left.len:
-        left_ch: mutable char = left_data[index.usize()].char()
-        right_ch: mutable char = right_data[index.usize()].char()
+        left_ch: mutable char = left.data[index.usize()].char()
+        right_ch: mutable char = right.data[index.usize()].char()
         if policy == NameCasePolicy.AsciiCaseInsensitive:
             left_ch <- name_ascii_lower(left_ch)
             right_ch <- name_ascii_lower(right_ch)
@@ -254,18 +251,17 @@ def intern_view(table: mutable NameTable&, text: sview, policy: NameCasePolicy) 
 
 def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameCasePolicy) -> NameId:
     can Memory.Allocate, Abort.Panic:
-        NAME_TABLE_INVALID_ID return if text.len < 0 or (text.len > 0 and text.data == null)
+        NAME_TABLE_INVALID_ID return if text.len < 0
         hash: u64 = name_text_hash(text, policy)
         existing: NameId = table.name_table_find(text, hash, policy)
         existing return if existing != NAME_TABLE_INVALID_ID
-        data: u8& = text.data if text.data != null else ""
         table.name_table_ensure_capacity(table.entries.count + 1)
         in table.owner:
             original_hash: u64 = name_text_hash(text, NameCasePolicy.CaseSensitive)
             owned_text: mutable darray[u8] = []
             index: mutable i64 = 0
             while index < text.len:
-                owned_text.push(data[index.usize()])
+                owned_text.push(text.data[index.usize()])
                 index <- index + 1
             owned_text.push(0)
             stable_text: sview = owned_text.items.cast[cstr][0:text.len]

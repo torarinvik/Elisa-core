@@ -110,18 +110,17 @@ def read_entire_file_cstr(a: mutable Arena&, path: cstr) -> cstr error[FileIoErr
 # repro/nw_fileio_catch_void_error_union_stage1_crash.elisa.)
 def write_entire_file(path: cstr, bytes: sview) -> i64 error[FileIoError]:
     can Blocking.IO, Memory.Allocate, Memory.Release:
-        if bytes.len < 0 or (bytes.len > 0 and bytes.data == null):
+        if bytes.len < 0:
             raise FileIoError.WriteFailed(path)
         byte_count: usize = bytes.len.usize()
         if byte_count.i64() != bytes.len:
             raise FileIoError.WriteFailed(path)
-        data: u8& = bytes.data if bytes.data != null else ""
         handle: mutable heap void&? = fopen(path.cast[u8&], "wb")
         if handle == null:
             raise FileIoError.OpenFailed(path)
         stream: mutable heap void& = handle
         if bytes.len > 0:
-            written: usize = fwrite(data.cast[void&], 1, byte_count, stream)
+            written: usize = fwrite(bytes.data.cast[void&], 1, byte_count, stream)
             if written != byte_count:
                 _ = fclose(stream)
                 raise FileIoError.WriteFailed(path)

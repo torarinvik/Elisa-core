@@ -132,11 +132,8 @@ def ctx_string_views_eq(lhs: sview, rhs: sview) -> int:
     0 return if lhs.len < 0 or rhs.len < 0
     if likely lhs.len != rhs.len:
         return 0
-    0 return if lhs.len > 0 and (lhs.data == null or rhs.data == null)
-    lhs_data: u8& = lhs.data if lhs.data != null else ""
-    rhs_data: u8& = rhs.data if rhs.data != null else ""
-    1 return if lhs.len == 0 or lhs_data.cast[uintptr] == rhs_data.cast[uintptr]
-    return 1 if memcmp(lhs_data.cast[void&], rhs_data.cast[void&], lhs.len.usize()) == 0 else 0
+    1 return if lhs.len == 0 or lhs.data.cast[uintptr] == rhs.data.cast[uintptr]
+    return 1 if memcmp(lhs.data.cast[void&], rhs.data.cast[void&], lhs.len.usize()) == 0 else 0
 
 def ctx_string_from_view(view: sview) -> cstr[shape_out]:
     return string_view_copy(view).cast[u8&] can Memory.Allocate, Abort.Panic

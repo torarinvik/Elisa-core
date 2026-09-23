@@ -809,12 +809,11 @@ def ctx_hash_cstr(s: cstr) -> u64:
 
 def ctx_hash_sview(view: sview) -> u64:
     h: mutable u64 = 0xcbf29ce484222325
-    return h if view.len <= 0 or view.data == null
-    data: u8& = view.data if view.data != null else ""
+    return h if view.len <= 0
     i: mutable i64 = 0
     trusted Unsafe.UncheckedIndex:
         while i < view.len:
-            h <- h ^ data[i.usize()].u64()
+            h <- h ^ view.data[i.usize()].u64()
             h <- h * 0x100000001b3
             i <- i + 1
     return h
@@ -823,13 +822,11 @@ def ctx_cstr_eq_sview(text: cstr, view: sview) -> bool:
     false return if view.len < 0
     i: mutable usize = 0
     len: usize = view.len.usize()
-    false return if len > 0 and view.data == null
-    data: u8& = view.data if view.data != null else ""
     remaining: mutable usize = len
     trusted Unsafe.UncheckedIndex:
         while remaining > 0:
             decreases remaining
-            false return if text[i] != data[i]
+            false return if text[i] != view.data[i]
             i <- i + 1
             remaining <- remaining - 1
         return text[len] == 0
