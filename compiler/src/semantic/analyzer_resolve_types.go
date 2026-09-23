@@ -27,7 +27,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		case "cstr":
 			return &CStrType{Shape: &WildcardShape{}, SurfaceName: "cstr"}
 		case "sview":
-			return &SViewType{}
+			return &SViewType{Region: n.Region}
 		case "dstr":
 			// dstr is an owned dynamic string: the u8 specialization of darray
 			// (docs/26). It shares darray's {ptr, count, capacity} representation

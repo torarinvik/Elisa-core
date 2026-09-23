@@ -115,6 +115,9 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	if a == nil || valueExpr == nil {
 		return
 	}
+	if a.checkUnannotatedSViewParamReturn(valueExpr) {
+		return
+	}
 	// The returned value's region: its own type's region if it carries one (a returned container /
 	// view), else the region it BORROWS from — peeling `&`/index/slice/field down to the underlying
 	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
@@ -126,10 +129,65 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	if region == "" || !a.lookupRegionParam(region) {
 		return
 	}
-	if regionParamReturnTypeRegion(a.currentReturn) == region {
+	declaredReturnRegion := regionParamReturnTypeRegion(a.currentReturn)
+	if a.currentFuncType != nil && a.currentFuncType.ReturnRegion != "" {
+		declaredReturnRegion = a.currentFuncType.ReturnRegion
+	}
+	if declaredReturnRegion == region {
 		return // the return type carries the same @r — sound, and checked at the call site
 	}
 	a.errorf(valueExpr.Pos(), "value tied to region parameter %q cannot be returned with a region-less type (its lifetime is the caller's %q region); annotate the return type with `@%s` (e.g. `-> view[u8] @%s`) so the borrow stays tied to the caller's region", region, region, region, region)
+}
+
+// checkUnannotatedSViewParamReturn rejects explicitly region-bound sview parameters when a
+// direct return erases that declared region. Unannotated sview forwarding is permitted here:
+// the region escape analysis records call-result provenance at the use site, and existing
+// standard-library/compiler APIs depend on forwarding unannotated descriptors.
+func (a *Analyzer) checkUnannotatedSViewParamReturn(valueExpr ast.Expr) bool {
+	if a == nil || a.currentFuncDecl == nil || a.currentFuncType == nil || a.currentReturn == nil {
+		return false
+	}
+	returned, ok := stripParenExpr(valueExpr).(*ast.Ident)
+	if !ok || returned == nil {
+		return false
+	}
+	returnType := StripAggregateStateType(a.currentReturn)
+	if _, ok := returnType.(*SViewType); !ok {
+		return false
+	}
+	for index, parameter := range a.currentFuncDecl.Params {
+		if parameter.Name != returned.Name || index >= len(a.currentFuncType.Params) {
+			continue
+		}
+		parameterType := StripAggregateStateType(a.currentFuncType.Params[index])
+		viewParameter, ok := parameterType.(*SViewType)
+		if !ok || viewParameter == nil {
+			return false
+		}
+		parameterRegion := explicitTypeRegion(parameter.Type)
+		if parameterRegion == "" || a.currentFuncType.ReturnRegion == parameterRegion {
+			return false
+		}
+		a.errorf(valueExpr.Pos(), "sview parameter %q is tied to region %q but the return type does not carry that region; annotate the return type with `@%s`", returned.Name, parameterRegion, parameterRegion)
+		return true
+	}
+	return false
+}
+
+func explicitTypeRegion(typ ast.TypeExpr) string {
+	switch t := typ.(type) {
+	case *ast.NamedType:
+		return t.Region
+	case *ast.BuiltinTypeExpr:
+		return t.Region
+	case *ast.GenericType:
+		return t.Region
+	case *ast.RefType:
+		return t.Region
+	case *ast.MutableType:
+		return explicitTypeRegion(t.Elem)
+	}
+	return ""
 }
 
 // regionParamReturnTypeRegion returns a type's region for the return-escape check: a reference's own

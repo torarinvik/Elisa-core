@@ -415,6 +415,8 @@ func (a *Analyzer) isFreshRegionAllocation(vd *ast.VarDeclStmt) bool {
 // typeExprHasExplicitRegion reports whether a type annotation carries an `@r` region.
 func typeExprHasExplicitRegion(te ast.TypeExpr) bool {
 	switch t := te.(type) {
+	case *ast.NamedType:
+		return t.Region != ""
 	case *ast.MutableType:
 		return typeExprHasExplicitRegion(t.Elem)
 	case *ast.RefType:
