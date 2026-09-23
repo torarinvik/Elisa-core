@@ -26,6 +26,8 @@ def valid_suffix(view: sview) -> bool:
 		"define i1 @literal_left(",
 		"define i1 @valid_suffix(",
 		"svlit.len.eq = icmp eq i64",
+		"svlit.data.nonnull = icmp ne ptr",
+		"svlit.valid = and i1",
 		"call i64 @ctx_string_view_eq(",
 	} {
 		if !strings.Contains(output, check) {

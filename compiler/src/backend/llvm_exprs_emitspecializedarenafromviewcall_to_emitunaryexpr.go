@@ -376,11 +376,25 @@ func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, view
 	if literalLen == 0 {
 		return lenEqual, nil
 	}
+	// The source-level carrier may be malformed by unsafe code, a foreign
+	// boundary, or corrupted storage. Even though ordinary sview constructors
+	// produce a valid pointer for a positive length, this specialization must
+	// preserve the runtime helper's null guard before it reaches byte loads or
+	// memcmp. The pointer comparison itself is safe; the branch below keeps all
+	// memory reads control-dependent on both the length and non-null checks.
+	viewDataNonNull := C.LLVMBuildICmp(
+		s.builder,
+		C.LLVMIntPredicate(C.LLVMIntNE),
+		viewData,
+		C.LLVMConstNull(C.LLVMTypeOf(viewData)),
+		cStringFree("svlit.data.nonnull"),
+	)
+	compareAllowed := C.LLVMBuildAnd(s.builder, lenEqual, viewDataNonNull, cStringFree("svlit.valid"))
 
 	entryBlock := C.LLVMGetInsertBlock(s.builder)
 	compareBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.compare"))
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("svlit.merge"))
-	C.LLVMBuildCondBr(s.builder, lenEqual, compareBB, mergeBB)
+	C.LLVMBuildCondBr(s.builder, compareAllowed, compareBB, mergeBB)
 
 	C.LLVMPositionBuilderAtEnd(s.builder, compareBB)
 	var compareValue C.LLVMValueRef

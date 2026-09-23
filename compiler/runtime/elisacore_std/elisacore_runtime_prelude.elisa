@@ -56,7 +56,7 @@ struct StringLenCacheEntry:
 	len: mutable usize
 
 struct StringView:
-	data: mutable u8&
+	data: u8&?
 	len: mutable i64
 
 struct ProgressBudget:
