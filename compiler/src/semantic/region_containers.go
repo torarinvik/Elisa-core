@@ -3,6 +3,7 @@ package semantic
 import (
 	"os"
 	"reflect"
+	"sort"
 
 	"elisacore/src/ast"
 )
@@ -686,16 +687,15 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, 
 		// every concrete backing dependency at the store boundary; otherwise a call can
 		// erase the source region and place the view into a longer-lived binding.
 		if state, ok := a.regionRefStateForExpr(valueExpr); ok {
-			for region, dependency := range state.Deps {
-				if region == nil || !dependency.Valid {
-					continue
-				}
+			regions := liveRegionDependencyNames(state)
+			sort.Strings(regions)
+			for _, valueRegion := range regions {
 				if targetRegion == "" {
-					a.checkRegionlessTargetStoreEscape(targetExpr, region.Name)
+					a.checkRegionlessTargetStoreEscape(targetExpr, valueRegion)
 					continue
 				}
-				if a.regionStoreEscapes(targetRegion, region.Name) {
-					a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(region.Name), regionDisplayName(targetRegion), regionDisplayName(region.Name), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+				if a.regionStoreEscapes(targetRegion, valueRegion) {
+					a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 				}
 			}
 		}
@@ -712,6 +712,35 @@ func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, 
 	if a.regionStoreEscapes(targetRegion, valueRegion) {
 		a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(valueRegion), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
 	}
+}
+
+func liveRegionDependencyNames(state regionRefState) []string {
+	seen := make(map[string]struct{})
+	seenFields := make(map[uintptr]struct{})
+	var visit func(regionRefState)
+	visit = func(current regionRefState) {
+		for region, dependency := range current.Deps {
+			if region != nil && dependency.Valid {
+				seen[region.Name] = struct{}{}
+			}
+		}
+		fieldsID := regionRefFieldsIdentity(current.Fields)
+		if fieldsID != 0 {
+			if _, alreadyVisited := seenFields[fieldsID]; alreadyVisited {
+				return
+			}
+			seenFields[fieldsID] = struct{}{}
+		}
+		for _, field := range current.Fields {
+			visit(field)
+		}
+	}
+	visit(state)
+	regions := make([]string, 0, len(seen))
+	for region := range seen {
+		regions = append(regions, region)
+	}
+	return regions
 }
 
 // checkNestedRegionElementStoreEscape is the container-mutation form of the

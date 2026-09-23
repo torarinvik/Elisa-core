@@ -73,3 +73,50 @@ def bad() -> i64:
 		t.Fatalf("expected the call result to retain the actual argument's region and reject storing it into a longer-lived region, got:\n%s", diagnostics)
 	}
 }
+
+func TestNestedSViewForwardingRegionReachesStoreCheck(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "nested_sview_forwarding_region.elisa", `extern sview(value: u8&?, start: i64, end: i64) -> sview
+
+struct ViewHolder:
+	view: sview
+
+def choose_second(left: sview, right: sview) -> sview:
+	return right
+
+def bad() -> i64:
+	can Memory.Allocate, Abort.Panic:
+		region outer(4096):
+			outer_bytes: mutable darray[u8] @outer = []
+			outer_bytes.push(65)
+			outer_bytes.push(0)
+			retained: mutable ViewHolder = ViewHolder{view: sview(&outer_bytes[0], 0, 1)}
+			region inner(4096):
+				inner_bytes: mutable darray[u8] @inner = []
+				inner_bytes.push(66)
+				inner_bytes.push(0)
+				short_view: sview @inner = sview(&inner_bytes[0], 0, 1)
+				retained <- ViewHolder{view: choose_second(retained.view, short_view)}
+			return retained.view.len
+`)
+	diagnostics := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(diagnostics, `value in region "inner" is stored into`) {
+		t.Fatalf("expected nested field provenance to reject storing the inner view in an outer binding, got:\n%s", diagnostics)
+	}
+}
+
+func TestLiveRegionDependencyNamesHandlesCyclicFieldFacts(t *testing.T) {
+	region := &Symbol{Name: "inner", Kind: SymbolRegion}
+	fields := map[string]regionRefState{}
+	state := regionRefState{
+		Deps: map[*Symbol]regionDependencyState{
+			region: {Valid: true},
+		},
+		Fields: fields,
+	}
+	fields["cycle"] = state
+
+	regions := liveRegionDependencyNames(state)
+	if len(regions) != 1 || regions[0] != "inner" {
+		t.Fatalf("expected cyclic field provenance to collect its live region once, got %v", regions)
+	}
+}
