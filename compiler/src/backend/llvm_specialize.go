@@ -18,7 +18,7 @@ func (g *llvmGenerator) ensureSpecializedFunction(decl *ast.FuncDecl, base *sema
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic specialization requires a function declaration and type")
 	}
-	params := funcGenericParams(base)
+	params := functionSpecializationParams(base)
 	orderedArgs := make([]semantic.Type, 0, len(params))
 	for _, param := range params {
 		name := param.Name
@@ -100,7 +100,7 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	if decl == nil || base == nil {
 		return nil, nil, fmt.Errorf("generic extern specialization requires a function declaration and type")
 	}
-	params := funcGenericParams(base)
+	params := functionSpecializationParams(base)
 	orderedArgs := make([]semantic.Type, 0, len(params))
 	for _, param := range params {
 		name := param.Name
@@ -124,9 +124,90 @@ func (g *llvmGenerator) ensureSpecializedExternFunction(decl *ast.ExternFuncDecl
 	return value, specializedType, err
 }
 
+// functionSpecializationParams includes ordinary type/value generics plus region
+// parameters that occur in a region-indexed nominal type. Region-polymorphic
+// functions may also carry inferred allocation regions (for example __rg_out)
+// that only select a hidden Arena argument; those must remain runtime parameters,
+// not become mandatory monomorphization keys.
+func functionSpecializationParams(base *semantic.FuncType) []ast.GenericParam {
+	params := append([]ast.GenericParam(nil), funcGenericParams(base)...)
+	seen := make(map[string]bool, len(params))
+	for _, param := range params {
+		seen[param.Name] = true
+	}
+	layoutRegions := make(map[string]bool)
+	for _, param := range base.Params {
+		collectNominalRegionParams(param, layoutRegions)
+	}
+	collectNominalRegionParams(base.Return, layoutRegions)
+	for _, name := range base.RegionParams {
+		if layoutRegions[name] && !seen[name] {
+			params = append(params, ast.GenericParam{Kind: ast.GenericParamRegion, Name: name})
+			seen[name] = true
+		}
+	}
+	return params
+}
+
+func collectNominalRegionParams(t semantic.Type, regions map[string]bool) {
+	if t == nil {
+		return
+	}
+	switch tt := t.(type) {
+	case *semantic.GenericInstanceType:
+		params := structGenericParams(asStructType(tt.Base))
+		for index, param := range params {
+			if index >= len(tt.Args) || param.Kind != ast.GenericParamRegion {
+				continue
+			}
+			if region, ok := tt.Args[index].(*semantic.RegionParamType); ok && region != nil {
+				regions[region.Name] = true
+			}
+		}
+		for _, arg := range tt.Args {
+			collectNominalRegionParams(arg, regions)
+		}
+	case *semantic.RefType:
+		collectNominalRegionParams(tt.Elem, regions)
+	case *semantic.ArrayType:
+		collectNominalRegionParams(tt.Elem, regions)
+	case *semantic.DArrayType:
+		collectNominalRegionParams(tt.Elem, regions)
+	case *semantic.ViewType:
+		collectNominalRegionParams(tt.Elem, regions)
+	case *semantic.DictType:
+		collectNominalRegionParams(tt.Key, regions)
+		collectNominalRegionParams(tt.Value, regions)
+	case *semantic.SetType:
+		collectNominalRegionParams(tt.Elem, regions)
+	case *semantic.OptionalType:
+		collectNominalRegionParams(tt.Value, regions)
+	case *semantic.ErrorUnionType:
+		collectNominalRegionParams(tt.Value, regions)
+	case *semantic.TupleType:
+		for _, field := range tt.Fields {
+			collectNominalRegionParams(field.Type, regions)
+		}
+	case *semantic.FuncType:
+		for _, param := range tt.Params {
+			collectNominalRegionParams(param, regions)
+		}
+		collectNominalRegionParams(tt.Return, regions)
+	}
+}
+
 func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semantic.Type, impls map[string]*semantic.StaticImpl) *semantic.FuncType {
 	if base == nil {
 		return nil
+	}
+	regionParams := make([]string, 0, len(base.RegionParams))
+	for _, name := range base.RegionParams {
+		if bound, ok := typeBindings[name]; ok {
+			if regionName := regionTypeArgumentName(bound); regionName != "" {
+				name = regionName
+			}
+		}
+		regionParams = append(regionParams, name)
 	}
 	params := make([]semantic.Type, 0, len(base.Params))
 	for _, param := range base.Params {
@@ -135,7 +216,7 @@ func specializeFuncType(base *semantic.FuncType, typeBindings map[string]semanti
 	specialized := &semantic.FuncType{
 		Name:                        base.Name,
 		TypeParams:                  nil,
-		RegionParams:                append([]string(nil), base.RegionParams...),
+		RegionParams:                regionParams,
 		PermissionParams:            append([]string(nil), base.PermissionParams...),
 		GenericParams:               nil,
 		ShapeParams:                 append([]string(nil), base.ShapeParams...),
@@ -333,6 +414,12 @@ func collectSpecializationBindings(pattern semantic.Type, actual semantic.Type, 
 		}
 	}
 	switch p := pattern.(type) {
+	case *semantic.RegionParamType:
+		if actualRegion := regionTypeArgumentName(actual); actualRegion != "" {
+			if _, exists := bindings[p.Name]; !exists {
+				bindings[p.Name] = &semantic.RegionValueType{Name: actualRegion}
+			}
+		}
 	case *semantic.TypeParamType:
 		if _, ok := bindings[p.Name]; !ok {
 			bindings[p.Name] = actual

@@ -261,7 +261,10 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		}
 		args = append(args, value)
 	}
-	regionArenaArgs := s.resolveRegionArenaArgs(expr, funcType)
+	regionArenaArgs, err := s.resolveRegionArenaArgs(expr, funcType, loweredArgs, args)
+	if err != nil {
+		return nil, nil, err
+	}
 	return s.emitResolvedCall(callee, funcType, s.directCallTarget(expr.Func), args, regionArenaArgs)
 }
 

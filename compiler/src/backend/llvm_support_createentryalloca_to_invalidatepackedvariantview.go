@@ -410,16 +410,26 @@ func stackTagArgIdentName(e ast.Expr) (string, bool) {
 // annotated with that region, read the matching argument's region, and pass
 // that region's arena from the caller's region environment. Order matches the
 // hidden params appended by lowerFunctionType.
-func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.FuncType) []C.LLVMValueRef {
+func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.FuncType, loweredArgs []ast.Expr, emittedArgs []C.LLVMValueRef) ([]C.LLVMValueRef, error) {
 	if s == nil || expr == nil || fn == nil || len(fn.RegionParams) == 0 {
-		return nil
+		return nil, nil
 	}
 	out := make([]C.LLVMValueRef, 0, len(fn.RegionParams))
 	for _, regionParam := range fn.RegionParams {
 		var arena C.LLVMValueRef
 		for i, p := range fn.Params {
-			if containerRegionName(p) != regionParam || i >= len(expr.Args) {
+			if matchedRegionName(p, p, regionParam) == "" && containerRegionName(p) != regionParam {
 				continue
+			}
+			if i >= len(loweredArgs) {
+				continue
+			}
+			// Arena carriers are the explicit runtime witness for their region
+			// parameter. Forward the already-lowered reference itself; deriving the
+			// region name alone loses the actual arena value at concrete call sites.
+			if semantic.IsArenaValueOrRefType(p) && i < len(emittedArgs) && emittedArgs[i] != nil {
+				arena = emittedArgs[i]
+				break
 			}
 			// Multi-stack routing (Phase B1b): a fresh inferred-region darray argument is routed
 			// to its own parallel arena via darrayStackTag, and ALL of its own growth ops allocate
@@ -433,7 +443,7 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 			// receiver to an AddrOfExpr, so without peeling a stack-tagged darray passed to a grower
 			// (e.g. `push_str(body, …)`) is missed and its backing splits (base vs parallel). Unlike
 			// darrayGrowthOwner, whose receiver is already a bare Ident, the call argument is wrapped.
-			if name, ok := stackTagArgIdentName(expr.Args[i]); ok && s.darrayStackTag != nil {
+			if name, ok := stackTagArgIdentName(loweredArgs[i]); ok && s.darrayStackTag != nil {
 				if tag, ok := s.darrayStackTag[name]; ok {
 					if owner, ok := s.regionArenaOwner(tag); ok {
 						arena = owner.arenaRef
@@ -441,9 +451,15 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 					}
 				}
 			}
-			if argRegion := containerRegionName(s.exprType(expr.Args[i])); argRegion != "" {
-				if owner, ok := s.regionArenaOwner(argRegion); ok {
-					arena = owner.arenaRef
+			actualType := s.exprType(loweredArgs[i])
+			argRegion := matchedRegionName(p, actualType, regionParam)
+			if argRegion == "" {
+				argRegion = containerRegionName(actualType)
+			}
+			if argRegion != "" {
+				arena = s.regionArenaPointer(argRegion)
+				if arena == nil {
+					return nil, fmt.Errorf("cannot resolve backing Arena for region %q passed to %q", argRegion, fn.Name)
 				}
 			}
 			break
@@ -454,9 +470,7 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 		// semantic binding fallback (analyzer_expr_calls.go) that lets a builder allocate
 		// into the caller's named region with no threaded Arena& parameter.
 		if arena == nil {
-			if owner, ok := s.regionArenaOwner(regionParam); ok {
-				arena = owner.arenaRef
-			}
+			arena = s.regionArenaPointer(regionParam)
 		}
 		// docs/91 S4 Stage 3: ambient-region fallback. When the region param binds to neither an
 		// argument's region nor a same-named region owner, it was bound by the semantic layer to the
@@ -468,9 +482,12 @@ func (s *functionState) resolveRegionArenaArgs(expr *ast.CallExpr, fn *semantic.
 				arena = ambient
 			}
 		}
+		if arena == nil {
+			return nil, fmt.Errorf("cannot resolve backing Arena for region parameter %q in call to %q", regionParam, fn.Name)
+		}
 		out = append(out, arena)
 	}
-	return out
+	return out, nil
 }
 func (s *functionState) treeOwnerArenaRefValue(owner treeAllocOwnerBinding, name string) (C.LLVMValueRef, error) {
 	if owner.arenaRef != nil {
