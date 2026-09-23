@@ -71,7 +71,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// declared type names an outer region dangles once the inner region is
 			// freed (the var-decl analogue of the assignment/push check). Decided by
 			// the region outlives-lattice.
-			a.checkNestedRegionStoreEscape(n.Value, declType, valueType)
+			a.checkNestedRegionStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, declType, valueType)
 			a.checkFreshContainerStoreEscape(&ast.Ident{Position: n.Position, Name: n.Name}, declType, n.Value)
 		} else if declType == nil {
 			a.errorf(n.Pos(), "variable %q requires a type or initializer", n.Name)
@@ -550,7 +550,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// slot dangles once the inner region is freed. Decided by the region
 		// outlives-lattice, independent of whether the target outlives the
 		// function (the function-outliving case is handled just above).
-		a.checkNestedRegionStoreEscape(n.Target, targetType, valueType)
+		a.checkNestedRegionStoreEscape(n.Target, n.Value, targetType, valueType)
 		// A list literal `[v]` stored into a longer-lived container copies an inner-region element's
 		// header; the store-site check above only sees the literal's own (target) region, so the
 		// element regions are checked separately.

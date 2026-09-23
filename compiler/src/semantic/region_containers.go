@@ -674,15 +674,33 @@ func (a *Analyzer) regionStoreEscapes(targetRegion, valueRegion string) bool {
 // The existing function-outliving store check (checkStoredRegionContainerEscape)
 // covers the global / process-lifetime target; this covers the local outer ->
 // inner case the lattice makes precise.
-func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr ast.Expr, targetType, valueType Type) {
+func (a *Analyzer) checkNestedRegionStoreEscape(targetExpr, valueExpr ast.Expr, targetType, valueType Type) {
 	if a == nil || targetExpr == nil {
 		return
 	}
 	valueRegion := containerOrEntryRegion(valueType)
+	targetRegion := containerOrEntryRegion(targetType)
 	if valueRegion == "" {
+		// A borrowed result may have a region-provenance summary without a region in its
+		// nominal type (notably an unannotated `sview` returned from a parameter). Check
+		// every concrete backing dependency at the store boundary; otherwise a call can
+		// erase the source region and place the view into a longer-lived binding.
+		if state, ok := a.regionRefStateForExpr(valueExpr); ok {
+			for region, dependency := range state.Deps {
+				if region == nil || !dependency.Valid {
+					continue
+				}
+				if targetRegion == "" {
+					a.checkRegionlessTargetStoreEscape(targetExpr, region.Name)
+					continue
+				}
+				if a.regionStoreEscapes(targetRegion, region.Name) {
+					a.errorf(targetExpr.Pos(), "value in region %q is stored into longer-lived region %q; region %q is freed first, leaving a dangling reference. Copy it into region %q (or a region that outlives %q) before storing", regionDisplayName(region.Name), regionDisplayName(targetRegion), regionDisplayName(region.Name), regionDisplayName(targetRegion), regionDisplayName(targetRegion))
+				}
+			}
+		}
 		return
 	}
-	targetRegion := containerOrEntryRegion(targetType)
 	if targetRegion == "" {
 		// Region-less target slot (a plain local, or a field of a region-less
 		// struct). The slot still dangles if its backing storage outlives the
