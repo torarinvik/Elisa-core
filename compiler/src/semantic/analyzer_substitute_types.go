@@ -65,6 +65,9 @@ func (a *Analyzer) substituteTypeWithDepth(t Type, bindings map[string]Type, sha
 		if resolved, ok := bindings[n.Name]; ok {
 			return resolved
 		}
+		if resolved, ok := regionBindings[n.Name]; ok {
+			return &RegionValueType{Name: resolved}
+		}
 		return n
 	case *RegionValueType:
 		return n

@@ -27,6 +27,25 @@ func assignableThreadingRegionParam(expected, actual Type, regionParams map[stri
 	return AssignableTo(stripped, ar)
 }
 
+// assignableArenaRegionParam accepts the short-lived reference used to pass an
+// Arena carrier into a generic `Arena& @r` formal. The call binds `r` to the
+// Arena's backing region separately; requiring that identity on the temporary
+// address itself would confuse the lifetime of the Arena value with the lifetime
+// of the storage managed by that Arena.
+func (a *Analyzer) assignableArenaRegionParam(pattern, actual Type, expr ast.Expr, regionParams map[string]bool) bool {
+	formal, ok := StripAggregateStateType(pattern).(*RefType)
+	if !ok || formal == nil || formal.Region == "" || !regionParams[formal.Region] || !IsArenaValueOrRefType(formal.Elem) {
+		return false
+	}
+	actualRef, ok := StripAggregateStateType(actual).(*RefType)
+	if !ok || actualRef == nil || actualRef.Region != "" || a.arenaRegionArgumentName(expr) == "" {
+		return false
+	}
+	formalWithoutRegion := cloneRefType(formal)
+	formalWithoutRegion.Region = ""
+	return AssignableTo(formalWithoutRegion, actualRef)
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	return a.analyzeCallExprWithExpected(expr, nil)
 }
@@ -430,6 +449,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			// locally-constructed analogue of struct-param region threading).
 			argType = a.attachStructLocalArgRegion(orderedArgs[i], argType, ft.Params[i], regionParams)
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+			a.collectArenaRegionBinding(ft.Params[i], orderedArgs[i], regionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
 			if specializedType, ok := a.specializeFunctionValueType(expectedType, argType); ok {
 				expectedType = specializedType
@@ -439,7 +459,7 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				expectedType = specializedType
 				specializedParamTypes[i] = specializedType
 			}
-			if !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) {
+			if !AssignableTo(expectedType, argType) && !assignableThreadingRegionParam(expectedType, argType, regionParams) && !a.assignableArenaRegionParam(ft.Params[i], argType, orderedArgs[i], regionParams) {
 				a.errorf(orderedArgs[i].Pos(), "argument %d to %q expects %s, got %s", i+1, ft.Name, expectedType, argType)
 				if !writableRefAssignableIgnoringMutability(expectedType, argType) || !a.reportRebindableReadOnlyRefNote(orderedArgs[i].Pos(), orderedArgs[i]) {
 					a.reportMutableRefArgumentNote(orderedArgs[i].Pos(), expectedType, argType)

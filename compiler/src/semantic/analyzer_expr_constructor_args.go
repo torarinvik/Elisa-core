@@ -203,6 +203,48 @@ func (a *Analyzer) collectRegionBinding(patternRegion, actualRegion string, bind
 	}
 }
 
+// arenaRegionArgumentName recovers the region identity selected by an Arena
+// value passed to a region-polymorphic allocator/parser. The Arena's address is
+// only borrowed for the call; its backing region is named by the Arena binding.
+// A forwarded Arena reference already carries that identity in RefType.Region.
+func (a *Analyzer) arenaRegionArgumentName(expr ast.Expr) string {
+	if a == nil || expr == nil {
+		return ""
+	}
+	switch n := expr.(type) {
+	case *ast.ParenExpr:
+		return a.arenaRegionArgumentName(n.Inner)
+	case *ast.AddrOfExpr:
+		return a.arenaRegionArgumentName(n.Operand)
+	case *ast.Ident:
+		if a.currentScope == nil {
+			return ""
+		}
+		sym, ok := a.currentScope.Lookup(n.Name)
+		if !ok || sym == nil || !IsArenaValueOrRefType(sym.Type) {
+			return ""
+		}
+		if ref, ok := StripAggregateStateType(sym.Type).(*RefType); ok && ref != nil && ref.Region != "" {
+			return ref.Region
+		}
+		return n.Name
+	default:
+		return ""
+	}
+}
+
+// collectArenaRegionBinding handles the explicit Arena carrier boundary:
+// `arena: mutable Arena` passed to a formal `Arena& @r` determines which region
+// the callee's region-indexed result belongs to, even though the temporary
+// borrow of the Arena struct itself is regionless.
+func (a *Analyzer) collectArenaRegionBinding(pattern Type, expr ast.Expr, bindings map[string]string, regionParams map[string]bool) {
+	ref, ok := StripAggregateStateType(pattern).(*RefType)
+	if !ok || ref == nil || ref.Region == "" || !regionParams[ref.Region] || !IsArenaValueOrRefType(ref.Elem) {
+		return
+	}
+	a.collectRegionBinding(ref.Region, a.arenaRegionArgumentName(expr), bindings, regionParams)
+}
+
 func (a *Analyzer) collectPermissionBinding(name string, refs []ast.PermissionRef, permissionBindings map[string][]ast.PermissionRef) {
 	if name == "" || permissionBindings == nil {
 		return
@@ -284,6 +326,15 @@ func (a *Analyzer) collectTypeBindings(pattern, actual Type, bindings map[string
 			// call site, e.g. `write_span(byte[0], n)` against `data: T&`). Bind the element
 			// type parameter against the value's own type so T resolves to the value type.
 			a.collectTypeBindings(p.Elem, actual, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
+		}
+	case *RegionParamType:
+		switch act := actual.(type) {
+		case *RegionParamType:
+			if _, exists := bindings[p.Name]; !exists {
+				bindings[p.Name] = act
+			}
+		case *RegionValueType:
+			a.collectRegionBinding(p.Name, act.Name, regionBindings, regionParams)
 		}
 	case *ArrayType:
 		if act, ok := actual.(*ArrayType); ok {
