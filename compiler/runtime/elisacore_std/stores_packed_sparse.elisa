@@ -1,9 +1,11 @@
 def ctx_packed_store_state_new_variant_sparse(a: mutable Arena&, row_bytes: usize) -> mutable heap void&:
     can Memory.Allocate, Abort.Panic:
         state: mutable heap PackedStoreState& = arena_alloc(a, size_of(PackedStoreState)).cast[heap PackedStoreState&]
-        row_words: usize = (row_bytes + size_of(uintptr) - 1) / size_of(uintptr)
+        row_words: usize = packed_store_row_word_count(row_bytes)
         preferred_region_capacity: mutable usize = ARENA_REGION_DEFAULT_CAPACITY
         hinted_capacity: usize = row_words * PACKED_STORE_MIN_ROWS_PER_REGION
+        if hinted_capacity / PACKED_STORE_MIN_ROWS_PER_REGION != row_words:
+            panic("packed store row capacity overflow")
 
         preferred_region_capacity <- hinted_capacity if preferred_region_capacity < hinted_capacity
         preferred_region_capacity <- row_words if preferred_region_capacity < row_words
@@ -38,20 +40,24 @@ def ctx_packed_store_state_new_variant_sparse_with_side_words(a: mutable Arena&,
 def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_bytes: usize, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         store_rows_note()
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
 
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
-        row_words: mutable usize = (size_bytes + size_of(uintptr) - 1) / size_of(uintptr)
-        row_words <- 1 if row_words == 0
+        if state.handles.count >= PACKED_STORE_MAX_INDEX:
+            panic("packed store index limit exceeded")
+        row_words: usize = packed_store_row_word_count(size_bytes)
         state.row_words <- row_words if row_words > state.row_words
 
         row_size_bytes: usize = row_words * size_of(uintptr)
+        if row_size_bytes / size_of(uintptr) != row_words:
+            panic("packed store row allocation size overflow")
         row: heap void& = arena_alloc(a, row_size_bytes)
         global_index: u32 = state.handles.count.u32()
         needed_rows: usize = state.handles.count + 1
         packed_store_ensure_metadata_capacity(a, state, needed_rows)
 
-        slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[void&])
+        slot: u32 = packed_store_append_variant_row(a, state, tag, row.cast[void&], row_words)
 
         in a:
             state.handles.push(row.cast[u8&].uintptr())
@@ -63,49 +69,75 @@ def ctx_packed_store_alloc_tagged_variant_sparse_result(a: mutable Arena&, size_
 def ctx_packed_store_alloc_fixed_tagged_variant_sparse_result(a: mutable Arena&, state_bits: mutable void&, tag: u32) -> PackedStoreIndexAllocResult:
     can Memory.Allocate, Abort.Panic:
         store_rows_note()
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
-        return ctx_packed_store_alloc_tagged_variant_sparse_result(a, state.row_words * size_of(uintptr), state_bits, tag)
+        row_size_bytes: usize = state.row_words * size_of(uintptr)
+        if row_size_bytes / size_of(uintptr) != state.row_words:
+            panic("packed store row allocation size overflow")
+        return ctx_packed_store_alloc_tagged_variant_sparse_result(a, row_size_bytes, state_bits, tag)
 def ctx_packed_store_encode_variant_sparse(ptr: void&, state_bits: mutable void&) -> u32:
     can Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         raw: uintptr = ptr.cast[u8&].uintptr()
-        assert state.handles.items != null
+        if state.handles.items == null:
+            panic("packed store handle table is empty")
 
         for i, handle in state.handles.enumerate():
+            if i >= PACKED_STORE_MAX_INDEX:
+                panic("packed store index limit exceeded")
             i.u32() return if handle == raw
 
         panic("variant-sparse packed store encode missing row pointer")
 def ctx_packed_store_decode_variant_sparse(index: u32, state_bits: mutable void&) -> mutable void&:
     can Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: PackedStoreState& = state_bits.cast[PackedStoreState&]
         index_usize: usize = index.usize()
-        assert index_usize < state.handles.count
-        assert state.handles.items != null
+        if index_usize >= state.handles.count:
+            panic("packed store index out of bounds")
+        if state.handles.items == null:
+            panic("packed store handle table is empty")
 
         handles: uintptr& = state.handles.items
         return handles[index_usize].cast[heap u8&].cast[mutable void&]
 def ctx_packed_store_read_variant_sparse_tag(state_bits: mutable void&, index: u32) -> u32:
-    assert state_bits != null
-    state: PackedStoreState& = state_bits.cast[PackedStoreState&]
-    index_usize: usize = index.usize()
-    assert index_usize < state.tags.count
-    assert state.tags.items != null
+    can Abort.Panic:
+        if state_bits == null:
+            panic("packed store state is null")
+        state: PackedStoreState& = state_bits.cast[PackedStoreState&]
+        index_usize: usize = index.usize()
+        if index_usize >= state.tags.count:
+            panic("packed store index out of bounds")
+        if state.tags.items == null:
+            panic("packed store tag table is empty")
 
-    tags: u32& = state.tags.items
-    return tags[index_usize]
+        tags: u32& = state.tags.items
+        return tags[index_usize]
 def ctx_packed_store_read_variant_sparse_word(index: u32, state_bits: mutable void&, word_offset: usize) -> uintptr:
     can Abort.Panic:
-        assert state_bits != null
+        if state_bits == null:
+            panic("packed store state is null")
         state: mutable PackedStoreState& = state_bits.cast[PackedStoreState&]
         index_usize: usize = index.usize()
-        assert index_usize < state.tags.count
-        assert state.tags.items != null
-        assert state.variant_slots.items != null
+        if index_usize >= state.tags.count:
+            panic("packed store index out of bounds")
+        if index_usize >= state.variant_slots.count:
+            panic("packed store variant slot out of bounds")
+        if index_usize >= state.handles.count:
+            panic("packed store handle index out of bounds")
+        if state.tags.items == null:
+            panic("packed store tag table is empty")
+        if state.variant_slots.items == null:
+            panic("packed store variant slot table is empty")
 
         tags: u32& = state.tags.items
         slots: u32& = state.variant_slots.items
-        row_words: uintptr& = packed_store_variant_row_ptr(state, tags[index_usize], slots[index_usize]).cast[uintptr&]
+        row: PackedStoreVariantRow = packed_store_variant_row_entry(state, tags[index_usize], slots[index_usize])
+        if word_offset >= row.word_count:
+            panic("packed store row word offset out of bounds")
+        row_words: uintptr& = row.pointer.cast[heap u8&].cast[uintptr&]
         return row_words[word_offset]

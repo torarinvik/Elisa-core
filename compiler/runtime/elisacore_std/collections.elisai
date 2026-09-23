@@ -275,6 +275,8 @@ extern arena_deque_back[T](d: Deque[T]&) -> T&?
 
 extern arena_deque_at[T](d: Deque[T]&, index: usize) -> T&
 
+extern arena_deque_at_mut[T](d: mutable Deque[T]&, index: usize) -> mutable T&
+
 extern arena_deque_pop_front[T](d: mutable Deque[T]&, out: mutable T&) -> bool
 
 extern arena_deque_pop_back[T](d: mutable Deque[T]&, out: mutable T&) -> bool

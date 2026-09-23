@@ -4,9 +4,12 @@ struct PackedStoreAllocResult:
 struct PackedStoreIndexAllocResult:
     row: mutable heap void&?
     index: mutable u32
+struct PackedStoreVariantRow:
+    pointer: mutable uintptr
+    word_count: usize
 struct PackedStoreVariantRows:
     tag: mutable u32
-    rows: mutable darray[uintptr]
+    rows: mutable darray[PackedStoreVariantRow]
 struct PackedStoreState:
     head_region: mutable heap Region&?
     alloc_region: mutable heap Region&?

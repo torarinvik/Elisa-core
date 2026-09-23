@@ -1,5 +1,12 @@
+const PACKED_STORE_MAX_INDEX: usize = 4294967295
+
 def packed_store_variant_rows_table(state: mutable PackedStoreState&) -> mutable darray[PackedStoreVariantRows]&:
     return &state.variant_rows
+def packed_store_row_word_count(size_bytes: usize) -> usize:
+    word_bytes: usize = size_of(uintptr)
+    words: mutable usize = size_bytes / word_bytes
+    words <- words + 1 if size_bytes % word_bytes != 0
+    return 1 if words == 0 else words
 def packed_store_find_variant_rows(state: mutable PackedStoreState&, tag: u32) -> mutable PackedStoreVariantRows&?:
     variants: darray[PackedStoreVariantRows]& = packed_store_variant_rows_table(state)
     null return if variants.items == null
@@ -19,28 +26,37 @@ def packed_store_get_or_create_variant_rows(a: mutable Arena&, state: mutable Pa
         in a:
             variants.push(created)
 
-        assert variants.items != null
+        if variants.items == null:
+            panic("packed store variant row table allocation failed")
         return &variants.items[variants.count - 1]
-def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&) -> u32:
+def packed_store_append_variant_row(a: mutable Arena&, state: mutable PackedStoreState&, tag: u32, row: void&, word_count: usize) -> u32:
     can Memory.Allocate, Abort.Panic:
         variant_rows: PackedStoreVariantRows& = packed_store_get_or_create_variant_rows(a, state, tag)
-        rows: mutable darray[uintptr]& = &variant_rows.rows
+        rows: mutable darray[PackedStoreVariantRow]& = &variant_rows.rows
+        if rows.count >= PACKED_STORE_MAX_INDEX:
+            panic("packed store variant row index limit exceeded")
         slot: u32 = rows.count.u32()
         in a:
-            rows.push(row.cast[u8&].uintptr())
+            rows.push(PackedStoreVariantRow{pointer: row.cast[u8&].uintptr(), word_count: word_count})
         return slot
-def packed_store_variant_row_ptr(state: mutable PackedStoreState&, tag: u32, slot: u32) -> mutable void&:
+def packed_store_variant_row_entry(state: mutable PackedStoreState&, tag: u32, slot: u32) -> PackedStoreVariantRow:
     can Abort.Panic:
         variant_rows: PackedStoreVariantRows&? = packed_store_find_variant_rows(state, tag)
-        assert variant_rows != null
+        if variant_rows == null:
+            panic("packed store variant row tag not found")
 
-        rows: darray[uintptr]& = &variant_rows.rows
+        rows: darray[PackedStoreVariantRow]& = &variant_rows.rows
         slot_index: usize = slot.usize()
-        assert rows.items != null
-        assert slot_index < rows.count
+        if rows.items == null:
+            panic("packed store variant row table is empty")
+        if slot_index >= rows.count:
+            panic("packed store variant row index out of bounds")
 
-        row_ptrs: uintptr& = rows.items
-        return row_ptrs[slot_index].cast[heap u8&].cast[mutable void&]
+        return rows[slot_index]
+def packed_store_variant_row_ptr(state: mutable PackedStoreState&, tag: u32, slot: u32) -> mutable void&:
+    can Abort.Panic:
+        row: PackedStoreVariantRow = packed_store_variant_row_entry(state, tag, slot)
+        return row.pointer.cast[heap u8&].cast[mutable void&]
 def ctx_packed_store_reserve(a: mutable Arena&, needed_rows: usize, state_bits: mutable void&):
     can Memory.Allocate, Abort.Panic:
         assert state_bits != null
