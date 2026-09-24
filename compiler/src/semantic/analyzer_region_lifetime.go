@@ -99,7 +99,7 @@ func (a *Analyzer) resolvePendingStorageViewErrors(reserveCommitDeclOffsets map[
 		if a.storageViewStaleUses != nil {
 			a.storageViewStaleUses[p.expr] = p.dep
 		}
-		a.errorf(p.expr.Pos(), storageViewInvalidatedMessage(p.viewName, p.dep.InvalidatedBy))
+		a.errorf(p.expr.Pos(), storageViewInvalidatedMessage(p.viewName, p.dep.InvalidatedBy, p.dep.Sources, p.dep.ContainerAliases))
 	}
 	a.pendingStorageViewErrors = nil
 }

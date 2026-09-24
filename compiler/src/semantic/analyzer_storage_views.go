@@ -6,11 +6,11 @@ import (
 	"elisacore/src/ast"
 )
 
-func storageViewInvalidatedMessage(name string, reason string) string {
+func storageViewInvalidatedMessage(name string, reason string, sources []string, containerAliases []string) string {
 	if reason == "" {
 		reason = "storage mutation"
 	}
-	return fmt.Sprintf("view %q cannot be used: storage dependency facts were invalidated by %s", name, reason)
+	return fmt.Sprintf("view %q cannot be used: storage dependency facts were invalidated by %s (backing sources: %q; container aliases: %q)", name, reason, sources, containerAliases)
 }
 
 // pendingStorageViewError is an invalidated-view use whose final verdict waits on the region stack
@@ -547,8 +547,12 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 		if !dep.Valid || !storageViewDependsOnAny(dep, mutatedSources) {
 			continue
 		}
+		matchedSource := storageViewMatchedMutationSource(dep, mutatedSources)
 		dep.Valid = false
 		dep.InvalidatedBy = reason
+		if matchedSource != "" {
+			dep.InvalidatedBy += fmt.Sprintf(" (matched mutation source %q)", matchedSource)
+		}
 		a.currentStorageViewDeps[sym] = dep
 	}
 }

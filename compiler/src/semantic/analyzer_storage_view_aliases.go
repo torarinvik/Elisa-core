@@ -1,6 +1,7 @@
 package semantic
 
 import (
+	"sort"
 	"strings"
 
 	"elisacore/src/ast"
@@ -198,6 +199,11 @@ func storageViewContainerAliasSources(expr ast.Expr) []string {
 		case *ast.TernaryExpr:
 			visit(n.Value)
 			visit(n.Alt)
+		case *ast.ListLitExpr:
+			// A list literal owns fresh backing storage. Its element expressions can
+			// carry borrows, but the new darray descriptor is not a shallow alias of
+			// any element or of another syntactically identical literal.
+			return
 		case *ast.CallExpr:
 			// Opaque helpers may return an input descriptor. Until a verified
 			// return-alias summary exists, include every argument conservatively.
@@ -271,6 +277,22 @@ func storageViewDependsOnAny(dependency storageViewDependencyState, sources map[
 		}
 	}
 	return false
+}
+
+func storageViewMatchedMutationSource(dependency storageViewDependencyState, sources map[string]bool) string {
+	candidates := make([]string, 0, len(sources))
+	for source := range sources {
+		candidates = append(candidates, source)
+	}
+	sort.Strings(candidates)
+	for _, source := range dependency.Sources {
+		for _, candidate := range candidates {
+			if storageViewSourcesOverlap(source, candidate) {
+				return candidate
+			}
+		}
+	}
+	return ""
 }
 
 // A write to an aggregate root can relocate any of its darray fields. Without a

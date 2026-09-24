@@ -106,6 +106,23 @@ func TestCopiedDArrayAliasRemainsUsableAfterGrowth(t *testing.T) {
 	}
 }
 
+func TestIndependentEmptyDArrayGrowthDoesNotInvalidateView(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_independent_empty_darrays.elisa", `def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			view: sview = values.as_sview()
+			other: mutable darray[u8] = []
+			other.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("growing an independent empty darray must not invalidate the view, got:\n%s", allDiagnostics(result))
+	}
+}
+
 func TestSViewCopiedDArrayAliasDependenciesJoinAcrossBranches(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_branch_joined_darray_alias.elisa", `def read(owner: mutable Arena&, choose_values: bool) -> char:
 	can Memory.Allocate, Abort.Panic:
