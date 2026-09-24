@@ -79,6 +79,10 @@ func TestUnboundedRawByteSliceNeedsUnsafeBoundary(t *testing.T) {
 	trusted Unsafe.PointerCast:
 		return data[lo:hi]
 `)
+	analyzeTreeTestSource(t, "sview_raw_pointer_slice_can.elisa", `def forge_view(data: u8&, lo: usize, hi: usize) -> sview:
+	can Unsafe.PointerCast:
+		return data[lo:hi]
+`)
 }
 
 func TestSViewForwardingPreservesActualArgumentRegion(t *testing.T) {
