@@ -94,7 +94,19 @@ func (a *Analyzer) validCast(src, dst Type) bool {
 	}
 	if srcRef, ok := src.(*RefType); ok {
 		if dstRef, ok := dst.(*RefType); ok {
-			return refStateAssignable(dstRef.State, srcRef.State) && refRegionAssignable(dstRef.Region, srcRef.Region)
+			if !refStateAssignable(dstRef.State, srcRef.State) {
+				return false
+			}
+			if refRegionAssignable(dstRef.Region, srcRef.Region) {
+				return true
+			}
+			// A pointer reinterpretation may explicitly rebind the target's region
+			// qualifier (for example, an allocator turning raw arena storage into
+			// `T& @r`). It is not an assignment: the cast still passes through the
+			// Unsafe.PointerCast permission check, and region-flow analysis retains
+			// the source provenance so the caller cannot use a forged longer-lived
+			// view after its actual owner is destroyed.
+			return isPointerLikeCastType(src) && isPointerLikeCastType(dst)
 		}
 	}
 	if isPointerLikeCastType(src) && isPointerLikeCastType(dst) {

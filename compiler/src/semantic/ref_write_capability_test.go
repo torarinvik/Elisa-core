@@ -174,6 +174,7 @@ func TestGenericReinterpretCastRequiresUnsafe(t *testing.T) {
 		{"from_type_param", "struct Node:\n    next: i64\n\ndef erase[T](p: T&) -> Node&:\n    p.cast[Node&]\n"},
 		{"between_type_params", "def swap_view[T, U](p: T&) -> U&:\n    p.cast[U&]\n"},
 		{"gain_mutability", "def writable[T](p: T&) -> mutable T&:\n    p.cast[mutable T&]\n"},
+		{"region_rebind", "def bind[T, @r](raw: heap void&) -> mutable heap T& @r:\n    raw.cast[mutable heap T& @r]\n"},
 		// A bare type parameter may itself be a pointer: with T = Node&, each of these forges one.
 		{"number_to_bare_param", "def forge[T](addr: u64) -> T:\n    return addr.cast[T]\n"},
 		{"number_conversion_to_bare_param", "def forge[T](addr: u64) -> T:\n    return addr.T()\n"},
@@ -205,6 +206,7 @@ func TestGenericPointerCastCoercionAndGrantCompile(t *testing.T) {
 		{"drop_mutability", "def readonly[T](p: mutable T&) -> T&:\n    p.cast[T&]\n"},
 		{"same_type", "def same[T](p: T&) -> T&:\n    p.cast[T&]\n"},
 		{"granted_reinterpret", "def reinterpret[T](p: i64&) -> T&:\n    trusted Unsafe.PointerCast:\n        return p.cast[T&]\n"},
+		{"trusted_region_rebind", "def bind[T, @r](raw: heap void&) -> mutable heap T& @r:\n    trusted Unsafe.PointerCast:\n        return raw.cast[mutable heap T& @r]\n"},
 		// A bare type parameter to a number cannot forge a pointer (the std's `flags_mask[T]`).
 		{"bare_param_to_number", "def ordinal[T](value: T) -> u64:\n    return value.u64()\n"},
 	}
