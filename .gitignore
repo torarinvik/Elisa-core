@@ -1,4 +1,5 @@
 compiler/bin/
+/compiler/build/
 Code/benchmarks/manual_arena_bench
 /memories
 *.o
