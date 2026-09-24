@@ -124,18 +124,21 @@ func TestIndependentEmptyDArrayGrowthDoesNotInvalidateView(t *testing.T) {
 }
 
 func TestSViewCapturedByLambdaIsInvalidatedAfterBackingGrowth(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_closure_after_darray_push.elisa", `def read(owner: mutable Arena&) -> usize:
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_closure_after_darray_push.elisa", `def read_first(view: sview) -> usize:
+	return view.len
+
+def read(owner: mutable Arena&) -> usize:
 	can Memory.Allocate, Abort.Panic:
 		values: mutable darray[u8] = []
 		in owner:
 			values.push(65)
 			view: sview = values.as_sview()
-			reader: fn() -> usize = fn() => view.len
+			reader: fn() -> usize = fn() => read_first(view)
 			values.push(66)
 			return reader()
 	return 0
-`, AnalyzeOptions{EnforceUnsafePermissions: true})
-	if !strings.Contains(allDiagnostics(result), "stale reference") {
+`, AnalyzeOptions{})
+	if !strings.Contains(allDiagnostics(result), "storage dependency facts were invalidated") {
 		t.Fatalf("expected backing growth to invalidate an sview captured by a live closure, got:\n%s", allDiagnostics(result))
 	}
 }
