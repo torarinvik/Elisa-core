@@ -38,6 +38,172 @@ func TestSViewDependencyFollowsMutableContainerAlias(t *testing.T) {
 	}
 }
 
+func TestSViewOfDArrayIsInvalidatedWhenCopiedAliasGrows(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_after_copied_darray_push.elisa", `def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			alias: mutable darray[u8] = values
+			view: sview = values.as_sview()
+			alias.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected growth through a shallow darray copy to invalidate the original sview, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewOfCopiedDArrayIsInvalidatedWhenOriginalGrows(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_after_original_darray_push.elisa", `def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			alias: mutable darray[u8] = values
+			view: sview = alias.as_sview()
+			values.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected growth through the original darray to invalidate an alias-derived sview, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewOfCopiedDArrayTracksAliasChains(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_after_chained_darray_alias_push.elisa", `def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			first: mutable darray[u8] = values
+			second: mutable darray[u8] = first
+			view: sview = second.as_sview()
+			values.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected chained darray aliases to preserve storage provenance, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestCopiedDArrayAliasRemainsUsableAfterGrowth(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "darray_copy_alias_remains_usable.elisa", `def count(owner: mutable Arena&) -> usize:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			alias: mutable darray[u8] = values
+			alias.push(66)
+			return alias.count
+	return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("growing a copied darray must not invalidate the darray alias itself, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewCopiedDArrayAliasDependenciesJoinAcrossBranches(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_branch_joined_darray_alias.elisa", `def read(owner: mutable Arena&, choose_values: bool) -> char:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		other: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			other.push(66)
+			alias: mutable darray[u8] = []
+			if choose_values:
+				alias <- values
+			else:
+				alias <- other
+			view: sview = values.as_sview()
+			alias.push(67)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected the branch-joined alias set to retain every possible backing, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestStorageViewSourcesOverlapAggregateFieldsThroughTheirRoot(t *testing.T) {
+	if !storageViewSourcesOverlap("parser.source", "parser.tokens") {
+		t.Fatal("expected sibling aggregate fields to conservatively overlap because their storage may alias")
+	}
+	if storageViewSourcesOverlap("left.source", "right.tokens") {
+		t.Fatal("unrelated aggregate roots must not be treated as storage aliases")
+	}
+}
+
+func TestSViewFieldInvalidatedByGrowthThroughSiblingField(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_sibling_darray_field_growth.elisa", `struct ParserBuffers:
+	source: mutable darray[u8]
+	tokens: mutable darray[u8]
+
+def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic, Unsafe.UncheckedIndex:
+		shared: mutable darray[u8] = []
+		in owner:
+			shared.push(65)
+			parser: mutable ParserBuffers = ParserBuffers{source: shared, tokens: shared}
+			view: sview = parser.source.as_sview()
+			parser.tokens.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected growth through a sibling darray field to invalidate a possibly aliased sview, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewFieldInvalidatedWhenItsSharedSourceGrows(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_field_source_darray_growth.elisa", `struct ParserBuffers:
+	source: mutable darray[u8]
+	tokens: mutable darray[u8]
+
+def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic, Unsafe.UncheckedIndex:
+		shared: mutable darray[u8] = []
+		in owner:
+			shared.push(65)
+			parser: mutable ParserBuffers = ParserBuffers{source: shared, tokens: shared}
+			view: sview = parser.source.as_sview()
+			shared.push(66)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected growth of a darray shared into an aggregate to invalidate its field-derived sview, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewFieldRetainsSourceAliasAfterFieldRebind(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_field_rebind_keeps_old_source.elisa", `struct ParserBuffers:
+	source: mutable darray[u8]
+	tokens: mutable darray[u8]
+
+def read(owner: mutable Arena&) -> char:
+	can Memory.Allocate, Abort.Panic, Unsafe.UncheckedIndex:
+		shared: mutable darray[u8] = []
+		other: mutable darray[u8] = []
+		in owner:
+			shared.push(65)
+			other.push(66)
+			parser: mutable ParserBuffers = ParserBuffers{source: shared, tokens: other}
+			view: sview = parser.source.as_sview()
+			parser.source <- other
+			shared.push(67)
+			return view[0]
+	return 'x'
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected a view to keep its original source provenance after its field is rebound, got:\n%s", allDiagnostics(result))
+	}
+}
+
 func TestSViewOfStableReserveCommitBufferSurvivesGrowth(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_stable_reserve_commit.elisa", `def read() -> char:
 	can Memory.Allocate, Abort.Panic:

@@ -235,6 +235,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// region-less aggregate carries its dangling interior field forward.
 		a.recordStructInteriorRegionTaint(&ast.Ident{Position: n.Position, Name: n.Name}, n.Value, valueType)
 		a.recordStorageViewBinding(sym, n.Value)
+		a.recordStorageContainerAlias(sym, n.Value, valueType)
 		a.dischargeLocalWhereRefinement(n)
 		aliasAccessType := declType
 		if n.Type == nil || typeExprHasExplicitMutableRef(n.Type) {
@@ -544,6 +545,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordAssignmentRefinement(n.Target, targetType, valueType)
 			a.recordRegionRefAssignment(n.Target, n.Value)
 			a.recordStorageViewAssignment(n.Target, n.Value)
+			a.recordStorageContainerAliasTarget(n.Target, n.Value, targetType, valueType)
 		}
 		if a.lvalueStorageOutlivesFunction(n.Target) {
 			a.checkLocalArenaEscape(n.Value, valueType, "store")
@@ -685,6 +687,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordAssignmentRefinement(n.Target, targetType, targetType)
 		a.recordRegionRefAssignment(n.Target, n.Value)
 		a.recordStorageViewAssignment(n.Target, n.Value)
+		a.recordStorageContainerAliasTarget(n.Target, n.Value, targetType, valueType)
 		a.recordSpecializedValueTypeTarget(n.Target, valueType)
 		a.recordNamedStateAssignmentTarget(n.Target, n.Value, valueType)
 		a.invalidatePredFactsForTarget(n.Target)
