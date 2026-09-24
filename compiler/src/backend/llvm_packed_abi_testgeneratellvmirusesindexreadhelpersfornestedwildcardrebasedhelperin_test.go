@@ -8,6 +8,30 @@ import (
 	"testing"
 )
 
+const packedStoreStateLayoutTestPrelude = `struct PackedStoreState:
+	head_region: uintptr
+	alloc_region: uintptr
+	alloc_region_index: usize
+	decode_region: uintptr
+	decode_region_index: usize
+	tail_region: uintptr
+	regions: darray[uintptr]
+	handles: darray[uintptr]
+	row_word_counts: darray[usize]
+	indices: darray[u32]
+	tags: darray[u32]
+	variant_slots: darray[u32]
+	variant_rows: darray[uintptr]
+	prefix_words: usize
+	prefix_columns: darray[uintptr]
+	prefix_column_capacity: usize
+	side_words: usize
+	side_columns: darray[uintptr]
+	side_column_capacity: usize
+	row_words: usize
+	preferred_region_capacity: usize
+`
+
 func TestGenerateLLVMIRUsesIndexReadHelpersForNestedWildcardRebasedHelperIndexedFrozenMatchedPayloadRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
 	src := `packed enum Expr:
 	common:
@@ -142,7 +166,8 @@ def choose() -> int:
 	}
 }
 func TestGenerateOptimizedLLVMIRUsesDirectPrefixColumnLoadsForFrozenRepeatedCommonFieldReadsInIndexSOA(t *testing.T) {
-	src := `packed enum Expr:
+	src := packedStoreStateLayoutTestPrelude + `
+packed enum Expr:
 	common:
 		@storage(inline)
 		span: int
@@ -176,7 +201,8 @@ def fold_common_frozen() -> int:
 	}
 }
 func TestGenerateOptimizedLLVMIRUsesDirectDenseMetadataLoadsForFrozenPackedMatchInIndexSOA(t *testing.T) {
-	src := `packed enum Expr:
+	src := packedStoreStateLayoutTestPrelude + `
+packed enum Expr:
 	common:
 		@storage(inline)
 		span: int
@@ -219,7 +245,8 @@ def fold_match_frozen() -> int:
 	}
 }
 func TestGenerateOptimizedLLVMIRUsesDirectAllWordsPrefixLoadsForRetainedReadsFrozenWidePayloadMatch(t *testing.T) {
-	src := `@packed_profile(retained_reads)
+	src := packedStoreStateLayoutTestPrelude + `
+@packed_profile(retained_reads)
 packed enum Expr:
 	common:
 		@storage(inline)

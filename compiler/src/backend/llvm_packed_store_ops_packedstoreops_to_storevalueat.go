@@ -293,48 +293,18 @@ func (ops *packedStoreOps) loadPackedStoreDArrayItemsDirectUncached(stateValue C
 	return C.LLVMBuildLoad2(ops.s.builder, opaquePtrType, itemsPtrPtr, cStringFree(name)), nil
 }
 func (ops *packedStoreOps) loadIndexSOAHandleDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	usizeType := ops.s.g.result.NamedTypes["usize"]
-	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	fieldOffset, err := ops.packedStoreStateFieldOffset("handles")
 	if err != nil {
 		return nil, err
 	}
-	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	uintptrArrayType := &semantic.DArrayType{Elem: ops.s.g.result.NamedTypes["uintptr"]}
-	uintptrArrayLLVMType, err := ops.s.g.lowerType(uintptrArrayType)
-	if err != nil {
-		return nil, err
-	}
-	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(uintptrArrayLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	handlesOffsetBytes := uint64(6)*wordBytes + darrayBytes
-	return ops.loadPackedStoreDArrayElementDirect(stateValue, handlesOffsetBytes, ops.s.g.result.NamedTypes["uintptr"], indexValue, name)
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.result.NamedTypes["uintptr"], indexValue, name)
 }
 func (ops *packedStoreOps) loadIndexSOATagDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, name string) (C.LLVMValueRef, error) {
-	usizeType := ops.s.g.result.NamedTypes["usize"]
-	usizeLLVMType, err := ops.s.g.lowerType(usizeType)
+	fieldOffset, err := ops.packedStoreStateFieldOffset("tags")
 	if err != nil {
 		return nil, err
 	}
-	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	uintptrArrayType := &semantic.DArrayType{Elem: ops.s.g.result.NamedTypes["uintptr"]}
-	uintptrArrayLLVMType, err := ops.s.g.lowerType(uintptrArrayType)
-	if err != nil {
-		return nil, err
-	}
-	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(uintptrArrayLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	tagsOffsetBytes := uint64(6)*wordBytes + uint64(3)*darrayBytes
-	return ops.loadPackedStoreDArrayElementDirect(stateValue, tagsOffsetBytes, ops.s.g.result.NamedTypes["u32"], indexValue, name)
+	return ops.loadPackedStoreDArrayElementDirect(stateValue, fieldOffset, ops.s.g.result.NamedTypes["u32"], indexValue, name)
 }
 func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRef, indexValue C.LLVMValueRef, wordOffset uint64, name string) (C.LLVMValueRef, error) {
 	if ops == nil || ops.s == nil || ops.s.g == nil {
@@ -351,20 +321,10 @@ func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRe
 	if err != nil {
 		return nil, err
 	}
-	wordBytes, err := ops.s.g.abiSizeOfLLVMType(usizeLLVMType)
+	prefixColumnsOffsetBytes, err := ops.packedStoreStateFieldOffset("prefix_columns")
 	if err != nil {
 		return nil, err
 	}
-	prefixColumnsType := &semantic.DArrayType{Elem: uintptrType}
-	prefixColumnsLLVMType, err := ops.s.g.lowerType(prefixColumnsType)
-	if err != nil {
-		return nil, err
-	}
-	darrayBytes, err := ops.s.g.abiSizeOfLLVMType(prefixColumnsLLVMType)
-	if err != nil {
-		return nil, err
-	}
-	prefixColumnsOffsetBytes := uint64(6)*wordBytes + uint64(6)*darrayBytes + wordBytes
 	columnsDataPtr, err := ops.loadPackedStoreDArrayItemsDirect(stateValue, prefixColumnsOffsetBytes, name+".prefix.columns.items")
 	if err != nil {
 		return nil, err
@@ -381,6 +341,18 @@ func (ops *packedStoreOps) loadIndexSOAPrefixWordDirect(stateValue C.LLVMValueRe
 	columnWordPtr := C.LLVMBuildGEP2(ops.s.builder, uintptrLLVMType, columnDataPtr, llvmValueSlicePtr([]C.LLVMValueRef{columnIndex}), 1, cStringFree(name+".prefix.word.ptr"))
 	return C.LLVMBuildLoad2(ops.s.builder, uintptrLLVMType, columnWordPtr, cStringFree(name+".prefix.word")), nil
 }
+
+func (ops *packedStoreOps) packedStoreStateFieldOffset(fieldName string) (uint64, error) {
+	if ops == nil || ops.s == nil || ops.s.g == nil {
+		return 0, fmt.Errorf("missing packed store lowering state")
+	}
+	stateType, ok := ops.s.g.result.NamedTypes["PackedStoreState"].(*semantic.StructType)
+	if !ok || stateType == nil {
+		return 0, fmt.Errorf("packed store state type is unavailable while resolving field %q", fieldName)
+	}
+	return ops.s.g.abiFieldOffset(stateType, fieldName)
+}
+
 func (ops *packedStoreOps) storeCount(name string) (C.LLVMValueRef, error) {
 	stateValue, err := ops.stateValue(name + ".state")
 	if err != nil {
