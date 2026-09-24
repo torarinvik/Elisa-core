@@ -292,7 +292,7 @@ func substituteAssocTypeExpr(expr ast.TypeExpr, assocExprs map[string]ast.TypeEx
 		for _, field := range n.Fields {
 			fields = append(fields, ast.TupleTypeField{Position: field.Position, Name: field.Name, Type: substituteAssocTypeExpr(field.Type, assocExprs)})
 		}
-		return &ast.TupleTypeExpr{Position: n.Position, Fields: fields}
+		return &ast.TupleTypeExpr{Position: n.Position, Fields: fields, Region: n.Region}
 	default:
 		return expr
 	}

@@ -123,7 +123,24 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 		for _, field := range n.Fields {
 			fields = append(fields, TupleField{Name: field.Name, Type: a.resolveType(field.Type)})
 		}
-		return &TupleType{Fields: fields}
+		tuple := &TupleType{Fields: fields}
+		if n.Region == "" {
+			return tuple
+		}
+		if !a.regionQualifierDefined(n.Region) {
+			a.errorf(n.Pos(), "unknown region qualifier %q", n.Region)
+			return tuple
+		}
+		stamped, carriesRegion, conflicts := stampAggregateRegion(tuple, n.Region)
+		if conflicts {
+			a.errorf(n.Pos(), "tuple region annotation @%s conflicts with a field tied to a different region", n.Region)
+			return tuple
+		}
+		if !carriesRegion {
+			a.errorf(n.Pos(), "tuple region annotation @%s requires at least one region-carrying field", n.Region)
+			return tuple
+		}
+		return stamped
 	case *ast.RefType:
 		region := n.Region
 		if region != "" && !a.regionQualifierDefined(region) {

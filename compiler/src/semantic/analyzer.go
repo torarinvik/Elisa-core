@@ -672,7 +672,7 @@ type checkpointState struct {
 }
 
 type storageViewDependencyState struct {
-	Source        string
+	Sources       []string
 	Valid         bool
 	InvalidatedBy string
 }

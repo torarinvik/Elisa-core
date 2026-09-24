@@ -621,6 +621,9 @@ type LmutRebindClaim struct {
 type TupleTypeExpr struct {
 	Position lexer.Pos
 	Fields   []TupleTypeField
+	// Region is an explicit @r lifetime on the aggregate. Semantic resolution
+	// propagates it to every region-carrying field, rejecting mixed lifetimes.
+	Region string
 }
 type TupleTypeField struct {
 	Position lexer.Pos

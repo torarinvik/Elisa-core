@@ -321,6 +321,10 @@ func takeReturnTypeRegion(typ ast.TypeExpr) string {
 		region := t.Region
 		t.Region = ""
 		return region
+	case *ast.TupleTypeExpr:
+		region := t.Region
+		t.Region = ""
+		return region
 	default:
 		return ""
 	}

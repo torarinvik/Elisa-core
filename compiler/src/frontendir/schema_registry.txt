@@ -1684,6 +1684,7 @@ F TupleExpr 2 Position
 T 264 TupleTypeExpr
 F TupleTypeExpr 1 Fields
 F TupleTypeExpr 2 Position
+F TupleTypeExpr 3 Region
 
 T 265 TupleTypeField
 F TupleTypeField 1 Name

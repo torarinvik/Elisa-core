@@ -13,6 +13,16 @@ func (a *Analyzer) applyDeclaredReturnRegion(fn *ast.FuncDecl, ft *FuncType) {
 		return
 	}
 	ft.ReturnRegion = fn.ReturnRegion
+	if tuple, ok := ft.Return.(*TupleType); ok {
+		stamped, carriesRegion, conflicts := stampAggregateRegion(tuple, fn.ReturnRegion)
+		if conflicts {
+			a.errorf(fn.Pos(), "tuple return region @%s conflicts with a field tied to a different region", fn.ReturnRegion)
+		} else if !carriesRegion {
+			a.errorf(fn.Pos(), "tuple return region @%s requires at least one region-carrying field", fn.ReturnRegion)
+		} else {
+			ft.Return = stamped
+		}
+	}
 	for index, param := range ft.Params {
 		if regionParamReturnTypeRegion(param) != fn.ReturnRegion {
 			continue

@@ -159,6 +159,8 @@ func containerTypeRegion(typ Type) string {
 		return t.Region
 	case *GenericInstanceType:
 		return t.Region
+	case *TupleType, *OptionalType, *ErrorUnionType, *ArrayType, *AggregateStateType, *StructType:
+		return commonExplicitTypeRegion(t)
 	}
 	return ""
 }
@@ -172,6 +174,113 @@ func typeCanCarryRegion(typ Type) bool {
 		return true
 	}
 	return false
+}
+
+// stampAggregateRegion ties every borrowed/region-owned leaf in an aggregate to
+// one lifetime. A region on a tuple is not merely metadata on the tuple shell:
+// projections must retain the same lifetime or a returned field could outlive
+// the aggregate's backing storage.
+func stampAggregateRegion(typ Type, region string) (Type, bool, bool) {
+	if typ == nil || region == "" {
+		return typ, false, false
+	}
+	switch value := typ.(type) {
+	case *DArrayType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *DictType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *SetType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *CStrType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *SViewType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *ViewType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *GenericInstanceType:
+		clone := *value
+		found, conflict := stampRegionField(&clone.Region, region)
+		return &clone, found, conflict
+	case *RefType:
+		clone := *value
+		if clone.Region != "" && clone.Region != region {
+			return typ, false, true
+		}
+		stampedElem, elemCarriesRegion, elemConflicts := stampAggregateRegion(clone.Elem, region)
+		if elemConflicts {
+			return typ, false, true
+		}
+		if elemCarriesRegion {
+			clone.Elem = stampedElem
+			return &clone, true, false
+		}
+		clone.Region = region
+		return &clone, true, false
+	case *TupleType:
+		clone := &TupleType{Fields: append([]TupleField(nil), value.Fields...)}
+		found := false
+		for index := range clone.Fields {
+			stampedField, fieldCarriesRegion, conflicts := stampAggregateRegion(clone.Fields[index].Type, region)
+			if conflicts {
+				return typ, false, true
+			}
+			if fieldCarriesRegion {
+				clone.Fields[index].Type = stampedField
+				found = true
+			}
+		}
+		return clone, found, false
+	case *OptionalType:
+		stampedValue, found, conflicts := stampAggregateRegion(value.Value, region)
+		if !found || conflicts {
+			return typ, found, conflicts
+		}
+		return &OptionalType{Value: stampedValue}, true, false
+	case *ErrorUnionType:
+		stampedValue, found, conflicts := stampAggregateRegion(value.Value, region)
+		if !found || conflicts {
+			return typ, found, conflicts
+		}
+		return &ErrorUnionType{Value: stampedValue, Errors: value.Errors}, true, false
+	case *ArrayType:
+		stampedElem, found, conflicts := stampAggregateRegion(value.Elem, region)
+		if !found || conflicts {
+			return typ, found, conflicts
+		}
+		clone := *value
+		clone.Elem = stampedElem
+		return &clone, true, false
+	case *AggregateStateType:
+		stampedBase, found, conflicts := stampAggregateRegion(value.Base, region)
+		if !found || conflicts {
+			return typ, found, conflicts
+		}
+		clone := *value
+		clone.Base = stampedBase
+		return &clone, true, false
+	default:
+		return typ, false, false
+	}
+}
+
+func stampRegionField(current *string, region string) (bool, bool) {
+	if *current != "" && *current != region {
+		return false, true
+	}
+	*current = region
+	return true, false
 }
 
 // stampContainerRegion returns a shallow clone of a region-carrying container

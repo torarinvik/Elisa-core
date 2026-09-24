@@ -97,8 +97,96 @@ func containerRegion(t Type) string {
 				return ""
 			}
 			t = tt.Elem
+		case *TupleType, *OptionalType, *ErrorUnionType, *ArrayType, *AggregateStateType, *StructType:
+			return commonExplicitTypeRegion(tt)
 		default:
 			return ""
+		}
+	}
+}
+
+type explicitTypeRegionSummary struct {
+	regions map[string]struct{}
+	unknown bool
+}
+
+func commonExplicitTypeRegion(typ Type) string {
+	summary := explicitTypeRegionSummary{regions: make(map[string]struct{})}
+	collectExplicitTypeRegions(typ, &summary, map[Type]bool{})
+	if summary.unknown || len(summary.regions) != 1 {
+		return ""
+	}
+	for region := range summary.regions {
+		return region
+	}
+	return ""
+}
+
+func collectExplicitTypeRegions(typ Type, summary *explicitTypeRegionSummary, seen map[Type]bool) {
+	if typ == nil || summary == nil || seen[typ] {
+		return
+	}
+	seen[typ] = true
+	addRegion := func(region string) {
+		if region == "" {
+			summary.unknown = true
+			return
+		}
+		summary.regions[region] = struct{}{}
+	}
+	visit := func(child Type) { collectExplicitTypeRegions(child, summary, seen) }
+	switch value := typ.(type) {
+	case *DArrayType:
+		addRegion(value.Region)
+		visit(value.Elem)
+	case *DictType:
+		addRegion(value.Region)
+		visit(value.Key)
+		visit(value.Value)
+	case *SetType:
+		addRegion(value.Region)
+		visit(value.Elem)
+	case *CStrType:
+		addRegion(value.Region)
+	case *SViewType:
+		addRegion(value.Region)
+	case *ViewType:
+		addRegion(value.Region)
+		visit(value.Elem)
+	case *RefType:
+		if value.Region != "" {
+			addRegion(value.Region)
+			visit(value.Elem)
+			return
+		}
+		before := len(summary.regions)
+		unknownBefore := summary.unknown
+		visit(value.Elem)
+		if before == len(summary.regions) && unknownBefore == summary.unknown {
+			addRegion("")
+		}
+	case *GenericInstanceType:
+		if value.Region != "" {
+			addRegion(value.Region)
+		}
+		for _, argument := range value.Args {
+			visit(argument)
+		}
+	case *TupleType:
+		for _, field := range value.Fields {
+			visit(field.Type)
+		}
+	case *OptionalType:
+		visit(value.Value)
+	case *ErrorUnionType:
+		visit(value.Value)
+	case *ArrayType:
+		visit(value.Elem)
+	case *AggregateStateType:
+		visit(value.Base)
+	case *StructType:
+		for _, field := range value.Fields {
+			visit(field.Type)
 		}
 	}
 }
@@ -124,7 +212,7 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
 	// carries no region itself).
 	region := regionParamReturnTypeRegion(valueType)
-	if region == "" && (isBorrowLikeType(valueType) || isRegionBorrowedStringOrViewType(valueType)) {
+	if region == "" && (isBorrowLikeType(valueType) || isRegionBorrowedStringOrViewType(valueType) || isRegionBorrowedAggregateType(valueType)) {
 		region = a.returnBorrowedRegion(valueExpr)
 	}
 	if region == "" || !a.lookupRegionParam(region) {
@@ -187,6 +275,8 @@ func explicitTypeRegion(typ ast.TypeExpr) string {
 		return t.Region
 	case *ast.MutableType:
 		return explicitTypeRegion(t.Elem)
+	case *ast.TupleTypeExpr:
+		return t.Region
 	}
 	return ""
 }
@@ -201,7 +291,10 @@ func regionParamReturnTypeRegion(t Type) string {
 	if rt, ok := t.(*RefType); ok && rt != nil && rt.Region != "" {
 		return rt.Region
 	}
-	return containerOrEntryRegion(t)
+	if region := containerOrEntryRegion(t); region != "" {
+		return region
+	}
+	return commonExplicitTypeRegion(t)
 }
 
 // returnBorrowedRegion finds the region a returned BORROW points into, peeling address-of, indexing,
@@ -221,11 +314,18 @@ func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
 			return r
 		}
 		return a.returnBorrowedRegion(n.Object)
+	case *ast.TupleExpr:
+		region := ""
+		for _, element := range n.Elems {
+			elementRegion := a.returnBorrowedRegion(element)
+			region = a.innerRegion(region, elementRegion)
+		}
+		return region
 	case *ast.Ident:
 		// An identifier can name either an owning container or a borrowed view. Only
 		// views/refs contribute a borrow lifetime here; owning container escape checks
 		// use their separate region rules.
-		if isRegionBorrowedStringOrViewType(a.exprTypes[n]) {
+		if isRegionBorrowedStringOrViewType(a.exprTypes[n]) || isRegionBorrowedAggregateType(a.exprTypes[n]) {
 			if region := regionParamReturnTypeRegion(a.exprTypes[n]); region != "" {
 				return region
 			}
@@ -246,6 +346,120 @@ func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
 // "reference does not outlive its referent".
 func (a *Analyzer) checkReturnRegionContainerEscape(valueExpr ast.Expr, valueType Type) {
 	a.checkRegionContainerEscape(valueExpr, valueType, "return")
+}
+
+// checkTupleReturnRegionEscapes checks tuple literals field-by-field. Contextual
+// tuple typing records the declared field types on the tuple expression, so
+// checking only the aggregate can mistake an input borrowed from @b for the
+// declared @a lifetime. Each source expression must independently satisfy its
+// field's return lifetime before the aggregate contract is trusted.
+func (a *Analyzer) checkTupleReturnRegionEscapes(valueExpr ast.Expr, valueType, returnType Type) bool {
+	returnTuple, ok := StripAggregateStateType(returnType).(*TupleType)
+	if !ok || returnTuple == nil {
+		return false
+	}
+	tupleExpr, isLiteral := stripParenExpr(valueExpr).(*ast.TupleExpr)
+	var sourceTuple *TupleType
+	if isLiteral {
+		if len(returnTuple.Fields) != len(tupleExpr.Elems) {
+			return false
+		}
+	} else {
+		sourceTuple = a.sourceTupleType(valueExpr, valueType)
+		if sourceTuple == nil || len(returnTuple.Fields) != len(sourceTuple.Fields) {
+			return false
+		}
+	}
+	for index, targetField := range returnTuple.Fields {
+		var element ast.Expr
+		actualType := Type(nil)
+		if isLiteral {
+			element = tupleExpr.Elems[index]
+			actualType = a.exprTypes[element]
+		} else {
+			actualType = sourceTuple.Fields[index].Type
+		}
+		if actualType == nil {
+			actualType = targetField.Type
+		}
+		if nestedTupleType(actualType) != nil && nestedTupleType(targetField.Type) != nil {
+			if isLiteral && a.checkTupleReturnRegionEscapes(element, actualType, targetField.Type) {
+				continue
+			}
+			if !isLiteral && a.checkTupleTypeReturnRegionEscapes(valueExpr, nestedTupleType(actualType), nestedTupleType(targetField.Type)) {
+				continue
+			}
+		}
+		a.checkTupleReturnFieldRegion(valueExpr, element, targetField.Name, actualType, targetField.Type)
+	}
+	return true
+}
+
+func (a *Analyzer) sourceTupleType(expr ast.Expr, analyzedType Type) *TupleType {
+	if ident, ok := stripParenExpr(expr).(*ast.Ident); ok && a.currentScope != nil {
+		if symbol, found := a.currentScope.Lookup(ident.Name); found && symbol != nil {
+			if tuple := nestedTupleType(symbol.Type); tuple != nil {
+				return tuple
+			}
+		}
+	}
+	return nestedTupleType(analyzedType)
+}
+
+func nestedTupleType(typ Type) *TupleType {
+	if tuple, ok := StripAggregateStateType(typ).(*TupleType); ok {
+		return tuple
+	}
+	return nil
+}
+
+func (a *Analyzer) checkTupleTypeReturnRegionEscapes(expr ast.Expr, source, target *TupleType) bool {
+	if source == nil || target == nil || len(source.Fields) != len(target.Fields) {
+		return false
+	}
+	for index, targetField := range target.Fields {
+		sourceType := source.Fields[index].Type
+		if a.checkTupleTypeReturnRegionEscapes(expr, nestedTupleType(sourceType), nestedTupleType(targetField.Type)) {
+			continue
+		}
+		a.checkTupleReturnFieldRegion(expr, nil, targetField.Name, sourceType, targetField.Type)
+	}
+	return true
+}
+
+func (a *Analyzer) checkTupleReturnFieldRegion(aggregateExpr, fieldExpr ast.Expr, name string, actualType, expectedType Type) {
+	expr := fieldExpr
+	if expr == nil {
+		expr = aggregateExpr
+	}
+	if expr == nil {
+		return
+	}
+	actualRegion := regionParamReturnTypeRegion(actualType)
+	if actualRegion == "" && fieldExpr != nil {
+		actualRegion = a.returnBorrowedRegion(fieldExpr)
+	}
+	expectedRegion := regionParamReturnTypeRegion(expectedType)
+	regionContractRejected := false
+	if expectedRegion != "" && actualRegion != expectedRegion &&
+		!a.regionOutlives(actualRegion, expectedRegion) && !isStaticStringLiteralExpr(fieldExpr) {
+		if actualRegion == "" {
+			a.errorf(expr.Pos(), "tuple return field %q has no proven backing region for the declared return lifetime %q", name, expectedRegion)
+		} else {
+			a.errorf(expr.Pos(), "tuple return field %q is tied to region %q, which does not prove the declared return lifetime %q", name, actualRegion, expectedRegion)
+		}
+		regionContractRejected = true
+	}
+	a.checkReturnRegionContainerEscape(expr, actualType)
+	a.checkRegionAggregateReturnEscape(expr, actualType)
+	if !regionContractRejected {
+		a.checkRegionParamReturnEscape(expr, actualType)
+	}
+}
+
+func isStaticStringLiteralExpr(expr ast.Expr) bool {
+	_, ok := stripParenExpr(expr).(*ast.StringLit)
+	return ok
 }
 
 // checkRegionAggregateReturnEscape rejects RETURNING a by-value aggregate that
@@ -308,6 +522,29 @@ func typeCarriesRegionStorageRec(t Type, seen map[Type]bool) bool {
 			return false
 		}
 		return typeCarriesRegionStorageRec(tt.Elem, seen)
+	case *TupleType:
+		for _, field := range tt.Fields {
+			if typeCarriesRegionStorageRec(field.Type, seen) {
+				return true
+			}
+		}
+		return false
+	case *OptionalType:
+		return typeCarriesRegionStorageRec(tt.Value, seen)
+	case *ErrorUnionType:
+		return typeCarriesRegionStorageRec(tt.Value, seen)
+	case *ArrayType:
+		return typeCarriesRegionStorageRec(tt.Elem, seen)
+	case *GenericInstanceType:
+		if tt.Region != "" {
+			return true
+		}
+		for _, argument := range tt.Args {
+			if typeCarriesRegionStorageRec(argument, seen) {
+				return true
+			}
+		}
+		return false
 	case *AggregateStateType:
 		if tt == nil {
 			return false
@@ -506,7 +743,7 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		return
 	}
 	region := containerRegion(valueType)
-	if region == "" && isRegionBorrowedStringOrViewType(valueType) {
+	if region == "" && (isRegionBorrowedStringOrViewType(valueType) || isRegionBorrowedAggregateType(valueType)) {
 		// Contextual checking against a region-less return/assignment type can erase the
 		// stamped region from valueType. Recover it from the source expression instead;
 		// in particular, a slice borrows the region of its underlying cstr/sview/view.
@@ -557,6 +794,14 @@ func isRegionBorrowedStringOrViewType(t Type) bool {
 	default:
 		return false
 	}
+}
+
+func isRegionBorrowedAggregateType(t Type) bool {
+	switch StripAggregateStateType(t).(type) {
+	case *TupleType, *ArrayType, *OptionalType, *ErrorUnionType:
+		return typeCarriesRegionStorage(t)
+	}
+	return false
 }
 
 // isSynthesizedAutoRegion reports whether a region name is one the compiler created
@@ -1608,6 +1853,8 @@ func containerOrEntryRegion(t Type) string {
 				return ""
 			}
 			t = tt.Elem
+		case *TupleType, *OptionalType, *ErrorUnionType, *ArrayType, *AggregateStateType, *StructType:
+			return commonExplicitTypeRegion(tt)
 		default:
 			return ""
 		}

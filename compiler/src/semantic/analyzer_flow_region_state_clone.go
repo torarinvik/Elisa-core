@@ -106,7 +106,7 @@ func (a *Analyzer) cloneStorageViewDeps() map[*Symbol]storageViewDependencyState
 	}
 	cloned := make(map[*Symbol]storageViewDependencyState, len(a.currentStorageViewDeps))
 	for sym, dep := range a.currentStorageViewDeps {
-		cloned[sym] = dep
+		cloned[sym] = cloneStorageViewDependency(dep)
 	}
 	return cloned
 }

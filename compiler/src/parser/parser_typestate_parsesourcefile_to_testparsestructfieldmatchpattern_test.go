@@ -21,6 +21,40 @@ func parseSourceFile(t *testing.T, src string) (*ast.File, []string) {
 	recordParserParityCase(t, src, len(errs), len(p.Notices()))
 	return file, errs
 }
+
+func TestTupleRegionSuffixIsPreservedOnParametersAndPromotedOnReturns(t *testing.T) {
+	file, errs := parseSourceFile(t, `def pair[@r](source: sview @r) -> (known: bool, value: sview) @r:
+	return (true, source)
+
+def project[@r](pair: (known: bool, value: sview) @r) -> sview @r:
+	return pair.value
+`)
+	if len(errs) != 0 {
+		t.Fatalf("unexpected parser errors: %v", errs)
+	}
+	if len(file.Decls) != 2 {
+		t.Fatalf("expected two declarations, got %d", len(file.Decls))
+	}
+	pair, ok := file.Decls[0].(*ast.FuncDecl)
+	if !ok {
+		t.Fatalf("expected first declaration to be a function, got %T", file.Decls[0])
+	}
+	if pair.ReturnRegion != "r" {
+		t.Fatalf("expected tuple return region to become function contract @r, got %q", pair.ReturnRegion)
+	}
+	if tuple, ok := pair.ReturnType.(*ast.TupleTypeExpr); !ok || tuple.Region != "" {
+		t.Fatalf("expected return region to be promoted off tuple type, got %T %#v", pair.ReturnType, pair.ReturnType)
+	}
+	project, ok := file.Decls[1].(*ast.FuncDecl)
+	if !ok || len(project.Params) != 1 {
+		t.Fatalf("expected second declaration to have one function parameter, got %T", file.Decls[1])
+	}
+	tuple, ok := project.Params[0].Type.(*ast.TupleTypeExpr)
+	if !ok || tuple.Region != "r" {
+		t.Fatalf("expected tuple parameter to retain @r, got %T %#v", project.Params[0].Type, project.Params[0].Type)
+	}
+}
+
 func TestParseCharLiteralInConstDecl(t *testing.T) {
 	file, errs := parseSourceFile(t, "const VALUE: char = '\\n'\n")
 	if len(errs) != 0 {

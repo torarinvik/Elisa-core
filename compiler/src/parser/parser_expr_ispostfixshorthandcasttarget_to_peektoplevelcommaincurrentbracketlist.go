@@ -109,7 +109,8 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 		typ = p.parseBaseType(storage, explicit, label, region)
 	}
 	// Explicit `@r` region-provenance suffix (docs/68 §5): the canonical use-site
-	// notation on a container (`darray[T] @r`) or a reference (`T& @r`, `T&? @r`).
+	// notation on a container (`darray[T] @r`), reference (`T& @r`), or tuple
+	// aggregate whose region-carrying fields all share the same lifetime.
 	// On a reference it is equivalent to the legacy region prefix `r T&` -- both
 	// populate the same Region field, so the analyzer treats them identically.
 	if p.peek() == lexer.TOKEN_AT && p.pos+1 < len(p.tokens) && p.tokens[p.pos+1].Kind == lexer.TOKEN_IDENT {
@@ -135,8 +136,15 @@ func (p *Parser) parseTypeExpr() ast.TypeExpr {
 				}
 				t.Region = regionName
 			}
+		case *ast.TupleTypeExpr:
+			if t != nil {
+				if t.Region != "" {
+					p.errorf("region given twice: `@%s` and `@%s` on the same tuple type", t.Region, regionName)
+				}
+				t.Region = regionName
+			}
 		default:
-			p.errorf("region annotation `@%s` is only supported on container, generic, and reference types", regionName)
+			p.errorf("region annotation `@%s` is only supported on container, generic, reference, and tuple types", regionName)
 		}
 	}
 	if p.match(lexer.TOKEN_PIPE) {

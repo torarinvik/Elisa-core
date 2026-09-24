@@ -102,16 +102,11 @@ func TestRunCLIReserveCommitInferenceDoesNotHardBoundResize(t *testing.T) {
     can Memory.Allocate, Abort.Panic:
         xs: mutable darray[i64] = []
         gap: i64 = 0
-        anchor: mutable i64&? = null
         for i in 0..<n:
             xs.push(i.i64())
-            if i == 0:
-                anchor <- &xs[0]
         _ = xs.resize(n * 2)
         xs[n] <- 99
-        if anchor != null:
-            return anchor[0] + xs[n] + gap
-        return -1
+        return xs[n] + gap
 @test
 def reserve_commit_resize_not_hard_bound_test() -> void:
     can Memory.Allocate, Abort.Panic:

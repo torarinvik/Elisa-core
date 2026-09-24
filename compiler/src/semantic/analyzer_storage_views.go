@@ -14,14 +14,14 @@ func storageViewInvalidatedMessage(name string, reason string) string {
 }
 
 // pendingStorageViewError is an invalidated-view use whose final verdict waits on the region stack
-// assignment (Phase C1b). sourceDeclOffset is the byte offset of the source darray's declaration —
-// a precise identity (no name collisions) for matching against reserve_commit decls in the post-pass.
+// assignment (Phase C1b). Source declaration offsets are precise identities for matching every
+// possible backing against reserve_commit decls in the post-pass.
 type pendingStorageViewError struct {
-	expr             ast.Expr
-	viewName         string
-	dep              storageViewDependencyState
-	sourceDeclOffset int
-	hasSourceDecl    bool
+	expr                ast.Expr
+	viewName            string
+	dep                 storageViewDependencyState
+	sourceDeclOffsets   []int
+	allSourcesHaveDecls bool
 }
 
 func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
@@ -47,10 +47,14 @@ func (a *Analyzer) reportInvalidStorageViewUse(expr ast.Expr) {
 	// Defer: if the source darray is given a reserve_commit stack (stable base) by the per-function
 	// region inference, the view stays valid across growth and this error is dropped in the
 	// post-pass; otherwise it is emitted there. The decl offset identifies the source precisely.
-	pending := pendingStorageViewError{expr: expr, viewName: ident.Name, dep: dep}
-	if srcSym, ok := a.currentScope.Lookup(dep.Source); ok && srcSym.Node != nil {
-		pending.sourceDeclOffset = srcSym.Node.Pos().Offset
-		pending.hasSourceDecl = true
+	pending := pendingStorageViewError{expr: expr, viewName: ident.Name, dep: dep, allSourcesHaveDecls: len(dep.Sources) > 0}
+	for _, source := range dep.Sources {
+		srcSym, ok := a.currentScope.Lookup(source)
+		if !ok || srcSym == nil || srcSym.Node == nil {
+			pending.allSourcesHaveDecls = false
+			continue
+		}
+		pending.sourceDeclOffsets = append(pending.sourceDeclOffsets, srcSym.Node.Pos().Offset)
 	}
 	a.pendingStorageViewErrors = append(a.pendingStorageViewErrors, pending)
 }
@@ -124,10 +128,89 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 			return dep, true
 		}
 		return storageViewDependencyFromSource(n.Object)
+	case *ast.TupleExpr:
+		var deps []storageViewDependencyState
+		for _, element := range n.Elems {
+			if dep, ok := a.storageViewDependencyForExpr(element); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.ListLitExpr:
+		var deps []storageViewDependencyState
+		for _, element := range n.Elems {
+			if dep, ok := a.storageViewDependencyForExpr(element); ok {
+				deps = append(deps, dep)
+			}
+		}
+		for _, key := range n.Keys {
+			if dep, ok := a.storageViewDependencyForExpr(key); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.ListComprehensionExpr:
+		deps := make([]storageViewDependencyState, 0, 2)
+		if listComprehensionResultMayContainBorrowedStorage(a.exprTypes[n]) {
+			if dep, ok := a.storageViewDependencyForExpr(n.Source); ok {
+				deps = append(deps, dep)
+			} else if dep, ok := storageViewDependencyFromSource(n.Source); ok {
+				deps = append(deps, dep)
+			}
+		}
+		if dep, ok := a.storageViewDependencyForExpr(n.Value); ok {
+			deps = append(deps, dep)
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.TernaryExpr:
+		var deps []storageViewDependencyState
+		for _, arm := range []ast.Expr{n.Value, n.Alt} {
+			if dep, ok := a.storageViewDependencyForExpr(arm); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.StructLitExpr:
+		var deps []storageViewDependencyState
+		for _, argument := range n.LoweredArgs() {
+			if dep, ok := a.storageViewDependencyForExpr(argument); ok {
+				deps = append(deps, dep)
+			}
+		}
+		for _, spread := range n.Spreads {
+			if dep, ok := a.storageViewDependencyForExpr(spread); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
+	case *ast.RecordUpdateExpr:
+		var deps []storageViewDependencyState
+		if dep, ok := a.storageViewDependencyForExpr(n.Base); ok {
+			deps = append(deps, dep)
+		}
+		for _, argument := range n.LoweredArgs() {
+			if dep, ok := a.storageViewDependencyForExpr(argument); ok {
+				deps = append(deps, dep)
+			}
+		}
+		return mergeStorageViewDependencies(deps...)
 	case *ast.CallExpr:
 		return a.storageViewDependencyForCall(n)
 	default:
 		return storageViewDependencyState{}, false
+	}
+}
+
+func listComprehensionResultMayContainBorrowedStorage(typ Type) bool {
+	switch result := StripAggregateStateType(typ).(type) {
+	case *DArrayType:
+		return typeCarriesRegionStorage(result.Elem)
+	case *DictType:
+		return typeCarriesRegionStorage(result.Key) || typeCarriesRegionStorage(result.Value)
+	case *SetType:
+		return typeCarriesRegionStorage(result.Elem)
+	default:
+		return false
 	}
 }
 
@@ -184,6 +267,16 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	}
 	name := callBaseName(call)
 	switch name {
+	case "bytes_view":
+		if len(call.Args) >= 1 {
+			return storageViewDependencyFromSource(call.Args[0])
+		}
+		return storageViewDependencyState{}, false
+	case "sview", "string_view_slice", "string_view_prefix", "string_view_suffix":
+		if len(call.Args) >= 1 {
+			return a.storageViewDependencyForExpr(call.Args[0])
+		}
+		return storageViewDependencyState{}, false
 	case "arena_dict_get", "arena_dict_get_mut", "arena_dict_get_cstr_view", "arena_dict_get_cstr_view_mut":
 		// arena_dict_get returns `&items[i].value` — an interior reference into the dict's bucket
 		// array. A later relocating insert (arena_dict_put*/get_or_insert resize → realloc) moves
@@ -255,6 +348,12 @@ func (a *Analyzer) storageViewDependencyForCall(call *ast.CallExpr) (storageView
 	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && field.Field == "view" && field.Object != nil {
 		return storageViewDependencyFromSource(field.Object)
 	}
+	if field, ok := call.Func.(*ast.FieldExpr); ok && field != nil && field.Object != nil {
+		switch field.Field {
+		case "as_sview", "as_cstr":
+			return storageViewDependencyFromSource(field.Object)
+		}
+	}
 	return storageViewDependencyState{}, false
 }
 
@@ -321,7 +420,30 @@ func storageViewDependencyFromSource(source ast.Expr) (storageViewDependencyStat
 	if key == "" {
 		return storageViewDependencyState{}, false
 	}
-	return storageViewDependencyState{Source: key, Valid: true}, true
+	return storageViewDependencyState{Sources: []string{key}, Valid: true}, true
+}
+
+func mergeStorageViewDependencies(dependencies ...storageViewDependencyState) (storageViewDependencyState, bool) {
+	merged := storageViewDependencyState{Valid: true}
+	seen := make(map[string]bool)
+	for _, dependency := range dependencies {
+		for _, source := range dependency.Sources {
+			if source != "" && !seen[source] {
+				seen[source] = true
+				merged.Sources = append(merged.Sources, source)
+			}
+		}
+		if !dependency.Valid {
+			merged.Valid = false
+			if merged.InvalidatedBy == "" {
+				merged.InvalidatedBy = dependency.InvalidatedBy
+			}
+		}
+	}
+	if len(merged.Sources) == 0 {
+		return storageViewDependencyState{}, false
+	}
+	return merged, true
 }
 
 // checkIteratorInvalidationForMutableRefArg rejects passing an actively-iterated relocatable
@@ -362,6 +484,10 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 	if key == "" {
 		return
 	}
+	mutatedSources := map[string]bool{key: true}
+	for _, root := range a.mutationRootsForTarget(source) {
+		mutatedSources[root] = true
+	}
 	// Iterator invalidation: relocating the buffer of a container that is being iterated
 	// would leave the live iteration reading freed/stale memory. Reject it at this single
 	// chokepoint that every relocating mutation (push/extend/reserve/clear/truncate) funnels
@@ -388,7 +514,7 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 		return
 	}
 	for sym, dep := range a.currentStorageViewDeps {
-		if !dep.Valid || dep.Source != key {
+		if !dep.Valid || !storageViewDependsOnAny(dep, mutatedSources) {
 			continue
 		}
 		dep.Valid = false
@@ -404,24 +530,41 @@ func mergeStorageViewDependencyStates(dst map[*Symbol]storageViewDependencyState
 	if dst == nil {
 		dst = make(map[*Symbol]storageViewDependencyState, len(src))
 		for sym, dep := range src {
-			dst[sym] = dep
+			dst[sym] = cloneStorageViewDependency(dep)
 		}
 		return dst
 	}
 	for sym, srcDep := range src {
 		dstDep, ok := dst[sym]
 		if !ok {
+			dst[sym] = cloneStorageViewDependency(srcDep)
 			continue
 		}
-		if dstDep.Source != srcDep.Source {
-			delete(dst, sym)
-			continue
-		}
+		merged, _ := mergeStorageViewDependencies(dstDep, srcDep)
 		if dstDep.Valid && !srcDep.Valid {
-			dst[sym] = srcDep
+			merged.InvalidatedBy = srcDep.InvalidatedBy
 		}
+		if !dstDep.Valid && merged.InvalidatedBy == "" {
+			merged.InvalidatedBy = dstDep.InvalidatedBy
+		}
+		merged.Valid = dstDep.Valid && srcDep.Valid
+		dst[sym] = merged
 	}
 	return dst
+}
+
+func storageViewDependsOnAny(dependency storageViewDependencyState, sources map[string]bool) bool {
+	for _, source := range dependency.Sources {
+		if sources[source] {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneStorageViewDependency(dependency storageViewDependencyState) storageViewDependencyState {
+	dependency.Sources = append([]string(nil), dependency.Sources...)
+	return dependency
 }
 
 func storageViewMutationReason(source ast.Expr, operation string) string {

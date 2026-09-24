@@ -75,7 +75,7 @@ func (p *Parser) applyDeclaredLmutThreading(fn *ast.FuncDecl) {
 	case 1:
 		fn.ReturnType = kept[0].Type
 	default:
-		fn.ReturnType = &ast.TupleTypeExpr{Position: tuple.Position, Fields: kept}
+		fn.ReturnType = &ast.TupleTypeExpr{Position: tuple.Position, Fields: kept, Region: tuple.Region}
 	}
 	fn.LmutThreadSlots = slots
 }
