@@ -183,12 +183,12 @@ func TestRunCLIPostfixSviewCastEnablesStringContentEquality(t *testing.T) {
 		t.Fatalf("failed to compute runtime include path: %v", err)
 	}
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
-	// A raw C-string (u8&?) gains content equality against string literals via the
-	// postfix-shorthand cast to a borrowed view (__cast__(u8&?) -> sview), instead of
-	// needing streq(). The == lowers to a length + byte content comparison.
+	// A valid C string gains content equality against string literals via the
+	// postfix-shorthand cast to a borrowed view (__cast__(cstr) -> sview), instead
+	// of needing streq(). Arbitrary u8 references are not C strings.
 	src := fmt.Sprintf(`# include %q
 
-def sview_cast_matches_program(p: u8&?) -> bool:
+def sview_cast_matches_program(p: cstr?) -> bool:
     return p.sview() == "program"
 
 @test

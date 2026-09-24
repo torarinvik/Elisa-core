@@ -20,6 +20,9 @@ func (a *Analyzer) analyzeStructLiteralExpr(expr *ast.StructLitExpr, expected Ty
 		return result
 	}
 	targetType := a.structLiteralTargetType(expr, expected)
+	if isRuntimeStringViewType(targetType) && a.currentUnsafePointerCastGrantDepth == 0 {
+		a.errorf(expr.Pos(), "direct StringView construction requires an explicit `trusted Unsafe.PointerCast` or `can Unsafe.PointerCast` boundary; use `sview` and validated byte-view constructors in safe code")
+	}
 	base, bindings, regionBindings, ok := structLiteralBaseAndBindings(targetType)
 	if !ok || base == nil {
 		// `Event(code)` on a non-struct target is the PREFIX type-constructor cast

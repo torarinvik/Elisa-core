@@ -159,8 +159,16 @@ func assignableRuntimeCompatible(dst, src Type) bool {
 		return SameType(bridge.DArray.Elem, bridge.DynArray.Args[0])
 	case runtimeBridgeDictDynDict:
 		return SameType(bridge.Dict.Key, bridge.DynDict.Args[0]) && SameType(bridge.Dict.Value, bridge.DynDict.Args[1])
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeCStrU8Ref, runtimeBridgeSViewStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeSViewStringView:
 		return true
+	case runtimeBridgeCStrU8Ref:
+		// A cstr carries the invariant that its pointer is non-null and points
+		// through a NUL terminator. Weakening that guarantee to a byte reference
+		// is safe; a byte reference does not prove termination and must never be
+		// promoted to cstr implicitly.
+		_, dstIsCStr := dst.(*CStrType)
+		_, srcIsCStr := src.(*CStrType)
+		return !dstIsCStr || srcIsCStr
 	default:
 		return false
 	}
@@ -188,8 +196,12 @@ func patternRuntimeCompatible(pattern, actual Type) bool {
 			return matchTypePattern(patternDynDict.Args[0], bridge.Dict.Key) && matchTypePattern(patternDynDict.Args[1], bridge.Dict.Value)
 		}
 		return false
-	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeCStrU8Ref, runtimeBridgeSViewStringView:
+	case runtimeBridgeDArrayViewDynArrayView, runtimeBridgeSViewStringView:
 		return true
+	case runtimeBridgeCStrU8Ref:
+		// Keep generic candidate matching directional too. A cstr formal may
+		// accept cstr actuals only, not an arbitrary u8 pointer.
+		return assignableRuntimeCompatible(pattern, actual)
 	default:
 		return false
 	}

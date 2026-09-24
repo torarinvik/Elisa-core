@@ -227,11 +227,13 @@ def json_decode_string_into(source: u8&, source_offset: usize, source_len: usize
                     return -1
                 out_pos <- out_pos + json_write_utf8_codepoint(dst, out_pos, codepoint)
         return out_pos.i64()
-def json_string_matches_literal(source: u8&, source_offset: usize, source_len: usize, literal: u8&) -> bool:
+def json_string_matches_literal(source: u8&, source_offset: usize, source_len: usize, literal: cstr) -> bool:
     if source_len < 2:
         return false
     if not json_string_has_escape(source, source_offset, source_len):
-        return sview(source + source_offset + 1, 0, (source_len - 2).i64()) == literal
+        trusted Unsafe.PointerCast:
+            span: StringView = StringView{data: source + source_offset + 1, len: (source_len - 2).i64()}
+            return sview_eq(span, sview(literal, 0, -1))
 
     literal_len: usize = runtime_strlen(literal)
     pos: mutable usize = source_offset + 1

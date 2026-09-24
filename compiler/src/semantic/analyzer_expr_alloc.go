@@ -9,6 +9,10 @@ func (a *Analyzer) analyzeCanExpr(expr *ast.CanExpr) Type {
 		return invalidType
 	}
 	refs := a.resolvePermissionRefs(expr.Permissions, true)
+	if permissionRefsContain(refs, "Unsafe", "PointerCast") {
+		a.currentUnsafePointerCastGrantDepth++
+		defer func() { a.currentUnsafePointerCastGrantDepth-- }()
+	}
 	if !expr.SuppressPermissionInference {
 		a.recordFunctionPermissionRefs(refs)
 	}

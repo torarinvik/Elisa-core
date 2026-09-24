@@ -450,6 +450,11 @@ type Analyzer struct {
 	currentTrustedNonProgressDepth    int
 	currentTrustedAssumeProgressDepth int
 	currentTrustedStaleRefDepth       int
+	// currentUnsafePointerCastGrantDepth tracks an explicit local
+	// `can Unsafe.PointerCast` or `trusted Unsafe.PointerCast` scope. The raw
+	// StringView ABI carrier may only be constructed within this boundary;
+	// surface `sview` values should otherwise come from validated constructors.
+	currentUnsafePointerCastGrantDepth int
 	// currentGrantedStaleRefDepth tracks an enclosing *tracked* `can Unsafe.StaleRef:`
 	// grant (vs the untracked `trusted` suppression in currentTrustedStaleRefDepth).
 	// A forwarded-ref store inside it is allowed AND surfaces Unsafe.StaleRef in the

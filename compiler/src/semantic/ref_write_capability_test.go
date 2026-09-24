@@ -149,7 +149,7 @@ func TestWritableRefBindingsStillCompile(t *testing.T) {
 		{"unsafe_cast_alias", "def f(v: void&) -> i64:\n    trusted Unsafe.PointerCast:\n        x: mutable u8& = v.cast[mutable u8&]\n        x[0] <- 65\n        return x[0].i64()\n"},
 		// The scope owns a region's arena; `&r` types read-only only because r cannot be reassigned.
 		{"region_arena_address", "def fill(a: mutable Arena&) -> i64:\n    1\n\ndef f() -> i64:\n    region r(4096):\n        a: mutable Arena& = &r\n        return fill(a)\n    0\n"},
-		{"cstr_out_parameter_static_slot", "def set_name(out: mutable cstr&) -> void:\n    out <- \"hello\"\n\ndef f() -> i64:\n    name: mutable static u8& = \"zz\"\n    set_name(&name)\n    name[1].i64()\n"},
+		{"cstr_out_parameter_static_slot", "def set_name(out: mutable cstr&) -> void:\n    out <- \"hello\"\n\ndef f() -> i64:\n    name: mutable cstr = \"zz\"\n    set_name(&name)\n    name[1].i64()\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

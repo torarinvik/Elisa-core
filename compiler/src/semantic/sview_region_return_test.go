@@ -37,8 +37,7 @@ def safe(view: sview) -> i64:
 	forwarded: sview = choose_second(view, view)
 	return view_length(forwarded)
 `)
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "sview_forwarding_region.elisa", `extern sview(value: u8&?, start: i64, end: i64) -> sview
-
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sview_forwarding_region.elisa", `
 def choose_second(left: sview, right: sview) -> sview:
 	return right
 
@@ -51,12 +50,12 @@ def bad() -> i64:
 			outer_bytes: mutable darray[u8] @outer = []
 			outer_bytes.push(65)
 			outer_bytes.push(0)
-			retained: mutable sview @outer = sview(&outer_bytes[0], 0, 1)
+			retained: mutable sview @outer = outer_bytes.as_sview()
 			region inner(4096):
 				inner_bytes: mutable darray[u8] @inner = []
 				inner_bytes.push(66)
 				inner_bytes.push(0)
-				short_view: sview @inner = sview(&inner_bytes[0], 0, 1)
+				short_view: sview @inner = inner_bytes.as_sview()
 				retained <- choose_second(retained, short_view)
 			return view_length(retained)
 `)
@@ -75,7 +74,7 @@ def bad() -> i64:
 }
 
 func TestNestedSViewForwardingRegionReachesStoreCheck(t *testing.T) {
-	result := analyzeTreeTestSourceWithSemanticErrors(t, "nested_sview_forwarding_region.elisa", `extern sview(value: u8&?, start: i64, end: i64) -> sview
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "nested_sview_forwarding_region.elisa", `
 
 struct ViewHolder:
 	view: sview
@@ -89,12 +88,12 @@ def bad() -> i64:
 			outer_bytes: mutable darray[u8] @outer = []
 			outer_bytes.push(65)
 			outer_bytes.push(0)
-			retained: mutable ViewHolder = ViewHolder{view: sview(&outer_bytes[0], 0, 1)}
+			retained: mutable ViewHolder = ViewHolder{view: outer_bytes.as_sview()}
 			region inner(4096):
 				inner_bytes: mutable darray[u8] @inner = []
 				inner_bytes.push(66)
 				inner_bytes.push(0)
-				short_view: sview @inner = sview(&inner_bytes[0], 0, 1)
+				short_view: sview @inner = inner_bytes.as_sview()
 				retained <- ViewHolder{view: choose_second(retained.view, short_view)}
 			return retained.view.len
 `)

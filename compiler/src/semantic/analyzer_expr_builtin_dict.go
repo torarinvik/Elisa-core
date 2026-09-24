@@ -274,7 +274,10 @@ func (a *Analyzer) analyzeBuiltinDictIndexExpr(expr *ast.IndexExpr, objType Type
 		return invalidType, true
 	}
 
-	indexType := a.analyzeExpr(expr.Index)
+	// Give a key expression its declared key type. In particular, a bare string
+	// literal is NUL-terminated by construction and may be contextually typed as
+	// cstr, while an arbitrary `static u8&` value must not be promoted.
+	indexType := a.analyzeValueExpr(expr.Index, dictType.Key)
 	cstrViewLookup := dictCstrKeyAcceptsSView(dictType, indexType)
 	if !cstrViewLookup && !AssignableTo(dictType.Key, indexType) {
 		a.errorf(expr.Index.Pos(), "dict index expects key of type %s, got %s", dictType.Key, indexType)

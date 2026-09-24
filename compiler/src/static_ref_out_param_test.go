@@ -29,26 +29,31 @@ func TestRunCLIStaticStringRefOutParamRebindsCallerSlot(t *testing.T) {
 def set_out(out: mutable cstr&) -> void:
 	out <- "D4yla3vx4tY"
 
-def make_static_ref() -> static u8&:
+def make_static_ref() -> cstr:
 	return "libkernel"
 
 extern malloc(size: usize) -> mutable heap void&?
 
-def copy_prefix(input: static u8&, len: usize) -> static u8&:
+def copy_prefix(input: cstr, len: usize) -> cstr:
 	raw: mutable heap void&? = malloc(len + 1)
 	if raw == null:
 		return ""
-	out: mutable heap u8& = raw.cast[mutable heap u8&]
+	out: mutable heap u8& = zeroed
+	trusted Unsafe.PointerCast:
+		out <- raw.cast[mutable heap u8&]
 	i: mutable usize = 0
 	while i < len:
 		out[i] <- input[i]
 		i <- i + 1
 	out[len] <- 0
-	return out.cast[static u8&]
+	trusted Unsafe.PointerCast:
+		return out.cast[cstr]
 
-def cstr_eq(lhs: u8&?, rhs: u8&?) -> bool:
-	if lhs == null or rhs == null:
-		return lhs == rhs
+def cstr_eq(lhs: cstr?, rhs: cstr?) -> bool:
+	if lhs == null:
+		return rhs == null
+	if rhs == null:
+		return false
 	i: mutable usize = 0
 	while lhs[i] != 0 and rhs[i] != 0:
 		if lhs[i] != rhs[i]:
@@ -65,7 +70,7 @@ def set_out_from_heap_slice(out: mutable cstr&) -> void:
 @test
 def static_string_ref_out_param_rebinds_caller_slot() -> void:
 	can Abort.Panic:
-		value: mutable static u8& = ""
+		value: mutable cstr = ""
 		set_out(&value)
 		assert_eq(value, "D4yla3vx4tY")
 		set_out_from_call(&value)

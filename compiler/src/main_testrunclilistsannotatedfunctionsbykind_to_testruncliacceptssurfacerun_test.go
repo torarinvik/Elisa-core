@@ -498,7 +498,7 @@ func TestRunCLIAcceptsBareSViewLocalAnnotationInObjectBuild(t *testing.T) {
 	runtimeInclude = filepath.ToSlash(runtimeInclude)
 	src := fmt.Sprintf(`# include %q
 
-def local_view(src: u8&) -> i64:
+def local_view(src: cstr) -> i64:
 	text: sview = sview(src, 0, 1)
 	return text.len
 `, runtimeInclude)

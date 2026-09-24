@@ -63,6 +63,11 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 }
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if _, ok := expr.(*ast.ZeroedLit); ok && expected != nil {
+		if isStringViewType(expected) {
+			a.errorf(expr.Pos(), "`zeroed` cannot construct an `sview`: every view must have a valid, live backing pointer; use an empty string view or a validated byte-view constructor")
+			a.recordAnalyzedExprType(expr, invalidType)
+			return invalidType
+		}
 		a.checkPrivateZeroedType(expected, expr.Pos(), make(map[Type]bool))
 		if dictType, ok := StripAggregateStateType(expected).(*DictType); ok {
 			if !a.ensureRuntimeBackedDictSupported(expr.Pos(), dictType) {
@@ -183,6 +188,13 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 func contextualStringLiteralType(expected Type) (Type, bool) {
 	if expected == nil {
 		return nil, false
+	}
+	if optional, ok := expected.(*OptionalType); ok && optional.Value != nil {
+		// String literals are statically NUL-terminated, so they can safely
+		// initialize/pass to an optional cstr just as they can to cstr itself.
+		// Return the non-optional payload type; AssignableTo handles the normal
+		// optional injection at the surrounding boundary.
+		return contextualStringLiteralType(optional.Value)
 	}
 	if _, ok := expected.(*CStrType); ok {
 		return expected, true

@@ -30,11 +30,11 @@ def valid_suffix(view: sview) -> bool:
 `)
 }
 
-func TestRawU8RefSliceProducesStringView(t *testing.T) {
-	analyzeTreeTestSource(t, "raw_u8_ref_slice_sview.elisa", `def window(source: u8&, start: usize, end: usize) -> sview:
+func TestBoundedU8ViewSlicePreservesItsBounds(t *testing.T) {
+	analyzeTreeTestSource(t, "bounded_u8_view_slice.elisa", `def window(source: view[u8], start: usize, end: usize) -> view[u8]:
     return source[start:end]
 
-def has_prefix(source: u8&) -> bool:
+def has_prefix(source: view[u8]) -> bool:
     return source[0:5] == "hello"
 `)
 }

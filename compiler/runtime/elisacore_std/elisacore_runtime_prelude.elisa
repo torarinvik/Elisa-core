@@ -216,6 +216,7 @@ def lookup_cached_string_len(ptr: u8&?, len_out: mutable usize&) -> int:
 # Runtime strlen (cache-aware)
 # ------------------------------------------------------------
 
+@internal
 def runtime_strlen(value: u8&?) -> usize:
 	src: u8& = value if value != null else ""
 
@@ -253,7 +254,7 @@ def intern_small_string(src: u8&, len: usize) -> heap u8&:
 # Integer / bool / char to string conversion
 # ------------------------------------------------------------
 
-def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
+def int_to_string_into(arena: mutable Arena&, value: i64) -> cstr:
 	can Memory.Allocate, Console.Format, Abort.Panic:
 		len: int = snprintf(null, 0, "%lld", value)
 		panic("int_to_string_into: snprintf failed") if len < 0
@@ -263,23 +264,26 @@ def int_to_string_into(arena: mutable Arena&, value: i64) -> heap u8&:
 		if string_len > 0 and string_len <= 8:
 			text: u8[9]
 			snprintf(&text[0], allocation_bytes, "%lld", value)
-			return intern_small_string(&text[0], string_len)
+			trusted Unsafe.PointerCast:
+				return intern_small_string(&text[0], string_len).cast[cstr]
 
 		out: mutable heap u8& = arena_alloc(arena, allocation_bytes).cast[heap u8&]
 		snprintf(out.cast[mutable u8&?], allocation_bytes, "%lld", value)
 
 		register_perm_string_len(out.cast[u8&], string_len) if arena == &perm_arena
 
-		return out
+		trusted Unsafe.PointerCast:
+			return out.cast[cstr]
 
-def bool_to_string_into(arena: Arena&, value: int) -> u8&:
+def bool_to_string_into(arena: Arena&, value: int) -> cstr:
 	_ = arena
 	return "True" if value != 0 else "False"
 
-def char_to_string_into(arena: Arena&, value: i64) -> heap u8&:
+def char_to_string_into(arena: Arena&, value: i64) -> cstr:
 	can Memory.Allocate, Abort.Panic:
 		_ = arena
 		text: u8[2]
 		text[0] <- value.u8()
 		text[1] <- 0
-		return intern_small_string(&text[0], 1)
+		trusted Unsafe.PointerCast:
+			return intern_small_string(&text[0], 1).cast[cstr]
