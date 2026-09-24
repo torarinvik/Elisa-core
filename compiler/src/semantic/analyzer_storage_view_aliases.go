@@ -77,6 +77,10 @@ func storageViewTypeCarriesDArray(typ Type, seen map[*StructType]bool) bool {
 	switch value := StripAggregateStateType(typ).(type) {
 	case *DArrayType:
 		return true
+	case *RefType:
+		return storageViewTypeCarriesDArray(value.Elem, seen)
+	case *ArrayType:
+		return storageViewTypeCarriesDArray(value.Elem, seen)
 	case *OptionalType:
 		return storageViewTypeCarriesDArray(value.Value, seen)
 	case *ErrorUnionType:

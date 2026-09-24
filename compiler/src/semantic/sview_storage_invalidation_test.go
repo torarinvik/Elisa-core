@@ -123,6 +123,51 @@ func TestIndependentEmptyDArrayGrowthDoesNotInvalidateView(t *testing.T) {
 	}
 }
 
+func TestSViewCapturedByLambdaIsInvalidatedAfterBackingGrowth(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_closure_after_darray_push.elisa", `def read(owner: mutable Arena&) -> usize:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			view: sview = values.as_sview()
+			reader: fn() -> usize = fn() => view.len
+			values.push(66)
+			return reader()
+	return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected backing growth to invalidate an sview captured by a live closure, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestDArrayCapturedByLambdaIsPinnedAgainstRelocatingGrowth(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "darray_closure_after_growth.elisa", `def read(owner: mutable Arena&) -> usize:
+	can Memory.Allocate, Abort.Panic:
+		values: mutable darray[u8] = []
+		in owner:
+			values.push(65)
+			reader: fn() -> usize = fn() => values.as_sview().len
+			values.push(66)
+			return reader()
+	return 0
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), "stale reference") {
+		t.Fatalf("expected growth to invalidate a closure that can derive a view from its captured darray, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestMutatingScalarCaptureDoesNotInvalidateLambda(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "scalar_closure_mutation.elisa", `def read() -> i64:
+	value: mutable i64 = 1
+	reader: fn() -> i64 = fn() => value
+	value <- value + 1
+	return reader()
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if diagnostics := allDiagnostics(result); diagnostics != "" {
+		t.Fatalf("scalar mutation must not invalidate a closure's unrelated storage dependencies, got:\n%s", diagnostics)
+	}
+}
+
 func TestSViewCopiedDArrayAliasDependenciesJoinAcrossBranches(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_branch_joined_darray_alias.elisa", `def read(owner: mutable Arena&, choose_values: bool) -> char:
 	can Memory.Allocate, Abort.Panic:

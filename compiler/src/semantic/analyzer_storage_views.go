@@ -209,11 +209,61 @@ func (a *Analyzer) storageViewDependencyForExpr(expr ast.Expr) (storageViewDepen
 			}
 		}
 		return mergeStorageViewDependencies(deps...)
+	case *ast.LambdaExpr:
+		return a.storageViewDependencyForLambda(n)
 	case *ast.CallExpr:
 		return a.storageViewDependencyForCall(n)
 	default:
 		return storageViewDependencyState{}, false
 	}
+}
+
+// A closure keeps its captured borrowed views and relocatable container headers
+// alive beyond the expression that created it. Carry those dependencies on the
+// function value so a later push/rehash cannot leave a captured view dangling.
+func (a *Analyzer) storageViewDependencyForLambda(lambda *ast.LambdaExpr) (storageViewDependencyState, bool) {
+	if a == nil || lambda == nil || a.lambdaInfo == nil || a.currentScope == nil {
+		return storageViewDependencyState{}, false
+	}
+	info := a.lambdaInfo[lambda]
+	if info == nil {
+		return storageViewDependencyState{}, false
+	}
+	var dependencies []storageViewDependencyState
+	for _, name := range info.Captures {
+		sym, ok := a.currentScope.Lookup(name)
+		if !ok || sym == nil {
+			continue
+		}
+		captured := storageViewDependencyState{Valid: true}
+		if a.currentStorageViewDeps != nil {
+			if dependency, exists := a.currentStorageViewDeps[sym]; exists {
+				captured = dependency
+				if len(captured.Sources) > 0 {
+					dependencies = append(dependencies, captured)
+				}
+			}
+		}
+		for _, alias := range captured.ContainerAliases {
+			dependencies = append(dependencies, storageViewDependencyState{
+				Sources:       []string{alias},
+				Valid:         captured.Valid,
+				InvalidatedBy: captured.InvalidatedBy,
+			})
+		}
+		captureType := a.currentTrackedValueType(sym)
+		if captureType == nil {
+			captureType = sym.Type
+		}
+		if storageViewTypeCarriesDArray(captureType, make(map[*StructType]bool)) {
+			dependencies = append(dependencies, storageViewDependencyState{
+				Sources:       []string{name},
+				Valid:         captured.Valid,
+				InvalidatedBy: captured.InvalidatedBy,
+			})
+		}
+	}
+	return mergeStorageViewDependencies(dependencies...)
 }
 
 func listComprehensionResultMayContainBorrowedStorage(typ Type) bool {
