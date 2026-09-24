@@ -124,7 +124,7 @@ func (a *Analyzer) checkRegionParamReturnEscape(valueExpr ast.Expr, valueType Ty
 	// region-carrying base (catches `return &m.bits[0]`, a ref INTO the @r field, whose `u8&` type
 	// carries no region itself).
 	region := regionParamReturnTypeRegion(valueType)
-	if region == "" {
+	if region == "" && (isBorrowLikeType(valueType) || isRegionBorrowedStringOrViewType(valueType)) {
 		region = a.returnBorrowedRegion(valueExpr)
 	}
 	if region == "" || !a.lookupRegionParam(region) {
@@ -222,7 +222,18 @@ func (a *Analyzer) returnBorrowedRegion(e ast.Expr) string {
 		}
 		return a.returnBorrowedRegion(n.Object)
 	case *ast.Ident:
-		return a.fieldObjectRegion(a.exprTypes[n])
+		// An identifier can name either an owning container or a borrowed view. Only
+		// views/refs contribute a borrow lifetime here; owning container escape checks
+		// use their separate region rules.
+		if isRegionBorrowedStringOrViewType(a.exprTypes[n]) {
+			if region := regionParamReturnTypeRegion(a.exprTypes[n]); region != "" {
+				return region
+			}
+		}
+		if region := a.fieldObjectRegion(a.exprTypes[n]); region != "" {
+			return region
+		}
+		return ""
 	}
 	return regionParamReturnTypeRegion(a.exprTypes[e])
 }
@@ -495,6 +506,12 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		return
 	}
 	region := containerRegion(valueType)
+	if region == "" && isRegionBorrowedStringOrViewType(valueType) {
+		// Contextual checking against a region-less return/assignment type can erase the
+		// stamped region from valueType. Recover it from the source expression instead;
+		// in particular, a slice borrows the region of its underlying cstr/sview/view.
+		region = a.returnBorrowedRegion(valueExpr)
+	}
 	if region == "" {
 		// A region-polymorphic call's result is allocated in the AMBIENT region even though its
 		// type carries no region (region-poly returns are region-less by convention — the region
@@ -530,6 +547,15 @@ func (a *Analyzer) checkRegionContainerEscape(valueExpr ast.Expr, valueType Type
 		} else {
 			a.errorf(valueExpr.Pos(), "value allocated in region %q escapes via %s; the region is freed at scope exit. Copy it into a caller-provided region param (def f[@r] ... -> ... @r) or a longer-lived region first", region, via)
 		}
+	}
+}
+
+func isRegionBorrowedStringOrViewType(t Type) bool {
+	switch StripAggregateStateType(stripRefForBounds(t)).(type) {
+	case *CStrType, *SViewType, *ViewType:
+		return true
+	default:
+		return false
 	}
 }
 

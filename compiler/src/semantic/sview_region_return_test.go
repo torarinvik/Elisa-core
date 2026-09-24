@@ -26,6 +26,61 @@ def relay[@r](view: sview @r) -> sview @r:
 `)
 }
 
+func TestSViewSlicesRetainTheSourceRegion(t *testing.T) {
+	analyzeTreeTestSource(t, "sview_slice_region.elisa", `def slice_cstr[@r](value: cstr @r) -> sview @r:
+	return value[0:1]
+
+def slice_sview[@r](value: sview @r) -> sview @r:
+	return value[0:1]
+
+def slice_cstr_ref[@r](value: cstr& @r) -> sview @r:
+	return value[0:1]
+
+def slice_sview_ref[@r](value: sview& @r) -> sview @r:
+	return value[0:1]
+
+def slice_byte_view_ref[@r](value: view[u8]& @r) -> view[u8] @r:
+	return value[0:1]
+`)
+}
+
+func TestSViewSliceCannotEscapeItsSourceRegion(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sview_slice_escape.elisa", `def leak_slice() -> sview:
+	can Memory.Allocate, Abort.Panic:
+		region a(4096):
+			bytes: mutable darray[u8] @a = []
+			bytes.push(65)
+			bytes.push(0)
+			terminated: cstr @a = bytes.as_cstr()
+			return terminated[0:1]
+`)
+	if errs := strings.Join(result.Errors(), "\n"); !strings.Contains(errs, "escapes via return") {
+		t.Fatalf("slicing a region-backed cstr lost the source lifetime; expected escape rejection, got:\n%s", errs)
+	}
+}
+
+func TestSViewSliceCannotEraseCallerRegion(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sview_slice_return_region.elisa", `def erase_region[@r](value: cstr @r) -> sview:
+	return value[0:1]
+`)
+	if errs := strings.Join(result.Errors(), "\n"); !strings.Contains(errs, `value tied to region parameter "r"`) {
+		t.Fatalf("returning a slice of a caller-owned cstr erased its borrow region; expected a region diagnostic, got:\n%s", errs)
+	}
+}
+
+func TestUnboundedRawByteSliceNeedsUnsafeBoundary(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "sview_raw_pointer_slice.elisa", `def forge_view(data: u8&, lo: usize, hi: usize) -> sview:
+	return data[lo:hi]
+`)
+	if errs := strings.Join(result.Errors(), "\n"); !strings.Contains(errs, "slicing an unbounded raw `u8&` into `sview` requires an explicit") {
+		t.Fatalf("raw pointer slicing forged a safe view without proving its extent; expected unsafe-boundary diagnostic, got:\n%s", errs)
+	}
+	analyzeTreeTestSource(t, "sview_raw_pointer_slice_trusted.elisa", `def forge_view(data: u8&, lo: usize, hi: usize) -> sview:
+	trusted Unsafe.PointerCast:
+		return data[lo:hi]
+`)
+}
+
 func TestSViewForwardingPreservesActualArgumentRegion(t *testing.T) {
 	analyzeTreeTestSource(t, "sview_forwarding_same_lifetime.elisa", `def choose_second(left: sview, right: sview) -> sview:
 	return right

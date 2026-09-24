@@ -306,7 +306,7 @@ func TestRunCLIFsPathOps(t *testing.T) {
 	preamble := fmt.Sprintf("# include %q\n# include %q\n",
 		rel("test.elisa"), rel("elisacore_runtime.elisa"))
 	src := preamble + `
-def eq(v: sview, lit: static u8&) -> bool:
+def eq(v: sview, lit: cstr) -> bool:
     return sview_eq(v, sview(lit, 0, -1))
 
 @test
@@ -358,7 +358,7 @@ func TestRunCLIFsJoin(t *testing.T) {
 	preamble := fmt.Sprintf("# include %q\n# include %q\n",
 		rel("test.elisa"), rel("elisacore_runtime.elisa"))
 	src := preamble + `
-def eqd(d: dstr, lit: static u8&) -> bool:
+def eqd(d: dstr, lit: cstr) -> bool:
     return sview_eq(bytes_view(d), sview(lit, 0, -1))
 
 @test

@@ -32,6 +32,59 @@ extern elisa_profile_allocation_event_v1(kind: u32, address: uintptr, size: usiz
 
 extern arena_profile_allocation_event(kind: u32, address: uintptr, size: usize, old_address: uintptr, old_size: usize, arena: uintptr, region: usize) -> void
 
+struct atomic[T]:
+    value: mutable T
+
+struct AtomicCell[T]:
+    slot: mutable atomic[T]
+
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+extern __elisa_arena_cache_lock_cell: AtomicCell[i32]
+
+extern load[T](slot: atomic[T]&, order: MemoryOrder) -> T
+
+extern store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder)
+
+extern exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T
+
+extern compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool
+
+extern fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+
+extern fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+
+extern fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+
+extern fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+
+extern fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+
+extern fence(order: MemoryOrder)
+
+extern atomic_cell[T](value: T) -> AtomicCell[T]
+
+extern atomic_load_relaxed[T](cell: AtomicCell[T]&) -> T
+
+extern atomic_load_acquire[T](cell: AtomicCell[T]&) -> T
+
+extern atomic_store_relaxed[T](cell: mutable AtomicCell[T]&, value: T)
+
+extern atomic_store_release[T](cell: mutable AtomicCell[T]&, value: T)
+
+extern atomic_exchange_acqrel[T](cell: mutable AtomicCell[T]&, value: T) -> T
+
+extern atomic_compare_exchange_acqrel[T](cell: mutable AtomicCell[T]&, expected: T, desired: T) -> bool
+
+extern atomic_fetch_add_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64
+
+extern atomic_fetch_sub_acqrel(cell: mutable AtomicCell[i64]&, value: i64) -> i64
+
 const ARENA_BACKEND_LIBC_MALLOC = 0
 
 const ARENA_BACKEND_LINUX_MMAP = 1

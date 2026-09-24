@@ -489,11 +489,17 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 		return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 	}
 	if cstr, ok := objType.(*CStrType); ok {
-		_ = cstr
-		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: cstr.Region}
 	}
 	if isStringViewType(objType) {
-		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		region := ""
+		if view, ok := objType.(*SViewType); ok {
+			region = view.Region
+		}
+		if view, ok := objType.(*ViewType); ok {
+			region = view.Region
+		}
+		return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: region}
 	}
 	if ref, ok := objType.(*RefType); ok {
 		if ref.State != RefStateNonNull {
@@ -513,18 +519,34 @@ func (a *Analyzer) analyzeSliceExpr(expr *ast.SliceExpr) Type {
 			return &ViewType{Elem: view.Elem, Mutable: ref.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "view", Region: view.Region}
 		}
 		if view, ok := ref.Elem.(*ViewType); ok {
-			return &ViewType{Elem: view.Elem, Mutable: ref.Mutable && view.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: view.Region}
+			region := view.Region
+			if region == "" {
+				region = ref.Region
+			}
+			return &ViewType{Elem: view.Elem, Mutable: ref.Mutable && view.Mutable, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: view.SurfaceName, Region: region}
 		}
 		if storeType, ok := ref.Elem.(*PackedEnumStoreType); ok && storeType.Enum != nil {
 			return &ViewType{Elem: storeType.Enum, Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), SurfaceName: "packedview"}
 		}
-		if _, ok := ref.Elem.(*CStrType); ok {
-			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		if cstr, ok := ref.Elem.(*CStrType); ok {
+			region := ref.Region
+			if region == "" {
+				region = cstr.Region
+			}
+			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: region}
 		}
-		if isStringViewType(ref.Elem) {
-			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End)}
+		if view, ok := ref.Elem.(*SViewType); ok {
+			region := ref.Region
+			if region == "" {
+				region = view.Region
+			}
+			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: region}
 		}
 		if builtin, ok := ref.Elem.(*BuiltinType); ok && builtin.Name == "u8" {
+			if a.currentUnsafePointerCastGrantDepth == 0 {
+				a.errorf(expr.Pos(), "slicing an unbounded raw `u8&` into `sview` requires an explicit `trusted Unsafe.PointerCast` or `can Unsafe.PointerCast` boundary; use a bounded `view[u8]` or `cstr` in safe code")
+				return invalidType
+			}
 			return &SViewType{Begin: a.exprSummary(expr.Start), End: a.exprSummary(expr.End), Region: ref.Region}
 		}
 	}

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"elisacore/src/ast"
+	"elisacore/src/lexer"
 	"elisacore/src/unparse"
 )
 
@@ -114,11 +115,36 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 		// redeclaration -- an .elisai the compiler could not read back.
 		return &ast.NamespaceDecl{Position: n.Position, Name: n.Name, Decls: decls, Module: n.Module, Const: n.Const, Extend: n.Extend}
 	case *ast.StaticIfDecl:
+		thenBody := interfaceDeclList(n.Then)
 		elifs := make([]ast.StaticElifDecl, 0, len(n.Elifs))
 		for _, elif := range n.Elifs {
 			elifs = append(elifs, ast.StaticElifDecl{Position: elif.Position, Cond: elif.Cond, Body: interfaceDeclList(elif.Body)})
 		}
-		return &ast.StaticIfDecl{Position: n.Position, Cond: n.Cond, Then: interfaceDeclList(n.Then), Elifs: elifs, Else: interfaceDeclList(n.Else)}
+		elseBody := interfaceDeclList(n.Else)
+		if len(thenBody) == 0 && len(elseBody) == 0 {
+			empty := true
+			for _, elif := range elifs {
+				if len(elif.Body) != 0 {
+					empty = false
+					break
+				}
+			}
+			if empty {
+				return nil
+			}
+		}
+		// A conditionally-private branch still affects which later branch is active.
+		// Keep its position with a harmless assertion so the generated interface stays
+		// syntactically valid without exporting a placeholder symbol.
+		if len(thenBody) == 0 {
+			thenBody = interfaceEmptyBranch(n.Position)
+		}
+		for i := range elifs {
+			if len(elifs[i].Body) == 0 {
+				elifs[i].Body = interfaceEmptyBranch(elifs[i].Position)
+			}
+		}
+		return &ast.StaticIfDecl{Position: n.Position, Cond: n.Cond, Then: thenBody, Elifs: elifs, Else: elseBody}
 	case *ast.StaticAssertDecl:
 		return nil
 	case *ast.StaticAssertBlockDecl:
@@ -128,6 +154,10 @@ func interfaceizeDecl(decl ast.Decl) ast.Decl {
 	default:
 		return decl
 	}
+}
+
+func interfaceEmptyBranch(pos lexer.Pos) []ast.Decl {
+	return []ast.Decl{&ast.StaticAssertDecl{Position: pos, Cond: &ast.BoolLit{Position: pos, Value: true}}}
 }
 
 func hasInterfaceInternalAnnotation(annotations []ast.Annotation) bool {

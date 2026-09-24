@@ -39,9 +39,10 @@ def valid_suffix(view: sview) -> bool:
 	}
 }
 
-func TestGenerateLLVMIRLowersRawU8RefSliceDirectly(t *testing.T) {
+func TestGenerateLLVMIRLowersTrustedRawU8RefSliceDirectly(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_raw_u8_ref_slice.elisa", `def window(source: u8&, start: usize, end: usize) -> sview:
-    return source[start:end]
+    trusted Unsafe.PointerCast:
+        return source[start:end]
 `)
 	output, err := generateLLVMIRWithDefaultPackedLoweringForTest(result)
 	if err != nil {

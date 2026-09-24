@@ -1,4 +1,4 @@
-def json_parser_value_field_impl(value: JsonParserValue&, key: u8&, out: mutable JsonParserValue&) -> i64:
+def json_parser_value_field_impl(value: JsonParserValue&, key: cstr, out: mutable JsonParserValue&) -> i64:
     can Memory.Allocate, Abort.Panic:
         out[0] <- json_parser_value_null()
         if not json_parser_value_is_live(value):
@@ -8,12 +8,12 @@ def json_parser_value_field_impl(value: JsonParserValue&, key: u8&, out: mutable
         child_node_ref: JsonNode&? = json_parser_value_field_node_ref(value, key, store)
         out[0] <- json_parser_value_from_node_ref(impl, child_node_ref)
         return 1 if out[0].impl_bits != 0.uintptr() else 0
-def json_parser_value_field_node_ref(value: JsonParserValue&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode&?:
+def json_parser_value_field_node_ref(value: JsonParserValue&, key: cstr, store: JsonNode.Store[Local]) -> JsonNode&?:
     if not json_parser_value_is_live(value):
         return null
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
     return json_ast_object_get_ref(json_parser_value_node(value), json_parser_document_source(impl), key, store)
-def json_parser_value_field_node(value: JsonParserValue&, key: u8&, store: JsonNode.Store[Local]) -> JsonNode:
+def json_parser_value_field_node(value: JsonParserValue&, key: cstr, store: JsonNode.Store[Local]) -> JsonNode:
     node_ref: JsonNode&? = json_parser_value_field_node_ref(value, key, store)
     if node_ref != null:
         return json_node_copy_ref(node_ref)
@@ -49,7 +49,7 @@ def json_parser_object_iter_value_node(iter: JsonParserObjectIter&, store: JsonN
     if node_ref != null:
         return json_node_copy_ref(node_ref)
     return json_node_invalid(store)
-def json_parser_value_field_kind_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_kind_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -58,7 +58,7 @@ def json_parser_value_field_kind_impl(value: JsonParserValue&, key: u8&) -> i64:
     if json_node_is_invalid(child_node, store):
         return -1
     return json_ast_kind_code(json_ast_kind(child_node, store))
-def json_parser_value_field_bool_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_bool_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -67,7 +67,7 @@ def json_parser_value_field_bool_impl(value: JsonParserValue&, key: u8&) -> i64:
     if json_node_is_invalid(child_node, store):
         return -1
     return json_ast_bool_value(child_node, store)
-def json_parser_value_field_is_null_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_is_null_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -76,7 +76,7 @@ def json_parser_value_field_is_null_impl(value: JsonParserValue&, key: u8&) -> i
     if json_node_is_invalid(child_node, store):
         return -1
     return 1 if json_ast_is_null(child_node, store) else 0
-def json_parser_value_field_number_kind_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_number_kind_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -85,7 +85,7 @@ def json_parser_value_field_number_kind_impl(value: JsonParserValue&, key: u8&) 
     if json_node_is_invalid(child_node, store):
         return -1
     return json_ast_number_kind_code(json_ast_number_kind(json_parser_document_source(impl), child_node, store))
-def json_parser_value_field_i64_impl(value: JsonParserValue&, key: u8&, out: mutable i64&) -> i64:
+def json_parser_value_field_i64_impl(value: JsonParserValue&, key: cstr, out: mutable i64&) -> i64:
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -98,7 +98,7 @@ def json_parser_value_field_i64_impl(value: JsonParserValue&, key: u8&, out: mut
         return 0
     out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
     return 1
-def json_parser_value_field_u64_impl(value: JsonParserValue&, key: u8&, out: mutable u64&) -> i64:
+def json_parser_value_field_u64_impl(value: JsonParserValue&, key: cstr, out: mutable u64&) -> i64:
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -111,7 +111,7 @@ def json_parser_value_field_u64_impl(value: JsonParserValue&, key: u8&, out: mut
         return 0
     out[0] <- number_value.unsigned_value
     return 1
-def json_parser_value_field_f64_impl(value: JsonParserValue&, key: u8&, out: mutable f64&) -> i64:
+def json_parser_value_field_f64_impl(value: JsonParserValue&, key: cstr, out: mutable f64&) -> i64:
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -124,7 +124,7 @@ def json_parser_value_field_f64_impl(value: JsonParserValue&, key: u8&, out: mut
     float_value: f64 = try json_ast_number_f64_value(json_parser_document_source(impl), child_node, store) else 0.0
     out[0] <- float_value
     return 1
-def json_parser_value_field_f32_impl(value: JsonParserValue&, key: u8&, out: mutable f32&) -> i64:
+def json_parser_value_field_f32_impl(value: JsonParserValue&, key: cstr, out: mutable f32&) -> i64:
     if not json_parser_value_is_live(value):
         return 0
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -137,7 +137,7 @@ def json_parser_value_field_f32_impl(value: JsonParserValue&, key: u8&, out: mut
     float_value: f32 = try json_ast_number_f32_value(json_parser_document_source(impl), child_node, store) else 0.0
     out[0] <- float_value
     return 1
-def json_parser_value_field_array_len_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_array_len_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)
@@ -146,7 +146,7 @@ def json_parser_value_field_array_len_impl(value: JsonParserValue&, key: u8&) ->
     if json_node_is_invalid(child_node, store):
         return -1
     return json_ast_array_len(child_node, store)
-def json_parser_value_field_object_len_impl(value: JsonParserValue&, key: u8&) -> i64:
+def json_parser_value_field_object_len_impl(value: JsonParserValue&, key: cstr) -> i64:
     if not json_parser_value_is_live(value):
         return -1
     impl: heap JsonParserDocumentInternal& = json_parser_value_doc_impl(value)

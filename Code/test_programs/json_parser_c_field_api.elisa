@@ -40,7 +40,7 @@ def json_parser_ast_object_len_impl(source: u8&) -> i64:
             length: i64 = json_ast_object_len(result.node, store)
             destroy scratch
             return length
-def json_parser_ast_field_bool_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_field_bool_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -58,7 +58,7 @@ def json_parser_ast_field_bool_impl(source: u8&, key: u8&) -> i64:
             out: i64 = json_ast_bool_value(field_node, store)
             destroy scratch
             return out
-def json_parser_ast_field_is_null_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_field_is_null_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -76,7 +76,7 @@ def json_parser_ast_field_is_null_impl(source: u8&, key: u8&) -> i64:
             out: i64 = 1 if json_ast_is_null(field_node, store) else 0
             destroy scratch
             return out
-def json_parser_ast_field_kind_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_field_kind_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -94,7 +94,7 @@ def json_parser_ast_field_kind_impl(source: u8&, key: u8&) -> i64:
             out: i64 = json_ast_kind_code(json_ast_kind(field_node, store))
             destroy scratch
             return out
-def json_parser_ast_array_field_len_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_array_field_len_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -112,7 +112,7 @@ def json_parser_ast_array_field_len_impl(source: u8&, key: u8&) -> i64:
             length: i64 = json_ast_array_len(field_node, store)
             destroy scratch
             return length
-def json_parser_ast_object_field_len_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_object_field_len_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -130,7 +130,7 @@ def json_parser_ast_object_field_len_impl(source: u8&, key: u8&) -> i64:
             length: i64 = json_ast_object_len(field_node, store)
             destroy scratch
             return length
-def json_parser_ast_field_number_kind_impl(source: u8&, key: u8&) -> i64:
+def json_parser_ast_field_number_kind_impl(source: u8&, key: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -148,7 +148,7 @@ def json_parser_ast_field_number_kind_impl(source: u8&, key: u8&) -> i64:
             out: i64 = json_ast_number_kind_code(json_ast_number_kind(source, field_node, store))
             destroy scratch
             return out
-def json_parser_ast_field_i64_impl(source: u8&, key: u8&, out: mutable i64&) -> i64:
+def json_parser_ast_field_i64_impl(source: u8&, key: cstr, out: mutable i64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -170,7 +170,7 @@ def json_parser_ast_field_i64_impl(source: u8&, key: u8&, out: mutable i64&) -> 
             out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
             destroy scratch
             return 1
-def json_parser_ast_field_u64_impl(source: u8&, key: u8&, out: mutable u64&) -> i64:
+def json_parser_ast_field_u64_impl(source: u8&, key: cstr, out: mutable u64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -192,7 +192,7 @@ def json_parser_ast_field_u64_impl(source: u8&, key: u8&, out: mutable u64&) -> 
             out[0] <- number_value.unsigned_value
             destroy scratch
             return 1
-def json_parser_ast_field_f64_impl(source: u8&, key: u8&, out: mutable f64&) -> i64:
+def json_parser_ast_field_f64_impl(source: u8&, key: cstr, out: mutable f64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -214,7 +214,7 @@ def json_parser_ast_field_f64_impl(source: u8&, key: u8&, out: mutable f64&) -> 
             out[0] <- float_value
             destroy scratch
             return 1
-def json_parser_ast_field_f32_impl(source: u8&, key: u8&, out: mutable f32&) -> i64:
+def json_parser_ast_field_f32_impl(source: u8&, key: cstr, out: mutable f32&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -236,7 +236,7 @@ def json_parser_ast_field_f32_impl(source: u8&, key: u8&, out: mutable f32&) -> 
             out[0] <- float_value
             destroy scratch
             return 1
-def json_parser_ast_array_field_i64_at_impl(source: u8&, key: u8&, index: usize, out: mutable i64&) -> i64:
+def json_parser_ast_array_field_i64_at_impl(source: u8&, key: cstr, index: usize, out: mutable i64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -262,7 +262,7 @@ def json_parser_ast_array_field_i64_at_impl(source: u8&, key: u8&, index: usize,
             out[0] <- number_value.signed_value if number_value.kind == JsonNumberKind.SIGNED else number_value.unsigned_value.i64()
             destroy scratch
             return 1
-def json_parser_ast_array_field_f64_at_impl(source: u8&, key: u8&, index: usize, out: mutable f64&) -> i64:
+def json_parser_ast_array_field_f64_at_impl(source: u8&, key: cstr, index: usize, out: mutable f64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -288,7 +288,7 @@ def json_parser_ast_array_field_f64_at_impl(source: u8&, key: u8&, index: usize,
             out[0] <- float_value
             destroy scratch
             return 1
-def json_parser_ast_array_field_f32_at_impl(source: u8&, key: u8&, index: usize, out: mutable f32&) -> i64:
+def json_parser_ast_array_field_f32_at_impl(source: u8&, key: cstr, index: usize, out: mutable f32&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -314,7 +314,7 @@ def json_parser_ast_array_field_f32_at_impl(source: u8&, key: u8&, index: usize,
             out[0] <- float_value
             destroy scratch
             return 1
-def json_parser_ast_array_field_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_kind_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -336,7 +336,7 @@ def json_parser_ast_array_field_kind_at_impl(source: u8&, key: u8&, index: usize
             out: i64 = json_ast_kind_code(json_ast_kind(item_node, store))
             destroy scratch
             return out
-def json_parser_ast_array_field_bool_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_bool_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -358,7 +358,7 @@ def json_parser_ast_array_field_bool_at_impl(source: u8&, key: u8&, index: usize
             out: i64 = json_ast_bool_value(item_node, store)
             destroy scratch
             return out
-def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -380,7 +380,7 @@ def json_parser_ast_array_field_is_null_at_impl(source: u8&, key: u8&, index: us
             out: i64 = 1 if json_ast_is_null(item_node, store) else 0
             destroy scratch
             return out
-def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -402,7 +402,7 @@ def json_parser_ast_array_field_array_len_at_impl(source: u8&, key: u8&, index: 
             out: i64 = json_ast_array_len(item_node, store)
             destroy scratch
             return out
-def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
@@ -424,7 +424,7 @@ def json_parser_ast_array_field_object_len_at_impl(source: u8&, key: u8&, index:
             out: i64 = json_ast_object_len(item_node, store)
             destroy scratch
             return out
-def json_parser_ast_array_field_number_kind_at_impl(source: u8&, key: u8&, index: usize) -> i64:
+def json_parser_ast_array_field_number_kind_at_impl(source: u8&, key: cstr, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
             source_len: usize = runtime_strlen(source)
