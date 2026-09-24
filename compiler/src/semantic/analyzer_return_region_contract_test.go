@@ -67,6 +67,33 @@ def caller(values: mutable darray[Expr]&):
 	}
 }
 
+func TestExplicitRegionParamAllocationCanBeReturned(t *testing.T) {
+	result := analyzeTreeTestSource(t, "explicit_region_param_allocation.elisa", `def make[@r](seed: i64& @r, value: i64) -> i64& @r:
+	return new[r] value
+
+def caller() -> i64:
+	region scratch(64):
+		seed: i64& @scratch = new[scratch] 0
+		value: i64& @scratch = make(seed, 7)
+		return value[0]
+`)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("caller-owned @r allocation should be returnable, got: %s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestExplicitRegionParamDoesNotPermitLocalRegionEscape(t *testing.T) {
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "explicit_region_param_local_escape.elisa", `def bad[@r](seed: i64& @r) -> i64& @r:
+	region local(64):
+		value: i64& @local = new[local] 7
+		return value
+`)
+	diagnostics := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(diagnostics, `cannot return reference: region dependency facts include local region "local"`) {
+		t.Fatalf("local region escape must remain rejected, got:\n%s", diagnostics)
+	}
+}
+
 func TestTupleRegionContractTracksSViewFields(t *testing.T) {
 	result := analyzeTreeTestSource(t, "tuple_region_contract.elisa", `def pair[@r](source: sview @r) -> (known: bool, value: sview) @r:
 	return (true, source)

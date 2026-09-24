@@ -809,7 +809,11 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 						escapesLocalRegionBlock = true
 					}
 				}
-				if !regionPoly || escapesLocalRegionBlock {
+				// An explicit @r contract is also a caller-owned region, even when the
+				// function is not using inferred __auto_* region polymorphism. `new[r]`
+				// returns are safe here because the caller supplies the arena; named
+				// block-local regions still fail closed above.
+				if (!regionPoly && !a.lookupRegionParam(region.Name)) || escapesLocalRegionBlock {
 					if _, isRef := valueType.(*RefType); isRef {
 						a.errorf(n.Pos(), localRegionEscapeMessage("reference", region.Name))
 					} else {
