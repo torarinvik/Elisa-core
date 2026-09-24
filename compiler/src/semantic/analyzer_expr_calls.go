@@ -46,6 +46,108 @@ func (a *Analyzer) assignableArenaRegionParam(pattern, actual Type, expr ast.Exp
 	return AssignableTo(formalWithoutRegion, actualRef)
 }
 
+func callHasUnresolvedRegionContext(expr ast.Expr, expected Type, regionParams map[string]bool, bindings map[string]Type, regionBindings map[string]string) bool {
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			break
+		}
+		expr = paren.Inner
+	}
+	if _, ok := expr.(*ast.CallExpr); !ok {
+		return false
+	}
+	regionIsUnresolved := func(name string) bool {
+		if name == "" || !regionParams[name] {
+			return false
+		}
+		if _, bound := regionBindings[name]; bound {
+			return false
+		}
+		if binding, bound := bindings[name]; bound {
+			region, isRegion := binding.(*RegionParamType)
+			return isRegion && region != nil && region.Name == name
+		}
+		return true
+	}
+	seen := map[Type]bool{}
+	var contains func(Type) bool
+	contains = func(typ Type) bool {
+		if typ == nil || seen[typ] {
+			return false
+		}
+		seen[typ] = true
+		containsRegion := func(name string) bool { return regionIsUnresolved(name) }
+		containsChild := func(child Type) bool { return contains(child) }
+		switch value := typ.(type) {
+		case *RegionParamType:
+			return value != nil && containsRegion(value.Name)
+		case *RefType:
+			return value != nil && (containsRegion(value.Region) || containsChild(value.Elem))
+		case *DArrayType:
+			return value != nil && (containsRegion(value.Region) || containsChild(value.Elem))
+		case *ViewType:
+			return value != nil && (containsRegion(value.Region) || containsChild(value.Elem))
+		case *CStrType:
+			return value != nil && containsRegion(value.Region)
+		case *SViewType:
+			return value != nil && containsRegion(value.Region)
+		case *DictType:
+			return value != nil && (containsRegion(value.Region) || containsChild(value.Key) || containsChild(value.Value))
+		case *SetType:
+			return value != nil && (containsRegion(value.Region) || containsChild(value.Elem))
+		case *GenericInstanceType:
+			if value == nil || containsRegion(value.Region) {
+				return value != nil
+			}
+			for _, arg := range value.Args {
+				if containsChild(arg) {
+					return true
+				}
+			}
+		case *OptionalType:
+			return value != nil && containsChild(value.Value)
+		case *ErrorUnionType:
+			return value != nil && containsChild(value.Value)
+		case *ArrayType:
+			return value != nil && containsChild(value.Elem)
+		case *TupleType:
+			if value != nil {
+				for _, field := range value.Fields {
+					if containsChild(field.Type) {
+						return true
+					}
+				}
+			}
+		case *AggregateStateType:
+			return value != nil && containsChild(value.Base)
+		case *StructType:
+			if value != nil {
+				for _, field := range value.Fields {
+					if containsChild(field.Type) {
+						return true
+					}
+				}
+			}
+		case *IDType:
+			return value != nil && (containsChild(value.Tag) || containsChild(value.Storage))
+		case *AddressSpaceType:
+			return value != nil && (containsChild(value.Elem) || containsChild(value.Storage))
+		case *FuncType:
+			if value != nil {
+				for _, param := range value.Params {
+					if containsChild(param) {
+						return true
+					}
+				}
+				return containsChild(value.Return)
+			}
+		}
+		return false
+	}
+	return contains(expected)
+}
+
 func (a *Analyzer) analyzeCallExpr(expr *ast.CallExpr) Type {
 	return a.analyzeCallExprWithExpected(expr, nil)
 }
@@ -435,7 +537,17 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 		var argType Type
 		if i < limit {
 			expectedType := a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)
-			orderedArgs[i], argType = a.analyzeCallLikeValueExpr(orderedArgs[i], expectedType)
+			// A nested generic call must infer an as-yet-unbound region from its
+			// own arguments, not from the outer call's contextual result type. The
+			// latter is only a constraint on the completed expression; pushing it
+			// into the nested call's arguments can pin its region before inference
+			// and reject a sound call (e.g. parsing into `arena`, then passing the
+			// resulting region-indexed handle to another generic function).
+			argumentExpected := expectedType
+			if callHasUnresolvedRegionContext(orderedArgs[i], expectedType, regionParams, bindings, regionBindings) {
+				argumentExpected = nil
+			}
+			orderedArgs[i], argType = a.analyzeCallLikeValueExpr(orderedArgs[i], argumentExpected)
 			if actualFuncType, ok := argType.(*FuncType); ok {
 				if !actualFuncType.ReturnProvenanceKnown {
 					a.inferFuncReturnProvenanceForExpr(orderedArgs[i], actualFuncType)
