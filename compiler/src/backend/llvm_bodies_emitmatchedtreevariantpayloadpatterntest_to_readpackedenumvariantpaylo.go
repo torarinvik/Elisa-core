@@ -12,7 +12,6 @@ import "C"
 
 import (
 	"elisacore/src/ast"
-	"elisacore/src/lexer"
 	"elisacore/src/semantic"
 	"fmt"
 	"sort"
@@ -55,62 +54,9 @@ func packedEnumMatchCanUseTagSwitch(enumType *semantic.EnumType, arms []ast.Matc
 	}
 	return len(seen) >= 3
 }
-func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, actualExpr ast.Expr, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
-	switch p := pattern.(type) {
-	case *ast.MatchWildcardPattern:
-		C.LLVMBuildBr(s.builder, successBB)
-		return nil
-	case *ast.MatchStringLiteralPattern:
-		literalExpr := &ast.StringLit{Position: p.Pos(), Value: p.Value}
-		literalType := runtimeStringLiteralType()
-		helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(actualType, literalType)
-		if !ok {
-			return fmt.Errorf("string match pattern requires a string value, got %s", actualType.String())
-		}
-		synthetic := &ast.BinaryExpr{Position: p.Pos(), Op: lexer.TOKEN_EQEQ, Left: actualExpr, Right: literalExpr}
-		cmp, _, err := s.emitRuntimeStringCompareExpr(synthetic, helperName, firstType, secondType, swap)
-		if err != nil {
-			return err
-		}
-		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
-		return nil
-	case *ast.MatchLiteralPattern:
-		// Integer match arm (`0xA9:`). emitComparableIsTargetTest unifies the scrutinee and literal
-		// operand types (so a bare literal lowers at the scrutinee's width) and emits an ICmp EQ.
-		cmp, _, err := s.emitComparableIsTargetTest(actualExpr, p.Value)
-		if err != nil {
-			return err
-		}
-		C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
-		return nil
-	case *ast.MatchRangePattern:
-		// docs/122 §5.2 range arm over an integer/char scrutinee: two chained comparisons.
-		actualValue, _, err := s.emitExpr(actualExpr, actualType)
-		if err != nil {
-			return err
-		}
-		return s.emitRangeMatchPatternTest(p, actualValue, actualType, successBB, failureBB)
-	case *ast.MatchOrPattern:
-		if len(p.Options) == 0 {
-			C.LLVMBuildBr(s.builder, failureBB)
-			return nil
-		}
-		for i, option := range p.Options {
-			nextFailureBB := failureBB
-			if i+1 < len(p.Options) {
-				nextFailureBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree(fmt.Sprintf("match.or.next.%d", i)))
-			}
-			if err := s.emitStringMatchPatternTest(option, actualExpr, actualType, successBB, nextFailureBB); err != nil {
-				return err
-			}
-			if i+1 < len(p.Options) {
-				C.LLVMPositionBuilderAtEnd(s.builder, nextFailureBB)
-			}
-		}
-		return nil
-	default:
-		return fmt.Errorf("unsupported scalar match pattern %T", pattern)
-	}
+func (s *functionState) emitStringMatchPatternTest(pattern ast.MatchPattern, actualValue C.LLVMValueRef, actualExpr ast.Expr, actualType semantic.Type, successBB C.LLVMBasicBlockRef, failureBB C.LLVMBasicBlockRef) error {
+	_, _, err := s.emitMatchPatternTest(pattern, actualValue, nil, actualType, nil, actualExpr, nil, successBB, failureBB)
+	return err
 }
 func (s *functionState) resolveStructMatchPatternArgs(pattern *ast.MatchStructPattern, actualType semantic.Type) ([]structLiteralField, []*ast.MatchPatternArg, error) {
 	if pattern == nil {

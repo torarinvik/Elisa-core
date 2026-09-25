@@ -32,6 +32,10 @@ func matchHasWildcard(arms []ast.MatchArm) bool {
 }
 func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 	actualType := s.exprType(stmt.Value)
+	actualValue, _, err := s.emitExpr(stmt.Value, actualType)
+	if err != nil {
+		return err
+	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.fail"))
 	allTerminated := true
@@ -43,7 +47,7 @@ func (s *functionState) emitStringMatch(stmt *ast.MatchStmt) error {
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.next"))
 		}
-		if err := s.emitStringMatchPatternTest(arm.Pattern, stmt.Value, actualType, bodyBB, nextBB); err != nil {
+		if err := s.emitStringMatchPatternTest(arm.Pattern, actualValue, stmt.Value, actualType, bodyBB, nextBB); err != nil {
 			return err
 		}
 

@@ -19,6 +19,10 @@ import (
 
 func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType semantic.Type) (C.LLVMValueRef, semantic.Type, error) {
 	actualType := s.exprType(expr.Value)
+	actualValue, _, err := s.emitExpr(expr.Value, actualType)
+	if err != nil {
+		return nil, nil, err
+	}
 	mergeBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.end"))
 	failBB := C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.fail"))
 	incomingValues := make([]C.LLVMValueRef, 0, len(expr.Arms)+1)
@@ -31,7 +35,7 @@ func (s *functionState) emitStringMatchExpr(expr *ast.MatchExpr, resultType sema
 		} else {
 			nextBB = C.LLVMAppendBasicBlockInContext(s.g.context, s.fnValue, cStringFree("match.expr.next"))
 		}
-		if err := s.emitStringMatchPatternTest(arm.Pattern, expr.Value, actualType, bodyBB, nextBB); err != nil {
+		if err := s.emitStringMatchPatternTest(arm.Pattern, actualValue, expr.Value, actualType, bodyBB, nextBB); err != nil {
 			return nil, nil, err
 		}
 

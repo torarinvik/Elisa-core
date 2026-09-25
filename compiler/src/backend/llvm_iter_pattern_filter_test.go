@@ -278,7 +278,7 @@ def classify(value: sview) -> i64:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
-	for _, check := range []string{"match.or.next.0", "define i64 @classify("} {
+	for _, check := range []string{"match.or.next", "define i64 @classify("} {
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected scalar string or-pattern IR to contain %q, got:\n%s", check, output)
 		}
