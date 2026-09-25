@@ -414,9 +414,15 @@ type Analyzer struct {
 	// value read (it is being filled / had its address taken), so the
 	// definite-assignment read check must not fire.
 	suppressUninitReadCheck int
-	suppressGlobalReadCheck int
-	currentPoolScopes       []poolScopeState
-	currentIndexBounds      map[string]indexBoundFact
+	// zeroedPlaceholderExpected is non-nil only while analyzing a local's direct
+	// `= zeroed` initializer. It permits a scalar invalid slot to be staged in
+	// that local because definite-assignment tracking prevents reads before it is
+	// filled. It does not permit invalid zeroed values in returns, call arguments,
+	// nested fields, or aggregates whose field initialization is not path-sensitive.
+	zeroedPlaceholderExpected Type
+	suppressGlobalReadCheck   int
+	currentPoolScopes         []poolScopeState
+	currentIndexBounds        map[string]indexBoundFact
 	// currentBoundEqual is a flow-sensitive equivalence relation over upper-bound EXPRESSION STRINGS
 	// (the same canonical form as indexBoundFact.Upper / indexableUpperBoundString): a symmetric
 	// adjacency set recording that two length-ish expressions are provably equal — `n == xs.count`

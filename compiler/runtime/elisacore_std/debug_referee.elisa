@@ -40,7 +40,7 @@ struct DebugRefereeEvent:
     kind: mutable int
     reason: mutable int
     value: mutable uintptr
-    label: mutable cstr
+    label: mutable cstr?
 
 struct DebugTraceEvent:
     sequence: mutable u64
@@ -48,7 +48,7 @@ struct DebugTraceEvent:
     a: mutable uintptr
     b: mutable uintptr
     c: mutable uintptr
-    label: mutable cstr
+    label: mutable cstr?
 
 global mutable debug_referee_enabled: bool = false
 global mutable debug_referee_trace_enabled: bool = false
@@ -115,8 +115,8 @@ struct ElisaSigaction:
 global mutable elisa_trace_fault_checked: bool = false
 
 struct ElisaTraceEntry:
-    name: mutable cstr
-    var_name: mutable cstr
+    name: mutable cstr?
+    var_name: mutable cstr?
     value: mutable u64
     line: mutable u32
     repeat: mutable u32
@@ -126,6 +126,9 @@ struct ElisaTraceEntry:
 global mutable elisa_trace_ring: ElisaTraceEntry[ELISA_TRACE_CAP] = zeroed
 global mutable elisa_trace_pos: u64 = 0     # ring head: number of distinct entries written
 global mutable elisa_trace_total: u64 = 0   # actual steps recorded (counts deduped repeats)
+
+def elisa_trace_cstr_or_empty(value: cstr?) -> cstr:
+    return value if value != null else ""
 
 # Plain step record: just function + line (the execution path).
 def elisa_trace_record(name: cstr, line: u32) -> void:
@@ -138,7 +141,8 @@ def elisa_trace_record(name: cstr, line: u32) -> void:
         # Compare the name by POINTER (the compiler passes one constant string per
         # function, so identity == same function) -- cheap, and avoids a string compare on
         # the hot path. cstr `==` would do a ctx_streq.
-        if elisa_trace_ring[last].has_value == 0 and elisa_trace_ring[last].line == line and elisa_trace_ring[last].name.cast[uintptr] == name.cast[uintptr]:
+        previous_name: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[last].name)
+        if elisa_trace_ring[last].has_value == 0 and elisa_trace_ring[last].line == line and previous_name.cast[uintptr] == name.cast[uintptr]:
             elisa_trace_ring[last].repeat <- elisa_trace_ring[last].repeat + 1
             return
     idx: usize = (elisa_trace_pos % ELISA_TRACE_CAP.u64()).usize()
@@ -242,7 +246,7 @@ def elisa_trace_dump() -> void:
     i: mutable u64 = 0
     while i < n:
         idx: usize = ((elisa_trace_pos - 1 - i) % ELISA_TRACE_CAP.u64()).usize()
-        nm: cstr = elisa_trace_ring[idx].name
+        nm: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].name)
         ln: u32 = elisa_trace_ring[idx].line
         rep: u32 = elisa_trace_ring[idx].repeat
         buf: mutable u8[256] = zeroed
@@ -252,7 +256,7 @@ def elisa_trace_dump() -> void:
         line_kind: i64 = 0 if elisa_trace_ring[idx].has_value != 0 else (1 if rep != 0 else 2)
         match line_kind:
             0:
-                vn: cstr = elisa_trace_ring[idx].var_name
+                vn: cstr = elisa_trace_cstr_or_empty(elisa_trace_ring[idx].var_name)
                 vv: u64 = elisa_trace_ring[idx].value
                 w <- snprintf(buf[0], 256, "  [-%llu] %s:%u  %s = %llu (0x%llx)\n", i, nm, ln, vn, vv, vv) can Console.Format
             1:
@@ -274,7 +278,7 @@ def debug_referee_set_trace_enabled(enabled: bool) can[Debug.Referee]:
 def debug_referee_reset() can[Debug.Referee]:
     debug_referee_sequence <- 0
     debug_referee_event_count <- 0
-    debug_referee_last_event <- DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""}
+    debug_referee_last_event <- DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null}
 
 def debug_referee_last_reason() -> int:
     return debug_referee_last_event.reason
@@ -289,7 +293,7 @@ def debug_referee_trace_count() -> usize:
     return debug_referee_event_count
 
 def debug_referee_trace_event_at(index: usize) -> DebugRefereeEvent:
-    DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: ""} return if index >= DEBUG_REFEREE_TRACE_CAP
+    DebugRefereeEvent{sequence: 0, kind: 0, reason: 0, value: 0, label: null} return if index >= DEBUG_REFEREE_TRACE_CAP
     return debug_referee_events[index]
 
 def debug_referee_is_poison(value: uintptr) -> bool:
@@ -376,7 +380,7 @@ def debug_trace_reset() can[Debug.Trace]:
     debug_trace_event_count <- 0
     debug_trace_overflowed <- false
     debug_trace_hash <- DEBUG_TRACE_HASH_INITIAL
-    debug_trace_last_event <- DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""}
+    debug_trace_last_event <- DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null}
 
 def debug_trace_count() -> usize:
     return debug_trace_event_count
@@ -388,7 +392,7 @@ def debug_trace_did_overflow() -> bool:
     return debug_trace_overflowed
 
 def debug_trace_event_at(index: usize) -> DebugTraceEvent:
-    DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: ""} return if index >= DEBUG_TRACE_TAPE_CAP
+    DebugTraceEvent{sequence: 0, kind: 0, a: 0, b: 0, c: 0, label: null} return if index >= DEBUG_TRACE_TAPE_CAP
     return debug_trace_events[index]
 
 def debug_trace_event_kind_at(index: usize) -> int:

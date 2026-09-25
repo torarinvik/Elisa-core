@@ -90,10 +90,9 @@ func TestZeroedArenaUseIsAccepted(t *testing.T) {
 	}
 }
 
-// Taking the address of a zeroed handle (handing it to a fill routine) clears
-// the uninitialized state.
-func TestZeroedHandleAddressTakenThenReadIsAccepted(t *testing.T) {
-	result := analyzeFunctionAnalysisTestSource(t, "zeroed_handle_addr.elisa", `extern Thing
+// Taking the address does not prove that an unknown callee writes a valid value.
+func TestZeroedHandleAddressTakenThenReadIsRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "zeroed_handle_addr.elisa", `extern Thing
 type ThingId = id[Thing]
 
 extern fill(h: mutable ThingId&) -> void
@@ -103,7 +102,40 @@ def ok() -> ThingId:
     fill(&h)
     return h
 `)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "uninitialized") {
+		t.Fatalf("expected the escaped handle to remain uninitialized without a write summary, got:\n%s", joined)
+	}
+}
+
+func TestOmittedReferenceReadBeforeAssignmentIsRejected(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "omitted_reference_uninitialized.elisa", `def bad() -> i64:
+    pointer: mutable i64&
+    return pointer[0]
+`)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "uninitialized") {
+		t.Fatalf("expected an uninitialized-read diagnostic, got:\n%s", joined)
+	}
+}
+
+func TestOmittedReferenceCannotBeWrittenThroughBeforeRebind(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "omitted_reference_write_through.elisa", `def bad() -> i64:
+    pointer: mutable i64&
+    pointer <- 42
+    return 0
+`)
+	if joined := strings.Join(result.Errors(), "\n"); !strings.Contains(joined, "uninitialized reference") {
+		t.Fatalf("expected write-through to require an initialized reference, got:\n%s", joined)
+	}
+}
+
+func TestZeroedReferenceReboundBeforeReadIsAccepted(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSource(t, "zeroed_reference_rebound.elisa", `def ok() -> i64:
+    backing: mutable i64 = 42
+    pointer: mutable i64& = zeroed
+    pointer <- &backing
+    return pointer[0]
+`)
 	if errs := result.Errors(); len(errs) != 0 {
-		t.Fatalf("expected no diagnostics after address-of init, got:\n%s", strings.Join(errs, "\n"))
+		t.Fatalf("expected a valid whole-reference rebind to establish the local, got:\n%s", strings.Join(errs, "\n"))
 	}
 }

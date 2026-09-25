@@ -56,7 +56,12 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 				valueType = invalidType
 				a.exprTypes[n.Value] = invalidType
 			} else {
+				previousZeroedPlaceholder := a.zeroedPlaceholderExpected
+				if isZeroedInitializer(n.Value) {
+					a.zeroedPlaceholderExpected = declType
+				}
 				valueType = a.analyzeValueExpr(n.Value, declType)
+				a.zeroedPlaceholderExpected = previousZeroedPlaceholder
 			}
 			if a.checkVoidBinding(n.Pos(), n.Name, declType, valueType, true) {
 				declType = invalidType
@@ -138,8 +143,10 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.recordStructLocalAllocRegion(sym, bindingType, n.Value, valueType)
 		a.recordRefinementChecks(n)
 		a.seedWhereRefinementFact(n)
+		if (n.Value == nil || isZeroedInitializer(n.Value)) && a.typeHasInvalidZeroValue(bindingType) {
+			a.markInvalidUninitialized(sym)
+		}
 		if n.Value != nil && isZeroedInitializer(n.Value) {
-			a.markZeroedUninitialized(sym)
 			// Track zeroed struct locals for `ensure result.f` postcondition proofs: an unwritten field
 			// on a zeroed local is definitively zero until the root is invalidated.
 			if _, ok := stripRefForBounds(bindingType).(*StructType); ok {
@@ -503,6 +510,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			n.WriteThrough = true
 			if ident, ok := stripOptimizationParens(n.Target).(*ast.Ident); ok {
 				a.requireWriteThroughTarget(ident, ref)
+				if targetSym, ok := a.currentScope.Lookup(ident.Name); ok && a.isInvalidUninitializedSymbol(targetSym) {
+					a.errorf(n.Pos(), "cannot write through uninitialized reference %q; initialize or rebind the reference first", ident.Name)
+				}
 			}
 		}
 		// A store through a byte reference (`r: mutable u8&`, `mutable static u8&`) takes ONE
@@ -593,7 +603,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			a.recordWrittenFieldForTarget(n.Target, n.Value)
 			a.recordConstAssignmentRangeFact(n.Target, n.Value)
 			a.recordCastRangeFact(n.Target, n.Value)
-			a.clearZeroedUninitializedForExpr(n.Target)
+			if !n.WriteThrough {
+				a.clearInvalidUninitializedForExpr(n.Target)
+			}
 			a.rejectAffineIndexOverwrite(n.Target)
 			a.clearAffineValueTarget(n.Target)
 			a.trackAffineValueTarget(n.Target, targetType)
@@ -699,7 +711,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		a.invalidateWrittenFieldForWrite(n.Target)
 		a.recordConstAssignmentRangeFact(n.Target, n.Value)
 		a.recordCastRangeFact(n.Target, n.Value)
-		a.clearZeroedUninitializedForExpr(n.Target)
+		a.clearInvalidUninitializedForExpr(n.Target)
 		a.clearAffineValueTarget(n.Target)
 		a.trackAffineValueTarget(n.Target, targetType)
 		a.markCreatedProtocolTarget(n.Target, n.Value, targetType)

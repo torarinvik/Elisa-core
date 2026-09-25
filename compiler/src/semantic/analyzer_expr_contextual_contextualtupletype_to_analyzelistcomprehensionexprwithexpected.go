@@ -62,9 +62,17 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 	return result
 }
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
-	if _, ok := expr.(*ast.ZeroedLit); ok && expected != nil {
-		if isStringViewType(expected) {
+	if isZeroedInitializer(expr) && expected != nil {
+		if a.zeroedTypeContainsSView(expected) {
 			a.errorf(expr.Pos(), "`zeroed` cannot construct an `sview`: every view must have a valid, live backing pointer; use an empty string view or a validated byte-view constructor")
+			a.recordAnalyzedExprType(expr, invalidType)
+			return invalidType
+		}
+		// Generic runtime storage may intentionally use a zeroed inactive slot, but
+		// only inside an explicit Unsafe.PointerCast boundary. Keep sview rejected
+		// above even there: its backing-pointer invariant is unconditional.
+		if a.currentUnsafePointerCastGrantDepth == 0 && a.zeroedTypeHasInvalidRepresentation(expected) && !a.zeroedPlaceholderCanDefer(expected) {
+			a.errorf(expr.Pos(), "cannot initialize %s from `zeroed`: its zero representation may contain a non-null reference; provide a valid value or use an optional reference", expected)
 			a.recordAnalyzedExprType(expr, invalidType)
 			return invalidType
 		}
@@ -185,6 +193,26 @@ func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	}
 	return result
 }
+
+func (a *Analyzer) zeroedPlaceholderCanDefer(expected Type) bool {
+	if a == nil || expected == nil || a.zeroedPlaceholderExpected == nil {
+		return false
+	}
+	if !SameType(expected, a.zeroedPlaceholderExpected) {
+		return false
+	}
+	// The existing definite-assignment lattice tracks a whole local, not individual
+	// invalid aggregate fields. Only scalar placeholders can use that proof. An
+	// aggregate stays rejected even with one invalid field because a write to a
+	// different field would otherwise clear the whole-local uninitialized bit.
+	switch StripAggregateStateType(expected).(type) {
+	case *RefType, *IDType, *CStrType, *TypeParamType:
+		return a.zeroedInvalidRepresentationCountAtDepth(expected, 0) == 1
+	default:
+		return false
+	}
+}
+
 func contextualStringLiteralType(expected Type) (Type, bool) {
 	if expected == nil {
 		return nil, false

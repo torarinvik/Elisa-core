@@ -69,8 +69,8 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 					a.errorf(n.Pos(), consumedFactUseMessage(affineHandleKind(sym.Type), n.Name, state.ConsumedBy))
 					return
 				}
-				if a.suppressUninitReadCheck == 0 && a.isZeroedUninitializedSymbol(sym) {
-					a.errorf(n.Pos(), "use of uninitialized variable %q: it was declared `= zeroed` and never assigned before this read; assign it (or a field of it) first", n.Name)
+				if a.suppressUninitReadCheck == 0 && a.isInvalidUninitializedSymbol(sym) {
+					a.errorf(n.Pos(), "use of uninitialized variable %q: it has no valid whole-value initialization before this read; assign the variable itself first", n.Name)
 					return
 				}
 				if ownerType, ok := borrowableOwnerRefElemType(result); ok {
@@ -778,7 +778,6 @@ func (a *Analyzer) analyzeExpr(expr ast.Expr) (result Type) {
 		a.suppressUninitReadCheck++
 		inner := a.analyzeExpr(n.Operand)
 		a.suppressUninitReadCheck--
-		a.clearZeroedUninitializedForExpr(n.Operand)
 		if a.containsAffineHandleValues(inner, map[string]bool{}) && !isBorrowableAffineOwnerType(inner) {
 			if _, ok := a.lookupAffineValueKey(n.Operand); ok {
 				if isAffineHandleType(inner) {

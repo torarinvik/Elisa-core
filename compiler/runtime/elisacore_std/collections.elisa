@@ -319,9 +319,11 @@ def array_view[T, N: usize](arr: T[N]&) -> view[T]:
 # ------------------------------------------------------------
 
 def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
-    out: mutable InlineVec[T, N] = zeroed
-    out.owner as & <- owner
-    return out
+    trusted Unsafe.PointerCast:
+        # Uninitialized inline slots are inactive until vec.len includes them.
+        out: mutable InlineVec[T, N] = zeroed
+        out.owner as & <- owner
+        return out
 
 
 def new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]:
@@ -899,7 +901,10 @@ def arena_dict_place_fresh[K, T](m: mutable dict[K, T]&, key: K, value: T) -> vo
 
 def arena_dict_zero_buckets[K, T](items: mutable DictBucket[K, T]&, capacity: usize):
     view: view[DictBucket[K, T]] = DynArrayView{data: collections_void_from_items[DictBucket[K, T]](items), len: capacity}
-    arena_da_fill(view, zeroed)
+    trusted Unsafe.PointerCast:
+        # State zero marks each bucket inactive; key/value become readable only
+        # after insertion writes both fields and publishes state one.
+        arena_da_fill(view, zeroed)
 
 def arena_dict_new[K, T](a: mutable Arena&, initial_capacity: usize) -> dict[K, T]:
     can Memory.Allocate, Abort.Panic:
@@ -1109,7 +1114,9 @@ def arena_dict_remove[K, T](m: mutable dict[K, T]&, key: K) -> bool:
     items: mutable DictBucket[K, T]& = m.items
     # Tombstone the slot (state 2): it stays non-empty so probes for entries that collided past
     # it still reach them. `used` is unchanged; the slot is reclaimed on the next rehash.
-    items[probe.index] <- zeroed
+    trusted Unsafe.PointerCast:
+        # The tombstone state prevents readers from observing this inactive payload.
+        items[probe.index] <- zeroed
     items[probe.index].state <- 2
     m.count <- m.count - 1.usize()
     return true
@@ -1194,7 +1201,9 @@ def arena_set_place_fresh[T](s: mutable set[T]&, key: T) -> void:
 
 def arena_set_zero_buckets[T](items: mutable SetBucket[T]&, capacity: usize):
     view: view[SetBucket[T]] = DynArrayView{data: collections_void_from_items[SetBucket[T]](items), len: capacity}
-    arena_da_fill(view, zeroed)
+    trusted Unsafe.PointerCast:
+        # State zero marks each bucket inactive until insertion writes its key.
+        arena_da_fill(view, zeroed)
 
 def arena_set_new[T](a: mutable Arena&, initial_capacity: usize) -> set[T]:
     can Memory.Allocate, Abort.Panic:
@@ -1312,7 +1321,9 @@ def arena_set_remove[T](s: mutable set[T]&, key: T) -> bool:
 
     assert s.items != null
     items: mutable SetBucket[T]& = s.items
-    items[probe.index] <- zeroed
+    trusted Unsafe.PointerCast:
+        # The tombstone state prevents readers from observing this inactive payload.
+        items[probe.index] <- zeroed
     items[probe.index].state <- 2
     s.count <- s.count - 1.usize()
     return true

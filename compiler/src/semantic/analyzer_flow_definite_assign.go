@@ -4,14 +4,16 @@ import (
 	"elisacore/src/ast"
 )
 
-// Definite-assignment tracking for locals declared with `= zeroed`.
+// Definite-assignment tracking for locals whose storage can start with an
+// invalid representation: an omitted initializer or `= zeroed` on a type that
+// requires a non-null reference/handle value.
 //
-// A local `x: T = zeroed` is seeded as "uninitialized". Reading it (or a field
-// of it) before any assignment to a path rooted at it is a use of uninitialized
-// memory. Any assignment to the variable or a field/element of it, or taking its
-// address (which may initialize it through the pointer), clears the state. The
-// flag lives in affineValueState keyed at {root, ""}, so clone/merge/snapshot
-// across control flow come for free from the affine machinery.
+// A local is seeded as "uninitialized". Reading it before a whole-binding
+// assignment is a use of uninitialized memory. Projected writes and address
+// escape do not establish the whole value: the analysis has no field-sensitive
+// initialization proof or callee write summary. The flag lives in
+// affineValueState keyed at {root, ""}, so clone/merge/snapshot across control
+// flow come from the affine machinery.
 //
 // `Arena`-typed locals are exempt: a zeroed Arena is a valid empty arena whose
 // zeroed state is its initialized state.
@@ -78,23 +80,14 @@ func (a *Analyzer) definiteAssignRootSymbol(expr ast.Expr) *Symbol {
 // structs, containers, optional refs, Arena) zero is a usable default, so those
 // are never seeded — keeping false positives near zero against the pervasive
 // `= zeroed`-as-default idiom.
-func typeHasInvalidZeroValue(t Type) bool {
-	switch tt := t.(type) {
-	case *RefType:
-		return tt != nil && tt.State == RefStateNonNull
-	case *IDType:
-		return true
-	case *CStrType:
-		// A non-optional borrowed string is a pointer; zeroed is a null cstr.
-		return true
-	}
-	return false
+func (a *Analyzer) typeHasInvalidZeroValue(t Type) bool {
+	return a.zeroedTypeHasInvalidRepresentation(t)
 }
 
-// markZeroedUninitialized seeds a local as uninitialized at its `= zeroed` decl,
-// but only when zero is an operationally invalid value for the local's type.
-func (a *Analyzer) markZeroedUninitialized(sym *Symbol) {
-	if a == nil || sym == nil || !typeHasInvalidZeroValue(sym.Type) {
+// markInvalidUninitialized seeds a local whose storage cannot be read until a
+// whole-value assignment establishes its representation.
+func (a *Analyzer) markInvalidUninitialized(sym *Symbol) {
+	if a == nil || sym == nil || !a.typeHasInvalidZeroValue(sym.Type) {
 		return
 	}
 	if a.currentAffineValues == nil {
@@ -106,10 +99,21 @@ func (a *Analyzer) markZeroedUninitialized(sym *Symbol) {
 	a.currentAffineValues[key] = state
 }
 
-// clearZeroedUninitializedForExpr marks the local rooted at expr as initialized
-// (after an assignment to it / a field of it, or taking its address).
-func (a *Analyzer) clearZeroedUninitializedForExpr(expr ast.Expr) {
+// clearInvalidUninitializedForExpr marks a local initialized after a whole
+// binding assignment. A field/index write or address escape cannot prove that
+// every invalid leaf has been initialized.
+func (a *Analyzer) clearInvalidUninitializedForExpr(expr ast.Expr) {
 	if a == nil || len(a.currentAffineValues) == 0 {
+		return
+	}
+	for {
+		paren, ok := expr.(*ast.ParenExpr)
+		if !ok || paren == nil {
+			break
+		}
+		expr = paren.Inner
+	}
+	if _, wholeBinding := expr.(*ast.Ident); !wholeBinding {
 		return
 	}
 	sym := a.definiteAssignRootSymbol(expr)
@@ -123,9 +127,9 @@ func (a *Analyzer) clearZeroedUninitializedForExpr(expr ast.Expr) {
 	}
 }
 
-// isZeroedUninitializedSymbol reports whether a local is still in its seeded
-// zeroed-uninitialized state.
-func (a *Analyzer) isZeroedUninitializedSymbol(sym *Symbol) bool {
+// isInvalidUninitializedSymbol reports whether a local is still in its seeded
+// invalid/uninitialized state.
+func (a *Analyzer) isInvalidUninitializedSymbol(sym *Symbol) bool {
 	if a == nil || sym == nil || len(a.currentAffineValues) == 0 {
 		return false
 	}
