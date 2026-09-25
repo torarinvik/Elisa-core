@@ -5,6 +5,13 @@ import (
 	"testing"
 )
 
+// A new semantic Type implementation must not silently inherit a zero-valid
+// representation merely because the safety walk has not been updated yet.
+type unclassifiedZeroValidityTestType struct{}
+
+func (unclassifiedZeroValidityTestType) String() string { return "FutureRuntimeType" }
+func (unclassifiedZeroValidityTestType) isType()        {}
+
 func TestZeroedCannotMaterializeInvalidReferenceRepresentations(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -75,6 +82,9 @@ def empty[T]() -> darray[T]:
 	values: darray[T] = zeroed
 	return values
 
+def empty_view[T]() -> view[T]:
+	return zeroed
+
 def identity[T](value: T) -> T:
 	return value
 `)
@@ -92,6 +102,23 @@ func TestZeroedUnknownGenericInstanceFailsClosed(t *testing.T) {
 		}
 		if !analyzer.zeroedTypeContainsSView(typ) {
 			t.Errorf("sview validity analysis treated unknown generic layout %s as sview-free", typ)
+		}
+	}
+}
+
+func TestZeroedUnknownTypeFormsFailClosed(t *testing.T) {
+	analyzer := &Analyzer{}
+	unknownTypes := []Type{
+		unclassifiedZeroValidityTestType{},
+		&BuiltinType{Name: "FutureBuiltin"},
+		(*DArrayType)(nil),
+	}
+	for _, typ := range unknownTypes {
+		if !analyzer.zeroedTypeHasInvalidRepresentation(typ) {
+			t.Errorf("zeroed validity analysis treated unclassified type %T (%s) as valid", typ, typ)
+		}
+		if !analyzer.zeroedTypeContainsSView(typ) {
+			t.Errorf("sview validity analysis treated unclassified type %T (%s) as sview-free", typ, typ)
 		}
 	}
 }
