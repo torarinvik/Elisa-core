@@ -239,7 +239,7 @@ func atomicRmwPayloadType(argType Type) (Type, bool) {
 		return nil, false
 	}
 	instance, ok := refType.Elem.(*GenericInstanceType)
-	if !ok || instance.Name != "atomic" || len(instance.Args) != 1 {
+	if !ok || (instance.Name != "atomic" && instance.Name != "AtomicSlot") || len(instance.Args) != 1 {
 		return nil, false
 	}
 	return instance.Args[0], true

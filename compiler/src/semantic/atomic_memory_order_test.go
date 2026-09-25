@@ -132,3 +132,46 @@ def bad(slot: mutable atomic[i64]&):
 		t.Fatalf("expected two failure-ordering strength diagnostics, got %d:\n%s", got, all)
 	}
 }
+
+func TestAtomicSlotKeepsPayloadAndRawOperationChecks(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "atomic_slot_checks.elisa", `
+struct AtomicSlot[T]:
+    value: mutable T
+
+struct Pair:
+    left: i64
+    right: i64
+
+enum MemoryOrder:
+    Relaxed
+    Acquire
+    Release
+    AcqRel
+    SeqCst
+
+def load[T](slot: AtomicSlot[T]&, order: MemoryOrder) -> T:
+    return slot.value
+
+def store[T](slot: mutable AtomicSlot[T]&, value: T, order: MemoryOrder):
+    slot.value <- value
+
+def bad(slot: mutable AtomicSlot[i64]&):
+    _ = load(slot, MemoryOrder.Release)
+    store(slot, 1, MemoryOrder.AcqRel)
+
+def bad_payload(slot: AtomicSlot[Pair]&):
+    pass
+`, AnalyzeOptions{})
+	all := allDiagnostics(result)
+	for _, want := range []string{
+		"raw concurrency surface removed: `load` is legacy raw atomic surface",
+		"raw concurrency surface removed: `store` is legacy raw atomic surface",
+		"atomic load cannot use release ordering",
+		"atomic store cannot use acquire ordering",
+		"atomic payload type must satisfy atomic_safe(T), got Pair",
+	} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("expected diagnostic %q, got:\n%s", want, all)
+		}
+	}
+}

@@ -164,7 +164,7 @@ func (s *functionState) emitAtomicSlotPtr(expr ast.Expr, name string) (C.LLVMVal
 		return nil, nil, nil, false, nil
 	}
 	instance, ok := refType.Elem.(*semantic.GenericInstanceType)
-	if !ok || instance.Name != "atomic" || len(instance.Args) != 1 {
+	if !ok || (instance.Name != "atomic" && instance.Name != "AtomicSlot") || len(instance.Args) != 1 {
 		return nil, nil, nil, false, nil
 	}
 	slotPtr, _, err := s.emitExpr(expr, slotType)

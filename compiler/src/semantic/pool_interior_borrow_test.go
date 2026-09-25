@@ -18,6 +18,11 @@ const poolBorrowPrelude = `affine struct Pooled[T]:
 struct Node:
     val: mutable i64
 
+extern pool_test_node() -> mutable heap Node&
+
+def make_pool_test_handle[T](ptr: mutable heap T&) -> Pooled[T]:
+    return Pooled[T]{ptr: ptr}
+
 def release[T](h: Pooled[T]) -> void:
     _ = move h
 
@@ -51,10 +56,10 @@ func expectPoolBorrowAccepted(t *testing.T, name, body string) {
 func TestPoolBorrowInDarrayUsedAfterReleaseIsRejected(t *testing.T) {
 	expectPoolBorrowRejected(t, "pool_borrow_darray_uaf", `
 def darray_uaf() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     xs: mutable darray[mutable heap Node&] = [h.ptr]
     release(move h)
-    b: mutable heap Node& = get xs[0] else zeroed
+    b: mutable heap Node& = get xs[0] else pool_test_node()
     b.val <- 9
 `)
 }
@@ -64,9 +69,9 @@ def darray_uaf() -> void:
 func TestPoolBorrowInDarrayUsedBeforeReleaseIsAccepted(t *testing.T) {
 	expectPoolBorrowAccepted(t, "pool_borrow_darray_valid", `
 def darray_valid() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     xs: mutable darray[mutable heap Node&] = [h.ptr]
-    b: mutable heap Node& = get xs[0] else zeroed
+    b: mutable heap Node& = get xs[0] else h.ptr
     b.val <- 9
     release(move h)
 `)
@@ -87,7 +92,7 @@ def wrap(p: mutable heap Node&) -> Wrapper:
     return Wrapper{p: p}
 
 def return_struct_uaf() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     w: Wrapper = wrap(h.ptr)
     release(move h)
     w.p.val <- 42
@@ -104,7 +109,7 @@ def wrap(p: mutable heap Node&) -> Wrapper:
     return Wrapper{p: p}
 
 def return_struct_valid() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     w: Wrapper = wrap(h.ptr)
     w.p.val <- 42
     release(move h)
@@ -123,7 +128,7 @@ def passthrough(p: mutable heap Node&) -> mutable heap Node&:
     return p
 
 def passthrough_uaf() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     b: mutable heap Node& = passthrough(h.ptr)
     release(move h)
     b.val <- 7
@@ -137,7 +142,7 @@ def passthrough(p: mutable heap Node&) -> mutable heap Node&:
     return p
 
 def passthrough_valid() -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     b: mutable heap Node& = passthrough(h.ptr)
     b.val <- 7
     release(move h)
@@ -153,7 +158,7 @@ def passthrough_valid() -> void:
 func TestPoolBorrowConditionalReleaseUsedAfterJoinIsRejected(t *testing.T) {
 	expectPoolBorrowRejected(t, "pool_borrow_cond_release_uaf", `
 def cond_release_uaf(flag: bool) -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     b: mutable heap Node& = h.ptr
     if flag:
         release(move h)
@@ -165,7 +170,7 @@ def cond_release_uaf(flag: bool) -> void:
 func TestPoolBorrowNoBranchReleaseIsAccepted(t *testing.T) {
 	expectPoolBorrowAccepted(t, "pool_borrow_no_release_valid", `
 def no_release_valid(flag: bool) -> void:
-    h: Pooled[Node] = zeroed
+    h: Pooled[Node] = make_pool_test_handle(pool_test_node())
     b: mutable heap Node& = h.ptr
     if flag:
         b.val <- 1

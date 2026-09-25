@@ -300,7 +300,7 @@ func (a *Analyzer) resolveType(expr ast.TypeExpr) Type {
 			for i, arg := range n.Args {
 				args = append(args, a.resolveGenericArgForParam(arg, params[i]))
 			}
-			if base.Builtin && base.Name == "atomic" && len(args) == 1 {
+			if (base.Name == "atomic" || base.Name == "AtomicSlot") && len(args) == 1 {
 				if !a.typeStructurallyAtomicSafe(args[0], map[string]bool{}) {
 					a.errorf(n.Pos(), "atomic payload type must satisfy atomic_safe(T), got %s", args[0])
 					return invalidType

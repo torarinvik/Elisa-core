@@ -331,11 +331,11 @@ def new[K, T](api: RegistryNamespace, owner: mutable Arena&) -> Registry[K, T]:
     _ = owner
     return zeroed
 
-def declare[K, T](table: mutable Registry[K, T]&, key: K, value: T) -> RegistryId:
+def declare[K, T](table: mutable Registry[K, T]&, key: K, value: T, id: RegistryId) -> RegistryId:
     _ = table
     _ = key
     _ = value
-    return zeroed
+    return id
 
 def lookup[K, T](table: Registry[K, T]&, key: K) -> T?:
     _ = table
@@ -348,18 +348,18 @@ def update[K, T](table: mutable Registry[K, T]&, item_id: RegistryId, value: T) 
     _ = value
     return true
 
-def get[K, T](table: Registry[K, T]&, item_id: RegistryId) -> T:
+def get[K, T](table: Registry[K, T]&, item_id: RegistryId, fallback: T) -> T:
     _ = table
     _ = item_id
-    return zeroed
+    return fallback
 
-def read(a: mutable Arena&) -> i32:
+def read(a: mutable Arena&, seed_id: RegistryId, fallback: FixtureSymbol) -> i32:
     can Global.Read, Memory.Allocate, Abort.Panic:
         table: mutable Registry[cstr[key_shape], FixtureSymbol] = registry.new(a)
-        item_id: RegistryId = table.declare("alpha", FixtureSymbol{value: 7})
+        item_id: RegistryId = table.declare("alpha", FixtureSymbol{value: 7}, seed_id)
         if table.lookup("alpha") is found:
             _ = table.update(item_id, found)
-        return table.get(item_id).value
+        return table.get(item_id, fallback).value
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -440,8 +440,8 @@ def read(a: mutable Arena&) -> i32:
 	if !ok || getCallee.Name != "get" {
 		t.Fatalf("expected UFCS get callee, got %T %#v", getCall.Func, getCall.Func)
 	}
-	if len(getCall.LoweredArgs()) != 2 {
-		t.Fatalf("expected receiver plus symbol id arg, got %d", len(getCall.LoweredArgs()))
+	if len(getCall.LoweredArgs()) != 3 {
+		t.Fatalf("expected receiver, symbol id, and fallback args, got %d", len(getCall.LoweredArgs()))
 	}
 }
 
@@ -544,10 +544,10 @@ struct Cell[T]:
 struct IndexMap[K, T]:
     marker: u8
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def read(cell: Cell[i64]) -> i64:
     return cell.value
@@ -619,18 +619,18 @@ struct Entry[T]:
 struct IndexMap[K, T]:
     marker: u8
 
-def entry[K, T](map: IndexMap[K, T]&, index: usize) -> Entry[T]:
+def entry[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> Entry[T]:
     _ = map
     _ = index
-    return zeroed
+    return Entry[T]{value: fallback}
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
-def read_value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
-    return entry[K, T](map, index).value
+def read_value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
+    return entry[K, T](map, index, fallback).value
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -662,10 +662,10 @@ struct Wrap[T]:
 struct IndexMap[K, T]:
     marker: u8
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def wrap_entry[T](entry: Entry[T]) -> Wrap[T]:
     return Wrap[T]{value: entry.value}
@@ -680,10 +680,10 @@ func TestAnalyzeUFCSGlobalNameDoesNotShadowLocalValueBinding(t *testing.T) {
 struct IndexMap[K, T]:
     marker: u8
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def read() -> i64:
     value: i64 = 7
@@ -699,10 +699,10 @@ func TestAnalyzeUFCSGlobalNameDoesNotShadowInferredValueBinding(t *testing.T) {
 struct IndexMap[K, T]:
     marker: u8
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def read() -> i64:
     value = 7
@@ -718,10 +718,10 @@ func TestAnalyzeUFCSGlobalNameDoesNotShadowTupleReturnLocalValue(t *testing.T) {
 struct IndexMap[K, T]:
     marker: u8
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def read(flag: bool) -> (value: bool, after: usize):
     value: mutable bool = flag
@@ -739,13 +739,13 @@ struct IndexMap[K, T]:
     marker: u8
 
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
-def read[K, T](map: IndexMap[K, T]&, index: usize) -> T:
-    return map.value(index)
+def read[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
+    return map.value(index, fallback)
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
@@ -758,10 +758,10 @@ struct IndexMap[K, T]:
     marker: u8
 
 
-def value[K, T](map: IndexMap[K, T]&, index: usize) -> T:
+def value[K, T](map: IndexMap[K, T]&, index: usize, fallback: T) -> T:
     _ = map
     _ = index
-    return zeroed
+    return fallback
 
 def read(flag: bool) -> (value: bool, after: usize):
     value: mutable bool = flag
@@ -785,20 +785,20 @@ struct Registry[K, T]:
     marker: u8
 
 
-def value[K, T](table: Registry[K, T]&, item_id: RegistryId) -> T:
+def value[K, T](table: Registry[K, T]&, item_id: RegistryId, fallback: T) -> T:
     _ = table
     _ = item_id
-    return zeroed
+    return fallback
 
 
-def entry[K, T](table: Registry[K, T]&, item_id: RegistryId) -> SymbolEntry[T]:
+def entry[K, T](table: Registry[K, T]&, item_id: RegistryId, fallback: T) -> SymbolEntry[T]:
     _ = table
     _ = item_id
-    return zeroed
+    return SymbolEntry[T]{value: fallback}
 
-def read[T](table: Registry[cstr, T]&, item_id: RegistryId) -> T:
-    _ = table.entry(item_id)
-    return table.value(item_id)
+def read[T](table: Registry[cstr, T]&, item_id: RegistryId, fallback: T) -> T:
+    _ = table.entry(item_id, fallback)
+    return table.value(item_id, fallback)
 `)
 	if errs := result.Errors(); len(errs) != 0 {
 		t.Fatalf("unexpected semantic errors: %v", errs)
