@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+// The concrete main call is essential: template-only lowering does not exercise
+// region substitution from StringHandle[r] to the caller's live arena.
 func TestGenerateLLVMIRPreservesGenericSViewRegionThroughDArrayGrowth(t *testing.T) {
 	src := `struct StringHandle[@r]:
     view: sview @r
@@ -21,6 +23,13 @@ def collect_view[@r](handle: StringHandle[r]) -> usize:
     count: usize = output.count
     output.clear()
     return count
+
+def main() -> i64 can[Memory.Allocate, Abort.Panic]:
+    region input_region(4096):
+        bytes: mutable darray[u8] @input_region = [65]
+        view: sview @input_region = bytes.as_sview()
+        handle: StringHandle[input_region] = StringHandle{view: view}
+        return collect_view(handle).i64()
 `
 	result := parseAndAnalyzeBackendTest(t, "backend_generic_sview_darray_region.elisa", src)
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)

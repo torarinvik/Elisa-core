@@ -1497,18 +1497,18 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			// aggregate copies to memcpy, avoiding `store <bigtype> zeroinitializer`
 			// (catastrophic for llc -O0 on multi-KB structs).
 			if err := s.storeValue(alloca, value, declType, n.Name); err != nil {
-			callContext := ""
-			if call, ok := n.Value.(*ast.CallExpr); ok {
-				targetName := fmt.Sprintf("%T", call.Func)
-				switch target := call.Func.(type) {
-				case *ast.Ident:
-					targetName = target.Name
-				case *ast.FieldExpr:
-					targetName = target.Field
+				callContext := ""
+				if call, ok := n.Value.(*ast.CallExpr); ok {
+					targetName := fmt.Sprintf("%T", call.Func)
+					switch target := call.Func.(type) {
+					case *ast.Ident:
+						targetName = target.Name
+					case *ast.FieldExpr:
+						targetName = target.Field
+					}
+					callContext = fmt.Sprintf(", call target %q has semantic type %v", targetName, s.exprType(call.Func))
 				}
-				callContext = fmt.Sprintf(", call target %q has semantic type %v", targetName, s.exprType(call.Func))
-			}
-			return fmt.Errorf("while emitting %s local %q at source line %d (expr %T has semantic type %v%s): %w", s.decl.Name, n.Name, n.Pos().Line, n.Value, s.exprType(n.Value), callContext, err)
+				return fmt.Errorf("while emitting %s local %q at source line %d (expr %T has semantic type %v%s): %w", s.decl.Name, n.Name, n.Pos().Line, n.Value, s.exprType(n.Value), callContext, err)
 			}
 			s.bindPackedStoreValue(declType, value)
 			if err := s.bindPackedStoreOriginsForExprPath(n.Name, n.Value, declType); err != nil {

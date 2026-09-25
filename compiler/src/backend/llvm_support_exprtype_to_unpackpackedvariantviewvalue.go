@@ -93,7 +93,7 @@ func (s *functionState) resolveDynamicShapeType(expr *ast.GenericType) (semantic
 		if err != nil {
 			return nil, true, err
 		}
-		return &semantic.ViewType{Elem: elem, SurfaceName: "view"}, true, nil
+		return &semantic.ViewType{Elem: elem, SurfaceName: "view", Region: substituteRegionName(expr.Region, s.typeMap)}, true, nil
 	case "packedview":
 		return nil, true, fmt.Errorf("packedview must be written with builtin syntax like packedview[Expr.Lit]")
 	default:

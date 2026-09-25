@@ -97,34 +97,42 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 	case *semantic.OptionalType:
 		return &semantic.OptionalType{Value: substituteType(tt.Value, subst, impls)}
 	case *semantic.RefType:
-		region := tt.Region
-		if region != "" {
-			if mapped, ok := subst[region]; ok {
-				switch mapped := mapped.(type) {
-				case *semantic.RegionParamType:
-					region = mapped.Name
-				case *semantic.RegionValueType:
-					region = mapped.Name
-				}
-			}
+		return &semantic.RefType{
+			Elem:            substituteType(tt.Elem, subst, impls),
+			Mutable:         tt.Mutable,
+			State:           tt.State,
+			Storage:         tt.Storage,
+			Region:          substituteRegionName(tt.Region, subst),
+			ExplicitStorage: tt.ExplicitStorage,
+			Linear:          tt.Linear,
 		}
-		state := tt.State
-		storage := tt.Storage
-		return &semantic.RefType{Elem: substituteType(tt.Elem, subst, impls), State: state, Storage: storage, Region: region, ExplicitStorage: tt.ExplicitStorage}
 	case *semantic.ArrayType:
 		elem := substituteType(tt.Elem, subst, impls)
 		if tt.ConstParam != "" {
 			if mapped, ok := subst[tt.ConstParam]; ok {
 				if value, valueOK := mapped.(*semantic.ConstValueType); valueOK && value.Value.Kind == semantic.ConstInt {
-					return &semantic.ArrayType{Elem: elem, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: tt.SurfaceName}
+					return &semantic.ArrayType{Elem: elem, ElemTypeExpr: tt.ElemTypeExpr, Size: strconv.FormatInt(value.Value.Int, 10), HasConstSize: true, ConstSize: value.Value.Int, SurfaceName: tt.SurfaceName}
 				}
 			}
 		}
-		return &semantic.ArrayType{Elem: elem, Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, ConstParam: tt.ConstParam, SurfaceName: tt.SurfaceName}
+		return &semantic.ArrayType{Elem: elem, ElemTypeExpr: tt.ElemTypeExpr, Size: tt.Size, HasConstSize: tt.HasConstSize, ConstSize: tt.ConstSize, ConstParam: tt.ConstParam, SurfaceName: tt.SurfaceName}
 	case *semantic.DArrayType:
-		return &semantic.DArrayType{Elem: substituteType(tt.Elem, subst, impls), Shape: tt.Shape, SurfaceName: tt.SurfaceName}
+		return &semantic.DArrayType{
+			Elem:         substituteType(tt.Elem, subst, impls),
+			Shape:        tt.Shape,
+			SurfaceName:  tt.SurfaceName,
+			ElemTypeExpr: tt.ElemTypeExpr,
+			Region:       substituteRegionName(tt.Region, subst),
+		}
 	case *semantic.ViewType:
-		return &semantic.ViewType{Elem: substituteType(tt.Elem, subst, impls), Begin: tt.Begin, End: tt.End, SurfaceName: tt.SurfaceName}
+		return &semantic.ViewType{
+			Elem:        substituteType(tt.Elem, subst, impls),
+			Mutable:     tt.Mutable,
+			Begin:       tt.Begin,
+			End:         tt.End,
+			SurfaceName: tt.SurfaceName,
+			Region:      substituteRegionName(tt.Region, subst),
+		}
 	case *semantic.TupleType:
 		fields := make([]semantic.TupleField, 0, len(tt.Fields))
 		for _, field := range tt.Fields {
@@ -134,17 +142,19 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 	case *semantic.PackedVariantViewType:
 		return tt
 	case *semantic.DictType:
-		return &semantic.DictType{Key: substituteType(tt.Key, subst, impls), Value: substituteType(tt.Value, subst, impls), SurfaceName: tt.SurfaceName, Region: tt.Region}
+		return &semantic.DictType{Key: substituteType(tt.Key, subst, impls), Value: substituteType(tt.Value, subst, impls), SurfaceName: tt.SurfaceName, Region: substituteRegionName(tt.Region, subst)}
 	case *semantic.SetType:
-		return &semantic.SetType{Elem: substituteType(tt.Elem, subst, impls), SurfaceName: tt.SurfaceName, Region: tt.Region}
+		return &semantic.SetType{Elem: substituteType(tt.Elem, subst, impls), SurfaceName: tt.SurfaceName, Region: substituteRegionName(tt.Region, subst)}
+	case *semantic.CStrType:
+		return &semantic.CStrType{Shape: tt.Shape, SurfaceName: tt.SurfaceName, Region: substituteRegionName(tt.Region, subst)}
 	case *semantic.SViewType:
-		return &semantic.SViewType{Begin: tt.Begin, End: tt.End}
+		return &semantic.SViewType{Begin: tt.Begin, End: tt.End, Region: substituteRegionName(tt.Region, subst)}
 	case *semantic.GenericInstanceType:
 		args := make([]semantic.Type, 0, len(tt.Args))
 		for _, arg := range tt.Args {
 			args = append(args, substituteType(arg, subst, impls))
 		}
-		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst, impls), Args: args}
+		return &semantic.GenericInstanceType{Name: tt.Name, Base: substituteType(tt.Base, subst, impls), Args: args, Region: substituteRegionName(tt.Region, subst)}
 	case *semantic.AggregateStateType:
 		return &semantic.AggregateStateType{Base: substituteType(tt.Base, subst, impls), State: tt.State, States: append([]semantic.RefState(nil), tt.States...)}
 	case *semantic.FuncType:
@@ -179,6 +189,27 @@ func substituteType(t semantic.Type, subst map[string]semantic.Type, impls map[s
 	default:
 		return t
 	}
+}
+
+func substituteRegionName(region string, subst map[string]semantic.Type) string {
+	if region == "" {
+		return ""
+	}
+	mapped, ok := subst[region]
+	if !ok {
+		return region
+	}
+	switch mapped := mapped.(type) {
+	case *semantic.RegionParamType:
+		if mapped != nil && mapped.Name != "" {
+			return mapped.Name
+		}
+	case *semantic.RegionValueType:
+		if mapped != nil && mapped.Name != "" {
+			return mapped.Name
+		}
+	}
+	return region
 }
 func runtimeDynArrayName(elem semantic.Type) string {
 	return mangleGenericType("DynArray", []semantic.Type{elem})

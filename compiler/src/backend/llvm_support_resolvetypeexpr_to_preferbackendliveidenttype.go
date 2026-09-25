@@ -22,11 +22,11 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 	case *ast.NamedType:
 		switch n.Name {
 		case "cstr":
-			return &semantic.CStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr"}, nil
+			return &semantic.CStrType{Shape: &semantic.WildcardShape{}, SurfaceName: "cstr", Region: substituteRegionName(n.Region, s.typeMap)}, nil
 		case "sview":
-			return &semantic.SViewType{}, nil
+			return &semantic.SViewType{Region: substituteRegionName(n.Region, s.typeMap)}, nil
 		case "dstr":
-			return &semantic.DArrayType{Elem: s.g.result.NamedTypes["u8"], Shape: &semantic.WildcardShape{}, SurfaceName: "dstr"}, nil
+			return &semantic.DArrayType{Elem: s.g.result.NamedTypes["u8"], Shape: &semantic.WildcardShape{}, SurfaceName: "dstr", Region: substituteRegionName(n.Region, s.typeMap)}, nil
 		}
 		if bound, ok := s.typeMap[n.Name]; ok {
 			return bound, nil
@@ -122,7 +122,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 		if err != nil {
 			return nil, err
 		}
-		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), Region: n.Region, ExplicitStorage: n.Explicit}, nil
+		return &semantic.RefType{Elem: elem, State: semantic.RefState(n.State), Storage: semantic.RefStorage(n.Storage), Region: substituteRegionName(n.Region, s.typeMap), ExplicitStorage: n.Explicit}, nil
 	case *ast.FuncTypeExpr:
 		params := make([]semantic.Type, 0, len(n.Params))
 		for _, param := range n.Params {
@@ -223,7 +223,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 				}
 				args = append(args, resolved)
 			}
-			return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args}), nil
+			return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args, Region: substituteRegionName(n.Region, s.typeMap)}), nil
 		}
 		if _, ok := base.(*semantic.OpaqueType); ok && len(n.Args) != 0 {
 			return nil, fmt.Errorf("type %q expects 0 type arguments, got %d", n.Name, len(n.Args))
@@ -236,7 +236,7 @@ func (s *functionState) resolveTypeExpr(expr ast.TypeExpr) (semantic.Type, error
 			}
 			args = append(args, resolved)
 		}
-		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args}), nil
+		return semantic.DefaultAggregateStateType(&semantic.GenericInstanceType{Name: lookupName, Base: base, Args: args, Region: substituteRegionName(n.Region, s.typeMap)}), nil
 	case *ast.GenericValueArgTypeExpr:
 		value, err := s.evalConstIntExpr(n.Value)
 		if err != nil {
@@ -527,9 +527,9 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		if len(expr.ValueArgs) == 0 {
-			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray", Region: expr.Region}, nil
+			return &semantic.DArrayType{Elem: elem, Shape: &semantic.WildcardShape{}, SurfaceName: "darray", Region: substituteRegionName(expr.Region, s.typeMap)}, nil
 		}
-		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray", Region: expr.Region}, nil
+		return &semantic.DArrayType{Elem: elem, Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "darray", Region: substituteRegionName(expr.Region, s.typeMap)}, nil
 	case "dict":
 		if len(expr.TypeArgs) != 2 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("dict expects 2 type arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -542,7 +542,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		return resolveBackendDictType(keyType, valueType, "dict", expr.Region)
+		return resolveBackendDictType(keyType, valueType, "dict", substituteRegionName(expr.Region, s.typeMap))
 	case "set":
 		if len(expr.TypeArgs) != 1 || len(expr.ValueArgs) != 0 {
 			return nil, fmt.Errorf("set expects 1 type argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
@@ -551,12 +551,12 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if err != nil {
 			return nil, err
 		}
-		return resolveBackendSetType(elemType, "set", expr.Region)
+		return resolveBackendSetType(elemType, "set", substituteRegionName(expr.Region, s.typeMap))
 	case "cstr":
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 1 {
 			return nil, fmt.Errorf("cstr expects 1 argument, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
-		return &semantic.CStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr"}, nil
+		return &semantic.CStrType{Shape: shapeFromValueExpr(expr.ValueArgs[0]), SurfaceName: "cstr", Region: substituteRegionName(expr.Region, s.typeMap)}, nil
 	case "view":
 		if len(expr.TypeArgs) != 1 {
 			return nil, fmt.Errorf("view expects 1 type argument, got %d", len(expr.TypeArgs))
@@ -566,6 +566,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 			return nil, err
 		}
 		viewType := &semantic.ViewType{Elem: elem, SurfaceName: "view"}
+		viewType.Region = substituteRegionName(expr.Region, s.typeMap)
 		if len(expr.ValueArgs) == 2 {
 			viewType.Begin = exprSummary(expr.ValueArgs[0])
 			viewType.End = exprSummary(expr.ValueArgs[1])
@@ -582,7 +583,7 @@ func (s *functionState) resolveBuiltinSurfaceTypeExpr(expr *ast.BuiltinTypeExpr)
 		if len(expr.TypeArgs) != 0 || len(expr.ValueArgs) != 2 {
 			return nil, fmt.Errorf("sview expects 2 arguments, got %d", len(expr.TypeArgs)+len(expr.ValueArgs))
 		}
-		return &semantic.SViewType{Begin: exprSummary(expr.ValueArgs[0]), End: exprSummary(expr.ValueArgs[1])}, nil
+		return &semantic.SViewType{Begin: exprSummary(expr.ValueArgs[0]), End: exprSummary(expr.ValueArgs[1]), Region: substituteRegionName(expr.Region, s.typeMap)}, nil
 	default:
 		return nil, fmt.Errorf("unknown built-in type %q", expr.Name)
 	}
