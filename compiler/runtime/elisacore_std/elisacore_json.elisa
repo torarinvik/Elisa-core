@@ -138,6 +138,8 @@ module Json:
         # Nesting limit. Recursive descent means depth costs host stack, so a hostile
         # document ("[[[[[[...") must be rejected rather than allowed to overflow it.
         const JSON_MAX_DEPTH: i64 = 256
+        const JSON_EMPTY_STRING_LENGTH: i64 = 0
+        const JSON_NULL_STRING_ADDRESS: uintptr = 0
 
         # Scratch big enough for any number lexeme worth converting exactly; longer
         # lexemes take the arena path in `json_lexeme_to_f64`.
@@ -889,6 +891,10 @@ module Json:
             trusted Unsafe.PointerCast:
                 match value:
                     JsonValue.String(data_bits, len):
+                        if len == JSON_EMPTY_STRING_LENGTH:
+                            return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
+                        if len < JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+                            raise JsonAccessError.WrongType
                         return StringView{data: data_bits.cast[u8&], len: len}
                     _:
                         raise JsonAccessError.WrongType
@@ -947,6 +953,8 @@ module Json:
                 return move out
 
         def json_member_key_view(member: JsonMember) -> sview:
+            if member.key_len <= JSON_EMPTY_STRING_LENGTH or member.key_bits == JSON_NULL_STRING_ADDRESS:
+                return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
             trusted Unsafe.PointerCast:
                 return StringView{data: member.key_bits.cast[u8&], len: member.key_len}
 
@@ -1118,7 +1126,11 @@ module Json:
                     JsonValue.Number(number):
                         json_emit_number(out, number)
                     JsonValue.String(data_bits, len):
-                        json_emit_escaped(out, StringView{data: data_bits.cast[u8&], len: len})
+                        if len <= JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
+                            json_emit_escaped(out, sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH))
+                        else:
+                            trusted Unsafe.PointerCast:
+                                json_emit_escaped(out, StringView{data: data_bits.cast[u8&], len: len})
                     JsonValue.Array(items_bits, count):
                         out.push(JSON_CH_LBRACKET.u8())
                         for index in 0..<count:
