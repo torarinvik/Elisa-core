@@ -4,11 +4,11 @@
 # target's atomic lowering without importing the full concurrency runtime.
 # ============================================================
 
-struct atomic[T]:
+struct AtomicSlot[T]:
     value: mutable T
 
 struct AtomicCell[T]:
-    slot: mutable atomic[T]
+    slot: mutable AtomicSlot[T]
 
 enum MemoryOrder:
     Relaxed
@@ -26,24 +26,24 @@ global mutable __elisa_arena_cache_lock_cell: AtomicCell[i32] = zeroed
 # Generic atomic operations
 # ------------------------------------------------------------
 
-def load[T](slot: atomic[T]&, order: MemoryOrder) -> T:
+def load[T](slot: AtomicSlot[T]&, order: MemoryOrder) -> T:
     can Atomics.Load:
         _ = order
         return slot.value
 
-def store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder):
+def store[T](slot: mutable AtomicSlot[T]&, value: T, order: MemoryOrder):
     can Atomics.Store:
         _ = order
         slot.value <- value
 
-def exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T:
+def exchange[T](slot: mutable AtomicSlot[T]&, value: T, order: MemoryOrder) -> T:
     can Atomics.Exchange:
         _ = order
         old_value: T = slot.value
         slot.value <- value
         return old_value
 
-def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
+def compare_exchange[T](slot: mutable AtomicSlot[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool:
     can Atomics.CompareExchange:
         _ = success
         _ = failure
@@ -52,35 +52,35 @@ def compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, succe
             return true
         return false
 
-def fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+def fetch_add(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64:
     can Atomics.Rmw:
         _ = order
         old_value: i64 = slot.value
         slot.value <- old_value + value
         return old_value
 
-def fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+def fetch_sub(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64:
     can Atomics.Rmw:
         _ = order
         old_value: i64 = slot.value
         slot.value <- old_value - value
         return old_value
 
-def fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+def fetch_or(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64:
     can Atomics.Rmw:
         _ = order
         old_value: i64 = slot.value
         slot.value <- old_value | value
         return old_value
 
-def fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+def fetch_and(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64:
     can Atomics.Rmw:
         _ = order
         old_value: i64 = slot.value
         slot.value <- old_value & value
         return old_value
 
-def fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64:
+def fetch_xor(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64:
     can Atomics.Rmw:
         _ = order
         old_value: i64 = slot.value
@@ -96,9 +96,8 @@ def fence(order: MemoryOrder):
 # ------------------------------------------------------------
 
 def atomic_cell[T](value: T) -> AtomicCell[T]:
-    out: AtomicCell[T] = zeroed
-    out.slot.value <- value
-    return out
+    slot: AtomicSlot[T] = AtomicSlot[T]{value: value}
+    return AtomicCell[T]{slot: slot}
 
 def atomic_load_relaxed[T](cell: AtomicCell[T]&) -> T:
     can Atomics.Load:

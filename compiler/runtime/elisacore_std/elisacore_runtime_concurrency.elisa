@@ -51,7 +51,7 @@ struct ConcurrencyWorkStart1:
 	fn_bits: mutable uintptr
 	arg_bits: mutable void&
 	result_bits: mutable void&
-	refs: mutable atomic[i64]
+	refs: mutable AtomicSlot[i64]
 
 @intrusive
 struct ConcurrencyTaskGroupNode:
@@ -355,6 +355,18 @@ def ctx_concurrency_box_new[T](value: T) -> mutable heap ConcurrencyBox[T]&:
 	box: mutable heap ConcurrencyBox[T]& = raw.cast[heap ConcurrencyBox[T]&]
 	box.value <- value
 	return box
+
+# Reserve result storage before spawning without fabricating an R value. The
+# worker writes exactly once, then join/pool_await synchronizes before reading.
+def ctx_concurrency_result_write[R](storage: mutable void&, value: R):
+	trusted Unsafe.PointerCast:
+		slot: mutable heap R& = storage.cast[mutable heap R&]
+		slot[0] <- value
+
+def ctx_concurrency_result_read[R](storage: void&) -> R:
+	trusted Unsafe.PointerCast:
+		slot: heap R& = storage.cast[heap R&]
+		return slot[0]
 
 def mutex() -> Mutex:
 	can Memory.Allocate, Memory.Release:
@@ -810,7 +822,7 @@ def task_group_wait_all_raw(group: mutable TaskGroup&):
 				free(current.cast[heap void&])
 				current <- next
 
-def ctx_concurrency_ref_release(slot: mutable atomic[i64]&) -> i64:
+def ctx_concurrency_ref_release(slot: mutable AtomicSlot[i64]&) -> i64:
 	trusted Unsafe.AssumeProgress:
 		while true:
 			current: i64 = load(slot, MemoryOrder.Acquire) can Atomics.Load
@@ -832,13 +844,12 @@ def ctx_concurrency_work1_release(state_bits: mutable void&?):
 def ctx_concurrency_work1_new[A, R, permission P](fn: fn(A) -> R can[P], arg: A) -> mutable heap ConcurrencyWorkStart1&:
 	can Memory.Allocate, Abort.Panic:
 		arg_box: heap ConcurrencyBox[A]& = ctx_concurrency_box_new(arg)
-		result_seed: R = zeroed
-		result_box: heap ConcurrencyBox[R]& = ctx_concurrency_box_new(result_seed)
+		result_storage: mutable heap void& = ctx_concurrency_alloc(size_of(ConcurrencyBox[R]))
 		raw: heap void& = ctx_concurrency_alloc(size_of(ConcurrencyWorkStart1))
 		state: mutable heap ConcurrencyWorkStart1& = raw.cast[heap ConcurrencyWorkStart1&]
 		state.fn_bits <- fn.cast[uintptr]
 		state.arg_bits <- arg_box.cast[void&]
-		state.result_bits <- result_box.cast[void&]
+		state.result_bits <- result_storage.cast[void&]
 		state.refs.value <- 2
 		return state
 
@@ -847,8 +858,8 @@ def ctx_concurrency_work1_entry[A, R, permission P](state_bits: mutable void&) -
 		state: heap ConcurrencyWorkStart1& = state_bits.cast[heap ConcurrencyWorkStart1&]
 		fn: fn(A) -> R can[P] = state.fn_bits.cast[fn(A) -> R can[P]]
 		arg_box: heap ConcurrencyBox[A]& = state.arg_bits.cast[heap ConcurrencyBox[A]&]
-		result_box: mutable heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
-		result_box.value <- fn(arg_box.value)
+		result: R = fn(arg_box.value)
+		ctx_concurrency_result_write[R](state.result_bits, result)
 		ctx_concurrency_work1_release(state.cast[mutable void&])
 		return state.cast[void&]
 
@@ -857,8 +868,7 @@ def ctx_concurrency_work1_take_result[R](state_bits: void&?) -> R:
 		panic("concurrency work returned no state") if state_bits == null
 		live_bits: void& = state_bits
 		state: heap ConcurrencyWorkStart1& = live_bits.cast[heap ConcurrencyWorkStart1&]
-		result_box: heap ConcurrencyBox[R]& = state.result_bits.cast[heap ConcurrencyBox[R]&]
-		result: R = result_box.value
+		result: R = ctx_concurrency_result_read[R](state.result_bits)
 		ctx_concurrency_work1_release(state.cast[mutable void&])
 		return result
 
@@ -1091,8 +1101,8 @@ def barrier_make(backing: mutable darray[i64]&, total: i64) -> Barrier:
 # per-thread state: the current generation is read before arrival and waited on.
 def barrier_wait(b: Barrier) -> void:
 	can Atomics.Load, Atomics.Store, Atomics.Rmw, Thread.Yield:
-		cnt: mutable atomic[i64]& = b.state.cast[mutable atomic[i64]&]
-		gen: mutable atomic[i64]& = (b.state + 8).cast[mutable atomic[i64]&]
+		cnt: mutable AtomicSlot[i64]& = b.state.cast[mutable AtomicSlot[i64]&]
+		gen: mutable AtomicSlot[i64]& = (b.state + 8).cast[mutable AtomicSlot[i64]&]
 		g: i64 = load(gen, MemoryOrder.Acquire)
 		arrived: i64 = fetch_add(cnt, 1, MemoryOrder.AcqRel) + 1
 		if arrived == b.total:

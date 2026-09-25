@@ -32,11 +32,11 @@ extern elisa_profile_allocation_event_v1(kind: u32, address: uintptr, size: usiz
 
 extern arena_profile_allocation_event(kind: u32, address: uintptr, size: usize, old_address: uintptr, old_size: usize, arena: uintptr, region: usize) -> void
 
-struct atomic[T]:
+struct AtomicSlot[T]:
     value: mutable T
 
 struct AtomicCell[T]:
-    slot: mutable atomic[T]
+    slot: mutable AtomicSlot[T]
 
 enum MemoryOrder:
     Relaxed
@@ -47,23 +47,23 @@ enum MemoryOrder:
 
 extern __elisa_arena_cache_lock_cell: AtomicCell[i32]
 
-extern load[T](slot: atomic[T]&, order: MemoryOrder) -> T
+extern load[T](slot: AtomicSlot[T]&, order: MemoryOrder) -> T
 
-extern store[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder)
+extern store[T](slot: mutable AtomicSlot[T]&, value: T, order: MemoryOrder)
 
-extern exchange[T](slot: mutable atomic[T]&, value: T, order: MemoryOrder) -> T
+extern exchange[T](slot: mutable AtomicSlot[T]&, value: T, order: MemoryOrder) -> T
 
-extern compare_exchange[T](slot: mutable atomic[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool
+extern compare_exchange[T](slot: mutable AtomicSlot[T]&, expected: T, desired: T, success: MemoryOrder, failure: MemoryOrder) -> bool
 
-extern fetch_add(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+extern fetch_add(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64
 
-extern fetch_sub(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+extern fetch_sub(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64
 
-extern fetch_or(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+extern fetch_or(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64
 
-extern fetch_and(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+extern fetch_and(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64
 
-extern fetch_xor(slot: mutable atomic[i64]&, value: i64, order: MemoryOrder) -> i64
+extern fetch_xor(slot: mutable AtomicSlot[i64]&, value: i64, order: MemoryOrder) -> i64
 
 extern fence(order: MemoryOrder)
 
