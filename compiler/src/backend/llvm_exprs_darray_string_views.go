@@ -54,6 +54,18 @@ func (s *functionState) emitBuiltinDArraySviewCall(expr *ast.CallExpr) (C.LLVMVa
 		return nil, nil, true, err
 	}
 	countValue := C.LLVMBuildLoad2(s.builder, usizeLLVMType, countPtr, cStringFree("darray.sview.count"))
+	// An empty darray may have a nil items pointer, but StringView.data is a
+	// non-null reference even when len is zero. Give empty views a process-lived
+	// NUL byte rather than allowing a null pointer into the StringView carrier.
+	empty := C.LLVMBuildICmp(
+		s.builder,
+		C.LLVMIntPredicate(C.LLVMIntEQ),
+		countValue,
+		C.LLVMConstInt(usizeLLVMType, 0, 0),
+		cStringFree("darray.sview.empty"),
+	)
+	emptyBacking := C.LLVMBuildGlobalStringPtr(s.builder, cStringFree(""), cStringFree("darray.sview.empty.backing"))
+	dataValue = C.LLVMBuildSelect(s.builder, empty, emptyBacking, dataValue, cStringFree("darray.sview.data.valid"))
 	sviewLLVMType, err := s.g.lowerType(resultType)
 	if err != nil {
 		return nil, nil, true, err
