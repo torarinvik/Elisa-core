@@ -77,12 +77,12 @@ func structHasRegionlessContainerFieldSeen(st *StructType, seen map[*StructType]
 // Two admissible initializer forms, both of which allocate the struct's container fields into the
 // caller's ambient region:
 //
-//   (1) a fresh struct literal — `bag: Bag = Bag([], [])` — the inline-construction case; or
-//   (2) a call to a region-POLYMORPHIC function returning container-bearing data —
-//       `bag: Bag = make_bag()`. A region-poly result is allocated in the ambient (threaded)
-//       region even though its type is region-less (the region rides the threaded arena, not the
-//       type), so it lives in EXACTLY the same region a struct-literal local would (see
-//       region_containers.go's region-poly carve-out / exprIsRegionPolyResultCarryingRegionData).
+//	(1) a fresh struct literal — `bag: Bag = Bag([], [])` — the inline-construction case; or
+//	(2) a call to a region-POLYMORPHIC function returning container-bearing data —
+//	    `bag: Bag = make_bag()`. A region-poly result is allocated in the ambient (threaded)
+//	    region even though its type is region-less (the region rides the threaded arena, not the
+//	    type), so it lives in EXACTLY the same region a struct-literal local would (see
+//	    region_containers.go's region-poly carve-out / exprIsRegionPolyResultCarryingRegionData).
 //
 // SOUNDNESS: form (2) is gated on exprIsRegionPolyResultCarryingRegionData, which requires the
 // callee be RegionPolymorphic AND the result transitively carry region storage. A function that
@@ -218,6 +218,18 @@ func (a *Analyzer) attachStructLocalArgRegion(arg ast.Expr, argType, paramType T
 		return argType
 	}
 	region := a.structLocalArgRegion(arg)
+	// A nested struct field reached through a region-carrying reference inherits the
+	// parent's storage region. Unlike a locally constructed struct, this provenance
+	// comes from the reference itself (and therefore remains valid only for that
+	// reference's lifetime); fieldObjectExprRegion stops at an intermediate field
+	// that already carries its own region.
+	if region == "" {
+		if address, ok := stripParenExpr(arg).(*ast.AddrOfExpr); ok {
+			if projected, ok := stripParenExpr(address.Operand).(*ast.FieldExpr); ok {
+				region = a.fieldObjectExprRegion(projected.Object, a.exprTypes[projected.Object])
+			}
+		}
+	}
 	if region == "" {
 		return argType
 	}

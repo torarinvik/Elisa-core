@@ -46,6 +46,29 @@ def use() -> void:
 	}
 }
 
+func TestConstructedLocalNestedModuleForwardedInferred(t *testing.T) {
+	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "module_literal_local.elisa",
+		`extend WorkspaceApi:
+    private:
+        struct TypeIndex:
+            entries: mutable darray[i64]
+        struct Workspace:
+            nodes: mutable darray[i64]
+            children: mutable darray[i64]
+            type_index: TypeIndex
+        def consume(workspace: mutable Workspace&) -> void:
+            workspace.nodes.push(1)
+            workspace.type_index.entries.push(2)
+        def prepare() -> usize:
+            workspace: mutable Workspace = Workspace{nodes: [], children: [], type_index: TypeIndex{entries: []}}
+            consume(&workspace)
+            return workspace.nodes.count
+`).Errors(), " | ")
+	if strings.Contains(errs, "cannot infer region parameter") {
+		t.Fatalf("constructed workspace locals in a nested module must thread their inferred region, got: %s", errs)
+	}
+}
+
 func TestConstructedLocalUFCSReceiverForwardedInferred(t *testing.T) {
 	errs := strings.Join(analyzeTreeTestSourceWithSemanticErrors(t, "literal_local_ufcs.elisa",
 		`struct Bag:

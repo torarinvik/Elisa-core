@@ -560,6 +560,11 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 			// region threads that region into the callee's struct-ref region param (the
 			// locally-constructed analogue of struct-param region threading).
 			argType = a.attachStructLocalArgRegion(orderedArgs[i], argType, ft.Params[i], regionParams)
+			// Keep the call-argument expression's cached type in sync with the type used for
+			// inference. Code generation resolves the hidden Arena& argument from this cached
+			// region; leaving it unstamped makes semantic analysis accept the call but lowers
+			// the hidden argument as null for nested struct fields.
+			a.exprTypes[orderedArgs[i]] = argType
 			a.collectTypeBindings(ft.Params[i], argType, bindings, shapeBindings, regionBindings, permissionBindings, regionParams)
 			a.collectArenaRegionBinding(ft.Params[i], orderedArgs[i], bindings, regionBindings, regionParams)
 			expectedType = a.substituteType(ft.Params[i], bindings, shapeBindings, regionBindings, permissionBindings)

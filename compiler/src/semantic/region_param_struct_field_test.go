@@ -33,6 +33,25 @@ func TestS4FieldGrowthAccepted(t *testing.T) {
 	}
 }
 
+func TestNestedMutableScratchFieldThreadsInferredRegion(t *testing.T) {
+	source := `struct Scratch:
+    values: mutable darray[usize]
+
+struct Workspace:
+    scratch: mutable Scratch
+
+def prepare(scratch: mutable Scratch&) -> void can[Memory.Allocate, Abort.Panic]:
+    scratch.values.push(1)
+
+def verify(workspace: mutable Workspace&) -> void can[Memory.Allocate, Abort.Panic]:
+    prepare(&workspace.scratch)
+`
+	errs := analyzeTreeTestSourceWithSemanticErrors(t, "nested_mutable_scratch_region.elisa", source).Errors()
+	if joined := strings.Join(errs, " | "); joined != "" {
+		t.Fatalf("nested mutable scratch field must carry its inferred storage region, got: %s", joined)
+	}
+}
+
 // Returning a VIEW into the grown field with a region-LESS return type loses the @r tie → reject
 // (this was a confirmed use-after-free before the escape coverage was added).
 func TestS4ReturnViewRegionlessRejected(t *testing.T) {
