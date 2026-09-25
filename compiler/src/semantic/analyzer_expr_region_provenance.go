@@ -341,6 +341,13 @@ func (a *Analyzer) regionRefStateForExpr(expr ast.Expr) (regionRefState, bool) {
 				return a.instantiateReturnProvenance(fnType.ReturnProvenance, n.Args)
 			}
 		}
+		// A call may have a concrete region directly on its result type even when
+		// it has no inferred return-provenance summary (notably built-in view
+		// constructors such as darray.as_sview). Preserve that dependency when
+		// the result is assigned into an existing, region-less binding.
+		if state, ok := a.containerRegionDependency(a.exprTypes[n]); ok {
+			return state, true
+		}
 		return regionRefState{}, false
 	default:
 		return regionRefState{}, false

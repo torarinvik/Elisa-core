@@ -123,7 +123,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 		// This path only ever runs when a type WAS written: with no declared type
 		// bindingType is already valueType, so there is nothing to widen. The
 		// `n.Mutable` promotion above remains -- there the programmer asked.
-		if specializedViewType, ok := concreteDArrayViewBindingType(bindingType, valueType); ok {
+		if specializedViewType, ok := concreteBorrowedViewBindingType(bindingType, valueType); ok {
 			bindingType = specializedViewType
 		}
 		if !n.Mutable {
@@ -1243,24 +1243,35 @@ func ghostInitIsErasureSafe(expr ast.Expr) bool {
 	}
 }
 
-func concreteDArrayViewBindingType(declared Type, actual Type) (Type, bool) {
+func concreteBorrowedViewBindingType(declared Type, actual Type) (Type, bool) {
 	declaredView, ok := declared.(*ViewType)
-	if !ok {
+	if ok {
+		actualView, actualOK := actual.(*ViewType)
+		if !actualOK || !SameType(declaredView.Elem, actualView.Elem) {
+			return nil, false
+		}
+		// Specialize to the actual slice's concrete bounds (for indexed bounds-checking), but keep the
+		// DECLARED mutability: `v: view[T] = mutableSlice` narrows to read-only, and `v: mutable view[T]`
+		// stays writable. (The declaration-site AssignableTo already rejected `mutable view[T]` from a
+		// read-only source, so a declared-mutable binding here is always backed by a mutable source.)
+		specialized := *actualView
+		specialized.Mutable = declaredView.Mutable
+		return &specialized, true
+	}
+	declaredSView, ok := declared.(*SViewType)
+	if !ok || declaredSView == nil || declaredSView.Region != "" {
 		return nil, false
 	}
-	actualView, ok := actual.(*ViewType)
-	if !ok {
+	actualSView, ok := actual.(*SViewType)
+	if !ok || actualSView == nil || actualSView.Region == "" {
 		return nil, false
 	}
-	if !SameType(declaredView.Elem, actualView.Elem) {
-		return nil, false
-	}
-	// Specialize to the actual slice's concrete bounds (for indexed bounds-checking), but keep the
-	// DECLARED mutability: `v: view[T] = mutableSlice` narrows to read-only, and `v: mutable view[T]`
-	// stays writable. (The declaration-site AssignableTo already rejected `mutable view[T]` from a
-	// read-only source, so a declared-mutable binding here is always backed by a mutable source.)
-	specialized := *actualView
-	specialized.Mutable = declaredView.Mutable
+	// A bare `sview` annotation intentionally leaves the lifetime to inference. Keep the source
+	// region on the local's type so aliases and field/index uses remain tied to their live backing
+	// storage; otherwise `view: sview = bytes.as_sview()` erased the only static proof that the
+	// pointee survives until the last use of `view`.
+	specialized := *declaredSView
+	specialized.Region = actualSView.Region
 	return &specialized, true
 }
 

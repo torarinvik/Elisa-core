@@ -21,6 +21,51 @@ func TestSViewOfDArrayIsInvalidatedAfterRelocatingPush(t *testing.T) {
 	}
 }
 
+func TestSViewBindingRetainsBackingRegionAfterDestroy(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_after_region_destroy.elisa", `def read() -> usize:
+	can Memory.Allocate, Abort.Panic:
+		region scratch(64):
+			bytes: mutable darray[u8] @scratch = [65.u8()]
+			view: sview = bytes.as_sview()
+			alias: sview = view
+			destroy scratch
+			return alias.len
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), `value "alias" cannot be used: region dependency facts were invalidated by destroy of region "scratch"`) {
+		t.Fatalf("a sview and its alias must retain the backing region and reject use after destroy, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewAssignmentRetainsBackingRegionAfterDestroy(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "assigned_sview_after_region_destroy.elisa", `def read() -> usize:
+	can Memory.Allocate, Abort.Panic:
+		region scratch(64):
+			bytes: mutable darray[u8] @scratch = [65.u8()]
+			view: mutable sview = ""
+			view <- bytes.as_sview()
+			destroy scratch
+			return view.len
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if !strings.Contains(allDiagnostics(result), `value "view" cannot be used: region dependency facts were invalidated by destroy of region "scratch"`) {
+		t.Fatalf("assigning an sview must retain its backing region and reject use after destroy, got:\n%s", allDiagnostics(result))
+	}
+}
+
+func TestSViewMayBeUsedBeforeBackingRegionDestroy(t *testing.T) {
+	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_last_use_before_region_destroy.elisa", `def read() -> usize:
+	can Memory.Allocate, Abort.Panic:
+		region scratch(64):
+			bytes: mutable darray[u8] @scratch = [65.u8()]
+			view: sview = bytes.as_sview()
+			length: usize = view.len
+			destroy scratch
+			return length
+`, AnalyzeOptions{EnforceUnsafePermissions: true})
+	if diagnostics := allDiagnostics(result); diagnostics != "" {
+		t.Fatalf("a sview whose last use precedes destroy must remain valid, got:\n%s", diagnostics)
+	}
+}
+
 func TestSViewDependencyFollowsMutableContainerAlias(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithOptionsAllowingDiagnostics(t, "sview_after_alias_push.elisa", `def read(owner: mutable Arena&) -> char:
 	can Memory.Allocate, Abort.Panic:
