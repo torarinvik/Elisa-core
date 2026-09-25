@@ -134,6 +134,28 @@ func TestOpaqueHandleZeroIsNotMisclassifiedAsSView(t *testing.T) {
 	}
 }
 
+func TestOpaqueHandleZeroNeedsAnExplicitUnsafeBoundary(t *testing.T) {
+	safe := analyzeTreeTestSourceWithSemanticErrors(t, "zeroed_opaque_handle_safe.elisa", `extern LLVMValueRef
+
+def bad() -> LLVMValueRef:
+	return zeroed
+`)
+	safeDiagnostics := strings.Join(safe.Errors(), "\n")
+	if !strings.Contains(safeDiagnostics, "zero representation may contain a non-null reference") {
+		t.Fatalf("safe opaque-handle zeroing must remain rejected, got:\n%s", safeDiagnostics)
+	}
+	if strings.Contains(safeDiagnostics, "cannot construct an `sview`") {
+		t.Fatalf("opaque pointer handle was misclassified as an sview, got:\n%s", safeDiagnostics)
+	}
+
+	analyzeTreeTestSource(t, "zeroed_opaque_handle_trusted.elisa", `extern LLVMValueRef
+
+def raw_handle() -> LLVMValueRef:
+	trusted Unsafe.PointerCast:
+		return zeroed
+`)
+}
+
 func TestZeroedGenericPlaceholderMustBeWrittenBeforeRead(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "zeroed_generic_uninitialized.elisa", `def bad[T]() -> T:
 	value: T = zeroed
