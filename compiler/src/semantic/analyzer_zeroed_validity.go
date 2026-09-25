@@ -417,8 +417,13 @@ func (a *Analyzer) zeroedTypeContainsSViewAtDepth(t Type, depth int) bool {
 		return false
 	case *InvalidType, *NeverType, *NullType:
 		return false
+	case *OpaqueType:
+		// Extern opaque values lower to opaque pointers. They cannot contain an
+		// inline sview, even though their nullability and zero-value validity
+		// still require a separate proof in zeroedInvalidRepresentationCount.
+		return false
 	case *StoreRowsViewType, *StoreRowViewType, *DictEntryType,
-		*PackedEnumStoreType, *PackedVariantViewType, *OpaqueType:
+		*PackedEnumStoreType, *PackedVariantViewType:
 		return true
 	default:
 		// Unknown semantic representations are not evidence that zero is free of

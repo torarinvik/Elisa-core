@@ -123,6 +123,17 @@ func TestZeroedUnknownTypeFormsFailClosed(t *testing.T) {
 	}
 }
 
+func TestOpaqueHandleZeroIsNotMisclassifiedAsSView(t *testing.T) {
+	analyzer := &Analyzer{}
+	handle := &OpaqueType{Name: "LLVMValueRef"}
+	if analyzer.zeroedTypeContainsSView(handle) {
+		t.Fatal("opaque pointer handle cannot contain an inline sview")
+	}
+	if !analyzer.zeroedTypeHasInvalidRepresentation(handle) {
+		t.Fatal("zeroed non-null opaque handle still requires an explicit validity proof")
+	}
+}
+
 func TestZeroedGenericPlaceholderMustBeWrittenBeforeRead(t *testing.T) {
 	result := analyzeTreeTestSourceWithSemanticErrors(t, "zeroed_generic_uninitialized.elisa", `def bad[T]() -> T:
 	value: T = zeroed
