@@ -74,6 +74,51 @@ def bad() -> RefBox:
 	}
 }
 
+// A type that already failed to resolve was reported where it failed. Judging
+// `zeroed` against the resulting <invalid> type only added a second, misleading
+// diagnostic ("cannot initialize <invalid> from `zeroed`").
+func TestZeroedDoesNotCascadeOnUnresolvedType(t *testing.T) {
+	cases := []struct {
+		name   string
+		source string
+		want   string
+	}{
+		{
+			name: "unknown type",
+			source: `def f() -> i64:
+	region r(64)
+	b: Nope @r = zeroed
+	destroy r
+	return 0
+`,
+			want: `unknown type "Nope"`,
+		},
+		{
+			name: "rejected set element",
+			source: `affine struct Guard:
+	id: i64
+
+def f() -> void:
+	s: set[Guard] = zeroed
+`,
+			want: "set elements cannot contain linear handles",
+		},
+	}
+
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			result := analyzeTreeTestSourceWithSemanticErrors(t, "zeroed_unresolved_type.elisa", test.source)
+			diagnostics := strings.Join(result.Errors(), "\n")
+			if !strings.Contains(diagnostics, test.want) {
+				t.Fatalf("expected %q, got:\n%s", test.want, diagnostics)
+			}
+			if strings.Contains(diagnostics, "from `zeroed`") {
+				t.Fatalf("zeroed check cascaded on an unresolved type:\n%s", diagnostics)
+			}
+		})
+	}
+}
+
 func TestZeroedStillSupportsNullableReferencesAndEmptyContainers(t *testing.T) {
 	analyzeTreeTestSource(t, "zeroed_valid_representation.elisa", `def maybe() -> i64&?:
 	return zeroed

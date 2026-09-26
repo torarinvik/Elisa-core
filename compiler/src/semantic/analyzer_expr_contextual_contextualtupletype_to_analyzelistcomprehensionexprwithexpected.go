@@ -63,6 +63,12 @@ func (a *Analyzer) analyzeTupleExprWithExpected(expr *ast.TupleExpr, expected Ty
 }
 func (a *Analyzer) analyzeValueExpr(expr ast.Expr, expected Type) Type {
 	if isZeroedInitializer(expr) && expected != nil {
+		// The expected type already failed to resolve and that failure was
+		// reported; judging `zeroed` against it would only cascade.
+		if IsInvalidType(expected) {
+			a.recordAnalyzedExprType(expr, invalidType)
+			return invalidType
+		}
 		if a.zeroedTypeContainsSView(expected) {
 			a.errorf(expr.Pos(), "`zeroed` cannot construct an `sview`: every view must have a valid, live backing pointer; use an empty string view or a validated byte-view constructor")
 			a.recordAnalyzedExprType(expr, invalidType)
