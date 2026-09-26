@@ -1113,6 +1113,7 @@ func AnalyzeWithOptions(file *ast.File, options AnalyzeOptions) *Result {
 		LoweredFile:             loweredFile,
 		GlobalScope:             a.globalScope,
 		NamedTypes:              a.namedTypes,
+		ModuleAliases:           a.moduleAliases,
 		StaticInterfaces:        a.staticInterfaces,
 		StaticImpls:             a.staticImpls,
 		ConstValues:             a.constValues,

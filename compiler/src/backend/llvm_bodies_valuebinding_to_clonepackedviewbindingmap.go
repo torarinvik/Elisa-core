@@ -270,18 +270,18 @@ func (s *functionState) visibleGlobalNames(name string) []string {
 	// `::` is the surface module separator; symbols are registered joined with `.`.
 	qualified := strings.ReplaceAll(name, "::", ".")
 	namespace := s.currentNamespace()
-	if namespace == "" {
-		return []string{qualified}
+	candidates := make([]string, 0, 3)
+	// Keep the analyzer's precedence: lexical namespace, canonical alias target,
+	// then the explicitly written path.
+	if namespace != "" {
+		candidates = append(candidates, namespace+"."+qualified)
 	}
-	// The analyzer offers the namespace-relative candidate FIRST for a DOTTED name too
-	// (semantic.visibleNameCandidates appends `namespace.name` before it splits on the
-	// dot), so `Scalar::ZERO` written inside `Geo` means `Geo.Scalar.ZERO`. The backend
-	// used to treat any dotted name as absolute and only ever tried `Scalar.ZERO`, so a
-	// reference to a NESTED module's member from its parent passed analysis and then
-	// failed to lower with `unknown identifier`. Adding the candidate can only bring the
-	// backend INTO agreement: where the namespace-relative name exists, the analyzer had
-	// already resolved to it.
-	return []string{namespace + "." + qualified, qualified}
+	if dot := strings.Index(qualified, "."); dot > 0 && s.g != nil && s.g.result != nil {
+		if target, ok := s.g.result.ModuleAliases[qualified[:dot]]; ok {
+			candidates = append(candidates, target+qualified[dot:])
+		}
+	}
+	return append(candidates, qualified)
 }
 
 // lookupVisibleNamedType resolves a (possibly unqualified) type name against the

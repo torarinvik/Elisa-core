@@ -37,10 +37,13 @@ type Result struct {
 	// EnforcePerfLints echoes the -Wperf flag into the analysis result so the BACKEND (which only
 	// learns vectorization outcomes post-LLVM-optimization) and its callers can promote the autovec
 	// verifier's warnings to hard compile errors without a separate flag-threading path.
-	EnforcePerfLints        bool
-	File                    *ast.File
-	LoweredFile             *ast.File
-	GlobalScope             *Scope
+	EnforcePerfLints bool
+	File             *ast.File
+	LoweredFile      *ast.File
+	GlobalScope      *Scope
+	// ModuleAliases carries the analyzed alias roots and canonical declaring modules
+	// into lowering; the backend must not reconstruct them from source leaf names.
+	ModuleAliases           map[string]string
 	NamedTypes              map[string]Type
 	StaticInterfaces        map[string]*StaticInterface
 	StaticImpls             map[string]*StaticImpl
