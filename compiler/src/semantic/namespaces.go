@@ -247,6 +247,15 @@ func (a *Analyzer) registerModuleAlias(n *ast.UsingDecl, namespace string) {
 		a.moduleAliases = make(map[string]string)
 	}
 	target := joinQualifiedName(namespace, n.Name)
+	// Previously declared aliases already carry canonical targets. Resolve the
+	// root here so types and backend declarations share the same identity.
+	root, suffix, qualified := strings.Cut(n.Name, ".")
+	if canonical, ok := a.moduleAliases[root]; ok {
+		target = canonical
+		if qualified {
+			target = joinQualifiedName(canonical, suffix)
+		}
+	}
 	if existing, ok := a.moduleAliases[n.Alias]; ok && existing != target {
 		a.errorf(n.Pos(), "conflicting alias: %q already aliases module %q, cannot also alias %q", n.Alias, existing, target)
 		return

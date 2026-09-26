@@ -41,3 +41,33 @@ def main() -> i64:
 		t.Fatal("missing lowered main")
 	}
 }
+
+func TestChainedModuleAliasPayloadIdentity(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "chained_enum.elisa", `
+module Outer:
+    module Right:
+        enum Message:
+            Empty
+            Some(value: i64)
+using Outer::Right as First
+using First as Second
+using Second as R
+
+def main() -> i64:
+    message: R::Message = R::Message.Some(42)
+    match message:
+        R::Message.Some(value):
+            return value
+        R::Message.Empty:
+            return 0
+    return -1
+`)
+	for _, alias := range []string{"First", "Second", "R"} {
+		if result.ModuleAliases[alias] != "Outer.Right" {
+			t.Fatalf("noncanonical alias %s: %v", alias, result.ModuleAliases)
+		}
+	}
+	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
+		t.Fatal(err)
+	}
+}
