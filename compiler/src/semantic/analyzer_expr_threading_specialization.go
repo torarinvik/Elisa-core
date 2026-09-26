@@ -580,6 +580,16 @@ func (a *Analyzer) lookupResolvedFieldType(actual Type, name string) (Type, bool
 }
 
 func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (Type, bool) {
+	return a.specializeCallbackCarryingTypeWithDepth(expected, actual, 0)
+}
+
+// Generic substitution can create fresh instance objects on each visit, so pointer
+// identity alone cannot bound traversal of recursive by-value field graphs.
+func (a *Analyzer) specializeCallbackCarryingTypeWithDepth(expected Type, actual Type, depth int) (Type, bool) {
+	if depth > semanticTraversalDepthLimit {
+		a.reportSemanticDepthLimit("callback-carrying type specialization", semanticTraversalDepthLimit)
+		return expected, false
+	}
 	if expected == nil || actual == nil {
 		return expected, false
 	}
@@ -588,7 +598,7 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 	}
 	switch tt := expected.(type) {
 	case *AggregateStateType:
-		nextBase, changed := a.specializeCallbackCarryingType(tt.Base, StripAggregateStateType(actual))
+		nextBase, changed := a.specializeCallbackCarryingTypeWithDepth(tt.Base, StripAggregateStateType(actual), depth+1)
 		if !changed {
 			return expected, false
 		}
@@ -601,7 +611,7 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 			if !ok {
 				continue
 			}
-			nextType, fieldChanged := a.specializeCallbackCarryingType(field.Type, actualFieldType)
+			nextType, fieldChanged := a.specializeCallbackCarryingTypeWithDepth(field.Type, actualFieldType, depth+1)
 			if !fieldChanged {
 				continue
 			}
@@ -631,7 +641,7 @@ func (a *Analyzer) specializeCallbackCarryingType(expected Type, actual Type) (T
 			if !ok {
 				continue
 			}
-			nextType, fieldChanged := a.specializeCallbackCarryingType(expectedFieldType, actualFieldType)
+			nextType, fieldChanged := a.specializeCallbackCarryingTypeWithDepth(expectedFieldType, actualFieldType, depth+1)
 			if !fieldChanged {
 				continue
 			}

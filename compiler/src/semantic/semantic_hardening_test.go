@@ -289,3 +289,16 @@ func TestInferFuncReturnProvenanceForExprCachesCanonicalGlobalType(t *testing.T)
 		t.Fatalf("expected canonical global function type to store parameter return provenance, got %#v", canonical.ReturnProvenance)
 	}
 }
+
+func TestCallbackCarryingSpecializationReportsRecursiveValueLimit(t *testing.T) {
+	analyzer := newSemanticHardeningTestAnalyzer()
+	first := &StructType{Name: "First", Fields: map[string]Field{}, Decl: &ast.StructDecl{Fields: []ast.FieldDecl{{Name: "next"}}}}
+	second := &StructType{Name: "Second", Fields: map[string]Field{}, Decl: &ast.StructDecl{Fields: []ast.FieldDecl{{Name: "next"}}}}
+	first.Fields["next"] = Field{Name: "next", Type: second}
+	second.Fields["next"] = Field{Name: "next", Type: first}
+	_, changed := analyzer.specializeCallbackCarryingType(first, first)
+	if changed {
+		t.Fatal("a recursive field graph without callbacks must not acquire specialization")
+	}
+	requireSemanticHardeningError(t, analyzer, "callback-carrying type specialization recursion limit")
+}
