@@ -523,6 +523,7 @@ func (s *functionState) emitExprBlock(expr *ast.ExprBlock, expected semantic.Typ
 	}
 	return value, actualType, nil
 }
+
 // emitDivergingExprBlock emits a value-less branch block whose last statement leaves
 // (docs/119 §4.1: `else: return -1`). There is no value: the block ends terminated and
 // the enclosing ternary leaves this arm out of its phi.
@@ -687,7 +688,11 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 			value, err := s.loadValue(global, sym.Type, expr.Name)
 			return value, sym.Type, err
 		case semantic.SymbolConst:
-			if value, _, ok := s.visibleConstValue(expr.Name); ok {
+			// lookupVisibleGlobalSymbol may resolve an unqualified imported name
+			// through a unique module suffix. Use that canonical name here too;
+			// looking the source spelling up again loses the `using` resolution
+			// and lets a semantically valid constant fail during LLVM lowering.
+			if value, _, ok := s.visibleConstValue(resolvedName); ok {
 				llvmValue, llvmType, err := s.emitConstValueWithType(value, sym.Type)
 				return llvmValue, llvmType, err
 			}
