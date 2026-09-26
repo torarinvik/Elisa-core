@@ -186,8 +186,9 @@ def memory_pool_create[T](pool: mutable MemoryPool[T]&) -> mutable heap T&:
             return item
 
 def memory_pool_destroy[T](pool: mutable MemoryPool[T]&, ptr: mutable heap T&):
-    ptr[0] <- zeroed
     trusted Unsafe.PointerCast:
+        # The slot is dead: it is recycled as a free-list node below and holds no live T.
+        ptr[0] <- zeroed
         node: mutable heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
         node.next <- pool.free_list
         pool.free_list as & <- node
@@ -241,8 +242,9 @@ def region_pool_create[T](pool: mutable RegionPool[T]&) -> mutable heap T&:
             return item
 
 def region_pool_free[T](pool: mutable RegionPool[T]&, ptr: mutable heap T&):
-    ptr[0] <- zeroed
     trusted Unsafe.PointerCast:
+        # The slot is dead: it is recycled as a free-list node below and holds no live T.
+        ptr[0] <- zeroed
         node: mutable heap MemoryPoolFreeNode& = ptr.cast[heap MemoryPoolFreeNode&]
         node.next <- pool.free_list
         pool.free_list as & <- node
@@ -285,8 +287,9 @@ def region_pool_release[T](pool: mutable RegionPool[T]&, handle: Pooled[T]):
     # Recycle inline (rather than calling region_pool_free) so we never hand the handle's
     # interior mutable ref across a call boundary, which the affine checker forbids.
     slot: mutable heap T& = handle.ptr
-    slot[0] <- zeroed
     trusted Unsafe.PointerCast:
+        # The slot is dead: it is recycled as a free-list node below and holds no live T.
+        slot[0] <- zeroed
         node: mutable heap MemoryPoolFreeNode& = slot.cast[heap MemoryPoolFreeNode&]
         node.next <- pool.free_list
         pool.free_list as & <- node

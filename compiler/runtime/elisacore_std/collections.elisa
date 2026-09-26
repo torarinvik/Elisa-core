@@ -321,9 +321,7 @@ def array_view[T, N: usize](arr: T[N]&) -> view[T]:
 def inline_vec[T, N: usize](owner: mutable Arena&) -> InlineVec[T, N]:
     trusted Unsafe.PointerCast:
         # Uninitialized inline slots are inactive until vec.len includes them.
-        out: mutable InlineVec[T, N] = zeroed
-        out.owner as & <- owner
-        return out
+        return InlineVec[T, N]{owner: owner, inline_items: zeroed, overflow: [], len: 0, is_spilled: false}
 
 
 def new[T, N: usize](api: InlineVecNamespace, owner: mutable Arena&) -> InlineVec[T, N]:
