@@ -574,6 +574,42 @@ def bt() -> void:
 	}
 }
 
+// An explicit `new[r]` in a region-polymorphic helper must use the hidden arena
+// argument associated with r. Unlike `new[auto]`, this is an explicit lifetime
+// choice and must remain valid after the helper returns, until the caller ends
+// the region.
+func TestRegionParamExplicitNewUsesCallerArena(t *testing.T) {
+	src := `
+struct Box:
+    value: i64
+
+def make_box[@r](seed: i64& @r) -> Box& @r:
+    return new[r] Box{value: seed}
+
+@test
+def explicit_region_new_test() -> void:
+    can Abort.Panic, Memory.Allocate:
+        region scratch(4096):
+            seed: i64& @scratch = new[scratch] 37
+            box: Box& @scratch = make_box(seed)
+            if box.value != 37:
+                panic("new[r] did not allocate into the caller's region")
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "explicit_region_new.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	objectPath := filepath.Join(dir, "explicit_region_new.o")
+	if code := runCLI([]string{"-emit", "obj", "-o", objectPath, path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("build failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if info, err := os.Stat(objectPath); err != nil || info.Size() == 0 {
+		t.Fatalf("expected non-empty object after lowering region-parameter new[r], stat=%v", err)
+	}
+}
+
 // Regression: a recursive plain enum in a program that does NOT include the std runtime must
 // still run. The backend declares the packed-store helpers (ctx_aos_store_new/alloc/record,
 // ctx_packed_store_*) as externs; they resolve against the default runtime object, which keeps

@@ -156,6 +156,17 @@ func (s *functionState) emitAllocExpr(expr *ast.AllocExpr) (C.LLVMValueRef, sema
 		return nil, nil, fmt.Errorf("only region-backed new[...] is lowered so far")
 	}
 	binding, found := s.lookupBinding(ownerIdent.Name)
+	// A region parameter is not a lexical Arena binding. Its arena arrives as a
+	// hidden function argument and is registered in the region environment, just
+	// like the arenas used by region-qualified container operations. Resolve
+	// `new[r]` through that environment when there is no local binding; otherwise
+	// a valid allocation in a region-polymorphic helper fails only in LLVM.
+	if !found {
+		if arena := s.regionArenaPointer(ownerIdent.Name); arena != nil {
+			binding = valueBinding{ptr: arena, typ: s.g.result.NamedTypes["Arena"]}
+			found = true
+		}
+	}
 	if !found {
 		return nil, nil, fmt.Errorf("unknown region %q during LLVM lowering", ownerIdent.Name)
 	}
