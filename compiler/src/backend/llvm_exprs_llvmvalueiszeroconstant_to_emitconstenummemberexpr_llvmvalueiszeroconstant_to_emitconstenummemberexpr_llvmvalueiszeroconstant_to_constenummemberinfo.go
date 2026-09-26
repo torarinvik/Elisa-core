@@ -661,7 +661,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		value, err := s.loadValue(binding.ptr, binding.typ, expr.Name)
 		return value, binding.typ, err
 	}
-	if owner, ok := s.regionArenaOwner(expr.Name); ok && owner.arenaRef != nil {
+	if arena := s.regionArenaPointer(expr.Name); arena != nil {
 		// A reference to an explicit `[@owner]` parameter by name yields the threaded
 		// hidden Arena& parameter as a value — so `owner` can be passed where an arena value is
 		// expected (a runtime container constructor like `indexmap.new(owner)`), the no-Arena-field
@@ -669,7 +669,7 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 		// `mutable Arena&` pointer value, so it is returned directly with no load.
 		arenaType := s.g.result.NamedTypes["Arena"]
 		refType := &semantic.RefType{Elem: arenaType, State: semantic.RefStateNonNull, Storage: semantic.RefStorageAny, Mutable: true}
-		return owner.arenaRef, refType, nil
+		return arena, refType, nil
 	}
 	if sym, resolvedName, ok := s.lookupVisibleGlobalSymbol(expr.Name); ok {
 		switch sym.Kind {
@@ -713,6 +713,10 @@ func (s *functionState) emitIdent(expr *ast.Ident) (C.LLVMValueRef, semantic.Typ
 	fnName := "<unknown>"
 	if s.decl != nil {
 		fnName = s.decl.Name
+	}
+	position := expr.Pos()
+	if !position.IsZero() {
+		return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering in %s at %s:%d:%d", expr.Name, fnName, position.File, position.Line, position.Col)
 	}
 	return nil, nil, fmt.Errorf("unknown identifier %q during LLVM lowering in %s", expr.Name, fnName)
 }

@@ -151,6 +151,7 @@ func (s *functionState) regionArenaPointer(region string) C.LLVMValueRef {
 	if s == nil || region == "" {
 		return nil
 	}
+	region = substituteRegionName(region, s.typeMap)
 	if owner, ok := s.regionArenaOwner(region); ok {
 		if arena, err := s.treeOwnerArenaRefValue(owner, region); err == nil && arena != nil {
 			return arena

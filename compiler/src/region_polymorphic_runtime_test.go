@@ -610,6 +610,48 @@ def explicit_region_new_test() -> void:
 	}
 }
 
+// A region-parameterized caller that invokes an inferred-region builder gets a
+// synthetic caller-region argument. That argument must lower to the caller's
+// hidden region slot even though it is not a source-written local variable.
+func TestRegionParamThreadsSyntheticCallerRegion(t *testing.T) {
+	src := `module Json:
+    public:
+        struct Box:
+            value: i64
+
+        def make_box(value: i64) -> Box& can[Memory.Allocate, Abort.Panic]:
+            return new[auto] Box{value: value}
+
+        def append_box[T, @r](values: mutable darray[i64]& @r, marker: T) -> void can[Memory.Allocate, Abort.Panic]:
+            box: Box& = make_box(42)
+            values.push(box.value)
+
+        def forward_box[T, @candidate_arena](values: mutable darray[i64]& @candidate_arena, marker: T) -> void can[Memory.Allocate, Abort.Panic]:
+            append_box(values, marker)
+
+using Json
+
+def main() -> i64 can[Memory.Allocate, Abort.Panic]:
+    region scratch(4096):
+        values: mutable darray[i64] @scratch = []
+        Json::forward_box(values, true)
+        return values[0]
+`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "synthetic_region_argument.elisa")
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	objectPath := filepath.Join(dir, "synthetic_region_argument.o")
+	var stdout, stderr bytes.Buffer
+	if code := runCLI([]string{"-emit", "obj", "-o", objectPath, path}, &stdout, &stderr); code != 0 {
+		t.Fatalf("LLVM lowering failed (exit %d)\nstdout:\n%s\nstderr:\n%s", code, stdout.String(), stderr.String())
+	}
+	if info, err := os.Stat(objectPath); err != nil || info.Size() == 0 {
+		t.Fatalf("expected non-empty object after lowering synthetic caller region, stat=%v", err)
+	}
+}
+
 // Regression: a recursive plain enum in a program that does NOT include the std runtime must
 // still run. The backend declares the packed-store helpers (ctx_aos_store_new/alloc/record,
 // ctx_packed_store_*) as externs; they resolve against the default runtime object, which keeps
