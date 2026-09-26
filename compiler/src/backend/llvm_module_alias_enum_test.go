@@ -71,3 +71,30 @@ def main() -> i64:
 		t.Fatal(err)
 	}
 }
+
+func TestAncestorRelativePayloadEnumPaths(t *testing.T) {
+	result := parseAndAnalyzeBackendTest(t, "relative_enum.elisa", `
+module Right:
+    enum Message:
+        Some(left: i64, right: i64)
+module Outer:
+    module Right:
+        enum Message:
+            Empty
+            Some(value: i64)
+    module Worker:
+        def answer() -> i64:
+            message: Right::Message = Right::Message.Some(42)
+            match message:
+                Right::Message.Some(value):
+                    return value
+                Right::Message.Empty:
+                    return 0
+            return -1
+def main() -> i64:
+    return Outer::Worker::answer()
+`)
+	if _, err := generateLLVMIRWithDefaultPackedLoweringForTest(result); err != nil {
+		t.Fatal(err)
+	}
+}

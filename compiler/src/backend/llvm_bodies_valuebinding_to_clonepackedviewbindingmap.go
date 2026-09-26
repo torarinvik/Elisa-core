@@ -273,8 +273,13 @@ func (s *functionState) visibleGlobalNames(name string) []string {
 	candidates := make([]string, 0, 3)
 	// Keep the analyzer's precedence: lexical namespace, canonical alias target,
 	// then the explicitly written path.
-	if namespace != "" {
-		candidates = append(candidates, namespace+"."+qualified)
+	for lexical := namespace; lexical != ""; {
+		candidates = append(candidates, lexical+"."+qualified)
+		if dot := strings.LastIndex(lexical, "."); dot >= 0 {
+			lexical = lexical[:dot]
+		} else {
+			lexical = ""
+		}
 	}
 	if dot := strings.Index(qualified, "."); dot > 0 && s.g != nil && s.g.result != nil {
 		if target, ok := s.g.result.ModuleAliases[qualified[:dot]]; ok {

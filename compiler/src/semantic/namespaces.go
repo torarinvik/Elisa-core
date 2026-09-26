@@ -324,8 +324,13 @@ func (a *Analyzer) visibleNameCandidates(name string) []string {
 			namespace = a.currentFuncType.Name[:idx]
 		}
 	}
-	if namespace != "" {
-		candidates = append(candidates, joinQualifiedName(namespace, name))
+	for lexical := namespace; lexical != ""; {
+		candidates = append(candidates, joinQualifiedName(lexical, name))
+		if dot := strings.LastIndex(lexical, "."); dot >= 0 {
+			lexical = lexical[:dot]
+		} else {
+			lexical = ""
+		}
 	}
 	if !strings.Contains(name, ".") {
 		for _, usingName := range a.currentUsings {
