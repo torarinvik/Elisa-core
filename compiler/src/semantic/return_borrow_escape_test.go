@@ -5,6 +5,57 @@ import (
 	"testing"
 )
 
+func TestAggregateReferenceReturnRejectsBlockLocalHelperEscape(t *testing.T) {
+	source := `struct BorrowedBox:
+    value: i64&
+
+def pack(value: i64&) -> BorrowedBox:
+    wrapped: BorrowedBox =
+        staged: BorrowedBox = BorrowedBox{value: value}
+        staged
+    wrapped
+
+def relay(value: i64&) -> BorrowedBox:
+    wrapped: BorrowedBox =
+        staged: BorrowedBox = pack(value)
+        staged
+    wrapped
+
+def escapes_block_local() -> BorrowedBox:
+    local: i64 = 1
+    relay(&local)
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "aggregate_reference_block_local_escape.elisa", source)
+	if errors := strings.Join(result.Errors(), "\n"); !strings.Contains(errors, "returning an aggregate or helper result that contains a reference into function-local storage") {
+		t.Fatalf("expected block-local reference escape to be rejected; got:\n%s", errors)
+	}
+}
+
+func TestAggregateReferenceReturnAllowsGlobalBorrowThroughBlockHelpers(t *testing.T) {
+	source := `struct BorrowedBox:
+    value: i64&
+
+global stable: i64 = 2
+
+def pack(value: i64&) -> BorrowedBox:
+    wrapped: BorrowedBox =
+        staged: BorrowedBox = BorrowedBox{value: &stable}
+        staged
+    wrapped
+
+def relay(value: i64&) -> BorrowedBox:
+    wrapped: BorrowedBox =
+        staged: BorrowedBox = pack(value)
+        staged
+    wrapped
+
+def returns_global() -> BorrowedBox:
+    local: i64 = 1
+    relay(&local)
+`
+	analyzeTreeTestSource(t, "aggregate_reference_global_borrow_block_helpers.elisa", source)
+}
+
 // Returning a freshly-taken reference to a function-local is a guaranteed dangle.
 func TestReturnRefToStackLocalIsRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "return_stack_local_ref.elisa", `def f() -> i32&:

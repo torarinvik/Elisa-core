@@ -94,6 +94,13 @@ func refStorageLifetimeRank(s RefStorage) int {
 // (like Rust rejecting `&local` returns) rather than an Unsafe-gated operation.
 func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type) {
 	a.checkBorrowEscapesLocal(value, valueType, "returning a reference into function-local storage; it dangles once the function returns")
+	if a == nil || value == nil || !a.typeCarriesBorrowedStorage(valueType, map[Type]bool{}) || isAddrOfRootedBorrow(value) {
+		return
+	}
+	flow := a.returnBorrowFlowForExpr(value, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+	if flow.Local {
+		a.errorf(value.Pos(), "returning an aggregate or helper result that contains a reference into function-local storage; it dangles once the function returns. Return/store the value or owner by value, or clone it into a longer-lived region")
+	}
 }
 
 // checkStoredBorrowEscapesLocal rejects storing a freshly-taken borrow of
