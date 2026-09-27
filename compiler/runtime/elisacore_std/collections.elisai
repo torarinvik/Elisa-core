@@ -106,6 +106,8 @@ static else:
 
 const ARENA_REGION_DEFAULT_CAPACITY: usize = (128 * 1024)
 
+const ARENA_FREE_CHAIN_REGION_VISITS: usize = 8
+
 const ARENA_WASM_PAGE_SIZE: usize = (64 * 1024)
 
 const ARENA_STRATEGY_CHAINED: int = 0

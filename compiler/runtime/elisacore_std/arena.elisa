@@ -34,6 +34,8 @@ static else:
 # committed on first touch, so idle capacity in the tail region costs address space,
 # not RSS. Matches REGION_CACHE_MAX_SLOTS so default regions stay cacheable.
 const ARENA_REGION_DEFAULT_CAPACITY: usize = 128 * 1024
+# Regions one free-block search may visit after missing in the hinted region (next-fit).
+const ARENA_FREE_CHAIN_REGION_VISITS: usize = 8
 const ARENA_WASM_PAGE_SIZE: usize = 64 * 1024
 
 # Per-region strategy stored in Arena.strategy (the surface `region r(N) using <strategy>`).
@@ -802,31 +804,57 @@ def arena_take_free_block_chain(a: mutable Arena&, need_slots: usize, size_bytes
         )
         return reclaimed
 
-    # The hint can be stale after a reset/rewind or an unusual caller mutation. Clear it
-    # before the fallback so an unsuccessful hint never suppresses a valid later region.
-    arena_free_hint_update(a.cast[uintptr], null)
-    cursor: mutable heap Region&? = a.begin
-    while cursor != null:
-        # Reclaimed spans are safe to reuse even in an adopted block: the owner tag
-        # prevents bump allocation from overwriting live adopted data, while this free
-        # list contains only ranges whose old darray backing has already been replaced.
-        if arena_take_free_block(cursor, need_slots) is reclaimed:
-            next_hint: mutable heap Region&? = cursor
-            next_hint <- arena_find_free_region(cursor) if cursor.free_list == null
-            arena_free_hint_set(a.cast[uintptr], next_hint)
-            arena_profile_region_layout(a, cursor)
-            arena_profile_allocation_event(
-                ELISA_PROFILE_ALLOCATION_ALLOC,
-                reclaimed.cast[uintptr],
-                size_bytes,
-                0.uintptr(),
-                0.usize(),
-                a.cast[uintptr],
-                cursor.global_index
-            )
-            return reclaimed
-        cursor <- cursor.next
+    # NEXT-FIT WITH A BOUNDED SCAN. The hint is valid (reset, rewind, trim, free and adopt
+    # all clear or re-point it), so every region reached from it is still in this chain.
+    # The old fallback walked the WHOLE chain from `a.begin` on every hint miss, probing up
+    # to 32 blocks per region. A compiler-sized arena holds ~1000 regions, and the miss is
+    # the common case (a darray growth move asks for twice the block it just freed), so
+    # sampling stage1 compiling itself put ~45% of all cpu in arena_take_free_block. Visit
+    # a bounded number of regions after the hint, wrapping at `a.begin`, and leave the
+    # hint where the scan stopped: the next miss resumes there, so every region is still
+    # revisited in turn. A scan that wraps back to the hint has seen everything and clears
+    # it, exactly as the exhaustive walk did.
+    cursor: mutable heap Region&? = hinted.next
+    cursor <- a.begin if cursor == null
+    regions_left: mutable usize = ARENA_FREE_CHAIN_REGION_VISITS
+    trusted Unsafe.AssumeProgress:
+        while cursor != null and cursor != hinted and regions_left > 0:
+            regions_left <- regions_left - 1
+            if cursor.free_list != null:
+                if arena_take_free_block(cursor, need_slots) is reclaimed:
+                    next_hint: mutable heap Region&? = cursor
+                    next_hint <- arena_find_free_region(cursor) if cursor.free_list == null
+                    arena_free_hint_update(a.cast[uintptr], next_hint)
+                    arena_profile_region_layout(a, cursor)
+                    arena_profile_allocation_event(
+                        ELISA_PROFILE_ALLOCATION_ALLOC,
+                        reclaimed.cast[uintptr],
+                        size_bytes,
+                        0.uintptr(),
+                        0.usize(),
+                        a.cast[uintptr],
+                        cursor.global_index
+                    )
+                    return reclaimed
+            cursor <- cursor.next
+            cursor <- a.begin if cursor == null
+    resume: mutable heap Region&? = cursor
+    resume <- null if cursor == hinted
+    arena_free_hint_update(a.cast[uintptr], resume)
     return null
+
+# Unchecked containment test for the reclaim walk. A region's payload size was
+# overflow-checked when the region was created, so recomputing it cannot overflow and
+# needs no checked multiply; the full validated test runs only on the region that
+# actually contains `raw`. The walk used to pay three checked multiplies per region on
+# every darray growth move (~12% of a self-host compile in arena_checked_mul_usize).
+@internal
+def arena_region_contains_address(r: heap Region&, raw: uintptr) -> bool:
+    base: mutable uintptr = 0.uintptr()
+    trusted Unsafe.PointerCast:
+        base <- arena_heap_u8_from_region_data(r).uintptr()
+    return false if raw < base
+    return (raw - base).usize() < r.capacity * size_of(uintptr)
 
 @internal
 def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots: usize, old_size: usize):
@@ -834,34 +862,37 @@ def arena_reclaim_allocation(a: mutable Arena&, oldptr: mutable void&, old_slots
         header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
         return if old_slots < header_slots
 
+        raw: mutable uintptr = 0.uintptr()
+        trusted Unsafe.PointerCast:
+            raw <- oldptr.cast[heap u8&].uintptr()
         cursor: mutable heap Region&? = a.begin
         while cursor != null:
-            trusted Unsafe.PointerCast:
-                base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
-                raw: uintptr = oldptr.cast[heap u8&].uintptr()
-                if cursor.count > cursor.capacity:
-                    panic("arena cursor exceeds region capacity")
-                payload_bytes: usize = arena_region_payload_bytes(cursor.capacity)
-                used_bytes: usize = arena_region_payload_bytes(cursor.count)
-                allocation_bytes: usize = arena_region_payload_bytes(old_slots)
-                if raw >= base:
-                    offset_bytes: usize = (raw - base).usize()
-                    if offset_bytes % size_of(uintptr) == 0 and offset_bytes <= used_bytes and allocation_bytes <= used_bytes - offset_bytes and offset_bytes <= payload_bytes and allocation_bytes <= payload_bytes - offset_bytes:
-                        block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
-                        block.slots <- old_slots
-                        block.next <- cursor.free_list
-                        cursor.free_list as & <- block
-                        arena_cache_record_reclaim(a.cast[uintptr], cursor)
-                        arena_profile_allocation_event(
-                            ELISA_PROFILE_ALLOCATION_RECLAIM,
-                            0.uintptr(),
-                            0.usize(),
-                            oldptr.cast[uintptr],
-                            old_size,
-                            a.cast[uintptr],
-                            cursor.global_index
-                        )
-                        return
+            if arena_region_contains_address(cursor, raw):
+                trusted Unsafe.PointerCast:
+                    base: uintptr = arena_heap_u8_from_region_data(cursor).uintptr()
+                    if cursor.count > cursor.capacity:
+                        panic("arena cursor exceeds region capacity")
+                    payload_bytes: usize = arena_region_payload_bytes(cursor.capacity)
+                    used_bytes: usize = arena_region_payload_bytes(cursor.count)
+                    allocation_bytes: usize = arena_region_payload_bytes(old_slots)
+                    if raw >= base:
+                        offset_bytes: usize = (raw - base).usize()
+                        if offset_bytes % size_of(uintptr) == 0 and offset_bytes <= used_bytes and allocation_bytes <= used_bytes - offset_bytes and offset_bytes <= payload_bytes and allocation_bytes <= payload_bytes - offset_bytes:
+                            block: mutable heap ArenaFreeBlock& = oldptr.cast[mutable heap ArenaFreeBlock&]
+                            block.slots <- old_slots
+                            block.next <- cursor.free_list
+                            cursor.free_list as & <- block
+                            arena_cache_record_reclaim(a.cast[uintptr], cursor)
+                            arena_profile_allocation_event(
+                                ELISA_PROFILE_ALLOCATION_RECLAIM,
+                                0.uintptr(),
+                                0.usize(),
+                                oldptr.cast[uintptr],
+                                old_size,
+                                a.cast[uintptr],
+                                cursor.global_index
+                            )
+                            return
             cursor <- cursor.next
 
 def free_region(r: heap Region&):
