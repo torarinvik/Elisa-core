@@ -98,6 +98,15 @@ func (a *Analyzer) checkReturnBorrowEscapesLocal(value ast.Expr, valueType Type)
 		return
 	}
 	flow := a.returnBorrowFlowForExpr(value, nil, map[*ast.FuncDecl]bool{}, map[*Symbol]bool{})
+	if a.currentFuncDecl != nil {
+		// A return expression is checked after its statements have been analyzed,
+		// but this expression-only walk has no alias environment for assignments
+		// to mutable locals. Summarize the enclosing function so a local aggregate
+		// that was assigned a borrowed parameter is not mistaken for storage owned
+		// by the local variable itself. The summary remains a may-flow: any return
+		// path carrying a borrow from this frame is still rejected.
+		flow = a.returnBorrowFlowForFunc(a.currentFuncDecl, map[*ast.FuncDecl]bool{})
+	}
 	if flow.Local {
 		a.errorf(value.Pos(), "returning an aggregate or helper result that contains a reference into function-local storage; it dangles once the function returns. Return/store the value or owner by value, or clone it into a longer-lived region")
 	}

@@ -56,6 +56,29 @@ def returns_global() -> BorrowedBox:
 	analyzeTreeTestSource(t, "aggregate_reference_global_borrow_block_helpers.elisa", source)
 }
 
+func TestAggregateReferenceReturnAllowsBorrowedParamThroughMutableAlias(t *testing.T) {
+	source := `struct BorrowedBox:
+    value: i64&
+
+global stable: i64 = 2
+
+def pack(value: i64&) -> BorrowedBox:
+    return BorrowedBox{value: value}
+
+def relay(value: i64&) -> BorrowedBox:
+    selected: mutable BorrowedBox = BorrowedBox{value: &stable}
+    selected <- BorrowedBox{value: value}
+    return pack(selected.value)
+
+def returns_param(value: i64&) -> BorrowedBox:
+    return relay(value)
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "aggregate_reference_mutable_alias.elisa", source)
+	if errs := result.Errors(); len(errs) != 0 {
+		t.Fatalf("expected a caller-owned borrow copied through a mutable aggregate to be accepted, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
 // Returning a freshly-taken reference to a function-local is a guaranteed dangle.
 func TestReturnRefToStackLocalIsRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "return_stack_local_ref.elisa", `def f() -> i32&:
