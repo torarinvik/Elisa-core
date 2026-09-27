@@ -11,9 +11,11 @@
 # SAFETY SURFACE: the `JsonValue`/`JsonMember` representations and raw run-copy
 # helpers are private to module `Json`; `using Json` preserves the public
 # top-level API while preventing callers from fabricating pointer-bearing enum
-# variants or calling the raw pointer helpers. Scalar constructors and parsing
-# remain available. Array/object-from-raw-run constructors are temporarily
-# private until an opaque builder API can carry its arena and lifetime safely.
+# variants or calling the raw pointer helpers. The public surface is the
+# region-indexed `JsonValueHandle[r]` API: parsing, `json_handle_*` accessors and
+# the scalar builders `json_handle_null/bool/number/string`. Array/object-from-
+# raw-run constructors are temporarily private until an opaque builder API can
+# carry its arena and lifetime safely.
 # Views and C strings returned from parsed values still borrow the backing arena;
 # resetting/freeing it invalidates them, and this lifetime is not yet enforced by
 # the type system.
@@ -506,15 +508,18 @@ module Json:
                 content_start: i64 = p.pos
                 raw_stop: mutable i64 = -1
                 has_escape: mutable bool = false
-                if not json_string_scan(p, content_start, raw_stop, has_escape):
-                    return json_fail_string(p, JsonErrorCode.INVALID_STRING, open_pos)
-                if not has_escape:
+                scanned: bool = json_string_scan(p, content_start, raw_stop, has_escape)
+                if scanned and not has_escape:
                     p.pos <- raw_stop + 1
                     raw: sview = string_view_slice(p.text, content_start, raw_stop)
                     return JsonStringRef{data_bits: raw.data.cast[u8&].cast[uintptr], len: raw.len}
                 in a:
                     out: mutable darray[u8] = []
-                    _ = arena_da_reserve(a, &out, (raw_stop - content_start + 1).usize())
+                    # A failed scan cannot tell a raw control byte from a bad escape
+                    # or a missing quote; the decoding loop below reports each at
+                    # its exact position, so it owns every malformed string.
+                    bound: i64 = raw_stop - content_start + 1 if scanned else 1
+                    _ = arena_da_reserve(a, &out, bound.usize())
                     closed: mutable bool = false
                     while not closed:
                         ch: i64 = json_peek(p)
@@ -1081,6 +1086,20 @@ module Json:
         def json_handle_value_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
             member_value: JsonValue = try json_value_at(value.node, index)
             return json_handle_like(member_value, value)
+
+        def json_handle_index_of[@r](value: JsonValueHandle[r], key: sview) -> i64:
+            return json_index_of(value.node, key)
+
+        def json_handle_as_cstr[@r](value: JsonValueHandle[r]) -> cstr @r error[JsonAccessError]:
+            return json_as_cstr(value.node)
+
+        # Scalar leaves carry no arena address; `owner` only fixes the region the
+        # handle is indexed by, so it can sit beside parsed nodes of that arena.
+        def json_handle_bool[@r](owner: mutable Arena& @r, value: bool) -> JsonValueHandle[r]:
+            return json_handle_in_arena(json_bool(value), owner)
+
+        def json_handle_number[@r](owner: mutable Arena& @r, value: f64) -> JsonValueHandle[r]:
+            return json_handle_in_arena(json_number(value), owner)
 
         def json_handle_string[@r](owner: mutable Arena& @r, text: sview) -> JsonValueHandle[r]:
             can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
