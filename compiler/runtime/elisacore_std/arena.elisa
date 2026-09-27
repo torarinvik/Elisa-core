@@ -339,8 +339,8 @@ def sfree[T](ptr: heap T&) -> heap T!:
 # owner's synchronization contract.
 struct ArenaRegionCache:
     slot: mutable heap Region&?
-    # Bounded retention budget shared by reclaimed spans and parked regions. Keep the
-    # historical field name because it is part of the runtime interface layout.
+    # Number of regions currently parked on `slot` (bounded by REGION_CACHE_MAX_ENTRIES).
+    # Keep the historical field name because it is part of the runtime interface layout.
     reclaimed_spans: mutable usize
 
 global mutable __elisa_region_cache: ArenaRegionCache = ArenaRegionCache{slot: null, reclaimed_spans: 0}
@@ -437,11 +437,10 @@ def arena_free_hint_transfer(child: uintptr, parent: uintptr, child_region: muta
 def arena_cache_record_reclaim(owner: uintptr, region: mutable heap Region&?):
     __elisa_arena_cache_lock_acquire()
     trusted [Unsafe.MutableGlobal, Global.Read, Global.Write]:
-        cache: mutable ArenaRegionCache& = &__elisa_region_cache
-        # This count is used only as a bounded-retention budget. Saturating keeps
-        # an unbounded realloc workload from wrapping and reopening the cache.
-        if cache.reclaimed_spans < REGION_CACHE_MAX_ENTRIES:
-            cache.reclaimed_spans <- cache.reclaimed_spans + 1
+        # A reclaimed span stays inside its own arena's region and is released with
+        # that arena, so it must not consume the parked-region budget: charging it
+        # here (with only a cache hit ever refunding) permanently closed the cache
+        # after 128 reclaims and sent every later free_region to munmap.
         hint: mutable ArenaFreeHint& = &__elisa_free_hint
         hint.owner <- owner
         hint.region <- region
