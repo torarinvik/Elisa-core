@@ -93,7 +93,9 @@ func DescribePackedLowering(result *semantic.Result, profile PackedLoweringProfi
 		}
 		sort.Strings(variantNames)
 
-		builder.WriteString(fmt.Sprintf("\n%s\n", enumType.Name))
+		// The heading names a TYPE, so it is spelled as source spells it: `::` walks the
+		// module path (`Outer::Right::Message`), never the internal dotted key.
+		builder.WriteString(fmt.Sprintf("\n%s\n", ast.ModulePathSpelling(enumType.Name)))
 		builder.WriteString(fmt.Sprintf("  effective abi: %s\n", packedModeName(g.packedModeForEnum(enumType))))
 		if enumType.HasPackedProfile {
 			builder.WriteString(fmt.Sprintf("  profile: %s\n", enumType.PackedProfile))

@@ -504,6 +504,30 @@ func TestRunCLIPrintsPackedLoweringSummary(t *testing.T) {
 		}
 	}
 }
+// The packed report heading names a type, so a nested module's enum is spelled with
+// `::` as source spells it -- never the internal dotted key (`Outer.Right.Message`).
+func TestRunCLIPackedReportSpellsModulePathWithColons(t *testing.T) {
+	fixtureDir := t.TempDir()
+	fixturePath := filepath.Join(fixtureDir, "packed_module_path.elisa")
+	src := "module Right:\n    packed enum Message:\n        Some(left: i64, right: i64)\nmodule Outer:\n    module Right:\n        packed enum Message:\n            Empty(other: i64)\n            Some(value: i64)\ndef main() -> i64:\n    return 0\n"
+	if err := os.WriteFile(fixturePath, []byte(src), 0o644); err != nil {
+		t.Fatalf("failed to write fixture: %v", err)
+	}
+	var stdout, stderr bytes.Buffer
+	if exitCode := runCLI([]string{"-emit", "packed", fixturePath}, &stdout, &stderr); exitCode != 0 {
+		t.Fatalf("expected runCLI to succeed, stderr:\n%s", stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"\nRight::Message\n", "\nOuter::Right::Message\n"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("expected packed report heading %q, got:\n%s", strings.TrimSpace(want), output)
+		}
+	}
+	if strings.Contains(output, "Outer.Right") || strings.Contains(output, "\nRight.Message") {
+		t.Fatalf("packed report printed a dotted module path:\n%s", output)
+	}
+}
+
 func TestRunCLIRejectsRemovedPackedABIFlag(t *testing.T) {
 	t.Parallel()
 	repoRoot := repoRootFromMainTest(t)
