@@ -79,6 +79,27 @@ def returns_param(value: i64&) -> BorrowedBox:
 	}
 }
 
+func TestAggregateReferenceReturnRejectsLocalBorrowThroughMutableAlias(t *testing.T) {
+	source := `struct BorrowedBox:
+    value: i64&
+
+global stable: i64 = 2
+
+def pack(value: i64&) -> BorrowedBox:
+    return BorrowedBox{value: value}
+
+def escapes_local() -> BorrowedBox:
+    local: i64 = 3
+    selected: mutable BorrowedBox = BorrowedBox{value: &stable}
+    selected <- BorrowedBox{value: &local}
+    return pack(selected.value)
+`
+	result := analyzeTreeTestSourceWithSemanticErrors(t, "aggregate_reference_local_alias_escape.elisa", source)
+	if errors := strings.Join(result.Errors(), "\n"); !strings.Contains(errors, "returning an aggregate or helper result that contains a reference into function-local storage") {
+		t.Fatalf("expected a local borrow hidden by mutable aggregate assignment to be rejected; got:\n%s", errors)
+	}
+}
+
 // Returning a freshly-taken reference to a function-local is a guaranteed dangle.
 func TestReturnRefToStackLocalIsRejected(t *testing.T) {
 	result := analyzeFunctionAnalysisTestSourceWithSemanticErrors(t, "return_stack_local_ref.elisa", `def f() -> i32&:
