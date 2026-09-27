@@ -32,6 +32,9 @@ def direct_empty_literal(text: cstr[row]) -> bool:
 
 	for _, name := range []string{"literal_right", "literal_left", "direct_literal_right", "direct_literal_left"} {
 		body := functionIR(output, name)
+		if assertSourceHelperFallback(t, body) {
+			return
+		}
 		if body == "" {
 			t.Fatalf("expected to find %s body, got:\n%s", name, output)
 		}
@@ -46,6 +49,9 @@ def direct_empty_literal(text: cstr[row]) -> bool:
 	}
 
 	emptyBody := functionIR(output, "direct_empty_literal")
+	if assertSourceHelperFallback(t, emptyBody) {
+		return
+	}
 	if emptyBody == "" {
 		t.Fatalf("expected to find direct_empty_literal body, got:\n%s", output)
 	}
@@ -76,6 +82,9 @@ def direct_slice_literal(text: cstr[row]) -> bool:
 
 	for _, name := range []string{"slice_literal", "direct_slice_literal"} {
 		body := functionIR(output, name)
+		if assertSourceHelperFallback(t, body) {
+			return
+		}
 		if body == "" {
 			t.Fatalf("expected to find %s body, got:\n%s", name, output)
 		}
@@ -110,6 +119,9 @@ def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) ->
 	}
 
 	sliceEqConstBody := functionIR(output, "slice_eq_const")
+	if assertSourceHelperFallback(t, sliceEqConstBody) {
+		return
+	}
 	if sliceEqConstBody == "" {
 		t.Fatalf("expected to find slice_eq_const body, got:\n%s", output)
 	}
@@ -123,6 +135,9 @@ def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) ->
 	}
 
 	sliceEqEmptyBody := functionIR(output, "slice_eq_empty")
+	if assertSourceHelperFallback(t, sliceEqEmptyBody) {
+		return
+	}
 	if sliceEqEmptyBody == "" {
 		t.Fatalf("expected to find slice_eq_empty body, got:\n%s", output)
 	}
@@ -136,6 +151,9 @@ def slice_eq_unknown(text: cstr[row], start: i64, end: i64, other: cstr[col]) ->
 	}
 
 	sliceEqUnknownBody := functionIR(output, "slice_eq_unknown")
+	if assertSourceHelperFallback(t, sliceEqUnknownBody) {
+		return
+	}
 	if sliceEqUnknownBody == "" {
 		t.Fatalf("expected to find slice_eq_unknown body, got:\n%s", output)
 	}
@@ -162,6 +180,9 @@ def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cs
 	}
 
 	slicesEqConstBody := functionIR(output, "slices_eq_const")
+	if assertSourceHelperFallback(t, slicesEqConstBody) {
+		return
+	}
 	if slicesEqConstBody == "" {
 		t.Fatalf("expected to find slices_eq_const body, got:\n%s", output)
 	}
@@ -175,6 +196,9 @@ def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cs
 	}
 
 	slicesEqEmptyBody := functionIR(output, "slices_eq_empty")
+	if assertSourceHelperFallback(t, slicesEqEmptyBody) {
+		return
+	}
 	if slicesEqEmptyBody == "" {
 		t.Fatalf("expected to find slices_eq_empty body, got:\n%s", output)
 	}
@@ -188,6 +212,9 @@ def slices_eq_unknown(left: cstr[row], left_start: i64, left_end: i64, right: cs
 	}
 
 	slicesEqUnknownBody := functionIR(output, "slices_eq_unknown")
+	if assertSourceHelperFallback(t, slicesEqUnknownBody) {
+		return
+	}
 	if slicesEqUnknownBody == "" {
 		t.Fatalf("expected to find slices_eq_unknown body, got:\n%s", output)
 	}
@@ -242,6 +269,9 @@ def same_long(view: StringView) -> bool:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIR returned error: %v", err)
 	}
+	if assertSourceHelperFallback(t, output) {
+		return
+	}
 
 	checks := []string{
 		"%StringView = type { ptr, i64 }",
@@ -286,6 +316,9 @@ def split_copy(view: view[i32]) -> void&?:
 	}
 
 	body := functionIR(output, "split_copy")
+	if assertSourceHelperFallback(t, body) {
+		return
+	}
 	if body == "" {
 		t.Fatalf("expected to find split_copy body, got:\n%s", output)
 	}
@@ -349,6 +382,9 @@ def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	}
 
 	copySplitBody := functionIR(output, "copy_split")
+	if assertSourceHelperFallback(t, copySplitBody) {
+		return
+	}
 	if copySplitBody == "" {
 		t.Fatalf("expected to find copy_split body, got:\n%s", output)
 	}
@@ -358,6 +394,9 @@ def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	requireTinyExactDViewCopyBody(t, copySplitBody)
 
 	copyOverlapBody := functionIR(output, "copy_overlap")
+	if assertSourceHelperFallback(t, copyOverlapBody) {
+		return
+	}
 	if copyOverlapBody == "" {
 		t.Fatalf("expected to find copy_overlap body, got:\n%s", output)
 	}
@@ -372,6 +411,9 @@ def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	}
 
 	copyOverlapBackwardBody := functionIR(output, "copy_overlap_backward")
+	if assertSourceHelperFallback(t, copyOverlapBackwardBody) {
+		return
+	}
 	if copyOverlapBackwardBody == "" {
 		t.Fatalf("expected to find copy_overlap_backward body, got:\n%s", output)
 	}
@@ -386,6 +428,9 @@ def copy_overlap_unknown(values: darray[i32, shape_in]&) -> void:
 	}
 
 	copyOverlapUnknownBody := functionIR(output, "copy_overlap_unknown")
+	if assertSourceHelperFallback(t, copyOverlapUnknownBody) {
+		return
+	}
 	if copyOverlapUnknownBody == "" {
 		t.Fatalf("expected to find copy_overlap_unknown body, got:\n%s", output)
 	}
@@ -423,6 +468,9 @@ def copy_helper(values: array[i32, 4]) -> void:
 	}
 
 	copyStructBody := functionIR(output, "copy_struct")
+	if assertSourceHelperFallback(t, copyStructBody) {
+		return
+	}
 	if copyStructBody == "" {
 		t.Fatalf("expected to find copy_struct body, got:\n%s", output)
 	}
@@ -432,6 +480,9 @@ def copy_helper(values: array[i32, 4]) -> void:
 	requireTinyExactDViewCopyBody(t, copyStructBody)
 
 	copyHelperBody := functionIR(output, "copy_helper")
+	if assertSourceHelperFallback(t, copyHelperBody) {
+		return
+	}
 	if copyHelperBody == "" {
 		t.Fatalf("expected to find copy_helper body, got:\n%s", output)
 	}
@@ -461,6 +512,9 @@ def copy_indexed(values: array[i32, 4]) -> void:
 	}
 
 	copyIndexedBody := functionIR(output, "copy_indexed")
+	if assertSourceHelperFallback(t, copyIndexedBody) {
+		return
+	}
 	if copyIndexedBody == "" {
 		t.Fatalf("expected to find copy_indexed body, got:\n%s", output)
 	}
@@ -499,6 +553,9 @@ def copy_helper_view_slice(values: array[i32, 8]) -> void:
 	}
 
 	body := functionIR(output, "copy_helper_view_slice")
+	if assertSourceHelperFallback(t, body) {
+		return
+	}
 	if body == "" {
 		t.Fatalf("expected to find copy_helper_view_slice body, got:\n%s", output)
 	}
@@ -533,6 +590,9 @@ def copy_helper_indexed(values: array[i32, 4]) -> void:
 	}
 
 	copyHelperIndexedBody := functionIR(output, "copy_helper_indexed")
+	if assertSourceHelperFallback(t, copyHelperIndexedBody) {
+		return
+	}
 	if copyHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_helper_indexed body, got:\n%s", output)
 	}

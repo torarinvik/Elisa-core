@@ -216,7 +216,7 @@ func (a *Analyzer) assertProofStmtAllowed(stmt ast.Stmt) bool {
 	case *ast.ExprStmt:
 		// A lemma call (ghost code) is permitted; a plain `assert(COND)` call is permitted (it only seeds
 		// a fact). Any other expression statement has potential effects and is rejected.
-		if cond, ok := assertedCondition(n.Expr); ok {
+		if cond, ok := a.assertedCondition(n.Expr); ok {
 			_ = cond
 			return true
 		}

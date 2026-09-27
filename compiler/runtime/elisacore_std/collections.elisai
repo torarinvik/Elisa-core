@@ -192,8 +192,6 @@ static elif (ARENA_BACKEND == ARENA_BACKEND_WIN32_VIRTUALALLOC):
 static elif (ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE):
     const ARENA_WASM_USES_HOST_ALLOCATOR: bool = true
 
-extern assert(condition: bool)
-
 extern arena_default_reserve_slots() -> usize
 
 extern max(a: usize, b: usize) -> usize

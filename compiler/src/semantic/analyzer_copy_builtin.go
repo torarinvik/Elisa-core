@@ -27,7 +27,7 @@ func (a *Analyzer) copyBuiltinTargetType(expr *ast.CallExpr) (Type, bool) {
 }
 
 func (a *Analyzer) analyzeCopyBuiltinCall(expr *ast.CallExpr) (Type, bool) {
-	if expr == nil || callSpecializedIdentName(expr) != "copy" {
+	if expr == nil || callSpecializedIdentName(expr) != "copy" || !a.callNameIsUnshadowed("copy") {
 		return nil, false
 	}
 	targetType, ok := a.copyBuiltinTargetType(expr)

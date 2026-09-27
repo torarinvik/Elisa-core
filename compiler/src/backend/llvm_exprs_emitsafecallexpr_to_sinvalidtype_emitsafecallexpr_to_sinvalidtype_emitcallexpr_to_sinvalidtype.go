@@ -93,7 +93,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 	if storeType, ok := s.packedStoreConstructorCall(expr); ok {
 		return s.emitPackedStoreConstructorValue(expr, storeType)
 	}
-	if callIdentName(expr) == "freeze" {
+	if callIdentName(expr) == "freeze" && s.g.result.IsCompilerBuiltinHelperCall(expr, "freeze") {
 		if len(expr.Args) != 1 {
 			return nil, nil, fmt.Errorf("freeze expects 1 argument, got %d", len(expr.Args))
 		}

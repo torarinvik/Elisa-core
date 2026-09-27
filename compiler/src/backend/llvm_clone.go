@@ -16,7 +16,7 @@ import (
 )
 
 func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
-	if expr == nil || callSpecializedIdentName(expr) != "clone" {
+	if expr == nil || callSpecializedIdentName(expr) != "clone" || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "clone") {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 1 {
@@ -44,7 +44,7 @@ func (s *functionState) emitBuiltinCloneCall(expr *ast.CallExpr) (C.LLVMValueRef
 // elements are pure value data (no region owner needed), so this is a plain
 // elementwise value copy with no allocation.
 func (s *functionState) emitBuiltinCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
-	if expr == nil || callSpecializedIdentName(expr) != "copy" {
+	if expr == nil || callSpecializedIdentName(expr) != "copy" || s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "copy") {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 1 {

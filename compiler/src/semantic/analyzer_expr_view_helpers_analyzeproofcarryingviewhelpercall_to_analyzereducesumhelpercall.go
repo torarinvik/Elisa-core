@@ -5,7 +5,17 @@ import (
 )
 
 func (a *Analyzer) analyzeProofCarryingViewHelperCall(expr *ast.CallExpr) (Type, bool) {
-	switch callIdentName(expr) {
+	name := callIdentName(expr)
+	if name == "" || a == nil || a.currentScope == nil {
+		return nil, false
+	}
+	// These helpers are compiler intrinsics, not reserved spellings. A local,
+	// module, or global declaration with the same name must remain an ordinary
+	// Elisa call and must not be silently replaced by compiler semantics.
+	if _, shadowed := a.currentScope.Lookup(name); shadowed {
+		return nil, false
+	}
+	switch name {
 	case "any":
 		return a.analyzeIterableBoolAggregateHelperCall(expr, "any"), true
 	case "all":

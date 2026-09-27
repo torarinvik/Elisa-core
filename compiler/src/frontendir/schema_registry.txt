@@ -140,6 +140,7 @@ F CallExpr 15 ResolvedImplicitArgsValid
 F CallExpr 16 Safe
 F CallExpr 17 SafeConcurrencySugar
 F CallExpr 18 SafeReceiver
+F CallExpr 19 FStringLowering
 
 T 23 CanExpr
 F CanExpr 1 Expr

@@ -12,6 +12,15 @@ func callIdentName(expr *ast.CallExpr) string {
 	}
 	return ident.Name
 }
+
+func (a *Analyzer) callNameIsUnshadowed(name string) bool {
+	if a == nil || a.currentScope == nil || name == "" {
+		return false
+	}
+	_, shadowed := a.currentScope.Lookup(name)
+	return !shadowed
+}
+
 func callSpecializedIdent(expr ast.Expr) (*ast.Ident, *ast.SpecializeExpr, bool) {
 	if expr == nil {
 		return nil, nil, false
@@ -47,10 +56,15 @@ func (a *Analyzer) recordBuiltinHelperFuncType(expr *ast.CallExpr, name string, 
 		}
 		params = append(params, argType)
 	}
-	a.exprTypes[expr.Func] = &FuncType{Name: name, Params: params, Return: returnType}
+	a.exprTypes[expr.Func] = &FuncType{
+		Name:   name,
+		Params: params,
+		Return: returnType,
+	}
+	a.recordCompilerBuiltinHelperCall(expr, name)
 }
 func (a *Analyzer) freezeStoreArg(expr *ast.CallExpr) (ast.Expr, bool) {
-	if callIdentName(expr) != "freeze" || len(expr.Args) != 1 {
+	if callIdentName(expr) != "freeze" || len(expr.Args) != 1 || !a.isCompilerBuiltinHelperCall(expr, "freeze") {
 		return nil, false
 	}
 	return expr.Args[0], true
@@ -80,7 +94,9 @@ func (a *Analyzer) analyzeFreezeCallExpr(expr *ast.CallExpr) Type {
 			a.errorf(expr.Args[0].Pos(), "local packed enum store %q must be moved explicitly before freeze", affineValueDisplayName(expr.Args[0]))
 			return invalidType
 		}
-		return PackedEnumStoreWithState(packedStore, a.namedTypes["Frozen"])
+		result := PackedEnumStoreWithState(packedStore, a.namedTypes["Frozen"])
+		a.recordBuiltinHelperFuncType(expr, "freeze", result)
+		return result
 	}
 	a.errorf(expr.Args[0].Pos(), "freeze expects a packed enum store, got %s", storeType)
 	return invalidType

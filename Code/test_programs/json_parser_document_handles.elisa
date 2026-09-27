@@ -37,13 +37,7 @@ def json_parser_document_source(impl: heap JsonParserDocumentInternal&) -> u8&:
 def json_parser_document_source_len(impl: heap JsonParserDocumentInternal&) -> usize:
     return impl.source_len
 def json_parser_document_store(impl: heap JsonParserDocumentInternal&) -> JsonNode.Store[Local]:
-    trusted Unsafe.PointerCast:
-        store: mutable JsonNode.Store[Local] = zeroed
-        words: mutable uintptr& = json_node_store_words((&store).cast[JsonNode.Store[Local]&]).cast[mutable uintptr&]
-        words[0] <- (&impl.arena).uintptr()
-        words[1] <- impl.store_row_bytes.uintptr()
-        words[2] <- impl.store_state_bits
-        return move store
+    return JsonNode.Store(impl.arena)
 def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out: mutable JsonParserDocument&) -> i64:
     can Memory.Allocate, Memory.Release, Abort.Panic:
         if out[0].impl_bits != 0.uintptr():

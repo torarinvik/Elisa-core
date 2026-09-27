@@ -100,7 +100,7 @@ func (a *Analyzer) cloneBuiltinCompatible(target Type, source Type, seen map[str
 	}
 }
 func (a *Analyzer) analyzeCloneBuiltinCall(expr *ast.CallExpr) (Type, bool) {
-	if expr == nil || callSpecializedIdentName(expr) != "clone" {
+	if expr == nil || callSpecializedIdentName(expr) != "clone" || !a.callNameIsUnshadowed("clone") {
 		return nil, false
 	}
 	targetType, ok := a.cloneBuiltinTargetType(expr)
@@ -228,9 +228,9 @@ func (a *Analyzer) analyzeNodeTableFillHelperCall(expr *ast.CallExpr) Type {
 }
 func (a *Analyzer) analyzePackedNodeHelperCall(expr *ast.CallExpr) (Type, bool) {
 	switch {
-	case callIdentName(expr) == "dense_key":
+	case callIdentName(expr) == "dense_key" && a.callNameIsUnshadowed("dense_key"):
 		return a.analyzeDenseKeyHelperCall(expr), true
-	case callSpecializedIdentName(expr) == "node_table_fill":
+	case callSpecializedIdentName(expr) == "node_table_fill" && a.callNameIsUnshadowed("node_table_fill"):
 		return a.analyzeNodeTableFillHelperCall(expr), true
 	default:
 		return nil, false

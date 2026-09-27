@@ -84,6 +84,9 @@ func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C
 	if !ok || (ident.Name != "string_view_copy" && ident.Name != "ctx_string_from_view") {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 1 || s == nil || s.g == nil || s.g.result == nil {
 		return nil, nil, false, nil
 	}
@@ -183,6 +186,9 @@ func (s *functionState) emitSpecializedStringViewCopyCall(expr *ast.CallExpr) (C
 func (s *functionState) emitSpecializedStringViewLiteralCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 {

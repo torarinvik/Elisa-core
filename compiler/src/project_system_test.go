@@ -755,11 +755,12 @@ export def load_fs(selector: GuestFsSelector) -> void abi c:
 `)
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern GuestFsSelectorRole
 type GuestFsSelector = id[GuestFsSelectorRole]
+const TEST_GUEST_FS_SELECTOR_ID: u32 = 1
 
 extern load_fs(selector: GuestFsSelector) -> void
 
 def main() -> int:
-    load_fs(zeroed)
+    load_fs(TEST_GUEST_FS_SELECTOR_ID.cast[GuestFsSelector])
     return 0
 `)
 
@@ -778,13 +779,14 @@ def main() -> int:
 
 	writeFixtureFile(t, filepath.Join(projectRoot, "src", "main.elisa"), `extern GuestFsSelectorRole
 type GuestFsSelector = id[GuestFsSelectorRole]
+const TEST_GUEST_FS_SELECTOR_ID: u32 = 1
 
 @segment_transition(guest)
 extern load_fs(selector: GuestFsSelector) -> void can[Unsafe.SegmentMutation, Segment.Guest]
 
 def main() -> int:
     can Unsafe.SegmentMutation, Segment.Guest:
-        load_fs(zeroed)
+        load_fs(TEST_GUEST_FS_SELECTOR_ID.cast[GuestFsSelector])
     return 0
 `)
 	stdout.Reset()

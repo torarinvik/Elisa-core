@@ -317,7 +317,7 @@ func (a *Analyzer) analyzeCallExprWithExpected(expr *ast.CallExpr, expected Type
 	if storeType, ok := a.packedStoreConstructorCall(expr); ok {
 		return storeType
 	}
-	if callIdentName(expr) == "freeze" {
+	if callIdentName(expr) == "freeze" && a.callNameIsUnshadowed("freeze") {
 		return a.analyzeFreezeCallExpr(expr)
 	}
 	if helperType, ok := a.analyzePackedNodeHelperCall(expr); ok {

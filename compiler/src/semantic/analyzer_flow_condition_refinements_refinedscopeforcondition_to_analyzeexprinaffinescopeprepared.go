@@ -463,6 +463,7 @@ func (a *Analyzer) applyPostIfFallthroughRefinement(stmt *ast.IfStmt) {
 		a.recordSMTAssertFact(smtFactExprForCondition(stmt.Cond, true))
 	}
 }
+
 // MatchPatternIsIrrefutable reports whether a pattern matches every value of its
 // scrutinee's type: `_`, or a struct pattern whose every field either binds or is itself
 // irrefutable. A struct has exactly one shape, so destructuring it always succeeds; a
@@ -641,13 +642,16 @@ func assignedRefinementType(targetType Type, valueType Type) Type {
 	}
 	return targetOptional
 }
-func assertedCondition(expr ast.Expr) (ast.Expr, bool) {
+func (a *Analyzer) assertedCondition(expr ast.Expr) (ast.Expr, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok || len(call.Args) != 1 {
 		return nil, false
 	}
 	ident, ok := call.Func.(*ast.Ident)
-	if !ok || (ident.Name != "assert" && ident.Name != "ASSERT") {
+	if !ok || (ident.Name != "assert" && ident.Name != "ASSERT") || a == nil || a.currentScope == nil {
+		return nil, false
+	}
+	if _, shadowed := a.currentScope.Lookup(ident.Name); shadowed {
 		return nil, false
 	}
 	return call.Args[0], true

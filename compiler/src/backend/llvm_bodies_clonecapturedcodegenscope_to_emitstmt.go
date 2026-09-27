@@ -1954,7 +1954,7 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 			// An `assert` that reads a ghost var is verification-only — erase its runtime check.
 			return nil
 		}
-		if cond, ok := backendAssertedCondition(n.Expr); ok {
+		if cond, ok := backendAssertedCondition(s.g.result, n.Expr); ok {
 			// A plain `assert(COND)` is NOT a call to a function named `assert` — the analyzer already
 			// claimed it (analyzer_flow.go: discharged through the proof ladder, COND recorded as a
 			// downstream flow fact). Lower it exactly like `assert … by:`: a debug-gated runtime check,
@@ -2035,13 +2035,16 @@ func (s *functionState) emitStmtInner(stmt ast.Stmt) error {
 // `ASSERT(COND)` is a single-argument call to the reserved `assert` identifier, not a real function
 // call. The analyzer already treats it as an assertion; the backend must agree so it lowers to a
 // debug-gated check rather than trying (and failing) to resolve `assert` as a callee.
-func backendAssertedCondition(expr ast.Expr) (ast.Expr, bool) {
+func backendAssertedCondition(result *semantic.Result, expr ast.Expr) (ast.Expr, bool) {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok || len(call.Args) != 1 {
 		return nil, false
 	}
 	ident, ok := call.Func.(*ast.Ident)
 	if !ok || (ident.Name != "assert" && ident.Name != "ASSERT") {
+		return nil, false
+	}
+	if result == nil || !result.IsCompilerBuiltinHelperCall(call, ident.Name) {
 		return nil, false
 	}
 	return call.Args[0], true

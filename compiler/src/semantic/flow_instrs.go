@@ -17,6 +17,44 @@ func populateBasicFlowInstrs(cfg *CFG) {
 	}
 }
 
+// populateAnalyzerFlowInstrs adds syntax-derived flow instructions, then drops
+// any freeze-specific facts unless semantic name resolution proved that the
+// exact call was the compiler builtin. CFG construction by itself has no scope
+// information, so spelling alone is not a sound identity check.
+func (a *Analyzer) populateAnalyzerFlowInstrs(cfg *CFG) {
+	populateBasicFlowInstrs(cfg)
+	builtinFreezePositions := make(map[lexer.Pos]struct{})
+	if a != nil {
+		for expr := range a.exprTypes {
+			call, ok := expr.(*ast.CallExpr)
+			if ok && a.isCompilerBuiltinHelperCall(call, "freeze") {
+				builtinFreezePositions[call.Pos()] = struct{}{}
+			}
+		}
+	}
+	filterFreezeFlowInstrs(cfg, builtinFreezePositions)
+}
+
+func filterFreezeFlowInstrs(cfg *CFG, allowed map[lexer.Pos]struct{}) {
+	if cfg == nil {
+		return
+	}
+	for blockIndex := range cfg.Blocks {
+		block := &cfg.Blocks[blockIndex]
+		filtered := block.Instrs[:0]
+		for _, instr := range block.Instrs {
+			isFreezeFact := instr.Note == "freeze produces frozen store" || instr.Note == "freeze rebases store provenance"
+			if isFreezeFact {
+				if _, ok := allowed[instr.Position]; !ok {
+					continue
+				}
+			}
+			filtered = append(filtered, instr)
+		}
+		block.Instrs = filtered
+	}
+}
+
 func appendBasicFlowInstrsForNode(block *CFGBlock, node ast.Node) {
 	if block == nil || node == nil {
 		return

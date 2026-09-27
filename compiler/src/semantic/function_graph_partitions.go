@@ -9,6 +9,10 @@ import (
 func ComputeGraphPartitions(fn *ast.FuncDecl) *GraphPartitions {
 	cfg := ConstructCFG(fn)
 	populateBasicFlowInstrs(cfg)
+	// This standalone helper receives only a function node, not its resolved
+	// scope. Treat freeze spellings conservatively instead of assuming that a
+	// same-named source function is the compiler builtin.
+	filterFreezeFlowInstrs(cfg, nil)
 	return computeGraphPartitionsFromCFG(cfg)
 }
 

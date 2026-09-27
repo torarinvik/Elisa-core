@@ -11,6 +11,15 @@ func (a *Analyzer) analyzeHashBuiltinCall(expr *ast.CallExpr) (Type, bool) {
 	if expr == nil || callIdentName(expr) != "ctx_hash_value" {
 		return nil, false
 	}
+	// This spelling is used by compiler-generated dict code, but source may use
+	// it too. A visible declaration owns the call and must not inherit builtin
+	// hashing semantics merely by reusing the name.
+	if a == nil || a.currentScope == nil {
+		return nil, false
+	}
+	if _, shadowed := a.currentScope.Lookup("ctx_hash_value"); shadowed {
+		return nil, false
+	}
 	u64Type := a.namedTypes["u64"]
 	if len(expr.Args) != 1 {
 		for _, arg := range expr.Args {

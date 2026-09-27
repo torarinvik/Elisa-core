@@ -16,10 +16,11 @@ import (
 // Memory.Allocate + Abort.Panic permission refs (recorded via the FuncType stamped on the callee
 // ident, which the permissions collector already consumes for every CallExpr).
 //
-// `__fstr` is reserved: it resolves here BEFORE ordinary name resolution, so a user function of the
-// same name can never intercept an f-string lowering.
+// Only parser-generated f-string calls carry FStringLowering. An ordinary source call that happens
+// to use the private lowering name is analyzed through normal name resolution and cannot inherit the
+// compiler's f-string allocation, formatting, or optimization behavior.
 func (a *Analyzer) analyzeBuiltinFStrCall(expr *ast.CallExpr) (Type, bool) {
-	if a == nil || expr == nil {
+	if a == nil || expr == nil || !expr.FStringLowering {
 		return nil, false
 	}
 	ident, ok := expr.Func.(*ast.Ident)
@@ -42,6 +43,7 @@ func (a *Analyzer) analyzeBuiltinFStrCall(expr *ast.CallExpr) (Type, bool) {
 		},
 		Permissions: []string{"Memory", "Abort"},
 	}
+	a.recordCompilerBuiltinHelperCall(expr, "__fstr")
 	a.exprTypes[expr.Func] = fnType
 	a.exprTypes[expr] = dstrType
 	return dstrType, true

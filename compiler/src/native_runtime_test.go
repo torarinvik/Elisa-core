@@ -627,12 +627,11 @@ func TestRunCLILocalParamShadowsSameNamedGlobalFunction(t *testing.T) {
 	src := fmt.Sprintf(`# include %q
 
 struct Wid[T]:
-    v: mutable T
+    v: mutable T&?
 
 def widget[T](owner: mutable Arena&) -> Wid[T]:
     _ = owner
-    w: mutable Wid[T] = zeroed
-    return w
+    return Wid[T]{v: null}
 
 struct Gadget:
     n: mutable i64

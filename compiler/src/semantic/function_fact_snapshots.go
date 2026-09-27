@@ -27,7 +27,7 @@ func (a *Analyzer) finalizeFunctionAnalysis(fn *ast.FuncDecl, fnType *FuncType) 
 		return
 	}
 	configureCFGParamLocations(cfg, fnType)
-	populateBasicFlowInstrs(cfg)
+	a.populateAnalyzerFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	partitions := computeGraphPartitionsFromCFG(cfg)
 	cleanupPlan := SynthesizeParamCleanupPlan(fn, fnType)

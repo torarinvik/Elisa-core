@@ -152,6 +152,115 @@ def kernel(buf: view[i32]) -> void:
 	mustExtentBounds(t, thirdFacts.Extent, 8, 12)
 }
 
+func TestShadowedAssertIsNotCompilerAssertion(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "shadowed_assert.elisa", `
+struct Box:
+    value: i32
+
+def assert(condition: bool) -> void:
+    pass
+
+def check(box: Box&?) -> i32:
+    assert(false)
+    return box.value
+`)
+	errors := strings.Join(result.Errors(), "\n")
+	if !strings.Contains(errors, "field access requires proven non-null reference") {
+		t.Fatalf("user-defined assert unsoundly refined a nullable reference; expected non-null diagnostic, got:\n%s", errors)
+	}
+	check := testFuncDeclByName(t, file, "check")
+	call := mustExprStmtCall(t, check.Body[0], "assert")
+	if result.IsCompilerBuiltinHelperCall(call, "assert") {
+		t.Fatal("user-defined assert call was marked as a compiler assertion")
+	}
+}
+
+const forgedCompilerBuiltinIntrinsicName = "elisa.internal.builtin.freeze"
+
+func TestCompilerBuiltinIdentityIsNotInferredFromIntrinsicName(t *testing.T) {
+	callee := &ast.Ident{Name: "freeze"}
+	call := &ast.CallExpr{Func: callee}
+	analyzer := &Analyzer{
+		exprTypes: map[ast.Expr]Type{
+			callee: &FuncType{IntrinsicName: forgedCompilerBuiltinIntrinsicName},
+		},
+	}
+	result := &Result{analyzer: analyzer, ExprTypes: analyzer.exprTypes}
+	if result.IsCompilerBuiltinHelperCall(call, "freeze") {
+		t.Fatal("compiler helper identity was inferred from a forgeable function-type string")
+	}
+
+	analyzer.recordCompilerBuiltinHelperCall(call, "freeze")
+	if !result.IsCompilerBuiltinHelperCall(call, "freeze") {
+		t.Fatal("resolved compiler helper call was not recognized by its exact call identity")
+	}
+	otherCall := &ast.CallExpr{Func: &ast.Ident{Name: "freeze"}}
+	if result.IsCompilerBuiltinHelperCall(otherCall, "freeze") {
+		t.Fatal("compiler helper identity leaked to a distinct same-named call")
+	}
+}
+
+func TestShadowedHashHelperIsNotCompilerBuiltin(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "shadowed_hash_helper.elisa", `
+def ctx_hash_value(key: i32) -> u64:
+    return 7
+
+def hash_key(key: i32) -> u64:
+    return ctx_hash_value(key)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("unexpected semantic errors:\n%s", strings.Join(errs, "\n"))
+	}
+	hashKey := testFuncDeclByName(t, file, "hash_key")
+	returnStmt, ok := hashKey.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected hash_key return statement, got %T", hashKey.Body[0])
+	}
+	call, ok := returnStmt.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected hash helper call, got %T", returnStmt.Value)
+	}
+	if result.IsCompilerBuiltinHelperCall(call, "ctx_hash_value") {
+		t.Fatal("user-defined ctx_hash_value call was marked as a compiler builtin")
+	}
+}
+
+func TestShadowedFreezeDoesNotCreateBuiltinFlowFacts(t *testing.T) {
+	file, result := parseAndAnalyzeOptimizationFactsTest(t, "shadowed_freeze.elisa", `
+def freeze(value: i32) -> i32:
+    return value
+
+def use_freeze(value: i32) -> i32:
+    return freeze(value)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("unexpected semantic errors:\n%s", strings.Join(errs, "\n"))
+	}
+	use := testFuncDeclByName(t, file, "use_freeze")
+	returnStmt, ok := use.Body[0].(*ast.ReturnStmt)
+	if !ok {
+		t.Fatalf("expected return statement, got %T", use.Body[0])
+	}
+	call, ok := returnStmt.Value.(*ast.CallExpr)
+	if !ok {
+		t.Fatalf("expected call expression, got %T", returnStmt.Value)
+	}
+	if result.IsCompilerBuiltinHelperCall(call, "freeze") {
+		t.Fatal("user-defined freeze call was marked as a compiler builtin")
+	}
+	analysis, ok := result.FunctionAnalysis(use)
+	if !ok || analysis == nil || analysis.CFG == nil {
+		t.Fatal("expected a completed function CFG for use_freeze")
+	}
+	for _, block := range analysis.CFG.Blocks {
+		for _, instr := range block.Instrs {
+			if instr.Note == "freeze produces frozen store" || instr.Note == "freeze rebases store provenance" {
+				t.Fatalf("user-defined freeze call created compiler flow fact: %+v", instr)
+			}
+		}
+	}
+}
+
 func TestAnalyzeZipMapAcceptsDisjointChunksExactItemsFromSharedBuffer(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_chunks_exact_disjoint.elisa", `
 def add(left: i32, right: i32) -> i32:
@@ -411,20 +520,14 @@ def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	}
 }
 
-func TestOptimizationFactsComposeHelperViewSlicesWithAffineBase(t *testing.T) {
+func TestOptimizationFactsComposeDirectViewSlicesWithAffineBase(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "helper_view_slice_affine.elisa", `
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
-	return view[start:end]
-
-def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
-	return arena_da_view_slice(view, start, view.len)
-
 def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (3 * chunk)
 	whole: view[i32] = buf[start:limit]
-	rest_view: view[i32] = arena_da_view_suffix(whole, chunk)
-	first: view[i32] = arena_da_view_slice(rest_view, 0, chunk)
-	second: view[i32] = arena_da_view_slice(rest_view, chunk, (2 * chunk))
+	rest_view: view[i32] = whole[chunk:whole.len]
+	first: view[i32] = rest_view[0:chunk]
+	second: view[i32] = rest_view[chunk:(2 * chunk)]
 	pass
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -453,11 +556,8 @@ def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	}
 }
 
-func TestAnalyzeZipMapAcceptsReadonlyHelperViewSlices(t *testing.T) {
+func TestAnalyzeZipMapAcceptsReadonlyDirectViewSlices(t *testing.T) {
 	file, result := parseAndAnalyzeOptimizationFactsTest(t, "zip_map_readonly_helper_slices.elisa", `
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
-	return view[start:end]
-
 def add(left: i32, right: i32) -> i32:
 	return left + right
 
@@ -465,9 +565,9 @@ def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	limit: usize = start + (3 * chunk)
 	whole: view[i32] = buf[start:limit]
 	ro: view[i32] = readonly(whole)
-	dst: view[i32] = arena_da_view_slice(whole, 0, chunk)
-	src1: view[i32] = arena_da_view_slice(ro, chunk, (2 * chunk))
-	src2: view[i32] = arena_da_view_slice(ro, (2 * chunk), (3 * chunk))
+	dst: view[i32] = whole[0:chunk]
+	src1: view[i32] = ro[chunk:(2 * chunk)]
+	src2: view[i32] = ro[(2 * chunk):(3 * chunk)]
 	zip_map(dst, src1, src2, add)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
@@ -509,14 +609,8 @@ def kernel(buf: view[i32], start: usize, chunk: usize) -> void:
 	}
 }
 
-func TestAnalyzeReduceSumAcceptsReadonlyHelperSuffix(t *testing.T) {
+func TestAnalyzeReduceSumAcceptsReadonlyDirectSuffix(t *testing.T) {
 	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_helper_suffix.elisa", `
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
-	return view[start:end]
-
-def arena_da_view_suffix[T](view: view[T], start: usize) -> view[T]:
-	return arena_da_view_slice(view, start, view.len)
-
 def sum_one(value: i32) -> i32:
 	return value
 
@@ -524,11 +618,25 @@ def kernel(buf: view[i32], start: usize, chunk: usize) -> i32:
 	limit: usize = start + (2 * chunk)
 	whole: view[i32] = buf[start:limit]
 	ro: view[i32] = readonly(whole)
-	rest_view: view[i32] = arena_da_view_suffix(ro, chunk)
+	rest_view: view[i32] = ro[chunk:ro.len]
 	return reduce_sum(rest_view, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {
 		t.Fatalf("expected readonly helper-suffix reduce_sum to analyze cleanly, got:\n%s", strings.Join(errs, "\n"))
+	}
+}
+
+func TestAnalyzeReduceSumAcceptsReadonlyFixedDArraySlice(t *testing.T) {
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_fixed_darray_slice.elisa", `
+def sum_with_bias(value: i64, bias: i64) -> i64:
+	return value + bias
+
+def kernel(values: darray[i64, 4], bias: i64) -> i64:
+	base: view[i64] = values[0:4]
+	return reduce_sum(readonly(base), sum_with_bias, bias)
+`)
+	if errs := result.Errors(); len(errs) > 0 {
+		t.Fatalf("expected a readonly fixed-darray slice to satisfy reduce_sum, got:\n%s", strings.Join(errs, "\n"))
 	}
 }
 
@@ -560,17 +668,14 @@ def kernel(buf: view[i32], cond: bool, chunk: usize) -> i32:
 	mustAffineExprTerms(t, facts.Extent.Size, 0, map[string]int64{"chunk": 1})
 }
 
-func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernaryHelperSlices(t *testing.T) {
-	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_helper_slices.elisa", `
-def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
-	return view[start:end]
-
+func TestAnalyzeReduceSumAcceptsReadonlyEqualSizeTernaryDirectSlices(t *testing.T) {
+	_, result := parseAndAnalyzeOptimizationFactsTest(t, "reduce_sum_readonly_ternary_direct_slices.elisa", `
 def sum_one(value: i32) -> i32:
 	return value
 
 def kernel(buf: view[i32], cond: bool, chunk: usize) -> i32:
 	whole: view[i32] = readonly(buf[0:(2 * chunk)])
-	picked: view[i32] = arena_da_view_slice(whole, 0, chunk) if cond else arena_da_view_slice(whole, chunk, (2 * chunk))
+	picked: view[i32] = whole[0:chunk] if cond else whole[chunk:(2 * chunk)]
 	return reduce_sum(picked, sum_one)
 `)
 	if errs := result.Errors(); len(errs) > 0 {

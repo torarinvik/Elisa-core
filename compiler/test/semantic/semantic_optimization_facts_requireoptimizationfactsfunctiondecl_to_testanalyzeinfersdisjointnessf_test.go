@@ -254,43 +254,43 @@ def inspect(a: Arena&, values: darray[i32, row]&, other: darray[i32, row]&, text
 	textCopyFacts := requireExprOptimizationFacts(t, result, textCopyExpr)
 	textSliceFacts := requireExprOptimizationFacts(t, result, textSliceExpr)
 
-	if !wholeAFacts.HasExactExtent() {
-		t.Fatalf("expected full-span arena_da_view to preserve exact source extent, got %#v", wholeAFacts)
+	if wholeAFacts.HasExactExtent() {
+		t.Fatalf("user-defined arena_da_view must not establish an exact extent by name, got %#v", wholeAFacts)
 	}
-	if !result.ExprsHaveSameExtent(wholeAExpr, wholeBExpr) {
-		t.Fatalf("expected full-span arena_da_view results over same-shape arrays to share exact extent")
+	if result.ExprsHaveSameExtent(wholeAExpr, wholeBExpr) {
+		t.Fatalf("user-defined arena_da_view calls must not be assumed to preserve their inputs")
 	}
 
-	if !subAFacts.HasExactExtent() {
-		t.Fatalf("expected arena_da_view_slice to preserve bounded extent, got %#v", subAFacts)
+	if subAFacts.HasExactExtent() {
+		t.Fatalf("user-defined arena_da_view_slice must not establish an exact extent by name, got %#v", subAFacts)
 	}
-	if !result.ExprsHaveSameExtent(subAExpr, subBExpr) {
-		t.Fatalf("expected matching bounded arena_da_view_slice results to share exact extent")
+	if result.ExprsHaveSameExtent(subAExpr, subBExpr) {
+		t.Fatalf("user-defined arena_da_view_slice calls must not certify equal extents by name")
 	}
 	if result.ExprsHaveSameExtent(wholeAExpr, subAExpr) {
 		t.Fatalf("expected bounded subview extent to differ from full-span source extent")
 	}
-	if !result.ExprsHaveSameExtent(subAExpr, copiedExpr) {
-		t.Fatalf("expected arena_da_from_view to preserve exact extent from its input view")
+	if result.ExprsHaveSameExtent(subAExpr, copiedExpr) {
+		t.Fatalf("user-defined arena_da_from_view must not inherit source extents by name")
 	}
 
-	if !textViewFacts.HasExactExtent() {
-		t.Fatalf("expected ctx_string_view to preserve bounded extent, got %#v", textViewFacts)
+	if textViewFacts.HasExactExtent() {
+		t.Fatalf("user-defined ctx_string_view must not establish an exact extent by name, got %#v", textViewFacts)
 	}
-	if !result.ExprsHaveSameExtent(textViewExpr, textSubExpr) {
-		t.Fatalf("expected full-span ctx_string_view_slice to preserve input extent")
+	if result.ExprsHaveSameExtent(textViewExpr, textSubExpr) {
+		t.Fatalf("user-defined ctx_string_view_slice must not certify an exact extent by name")
 	}
-	if !textCopyFacts.ReadOnly || !textCopyFacts.HasExactExtent() {
-		t.Fatalf("expected ctx_string_from_view to preserve readonly exact extent facts, got %#v", textCopyFacts)
+	if !textCopyFacts.ReadOnly {
+		t.Fatalf("the cstr result type should remain readonly, got %#v", textCopyFacts)
 	}
-	if !result.ExprsHaveSameExtent(textSubExpr, textCopyExpr) {
-		t.Fatalf("expected ctx_string_from_view to preserve exact extent from its input view")
+	if result.ExprsHaveSameExtent(textSubExpr, textCopyExpr) {
+		t.Fatalf("user-defined ctx_string_from_view must not inherit source extents by name")
 	}
-	if !textSliceFacts.ReadOnly || !textSliceFacts.HasExactExtent() {
-		t.Fatalf("expected ctx_string_slice to preserve readonly exact extent facts, got %#v", textSliceFacts)
+	if !textSliceFacts.ReadOnly {
+		t.Fatalf("the cstr result type should remain readonly, got %#v", textSliceFacts)
 	}
-	if !result.ExprsHaveSameExtent(textViewExpr, textSliceExpr) {
-		t.Fatalf("expected ctx_string_slice to preserve exact extent matching an equivalent ctx_string_view")
+	if result.ExprsHaveSameExtent(textViewExpr, textSliceExpr) {
+		t.Fatalf("user-defined ctx_string_slice must not certify matching extents by name")
 	}
 }
 func TestAnalyzeInfersDenseWritableFactsForNodeTableValues(t *testing.T) {
@@ -490,28 +490,78 @@ def inspect(text: cstr[row], buf: array[i32, 8]) -> int:
 	if result.ExprsAreDisjoint(leftExpr, overlapExpr) {
 		t.Fatalf("expected overlapping fixed-array slices to remain potentially aliased")
 	}
-	if !result.ExprsAreDisjoint(firstExpr, secondExpr) {
-		t.Fatalf("expected adjacent string views over the same base to be disjoint")
+	if result.ExprsAreDisjoint(firstExpr, secondExpr) {
+		t.Fatalf("user-defined string-view constructors must not certify disjointness by name")
 	}
 	if result.ExprsAreDisjoint(firstExpr, middleExpr) {
 		t.Fatalf("expected overlapping string views to remain potentially aliased")
 	}
-	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
-		t.Fatalf("expected split prefix/suffix string views to be disjoint")
+	if result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
+		t.Fatalf("user-defined prefix/suffix helpers must not certify disjointness by name")
 	}
-	if !result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
-		t.Fatalf("expected full-span string_view_prefix to preserve exact extent")
+	if result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
+		t.Fatalf("user-defined prefix helper must not certify an exact extent by name")
 	}
-	if !result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
-		t.Fatalf("expected zero-offset string_view_suffix to preserve exact extent")
+	if result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
+		t.Fatalf("user-defined suffix helper must not certify an exact extent by name")
 	}
-	if !result.ExprsAreDisjoint(freshViewAExpr, freshViewBExpr) {
-		t.Fatalf("expected fresh-allocation string views to be disjoint")
+	if result.ExprsAreDisjoint(freshViewAExpr, freshViewBExpr) {
+		t.Fatalf("user-defined sview must not certify fresh-allocation disjointness by name")
 	}
 	if !result.ExprsAreDisjoint(allocAExpr, allocBExpr) {
 		t.Fatalf("expected distinct fresh allocations to be disjoint")
 	}
 	if result.ExprsAreDisjoint(allocAExpr, allocAliasExpr) {
 		t.Fatalf("expected an alias of a fresh allocation to remain non-disjoint from the source")
+	}
+}
+
+func TestOptimizationFactsDoNotAssumeUserDefinedViewHelperSemantics(t *testing.T) {
+	src := `def ctx_string_view_slice(view: sview, start: i64, end: i64) -> sview:
+	_ = start
+	_ = end
+	return view
+
+def inspect(view: sview) -> bool:
+	left: sview = ctx_string_view_slice(view, 0, 2)
+	right: sview = ctx_string_view_slice(view, 2, 4)
+	return left == right
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_shadowed_view_helper.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+	if result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatal("a user-defined helper that returns its input unchanged must not certify its differently indexed results as disjoint")
+	}
+}
+
+func TestProofCarryingViewHelperNameCanBeShadowedByOrdinaryFunction(t *testing.T) {
+	src := `struct SplitPair:
+	left: view[i32]
+	right: view[i32]
+
+def split_at(source: view[i32], midpoint: usize) -> SplitPair:
+	_ = midpoint
+	return SplitPair{left: source, right: source}
+
+def inspect(values: array[i32, 4]) -> int:
+	parts: SplitPair = split_at(values[0:4], 2)
+	left: view[i32] = parts.left
+	right: view[i32] = parts.right
+	return 0
+`
+	result, errs := parseAndAnalyze(t, "optimization_facts_shadowed_split_at.elisa", src)
+	requireNoErrors(t, errs)
+	requireNoWarnings(t, result)
+
+	fn := requireOptimizationFactsFunctionDecl(t, result, "inspect")
+	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
+	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
+	if result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatal("a user-defined split_at that returns the same view twice must not certify disjointness")
 	}
 }

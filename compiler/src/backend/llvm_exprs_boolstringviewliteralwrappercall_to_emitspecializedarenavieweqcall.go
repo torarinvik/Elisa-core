@@ -213,6 +213,9 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 	if ident.Name != "memcpy" && ident.Name != "arena_memcpy" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 3 {
 		return nil, nil, false, nil
 	}
@@ -253,6 +256,9 @@ func (s *functionState) emitSpecializedMemcpyCall(expr *ast.CallExpr) (C.LLVMVal
 func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_copy_exact" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
@@ -426,6 +432,9 @@ func (s *functionState) emitSpecializedArenaViewCopyCall(expr *ast.CallExpr) (C.
 func (s *functionState) emitSpecializedArenaViewEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_eq_exact" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {

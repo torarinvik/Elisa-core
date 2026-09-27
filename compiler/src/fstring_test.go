@@ -53,6 +53,13 @@ def f(name: sview) -> dstr:
 	if ident, ok := call.Func.(*ast.Ident); !ok || ident.Name != "__fstr" {
 		t.Fatalf("desugar target must be __fstr, got %v", call.Func)
 	}
+	if !call.FStringLowering {
+		t.Fatal("parser-created f-string call must carry its lowering identity")
+	}
+	clonedCall, ok := ast.CloneExpr(call).(*ast.CallExpr)
+	if !ok || !clonedCall.FStringLowering {
+		t.Fatal("AST cloning must preserve f-string lowering identity")
+	}
 	if len(call.Args) != 3 {
 		t.Fatalf("expected 3 parts (chunk, expr, chunk), got %d", len(call.Args))
 	}

@@ -24,6 +24,9 @@ func (s *functionState) emitHashBuiltinCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	if expr == nil || callIdentName(expr) != "ctx_hash_value" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "ctx_hash_value") {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 1 {
 		return nil, nil, true, fmt.Errorf("ctx_hash_value expects 1 argument, got %d", len(expr.Args))
 	}

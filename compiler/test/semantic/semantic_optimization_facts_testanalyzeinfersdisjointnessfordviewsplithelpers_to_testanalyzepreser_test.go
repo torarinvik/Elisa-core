@@ -47,14 +47,14 @@ def inspect(values: darray[i32, row]&) -> int:
 	fullPrefixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_prefix")
 	fullSuffixExpr := requireOptimizationFactsVarInitExpr(t, fn, "full_suffix")
 
-	if !result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
-		t.Fatalf("expected view prefix/suffix helpers to produce disjoint views")
+	if result.ExprsAreDisjoint(prefixExpr, suffixExpr) {
+		t.Fatalf("user-defined prefix/suffix helpers must not certify their outputs as disjoint by name")
 	}
-	if !result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
-		t.Fatalf("expected full-span arena_da_view_prefix to preserve exact extent")
+	if result.ExprsHaveSameExtent(baseExpr, fullPrefixExpr) {
+		t.Fatalf("user-defined prefix helper must not certify an exact extent by name")
 	}
-	if !result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
-		t.Fatalf("expected zero-offset arena_da_view_suffix to preserve exact extent")
+	if result.ExprsHaveSameExtent(baseExpr, fullSuffixExpr) {
+		t.Fatalf("user-defined suffix helper must not certify an exact extent by name")
 	}
 }
 func TestAnalyzeInfersEqualExtentSizeForSplitDViews(t *testing.T) {
@@ -94,14 +94,14 @@ def inspect(values: darray[i32, 4]&) -> int:
 	leftExpr := requireOptimizationFactsVarInitExpr(t, fn, "left")
 	rightExpr := requireOptimizationFactsVarInitExpr(t, fn, "right")
 
-	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
-		t.Fatalf("expected left/right split dviews to be disjoint")
+	if result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("user-defined view-slice helper must not certify disjoint outputs by name")
 	}
-	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
-		t.Fatalf("expected left/right split dviews to have equal extent size")
+	if result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("user-defined view-slice helper must not certify extent sizes by name")
 	}
 	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
-		t.Fatalf("expected left/right split dviews to retain distinct exact bounds")
+		t.Fatalf("user-defined view-slice helper must not create exact extents by name")
 	}
 }
 func TestAnalyzeInfersFactsForDirectDViewSliceSyntax(t *testing.T) {
@@ -152,8 +152,8 @@ def inspect(values: darray[i32, 4]&) -> int:
 	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
 		t.Fatalf("expected adjacent direct view slices to retain distinct exact bounds")
 	}
-	if !result.ExprsHaveSameExtent(baseExpr, fullExpr) {
-		t.Fatalf("expected full-span direct view slice syntax to preserve input extent")
+	if result.ExprsHaveSameExtent(baseExpr, fullExpr) {
+		t.Fatalf("an opaque view-producing helper must not let a full-span slice claim the base's exact extent")
 	}
 }
 func TestAnalyzePreservesOptimizationFactsThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {
@@ -188,17 +188,17 @@ def inspect(values: array[i32, 8]) -> int:
 	leftFacts := requireExprOptimizationFacts(t, result, leftExpr)
 	rightFacts := requireExprOptimizationFacts(t, result, rightExpr)
 
-	if !leftFacts.HasExactExtent() || !rightFacts.HasExactExtent() {
-		t.Fatalf("expected standard view-slice helper field projections to preserve exact extents, got %#v and %#v", leftFacts, rightFacts)
+	if leftFacts.HasExactExtent() || rightFacts.HasExactExtent() {
+		t.Fatalf("user-defined view-slice helper must not establish exact extents for projected fields by name, got %#v and %#v", leftFacts, rightFacts)
 	}
-	if !result.ExprsAreDisjoint(leftExpr, rightExpr) {
-		t.Fatalf("expected standard view-slice helper field projections to stay disjoint")
+	if result.ExprsAreDisjoint(leftExpr, rightExpr) {
+		t.Fatalf("user-defined view-slice helper must not certify projected fields as disjoint by name")
 	}
-	if !result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
-		t.Fatalf("expected standard view-slice helper field projections to retain equal extent size")
+	if result.ExprsHaveEqualExtentSize(leftExpr, rightExpr) {
+		t.Fatalf("user-defined view-slice helper must not certify projected extent sizes by name")
 	}
 	if result.ExprsHaveSameExtent(leftExpr, rightExpr) {
-		t.Fatalf("expected standard view-slice helper field projections to retain distinct exact bounds")
+		t.Fatalf("user-defined view-slice helper must not create exact projected extents by name")
 	}
 }
 func TestAnalyzePreservesFrozenPackedStoreProvenanceThroughStandardViewSliceHelperFieldProjectionExpressions(t *testing.T) {

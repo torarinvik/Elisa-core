@@ -467,6 +467,9 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 	if callIdentName(expr) != "dense_key" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "dense_key") {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 2 {
 		return nil, nil, true, fmt.Errorf("dense_key expects 2 arguments, got %d", len(expr.Args))
 	}
@@ -523,6 +526,9 @@ func (s *functionState) emitDenseKeyHelperCall(expr *ast.CallExpr) (C.LLVMValueR
 }
 func (s *functionState) emitNodeTableFillHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	if callSpecializedIdentName(expr) != "node_table_fill" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "node_table_fill") {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 3 {

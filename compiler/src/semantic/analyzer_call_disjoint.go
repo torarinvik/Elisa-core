@@ -168,6 +168,7 @@ func (a *Analyzer) privateFreshDArrayLocals() map[string]bool {
 		return set
 	}
 	scan := &privateFreshScan{
+		analyzer:  a,
 		declCount: map[string]int{},
 		fresh:     map[string]bool{},
 		escaped:   map[string]bool{},
@@ -191,6 +192,7 @@ func (a *Analyzer) privateFreshDArrayLocals() map[string]bool {
 // This fail-safe default is what makes the scan sound against AST shapes it does not special-case:
 // an unrecognized container can over-mark (lose optimization) but can never under-mark an escape.
 type privateFreshScan struct {
+	analyzer  *Analyzer
 	declCount map[string]int
 	fresh     map[string]bool
 	escaped   map[string]bool
@@ -234,7 +236,7 @@ func (s *privateFreshScan) scanValue(v reflect.Value) {
 			// Fall through to generic recursion so the initializer (and any nested
 			// statements) are scanned for escapes of OTHER names.
 		case *ast.CallExpr:
-			if isCloneCallExpr(n) {
+			if s.isCloneCallExpr(n) {
 				// clone[darray[T]](x) deep-copies elements into a fresh destination. Reading
 				// the source container to copy its elements does not header-copy or share its
 				// backing buffer, so a bare source local remains private-fresh.
@@ -287,7 +289,7 @@ func (s *privateFreshScan) recordDecl(n *ast.VarDeclStmt) {
 		return
 	}
 	s.declCount[n.Name]++
-	if isFreshDArrayAllocExpr(n.Value) {
+	if s.isFreshDArrayAllocExpr(n.Value) {
 		s.fresh[n.Name] = true
 	}
 }
@@ -330,7 +332,7 @@ func (s *privateFreshScan) markAllNamesEscaped(v reflect.Value) {
 // brand-new, unaliased buffer: a list literal `[...]` (including empty `[]`), a darray
 // comprehension, or `clone(...)`. Anything else (an identifier, a call returning a view, a slice)
 // is conservatively NOT fresh.
-func isFreshDArrayAllocExpr(e ast.Expr) bool {
+func (s *privateFreshScan) isFreshDArrayAllocExpr(e ast.Expr) bool {
 	switch n := stripOptimizationParens(e).(type) {
 	case *ast.ListLitExpr:
 		// Non-brace `[...]` is a list/darray literal; brace `{...}` is a dict/set literal.
@@ -339,31 +341,27 @@ func isFreshDArrayAllocExpr(e ast.Expr) bool {
 		// Darray comprehension only (dict/set comprehensions are not darray buffers).
 		return n.Key == nil && !n.Set
 	case *ast.CallExpr:
-		if isCloneCallExpr(n) {
+		if s.isCloneCallExpr(n) {
 			return true
 		}
 	}
 	return false
 }
 
-func isCloneCallExpr(call *ast.CallExpr) bool {
-	if call == nil {
+func (s *privateFreshScan) isCloneCallExpr(call *ast.CallExpr) bool {
+	if s == nil || s.analyzer == nil || call == nil {
 		return false
 	}
-	fn := stripOptimizationParens(call.Func)
-	if spec, ok := fn.(*ast.SpecializeExpr); ok && spec != nil {
-		fn = stripOptimizationParens(spec.Operand)
-	}
-	ident, ok := fn.(*ast.Ident)
-	return ok && ident.Name == "clone"
+	return s.analyzer.isCompilerBuiltinHelperCall(call, "clone")
 }
 
 // buildPairEvidence records, per container-param pair of the callee, WHY it could be distinct at
 // this call site (consumed by the whole-program fixpoint in finalizeFuncDisjointParams):
 //   - base:   the per-call fresh-anchor predicate proved it here (unconditional).
 //   - depend: both args are the ENCLOSING function's own parameters p≠q, so the pair is distinct
-//             here exactly when the enclosing function's (p,q) is itself proven disjoint — the
-//             interprocedural forwarding edge.
+//     here exactly when the enclosing function's (p,q) is itself proven disjoint — the
+//     interprocedural forwarding edge.
+//
 // A pair with neither gets no entry, which keeps it out of the callee's fact (fail closed).
 func (a *Analyzer) buildPairEvidence(containerParams []int, distinct map[[2]int]bool, args []ast.Expr) map[[2]int]pairDisjointEvidence {
 	evidence := map[[2]int]pairDisjointEvidence{}

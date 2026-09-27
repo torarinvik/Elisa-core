@@ -12,6 +12,16 @@ func (r *Result) ExprOptimizationFacts(expr ast.Expr) (OptimizationFacts, bool) 
 	return facts, ok
 }
 
+// IsCompilerBuiltinHelperCall reports whether semantic analysis resolved this
+// exact call expression through a compiler-owned helper implementation. A
+// source function that merely reuses the helper's spelling is not a builtin.
+func (r *Result) IsCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bool {
+	if r == nil || r.analyzer == nil {
+		return false
+	}
+	return r.analyzer.isCompilerBuiltinHelperCall(call, name)
+}
+
 func (r *Result) ExprsHaveSameExtent(left, right ast.Expr) bool {
 	if r == nil {
 		return false

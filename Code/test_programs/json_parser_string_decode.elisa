@@ -1,9 +1,5 @@
 def json_new_cursor_with_len(source: u8&, source_len: usize) -> JsonCursor:
-    out: mutable JsonCursor = zeroed
-    out.source <- source
-    out.source_len <- source_len
-    out.pos <- 0
-    return out
+    return JsonCursor{source: source, source_len: source_len, pos: 0}
 def json_new_cursor(source: u8&) -> JsonCursor:
     return json_new_cursor_with_len(source, runtime_strlen(source))
 def json_copy_cursor(cursor: JsonCursor&) -> JsonCursor:

@@ -34,7 +34,7 @@ func (a *Analyzer) inferFuncSinkParams(fn *ast.FuncDecl, fnType *FuncType) {
 
 	cfg := a.constructCFG(fn)
 	configureCFGParamLocations(cfg, fnType)
-	populateBasicFlowInstrs(cfg)
+	a.populateAnalyzerFlowInstrs(cfg)
 	a.addImplicitSinkFlowInstrs(cfg)
 	fnType.SinkParams = inferSinkParamsFromCFG(cfg)
 	fnType.SinkParamsKnown = true

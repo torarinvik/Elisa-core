@@ -385,7 +385,11 @@ func (a *Analyzer) resolveProjectedFieldValueFromBuiltinViewHelperCall(call *ast
 	if call == nil || len(path) == 0 {
 		return nil, false
 	}
-	switch optimizationHelperName(call.Func) {
+	helperName := optimizationHelperName(call.Func)
+	if !a.isCompilerBuiltinHelperCall(call, helperName) {
+		return nil, false
+	}
+	switch helperName {
 	case "arena_da_from_view":
 		if len(call.Args) < 2 {
 			return nil, false

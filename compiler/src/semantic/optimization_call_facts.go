@@ -5,6 +5,23 @@ import (
 	"fmt"
 )
 
+func (a *Analyzer) isCompilerBuiltinHelperCall(call *ast.CallExpr, name string) bool {
+	if a == nil || call == nil || name == "" || a.compilerBuiltinHelperCalls == nil {
+		return false
+	}
+	return a.compilerBuiltinHelperCalls[call] == name
+}
+
+func (a *Analyzer) recordCompilerBuiltinHelperCall(call *ast.CallExpr, name string) {
+	if a == nil || call == nil || name == "" {
+		return
+	}
+	if a.compilerBuiltinHelperCalls == nil {
+		a.compilerBuiltinHelperCalls = make(map[*ast.CallExpr]string)
+	}
+	a.compilerBuiltinHelperCalls[call] = name
+}
+
 func (a *Analyzer) recordImmutableSymbolOptimizationFacts(sym *Symbol, expr ast.Expr) {
 	if a == nil || sym == nil || expr == nil || sym.Mutable || a.symbolFacts == nil {
 		return
@@ -47,7 +64,11 @@ func (a *Analyzer) inferCallOptimizationFacts(call *ast.CallExpr, facts Optimiza
 	if call == nil {
 		return facts
 	}
-	switch optimizationHelperName(call.Func) {
+	helperName := optimizationHelperName(call.Func)
+	if !a.isCompilerBuiltinHelperCall(call, helperName) {
+		return facts
+	}
+	switch helperName {
 	case "readonly":
 		if sourceFacts, ok := a.exprFactsForCallArg(call, 0); ok {
 			facts = overlayOptimizationFacts(facts, sourceFacts)
@@ -399,7 +420,7 @@ func (a *Analyzer) inferSplitViewFieldOptimizationFacts(expr *ast.FieldExpr) (Op
 		return OptimizationFacts{}, false
 	}
 	call, ok := a.boundCallExpr(expr.Object)
-	if !ok || callIdentName(call) != "split_at" || len(call.Args) < 2 {
+	if !ok || callIdentName(call) != "split_at" || !a.isCompilerBuiltinHelperCall(call, "split_at") || len(call.Args) < 2 {
 		return OptimizationFacts{}, false
 	}
 	if expr.Field != "left" && expr.Field != "right" {
@@ -446,6 +467,10 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 	if a == nil || expr == nil {
 		return OptimizationFacts{}, false
 	}
+	call, ok := a.boundCallExpr(expr.Object)
+	if !ok || callIdentName(call) != "chunks_exact" || !a.isCompilerBuiltinHelperCall(call, "chunks_exact") {
+		return OptimizationFacts{}, false
+	}
 	objectType := a.exprTypes[expr.Object]
 	if _, ok := ChunksExactViewItemType(objectType); !ok {
 		return OptimizationFacts{}, false
@@ -461,7 +486,7 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 	}
 	chunkSize := ""
 	chunkSizeConst, chunkSizeConstOK := int64(0), false
-	if call, ok := a.boundCallExpr(expr.Object); ok && callIdentName(call) == "chunks_exact" && len(call.Args) >= 2 {
+	if len(call.Args) >= 2 {
 		chunkSize = optimizationExprString(call.Args[1])
 		chunkSizeConst, chunkSizeConstOK = a.resolveProjectedFieldConstIntExpr(call.Args[1])
 	}
@@ -470,7 +495,7 @@ func (a *Analyzer) inferChunksExactItemOptimizationFacts(expr *ast.IndexExpr) (O
 	}
 	chunkIndex, chunkIndexOK := a.resolveProjectedFieldConstIntExpr(expr.Index)
 	sourceBegin := "0"
-	if call, ok := a.boundCallExpr(expr.Object); ok && callIdentName(call) == "chunks_exact" && len(call.Args) >= 1 {
+	if len(call.Args) >= 1 {
 		if sourceFacts, ok := a.lookupOptimizationFactsForExpr(call.Args[0]); ok && sourceFacts.Extent != nil && sourceFacts.Extent.Kind == OptimizationExtentViewBounds && sourceFacts.Extent.Begin != "" {
 			sourceBegin = sourceFacts.Extent.Begin
 		}

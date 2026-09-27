@@ -87,6 +87,9 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 	if !ok || ident.Name != "arena_da_from_view" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {
 		return nil, nil, false, nil
 	}
@@ -235,6 +238,9 @@ func (s *functionState) emitSpecializedArenaFromViewCall(expr *ast.CallExpr) (C.
 func (s *functionState) emitSpecializedArenaViewFillCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "arena_da_fill" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 2 || s == nil || s.g == nil || s.g.result == nil {

@@ -86,6 +86,9 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 	if !ok || ident.Name != "ctx_string_slice_eq" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 4 || s == nil || s.g == nil || s.g.result == nil {
 		return nil, nil, false, nil
 	}
@@ -176,6 +179,9 @@ func (s *functionState) emitSpecializedStringSliceEqCall(expr *ast.CallExpr) (C.
 func (s *functionState) emitSpecializedStringSlicesEqCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slices_eq" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 6 || s == nil || s.g == nil || s.g.result == nil {
@@ -278,6 +284,9 @@ func (s *functionState) emitSpecializedRuntimeStringCompareCall(expr *ast.CallEx
 	switch ident.Name {
 	case "ctx_streq", "ctx_string_view_eq", "string_view_eq", "ctx_string_views_eq", "string_views_eq":
 	default:
+		return nil, nil, false, nil
+	}
+	if !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	leftExpr := expr.Args[0]
@@ -432,6 +441,9 @@ func (s *functionState) emitDirectStringViewCopyLarge(viewData C.LLVMValueRef, v
 func (s *functionState) emitSpecializedStringSliceCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
 	ident, ok := expr.Func.(*ast.Ident)
 	if !ok || ident.Name != "ctx_string_slice" {
+		return nil, nil, false, nil
+	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
 		return nil, nil, false, nil
 	}
 	if len(expr.Args) != 3 || s == nil || s.g == nil || s.g.result == nil {

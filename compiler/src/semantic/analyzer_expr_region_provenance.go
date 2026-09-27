@@ -381,6 +381,10 @@ func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (r
 	if a == nil || call == nil || len(call.Args) == 0 {
 		return regionRefState{}, false
 	}
+	helperName := callIdentName(call)
+	if !a.isCompilerBuiltinHelperCall(call, helperName) {
+		return regionRefState{}, false
+	}
 	sourceState, ok := a.regionRefStateForExpr(call.Args[0])
 	if !ok || !hasRegionProvenance(sourceState) {
 		return regionRefState{}, false
@@ -389,7 +393,7 @@ func (a *Analyzer) regionRefStateForProofCarryingViewCall(call *ast.CallExpr) (r
 	if !summaryOK {
 		summarized = cloneRegionRefState(sourceState)
 	}
-	switch callIdentName(call) {
+	switch helperName {
 	case "readonly":
 		return cloneRegionRefState(sourceState), true
 	case "split_at":

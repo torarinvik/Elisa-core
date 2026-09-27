@@ -86,8 +86,6 @@ struct JsonParserNumberData:
 error JsonNumberAccessError:
     Invalid
 extern strtod(nptr: u8&, endptr: u8&?) -> f64
-def readonly[T](view: view[T]) -> view[T]:
-    return view
 struct JsonParserDocumentInternal:
     source: mutable u8&
     source_len: mutable usize

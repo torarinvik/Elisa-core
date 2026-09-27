@@ -116,9 +116,10 @@ func (p *Parser) desugarFString(tok lexer.Token) ast.Expr {
 		args = append(args, &ast.StringLit{Position: tok.Pos, Value: ""})
 	}
 	return &ast.CallExpr{
-		Position: tok.Pos,
-		Func:     &ast.Ident{Position: tok.Pos, Name: "__fstr"},
-		Args:     args,
+		Position:        tok.Pos,
+		Func:            &ast.Ident{Position: tok.Pos, Name: "__fstr"},
+		Args:            args,
+		FStringLowering: true,
 	}
 }
 

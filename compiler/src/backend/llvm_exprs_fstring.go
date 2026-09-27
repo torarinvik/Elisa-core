@@ -35,6 +35,9 @@ func (s *functionState) emitBuiltinFStrCall(expr *ast.CallExpr) (C.LLVMValueRef,
 	if !ok || ident == nil || ident.Name != "__fstr" {
 		return nil, nil, false, nil
 	}
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, "__fstr") {
+		return nil, nil, false, nil
+	}
 	dstrType, ok := s.exprType(expr).(*semantic.DArrayType)
 	if !ok || dstrType == nil {
 		return nil, nil, false, nil

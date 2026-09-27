@@ -108,16 +108,17 @@ func CloneExpr(expr Expr) Expr {
 			}
 		}
 		return &CallExpr{
-			Position:      n.Position,
-			Func:          fn,
-			SafeReceiver:  safeReceiver,
-			HasArgForward: n.HasArgForward,
-			ArgForwardPos: n.ArgForwardPos,
-			Args:          args,
-			ArgNames:      append([]string(nil), n.ArgNames...),
-			ArgShorthand:  append([]bool(nil), n.ArgShorthand...),
-			ArgItemOrder:  argItems,
-			Safe:          n.Safe,
+			Position:        n.Position,
+			Func:            fn,
+			SafeReceiver:    safeReceiver,
+			FStringLowering: n.FStringLowering,
+			HasArgForward:   n.HasArgForward,
+			ArgForwardPos:   n.ArgForwardPos,
+			Args:            args,
+			ArgNames:        append([]string(nil), n.ArgNames...),
+			ArgShorthand:    append([]bool(nil), n.ArgShorthand...),
+			ArgItemOrder:    argItems,
+			Safe:            n.Safe,
 		}
 	case *CastExpr:
 		operand := CloneExpr(n.Operand)
@@ -255,7 +256,7 @@ func CloneExprSubst(expr Expr, subst map[string]Expr) Expr {
 			}
 			args = append(args, next)
 		}
-		return &CallExpr{Position: n.Position, Func: fn, Args: args, ArgNames: append([]string(nil), n.ArgNames...)}
+		return &CallExpr{Position: n.Position, Func: fn, Args: args, ArgNames: append([]string(nil), n.ArgNames...), FStringLowering: n.FStringLowering}
 	default:
 		// Non-substituting fallback for the remaining literal/leaf shapes (no idents to replace).
 		return CloneExpr(expr)

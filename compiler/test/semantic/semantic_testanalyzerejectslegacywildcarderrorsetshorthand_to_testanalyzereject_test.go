@@ -337,7 +337,6 @@ func TestAnalyzePinsArenaBuiltinPermissionContracts(t *testing.T) {
 	requireNoWarnings(t, result)
 	requireDeclaredFunctionPermissionRefs(t, result, "malloc", "Memory.Allocate")
 	requireDeclaredFunctionPermissionRefs(t, result, "free", "Memory.Release")
-	requireFunctionPermissionRefs(t, result, "assert", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "sfree", "Memory.Release")
 	requireFunctionPermissionRefs(t, result, "new_region_with_owner", "Memory.Allocate", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "new_region", "Memory.Allocate", "Abort.Panic")

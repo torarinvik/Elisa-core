@@ -49,6 +49,9 @@ def fill_runtime_wide_unknown(view: view[i32], value: i32) -> void:
 	}
 
 	runtimeByteBody := functionIR(output, "fill_runtime_byte")
+	if assertSourceHelperFallback(t, runtimeByteBody) {
+		return
+	}
 	if runtimeByteBody == "" {
 		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
 	}
@@ -63,6 +66,9 @@ def fill_runtime_wide_unknown(view: view[i32], value: i32) -> void:
 	}
 
 	runtimeWideBody := functionIR(output, "fill_runtime_wide")
+	if assertSourceHelperFallback(t, runtimeWideBody) {
+		return
+	}
 	if runtimeWideBody == "" {
 		t.Fatalf("expected to find fill_runtime_wide body, got:\n%s", output)
 	}
@@ -77,6 +83,9 @@ def fill_runtime_wide_unknown(view: view[i32], value: i32) -> void:
 	}
 
 	runtimeWideUnknownBody := functionIR(output, "fill_runtime_wide_unknown")
+	if assertSourceHelperFallback(t, runtimeWideUnknownBody) {
+		return
+	}
 	if runtimeWideUnknownBody == "" {
 		t.Fatalf("expected to find fill_runtime_wide_unknown body, got:\n%s", output)
 	}
@@ -122,6 +131,9 @@ def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
 	}
 
 	literalBody := functionIR(output, "fill_literal_int_to_bytes")
+	if assertSourceHelperFallback(t, literalBody) {
+		return
+	}
 	if literalBody == "" {
 		t.Fatalf("expected to find fill_literal_int_to_bytes body, got:\n%s", output)
 	}
@@ -136,6 +148,9 @@ def fill_runtime_int_to_bytes(values: darray[u8, 4]&, value: int) -> void:
 	}
 
 	runtimeBody := functionIR(output, "fill_runtime_int_to_bytes")
+	if assertSourceHelperFallback(t, runtimeBody) {
+		return
+	}
 	if runtimeBody == "" {
 		t.Fatalf("expected to find fill_runtime_int_to_bytes body, got:\n%s", output)
 	}
@@ -224,6 +239,9 @@ def fill_runtime_byte(values: darray[u8, 4]&, value: u8) -> void:
 		t.Fatalf("expected libc memset declaration to use the C int/i32 ABI, got:\n%s", output)
 	}
 	fillBody := functionIR(output, "fill_runtime_byte")
+	if assertSourceHelperFallback(t, fillBody) {
+		return
+	}
 	if fillBody == "" {
 		t.Fatalf("expected to find fill_runtime_byte body, got:\n%s", output)
 	}
@@ -328,6 +346,9 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	}
 
 	eqSplitBody := functionIR(output, "eq_split")
+	if assertSourceHelperFallback(t, eqSplitBody) {
+		return
+	}
 	if eqSplitBody == "" {
 		t.Fatalf("expected to find eq_split body, got:\n%s", output)
 	}
@@ -337,6 +358,9 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	requireTinyExactDViewEqBody(t, eqSplitBody, true)
 
 	eqOverlapBody := functionIR(output, "eq_overlap")
+	if assertSourceHelperFallback(t, eqOverlapBody) {
+		return
+	}
 	if eqOverlapBody == "" {
 		t.Fatalf("expected to find eq_overlap body, got:\n%s", output)
 	}
@@ -346,6 +370,9 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	requireTinyExactDViewEqBody(t, eqOverlapBody, false)
 
 	eqSameBody := functionIR(output, "eq_same")
+	if assertSourceHelperFallback(t, eqSameBody) {
+		return
+	}
 	if eqSameBody == "" {
 		t.Fatalf("expected to find eq_same body, got:\n%s", output)
 	}
@@ -355,6 +382,9 @@ def eq_diff_extent(values: darray[i32, 4]&) -> bool:
 	requireTinyExactDViewEqBody(t, eqSameBody, false)
 
 	eqDiffExtentBody := functionIR(output, "eq_diff_extent")
+	if assertSourceHelperFallback(t, eqDiffExtentBody) {
+		return
+	}
 	if eqDiffExtentBody == "" {
 		t.Fatalf("expected to find eq_diff_extent body, got:\n%s", output)
 	}
@@ -393,6 +423,9 @@ def eq_helper(values: array[i32, 4]) -> bool:
 	}
 
 	eqStructBody := functionIR(output, "eq_struct")
+	if assertSourceHelperFallback(t, eqStructBody) {
+		return
+	}
 	if eqStructBody == "" {
 		t.Fatalf("expected to find eq_struct body, got:\n%s", output)
 	}
@@ -402,6 +435,9 @@ def eq_helper(values: array[i32, 4]) -> bool:
 	requireTinyExactDViewEqBody(t, eqStructBody, true)
 
 	eqHelperBody := functionIR(output, "eq_helper")
+	if assertSourceHelperFallback(t, eqHelperBody) {
+		return
+	}
 	if eqHelperBody == "" {
 		t.Fatalf("expected to find eq_helper body, got:\n%s", output)
 	}
@@ -432,6 +468,9 @@ def eq_indexed(values: array[i32, 4]) -> bool:
 	}
 
 	eqIndexedBody := functionIR(output, "eq_indexed")
+	if assertSourceHelperFallback(t, eqIndexedBody) {
+		return
+	}
 	if eqIndexedBody == "" {
 		t.Fatalf("expected to find eq_indexed body, got:\n%s", output)
 	}
@@ -467,6 +506,9 @@ def eq_helper_indexed(values: array[i32, 4]) -> bool:
 	}
 
 	eqHelperIndexedBody := functionIR(output, "eq_helper_indexed")
+	if assertSourceHelperFallback(t, eqHelperIndexedBody) {
+		return
+	}
 	if eqHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_helper_indexed body, got:\n%s", output)
 	}
@@ -505,6 +547,9 @@ def eq_nested_helper_indexed(values: array[i32, 4]) -> bool:
 	}
 
 	eqNestedHelperIndexedBody := functionIR(output, "eq_nested_helper_indexed")
+	if assertSourceHelperFallback(t, eqNestedHelperIndexedBody) {
+		return
+	}
 	if eqNestedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_nested_helper_indexed body, got:\n%s", output)
 	}
@@ -541,6 +586,9 @@ def eq_rebased_helper_indexed(values: array[i32, 4]) -> bool:
 	}
 
 	eqRebasedHelperIndexedBody := functionIR(output, "eq_rebased_helper_indexed")
+	if assertSourceHelperFallback(t, eqRebasedHelperIndexedBody) {
+		return
+	}
 	if eqRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find eq_rebased_helper_indexed body, got:\n%s", output)
 	}

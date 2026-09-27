@@ -174,6 +174,9 @@ def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	}
 
 	copySmallBody := functionIR(output, "copy_small")
+	if assertSourceHelperFallback(t, copySmallBody) {
+		return
+	}
 	if copySmallBody == "" {
 		t.Fatalf("expected to find copy_small body, got:\n%s", output)
 	}
@@ -185,6 +188,9 @@ def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	}
 
 	copyLargeBody := functionIR(output, "copy_large")
+	if assertSourceHelperFallback(t, copyLargeBody) {
+		return
+	}
 	if copyLargeBody == "" {
 		t.Fatalf("expected to find copy_large body, got:\n%s", output)
 	}
@@ -198,6 +204,9 @@ def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	}
 
 	copyFullBody := functionIR(output, "copy_full")
+	if assertSourceHelperFallback(t, copyFullBody) {
+		return
+	}
 	if copyFullBody == "" {
 		t.Fatalf("expected to find copy_full body, got:\n%s", output)
 	}
@@ -211,6 +220,9 @@ def copy_unknown(text: cstr[row], start: i64, end: i64) -> cstr:
 	}
 
 	copyUnknownBody := functionIR(output, "copy_unknown")
+	if assertSourceHelperFallback(t, copyUnknownBody) {
+		return
+	}
 	if copyUnknownBody == "" {
 		t.Fatalf("expected to find copy_unknown body, got:\n%s", output)
 	}

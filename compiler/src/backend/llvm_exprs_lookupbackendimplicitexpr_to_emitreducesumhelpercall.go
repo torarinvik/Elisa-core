@@ -143,7 +143,11 @@ func backendExplicitMoveOperand(expr ast.Expr) (ast.Expr, bool) {
 	}
 }
 func (s *functionState) emitProofCarryingViewHelperCall(expr *ast.CallExpr) (C.LLVMValueRef, semantic.Type, bool, error) {
-	switch callIdentName(expr) {
+	helperName := callIdentName(expr)
+	if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(expr, helperName) {
+		return nil, nil, false, nil
+	}
+	switch helperName {
 	case "any":
 		return s.emitIterableBoolAggregateHelperCall(expr, "any", true)
 	case "all":

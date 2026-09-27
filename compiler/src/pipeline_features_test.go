@@ -159,8 +159,6 @@ def main() -> i64:
 	}
 }
 
-
-
 func TestRunCLIAcceptsParenthesizedContextualTernaryDArrayLiteral(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
@@ -248,7 +246,6 @@ func TestRunCLIPrintsRegionOwnedStructSyntaxInAST(t *testing.T) {
 	}
 }
 
-
 func TestRunCLIInterpretsNamedRuntimeFunctionCalls(t *testing.T) {
 	t.Parallel()
 	fixtureDir := t.TempDir()
@@ -287,7 +284,7 @@ func TestRunCLIRejectsBadNamedRuntimeFunctionCall(t *testing.T) {
 	if exitCode == 0 {
 		t.Fatalf("expected interpreter named-runtime fixture to fail")
 	}
-	if !strings.Contains(stderr.String(), `unknown argument "value"`) {
+	if !strings.Contains(stderr.String(), `function "assert" has no parameter "value"`) {
 		t.Fatalf("expected semantic rejection for unknown named runtime arg, got:\n%s", stderr.String())
 	}
 }

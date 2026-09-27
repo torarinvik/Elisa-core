@@ -712,16 +712,19 @@ type MoveExpr struct {
 	Operand  Expr
 }
 type CallExpr struct {
-	Position      lexer.Pos
-	Func          Expr
-	SafeReceiver  Expr
-	HasArgForward bool
-	ArgForwardPos lexer.Pos
-	Args          []Expr
-	ArgNames      []string
-	ArgShorthand  []bool
-	ArgItemOrder  []CallArgItem
-	Safe          bool
+	Position     lexer.Pos
+	Func         Expr
+	SafeReceiver Expr
+	// FStringLowering marks the parser-created call that implements an f-string.
+	// Unlike spelling alone, this identity cannot be forged by an ordinary source call.
+	FStringLowering bool
+	HasArgForward   bool
+	ArgForwardPos   lexer.Pos
+	Args            []Expr
+	ArgNames        []string
+	ArgShorthand    []bool
+	ArgItemOrder    []CallArgItem
+	Safe            bool
 	// SafeConcurrencySugar marks a call node that the parser synthesized from a
 	// safe concurrency construct (e.g. `submit`/`pool` scope lowering to a
 	// `pool_submit1` call). User code never wrote the raw primitive, so the

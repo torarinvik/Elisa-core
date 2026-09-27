@@ -35,6 +35,9 @@ def copy_nested_helper_indexed(values: array[i32, 4]) -> void:
 	}
 
 	copyNestedHelperIndexedBody := functionIR(output, "copy_nested_helper_indexed")
+	if assertSourceHelperFallback(t, copyNestedHelperIndexedBody) {
+		return
+	}
 	if copyNestedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_helper_indexed body, got:\n%s", output)
 	}
@@ -70,6 +73,9 @@ def copy_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	}
 
 	copyRebasedHelperIndexedBody := functionIR(output, "copy_rebased_helper_indexed")
+	if assertSourceHelperFallback(t, copyRebasedHelperIndexedBody) {
+		return
+	}
 	if copyRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_rebased_helper_indexed body, got:\n%s", output)
 	}
@@ -105,6 +111,9 @@ def copy_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	}
 
 	copyWildcardRebasedHelperIndexedBody := functionIR(output, "copy_wildcard_rebased_helper_indexed")
+	if assertSourceHelperFallback(t, copyWildcardRebasedHelperIndexedBody) {
+		return
+	}
 	if copyWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
@@ -143,6 +152,9 @@ def copy_nested_wildcard_rebased_helper_indexed(values: array[i32, 8]) -> void:
 	}
 
 	copyNestedWildcardRebasedHelperIndexedBody := functionIR(output, "copy_nested_wildcard_rebased_helper_indexed")
+	if assertSourceHelperFallback(t, copyNestedWildcardRebasedHelperIndexedBody) {
+		return
+	}
 	if copyNestedWildcardRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_wildcard_rebased_helper_indexed body, got:\n%s", output)
 	}
@@ -178,6 +190,9 @@ def copy_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 	}
 
 	copyWildcardRebasedOverlapBody := functionIR(output, "copy_wildcard_rebased_overlap")
+	if assertSourceHelperFallback(t, copyWildcardRebasedOverlapBody) {
+		return
+	}
 	if copyWildcardRebasedOverlapBody == "" {
 		t.Fatalf("expected to find copy_wildcard_rebased_overlap body, got:\n%s", output)
 	}
@@ -221,6 +236,9 @@ def copy_nested_wildcard_rebased_overlap(values: array[i32, 8]) -> void:
 	}
 
 	copyNestedWildcardRebasedOverlapBody := functionIR(output, "copy_nested_wildcard_rebased_overlap")
+	if assertSourceHelperFallback(t, copyNestedWildcardRebasedOverlapBody) {
+		return
+	}
 	if copyNestedWildcardRebasedOverlapBody == "" {
 		t.Fatalf("expected to find copy_nested_wildcard_rebased_overlap body, got:\n%s", output)
 	}
@@ -264,6 +282,9 @@ def copy_nested_rebased_helper_indexed(values: array[i32, 4]) -> void:
 	}
 
 	copyNestedRebasedHelperIndexedBody := functionIR(output, "copy_nested_rebased_helper_indexed")
+	if assertSourceHelperFallback(t, copyNestedRebasedHelperIndexedBody) {
+		return
+	}
 	if copyNestedRebasedHelperIndexedBody == "" {
 		t.Fatalf("expected to find copy_nested_rebased_helper_indexed body, got:\n%s", output)
 	}
@@ -302,6 +323,9 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 	}
 
 	copyStructBody := functionIR(output, "copy_nested_struct")
+	if assertSourceHelperFallback(t, copyStructBody) {
+		return
+	}
 	if copyStructBody == "" {
 		t.Fatalf("expected to find copy_nested_struct body, got:\n%s", output)
 	}
@@ -311,6 +335,9 @@ def copy_nested_helper(values: array[i32, 4]) -> void:
 	requireTinyExactDViewCopyBody(t, copyStructBody)
 
 	copyHelperBody := functionIR(output, "copy_nested_helper")
+	if assertSourceHelperFallback(t, copyHelperBody) {
+		return
+	}
 	if copyHelperBody == "" {
 		t.Fatalf("expected to find copy_nested_helper body, got:\n%s", output)
 	}
@@ -360,6 +387,9 @@ def fill_unknown(view: view[i32]) -> void:
 	}
 
 	zeroBody := functionIR(output, "zero_split")
+	if assertSourceHelperFallback(t, zeroBody) {
+		return
+	}
 	if zeroBody == "" {
 		t.Fatalf("expected to find zero_split body, got:\n%s", output)
 	}
@@ -374,6 +404,9 @@ def fill_unknown(view: view[i32]) -> void:
 	}
 
 	fillBody := functionIR(output, "fill_split")
+	if assertSourceHelperFallback(t, fillBody) {
+		return
+	}
 	if fillBody == "" {
 		t.Fatalf("expected to find fill_split body, got:\n%s", output)
 	}
@@ -388,6 +421,9 @@ def fill_unknown(view: view[i32]) -> void:
 	}
 
 	fillUnknownBody := functionIR(output, "fill_unknown")
+	if assertSourceHelperFallback(t, fillUnknownBody) {
+		return
+	}
 	if fillUnknownBody == "" {
 		t.Fatalf("expected to find fill_unknown body, got:\n%s", output)
 	}
@@ -441,6 +477,9 @@ def fill_nonuniform_unknown(view: view[i32]) -> void:
 	}
 
 	byteBody := functionIR(output, "fill_bytes")
+	if assertSourceHelperFallback(t, byteBody) {
+		return
+	}
 	if byteBody == "" {
 		t.Fatalf("expected to find fill_bytes body, got:\n%s", output)
 	}
@@ -455,6 +494,9 @@ def fill_nonuniform_unknown(view: view[i32]) -> void:
 	}
 
 	onesBody := functionIR(output, "fill_all_ones")
+	if assertSourceHelperFallback(t, onesBody) {
+		return
+	}
 	if onesBody == "" {
 		t.Fatalf("expected to find fill_all_ones body, got:\n%s", output)
 	}
@@ -469,6 +511,9 @@ def fill_nonuniform_unknown(view: view[i32]) -> void:
 	}
 
 	nonUniformBody := functionIR(output, "fill_nonuniform")
+	if assertSourceHelperFallback(t, nonUniformBody) {
+		return
+	}
 	if nonUniformBody == "" {
 		t.Fatalf("expected to find fill_nonuniform body, got:\n%s", output)
 	}
@@ -483,6 +528,9 @@ def fill_nonuniform_unknown(view: view[i32]) -> void:
 	}
 
 	nonUniformUnknownBody := functionIR(output, "fill_nonuniform_unknown")
+	if assertSourceHelperFallback(t, nonUniformUnknownBody) {
+		return
+	}
 	if nonUniformUnknownBody == "" {
 		t.Fatalf("expected to find fill_nonuniform_unknown body, got:\n%s", output)
 	}

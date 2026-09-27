@@ -197,14 +197,6 @@ static elif ARENA_BACKEND == ARENA_BACKEND_WASM_HEAPBASE:
     # Elisa's arena and JS-created strings/byte buffers on one collision-free heap.
     const ARENA_WASM_USES_HOST_ALLOCATOR: bool = true
 
-# ------------------------------------------------------------
-# Small utilities
-# ------------------------------------------------------------
-
-def assert(condition: bool):
-    can Abort.Panic:
-        panic("assert failed") if not condition
-
 # The default reserve_commit reservation, sized to the TARGET'S POINTER WIDTH.
 #
 # 256 MiB of address space is free on a 64-bit demand-paged target. It is not free anywhere

@@ -258,6 +258,7 @@ func (s *functionState) emitPointerArithmeticExpr(expr *ast.BinaryExpr, leftType
 	ptr := C.LLVMBuildGEP2(s.builder, elemLLVMType, baseValue, llvmValueSlicePtr(indices), C.unsigned(len(indices)), cStringFree("ptrarith"))
 	return ptr, resultType, true, nil
 }
+
 // emitStringCompareOperandValue materializes a string-compare operand as a VALUE of
 // valueType. When the operand expression is a reference to a view (`sview&`, e.g. a
 // `dict.get` result bound via `is`), emitExpr on it yields the pointer, not the aggregate —
@@ -526,6 +527,9 @@ func (s *functionState) emitSpecializedRuntimeCall(expr *ast.CallExpr) (C.LLVMVa
 	if ident.Name != "string_view_eq" && ident.Name != "ctx_string_view_eq" {
 		return nil, nil, false, nil
 	}
+	if !s.g.result.IsCompilerBuiltinHelperCall(expr, ident.Name) {
+		return nil, nil, false, nil
+	}
 	if len(expr.Args) != 2 {
 		return nil, nil, false, nil
 	}
@@ -641,6 +645,9 @@ func (s *functionState) constantCStrSliceCall(expr ast.Expr) (ast.Expr, semantic
 	case *ast.CallExpr:
 		ident, ok := n.Func.(*ast.Ident)
 		if !ok || ident.Name != "ctx_string_slice" || len(n.Args) != 3 {
+			return nil, nil, 0, 0, false
+		}
+		if s == nil || s.g == nil || s.g.result == nil || !s.g.result.IsCompilerBuiltinHelperCall(n, ident.Name) {
 			return nil, nil, 0, 0, false
 		}
 		baseExpr := n.Args[0]

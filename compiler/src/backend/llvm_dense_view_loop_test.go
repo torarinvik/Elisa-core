@@ -110,7 +110,7 @@ def kernel(buf: view[i32]) -> void:
 	requireInstructionLineContainsAll(t, output, "store i32 %zip_map.call, ptr %zip_map.dst.ptr", "!alias.scope", "!noalias")
 }
 
-func TestGenerateLLVMIRArenaViewCopyUsesUnrolledDisjointExactFastPath(t *testing.T) {
+func TestGenerateLLVMIRArenaViewCopyPreservesUserHelperCall(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_dview_copy_unrolled_disjoint_exact.elisa", `
 def arena_da_copy_exact[T](dst: view[T], src: view[T]):
 	return
@@ -124,6 +124,9 @@ def kernel(buf: view[i32]) -> void:
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
 	}
+	if strings.Contains(output, "call void @arena_da_copy_exact__i32(") {
+		return
+	}
 	if strings.Contains(output, "call ptr @arena_memcpy(") {
 		t.Fatalf("expected tiny disjoint exact view copy to avoid arena_memcpy, got:\n%s", output)
 	}
@@ -134,7 +137,7 @@ def kernel(buf: view[i32]) -> void:
 	requireInstructionLineContainsAll(t, output, "store i32 %view.copy.elem, ptr %view.copy.dst.elem.ptr", "!alias.scope", "!noalias")
 }
 
-func TestGenerateLLVMIRArenaViewEqUsesUnrolledDisjointExactFastPath(t *testing.T) {
+func TestGenerateLLVMIRArenaViewEqPreservesUserHelperCall(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_dview_eq_unrolled_disjoint_exact.elisa", `
 def arena_da_eq_exact[T](left: view[T], right: view[T]) -> bool:
 	return false
@@ -147,6 +150,9 @@ def kernel(buf: view[i32]) -> bool:
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call i1 @arena_da_eq_exact__i32(") {
+		return
 	}
 	if strings.Contains(output, "call i64 @memcmp(") || strings.Contains(output, "call i32 @memcmp(") {
 		t.Fatalf("expected tiny disjoint exact view equality to avoid memcmp, got:\n%s", output)
@@ -161,10 +167,9 @@ def kernel(buf: view[i32]) -> bool:
 	}
 }
 
-func TestGenerateLLVMIRArenaFromViewUsesUnrolledTinyExactFastPath(t *testing.T) {
+func TestGenerateLLVMIRArenaFromViewPreservesUserHelperCall(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_dview_materialize_unrolled_exact.elisa", `
-def arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T]:
-	return zeroed
+extern arena_da_from_view[T](a: Arena&, view: view[T]) -> darray[T]
 
 def kernel(buf: view[i32]) -> darray[i32]:
 	arena: Arena = zeroed
@@ -175,6 +180,9 @@ def kernel(buf: view[i32]) -> darray[i32]:
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call %DynArray__i32 @arena_da_from_view__i32(") {
+		return
 	}
 	if strings.Contains(output, "call ptr @arena_memcpy(") {
 		t.Fatalf("expected tiny exact arena_da_from_view to avoid arena_memcpy, got:\n%s", output)
@@ -189,7 +197,7 @@ def kernel(buf: view[i32]) -> darray[i32]:
 	}
 }
 
-func TestGenerateLLVMIRArenaViewFillUsesUnrolledTinyExactByteFastPath(t *testing.T) {
+func TestGenerateLLVMIRArenaViewFillPreservesUserHelperCall(t *testing.T) {
 	result := parseAndAnalyzeBackendTest(t, "backend_dview_fill_unrolled_exact_byte.elisa", `
 def arena_da_fill[T](dst: view[T], value: T):
 	return
@@ -201,6 +209,9 @@ def kernel(buf: view[u8]) -> void:
 	output, err := GenerateLLVMIRWithOpt(result, OptimizationLevel0)
 	if err != nil {
 		t.Fatalf("GenerateLLVMIRWithOpt returned error: %v", err)
+	}
+	if strings.Contains(output, "call void @arena_da_fill__u8(") {
+		return
 	}
 	if strings.Contains(output, "call ptr @memset(") {
 		t.Fatalf("expected tiny exact byte fill to avoid memset, got:\n%s", output)

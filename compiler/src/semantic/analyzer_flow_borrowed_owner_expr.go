@@ -296,11 +296,15 @@ func (a *Analyzer) borrowedOwnerRefStateForProofCarryingViewCall(call *ast.CallE
 	if a == nil || call == nil || len(call.Args) == 0 {
 		return borrowedOwnerRefState{}, false
 	}
+	helperName := callIdentName(call)
+	if !a.isCompilerBuiltinHelperCall(call, helperName) {
+		return borrowedOwnerRefState{}, false
+	}
 	sourceState, ok := a.borrowedOwnerRefStateForExpr(call.Args[0])
 	if !ok || !hasBorrowedOwnerRefState(sourceState) {
 		return borrowedOwnerRefState{}, false
 	}
-	switch callIdentName(call) {
+	switch helperName {
 	case "readonly":
 		return cloneBorrowedOwnerRefState(sourceState), true
 	case "split_at":

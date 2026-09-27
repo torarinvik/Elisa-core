@@ -61,6 +61,28 @@ func functionIR(output string, name string) string {
 	}
 	return output[start : idx+endOffset]
 }
+
+// assertSourceHelperFallback confirms that a source-written call to one of the
+// compiler-specialized runtime helper names remains an ordinary call. These
+// names are not reserved intrinsics: spelling alone cannot authorize replacing
+// the user's implementation with compiler semantics.
+func assertSourceHelperFallback(t *testing.T, body string) bool {
+	t.Helper()
+	for _, name := range []string{
+		"memcpy", "arena_memcpy", "arena_da_copy_exact", "arena_da_eq_exact",
+		"arena_da_from_view", "arena_da_fill", "ctx_string_slice_eq",
+		"ctx_string_slices_eq", "ctx_string_slice", "string_view_copy",
+		"ctx_string_from_view", "ctx_streq", "ctx_string_view_eq",
+		"string_view_eq", "ctx_string_views_eq", "string_views_eq",
+	} {
+		if strings.Contains(body, "call ") && strings.Contains(body, "@"+name) {
+			t.Logf("preserved ordinary call to source-defined helper %q", name)
+			return true
+		}
+	}
+	return false
+}
+
 func requireInstructionLineContainsAll(t *testing.T, output string, needle string, want ...string) {
 	t.Helper()
 	for _, line := range strings.Split(output, "\n") {
@@ -142,6 +164,121 @@ def read_box(box: Box&) -> i32:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestUserDefinedAssertCallKeepsItsImplementation(t *testing.T) {
+	src := `def assert(condition: bool) -> void:
+    pass
+
+def check() -> void:
+    assert(false)
+`
+	result := parseAndAnalyze(t, "backend_shadowed_assert.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	body := functionIR(output, "check")
+	if body == "" {
+		t.Fatalf("expected check function in LLVM IR, got:\n%s", output)
+	}
+	if !strings.Contains(body, "call void @assert(") {
+		t.Fatalf("expected ordinary call to user-defined assert, got:\n%s", body)
+	}
+	if strings.Contains(body, "assertion failed") || strings.Contains(body, "llvm.trap") {
+		t.Fatalf("user-defined assert was lowered as a compiler assertion, got:\n%s", body)
+	}
+}
+
+func TestUserDefinedHashHelperKeepsItsImplementation(t *testing.T) {
+	src := `def ctx_hash_value(key: i32) -> u64:
+    return 7
+
+def hash_key(key: i32) -> u64:
+    return ctx_hash_value(key)
+`
+	result := parseAndAnalyze(t, "backend_shadowed_hash_helper.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	body := functionIR(output, "hash_key")
+	if body == "" {
+		t.Fatalf("expected hash_key function in LLVM IR, got:\n%s", output)
+	}
+	if !strings.Contains(body, "call i64 @ctx_hash_value") {
+		t.Fatalf("expected ordinary call to user-defined ctx_hash_value, got:\n%s", body)
+	}
+	if strings.Contains(body, "ctx_hash_u64") || strings.Contains(body, "ctx_hash_cstr") {
+		t.Fatalf("user-defined hash helper was lowered with compiler hash semantics, got:\n%s", body)
+	}
+}
+
+func TestUserDefinedCompilerHelperNamesKeepTheirImplementations(t *testing.T) {
+	src := `def freeze(value: i32) -> i32:
+    return value
+
+def dense_key(left: i32, right: i32) -> i32:
+    return left + right
+
+def clone[T](value: T) -> T:
+    return value
+
+def copy[T](value: T) -> T:
+    return value
+
+def use_freeze(value: i32) -> i32:
+    return freeze(value)
+
+def use_dense_key(left: i32, right: i32) -> i32:
+    return dense_key(left, right)
+
+def use_clone(value: i32) -> i32:
+    return clone[i32](value)
+
+def use_copy(value: i32) -> i32:
+    return copy[i32](value)
+`
+	result := parseAndAnalyze(t, "backend_shadowed_compiler_helpers.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	for _, name := range []string{"use_freeze", "use_dense_key", "use_clone", "use_copy"} {
+		body := functionIR(output, name)
+		if body == "" {
+			t.Fatalf("expected %s function in LLVM IR, got:\n%s", name, output)
+		}
+		if !strings.Contains(body, "call ") {
+			t.Fatalf("expected %s to retain an ordinary user-helper call, got:\n%s", name, body)
+		}
+	}
+}
+
+func TestUserDefinedFStringInternalNameDoesNotCaptureSourceCall(t *testing.T) {
+	src := `def __fstr(value: i32) -> i32:
+    return value
+
+def explicit_call(value: i32) -> i32:
+    return __fstr(value)
+
+def formatted(name: sview) -> dstr:
+    can Memory.Allocate, Abort.Panic:
+        return f"hello {name}"
+`
+	result := parseAndAnalyze(t, "backend_user_defined_fstr_name.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	callBody := functionIR(output, "explicit_call")
+	if !strings.Contains(callBody, "call i32 @__fstr") {
+		t.Fatalf("explicit source call to __fstr was not preserved:\n%s", callBody)
+	}
+	formattedBody := functionIR(output, "formatted")
+	if !strings.Contains(formattedBody, "ctx_fstr_alloc") {
+		t.Fatalf("parser-generated f-string did not use builtin lowering:\n%s", formattedBody)
 	}
 }
 func TestGenerateLLVMIRLowersNestedStructLiterals(t *testing.T) {
@@ -490,5 +627,32 @@ def call_touch(value: i32) -> i32:
 		if !strings.Contains(output, check) {
 			t.Fatalf("expected output to contain %q, got:\n%s", check, output)
 		}
+	}
+}
+
+func TestUserDefinedStringViewEqualityHelperKeepsItsImplementation(t *testing.T) {
+	src := `struct StringView:
+	data: u8&
+	len: i64
+
+def ctx_string_view_eq(left: StringView, right: StringView) -> int:
+	_ = left
+	_ = right
+	return 0
+
+def check(left: StringView, right: StringView) -> bool:
+	return ctx_string_view_eq(left, right) != 0
+`
+	result := parseAndAnalyze(t, "backend_user_defined_string_view_eq.elisa", src)
+	output, err := backend.GenerateLLVMIR(result)
+	if err != nil {
+		t.Fatalf("GenerateLLVMIR returned error: %v", err)
+	}
+	body := functionIR(output, "check")
+	if body == "" {
+		t.Fatalf("expected to find check body, got:\n%s", output)
+	}
+	if !strings.Contains(body, "call i64 @ctx_string_view_eq(") {
+		t.Fatalf("expected check to call the user-defined helper instead of compiler equality lowering, got:\n%s", body)
 	}
 }

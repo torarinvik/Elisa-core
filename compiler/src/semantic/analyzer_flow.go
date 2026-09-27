@@ -1085,7 +1085,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 	case *ast.PanicStmt:
 		a.analyzeExpr(n.Message)
 	case *ast.ExprStmt:
-		if cond, ok := assertedCondition(n.Expr); ok {
+		if cond, ok := a.assertedCondition(n.Expr); ok {
 			// An `assert` is a contract: ghost vars are readable here (it is debug-checked / erased
 			// in release, never observable by real values).
 			a.ghostReadAllowed++
@@ -1097,6 +1097,9 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			}
 			if !IsBoolType(condType) && !IsInvalidType(condType) {
 				a.errorf(n.Pos(), "assert condition must be bool, got %s", condType)
+			}
+			if call, ok := n.Expr.(*ast.CallExpr); ok {
+				a.recordBuiltinHelperFuncType(call, callIdentName(call), condType)
 			}
 			// docs/98 — proof holes: under strict proofs a plain `assert` is held to the same
 			// prove-it-or-fail bar as `assert … by:`. Discharge BEFORE the cond is recorded as a
