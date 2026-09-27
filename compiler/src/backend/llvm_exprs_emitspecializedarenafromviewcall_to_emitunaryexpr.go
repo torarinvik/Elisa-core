@@ -364,6 +364,13 @@ func (s *functionState) emitStringViewStaticLiteralEqual(viewExpr ast.Expr, view
 	if err != nil {
 		return nil, err
 	}
+	return s.emitStringViewValueStaticLiteralEqual(viewValue, literalExpr, literalText)
+}
+
+// emitStringViewValueStaticLiteralEqual lowers the literal comparison from an
+// already evaluated view value. Match scrutinees use this form so a call or
+// other effectful expression is never emitted a second time for each arm.
+func (s *functionState) emitStringViewValueStaticLiteralEqual(viewValue C.LLVMValueRef, literalExpr ast.Expr, literalText string) (C.LLVMValueRef, error) {
 	viewData := C.LLVMBuildExtractValue(s.builder, viewValue, 0, cStringFree("svlit.data"))
 	viewLen := C.LLVMBuildExtractValue(s.builder, viewValue, 1, cStringFree("svlit.len"))
 	literalLen := len([]byte(literalText))

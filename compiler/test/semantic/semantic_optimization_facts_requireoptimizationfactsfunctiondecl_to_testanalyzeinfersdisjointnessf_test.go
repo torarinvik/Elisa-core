@@ -197,15 +197,15 @@ def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
-	return StringView{data: "", len: 0}
+	trusted Unsafe.PointerCast:
+		return StringView{data: "", len: 0}
 
 def string_view_slice(view: StringView, start: i64, end: i64) -> StringView:
 	_ = start
 	_ = end
 	return view
 
-def string_view_copy(view: StringView) -> u8&:
-	return view.data
+extern string_view_copy(view: StringView) -> cstr[shape_out]
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)
@@ -430,7 +430,8 @@ def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	_ = value
 	_ = start
 	_ = end
-	return StringView{data: "", len: 0}
+	trusted Unsafe.PointerCast:
+		return StringView{data: "", len: 0}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)

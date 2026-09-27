@@ -312,22 +312,37 @@ def bad() -> int:
 		t.Fatalf("expected StringView to stay out of user-facing generic diagnostics, got:\n%s", all)
 	}
 }
-func TestAnalyzeDStrRuntimeBridgeWorksBothDirections(t *testing.T) {
+func TestAnalyzeCStrBridgeAllowsOnlyTerminatorPreservingDirection(t *testing.T) {
 	src := `def take_raw(text: u8&) -> void:
 	pass
 
 def take_logical(text: cstr[shape_text]) -> void:
 	pass
 
-def roundtrip(text: cstr[row], raw: u8&) -> cstr[row]:
+def safe_cstr_to_raw(text: cstr[row]) -> u8&:
 	take_raw(text)
-	take_logical(raw)
-	bridged: cstr[row] = raw
 	raw_value: u8& = text
 	return raw_value
+
+def reject_unterminated_raw(raw: u8&) -> cstr[row]:
+	take_logical(raw)
+	bridged: cstr[row] = raw
+	return raw
 `
 	_, errs := parseAndAnalyze(t, "cstr_runtime_bridge_roundtrip.elisa", src)
-	requireNoErrors(t, errs)
+	if len(errs) != 3 {
+		t.Fatalf("expected exactly the three unsafe raw-to-cstr conversions to be rejected, got %d errors:\n%s", len(errs), strings.Join(errs, "\n"))
+	}
+	all := strings.Join(errs, "\n")
+	for _, expected := range []string{
+		`argument 1 to "take_logical" expects cstr[shape_text], got u8&`,
+		`variable "bridged" expects cstr[row], got u8&`,
+		`return type expects cstr[row], got u8&`,
+	} {
+		if !strings.Contains(all, expected) {
+			t.Fatalf("expected rejection %q while preserving the cstr-to-u8& control, got:\n%s", expected, all)
+		}
+	}
 }
 func TestAnalyzeDArrayViewUsesDynArrayViewRuntimeFields(t *testing.T) {
 	src := `def non_empty[T](view: view[T]) -> bool:

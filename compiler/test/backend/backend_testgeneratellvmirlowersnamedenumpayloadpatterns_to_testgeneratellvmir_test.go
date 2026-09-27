@@ -428,6 +428,7 @@ error IoError:
 
 extern alloc(size: usize) -> heap void&?
 extern read_file(path: u8&) -> cstr[file_text] error[IoError]
+extern empty_file_text() -> cstr[file_text]
 
 def checked_alloc(size: usize) -> heap void& error[MemoryError]:
 	ptr: heap void& = get alloc(size) else raise MemoryError.OutOfMemory
@@ -437,12 +438,12 @@ def load_text(path: u8&) -> cstr[file_text] error[IoError]:
 	text: cstr[file_text] = try read_file(path)
 	return text
 
-def load_with_fallback(path: u8&) -> u8&:
-	text: u8& = try read_file(path) else "".cast[u8&]
+def load_with_fallback(path: u8&) -> cstr[file_text]:
+	text: cstr[file_text] = try read_file(path) else empty_file_text()
 	return text
 
-def load_with_default(path: u8&) -> u8&:
-	text: u8& = try read_file(path) else "".cast[u8&]
+def load_with_default(path: u8&) -> cstr[file_text]:
+	text: cstr[file_text] = try read_file(path) else empty_file_text()
 	return text
 `
 	result := parseAndAnalyze(t, "backend_error_handling.elisa", src)

@@ -31,9 +31,9 @@ def arena_da_view_slice[T](view: view[T], start: usize, end: usize) -> view[T]:
 	return view
 
 def arena_da_view_get[T](view: view[T], index: usize) -> T:
-	_ = view
-	_ = index
-	return zeroed
+	assert index < view.len
+	assert view.data != null
+	return view[index]
 
 def use(values: darray[i32, row]&) -> i32:
 	view: view[i32] = arena_da_view(values, 0, values.count)

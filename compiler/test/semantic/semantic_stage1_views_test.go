@@ -13,7 +13,8 @@ func TestAnalyzeStage1StringViewWrappersSupportBoundedViews(t *testing.T) {
 	len: mutable i64
 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
-	return StringView{data: "", len: 0}
+	trusted Unsafe.PointerCast:
+		return StringView{data: "", len: 0}
 
 def string_view_len(view: StringView) -> i64:
 	return view.len
@@ -21,8 +22,7 @@ def string_view_len(view: StringView) -> i64:
 def string_view_index(view: StringView, index: i64) -> i64:
 	return -1
 
-def string_view_copy(view: StringView) -> u8&:
-	return view.data
+extern string_view_copy(view: StringView) -> cstr[shape_out]
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)
@@ -61,7 +61,8 @@ func TestAnalyzeStage1StringViewHelpersAcceptSubviewAndEquality(t *testing.T) {
 	len: mutable i64
 
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
-	return StringView{data: "", len: 0}
+	trusted Unsafe.PointerCast:
+		return StringView{data: "", len: 0}
 
 def string_view_len(view: StringView) -> i64:
 	return view.len

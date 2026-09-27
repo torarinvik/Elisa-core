@@ -315,14 +315,16 @@ extern intern_small_string(src: u8&, len: usize) -> heap u8&
 def sview(value: u8&?, start: i64, end: i64) -> StringView:
 	src: u8& = value if value != null else "".cast[u8&]
 	_ = start
-	return StringView{data: src, len: end}
+	trusted Unsafe.PointerCast:
+		return StringView{data: src, len: end}
 
 def ctx_string_view(value: cstr[shape_in], start: i64, end: i64) -> StringView:
 	return sview(value, start, end)
 
-def string_view_copy(view: StringView) -> heap u8&:
+def string_view_copy(view: StringView) -> cstr[shape_out]:
 	_ = view
-	return intern_small_string("".cast[u8&], 0)
+	trusted Unsafe.PointerCast:
+		return intern_small_string("".cast[u8&], 0).cast[cstr]
 
 def ctx_string_from_view(view: StringView) -> cstr[shape_out]:
 	return string_view_copy(view)

@@ -387,7 +387,7 @@ func TestAnalyzeStrictUnsafeHeapFixedBufferCastsStayInternal(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_owns_ptr")
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_owns_range")
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_is_last_allocation")
-	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_align")
+	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_align", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_resize")
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_align_or_panic", "Abort.Panic")
 	requireFunctionPermissionRefs(t, result, "fixed_buffer_alloc_or_panic", "Abort.Panic")
@@ -445,8 +445,8 @@ func TestAnalyzePinsRuntimePreludeHeapPointerContracts(t *testing.T) {
 	requireFunctionReturnTypeString(t, result, "alloc_perm", "heap mutable void&")
 	requireFunctionReturnTypeString(t, result, "alloc_scratch", "heap mutable void&")
 	requireFunctionReturnTypeString(t, result, "intern_small_string", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "int_to_string_into", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "char_to_string_into", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "int_to_string_into", "cstr")
+	requireFunctionReturnTypeString(t, result, "char_to_string_into", "cstr")
 }
 func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	repoRoot := repoRootFromTestFile(t)
@@ -462,11 +462,11 @@ func TestAnalyzePinsRuntimeStage1BuiltinPermissionContracts(t *testing.T) {
 	requireFunctionPermissionRefs(t, result, "rt_int_to_string", "Memory.Allocate", "Console.Format", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_char_to_string", "Memory.Allocate", "Abort.Panic", "Global.Read", "Global.Write")
 	requireFunctionPermissionRefs(t, result, "rt_puts", "Console.Write")
-	requireFunctionReturnTypeString(t, result, "int_to_string", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "char_to_string", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "char_to_string_scratch", "heap u8&")
-	requireFunctionReturnTypeString(t, result, "string_view_copy", "heap u8&")
+	requireFunctionReturnTypeString(t, result, "int_to_string", "cstr")
+	requireFunctionReturnTypeString(t, result, "int_to_string_scratch", "cstr")
+	requireFunctionReturnTypeString(t, result, "char_to_string", "cstr")
+	requireFunctionReturnTypeString(t, result, "char_to_string_scratch", "cstr")
+	requireFunctionReturnTypeString(t, result, "string_view_copy", "cstr")
 }
 func TestAnalyzeAcceptsValueOptionalsAndTryElse(t *testing.T) {
 	src := `def maybe_value(flag: bool) -> int?:

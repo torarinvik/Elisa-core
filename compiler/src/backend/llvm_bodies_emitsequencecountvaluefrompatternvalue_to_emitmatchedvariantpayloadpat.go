@@ -682,6 +682,34 @@ func (s *functionState) emitLiteralMatchPatternTest(literalExpr ast.Expr, actual
 			literalType = actualType
 		}
 	}
+	if literalText, ok := s.staticCStringLiteral(literalExpr); ok && classifyRuntimeStringCompareKind(actualType) == runtimeStringCompareView {
+		// `actualValue` is the scrutinee already evaluated by the match lowering.
+		// Reusing it preserves exactly-once evaluation while applying the same
+		// length/null-guarded tiny-literal path used by view equality.
+		if _, isStringLiteral := literalExpr.(*ast.StringLit); isStringLiteral {
+			viewType := actualType
+			if ref, isReference := actualType.(*semantic.RefType); isReference {
+				if _, isView := ref.Elem.(*semantic.SViewType); isView {
+					viewType = ref.Elem
+					var err error
+					actualValue, err = s.loadValue(actualValue, viewType, "match.sview")
+					if err != nil {
+						return err
+					}
+				} else {
+					viewType = nil
+				}
+			}
+			if viewType != nil {
+				cmp, err := s.emitStringViewValueStaticLiteralEqual(actualValue, literalExpr, literalText)
+				if err != nil {
+					return err
+				}
+				C.LLVMBuildCondBr(s.builder, cmp, successBB, failureBB)
+				return nil
+			}
+		}
+	}
 	if helperName, firstType, secondType, swap, ok := runtimeStringCompareInfo(actualType, literalType); ok {
 		cmp, err := s.emitRuntimeStringCompareLiteralValue(actualValue, literalExpr, literalType, helperName, firstType, secondType, swap)
 		if err != nil {

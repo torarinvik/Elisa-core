@@ -329,7 +329,9 @@ def unwrap_or(value: MaybeInt, fallback: int) -> int:
 	}
 }
 func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *testing.T) {
-	src := `def classify(text: StringView) -> int:
+	src := `extern next_view() -> StringView
+
+def classify(text: StringView) -> int:
 	match text:
 		"if":
 			return 1
@@ -338,6 +340,13 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *tes
 		_:
 			return 0
 	return 0
+
+def classify_call() -> int:
+	match next_view():
+		"if":
+			return 1
+		_:
+			return 0
 `
 	result := parseAndAnalyze(t, "backend_string_match_stmt_fast_path.elisa", src)
 	output, err := backend.GenerateLLVMIR(result)
@@ -367,6 +376,13 @@ func TestGenerateLLVMIRLowersStringMatchStatementsWithTinyLiteralFastPath(t *tes
 	}
 	if strings.Count(body, "icmp eq i8") < 2 {
 		t.Fatalf("expected classify to compare literal bytes directly for both string arms, got:\n%s", body)
+	}
+	callBody := functionIR(output, "classify_call")
+	if strings.Count(callBody, "call %StringView @next_view(") != 1 {
+		t.Fatalf("expected the effectful match scrutinee to be evaluated exactly once, got:\n%s", callBody)
+	}
+	if strings.Contains(callBody, "ctx_string_views_eq") {
+		t.Fatalf("expected the already-evaluated view to use the literal fast path, got:\n%s", callBody)
 	}
 }
 func TestGenerateLLVMIRLowersStringMatchStatementsWithoutPhi(t *testing.T) {
