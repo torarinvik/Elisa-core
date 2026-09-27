@@ -28,8 +28,12 @@ include "../../compiler/runtime/elisacore_std/elisacore_json.elisa"
 # (repro/nw_json_hex_escape_literal_stage1.elisa).
 
 # ------------------------------------------------------------
-# Canonical dump (built only from the module's public accessors)
+# Canonical dump (built only from the module's public handle accessors)
 # ------------------------------------------------------------
+#
+# The raw `JsonValue` DOM is private to module `Json` (its variants carry arena
+# addresses), so everything below goes through `JsonValueHandle[r]`, whose type
+# names the region of the arena the document was parsed into.
 
 # A const cstr global indexed here would decline under stage1's backend, so the
 # hex digit is arithmetic.
@@ -59,11 +63,17 @@ def emit_hex_bytes(out: mutable darray[u8]&, text: sview):
             out.push(hex_digit((byte >> 4) & 15))
             out.push(hex_digit(byte & 15))
 
+# Copies exactly the bytes snprintf reports, bounded by the buffer, rather than
+# re-scanning the stack buffer as a C string.
 def emit_f64_exact(out: mutable darray[u8]&, value: f64):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         buffer: mutable u8[64]
-        _ = snprintf((&buffer[0]).cast[u8&?], 64.usize(), "%.17g", value)
-        emit_text(out, sview(&buffer[0], 0, -1))
+        written: i32 = snprintf((&buffer[0]).cast[u8&?], 64.usize(), "%.17g", value)
+        count: mutable i64 = written.i64()
+        count <- 0 if count < 0
+        count <- 63 if count > 63
+        for index in 0..<count:
+            out.push(buffer[index])
 
 def emit_string_dump(out: mutable darray[u8]&, body: sview):
     can Memory.Allocate, Abort.Panic:
@@ -72,45 +82,45 @@ def emit_string_dump(out: mutable darray[u8]&, body: sview):
         out.push(58)
         emit_hex_bytes(out, body)
 
-def dump_value(out: mutable darray[u8]&, value: JsonValue):
+def dump_value[@r](out: mutable darray[u8]&, value: JsonValueHandle[r]):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        kind: JsonKind = json_kind(value)
+        kind: JsonKind = json_handle_kind(value)
         if kind == JsonKind.NULL:
             out.push(78)
             return
         if kind == JsonKind.BOOL:
             emit_text(out, sview("B:", 0, -1))
-            flag: bool = try json_as_bool(value) else false
+            flag: bool = try json_handle_as_bool(value) else false
             out.push(49) if flag
             out.push(48) if not flag
             return
         if kind == JsonKind.NUMBER:
             emit_text(out, sview("D:", 0, -1))
-            emit_f64_exact(out, try json_as_number(value) else 0.0)
+            emit_f64_exact(out, try json_handle_as_number(value) else 0.0)
             return
         if kind == JsonKind.STRING:
-            emit_string_dump(out, try json_as_string(value) else sview("", 0, 0))
+            emit_string_dump(out, try json_handle_as_string(value) else sview("", 0, 0))
             return
         if kind == JsonKind.ARRAY:
-            count: i64 = json_array_len(value)
+            count: i64 = json_handle_array_len(value)
             emit_text(out, sview("A:", 0, -1))
             emit_i64(out, count)
             out.push(40)
             for index in 0..<count:
                 out.push(32) if index > 0
-                item: JsonValue = try json_at(value, index) else json_null()
+                item: JsonValueHandle[r] = try json_handle_at(value, index) else json_handle_null(value)
                 dump_value(out, item)
             out.push(41)
             return
-        count: i64 = json_object_len(value)
+        count: i64 = json_handle_object_len(value)
         emit_text(out, sview("O:", 0, -1))
         emit_i64(out, count)
         out.push(40)
         for index in 0..<count:
             out.push(32) if index > 0
-            emit_string_dump(out, try json_key_at(value, index) else sview("", 0, 0))
+            emit_string_dump(out, try json_handle_key_at(value, index) else sview("", 0, 0))
             out.push(61)
-            member: JsonValue = try json_value_at(value, index) else json_null()
+            member: JsonValueHandle[r] = try json_handle_value_at(value, index) else json_handle_null(value)
             dump_value(out, member)
         out.push(41)
 
@@ -118,38 +128,40 @@ def dump_value(out: mutable darray[u8]&, value: JsonValue):
 # Assertions
 # ------------------------------------------------------------
 
-def parse_or_fail(a: mutable Arena&, text: cstr) -> JsonValue:
+def parse_or_fail[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r]:
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        outcome: JsonParseResult = json_parse_checked(a, sview(text, 0, -1))
+        outcome: JsonParseResult[r] = json_parse_checked(a, sview(text, 0, -1))
         fail("expected a valid document") if outcome.code != JsonErrorCode.OK
-        return outcome.value
+        return json_handle_from_result(outcome)
 
 # Parse `text`, dump it canonically and compare against CPython's dump.
-def check_parity(a: mutable Arena&, text: cstr, expected: cstr):
+def check_parity[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        value: JsonValue = parse_or_fail(a, text)
+        value: JsonValueHandle[r] = parse_or_fail(a, text)
         in a:
             actual: mutable darray[u8] = []
             dump_value(&actual, value)
             assert_true(sview_eq(bytes_view(actual), sview(expected, 0, -1)))
 
 # Parse, serialise, and check the serialisation parses back to the same dump.
-def check_roundtrip(a: mutable Arena&, text: cstr, expected: cstr):
+def check_roundtrip[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        value: JsonValue = parse_or_fail(a, text)
+        value: JsonValueHandle[r] = parse_or_fail(a, text)
+        written: darray[u8] = json_handle_write(a, value)
+        reparsed: JsonParseResult[r] = json_parse_checked(a, bytes_view(written))
+        fail("serialised output did not parse back") if reparsed.code != JsonErrorCode.OK
         in a:
-            written: mutable darray[u8] = json_write(a, value)
-            reparsed: JsonParseResult = json_parse_checked(a, bytes_view(written))
-            fail("serialised output did not parse back") if reparsed.code != JsonErrorCode.OK
             again: mutable darray[u8] = []
-            dump_value(&again, reparsed.value)
+            dump_value(&again, json_handle_from_result(reparsed))
             assert_true(sview_eq(bytes_view(again), sview(expected, 0, -1)))
 
-def check_rejected(a: mutable Arena&, text: cstr, code: i64, pos: i64):
+def check_rejected[@r](a: mutable Arena& @r, text: cstr, code: i64, pos: i64):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        outcome: JsonParseResult = json_parse_checked(a, sview(text, 0, -1))
+        outcome: JsonParseResult[r] = json_parse_checked(a, sview(text, 0, -1))
         assert_eq(outcome.code.i64(), code)
         assert_eq(outcome.pos, pos)
+        # A rejected document still yields a usable (null) handle.
+        assert_true(json_handle_is_null(json_handle_from_result(outcome)))
         # The raising surface must agree with the checked one.
         catch json_parse(a, sview(text, 0, -1)):
             ok:
@@ -157,23 +169,23 @@ def check_rejected(a: mutable Arena&, text: cstr, code: i64, pos: i64):
             error e:
                 assert_true(true)
 
-def check_number(a: mutable Arena&, text: cstr, expected: f64):
+def check_number[@r](a: mutable Arena& @r, text: cstr, expected: f64):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        value: JsonValue = parse_or_fail(a, text)
-        assert_true(json_is_number(value))
-        assert_eq(try json_as_number(value) else -1.0, expected)
+        value: JsonValueHandle[r] = parse_or_fail(a, text)
+        assert_true(json_handle_is_number(value))
+        assert_eq(try json_handle_as_number(value) else -1.0, expected)
 
-def check_string(a: mutable Arena&, text: cstr, expected: sview):
+def check_string[@r](a: mutable Arena& @r, text: cstr, expected: sview):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        value: JsonValue = parse_or_fail(a, text)
-        assert_true(json_is_string(value))
-        decoded: sview = try json_as_string(value) else sview("", 0, 0)
+        value: JsonValueHandle[r] = parse_or_fail(a, text)
+        assert_true(json_handle_is_string(value))
+        decoded: sview = try json_handle_as_string(value) else sview("", 0, 0)
         assert_true(sview_eq(decoded, expected))
 
-def check_serialises_to(a: mutable Arena&, text: cstr, expected: cstr):
+def check_serialises_to[@r](a: mutable Arena& @r, text: cstr, expected: cstr):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        value: JsonValue = parse_or_fail(a, text)
-        assert_true(sview_eq(sview(json_to_cstr(a, value), 0, -1), sview(expected, 0, -1)))
+        value: JsonValueHandle[r] = parse_or_fail(a, text)
+        assert_true(sview_eq(sview(json_handle_to_cstr(a, value), 0, -1), sview(expected, 0, -1)))
 
 # ------------------------------------------------------------
 # Building control bytes at run time
@@ -196,28 +208,28 @@ def bytes3(a: mutable Arena&, prefix: cstr, byte: u8, suffix: cstr) -> sview:
 # Scalars and type tests
 # ------------------------------------------------------------
 
-def scalar_tests(a: mutable Arena&):
+def scalar_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        null_value: JsonValue = parse_or_fail(a, "null")
-        assert_true(json_is_null(null_value))
-        assert_true(json_kind(null_value) == JsonKind.NULL)
-        assert_false(json_is_bool(null_value))
+        null_value: JsonValueHandle[r] = parse_or_fail(a, "null")
+        assert_true(json_handle_is_null(null_value))
+        assert_true(json_handle_kind(null_value) == JsonKind.NULL)
+        assert_false(json_handle_is_bool(null_value))
 
-        yes: JsonValue = parse_or_fail(a, "true")
-        assert_true(json_is_bool(yes))
-        assert_true(json_kind(yes) == JsonKind.BOOL)
-        assert_true(try json_as_bool(yes) else false)
+        yes: JsonValueHandle[r] = parse_or_fail(a, "true")
+        assert_true(json_handle_is_bool(yes))
+        assert_true(json_handle_kind(yes) == JsonKind.BOOL)
+        assert_true(try json_handle_as_bool(yes) else false)
 
-        no: JsonValue = parse_or_fail(a, "false")
-        assert_true(json_is_bool(no))
-        assert_false(try json_as_bool(no) else true)
+        no: JsonValueHandle[r] = parse_or_fail(a, "false")
+        assert_true(json_handle_is_bool(no))
+        assert_false(try json_handle_as_bool(no) else true)
 
         # Wrong-type accessors report rather than lie.
-        assert_eq(try json_as_number(yes) else -7.0, -7.0)
-        assert_true(sview_eq(try json_as_string(yes) else sview("!", 0, -1), sview("!", 0, -1)))
-        assert_eq(json_array_len(yes), -1)
-        assert_eq(json_object_len(yes), -1)
-        catch json_as_bool(null_value):
+        assert_eq(try json_handle_as_number(yes) else -7.0, -7.0)
+        assert_true(sview_eq(try json_handle_as_string(yes) else sview("!", 0, -1), sview("!", 0, -1)))
+        assert_eq(json_handle_array_len(yes), -1)
+        assert_eq(json_handle_object_len(yes), -1)
+        catch json_handle_as_bool(null_value):
             ok:
                 fail("null is not a bool")
             error e:
@@ -227,7 +239,7 @@ def scalar_tests(a: mutable Arena&):
 # Numbers
 # ------------------------------------------------------------
 
-def number_tests(a: mutable Arena&):
+def number_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         check_number(a, "0", 0.0)
         check_number(a, "1", 1.0)
@@ -244,7 +256,7 @@ def number_tests(a: mutable Arena&):
         # 2^53 + 1 is not representable; the nearest double is 2^53.
         check_number(a, "9007199254740993", 9007199254740992.0)
         # -0 keeps its sign through strtod and out again.
-        assert_true(json_to_cstr(a, parse_or_fail(a, "-0")) == "-0")
+        assert_true(json_handle_to_cstr(a, parse_or_fail(a, "-0")) == "-0")
         # Serialisation picks the shortest of the 15/16/17-digit forms that
         # still converts back to the identical double.
         check_serialises_to(a, "1.0", "1")
@@ -258,7 +270,7 @@ def number_tests(a: mutable Arena&):
 # Strings and escapes
 # ------------------------------------------------------------
 
-def string_tests(a: mutable Arena&):
+def string_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         check_string(a, "\"\"", sview("", 0, 0))
         check_string(a, "\"hello\"", sview("hello", 0, -1))
@@ -291,7 +303,7 @@ def string_tests(a: mutable Arena&):
 # Unicode
 # ------------------------------------------------------------
 
-def unicode_tests(a: mutable Arena&):
+def unicode_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # \u escapes decode to UTF-8: 1, 2 and 3 byte forms.
         check_string(a, "\"\\u0041\"", sview("A", 0, -1))
@@ -312,164 +324,150 @@ def unicode_tests(a: mutable Arena&):
 # Containers and accessors
 # ------------------------------------------------------------
 
-def array_tests(a: mutable Arena&):
+def array_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        empty: JsonValue = parse_or_fail(a, "[]")
-        assert_true(json_is_array(empty))
-        assert_eq(json_array_len(empty), 0)
+        empty: JsonValueHandle[r] = parse_or_fail(a, "[]")
+        assert_true(json_handle_is_array(empty))
+        assert_eq(json_handle_array_len(empty), 0)
 
-        items: JsonValue = parse_or_fail(a, "[10,20,30]")
-        assert_eq(json_array_len(items), 3)
-        first: JsonValue = try json_at(items, 0) else json_null()
-        third: JsonValue = try json_at(items, 2) else json_null()
-        assert_eq(try json_as_number(first) else -1.0, 10.0)
-        assert_eq(try json_as_number(third) else -1.0, 30.0)
+        items: JsonValueHandle[r] = parse_or_fail(a, "[10,20,30]")
+        assert_eq(json_handle_array_len(items), 3)
+        first: JsonValueHandle[r] = try json_handle_at(items, 0) else json_handle_null(items)
+        third: JsonValueHandle[r] = try json_handle_at(items, 2) else json_handle_null(items)
+        assert_eq(try json_handle_as_number(first) else -1.0, 10.0)
+        assert_eq(try json_handle_as_number(third) else -1.0, 30.0)
         # Out-of-range indexing errors instead of reading past the run.
-        catch json_at(items, 3):
+        catch json_handle_at(items, 3):
             ok:
                 fail("index 3 of a 3-element array should be out of range")
             error e:
                 assert_true(true)
-        catch json_at(items, -1):
+        catch json_handle_at(items, -1):
             ok:
                 fail("a negative index should be out of range")
             error e:
                 assert_true(true)
 
-        nested: JsonValue = parse_or_fail(a, "[[1,[2,[3]]]]")
-        inner: JsonValue = try json_at(nested, 0) else json_null()
-        assert_eq(json_array_len(inner), 2)
-        deeper: JsonValue = try json_at(inner, 1) else json_null()
-        assert_eq(json_array_len(deeper), 2)
-        deep_head: JsonValue = try json_at(deeper, 0) else json_null()
-        assert_eq(try json_as_number(deep_head) else -1.0, 2.0)
+        nested: JsonValueHandle[r] = parse_or_fail(a, "[[1,[2,[3]]]]")
+        inner: JsonValueHandle[r] = try json_handle_at(nested, 0) else json_handle_null(nested)
+        assert_eq(json_handle_array_len(inner), 2)
+        deeper: JsonValueHandle[r] = try json_handle_at(inner, 1) else json_handle_null(inner)
+        assert_eq(json_handle_array_len(deeper), 2)
+        deep_head: JsonValueHandle[r] = try json_handle_at(deeper, 0) else json_handle_null(deeper)
+        assert_eq(try json_handle_as_number(deep_head) else -1.0, 2.0)
 
-        mixed: JsonValue = parse_or_fail(a, "[null,true,false,0,\"s\",[],{}]")
-        assert_eq(json_array_len(mixed), 7)
-        assert_true(json_is_null(try json_at(mixed, 0) else json_bool(true)))
-        assert_true(json_is_array(try json_at(mixed, 5) else json_null()))
-        assert_true(json_is_object(try json_at(mixed, 6) else json_null()))
+        mixed: JsonValueHandle[r] = parse_or_fail(a, "[null,true,false,0,\"s\",[],{}]")
+        assert_eq(json_handle_array_len(mixed), 7)
+        assert_true(json_handle_is_null(try json_handle_at(mixed, 0) else json_handle_bool(a, true)))
+        assert_true(json_handle_is_array(try json_handle_at(mixed, 5) else json_handle_null(mixed)))
+        assert_true(json_handle_is_object(try json_handle_at(mixed, 6) else json_handle_null(mixed)))
 
-def object_tests(a: mutable Arena&):
+def object_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        empty: JsonValue = parse_or_fail(a, "{}")
-        assert_true(json_is_object(empty))
-        assert_eq(json_object_len(empty), 0)
+        empty: JsonValueHandle[r] = parse_or_fail(a, "{}")
+        assert_true(json_handle_is_object(empty))
+        assert_eq(json_handle_object_len(empty), 0)
 
-        doc: JsonValue = parse_or_fail(a, "{\"b\":1,\"a\":2,\"c\":null}")
-        assert_eq(json_object_len(doc), 3)
+        doc: JsonValueHandle[r] = parse_or_fail(a, "{\"b\":1,\"a\":2,\"c\":null}")
+        assert_eq(json_handle_object_len(doc), 3)
         # Members keep INSERTION order, not sorted order.
-        assert_true(sview_eq(try json_key_at(doc, 0) else sview("", 0, 0), sview("b", 0, -1)))
-        assert_true(sview_eq(try json_key_at(doc, 1) else sview("", 0, 0), sview("a", 0, -1)))
-        assert_true(sview_eq(try json_key_at(doc, 2) else sview("", 0, 0), sview("c", 0, -1)))
+        assert_true(sview_eq(try json_handle_key_at(doc, 0) else sview("", 0, 0), sview("b", 0, -1)))
+        assert_true(sview_eq(try json_handle_key_at(doc, 1) else sview("", 0, 0), sview("a", 0, -1)))
+        assert_true(sview_eq(try json_handle_key_at(doc, 2) else sview("", 0, 0), sview("c", 0, -1)))
 
-        assert_true(json_has(doc, sview("a", 0, -1)))
-        assert_false(json_has(doc, sview("z", 0, -1)))
-        assert_eq(json_index_of(doc, sview("c", 0, -1)), 2)
-        assert_eq(json_index_of(doc, sview("z", 0, -1)), -1)
-        found: JsonValue = try json_get(doc, sview("a", 0, -1)) else json_null()
-        assert_eq(try json_as_number(found) else -1.0, 2.0)
-        catch json_get(doc, sview("z", 0, -1)):
+        assert_true(json_handle_has(doc, sview("a", 0, -1)))
+        assert_false(json_handle_has(doc, sview("z", 0, -1)))
+        assert_eq(json_handle_index_of(doc, sview("c", 0, -1)), 2)
+        assert_eq(json_handle_index_of(doc, sview("z", 0, -1)), -1)
+        found: JsonValueHandle[r] = try json_handle_get(doc, sview("a", 0, -1)) else json_handle_null(doc)
+        assert_eq(try json_handle_as_number(found) else -1.0, 2.0)
+        catch json_handle_get(doc, sview("z", 0, -1)):
             ok:
                 fail("a missing key should not resolve")
             error e:
                 assert_true(true)
-        catch json_key_at(doc, 3):
+        catch json_handle_key_at(doc, 3):
             ok:
                 fail("member index 3 of a 3-member object should be out of range")
             error e:
                 assert_true(true)
 
         # An empty key and an escaped key are ordinary strings.
-        odd: JsonValue = parse_or_fail(a, "{\"\":1,\"a\\nb\":2}")
-        assert_true(json_has(odd, sview("", 0, 0)))
-        assert_true(json_has(odd, sview("a\nb", 0, -1)))
+        odd: JsonValueHandle[r] = parse_or_fail(a, "{\"\":1,\"a\\nb\":2}")
+        assert_true(json_handle_has(odd, sview("", 0, 0)))
+        assert_true(json_handle_has(odd, sview("a\nb", 0, -1)))
 
         # Duplicate keys are all kept; lookup answers with the first.
-        dup: JsonValue = parse_or_fail(a, "{\"a\":1,\"a\":2}")
-        assert_eq(json_object_len(dup), 2)
-        assert_eq(json_index_of(dup, sview("a", 0, -1)), 0)
-        dup_first: JsonValue = try json_get(dup, sview("a", 0, -1)) else json_null()
-        assert_eq(try json_as_number(dup_first) else -1.0, 1.0)
-        assert_true(json_to_cstr(a, dup) == "{\"a\":1,\"a\":2}")
+        dup: JsonValueHandle[r] = parse_or_fail(a, "{\"a\":1,\"a\":2}")
+        assert_eq(json_handle_object_len(dup), 2)
+        assert_eq(json_handle_index_of(dup, sview("a", 0, -1)), 0)
+        dup_first: JsonValueHandle[r] = try json_handle_get(dup, sview("a", 0, -1)) else json_handle_null(dup)
+        assert_eq(try json_handle_as_number(dup_first) else -1.0, 1.0)
+        assert_true(json_handle_to_cstr(a, dup) == "{\"a\":1,\"a\":2}")
 
-        nested: JsonValue = parse_or_fail(a, "{\"a\":{\"b\":{\"c\":[1,2,{\"d\":null}]}}}")
-        level_a: JsonValue = try json_get(nested, sview("a", 0, -1)) else json_null()
-        level_b: JsonValue = try json_get(level_a, sview("b", 0, -1)) else json_null()
-        level_c: JsonValue = try json_get(level_b, sview("c", 0, -1)) else json_null()
-        assert_eq(json_array_len(level_c), 3)
-        leaf: JsonValue = try json_at(level_c, 2) else json_null()
-        assert_true(json_has(leaf, sview("d", 0, -1)))
+        nested: JsonValueHandle[r] = parse_or_fail(a, "{\"a\":{\"b\":{\"c\":[1,2,{\"d\":null}]}}}")
+        level_a: JsonValueHandle[r] = try json_handle_get(nested, sview("a", 0, -1)) else json_handle_null(nested)
+        level_b: JsonValueHandle[r] = try json_handle_get(level_a, sview("b", 0, -1)) else json_handle_null(nested)
+        level_c: JsonValueHandle[r] = try json_handle_get(level_b, sview("c", 0, -1)) else json_handle_null(nested)
+        assert_eq(json_handle_array_len(level_c), 3)
+        leaf: JsonValueHandle[r] = try json_handle_at(level_c, 2) else json_handle_null(nested)
+        assert_true(json_handle_has(leaf, sview("d", 0, -1)))
 
 # ------------------------------------------------------------
 # Whitespace
 # ------------------------------------------------------------
 
-def whitespace_tests(a: mutable Arena&):
+def whitespace_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # Space, tab, CR and LF are the only whitespace JSON allows, and they
         # are allowed anywhere between tokens.
-        spaced: JsonValue = parse_or_fail(a, " \t\r\n{ \"a\" : [ 1 , 2 ] , \"b\" : null } \t\r\n")
-        assert_eq(json_object_len(spaced), 2)
-        assert_eq(json_array_len(try json_get(spaced, sview("a", 0, -1)) else json_null()), 2)
+        spaced: JsonValueHandle[r] = parse_or_fail(a, " \t\r\n{ \"a\" : [ 1 , 2 ] , \"b\" : null } \t\r\n")
+        assert_eq(json_handle_object_len(spaced), 2)
+        assert_eq(json_handle_array_len(try json_handle_get(spaced, sview("a", 0, -1)) else json_handle_null(spaced)), 2)
         check_serialises_to(a, "  [ 1 , 2 ]  ", "[1,2]")
         check_serialises_to(a, "\n\t{ }\r\n", "{}")
         # A vertical tab is NOT JSON whitespace.
         vertical_tab: sview = bytes3(a, "[1,", 11, "2]")
-        rejected: JsonParseResult = json_parse_checked(a, vertical_tab)
+        rejected: JsonParseResult[r] = json_parse_checked(a, vertical_tab)
         assert_eq(rejected.code.i64(), 2)
         assert_eq(rejected.pos, 3)
 
 # ------------------------------------------------------------
 # Builders
 # ------------------------------------------------------------
+#
+# Only the scalar and string builders are public: array/object-from-run
+# constructors stay module-private until a handle-typed builder exists.
 
-def builder_tests(a: mutable Arena&):
+def builder_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        assert_true(json_is_null(json_null()))
-        assert_true(try json_as_bool(json_bool(true)) else false)
-        assert_eq(try json_as_number(json_number(2.5)) else -1.0, 2.5)
-        text: JsonValue = json_string(a, sview("a\"b", 0, -1))
-        assert_true(sview_eq(try json_as_string(text) else sview("", 0, 0), sview("a\"b", 0, -1)))
-        assert_true(json_to_cstr(a, text) == "\"a\\\"b\"")
-
-        in a:
-            items: mutable darray[JsonValue] = []
-            items.push(json_number(1.0))
-            items.push(json_bool(false))
-            items.push(json_null())
-            array: JsonValue = json_array_from(a, items)
-            assert_eq(json_array_len(array), 3)
-            assert_true(json_to_cstr(a, array) == "[1,false,null]")
-
-            members: mutable darray[JsonMember] = []
-            members.push(json_member(a, sview("z", 0, -1), json_number(1.0)))
-            members.push(json_member(a, sview("a", 0, -1), array))
-            object: JsonValue = json_object_from(a, members)
-            assert_eq(json_object_len(object), 2)
-            # Insertion order, not sorted order.
-            assert_true(json_to_cstr(a, object) == "{\"z\":1,\"a\":[1,false,null]}")
-
-        # Empty containers build without touching the arena.
-        in a:
-            none: mutable darray[JsonValue] = []
-            assert_true(json_to_cstr(a, json_array_from(a, none)) == "[]")
-            no_members: mutable darray[JsonMember] = []
-            assert_true(json_to_cstr(a, json_object_from(a, no_members)) == "{}")
+        anchor: JsonValueHandle[r] = json_handle_number(a, 0.0)
+        assert_true(json_handle_is_null(json_handle_null(anchor)))
+        assert_true(json_handle_to_cstr(a, json_handle_null(anchor)) == "null")
+        assert_true(try json_handle_as_bool(json_handle_bool(a, true)) else false)
+        assert_false(try json_handle_as_bool(json_handle_bool(a, false)) else true)
+        assert_eq(try json_handle_as_number(json_handle_number(a, 2.5)) else -1.0, 2.5)
+        assert_true(json_handle_to_cstr(a, json_handle_number(a, 2.5)) == "2.5")
+        text: JsonValueHandle[r] = json_handle_string(a, sview("a\"b", 0, -1))
+        assert_true(sview_eq(try json_handle_as_string(text) else sview("", 0, 0), sview("a\"b", 0, -1)))
+        assert_true(json_handle_to_cstr(a, text) == "\"a\\\"b\"")
+        empty_text: JsonValueHandle[r] = json_handle_string(a, sview("", 0, 0))
+        assert_eq((try json_handle_as_string(empty_text) else sview("!", 0, -1)).len, 0)
+        assert_true(json_handle_to_cstr(a, empty_text) == "\"\"")
 
 # ------------------------------------------------------------
 # Non-finite doubles
 # ------------------------------------------------------------
 
-def non_finite_tests(a: mutable Arena&):
+def non_finite_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # JSON has no NaN or Infinity, so a hand-built one serialises as `null`
         # (JavaScript's JSON.stringify rule). Parsing them back is rejected in
         # malformed_tests.
         huge: f64 = 1.0e308 * 10.0
-        assert_true(json_to_cstr(a, json_number(huge)) == "null")
-        assert_true(json_to_cstr(a, json_number(-huge)) == "null")
-        assert_true(json_to_cstr(a, json_number(huge - huge)) == "null")
+        assert_true(json_handle_to_cstr(a, json_handle_number(a, huge)) == "null")
+        assert_true(json_handle_to_cstr(a, json_handle_number(a, -huge)) == "null")
+        assert_true(json_handle_to_cstr(a, json_handle_number(a, huge - huge)) == "null")
 
 # ------------------------------------------------------------
 # Nesting limit
@@ -485,15 +483,15 @@ def nested_arrays(a: mutable Arena&, depth: i64) -> sview:
                 out.push(93)
             return bytes_view(out)
 
-def depth_tests(a: mutable Arena&):
+def depth_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # JSON_MAX_DEPTH is 256: 256 levels parse, 257 do not. The documents are
         # built at run time -- a `const cstr` global passed as a call argument
         # declines under stage1's backend.
-        deep: JsonParseResult = json_parse_checked(a, nested_arrays(a, 256))
+        deep: JsonParseResult[r] = json_parse_checked(a, nested_arrays(a, 256))
         assert_eq(deep.code.i64(), 0)
-        assert_eq(json_array_len(deep.value), 1)
-        too_deep: JsonParseResult = json_parse_checked(a, nested_arrays(a, 257))
+        assert_eq(json_handle_array_len(json_handle_from_result(deep)), 1)
+        too_deep: JsonParseResult[r] = json_parse_checked(a, nested_arrays(a, 257))
         assert_eq(too_deep.code.i64(), 10)
         assert_eq(too_deep.pos, 257)
 
@@ -511,20 +509,20 @@ def long_fraction(a: mutable Arena&, digit: u8, count: i64) -> sview:
                 out.push(digit)
             return bytes_view(out)
 
-def long_number_tests(a: mutable Arena&):
+def long_number_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # 600 fraction digits is past JSON_NUMBER_SCRATCH (512), so this takes
         # the arena copy path in json_lexeme_to_f64. The expected doubles come
         # from CPython: float("1." + "3"*600) and float("1." + "9"*600).
-        thirds: JsonParseResult = json_parse_checked(a, long_fraction(a, 51, 600))
+        thirds: JsonParseResult[r] = json_parse_checked(a, long_fraction(a, 51, 600))
         assert_eq(thirds.code.i64(), 0)
-        assert_eq(try json_as_number(thirds.value) else -1.0, 1.3333333333333333)
-        nines: JsonParseResult = json_parse_checked(a, long_fraction(a, 57, 600))
+        assert_eq(try json_handle_as_number(json_handle_from_result(thirds)) else -1.0, 1.3333333333333333)
+        nines: JsonParseResult[r] = json_parse_checked(a, long_fraction(a, 57, 600))
         assert_eq(nines.code.i64(), 0)
-        assert_eq(try json_as_number(nines.value) else -1.0, 2.0)
+        assert_eq(try json_handle_as_number(json_handle_from_result(nines)) else -1.0, 2.0)
         # Just under the buffer, for the stack path.
-        short_thirds: JsonParseResult = json_parse_checked(a, long_fraction(a, 51, 100))
-        assert_eq(try json_as_number(short_thirds.value) else -1.0, 1.3333333333333333)
+        short_thirds: JsonParseResult[r] = json_parse_checked(a, long_fraction(a, 51, 100))
+        assert_eq(try json_handle_as_number(json_handle_from_result(short_thirds)) else -1.0, 1.3333333333333333)
 
 # ------------------------------------------------------------
 # Large documents (arena growth under interleaving)
@@ -549,24 +547,25 @@ def grid_document(a: mutable Arena&, outer: i64, inner: i64) -> sview:
             out.push(93)
             return bytes_view(out)
 
-def check_grid(a: mutable Arena&, outer: i64, inner: i64):
+def check_grid[@r](a: mutable Arena& @r, outer: i64, inner: i64):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         text: sview = grid_document(a, outer, inner)
-        parsed: JsonParseResult = json_parse_checked(a, text)
+        parsed: JsonParseResult[r] = json_parse_checked(a, text)
         assert_eq(parsed.code.i64(), 0)
-        assert_eq(json_array_len(parsed.value), outer)
+        root: JsonValueHandle[r] = json_handle_from_result(parsed)
+        assert_eq(json_handle_array_len(root), outer)
         for row in 0..<outer:
-            items: JsonValue = try json_at(parsed.value, row) else json_null()
-            assert_eq(json_array_len(items), inner)
+            items: JsonValueHandle[r] = try json_handle_at(root, row) else json_handle_null(root)
+            assert_eq(json_handle_array_len(items), inner)
             for column in 0..<inner:
-                cell: JsonValue = try json_at(items, column) else json_null()
-                assert_eq(try json_as_number(cell) else -1.0, (column % 10).f64())
+                cell: JsonValueHandle[r] = try json_handle_at(items, column) else json_handle_null(root)
+                assert_eq(try json_handle_as_number(cell) else -1.0, (column % 10).f64())
         # The document is already in the serialiser's compact form, so the
         # round-trip must be byte-identical.
-        written: darray[u8] = json_write(a, parsed.value)
+        written: darray[u8] = json_handle_write(a, root)
         assert_true(sview_eq(bytes_view(written), text))
 
-def large_document_tests(a: mutable Arena&):
+def large_document_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         check_grid(a, 50, 50)
         check_grid(a, 300, 3)
@@ -576,31 +575,32 @@ def large_document_tests(a: mutable Arena&):
 # C-string surfaces
 # ------------------------------------------------------------
 
-def cstr_tests(a: mutable Arena&):
+def cstr_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+        fallback: JsonValueHandle[r] = json_handle_bool(a, false)
         # json_parse_cstr is json_parse over a NUL-terminated string.
-        doc: JsonValue = try json_parse_cstr(a, "{\"a\":[1,2]}") else json_null()
-        assert_eq(json_object_len(doc), 1)
-        assert_eq(json_array_len(try json_get(doc, sview("a", 0, -1)) else json_null()), 2)
+        doc: JsonValueHandle[r] = try json_parse_cstr(a, "{\"a\":[1,2]}") else fallback
+        assert_eq(json_handle_object_len(doc), 1)
+        assert_eq(json_handle_array_len(try json_handle_get(doc, sview("a", 0, -1)) else fallback), 2)
         catch json_parse_cstr(a, "{\"a\":}"):
             ok:
                 fail("json_parse_cstr accepted a malformed document")
             error e:
                 assert_true(true)
 
-        # json_as_cstr borrows the decoded bytes, which are always NUL-terminated.
-        text: JsonValue = parse_or_fail(a, "\"hi\\u00e9\"")
-        decoded: cstr = try json_as_cstr(text) else ""
+        # json_handle_as_cstr borrows the decoded bytes, which are always NUL-terminated.
+        text: JsonValueHandle[r] = parse_or_fail(a, "\"hi\\u00e9\"")
+        decoded: cstr = try json_handle_as_cstr(text) else "".cast[cstr]
         assert_true(decoded == "hié")
-        catch json_as_cstr(doc):
+        catch json_handle_as_cstr(doc):
             ok:
                 fail("an object is not a string")
             error e:
                 assert_true(true)
         # An embedded NUL truncates the C view but not the sview.
-        with_nul: JsonValue = parse_or_fail(a, "\"a\\u0000b\"")
-        assert_eq((try json_as_string(with_nul) else sview("", 0, 0)).len, 3)
-        truncated: cstr = try json_as_cstr(with_nul) else ""
+        with_nul: JsonValueHandle[r] = parse_or_fail(a, "\"a\\u0000b\"")
+        assert_eq((try json_handle_as_string(with_nul) else sview("", 0, 0)).len, 3)
+        truncated: cstr = try json_handle_as_cstr(with_nul) else "".cast[cstr]
         assert_true(truncated == "a")
 
 # ------------------------------------------------------------
@@ -610,7 +610,7 @@ def cstr_tests(a: mutable Arena&):
 # For each document: the canonical dump must equal CPython's, and serialising
 # and re-parsing must reproduce that same dump.
 
-def parity_tests(a: mutable Arena&):
+def parity_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # null
         check_parity(a, "null", "N")
@@ -786,7 +786,7 @@ def parity_tests(a: mutable Arena&):
 # code/position pair is the module's own contract; the variant each code maps to
 # is listed alongside. All ten JsonError variants are covered.
 
-def malformed_tests(a: mutable Arena&):
+def malformed_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # empty_input -> UNEXPECTED_END
         check_rejected(a, "", 1, 0)
@@ -870,10 +870,10 @@ def malformed_tests(a: mutable Arena&):
 # ------------------------------------------------------------
 #
 # CPython's json module ACCEPTS these; this module rejects them on purpose.
-# Lone surrogates cannot be encoded as well-formed UTF-8, and a JsonValue.String
+# Lone surrogates cannot be encoded as well-formed UTF-8, and a parsed string
 # stores decoded bytes, so they have nowhere to go.
 
-def stricter_than_python_tests(a: mutable Arena&):
+def stricter_than_python_tests[@r](a: mutable Arena& @r):
     can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
         # lone_high_surrogate -> INVALID_ESCAPE
         check_rejected(a, "\"\\ud83d\"", 6, 1)
@@ -886,25 +886,29 @@ def stricter_than_python_tests(a: mutable Arena&):
 
 # ------------------------------------------------------------
 
+# ------------------------------------------------------------
+
 def main() -> i64:
-    can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
-        region scratch(16777216)
-        arena: mutable Arena& = (&scratch).cast[mutable Arena&]
-        scalar_tests(arena)
-        number_tests(arena)
-        string_tests(arena)
-        unicode_tests(arena)
-        array_tests(arena)
-        object_tests(arena)
-        whitespace_tests(arena)
-        builder_tests(arena)
-        cstr_tests(arena)
-        non_finite_tests(arena)
-        depth_tests(arena)
-        long_number_tests(arena)
-        large_document_tests(arena)
-        parity_tests(arena)
-        malformed_tests(arena)
-        stricter_than_python_tests(arena)
-        destroy scratch
+    can Memory.Allocate, Memory.Release, Abort.Panic, Console.Format, Unsafe.PointerCast:
+        # A plain Arena rather than a `region` binding: the handle API is indexed
+        # by the arena's region, and a `region` name does not bind a
+        # `mutable Arena& @r` parameter. The arena grows in chunks as needed.
+        scratch: mutable Arena = zeroed
+        scalar_tests(&scratch)
+        number_tests(&scratch)
+        string_tests(&scratch)
+        unicode_tests(&scratch)
+        array_tests(&scratch)
+        object_tests(&scratch)
+        whitespace_tests(&scratch)
+        builder_tests(&scratch)
+        cstr_tests(&scratch)
+        non_finite_tests(&scratch)
+        depth_tests(&scratch)
+        long_number_tests(&scratch)
+        large_document_tests(&scratch)
+        parity_tests(&scratch)
+        malformed_tests(&scratch)
+        stricter_than_python_tests(&scratch)
+        arena_free(&scratch)
         return 0
