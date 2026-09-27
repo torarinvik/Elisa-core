@@ -127,7 +127,7 @@ func (a *Analyzer) analyzeAutoAllocExpr(expr *ast.AllocExpr, expected Type) Type
 	// region-provenance pass (the AutoRegion case there records a dependency on the active region).
 	if enumType, _, ok := a.packedAllocConstructorInfo(expr.Value); ok && enumType != nil && enumType.Packed {
 		if enumType.StoreType == nil {
-			a.errorf(expr.Pos(), "packed enum %q is missing store layout metadata", enumType.Name)
+			a.errorf(expr.Pos(), "packed enum %q is missing store layout metadata", ast.ModulePathSpelling(enumType.Name))
 			return invalidType
 		}
 		localStoreType := PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"])

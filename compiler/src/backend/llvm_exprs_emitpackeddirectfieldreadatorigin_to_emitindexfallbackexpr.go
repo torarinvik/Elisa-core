@@ -271,12 +271,19 @@ func (s *functionState) readPackedEnumWordWithStore(handleValue C.LLVMValueRef, 
 	}
 	return ops.loadPayloadWord(handleValue, enumType, wordOffset, "packed.common.store")
 }
+// The owner resolves exactly as an enum constructor's does (enumConstructorInfoFromField):
+// through the enclosing module's visible names. A raw NamedTypes lookup of the bare
+// spelling missed every packed enum declared inside a module, so `Message.Store(owner)`
+// there fell through to the enum-constructor path and failed as "unknown enum constructor".
 func (s *functionState) packedStoreConstructorInfoFromField(expr *ast.FieldExpr) (*semantic.PackedEnumStoreType, bool) {
-	ident, ok := expr.Object.(*ast.Ident)
+	if expr == nil || expr.Field != "Store" {
+		return nil, false
+	}
+	ownerName, _, ok := qualifiedFieldOwnerAndLeaf(expr)
 	if !ok {
 		return nil, false
 	}
-	base, ok := s.g.result.NamedTypes[ident.Name]
+	base, _, ok := s.lookupVisibleNamedType(ownerName)
 	if !ok {
 		return nil, false
 	}

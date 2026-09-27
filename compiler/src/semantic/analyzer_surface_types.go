@@ -49,7 +49,7 @@ func (a *Analyzer) resolvePackedVariantViewSurfaceType(expr ast.TypeExpr, pos le
 		return invalidType
 	}
 	if !enumType.Packed {
-		a.errorf(pos, "packedview requires a packed enum variant, got ordinary enum %q", enumType.Name)
+		a.errorf(pos, "packedview requires a packed enum variant, got ordinary enum %q", ast.ModulePathSpelling(enumType.Name))
 		return invalidType
 	}
 	variant, ok := enumType.Variant(variantName)

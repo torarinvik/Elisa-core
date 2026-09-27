@@ -15,7 +15,7 @@ func (a *Analyzer) analyzeScopedPackedAllocExpr(expr *ast.AllocExpr) Type {
 	}
 	storeType, ok := a.lookupPackedStore(enumType)
 	if !ok {
-		a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), packedEnumStoreTypeName(enumType.Name))
+		a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))
 		if enumType.StoreType != nil {
 			return a.analyzePackedAllocExpr(expr, PackedEnumStoreWithState(enumType.StoreType, a.namedTypes["Local"]))
 		}
@@ -42,7 +42,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 					variant, ok := enumType.Variant(fieldExpr.Field)
 					if ok && enumType.Packed && len(variant.Payload) == 0 {
 						if storeType.Enum.Root().Name != enumType.Root().Name { // docs/77: members share the root store
-							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+							a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 						}
 						return enumType
 					}
@@ -63,7 +63,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		return invalidType
 	}
 	if storeType.Enum.Root().Name != enumType.Root().Name { // docs/77: members share the root store
-		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+		a.errorf(allocOwnerPos(expr), "packed enum constructor %q requires store %q, got %q", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 	}
 	orderedArgs, commonArgs, ok := a.resolvePackedEnumConstructorArgs(callExpr, enumType, variant)
 	if !ok {
@@ -105,7 +105,7 @@ func (a *Analyzer) analyzePackedAllocExpr(expr *ast.AllocExpr, storeType *Packed
 		var actual Type
 		commonArgs[commonDecl.Name], actual = a.analyzeCallLikeValueExpr(arg, field.Type)
 		if !AssignableTo(field.Type, actual) {
-			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, enumType.Name+"."+variant.Name, field.Type, actual)
+			a.errorf(commonArgs[commonDecl.Name].Pos(), "packed enum common field %q for %q expects %s, got %s", commonDecl.Name, ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, field.Type, actual)
 		}
 		a.consumeAffineValueExpr(commonArgs[commonDecl.Name], field.Type, "move into enum common field "+strconv.Quote(commonDecl.Name))
 	}

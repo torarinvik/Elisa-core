@@ -342,7 +342,7 @@ func (a *Analyzer) enumVariantExprType(expr *ast.FieldExpr) (*EnumType, Type, bo
 			if _, ok := a.lookupPackedStore(enumType); ok {
 				return enumType, nil, true
 			}
-			a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", enumType.Name+"."+variant.Name, packedEnumStoreTypeName(enumType.Name), packedEnumStoreTypeName(enumType.Name))
+			a.errorf(expr.Pos(), "packed enum constructor %q requires an active in %s: scope or explicit new[%s]", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))
 			return enumType, invalidType, true
 		}
 		params := make([]Type, len(variant.Payload))

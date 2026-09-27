@@ -80,17 +80,17 @@ func (a *Analyzer) validateMatchStore(pos lexer.Pos, valueExpr ast.Expr, actual 
 		if enumType.RecursivePlain && a.currentAllocExpr != nil {
 			return
 		}
-		a.errorf(pos, "packed enum match over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
+		a.errorf(pos, "packed enum match over %q requires an in %s clause", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))
 		return
 	}
 	storeType := a.analyzeExpr(storeExpr)
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 		return
 	}
 	if packedStore.Enum != enumType {
-		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+		a.errorf(storeExpr.Pos(), "packed enum match over %q requires store type %q, got %s", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 	}
 }
 

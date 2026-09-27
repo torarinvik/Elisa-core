@@ -125,7 +125,7 @@ func (s *functionState) emitCallExpr(expr *ast.CallExpr) (C.LLVMValueRef, semant
 		if enumType != nil && enumType.Packed {
 			store, ok := s.lookupPackedStore(enumType)
 			if !ok {
-				return nil, nil, fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
+				return nil, nil, fmt.Errorf("packed enum constructor %s.%s requires an active in %s.Store: scope or explicit new[%s.Store]", ast.ModulePathSpelling(enumType.Name), variant.Name, ast.ModulePathSpelling(enumType.Name), ast.ModulePathSpelling(enumType.Name))
 			}
 			return s.emitPackedEnumConstructorAlloc(expr, store.value, enumType, variant, expr.Args, expr.ArgNames)
 		}

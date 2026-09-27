@@ -87,7 +87,7 @@ func (a *Analyzer) lookupFieldWithDiagnostics(objType Type, fieldName string, po
 		field, ok := enumType.Common[fieldName]
 		if !ok {
 			if emitDiagnostics {
-				a.errorf(pos, "packed enum %q has no common field %q", enumType.Name, fieldName)
+				a.errorf(pos, "packed enum %q has no common field %q", ast.ModulePathSpelling(enumType.Name), fieldName)
 			}
 			return Field{}, false
 		}

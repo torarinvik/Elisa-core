@@ -400,7 +400,7 @@ func (s *functionState) emitExpr(expr ast.Expr, expected semantic.Type) (C.LLVMV
 			if enumType != nil && enumType.Packed {
 				store, ok := s.lookupPackedStore(enumType)
 				if !ok {
-					err = fmt.Errorf("packed enum constructor %s.%s requires an active in %s: scope or explicit new[%s]", enumType.Name, variant.Name, enumType.StoreType.Name, enumType.StoreType.Name)
+					err = fmt.Errorf("packed enum constructor %s.%s requires an active in %s.Store: scope or explicit new[%s.Store]", ast.ModulePathSpelling(enumType.Name), variant.Name, ast.ModulePathSpelling(enumType.Name), ast.ModulePathSpelling(enumType.Name))
 				} else {
 					value, actualType, err = s.emitPackedEnumConstructorAlloc(nil, store.value, enumType, variant, nil, nil)
 				}

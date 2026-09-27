@@ -113,16 +113,16 @@ func (a *Analyzer) validateMoveBindStore(pos lexer.Pos, valueExpr ast.Expr, actu
 		if enumType.RecursivePlain && a.currentAllocExpr != nil {
 			return // active arena scope: store resolves on demand at codegen (see validateMatchStore)
 		}
-		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", enumType.Name, packedEnumStoreTypeName(enumType.Name))
+		a.errorf(pos, "packed enum move-as over %q requires an in %s clause", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)))
 		return
 	}
 	storeType := a.analyzeExpr(storeExpr)
 	packedStore, ok := storeType.(*PackedEnumStoreType)
 	if !ok {
-		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 		return
 	}
 	if packedStore.Enum != enumType {
-		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", enumType.Name, packedEnumStoreTypeName(enumType.Name), storeType)
+		a.errorf(storeExpr.Pos(), "packed enum move-as over %q requires store type %q, got %s", ast.ModulePathSpelling(enumType.Name), packedEnumStoreTypeName(ast.ModulePathSpelling(enumType.Name)), storeType)
 	}
 }

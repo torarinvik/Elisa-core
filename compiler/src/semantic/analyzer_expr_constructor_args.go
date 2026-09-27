@@ -116,7 +116,7 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 		}
 		if _, found := enumType.Common[name]; found {
 			if _, exists := commonArgs[name]; exists {
-				a.errorf(arg.Pos(), "packed enum constructor %q common field %q is specified more than once", enumType.Name+"."+variant.Name, name)
+				a.errorf(arg.Pos(), "packed enum constructor %q common field %q is specified more than once", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, name)
 				a.analyzeExpr(arg)
 				ok = false
 				continue
@@ -124,7 +124,7 @@ func (a *Analyzer) resolvePackedEnumConstructorArgs(expr *ast.CallExpr, enumType
 			commonArgs[name] = arg
 			continue
 		}
-		a.errorf(arg.Pos(), "packed enum constructor %q has no payload or common field %q", enumType.Name+"."+variant.Name, name)
+		a.errorf(arg.Pos(), "packed enum constructor %q has no payload or common field %q", ast.ModulePathSpelling(enumType.Name)+"."+variant.Name, name)
 		a.analyzeExpr(arg)
 		ok = false
 	}
