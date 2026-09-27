@@ -51,7 +51,7 @@ def json_parser_parity_suite_impl() -> int:
 
             source: static u8& = "{\"na\\u006de\":\"line\\nbreak\",\"quote\":\"\\\"\",\"smile\":\"\\u263A\"}"
             source_any: u8& = source.cast[u8&]
-            source_len: usize = runtime_strlen(source_any)
+            source_len: usize = json_c_string_len(source_any)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -79,7 +79,7 @@ def json_parser_parity_suite_impl() -> int:
 
             numbers_source: static u8& = "{\"small\":123,\"big\":18446744073709551615,\"neg\":-9223372036854775808,\"frac\":1.5,\"exp\":1e3,\"huge\":18446744073709551616,\"tiny\":-9223372036854775809}"
             numbers_any: u8& = numbers_source.cast[u8&]
-            numbers_len: usize = runtime_strlen(numbers_any)
+            numbers_len: usize = json_c_string_len(numbers_any)
             region numbers_scratch(json_ast_scratch_capacity(numbers_len))
             numbers_store: JsonNode.Store[Local] = JsonNode.Store(numbers_scratch)
             numbers_arena: mutable Arena& = (&numbers_scratch).cast[mutable Arena&]

@@ -1,7 +1,7 @@
 def json_parser_ast_object_key_eq_at_impl(source: u8&, index: usize, literal: cstr) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -19,7 +19,7 @@ def json_parser_ast_object_key_eq_at_impl(source: u8&, index: usize, literal: cs
 def json_parser_ast_object_key_len_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -37,7 +37,7 @@ def json_parser_ast_object_key_len_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_object_key_copy_at_impl(source: u8&, index: usize, out: u8&, capacity: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -55,7 +55,7 @@ def json_parser_ast_object_key_copy_at_impl(source: u8&, index: usize, out: u8&,
 def json_parser_ast_object_field_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -77,7 +77,7 @@ def json_parser_ast_object_field_i64_at_impl(source: u8&, index: usize, out: mut
 def json_parser_ast_object_field_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -99,7 +99,7 @@ def json_parser_ast_object_field_f64_at_impl(source: u8&, index: usize, out: mut
 def json_parser_ast_object_field_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -121,7 +121,7 @@ def json_parser_ast_object_field_f32_at_impl(source: u8&, index: usize, out: mut
 def json_parser_ast_object_field_bool_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -139,7 +139,7 @@ def json_parser_ast_object_field_bool_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_object_field_is_null_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -157,7 +157,7 @@ def json_parser_ast_object_field_is_null_at_impl(source: u8&, index: usize) -> i
 def json_parser_ast_object_value_kind_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -175,7 +175,7 @@ def json_parser_ast_object_value_kind_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_object_value_array_len_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -193,7 +193,7 @@ def json_parser_ast_object_value_array_len_at_impl(source: u8&, index: usize) ->
 def json_parser_ast_object_value_object_len_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -211,7 +211,7 @@ def json_parser_ast_object_value_object_len_at_impl(source: u8&, index: usize) -
 def json_parser_ast_object_value_number_kind_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -229,7 +229,7 @@ def json_parser_ast_object_value_number_kind_at_impl(source: u8&, index: usize) 
 def json_parser_ast_array_i64_at_impl(source: u8&, index: usize, out: mutable i64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -251,7 +251,7 @@ def json_parser_ast_array_i64_at_impl(source: u8&, index: usize, out: mutable i6
 def json_parser_ast_array_f64_at_impl(source: u8&, index: usize, out: mutable f64&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -273,7 +273,7 @@ def json_parser_ast_array_f64_at_impl(source: u8&, index: usize, out: mutable f6
 def json_parser_ast_array_f32_at_impl(source: u8&, index: usize, out: mutable f32&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -295,7 +295,7 @@ def json_parser_ast_array_f32_at_impl(source: u8&, index: usize, out: mutable f3
 def json_parser_ast_array_kind_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -313,7 +313,7 @@ def json_parser_ast_array_kind_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_array_array_len_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -331,7 +331,7 @@ def json_parser_ast_array_array_len_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_array_object_len_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -349,7 +349,7 @@ def json_parser_ast_array_object_len_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_array_number_kind_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -367,7 +367,7 @@ def json_parser_ast_array_number_kind_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_array_bool_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]
@@ -385,7 +385,7 @@ def json_parser_ast_array_bool_at_impl(source: u8&, index: usize) -> i64:
 def json_parser_ast_array_is_null_at_impl(source: u8&, index: usize) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]

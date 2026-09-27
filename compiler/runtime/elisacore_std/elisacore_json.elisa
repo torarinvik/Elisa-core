@@ -241,10 +241,17 @@ module Json:
         # the document on success; otherwise `code`/`pos` say what went wrong and where,
         # and `value` is `JsonValue.Null`.
     public:
-        struct JsonParseResult:
+        struct JsonParseResult[@r]:
             code: mutable JsonErrorCode
             pos: mutable i64
-            value: mutable JsonValue
+            value: mutable JsonValueHandle[r]
+
+        # A safe API handle for carrying a parsed node across module boundaries.
+        # The payload enum stays private so clients cannot construct raw arena
+        # addresses or depend on its representation; use `json_handle_*` below.
+        struct JsonValueHandle[@r]:
+            private:
+                node: JsonValue
 
         # A decoded string body living in the arena: base address plus byte length,
         # NOT counting the NUL byte that always follows it.
@@ -724,7 +731,7 @@ module Json:
         # whitespace is allowed; anything else after the top-level value is
         # `TRAILING_DATA`, so a truncated or doubled document cannot slip through.
     public:
-        def json_parse_checked(a: mutable Arena&, text: sview) -> JsonParseResult:
+        def json_parse_checked[@r](a: mutable Arena& @r, text: sview) -> JsonParseResult[r]:
             can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
                 p: mutable JsonParser = JsonParser{text: text, pos: 0, depth: 0, error_code: JsonErrorCode.OK, error_pos: 0}
                 value: JsonValue = json_parse_value(a, &p)
@@ -733,47 +740,17 @@ module Json:
                     if p.pos < text.len:
                         json_note(&p, JsonErrorCode.TRAILING_DATA, p.pos)
                 if p.error_code != JsonErrorCode.OK:
-                    return JsonParseResult{code: p.error_code, pos: p.error_pos, value: JsonValue.Null}
-                return JsonParseResult{code: JsonErrorCode.OK, pos: 0, value: value}
-
-        # `json_parse_checked` with the failure raised as a `JsonError` variant.
-        def json_parse(a: mutable Arena&, text: sview) -> JsonValue error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
-                outcome: JsonParseResult = json_parse_checked(a, text)
-                code: JsonErrorCode = outcome.code
-                pos: i64 = outcome.pos
-                if code == JsonErrorCode.UNEXPECTED_END:
-                    raise JsonError.UnexpectedEnd(pos)
-                if code == JsonErrorCode.UNEXPECTED_CHAR:
-                    raise JsonError.UnexpectedChar(pos)
-                if code == JsonErrorCode.INVALID_LITERAL:
-                    raise JsonError.InvalidLiteral(pos)
-                if code == JsonErrorCode.INVALID_NUMBER:
-                    raise JsonError.InvalidNumber(pos)
-                if code == JsonErrorCode.INVALID_STRING:
-                    raise JsonError.InvalidString(pos)
-                if code == JsonErrorCode.INVALID_ESCAPE:
-                    raise JsonError.InvalidEscape(pos)
-                if code == JsonErrorCode.EXPECTED_COLON:
-                    raise JsonError.ExpectedColon(pos)
-                if code == JsonErrorCode.EXPECTED_COMMA_OR_END:
-                    raise JsonError.ExpectedCommaOrEnd(pos)
-                if code == JsonErrorCode.TRAILING_DATA:
-                    raise JsonError.TrailingData(pos)
-                if code == JsonErrorCode.DEPTH_EXCEEDED:
-                    raise JsonError.DepthExceeded(pos)
-                return outcome.value
-
-        # `json_parse` over a NUL-terminated C string.
-        def json_parse_cstr(a: mutable Arena&, text: cstr) -> JsonValue error[JsonError]:
-            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
-                value: JsonValue = try json_parse(a, sview(text, 0, -1))
-                return value
+                    return JsonParseResult{code: p.error_code, pos: p.error_pos, value: json_handle_null_value(a)}
+                return JsonParseResult{code: JsonErrorCode.OK, pos: 0, value: json_handle_in_arena(value, a)}
 
         # ------------------------------------------------------------
         # Constructors
         # ------------------------------------------------------------
 
+    private:
+        # Raw-value constructors stay module-private: their representation can contain
+        # pointers into an Arena and therefore must only cross the public boundary inside
+        # a region-indexed JsonValueHandle.
         def json_null() -> JsonValue:
             return JsonValue.Null
 
@@ -831,7 +808,7 @@ module Json:
         # Type tests
         # ------------------------------------------------------------
 
-    public:
+    private:
         def json_kind(value: JsonValue) -> JsonKind:
             match value:
                 JsonValue.Null:
@@ -895,7 +872,8 @@ module Json:
                             return sview("", JSON_EMPTY_STRING_LENGTH, JSON_EMPTY_STRING_LENGTH)
                         if len < JSON_EMPTY_STRING_LENGTH or data_bits == JSON_NULL_STRING_ADDRESS:
                             raise JsonAccessError.WrongType
-                        return StringView{data: data_bits.cast[u8&], len: len}
+                        trusted Unsafe.PointerCast:
+                            return StringView{data: data_bits.cast[u8&], len: len}
                     _:
                         raise JsonAccessError.WrongType
                 raise JsonAccessError.WrongType
@@ -958,7 +936,7 @@ module Json:
             trusted Unsafe.PointerCast:
                 return StringView{data: member.key_bits.cast[u8&], len: member.key_len}
 
-    public:
+    private:
         def json_at(value: JsonValue, index: i64) -> JsonValue error[JsonAccessError]:
             match value:
                 JsonValue.Array(items_bits, count):
@@ -1027,6 +1005,86 @@ module Json:
                 raise JsonAccessError.MissingKey
             found: JsonValue = try json_value_at(value, index)
             return found
+
+        # Internal constructor and the checked document-to-handle boundary. Keeping
+        # the raw-value constructor private prevents clients from manufacturing a
+        # handle from arbitrary data.
+    private:
+        def json_handle_in_arena[@r](value: JsonValue, owner: mutable Arena& @r) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: value}
+
+        def json_handle_null_value[@r](owner: mutable Arena& @r) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: JsonValue.Null}
+
+        def json_handle_like[@r](value: JsonValue, owner: JsonValueHandle[r]) -> JsonValueHandle[r]:
+            return JsonValueHandle{node: value}
+
+    public:
+        def json_handle_from_result[@r](result: JsonParseResult[r]) -> JsonValueHandle[r]:
+            return result.value
+
+        # Public operations over the opaque handle let external modules traverse
+        # documents without naming or pattern-matching the private JsonValue enum.
+        def json_handle_null[@r](owner: JsonValueHandle[r]) -> JsonValueHandle[r]:
+            return json_handle_like(JsonValue.Null, owner)
+
+        def json_handle_kind[@r](value: JsonValueHandle[r]) -> JsonKind:
+            return json_kind(value.node)
+
+        def json_handle_is_null[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.NULL
+
+        def json_handle_is_bool[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.BOOL
+
+        def json_handle_is_number[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.NUMBER
+
+        def json_handle_is_string[@r](value: JsonValueHandle[r]) -> bool:
+            return json_handle_kind(value) == JsonKind.STRING
+
+        def json_handle_is_object[@r](value: JsonValueHandle[r]) -> bool:
+            return json_is_object(value.node)
+
+        def json_handle_is_array[@r](value: JsonValueHandle[r]) -> bool:
+            return json_is_array(value.node)
+
+        def json_handle_has[@r](value: JsonValueHandle[r], key: sview) -> bool:
+            return json_has(value.node, key)
+
+        def json_handle_get[@r](value: JsonValueHandle[r], key: sview) -> JsonValueHandle[r] error[JsonAccessError]:
+            found: JsonValue = try json_get(value.node, key)
+            return json_handle_like(found, value)
+
+        def json_handle_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
+            found: JsonValue = try json_at(value.node, index)
+            return json_handle_like(found, value)
+
+        def json_handle_array_len[@r](value: JsonValueHandle[r]) -> i64:
+            return json_array_len(value.node)
+
+        def json_handle_as_bool[@r](value: JsonValueHandle[r]) -> bool error[JsonAccessError]:
+            return json_as_bool(value.node)
+
+        def json_handle_as_number[@r](value: JsonValueHandle[r]) -> f64 error[JsonAccessError]:
+            return json_as_number(value.node)
+
+        def json_handle_as_string[@r](value: JsonValueHandle[r]) -> sview @r error[JsonAccessError]:
+            return json_as_string(value.node)
+
+        def json_handle_object_len[@r](value: JsonValueHandle[r]) -> i64:
+            return json_object_len(value.node)
+
+        def json_handle_key_at[@r](value: JsonValueHandle[r], index: i64) -> sview @r error[JsonAccessError]:
+            return json_key_at(value.node, index)
+
+        def json_handle_value_at[@r](value: JsonValueHandle[r], index: i64) -> JsonValueHandle[r] error[JsonAccessError]:
+            member_value: JsonValue = try json_value_at(value.node, index)
+            return json_handle_like(member_value, value)
+
+        def json_handle_string[@r](owner: mutable Arena& @r, text: sview) -> JsonValueHandle[r]:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+                return json_handle_in_arena(json_string(owner, text), owner)
 
         # ------------------------------------------------------------
         # Serialisation
@@ -1152,7 +1210,7 @@ module Json:
         # the parsed text, or the order they were handed to `json_object_from` - never
         # a sorted or hashed order. Round-tripping a document therefore preserves key
         # order exactly.
-    public:
+    private:
         def json_write(a: mutable Arena&, value: JsonValue) -> darray[u8]:
             can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
                 in a:
@@ -1169,5 +1227,49 @@ module Json:
                 in a:
                     bytes.push(0)
                 return bytes.items.cast[cstr]
+
+    public:
+        # Checked parsing with variant-style errors. The returned handle keeps the
+        # backing arena's region in its type, including all decoded strings and children.
+        def json_parse[@r](a: mutable Arena& @r, text: sview) -> JsonValueHandle[r] error[JsonError]:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+                outcome: JsonParseResult[r] = json_parse_checked(a, text)
+                code: JsonErrorCode = outcome.code
+                pos: i64 = outcome.pos
+                if code == JsonErrorCode.UNEXPECTED_END:
+                    raise JsonError.UnexpectedEnd(pos)
+                if code == JsonErrorCode.UNEXPECTED_CHAR:
+                    raise JsonError.UnexpectedChar(pos)
+                if code == JsonErrorCode.INVALID_LITERAL:
+                    raise JsonError.InvalidLiteral(pos)
+                if code == JsonErrorCode.INVALID_NUMBER:
+                    raise JsonError.InvalidNumber(pos)
+                if code == JsonErrorCode.INVALID_STRING:
+                    raise JsonError.InvalidString(pos)
+                if code == JsonErrorCode.INVALID_ESCAPE:
+                    raise JsonError.InvalidEscape(pos)
+                if code == JsonErrorCode.EXPECTED_COLON:
+                    raise JsonError.ExpectedColon(pos)
+                if code == JsonErrorCode.EXPECTED_COMMA_OR_END:
+                    raise JsonError.ExpectedCommaOrEnd(pos)
+                if code == JsonErrorCode.TRAILING_DATA:
+                    raise JsonError.TrailingData(pos)
+                if code == JsonErrorCode.DEPTH_EXCEEDED:
+                    raise JsonError.DepthExceeded(pos)
+                return outcome.value
+
+        def json_parse_cstr[@r](a: mutable Arena& @r, text: cstr) -> JsonValueHandle[r] error[JsonError]:
+            can Memory.Allocate, Abort.Panic, Unsafe.PointerCast:
+                return try json_parse(a, sview(text, 0, -1))
+
+        # The writer borrows the JSON tree only for this call and copies output bytes
+        # into `a`, so only the returned buffer is tied to the output arena.
+        def json_handle_write[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> darray[u8] @r:
+            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+                return json_write(a, value.node)
+
+        def json_handle_to_cstr[@j, @r](a: mutable Arena& @r, value: JsonValueHandle[j]) -> cstr @r:
+            can Memory.Allocate, Abort.Panic, Console.Format, Unsafe.PointerCast:
+                return json_to_cstr(a, value.node)
 
 using Json

@@ -8,17 +8,15 @@
 
 def concat2(lhs: cstr?, rhs: cstr?) -> cstr:
     can Memory.Allocate, Abort.Panic:
-        left_cstr: cstr = lhs if lhs != null else ""
-        right_cstr: cstr = rhs if rhs != null else ""
-        left: u8& = left_cstr
-        right: u8& = right_cstr
+        left: cstr = lhs if lhs != null else ""
+        right: cstr = rhs if rhs != null else ""
 
-        left_len: usize = runtime_strlen(left_cstr)
-        right_len: usize = runtime_strlen(right_cstr)
+        left_len: usize = runtime_strlen(left)
+        right_len: usize = runtime_strlen(right)
 
-        right_cstr return if left_len == 0
+        right return if left_len == 0
 
-        left_cstr return if right_len == 0
+        left return if right_len == 0
 
         result_len: usize = runtime_checked_add_usize(left_len, right_len)
 
@@ -41,17 +39,15 @@ def concat2(lhs: cstr?, rhs: cstr?) -> cstr:
 
 def concat2_scratch(lhs: cstr?, rhs: cstr?) -> cstr:
     can Memory.Allocate, Abort.Panic:
-        left_cstr: cstr = lhs if lhs != null else ""
-        right_cstr: cstr = rhs if rhs != null else ""
-        left: u8& = left_cstr
-        right: u8& = right_cstr
+        left: cstr = lhs if lhs != null else ""
+        right: cstr = rhs if rhs != null else ""
 
-        left_len: usize = runtime_strlen(left_cstr)
-        right_len: usize = runtime_strlen(right_cstr)
+        left_len: usize = runtime_strlen(left)
+        right_len: usize = runtime_strlen(right)
 
-        right_cstr return if left_len == 0
+        right return if left_len == 0
 
-        left_cstr return if right_len == 0
+        left return if right_len == 0
 
         result_len: usize = runtime_checked_add_usize(left_len, right_len)
 
@@ -106,94 +102,20 @@ def ctx_fstr_append(out: mutable dstr&, ptr: u8&?, len: usize):
 # ------------------------------------------------------------
 
 def string_index(value: cstr?, index: i64) -> i64:
-    source_cstr: cstr = value if value != null else ""
-    src: u8& = source_cstr
-    len: usize = runtime_strlen(source_cstr)
-
-    return 0 if index < 0 or index.usize() >= len else src[index.usize()].i64()
+    return string_view_index(sview(value, 0, -1), index)
 
     
 
 def string_slice_eq(value: cstr?, start: i64, end: i64, other: cstr?) -> int:
-    source_cstr: cstr = value if value != null else ""
-    other_cstr: cstr = other if other != null else ""
-    src: u8& = source_cstr
-    rhs: u8& = other_cstr
-    len: usize = runtime_strlen(source_cstr)
-
-    lo: mutable usize = 0
-    hi: mutable usize = len
-
-    if start > 0:
-        lo <- start.usize()
-        lo <- len if lo > len
-
-    if end >= 0:
-        hi <- end.usize()
-        hi <- len if hi > len
-
-    hi <- lo if hi < lo
-
-    slice_len: usize = hi - lo
-    rhs_len: usize = runtime_strlen(other_cstr)
-
-    0 return if slice_len != rhs_len
-
-    #1 return if slice_len == 0
-    #1 return if src + lo == rhs
-    1 return if slice_len == 0 or (src + lo).cast[uintptr] == rhs.cast[uintptr]
-
-    return 1 if memcmp((src + lo).cast[void&], rhs.cast[void&], slice_len) == 0 else 0
+    return string_view_eq(sview(value, start, end), other)
 
 def string_slices_eq(lhs: cstr?, lhs_start: i64, lhs_end: i64, rhs: cstr?, rhs_start: i64, rhs_end: i64) -> int:
-    left_cstr: cstr = lhs if lhs != null else ""
-    right_cstr: cstr = rhs if rhs != null else ""
-    left: u8& = left_cstr
-    right: u8& = right_cstr
-    left_len: usize = runtime_strlen(left_cstr)
-    right_len: usize = runtime_strlen(right_cstr)
-
-    left_lo: mutable usize = 0
-    left_hi: mutable usize = left_len
-    right_lo: mutable usize = 0
-    right_hi: mutable usize = right_len
-
-    if lhs_start > 0:
-        left_lo <- lhs_start.usize()
-        left_lo <- left_len if left_lo > left_len
-
-    if lhs_end >= 0:
-        left_hi <- lhs_end.usize()
-        left_hi <- left_len if left_hi > left_len
-
-    left_hi <- left_lo if left_hi < left_lo
-
-    if rhs_start > 0:
-        right_lo <- rhs_start.usize()
-        right_lo <- right_len if right_lo > right_len
-
-    if rhs_end >= 0:
-        right_hi <- rhs_end.usize()
-        right_hi <- right_len if right_hi > right_len
-
-    right_hi <- right_lo if right_hi < right_lo
-
-    left_slice_len: usize = left_hi - left_lo
-    right_slice_len: usize = right_hi - right_lo
-
-    0 return if left_slice_len != right_slice_len
-
-    #1 return if left_slice_len == 0
-    #1 return if left + left_lo == right + right_lo
-    1 return if left_slice_len == 0 or (left + left_lo).cast[uintptr] == (right + right_lo).cast[uintptr]
-
-    return 1 if memcmp((left + left_lo).cast[void&], (right + right_lo).cast[void&], left_slice_len) == 0 else 0
+    return string_views_eq(sview(lhs, lhs_start, lhs_end), sview(rhs, rhs_start, rhs_end))
 
 def string_slice(value: cstr?, start: i64, end: i64) -> cstr:
     can Memory.Allocate, Abort.Panic:
-        source_cstr: cstr = value if value != null else ""
-        src: u8& = source_cstr
-        len: usize = runtime_strlen(source_cstr)
+        src: cstr = value if value != null else ""
+        len: usize = runtime_strlen(src)
 
         lo: mutable usize = 0
         hi: mutable usize = len
@@ -208,7 +130,7 @@ def string_slice(value: cstr?, start: i64, end: i64) -> cstr:
 
         hi <- lo if hi < lo
 
-        source_cstr return if lo == 0 and hi == len
+        src return if lo == 0 and hi == len
 
         out_len: usize = hi - lo
 
@@ -216,52 +138,64 @@ def string_slice(value: cstr?, start: i64, end: i64) -> cstr:
 
         if out_len <= 8:
             trusted Unsafe.PointerCast:
-                return intern_small_string(src + lo, out_len).cast[cstr]
+                return intern_small_string(src.cast[u8&] + lo, out_len).cast[cstr]
 
         allocation_bytes: usize = runtime_checked_add_usize(out_len, 1)
         out: mutable u8& = alloc_perm(runtime_checked_usize_to_i64(allocation_bytes)).cast[u8&]
-        memcpy(out.cast[mutable void&], (src + lo).cast[void&], out_len)
+        memcpy(out.cast[mutable void&], (src.cast[u8&] + lo).cast[void&], out_len)
         out[out_len] <- 0
         register_perm_string_len(out, out_len)
         trusted Unsafe.PointerCast:
             return out.cast[cstr]
 
 def sview(value: cstr?, start: i64, end: i64) -> sview:
-    source_cstr: cstr = value if value != null else ""
-    src: u8& = source_cstr
-    len: usize = runtime_strlen(source_cstr)
-
-    lo: mutable usize = 0
-    hi: mutable usize = len
-
-    if start > 0:
-        lo <- start.usize()
-        lo <- len if lo > len
-
-    if end >= 0:
-        hi <- end.usize()
-        hi <- len if hi > len
-
-    hi <- lo if hi < lo
-
-    out_len: usize = hi - lo
-    signed_out_len: i64 = out_len.i64()
-    if signed_out_len < 0 or signed_out_len.usize() != out_len:
-        trusted Unsafe.PointerCast:
-            return StringView{data: src, len: 0}
+    src: cstr = value if value != null else ""
     trusted Unsafe.PointerCast:
-        return StringView{data: src + lo, len: signed_out_len}
+        src_bytes: u8& = src.cast[u8&]
+        len: usize = runtime_strlen(src)
 
-# Ergonomic cast: a raw C-string (u8&?) -> borrowed string view, so content
+        lo: mutable usize = 0
+        hi: mutable usize = len
+
+        if start > 0:
+            lo <- start.usize()
+            lo <- len if lo > len
+
+        if end >= 0:
+            hi <- end.usize()
+            hi <- len if hi > len
+
+        hi <- lo if hi < lo
+
+        out_len: usize = hi - lo
+        signed_out_len: i64 = out_len.i64()
+        if signed_out_len < 0 or signed_out_len.usize() != out_len:
+            return StringView{data: src_bytes, len: 0}
+        return StringView{data: src_bytes + lo, len: signed_out_len}
+
+# A borrowed view over foreign or otherwise raw storage with a caller-supplied extent.
+# This is deliberately an unsafe boundary: the caller must prove that `count` bytes are
+# readable at `data` and that the storage outlives every use of the returned view. Unlike
+# `sview`, this function never scans for a NUL terminator. Prefer `bytes_view_range[_ref]`
+# for darrays, which proves the requested extent from the container itself.
+def unsafe_sview_bounded_bytes(data: u8&, count: usize) -> sview can[Unsafe.PointerCast]:
+    signed_count: i64 = count.i64()
+    if signed_count < 0 or signed_count.usize() != count:
+        return sview("", 0, 0)
+    can Unsafe.PointerCast:
+        return StringView{data: data, len: signed_count}
+
+# Ergonomic cast: a nullable C string pointer -> borrowed string view, so content
 # equality works directly (`bytes.sview() == "x86_64"`) instead of streq().
 # This is the explicit postfix-shorthand cast `value.sview()`; it strlen's the
-# C-string to bound the view (null -> empty view). The view BORROWS the
+# NUL-terminated string to bound the view (null -> empty view). The view BORROWS the
 # underlying storage, so it is valid only while that C-string is alive — the
 # compiler tracks the interior borrow. Unlike `cstr`/DStr (a counted/owned
 # string that would require a copy), a view is alloc-free and is exactly the
 # right primitive for comparison.
 def __cast__(value: cstr?) -> sview:
-    return sview(value, 0, -1)
+    source: cstr = value if value != null else ""
+    return sview(source, 0, -1)
 
 def string_view_len(view: sview) -> i64:
     0 return if view.len < 0
@@ -303,9 +237,8 @@ def string_view_index(view: sview, index: i64) -> i64:
     return view.data[index_usize].i64()
 
 def string_view_eq(view: sview, other: cstr?) -> int:
-    rhs_cstr: cstr = other if other != null else ""
-    rhs: u8& = rhs_cstr
-    rhs_len: usize = runtime_strlen(rhs_cstr)
+    rhs: cstr = other if other != null else ""
+    rhs_len: usize = runtime_strlen(rhs)
 
     0 return if view.len < 0
     view_len: usize = view.len.usize()
@@ -443,6 +376,37 @@ def bytes_view(buf: darray[u8]) -> sview:
     trusted Unsafe.UncheckedIndex:
         trusted Unsafe.PointerCast:
             return StringView{data: &buf[0], len: signed_len}
+
+# A bounded borrowed view into a byte buffer. The source's count and capacity provide
+# the extent; this never scans for a NUL byte and cannot be used with an arbitrary pointer.
+def bytes_view_range(buf: darray[u8], start: usize, count: usize) -> sview:
+    base: sview = bytes_view(buf)
+    empty: sview = sview("", 0, 0)
+    return empty if base.len < 0
+    base_len: usize = base.len.usize()
+    return empty if base_len.i64() != base.len or start > base_len or count > base_len - start
+    start_signed: i64 = start.i64()
+    count_signed: i64 = count.i64()
+    return empty if start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
+    return string_view_slice(base, start_signed, start_signed + count_signed)
+
+# Reference-taking counterpart for APIs that already receive a darray borrow. It
+# proves the requested extent against the live container before the only indexed
+# address calculation, so the returned view carries the borrow rather than a copy.
+def bytes_view_range_ref(buf: darray[u8]&, start: usize, count: usize) -> sview:
+    empty: sview = sview("", 0, 0)
+    n: usize = buf.count
+    return empty if n == 0 or buf.items == null or n > buf.capacity
+    signed_n: i64 = n.i64()
+    return empty if signed_n < 0 or signed_n.usize() != n
+    return empty if start > n or count > n - start
+    start_signed: i64 = start.i64()
+    count_signed: i64 = count.i64()
+    return empty if start_signed < 0 or start_signed.usize() != start or count_signed < 0 or count_signed.usize() != count
+    return empty if count == 0
+    trusted Unsafe.UncheckedIndex:
+        trusted Unsafe.PointerCast:
+            return StringView{data: &buf[start], len: count_signed}
 
 # FNV-1a 64-bit hash of the bytes of `value` (std::hash<std::string_view>). Deterministic
 # and order-sensitive; to hash a C-string / dstr, take a `sview` of its bytes first.

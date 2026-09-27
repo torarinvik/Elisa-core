@@ -1,7 +1,7 @@
 def json_new_cursor_with_len(source: u8&, source_len: usize) -> JsonCursor:
     return JsonCursor{source: source, source_len: source_len, pos: 0}
 def json_new_cursor(source: u8&) -> JsonCursor:
-    return json_new_cursor_with_len(source, runtime_strlen(source))
+    return json_new_cursor_with_len(source, json_c_string_len(source))
 def json_copy_cursor(cursor: JsonCursor&) -> JsonCursor:
     return JsonCursor{source: cursor.source, source_len: cursor.source_len, pos: cursor.pos}
 @inline(always)

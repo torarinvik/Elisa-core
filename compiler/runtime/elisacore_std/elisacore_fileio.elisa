@@ -101,7 +101,8 @@ def read_entire_file_cstr(a: mutable Arena&, path: cstr) -> cstr error[FileIoErr
         buffer: mutable darray[u8] = try read_entire_file(a, path)
         in a:
             buffer.push(0)
-        return buffer.items.cast[cstr]
+        trusted Unsafe.PointerCast:
+            return buffer.items.cast[cstr]
 
 # Write `bytes` to the file at `path`, replacing any existing contents.
 # Returns the number of bytes written. (A `void error[...]` return is avoided:

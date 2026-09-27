@@ -127,3 +127,11 @@ struct JsonParallelJob:
     repeats: usize
     result_bits: uintptr
     mode: i64
+
+# Length of a NUL-terminated source buffer received as raw bytes (the C API passes
+# `const uint8_t*`). `runtime_strlen` takes `cstr?`, the type that states the
+# termination contract, so the conversion is made here once: every caller's source
+# must be NUL-terminated, exactly as the unbounded scan already required.
+def json_c_string_len(source: u8&) -> usize:
+    trusted Unsafe.PointerCast:
+        return runtime_strlen(source.cast[cstr])

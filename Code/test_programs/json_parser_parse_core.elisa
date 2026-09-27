@@ -19,7 +19,7 @@ def json_expect_literal_with_len(cursor: mutable JsonCursor&, literal: u8&, lite
     cursor.pos <- cursor.pos + literal_len
     return true
 def json_expect_literal(cursor: mutable JsonCursor&, literal: u8&) -> bool:
-    return json_expect_literal_with_len(cursor, literal, runtime_strlen(literal))
+    return json_expect_literal_with_len(cursor, literal, json_c_string_len(literal))
 def json_invalid_lexeme() -> JsonLexemeResult:
     return JsonLexemeResult{checksum: -1, source_offset: 0, source_len: 0}
 def json_parse_string_lexeme(cursor: mutable JsonCursor&) -> JsonLexemeResult:
@@ -445,7 +445,7 @@ def json_parser_document_node_count_impl(doc: JsonParserDocument&) -> i64:
 def json_parser_ast_node_count_impl(source: u8&) -> i64:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
-            source_len: usize = runtime_strlen(source)
+            source_len: usize = json_c_string_len(source)
             region scratch(json_ast_scratch_capacity(source_len))
             store: JsonNode.Store[Local] = JsonNode.Store(scratch)
             arena: mutable Arena& = (&scratch).cast[mutable Arena&]

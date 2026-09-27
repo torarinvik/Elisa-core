@@ -727,6 +727,11 @@ def new_region_backend(capacity: usize, strategy: int) -> mutable heap Region&:
         return new_region(capacity)
 
 @internal
+def arena_free_block_after_slots(block: mutable heap ArenaFreeBlock&, slots: usize) -> mutable heap ArenaFreeBlock&:
+    trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
+        return (block.cast[mutable heap u8&] + slots * size_of(uintptr)).cast[mutable heap ArenaFreeBlock&]
+
+@internal
 def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable heap void&?:
     header_slots: usize = (size_of(ArenaFreeBlock) + size_of(uintptr) - 1) / size_of(uintptr)
     # FIRST-FIT WITH A BOUNDED PROBE. The exhaustive walk made every allocation
@@ -747,10 +752,10 @@ def arena_take_free_block(r: mutable heap Region&, need_slots: usize) -> mutable
             block: mutable heap ArenaFreeBlock& = current
             remainder: usize = current.slots - need_slots
             if remainder >= header_slots:
-                split: mutable heap ArenaFreeBlock& = zeroed
-                trusted [Unsafe.PointerCast, Unsafe.PointerArithmetic]:
-                    # need_slots comes from arena_size_bytes_to_slots, which checked this product.
-                    split as & <- (block.cast[mutable heap u8&] + need_slots * size_of(uintptr)).cast[mutable heap ArenaFreeBlock&]
+                # The checked request size and remainder bound establish a live free-block
+                # header here; construct its reference directly instead of zeroing a non-null
+                # reference slot and rebinding it inside an unsafe block.
+                split: mutable heap ArenaFreeBlock& = arena_free_block_after_slots(block, need_slots)
                 split.slots <- remainder
                 split.next <- current.next
                 if previous != null:

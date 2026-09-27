@@ -12,7 +12,7 @@ def json_ast_string_view_with_len(source: u8&, source_len: usize, node: JsonNode
             return StringView{data: source + start.usize(), len: (lexeme.source_len - 2).i64()}
     return json_empty_view()
 def json_ast_string_view(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> sview:
-    return json_ast_string_view_with_len(source, runtime_strlen(source), node, store)
+    return json_ast_string_view_with_len(source, json_c_string_len(source), node, store)
 def json_ast_string_value_from_span(source: u8&, source_offset: usize, source_len: usize) -> heap u8&:
     trusted Unsafe.PointerCast:
         can Memory.Allocate, Abort.Panic:
@@ -41,14 +41,14 @@ def json_ast_string_is_escaped_with_len(source: u8&, source_len: usize, node: Js
         return false
     return json_string_has_escape(source, lexeme.source_offset, lexeme.source_len)
 def json_ast_string_is_escaped(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> bool:
-    return json_ast_string_is_escaped_with_len(source, runtime_strlen(source), node, store)
+    return json_ast_string_is_escaped_with_len(source, json_c_string_len(source), node, store)
 def json_ast_string_len_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
         return json_decoded_string_len(source, lexeme.source_offset, lexeme.source_len)
     return -1
 def json_ast_string_len(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> i64:
-    return json_ast_string_len_with_len(source, runtime_strlen(source), node, store)
+    return json_ast_string_len_with_len(source, json_c_string_len(source), node, store)
 def json_ast_string_copy_with_len(source: u8&, source_len: usize, node: JsonNode, out: u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
@@ -65,7 +65,7 @@ def json_ast_string_copy_with_len(source: u8&, source_len: usize, node: JsonNode
         return written
     return -1
 def json_ast_string_copy(source: u8&, node: JsonNode, out: u8&, capacity: usize, store: JsonNode.Store[Local]) -> i64:
-    return json_ast_string_copy_with_len(source, runtime_strlen(source), node, out, capacity, store)
+    return json_ast_string_copy_with_len(source, json_c_string_len(source), node, out, capacity, store)
 def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
     can Memory.Allocate, Abort.Panic:
         lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
@@ -73,14 +73,14 @@ def json_ast_string_value_with_len(source: u8&, source_len: usize, node: JsonNod
             return json_ast_string_value_from_span(source, lexeme.source_offset, lexeme.source_len)
         return intern_small_string("", 0)
 def json_ast_string_value(source: u8&, node: JsonNode, store: JsonNode.Store[Local]) -> heap u8&:
-    return json_ast_string_value_with_len(source, runtime_strlen(source), node, store) can Memory.Allocate, Abort.Panic
+    return json_ast_string_value_with_len(source, json_c_string_len(source), node, store) can Memory.Allocate, Abort.Panic
 def json_ast_string_eq_literal_with_len(source: u8&, source_len: usize, node: JsonNode, literal: cstr, store: JsonNode.Store[Local]) -> bool:
     lexeme: JsonLexemeResult = json_ast_text_lexeme(source, source_len, node, store)
     if lexeme.checksum >= 0:
         return json_string_matches_literal(source, lexeme.source_offset, lexeme.source_len, literal)
     return false
 def json_ast_string_eq_literal(source: u8&, node: JsonNode, literal: cstr, store: JsonNode.Store[Local]) -> bool:
-    return json_ast_string_eq_literal_with_len(source, runtime_strlen(source), node, literal, store)
+    return json_ast_string_eq_literal_with_len(source, json_c_string_len(source), node, literal, store)
 def json_parser_array_iter_cursor(iter: JsonParserArrayIter&) -> JsonAstArrayIterCursor:
     trusted Unsafe.PointerCast:
         if not json_parser_array_iter_is_live(iter):

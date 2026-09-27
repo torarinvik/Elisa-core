@@ -264,7 +264,9 @@ def name_table_intern_copy(table: mutable NameTable&, text: sview, policy: NameC
                 owned_text.push(text.data[index.usize()])
                 index <- index + 1
             owned_text.push(0)
-            stable_text: sview = owned_text.items.cast[cstr][0:text.len]
+            stable_text: mutable sview = sview("", 0, 0)
+            trusted Unsafe.PointerCast:
+                stable_text <- owned_text.items.cast[cstr][0:text.len]
             table.entries.push(NameEntry{text: stable_text, owned_text: owned_text, hash: hash, original_hash: original_hash})
             name_id: NameId = table.entries.count.u32().NameId()
             table.name_table_insert_existing_bucket(name_id)

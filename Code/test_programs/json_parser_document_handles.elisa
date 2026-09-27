@@ -15,7 +15,7 @@ def json_parser_checksum_impl(source: u8&) -> i64:
         return -1
     return checksum
 def json_parse_document_node(source: u8&, arena: mutable Arena&, store: JsonNode.Store[Local]) -> JsonParseNodeResult:
-    return json_parse_document_node_with_len(source, runtime_strlen(source), arena, store) can Memory.Allocate, Abort.Panic
+    return json_parse_document_node_with_len(source, json_c_string_len(source), arena, store) can Memory.Allocate, Abort.Panic
 def json_parser_document_null() -> JsonParserDocument:
     return JsonParserDocument{impl_bits: 0.uintptr()}
 def json_parser_value_null() -> JsonParserValue:
@@ -80,7 +80,7 @@ def json_parser_document_parse_with_len_impl(source: u8&, source_len: usize, out
         out[0] <- JsonParserDocument{impl_bits: internal.uintptr()}
         return 1
 def json_parser_document_parse_impl(source: u8&, out: mutable JsonParserDocument&) -> i64:
-    return json_parser_document_parse_with_len_impl(source, runtime_strlen(source), out) can Memory.Allocate, Memory.Release, Abort.Panic
+    return json_parser_document_parse_with_len_impl(source, json_c_string_len(source), out) can Memory.Allocate, Memory.Release, Abort.Panic
 def json_parser_document_destroy_impl(doc: mutable JsonParserDocument&):
     trusted Unsafe.PointerCast:
         can Memory.Release, Abort.Panic:

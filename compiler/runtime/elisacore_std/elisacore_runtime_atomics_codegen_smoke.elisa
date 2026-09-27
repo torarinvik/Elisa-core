@@ -1,0 +1,25 @@
+include "./elisacore_runtime_atomics.elisa"
+
+def atomic_fence_codegen_probe() can[Atomics.Fence]:
+    can Atomics.Fence:
+        fence(MemoryOrder.SeqCst)
+
+def atomic_bool_codegen_probe(cell: mutable AtomicCell[bool]&) -> bool can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange]:
+    can Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange:
+        atomic_store_release(cell, true)
+        previous: bool = atomic_exchange_acqrel(cell, false)
+        swapped: bool = atomic_compare_exchange_acqrel(cell, false, true)
+        return previous and swapped and load(&cell.slot, MemoryOrder.Acquire)
+
+def atomic_pointer_codegen_probe(cell: mutable AtomicCell[u8&]&, first: u8&, second: u8&) -> bool can[Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange]:
+    can Atomics.Load, Atomics.Store, Atomics.Exchange, Atomics.CompareExchange:
+        atomic_store_release(cell, first)
+        _ = exchange(&cell.slot, second, MemoryOrder.AcqRel)
+        swapped: bool = compare_exchange(&cell.slot, second, first, MemoryOrder.AcqRel, MemoryOrder.Acquire)
+        _ = load(&cell.slot, MemoryOrder.Acquire)
+        return swapped
+
+def atomic_float_codegen_probe(cell: mutable AtomicCell[f64]&, value: f64) -> bool can[Atomics.Load, Atomics.Store]:
+    can Atomics.Load, Atomics.Store:
+        atomic_store_release(cell, value)
+        return load(&cell.slot, MemoryOrder.Acquire) == value

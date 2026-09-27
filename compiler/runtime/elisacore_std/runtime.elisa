@@ -55,15 +55,14 @@ def __cast__(value: static u8&) -> u8&:
 
 
 def string_len(value: cstr?) -> i64:
-    source_cstr: cstr = value if value != null else ""
-    source: u8& = source_cstr
+    source: cstr = value if value != null else ""
     return runtime_strlen(source).i64()
 
 def streq(lhs: cstr?, rhs: cstr?) -> int:
     left: cstr = lhs if lhs != null else ""
     right: cstr = rhs if rhs != null else ""
 
-    return 1 if left.cast[uintptr] == right.cast[uintptr] or strcmp(left.cast[u8&], right.cast[u8&]) == 0 else 0
+    return 1 if left.cast[uintptr] == right.cast[uintptr] or strcmp(left, right) == 0 else 0
 
 # ============================================================
 # Stage 1 runtime forwarding wrappers
@@ -146,7 +145,8 @@ def rt_reset_scratch():
     reset_scratch()
 
 def rt_puts(value: cstr?) -> int:
-    return puts(value if value != null else "") can Console.Write
+    safe_value: cstr = value if value != null else ""
+    return puts(safe_value.cast[u8&]) can Console.Write
 
 # ------------------------------------------------------------
 # Console printing
