@@ -696,6 +696,11 @@ type storageViewDependencyState struct {
 	// (`&xs[i]`), not merely a value derived from it. Only these are invalidated by a callee's
 	// mutable borrow; see invalidateStorageViewsForMutableRefArg.
 	Interior bool
+	// Replaced: the invalidation was a whole-value store (`xs <- [...]`), which points the
+	// container at a different buffer. A reserve_commit/fixed backing keeps the OLD base in
+	// place across growth, but that does not make the view alias the new contents, so the
+	// stable-backing post-pass must not drop it.
+	Replaced bool
 }
 
 type regionDependencyState struct {

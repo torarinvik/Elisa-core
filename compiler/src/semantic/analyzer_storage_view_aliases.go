@@ -347,6 +347,7 @@ func mergeStorageViewDependencyStates(dst map[*Symbol]storageViewDependencyState
 			merged.InvalidatedBy = dstDep.InvalidatedBy
 		}
 		merged.Valid = dstDep.Valid && srcDep.Valid
+		merged.Replaced = (!dstDep.Valid && dstDep.Replaced) || (!srcDep.Valid && srcDep.Replaced)
 		for _, alias := range dstDep.ContainerAliases {
 			merged.ContainerAliases = appendStorageViewSource(merged.ContainerAliases, alias)
 		}

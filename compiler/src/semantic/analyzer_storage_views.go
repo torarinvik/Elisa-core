@@ -81,6 +81,15 @@ func (a *Analyzer) recordStorageViewBinding(sym *Symbol, value ast.Expr) {
 	if sym == nil {
 		return
 	}
+	// A scalar binding (`t: i64 = r` with `r = &xs[0]`) holds a COPY of the referent, not an
+	// address into the buffer: nothing a later relocation or replacement of xs does can make
+	// it stale, so it carries no storage dependency.
+	if storageViewScalarBindingType(sym.Type) {
+		if a.currentStorageViewDeps != nil {
+			delete(a.currentStorageViewDeps, sym)
+		}
+		return
+	}
 	dep, ok := a.storageViewDependencyForExpr(value)
 	if !ok {
 		if a.currentStorageViewDeps != nil {
@@ -104,6 +113,16 @@ func (a *Analyzer) recordStorageViewBinding(sym *Symbol, value ast.Expr) {
 		}
 	}
 	a.currentStorageViewDeps[sym] = dep
+}
+
+// storageViewScalarBindingType: plain value scalars. `uintptr` is excluded -- it can hold an
+// address into the buffer.
+func storageViewScalarBindingType(t Type) bool {
+	if b, ok := t.(*BuiltinType); ok && b != nil {
+		return b.Name == "bool" || (b.Name != "uintptr" && IsNumericType(b))
+	}
+	_, isBitInt := t.(*BitIntType)
+	return isBitInt
 }
 
 func (a *Analyzer) recordStorageViewAssignment(target ast.Expr, value ast.Expr) {
@@ -259,6 +278,7 @@ func (a *Analyzer) storageViewDependencyForLambda(lambda *ast.LambdaExpr) (stora
 				Sources:       []string{alias},
 				Valid:         captured.Valid,
 				InvalidatedBy: captured.InvalidatedBy,
+				Replaced:      captured.Replaced,
 			})
 		}
 		captureType := a.currentTrackedValueType(sym)
@@ -270,6 +290,7 @@ func (a *Analyzer) storageViewDependencyForLambda(lambda *ast.LambdaExpr) (stora
 				Sources:       []string{name},
 				Valid:         captured.Valid,
 				InvalidatedBy: captured.InvalidatedBy,
+				Replaced:      captured.Replaced,
 			})
 		}
 	}
@@ -530,6 +551,7 @@ func mergeStorageViewDependencies(dependencies ...storageViewDependencyState) (s
 			if merged.InvalidatedBy == "" {
 				merged.InvalidatedBy = dependency.InvalidatedBy
 			}
+			merged.Replaced = merged.Replaced || dependency.Replaced
 		}
 	}
 	if len(merged.Sources) == 0 {
@@ -572,15 +594,30 @@ func (a *Analyzer) checkIteratorInvalidationForMutableRefArg(arg ast.Expr) {
 }
 
 func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason string) {
+	a.invalidateStorageViewsForSourceMode(source, reason, false)
+}
+
+// invalidateStorageViewsForSourceMode is invalidateStorageViewsForSource; REPLACED marks a
+// whole-value store, which no stable backing can make harmless (see Replaced).
+func (a *Analyzer) invalidateStorageViewsForSourceMode(source ast.Expr, reason string, replaced bool) {
+	a.invalidateStorageViewsForSourceScoped(source, reason, replaced, true)
+}
+
+// invalidateStorageViewsForSourceScoped is the chokepoint. followAliases=false limits the
+// mutation to the place's OWN storage: replacing a value-typed local (`f <- other` over a
+// struct built from `buf`) rewrites f's bytes and leaves `buf` -- and views into it -- intact.
+func (a *Analyzer) invalidateStorageViewsForSourceScoped(source ast.Expr, reason string, replaced, followAliases bool) {
 	key := optimizationExprString(source)
 	if key == "" {
 		return
 	}
 	mutatedSources := map[string]bool{key: true}
-	for _, root := range a.mutationRootsForTarget(source) {
-		mutatedSources[root] = true
+	if followAliases {
+		for _, root := range a.mutationRootsForTarget(source) {
+			mutatedSources[root] = true
+		}
+		a.expandStorageViewMutationAliases(mutatedSources)
 	}
-	a.expandStorageViewMutationAliases(mutatedSources)
 	// Iterator invalidation: relocating the buffer of a container that is being iterated
 	// would leave the live iteration reading freed/stale memory. Reject it at this single
 	// chokepoint that every relocating mutation (push/extend/reserve/clear/truncate) funnels
@@ -594,7 +631,7 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 		// Resolve the mutation's laundered roots (the same alias-binding machinery the
 		// mutable-alias checker uses) and reject if any of them is the locked iterand.
 		for _, root := range a.mutationRootsForTarget(source) {
-			if root == key {
+			if root == key || !followAliases {
 				continue
 			}
 			if _, iterated := a.currentIteratedSources[root]; iterated {
@@ -603,7 +640,53 @@ func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason strin
 			}
 		}
 	}
-	a.invalidateStorageViewDeps(mutatedSources, reason, false)
+	a.invalidateStorageViewDepsMode(mutatedSources, reason, false, replaced)
+}
+
+// invalidateStorageViewsForWholeAssignment invalidates interior references into a container
+// that is replaced as a whole (`xs <- [1, 2, 3]`, `s <- S{...}` over a struct holding a darray,
+// or a store through a `mutable darray[T]&` parameter). The container's header now names a
+// different buffer, so `&xs[0]` taken before the store reads the old one -- exactly the
+// staleness a relocating push causes, and funnelled through the same chokepoint (which also
+// rejects replacing a container that is being iterated). Rebinding a reference slot to another
+// reference (`ys <- &zs`) leaves the old referent untouched and is not a mutation of it.
+func (a *Analyzer) invalidateStorageViewsForWholeAssignment(target ast.Expr, targetType, valueType Type) {
+	if a == nil || target == nil || isBorrowLikeType(valueType) {
+		return
+	}
+	switch stripRefForBounds(targetType).(type) {
+	case *DArrayType, *DictType, *SetType, *StructType:
+	default:
+		return
+	}
+	place := stripOptimizationParens(target)
+	// The target's OWN facts are not invalidated: recordStorageViewAssignment rebinds them
+	// from the value right after. Without this, `xs <- [h for h in xs if ...]` over an
+	// element-borrowing darray (darray[sview]) made xs a view of itself, and the next
+	// whole assignment poisoned xs through its own replaced binding.
+	var self *Symbol
+	var selfDep storageViewDependencyState
+	selfHad := false
+	if ident, ok := place.(*ast.Ident); ok && a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(ident.Name); found {
+			self = sym
+			selfDep, selfHad = a.currentStorageViewDeps[sym]
+		}
+	}
+	// Only a place reached THROUGH a reference writes someone else's container; a value-typed
+	// root owns what is replaced, so aliases it was built from are not mutated.
+	followAliases := true
+	if root := rootIdentExpr(place); root != nil && a.currentScope != nil {
+		if sym, found := a.currentScope.Lookup(root.Name); found && sym != nil {
+			if _, isRef := sym.Type.(*RefType); !isRef {
+				followAliases = false
+			}
+		}
+	}
+	a.invalidateStorageViewsForSourceScoped(place, storageViewMutationReason(target, "reassignment"), true, followAliases)
+	if self != nil && selfHad {
+		a.currentStorageViewDeps[self] = selfDep
+	}
 }
 
 // invalidateStorageViewsForMutableRefArg invalidates interior references into a container passed
@@ -637,6 +720,10 @@ func (a *Analyzer) invalidateStorageViewsForMutableRefArg(arg ast.Expr, callee s
 // from the container (a comprehension copy, a parse result) survives a callee's borrow, which
 // cannot relocate storage the value does not point into.
 func (a *Analyzer) invalidateStorageViewDeps(mutatedSources map[string]bool, reason string, interiorOnly bool) {
+	a.invalidateStorageViewDepsMode(mutatedSources, reason, interiorOnly, false)
+}
+
+func (a *Analyzer) invalidateStorageViewDepsMode(mutatedSources map[string]bool, reason string, interiorOnly, replaced bool) {
 	if len(a.currentStorageViewDeps) == 0 {
 		return
 	}
@@ -647,6 +734,7 @@ func (a *Analyzer) invalidateStorageViewDeps(mutatedSources map[string]bool, rea
 		matchedSource := storageViewMatchedMutationSource(dep, mutatedSources)
 		dep.Valid = false
 		dep.InvalidatedBy = reason
+		dep.Replaced = replaced
 		if matchedSource != "" {
 			dep.InvalidatedBy += fmt.Sprintf(" (matched mutation source %q)", matchedSource)
 		}

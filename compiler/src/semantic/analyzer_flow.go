@@ -560,6 +560,7 @@ func (a *Analyzer) analyzeStmt(stmt ast.Stmt) {
 			// region and storage-view facts. Recording the scalar as a rebind erased them, so a
 			// later push followed by another use of w went unchecked.
 			if !n.WriteThrough {
+				a.invalidateStorageViewsForWholeAssignment(n.Target, targetType, valueType)
 				a.recordRegionRefAssignment(n.Target, n.Value)
 				a.recordStorageViewAssignment(n.Target, n.Value)
 				a.recordStorageContainerAliasTarget(n.Target, n.Value, targetType, valueType)

@@ -89,7 +89,7 @@ func (a *Analyzer) checkRegionLifetimes(fn *ast.FuncDecl) {
 // valid). Suppress iff the backing is provably stable — the soundness invariant (docs/72).
 func (a *Analyzer) resolvePendingStorageViewErrors(reserveCommitDeclOffsets map[int]bool) {
 	for _, p := range a.pendingStorageViewErrors {
-		allSourcesStable := p.allSourcesHaveDecls && len(p.sourceDeclOffsets) == len(p.dep.Sources)
+		allSourcesStable := p.allSourcesHaveDecls && len(p.sourceDeclOffsets) == len(p.dep.Sources) && !p.dep.Replaced
 		for _, sourceDeclOffset := range p.sourceDeclOffsets {
 			allSourcesStable = allSourcesStable && reserveCommitDeclOffsets[sourceDeclOffset]
 		}
