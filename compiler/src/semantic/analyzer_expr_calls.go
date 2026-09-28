@@ -833,8 +833,10 @@ func (a *Analyzer) analyzeResolvedCallExprWithExpected(expr *ast.CallExpr, ft *F
 				switch stripRefForBounds(rt.Elem).(type) {
 				case *DArrayType:
 					a.checkIteratorInvalidationForMutableRefArg(loweredArgs[i])
+					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
 					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
 				case *StructType:
+					a.checkIteratorInvalidationForEnclosingMutableRefArg(loweredArgs[i])
 					a.invalidateStorageViewsForMutableRefArg(loweredArgs[i], appliedType.Name)
 				}
 			}

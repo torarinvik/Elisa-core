@@ -593,6 +593,28 @@ func (a *Analyzer) checkIteratorInvalidationForMutableRefArg(arg ast.Expr) {
 	}
 }
 
+// checkIteratorInvalidationForEnclosingMutableRefArg rejects passing, by MUTABLE reference, a
+// place that strictly ENCLOSES an actively-iterated container (`grow(&p)` or `p.step()` inside
+// `for v in p.items:`). The callee reaches the iterand through the owner and may push/clear/
+// replace it, relocating the buffer the loop walks; it is analyzed in its own scope, so the
+// call site is the only place this is visible.
+func (a *Analyzer) checkIteratorInvalidationForEnclosingMutableRefArg(arg ast.Expr) {
+	if a == nil || arg == nil || len(a.currentIteratedSources) == 0 {
+		return
+	}
+	place := stripOptimizationParens(arg)
+	if addr, ok := place.(*ast.AddrOfExpr); ok {
+		place = addr.Operand
+	}
+	key := optimizationExprString(place)
+	if key == "" {
+		return
+	}
+	if enclosed := iteratedSourceEnclosedBy(a.currentIteratedSources, key); enclosed != "" {
+		a.errorf(arg.Pos(), "cannot pass %q by mutable reference while %q is being iterated: the callee may push/clear/replace it through %q and move its buffer out from under the loop. Iterate by index up to a saved count, or collect into a separate darray first", key, enclosed, key)
+	}
+}
+
 func (a *Analyzer) invalidateStorageViewsForSource(source ast.Expr, reason string) {
 	a.invalidateStorageViewsForSourceMode(source, reason, false)
 }
